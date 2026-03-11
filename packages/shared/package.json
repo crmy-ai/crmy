@@ -1,0 +1,22 @@
+{
+  "name": "@crmy/shared",
+  "version": "0.1.0",
+  "description": "Shared types, Zod schemas, and validation for crmy.ai",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
+  "license": "MIT"
+}
