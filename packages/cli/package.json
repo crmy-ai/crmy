@@ -1,0 +1,27 @@
+{
+  "name": "crmy-ai",
+  "version": "0.1.0",
+  "description": "crmy.ai CLI — Local CLI + stdio MCP server",
+  "type": "module",
+  "bin": {
+    "crmy-ai": "dist/index.js",
+    "crmy": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@crmy/shared": "*",
+    "@crmy/server": "*",
+    "@modelcontextprotocol/sdk": "^1.27.0",
+    "commander": "^12.1.0",
+    "inquirer": "^12.0.0",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,22 @@
+{
+  "name": "crmy-ai",
+  "version": "0.1.0",
+  "description": "The agent-first open source CRM. MCP-native.",
+  "private": true,
+  "workspaces": [
+    "packages/shared",
+    "packages/server",
+    "packages/cli"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev": "npm run dev --workspace=packages/server",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "migrate": "tsx scripts/migrate.ts"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}

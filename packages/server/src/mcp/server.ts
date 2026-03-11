@@ -1,0 +1,72 @@
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ZodRawShape, ZodObject } from 'zod';
+import type { ActorContext } from '@crmy/shared';
+import { CrmyError } from '@crmy/shared';
+import type { DbPool } from '../db/pool.js';
+import { contactTools } from './tools/contacts.js';
+import { accountTools } from './tools/accounts.js';
+import { opportunityTools } from './tools/opportunities.js';
+import { activityTools } from './tools/activities.js';
+import { analyticsTools } from './tools/analytics.js';
+import { hitlTools } from './tools/hitl.js';
+import { metaTools } from './tools/meta.js';
+
+export interface ToolDef {
+  name: string;
+  description: string;
+  inputSchema: ZodObject<ZodRawShape>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handler: (input: any, actor: ActorContext) => Promise<unknown>;
+}
+
+export function getAllTools(db: DbPool): ToolDef[] {
+  return [
+    ...contactTools(db),
+    ...accountTools(db),
+    ...opportunityTools(db),
+    ...activityTools(db),
+    ...analyticsTools(db),
+    ...hitlTools(db),
+    ...metaTools(db),
+  ];
+}
+
+export function createMcpServer(db: DbPool, getActor: () => ActorContext): McpServer {
+  const server = new McpServer({
+    name: 'crmy',
+    version: '0.1.0',
+  });
+
+  const tools = getAllTools(db);
+
+  for (const tool of tools) {
+    server.tool(
+      tool.name,
+      tool.description,
+      tool.inputSchema.shape,
+      async (input) => {
+        try {
+          const actor = getActor();
+          const result = await tool.handler(input, actor);
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
+          };
+        } catch (err) {
+          if (err instanceof CrmyError) {
+            return {
+              content: [{ type: 'text' as const, text: JSON.stringify(err.toJSON()) }],
+              isError: true,
+            };
+          }
+          const message = err instanceof Error ? err.message : 'Internal error';
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify({ error: message }) }],
+            isError: true,
+          };
+        }
+      },
+    );
+  }
+
+  return server;
+}
