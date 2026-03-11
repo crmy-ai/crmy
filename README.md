@@ -1,6 +1,6 @@
-# CRMy.ai
+# CRMy
 
-The agent-first open source CRM. MCP-native. Works with any PostgreSQL.
+An agent-first open source CRM. MCP-native. Works with any PostgreSQL.
 
 ## Quickstart (30 seconds)
 
