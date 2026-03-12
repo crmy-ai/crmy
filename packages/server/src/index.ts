@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import express from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { initPool, getPool, closePool, type DbPool } from './db/pool.js';
@@ -114,6 +116,14 @@ export async function createApp(config: ServerConfig) {
 
   // Authenticated API routes
   app.use('/api/v1', authMiddleware(db, config.jwtSecret), apiRouter(db));
+
+  // Serve web UI static files
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const webDist = path.resolve(__dirname, '../../web/dist');
+  app.use('/app', express.static(webDist));
+  app.get('/app/*', (_req, res) => {
+    res.sendFile(path.join(webDist, 'index.html'));
+  });
 
   // HITL auto-approval worker (every 60 seconds)
   const hitlInterval = setInterval(async () => {
