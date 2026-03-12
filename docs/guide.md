@@ -1,6 +1,6 @@
-# crmy.ai User Guide
+# CRMy User Guide
 
-Complete documentation for crmy.ai — the agent-first open source CRM.
+Complete documentation for CRMy — the agent-first open source CRM.
 
 ---
 
@@ -8,24 +8,25 @@ Complete documentation for crmy.ai — the agent-first open source CRM.
 
 1. [Getting Started](#getting-started)
 2. [Configuration](#configuration)
-3. [Core Concepts](#core-concepts)
-4. [Contacts](#contacts)
-5. [Accounts](#accounts)
-6. [Opportunities](#opportunities)
-7. [Activities](#activities)
-8. [Use Cases](#use-cases)
-9. [Notes & Comments](#notes--comments)
-10. [Workflows & Automation](#workflows--automation)
-11. [Webhooks](#webhooks)
-12. [Email](#email)
-13. [Custom Fields](#custom-fields)
-14. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
-15. [Analytics & Reporting](#analytics--reporting)
-16. [Plugins](#plugins)
-17. [REST API Reference](#rest-api-reference)
-18. [MCP Tools Reference](#mcp-tools-reference)
-19. [Authentication](#authentication)
-20. [Database & Migrations](#database--migrations)
+3. [Authentication](#authentication)
+4. [Web UI](#web-ui)
+5. [Core Concepts](#core-concepts)
+6. [Contacts](#contacts)
+7. [Accounts](#accounts)
+8. [Opportunities](#opportunities)
+9. [Activities](#activities)
+10. [Use Cases](#use-cases)
+11. [Notes & Comments](#notes--comments)
+12. [Workflows & Automation](#workflows--automation)
+13. [Webhooks](#webhooks)
+14. [Email](#email)
+15. [Custom Fields](#custom-fields)
+16. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
+17. [Analytics & Reporting](#analytics--reporting)
+18. [Plugins](#plugins)
+19. [REST API Reference](#rest-api-reference)
+20. [MCP Tools Reference](#mcp-tools-reference)
+21. [Database & Migrations](#database--migrations)
 
 ---
 
@@ -48,17 +49,34 @@ npx crmy init
 - Node.js >= 20.0.0
 - PostgreSQL >= 14
 
-### Quick setup
+### Quick setup — Local mode
 
 ```bash
 # 1. Initialize (interactive — sets up DB, user, API key)
 npx crmy init
 
-# 2. Add to Claude Code as an MCP server
-claude mcp add crmy -- npx crmy mcp
-
-# 3. Or start the HTTP server
+# 2. Start the server (REST API + Web UI at /app)
 npx crmy server
+
+# 3. Add to Claude Code as an MCP server
+claude mcp add crmy -- npx crmy mcp
+```
+
+### Quick setup — Remote mode
+
+Connect the CLI to an existing CRMy server without needing direct database access:
+
+```bash
+# 1. Point the CLI at your server
+crmy auth setup https://crm.company.com
+
+# 2. Sign in
+crmy login
+# Prompts for email + password, stores JWT in ~/.crmy/auth.json
+
+# 3. Use the CLI normally — all commands call the REST API
+crmy contacts list
+crmy use-cases create
 ```
 
 ### Docker
@@ -112,6 +130,201 @@ Created by `crmy init`. Stored in your project root. Auto-added to `.gitignore`.
 | `PORT` | No | `3000` | HTTP server port |
 | `CRMY_TENANT_ID` | No | `default` | Default tenant slug |
 | `CRMY_API_KEY` | No | — | API key for CLI auth (overrides .crmy.json) |
+| `CRMY_SERVER_URL` | No | — | Server URL for remote CLI mode |
+
+---
+
+## Authentication
+
+CRMy supports multiple authentication methods across the CLI, Web UI, and API.
+
+### CLI Authentication
+
+#### Local mode (direct database)
+
+When you run `crmy init`, the CLI connects directly to PostgreSQL. An API key is generated and stored in `.crmy.json`. No server is needed — all commands run MCP tools in-process.
+
+#### Remote mode (REST API)
+
+Connect the CLI to a running CRMy server:
+
+```bash
+# Configure the server URL (validates with health check)
+crmy auth setup http://localhost:3000
+
+# Sign in with email + password
+crmy login
+# or: crmy auth login
+
+# Check current auth status
+crmy auth status
+
+# Sign out (clears stored credentials)
+crmy auth logout
+```
+
+Credentials are stored in `~/.crmy/auth.json` (file permissions `0600`). The JWT token has a 1-hour expiration — run `crmy login` again when it expires.
+
+#### Headless / CI mode
+
+For automation, set environment variables instead of interactive login:
+
+```bash
+export CRMY_SERVER_URL=https://crm.company.com
+export CRMY_API_KEY=crmy_abc123...
+crmy contacts list   # uses REST API with API key
+```
+
+#### Priority order
+
+The CLI resolves credentials in this order:
+1. Direct database (`DATABASE_URL` or `.crmy.json` → `database.url`)
+2. Stored JWT from `crmy login` (`~/.crmy/auth.json`)
+3. Server URL + API key from environment (`CRMY_SERVER_URL` + `CRMY_API_KEY`)
+
+### Web UI Authentication
+
+Visit `/app/login` in your browser. Enter email + password to receive a JWT stored in `localStorage`.
+
+Registration is also available at `/app/login` — creates a new tenant and owner account.
+
+### API Authentication
+
+All `/api/v1/*` endpoints require an `Authorization` header:
+
+```
+Authorization: Bearer <jwt-token>
+Authorization: Bearer crmy_<api-key>
+```
+
+#### JWT tokens
+
+Obtain a JWT by registering or logging in:
+
+```
+POST /auth/register   { name, email, password, tenant_name }
+POST /auth/login      { email, password }
+```
+
+Tokens expire after 1 hour.
+
+#### API keys
+
+Create API keys for long-lived, programmatic access:
+
+```
+POST /auth/api-keys   { label, scopes: ["*"] }
+```
+
+Returns the key once (prefixed `crmy_...`). Store it securely.
+
+```
+GET    /auth/api-keys        List all keys
+DELETE /auth/api-keys/:id    Revoke a key
+```
+
+### Roles
+
+- `owner` — full access, can manage users and keys
+- `admin` — full access to CRM data, can delete records
+- `member` — standard access, cannot delete
+
+---
+
+## Web UI
+
+The CRMy web interface is a React SPA served at `/app` by the Express server.
+
+```
+http://localhost:3000/app
+```
+
+### Tech stack
+
+- React 18 + TypeScript
+- Vite (build tooling)
+- Tailwind CSS
+- TanStack Query (server state)
+- React Router v6
+
+### Pages
+
+#### Dashboard (`/app`)
+
+Four stat cards at the top: Pipeline Value, Open Deals, Active Use Cases, HITL Pending.
+
+Below that, a **Use Case stage summary strip** showing count and attributed ARR per stage. Click any stage to filter the use cases list.
+
+Bottom section shows the 10 most recent activities.
+
+#### Contacts (`/app/contacts`)
+
+- **List**: searchable table with name, email, company, lifecycle stage
+- **Create** (`/app/contacts/new`): form for first name, last name, email, phone, title, company, stage
+- **Detail** (`/app/contacts/:id`): contact info, activity timeline, and linked use cases section
+
+#### Accounts (`/app/accounts`)
+
+- **List**: searchable table with name, industry, revenue, employees, health score
+- **Create** (`/app/accounts/new`): name, domain, industry, website
+- **Detail** (`/app/accounts/:id`): account info with tabs:
+  - **Overview**: details, contacts, opportunities
+  - **Use Cases**: list with consumption bars, health badges, and total attributed ARR
+
+#### Pipeline (`/app/pipeline`)
+
+Kanban-style board with columns for each opportunity stage (prospecting through closed). Each card shows deal name, amount, and close date.
+
+#### Opportunities (`/app/opportunities/:id`)
+
+Detail view with tabs:
+- **Details**: stage, amount, probability, forecast category
+- **Use Cases**: linked use cases with attributed ARR total
+
+#### Use Cases (`/app/use-cases`)
+
+- **List**: table with stage filter, consumption progress bars, health badges
+- **Create** (`/app/use-cases/new`): full form with account selection, stage, consumption unit/capacity, ARR, dates
+- **360 Detail** (`/app/use-cases/:id`): the most comprehensive page:
+
+**Stage bar**: horizontal bar showing all stages. Current stage highlighted. Click another stage to open the advance modal (note required for churned/sunset).
+
+**Left panel**:
+- Account and opportunity links
+- Revenue: attributed ARR and expansion potential
+- Consumption bar: green < 70%, amber 70–90%, red > 90% — with edit modal
+- Health badge: colored score with note — with update modal (note required)
+- Contacts: list with role badges, add/remove functionality
+
+**Right panel**: activity timeline
+
+#### Analytics (`/app/analytics`)
+
+- Pipeline by stage (deal count + value)
+- Forecast summary
+- Use case ARR by stage
+- Use case ARR by account
+- Health distribution (healthy / at-risk / critical)
+
+#### HITL Queue (`/app/hitl`)
+
+Cards for each pending approval request showing:
+- Action type and agent ID
+- Submission time and expiration
+- Action summary
+- Expandable payload viewer
+- Note input + Approve/Reject buttons
+- Empty state: "No pending approvals — your agents are running autonomously"
+
+Polls every 10 seconds.
+
+#### Settings (`/app/settings`)
+
+Tabbed interface:
+- **Profile**: name, email, role (read-only)
+- **API Keys**: create new keys (shown once), list existing, revoke
+- **Webhooks**: add endpoint URL + event types, list existing, delete
+- **Custom Fields**: tabbed by object type (contact, account, opportunity, activity, use_case) — create field definitions, list, delete
 
 ---
 
@@ -957,44 +1170,6 @@ Content-Type: application/json
 ```
 
 Uses the MCP Streamable HTTP transport. Each request creates a new session.
-
----
-
-## Authentication
-
-### JWT tokens
-
-Obtain a JWT by registering or logging in:
-
-```
-POST /auth/register   { name, email, password, tenant_name }
-POST /auth/login      { email, password }
-```
-
-Tokens expire after 1 hour. Include in requests as `Authorization: Bearer <token>`.
-
-### API keys
-
-Create API keys for long-lived access:
-
-```
-POST /auth/api-keys   { label, scopes: ["read", "write"] }
-```
-
-Returns the key once (prefixed `crmy_...`). Use as `Authorization: Bearer crmy_...`.
-
-Manage keys:
-
-```
-GET    /auth/api-keys        List all keys
-DELETE /auth/api-keys/:id    Revoke a key
-```
-
-### Roles
-
-- `owner` — full access, can manage users and keys
-- `admin` — full access to CRM data, can delete records
-- `member` — standard access, cannot delete
 
 ---
 

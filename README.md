@@ -1,4 +1,4 @@
-# crmy.ai
+# CRMy
 
 The agent-first open source CRM. MCP-native. Works with any PostgreSQL.
 
@@ -21,15 +21,27 @@ npx crmy init
 
 ## Quickstart
 
-### 1. Initialize
+### Option A — Local mode (direct database)
 
 ```bash
 npx crmy init
+# Walks you through: connect to PostgreSQL, run migrations, create user, generate API key.
+# Config saved to .crmy.json (auto-added to .gitignore).
+
+npx crmy server
+# Server ready on :3000 — REST API + MCP + Web UI at /app
 ```
 
-Walks you through: connect to PostgreSQL, run migrations, create your user, generate an API key. Config is saved to `.crmy.json` (auto-added to `.gitignore`).
+### Option B — Connect to a remote server
 
-### 2. Use with Claude Code
+```bash
+crmy auth setup https://crm.company.com
+crmy login
+# Prompts for email + password, stores JWT in ~/.crmy/auth.json
+# All subsequent CLI commands use the REST API
+```
+
+### Use with Claude Code
 
 ```bash
 claude mcp add crmy -- npx crmy mcp
@@ -39,20 +51,83 @@ Then in Claude Code:
 > "Create a contact for Sarah Chen at Acme Corp, set her stage to prospect,
 >  and log a call we had today about their Q2 budget"
 
-### 3. Start the HTTP server
-
-```bash
-npx crmy server
-# Server ready on :3000 with MCP + REST endpoints
-```
-
-### 4. Self-host with Docker
+### Self-host with Docker
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
 ```
 
 Starts PostgreSQL + crmy server on port 3000 with auto-migrations.
+
+## Web UI
+
+The web interface is available at `/app` when running the server. Built with React 18 + Vite + Tailwind CSS.
+
+```
+http://localhost:3000/app
+```
+
+### Pages
+
+| Page | Description |
+|------|-------------|
+| Dashboard | Stat cards, use case stage strip, recent activity feed |
+| Contacts | List, create, detail with activity timeline and linked use cases |
+| Accounts | List, create, detail with Use Cases tab showing ARR totals |
+| Pipeline | Kanban board by opportunity stage |
+| Opportunities | Detail view with linked Use Cases tab |
+| Use Cases | List with filters, create form, 360 detail page |
+| Activities | Activity log across all objects |
+| Analytics | Pipeline by stage, forecast, use case ARR/health distribution |
+| HITL Queue | Approve/reject agent actions with payload viewer |
+| Settings | Profile, API keys, webhooks, custom fields management |
+| Search | Global cross-entity search |
+
+### Use Case 360
+
+The use case detail page provides a complete view:
+- **Stage bar** — click to advance with confirmation modal (note required for sunset/churned)
+- **Consumption bar** — green/amber/red thresholds at 70%/90%
+- **Health badge** — colored by score (green >= 70, amber 40-69, red < 40)
+- **Contact management** — add/remove contacts with role assignment
+- **Activity timeline** — linked activities and events
+
+## Authentication
+
+CRMy supports three authentication methods:
+
+### JWT Login
+
+```bash
+# From the CLI
+crmy auth setup http://localhost:3000
+crmy login
+
+# From the Web UI
+# Visit /app/login — email + password
+```
+
+### API Keys
+
+```bash
+# Create via CLI (after init)
+# Key is generated during `crmy init` and stored in .crmy.json
+
+# Create via REST
+POST /auth/api-keys  { "label": "my-agent", "scopes": ["*"] }
+# Returns the key once — store it securely
+
+# Use in requests
+Authorization: Bearer crmy_<key>
+```
+
+### Environment Variables
+
+```bash
+export CRMY_SERVER_URL=http://localhost:3000
+export CRMY_API_KEY=crmy_abc123...
+crmy contacts list   # uses REST API with API key
+```
 
 ## Develop from source
 
@@ -70,7 +145,8 @@ npm run dev     # starts server with tsx watch
 packages/
   shared/   @crmy/shared   TypeScript types, Zod schemas, validation
   server/   @crmy/server   Express + PostgreSQL + MCP Streamable HTTP
-  cli/      crmy        Local CLI + stdio MCP server
+  cli/      crmy           Local CLI + stdio MCP server
+  web/      @crmy/web      React SPA (served at /app by Express)
 docker/                    Dockerfile + docker-compose.yml
 scripts/                   Migration runner
 ```
@@ -92,9 +168,10 @@ scripts/                   Migration runner
 | `JWT_SECRET` | Yes | — | Secret for signing JWT tokens |
 | `PORT` | No | `3000` | HTTP server port |
 | `CRMY_TENANT_ID` | No | `default` | Default tenant slug |
-| `CRMY_API_KEY` | No | — | API key for CLI authentication |
+| `CRMY_API_KEY` | No | — | API key for CLI/agent authentication |
+| `CRMY_SERVER_URL` | No | — | Server URL for remote CLI mode |
 
-## MCP Tools (50+)
+## MCP Tools (60+)
 
 | Category | Tools |
 |---|---|
@@ -115,39 +192,67 @@ scripts/                   Migration runner
 ## CLI Reference
 
 ```
-crmy init                        Interactive setup
-crmy server [--port 3000]        Start HTTP server
+Authentication
+crmy auth setup [url]            Configure server URL
+crmy auth login                  Sign in (or use `crmy login`)
+crmy auth status                 Show auth state + token expiry
+crmy auth logout                 Clear stored credentials
+crmy login                       Shortcut for `crmy auth login`
+
+Setup & Server
+crmy init                        Interactive local setup
+crmy server [--port 3000]        Start HTTP server + Web UI
 crmy mcp                         Start stdio MCP server
+
+Contacts
 crmy contacts list [--q <query>] List contacts
 crmy contacts create             Interactive create
 crmy contacts get <id>           Get contact details
+
+Accounts
 crmy accounts list               List accounts
 crmy accounts get <id>           Get account + contacts + opps
+
+Opportunities
 crmy opps list [--stage <s>]     List opportunities
 crmy opps advance <id> <stage>   Advance opportunity stage
+
+Use Cases
 crmy use-cases list              List use cases
 crmy use-cases get <id>          Get use case details
 crmy use-cases create            Interactive create
 crmy use-cases summary           Use case summary
+
+Webhooks
 crmy webhooks list               List webhook endpoints
 crmy webhooks create             Register new webhook
 crmy webhooks delete <id>        Remove webhook
 crmy webhooks deliveries         Delivery log
+
+Email
 crmy emails list                 List outbound emails
 crmy emails create               Draft email (with HITL)
 crmy emails get <id>             Get email details
+
+Custom Fields
 crmy custom-fields list <type>   List custom fields
 crmy custom-fields create        Define custom field
 crmy custom-fields delete <id>   Remove field definition
+
+Notes
 crmy notes list <type> <id>      List notes on an object
 crmy notes add <type> <id>       Add note (--parent, --external, --pin)
 crmy notes get <id>              Get note with replies
 crmy notes delete <id>           Delete note
+
+Workflows
 crmy workflows list              List automation workflows
 crmy workflows get <id>          Get workflow + recent runs
 crmy workflows create            Interactive create
 crmy workflows delete <id>       Delete workflow
 crmy workflows runs <id>         Execution history
+
+Other
 crmy pipeline                    Pipeline summary
 crmy search <query>              Cross-entity search
 crmy hitl list                   Pending HITL requests
