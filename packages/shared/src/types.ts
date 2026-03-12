@@ -336,3 +336,64 @@ export interface BulkJob {
   created_at: string;
   completed_at?: string;
 }
+
+// -- v0.3 types --
+
+export interface Note {
+  id: UUID;
+  tenant_id: UUID;
+  object_type: string;
+  object_id: UUID;
+  parent_id?: UUID;
+  body: string;
+  visibility: 'internal' | 'external';
+  mentions: string[];
+  pinned: boolean;
+  author_id?: UUID;
+  author_type: 'user' | 'agent' | 'system';
+  created_at: string;
+  updated_at: string;
+}
+
+export type WorkflowActionType =
+  | 'send_notification'
+  | 'update_field'
+  | 'create_activity'
+  | 'add_tag'
+  | 'remove_tag'
+  | 'assign_owner'
+  | 'create_note'
+  | 'webhook';
+
+export interface WorkflowAction {
+  type: WorkflowActionType;
+  config: Record<string, unknown>;
+}
+
+export interface Workflow {
+  id: UUID;
+  tenant_id: UUID;
+  name: string;
+  description?: string;
+  trigger_event: string;
+  trigger_filter: Record<string, unknown>;
+  actions: WorkflowAction[];
+  is_active: boolean;
+  run_count: number;
+  last_run_at?: string;
+  created_by?: UUID;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowRun {
+  id: UUID;
+  workflow_id: UUID;
+  event_id?: number;
+  status: 'running' | 'completed' | 'failed';
+  actions_run: number;
+  actions_total: number;
+  error?: string;
+  started_at: string;
+  completed_at?: string;
+}

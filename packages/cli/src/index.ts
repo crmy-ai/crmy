@@ -19,13 +19,15 @@ import { useCasesCommand } from './commands/use-cases.js';
 import { webhooksCommand } from './commands/webhooks.js';
 import { emailsCommand } from './commands/emails.js';
 import { customFieldsCommand } from './commands/custom-fields.js';
+import { notesCommand } from './commands/notes.js';
+import { workflowsCommand } from './commands/workflows.js';
 
 const program = new Command();
 
 program
   .name('crmy')
   .description('CRMy — The agent-first open source CRM')
-  .version('0.2.0');
+  .version('0.3.0');
 
 program.addCommand(initCommand());
 program.addCommand(serverCommand());
@@ -43,5 +45,7 @@ program.addCommand(useCasesCommand());
 program.addCommand(webhooksCommand());
 program.addCommand(emailsCommand());
 program.addCommand(customFieldsCommand());
+program.addCommand(notesCommand());
+program.addCommand(workflowsCommand());
 
 program.parse();

@@ -36,9 +36,11 @@ docker compose -f docker/docker-compose.yml up -d
 - **Raw SQL**: No ORM. Every query is readable and auditable.
 - **Event sourcing**: Every mutation writes an append-only event row for full audit trail.
 - **HITL**: Agents can request human approval before high-impact actions.
+- **Plugins**: Extensible plugin system with lifecycle hooks (sample Slack notifier included).
+- **Workflows**: Event-driven automation with configurable triggers and actions.
 - **PostgreSQL**: Production-grade storage with raw SQL queries.
 
-## MCP Tools (40+)
+## MCP Tools (50+)
 
 | Category | Tools |
 |---|---|
@@ -47,6 +49,8 @@ docker compose -f docker/docker-compose.yml up -d
 | Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `pipeline_summary` |
 | Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update` |
 | Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
+| Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
+| Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
 | Emails | `email_create`, `email_get`, `email_search` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
@@ -81,6 +85,15 @@ crmy-ai emails get <id>             Get email details
 crmy-ai custom-fields list <type>   List custom fields
 crmy-ai custom-fields create        Define custom field
 crmy-ai custom-fields delete <id>   Remove field definition
+crmy-ai notes list <type> <id>      List notes on an object
+crmy-ai notes add <type> <id>       Add note (supports --parent, --external, --pin)
+crmy-ai notes get <id>              Get note with replies
+crmy-ai notes delete <id>           Delete note
+crmy-ai workflows list              List automation workflows
+crmy-ai workflows get <id>          Get workflow + recent runs
+crmy-ai workflows create            Interactive create
+crmy-ai workflows delete <id>       Delete workflow
+crmy-ai workflows runs <id>         Execution history
 crmy-ai pipeline                    Pipeline summary
 crmy-ai search <query>              Cross-entity search
 crmy-ai hitl list                   Pending HITL requests

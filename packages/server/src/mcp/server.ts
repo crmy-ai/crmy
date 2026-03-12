@@ -17,6 +17,8 @@ import { useCaseTools } from './tools/use-cases.js';
 import { webhookTools } from './tools/webhooks.js';
 import { emailTools } from './tools/email.js';
 import { customFieldTools } from './tools/custom-fields.js';
+import { noteTools } from './tools/notes.js';
+import { workflowTools } from './tools/workflows.js';
 
 export interface ToolDef {
   name: string;
@@ -38,6 +40,8 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...webhookTools(db),
     ...emailTools(db),
     ...customFieldTools(db),
+    ...noteTools(db),
+    ...workflowTools(db),
     ...metaTools(db),
   ];
 }
@@ -45,7 +49,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
 export function createMcpServer(db: DbPool, getActor: () => ActorContext): McpServer {
   const server = new McpServer({
     name: 'crmy',
-    version: '0.2.0',
+    version: '0.3.0',
   });
 
   const tools = getAllTools(db);

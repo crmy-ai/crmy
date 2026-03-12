@@ -1,6 +1,6 @@
 {
   "name": "crmy",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CRMy CLI — Local CLI + stdio MCP server",
   "type": "module",
   "bin": {

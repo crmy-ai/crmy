@@ -522,3 +522,89 @@ export const bulkJobList = z.object({
   limit,
   cursor,
 });
+
+// -- Note schemas --
+
+const noteObjectType = z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case']);
+const noteVisibility = z.enum(['internal', 'external']);
+
+export const noteCreate = z.object({
+  object_type: noteObjectType,
+  object_id: uuid,
+  parent_id: uuid.optional(),
+  body: z.string().min(1),
+  visibility: noteVisibility.default('internal'),
+  mentions: z.array(z.string()).default([]),
+  pinned: z.boolean().default(false),
+});
+
+export const noteUpdate = z.object({
+  id: uuid,
+  patch: z.object({
+    body: z.string().min(1).optional(),
+    visibility: noteVisibility.optional(),
+    pinned: z.boolean().optional(),
+  }),
+});
+
+export const noteGet = z.object({ id: uuid });
+export const noteDelete = z.object({ id: uuid });
+
+export const noteList = z.object({
+  object_type: noteObjectType,
+  object_id: uuid,
+  visibility: noteVisibility.optional(),
+  pinned: z.boolean().optional(),
+  limit,
+  cursor,
+});
+
+// -- Workflow schemas --
+
+const workflowActionType = z.enum([
+  'send_notification', 'update_field', 'create_activity',
+  'add_tag', 'remove_tag', 'assign_owner', 'create_note', 'webhook',
+]);
+
+const workflowActionSchema = z.object({
+  type: workflowActionType,
+  config: z.record(z.unknown()),
+});
+
+export const workflowCreate = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  trigger_event: z.string().min(1),
+  trigger_filter: z.record(z.unknown()).default({}),
+  actions: z.array(workflowActionSchema).min(1),
+  is_active: z.boolean().default(true),
+});
+
+export const workflowUpdate = z.object({
+  id: uuid,
+  patch: z.object({
+    name: z.string().min(1).optional(),
+    description: z.string().nullable().optional(),
+    trigger_event: z.string().min(1).optional(),
+    trigger_filter: z.record(z.unknown()).optional(),
+    actions: z.array(workflowActionSchema).optional(),
+    is_active: z.boolean().optional(),
+  }),
+});
+
+export const workflowGet = z.object({ id: uuid });
+export const workflowDelete = z.object({ id: uuid });
+
+export const workflowList = z.object({
+  trigger_event: z.string().optional(),
+  is_active: z.boolean().optional(),
+  limit,
+  cursor,
+});
+
+export const workflowRunList = z.object({
+  workflow_id: uuid,
+  status: z.enum(['running', 'completed', 'failed']).optional(),
+  limit,
+  cursor,
+});
