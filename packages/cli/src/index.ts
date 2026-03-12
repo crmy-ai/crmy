@@ -22,6 +22,7 @@ import { customFieldsCommand } from './commands/custom-fields.js';
 import { notesCommand } from './commands/notes.js';
 import { workflowsCommand } from './commands/workflows.js';
 import { authCommand } from './commands/auth.js';
+import { helpCommand } from './commands/help.js';
 
 const program = new Command();
 
@@ -49,6 +50,7 @@ program.addCommand(emailsCommand());
 program.addCommand(customFieldsCommand());
 program.addCommand(notesCommand());
 program.addCommand(workflowsCommand());
+program.addCommand(helpCommand());
 
 // Top-level `crmy login` shortcut (delegates to `crmy auth login`)
 program.command('login')

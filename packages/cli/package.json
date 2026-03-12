@@ -8,7 +8,7 @@
   },
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --clean",
+    "build": "tsup src/index.ts --format esm --clean",
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
