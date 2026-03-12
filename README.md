@@ -2,13 +2,34 @@
 
 The agent-first open source CRM. MCP-native. Works with any PostgreSQL.
 
-## Quickstart (30 seconds)
+## Install
+
+```bash
+npm install -g crmy-ai
+```
+
+Or run directly with npx (no install needed):
 
 ```bash
 npx crmy-ai init
 ```
 
-## Use with Claude Code
+### Prerequisites
+
+- **Node.js** >= 20.0.0
+- **PostgreSQL** >= 14 (any provider: local, Supabase, Neon, RDS, etc.)
+
+## Quickstart
+
+### 1. Initialize
+
+```bash
+npx crmy-ai init
+```
+
+Walks you through: connect to PostgreSQL, run migrations, create your user, generate an API key. Config is saved to `.crmy.json` (auto-added to `.gitignore`).
+
+### 2. Use with Claude Code
 
 ```bash
 claude mcp add crmy -- npx crmy-ai mcp
@@ -18,27 +39,60 @@ Then in Claude Code:
 > "Create a contact for Sarah Chen at Acme Corp, set her stage to prospect,
 >  and log a call we had today about their Q2 budget"
 
-## Self-host with Docker
+### 3. Start the HTTP server
+
+```bash
+npx crmy-ai server
+# Server ready on :3000 with MCP + REST endpoints
+```
+
+### 4. Self-host with Docker
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
 ```
 
+Starts PostgreSQL + crmy server on port 3000 with auto-migrations.
+
+## Develop from source
+
+```bash
+git clone https://github.com/codycharris/crmy.git
+cd crmy
+npm install
+npm run build
+npm run dev     # starts server with tsx watch
+```
+
 ## Architecture
 
-- **@crmy/shared** — TypeScript types, Zod schemas, validation
-- **@crmy/server** — Express + PostgreSQL + MCP Streamable HTTP endpoint
-- **crmy-ai (CLI)** — Local CLI + stdio MCP server for Claude Code
+```
+packages/
+  shared/   @crmy/shared   TypeScript types, Zod schemas, validation
+  server/   @crmy/server   Express + PostgreSQL + MCP Streamable HTTP
+  cli/      crmy-ai        Local CLI + stdio MCP server
+docker/                    Dockerfile + docker-compose.yml
+scripts/                   Migration runner
+```
 
-### Key Design Decisions
+### Design Decisions
 
-- **MCP-first**: All CRM operations are defined as MCP tools. REST API and CLI are thin wrappers around the same tool handlers.
+- **MCP-first**: All CRM operations are MCP tools. REST API and CLI are thin wrappers.
 - **Raw SQL**: No ORM. Every query is readable and auditable.
 - **Event sourcing**: Every mutation writes an append-only event row for full audit trail.
-- **HITL**: Agents can request human approval before high-impact actions.
-- **Plugins**: Extensible plugin system with lifecycle hooks (sample Slack notifier included).
+- **HITL**: Agents request human approval before high-impact actions.
+- **Plugins**: Extensible plugin system with lifecycle hooks.
 - **Workflows**: Event-driven automation with configurable triggers and actions.
-- **PostgreSQL**: Production-grade storage with raw SQL queries.
+
+### Environment variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
+| `JWT_SECRET` | Yes | — | Secret for signing JWT tokens |
+| `PORT` | No | `3000` | HTTP server port |
+| `CRMY_TENANT_ID` | No | `default` | Default tenant slug |
+| `CRMY_API_KEY` | No | — | API key for CLI authentication |
 
 ## MCP Tools (50+)
 
@@ -58,7 +112,7 @@ docker compose -f docker/docker-compose.yml up -d
 | HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
 | Meta | `schema_get`, `tenant_get_stats` |
 
-## CLI Commands
+## CLI Reference
 
 ```
 crmy-ai init                        Interactive setup
@@ -86,7 +140,7 @@ crmy-ai custom-fields list <type>   List custom fields
 crmy-ai custom-fields create        Define custom field
 crmy-ai custom-fields delete <id>   Remove field definition
 crmy-ai notes list <type> <id>      List notes on an object
-crmy-ai notes add <type> <id>       Add note (supports --parent, --external, --pin)
+crmy-ai notes add <type> <id>       Add note (--parent, --external, --pin)
 crmy-ai notes get <id>              Get note with replies
 crmy-ai notes delete <id>           Delete note
 crmy-ai workflows list              List automation workflows
@@ -105,10 +159,10 @@ crmy-ai migrate run                 Run migrations
 crmy-ai migrate status              Migration status
 ```
 
-## REST API
+## Documentation
 
-All endpoints under `/api/v1/` require `Authorization: Bearer <jwt-or-api-key>`.
+See the [complete user guide](docs/guide.md) for detailed documentation covering all features, REST API reference, plugin development, workflow configuration, and more.
 
-See the [full API reference](docs/mcp-tools.md) for details.
+## License
 
-## Tech: TypeScript · PostgreSQL · MCP · Apache-2.0 License
+Apache-2.0
