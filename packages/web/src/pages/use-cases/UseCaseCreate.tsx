@@ -10,7 +10,7 @@ import { Textarea } from '../../components/ui/textarea';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
 import { useCreateUseCase, useAccounts } from '../../api/hooks';
 
-const STAGES = ['discovery', 'onboarding', 'active', 'at_risk', 'churned', 'expansion'];
+const STAGES = ['discovery', 'poc', 'production', 'scaling', 'sunset'];
 const UNITS = ['api_calls', 'credits', 'tokens', 'gb', 'seats', 'workflows', 'events', 'custom'];
 
 export function UseCaseCreatePage() {

@@ -172,11 +172,10 @@ export interface OperationResult<T> {
 
 export type UseCaseStage =
   | 'discovery'
-  | 'onboarding'
-  | 'active'
-  | 'at_risk'
-  | 'churned'
-  | 'expansion';
+  | 'poc'
+  | 'production'
+  | 'scaling'
+  | 'sunset';
 
 export interface UseCase {
   id: UUID;

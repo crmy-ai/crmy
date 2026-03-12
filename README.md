@@ -86,7 +86,7 @@ http://localhost:3000/app
 ### Use Case 360
 
 The use case detail page provides a complete view:
-- **Stage bar** — click to advance with confirmation modal (note required for sunset/churned)
+- **Stage bar** — click to advance with confirmation modal (note required for sunset)
 - **Consumption bar** — green/amber/red thresholds at 70%/90%
 - **Health badge** — colored by score (green >= 70, amber 40-69, red < 40)
 - **Contact management** — add/remove contacts with role assignment

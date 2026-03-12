@@ -109,7 +109,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_advance_stage',
-      description: 'Advance a use case to a new stage (discovery → onboarding → active → expansion, or at_risk/churned)',
+      description: 'Advance a use case to a new stage (discovery → poc → production → scaling → sunset)',
       inputSchema: useCaseAdvanceStage,
       handler: async (input: z.infer<typeof useCaseAdvanceStage>, actor: ActorContext) => {
         const before = await ucRepo.getUseCase(db, actor.tenant_id, input.id);

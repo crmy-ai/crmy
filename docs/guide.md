@@ -287,7 +287,7 @@ Detail view with tabs:
 - **Create** (`/app/use-cases/new`): full form with account selection, stage, consumption unit/capacity, ARR, dates
 - **360 Detail** (`/app/use-cases/:id`): the most comprehensive page:
 
-**Stage bar**: horizontal bar showing all stages. Current stage highlighted. Click another stage to open the advance modal (note required for churned/sunset).
+**Stage bar**: horizontal bar showing all stages. Current stage highlighted. Click another stage to open the advance modal (note required for sunset).
 
 **Left panel**:
 - Account and opportunity links
@@ -530,7 +530,15 @@ Use cases track consumption-based workloads for customer success. They link to a
 
 ### Use case stages
 
-`discovery` → `onboarding` → `active` → `at_risk` → `churned` → `expansion`
+`discovery` → `poc` → `production` → `scaling` → `sunset`
+
+| Stage | Meaning |
+|-------|---------|
+| `discovery` | Use case identified; evaluating fit |
+| `poc` | Active proof-of-concept or pilot |
+| `production` | Live in production, driving real consumption |
+| `scaling` | Expanding volume/users within same use case |
+| `sunset` | Being wound down, consumption declining |
 
 ### MCP tools
 

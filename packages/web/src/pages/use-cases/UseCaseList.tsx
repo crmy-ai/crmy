@@ -16,7 +16,7 @@ function formatCurrency(cents?: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(cents / 100);
 }
 
-const STAGES = ['', 'discovery', 'onboarding', 'active', 'at_risk', 'churned', 'expansion'];
+const STAGES = ['', 'discovery', 'poc', 'production', 'scaling', 'sunset'];
 
 export function UseCaseListPage() {
   const [searchParams] = useSearchParams();

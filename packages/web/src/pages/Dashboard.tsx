@@ -7,14 +7,13 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card'
 import { Badge } from '../components/ui/badge';
 import { usePipelineSummary, useUseCaseAnalytics, useHITLRequests, useActivities } from '../api/hooks';
 
-const USE_CASE_STAGES = ['discovery', 'onboarding', 'active', 'at_risk', 'churned', 'expansion'] as const;
+const USE_CASE_STAGES = ['discovery', 'poc', 'production', 'scaling', 'sunset'] as const;
 const stageColors: Record<string, string> = {
   discovery: 'bg-slate-100 text-slate-800',
-  onboarding: 'bg-slate-100 text-slate-800',
-  active: 'bg-emerald-100 text-emerald-800',
-  at_risk: 'bg-amber-100 text-amber-800',
-  churned: 'bg-red-100 text-red-800',
-  expansion: 'bg-teal-100 text-teal-800',
+  poc: 'bg-slate-100 text-slate-800',
+  production: 'bg-emerald-100 text-emerald-800',
+  scaling: 'bg-teal-100 text-teal-800',
+  sunset: 'bg-red-100 text-red-800',
 };
 
 function formatCurrency(cents?: number) {
@@ -34,7 +33,7 @@ export function DashboardPage() {
 
   const ucGroups = (ucData as any)?.by_group ?? (ucData as any)?.data ?? [];
   const activeUcCount = ucGroups.reduce((sum: number, g: any) =>
-    ['active', 'expansion'].includes(g.label ?? g.stage) ? sum + (g.count ?? 0) : sum, 0);
+    ['production', 'scaling'].includes(g.label ?? g.stage) ? sum + (g.count ?? 0) : sum, 0);
 
   const stats = [
     { label: 'Pipeline Value', value: formatCurrency(pipelineValue), icon: DollarSign, color: 'text-blue-600' },
