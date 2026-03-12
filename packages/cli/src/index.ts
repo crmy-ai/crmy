@@ -16,6 +16,9 @@ import { eventsCommand } from './commands/events.js';
 import { configCommand } from './commands/config.js';
 import { migrateCommand } from './commands/migrate.js';
 import { useCasesCommand } from './commands/use-cases.js';
+import { webhooksCommand } from './commands/webhooks.js';
+import { emailsCommand } from './commands/emails.js';
+import { customFieldsCommand } from './commands/custom-fields.js';
 
 const program = new Command();
 
@@ -37,5 +40,8 @@ program.addCommand(eventsCommand());
 program.addCommand(configCommand());
 program.addCommand(migrateCommand());
 program.addCommand(useCasesCommand());
+program.addCommand(webhooksCommand());
+program.addCommand(emailsCommand());
+program.addCommand(customFieldsCommand());
 
 program.parse();

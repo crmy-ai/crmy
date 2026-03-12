@@ -14,6 +14,9 @@ import { analyticsTools } from './tools/analytics.js';
 import { hitlTools } from './tools/hitl.js';
 import { metaTools } from './tools/meta.js';
 import { useCaseTools } from './tools/use-cases.js';
+import { webhookTools } from './tools/webhooks.js';
+import { emailTools } from './tools/email.js';
+import { customFieldTools } from './tools/custom-fields.js';
 
 export interface ToolDef {
   name: string;
@@ -32,6 +35,9 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...analyticsTools(db),
     ...hitlTools(db),
     ...useCaseTools(db),
+    ...webhookTools(db),
+    ...emailTools(db),
+    ...customFieldTools(db),
     ...metaTools(db),
   ];
 }

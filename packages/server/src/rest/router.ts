@@ -464,6 +464,150 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  // --- Webhooks ---
+  router.get('/webhooks', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'webhook_list');
+      const result = await handler({
+        active: req.query.active !== undefined ? req.query.active === 'true' : undefined,
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/webhooks', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'webhook_create');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/webhooks/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'webhook_get');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/webhooks/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'webhook_update');
+      const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/webhooks/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'webhook_delete');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/webhooks/:id/deliveries', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'webhook_list_deliveries');
+      const result = await handler({
+        endpoint_id: p(req, 'id'),
+        status: qs(req.query.status),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Emails ---
+  router.get('/emails', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_search');
+      const result = await handler({
+        contact_id: qs(req.query.contact_id),
+        status: qs(req.query.status),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/emails', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_create');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/emails/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_get');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Custom Fields ---
+  router.get('/custom-fields', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const objectType = qs(req.query.object_type);
+      if (!objectType) {
+        res.status(400).json({
+          type: 'https://crmy.ai/errors/validation',
+          title: 'Validation Error',
+          status: 400,
+          detail: 'object_type parameter is required',
+        });
+        return;
+      }
+      const handler = toolHandler(db, 'custom_field_list');
+      const result = await handler({ object_type: objectType }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/custom-fields', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'custom_field_create');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/custom-fields/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'custom_field_update');
+      const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/custom-fields/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'custom_field_delete');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Events ---
   router.get('/events', async (req: Request, res: Response) => {
     try {

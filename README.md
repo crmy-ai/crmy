@@ -36,9 +36,9 @@ docker compose -f docker/docker-compose.yml up -d
 - **Raw SQL**: No ORM. Every query is readable and auditable.
 - **Event sourcing**: Every mutation writes an append-only event row for full audit trail.
 - **HITL**: Agents can request human approval before high-impact actions.
-- **PostgreSQL only (v0.1)**: SQLite planned for v0.2.
+- **PostgreSQL**: Production-grade storage with raw SQL queries.
 
-## MCP Tools (25+)
+## MCP Tools (40+)
 
 | Category | Tools |
 |---|---|
@@ -46,6 +46,10 @@ docker compose -f docker/docker-compose.yml up -d
 | Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy` |
 | Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `pipeline_summary` |
 | Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update` |
+| Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
+| Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
+| Emails | `email_create`, `email_get`, `email_search` |
+| Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
 | Analytics | `crm_search`, `pipeline_forecast`, `account_health_report` |
 | HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
 | Meta | `schema_get`, `tenant_get_stats` |
@@ -63,6 +67,20 @@ crmy-ai accounts list               List accounts
 crmy-ai accounts get <id>           Get account + contacts + opps
 crmy-ai opps list [--stage <s>]     List opportunities
 crmy-ai opps advance <id> <stage>   Advance opportunity stage
+crmy-ai use-cases list              List use cases
+crmy-ai use-cases get <id>          Get use case details
+crmy-ai use-cases create            Interactive create
+crmy-ai use-cases summary           Use case summary
+crmy-ai webhooks list               List webhook endpoints
+crmy-ai webhooks create             Register new webhook
+crmy-ai webhooks delete <id>        Remove webhook
+crmy-ai webhooks deliveries         Delivery log
+crmy-ai emails list                 List outbound emails
+crmy-ai emails create               Draft email (with HITL)
+crmy-ai emails get <id>             Get email details
+crmy-ai custom-fields list <type>   List custom fields
+crmy-ai custom-fields create        Define custom field
+crmy-ai custom-fields delete <id>   Remove field definition
 crmy-ai pipeline                    Pipeline summary
 crmy-ai search <query>              Cross-entity search
 crmy-ai hitl list                   Pending HITL requests
@@ -80,4 +98,4 @@ All endpoints under `/api/v1/` require `Authorization: Bearer <jwt-or-api-key>`.
 
 See the [full API reference](docs/mcp-tools.md) for details.
 
-## Tech: TypeScript · PostgreSQL · MCP · MIT License
+## Tech: TypeScript · PostgreSQL · MCP · Apache-2.0 License
