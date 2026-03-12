@@ -1,3 +1,6 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import { Command } from 'commander';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadConfigFile } from '../config.js';
@@ -12,7 +15,7 @@ export function mcpCommand(): Command {
       const apiKey = process.env.CRMY_API_KEY ?? config.apiKey;
 
       if (!databaseUrl) {
-        console.error('No database URL. Run `crmy-ai init` first or set DATABASE_URL.');
+        console.error('No database URL. Run `crmy init` first or set DATABASE_URL.');
         process.exit(1);
       }
 

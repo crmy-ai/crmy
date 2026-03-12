@@ -1,3 +1,6 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import { Command } from 'commander';
 import { loadConfigFile } from '../config.js';
 
@@ -23,7 +26,7 @@ export function eventsCommand(): Command {
       // Get default tenant
       const tenantResult = await db.query("SELECT id FROM tenants WHERE slug = 'default' LIMIT 1");
       if (tenantResult.rows.length === 0) {
-        console.log('No tenant found. Run crmy-ai init first.');
+        console.log('No tenant found. Run crmy init first.');
         await closePool();
         return;
       }

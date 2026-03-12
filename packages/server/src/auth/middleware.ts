@@ -1,3 +1,6 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import { type Request, type Response, type NextFunction } from 'express';
 import * as jose from 'jose';
 import crypto from 'node:crypto';

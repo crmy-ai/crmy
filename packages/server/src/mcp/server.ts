@@ -1,3 +1,6 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ZodRawShape, ZodObject } from 'zod';
 import type { ActorContext } from '@crmy/shared';
@@ -10,6 +13,12 @@ import { activityTools } from './tools/activities.js';
 import { analyticsTools } from './tools/analytics.js';
 import { hitlTools } from './tools/hitl.js';
 import { metaTools } from './tools/meta.js';
+import { useCaseTools } from './tools/use-cases.js';
+import { webhookTools } from './tools/webhooks.js';
+import { emailTools } from './tools/email.js';
+import { customFieldTools } from './tools/custom-fields.js';
+import { noteTools } from './tools/notes.js';
+import { workflowTools } from './tools/workflows.js';
 
 export interface ToolDef {
   name: string;
@@ -27,6 +36,12 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...activityTools(db),
     ...analyticsTools(db),
     ...hitlTools(db),
+    ...useCaseTools(db),
+    ...webhookTools(db),
+    ...emailTools(db),
+    ...customFieldTools(db),
+    ...noteTools(db),
+    ...workflowTools(db),
     ...metaTools(db),
   ];
 }
@@ -34,7 +49,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
 export function createMcpServer(db: DbPool, getActor: () => ActorContext): McpServer {
   const server = new McpServer({
     name: 'crmy',
-    version: '0.1.0',
+    version: '0.3.0',
   });
 
   const tools = getAllTools(db);

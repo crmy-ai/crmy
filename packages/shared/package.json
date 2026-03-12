@@ -1,7 +1,7 @@
 {
   "name": "@crmy/shared",
-  "version": "0.1.0",
-  "description": "Shared types, Zod schemas, and validation for crmy.ai",
+  "version": "0.3.0",
+  "description": "Shared types, Zod schemas, and validation for CRMy",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -18,5 +18,5 @@
   "dependencies": {
     "zod": "^3.23.0"
   },
-  "license": "MIT"
+  "license": "Apache-2.0"
 }

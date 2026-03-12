@@ -1,3 +1,6 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 export type ErrorCode =
   | 'VALIDATION_ERROR'
   | 'NOT_FOUND'

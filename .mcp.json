@@ -2,7 +2,7 @@
   "mcpServers": {
     "crmy": {
       "command": "npx",
-      "args": ["crmy-ai", "mcp"],
+      "args": ["crmy", "mcp"],
       "env": {
         "CRMY_SERVER_URL": "http://localhost:3000",
         "CRMY_API_KEY": "${CRMY_API_KEY}"

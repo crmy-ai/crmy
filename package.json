@@ -1,12 +1,13 @@
 {
-  "name": "crmy-ai",
-  "version": "0.1.0",
-  "description": "The agent-first open source CRM. MCP-native.",
+  "name": "crmy",
+  "version": "0.3.0",
+  "description": "CRMy — the agent-first open source CRM",
   "private": true,
   "workspaces": [
     "packages/shared",
     "packages/server",
-    "packages/cli"
+    "packages/cli",
+    "packages/web"
   ],
   "scripts": {
     "build": "npm run build --workspaces",
@@ -18,5 +19,5 @@
   "engines": {
     "node": ">=20.0.0"
   },
-  "license": "MIT"
+  "license": "Apache-2.0"
 }

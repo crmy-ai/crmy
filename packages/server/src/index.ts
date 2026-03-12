@@ -1,4 +1,9 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import express from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { initPool, getPool, closePool, type DbPool } from './db/pool.js';
@@ -8,6 +13,7 @@ import { authMiddleware } from './auth/middleware.js';
 import { apiRouter } from './rest/router.js';
 import { createMcpServer } from './mcp/server.js';
 import { autoApproveExpired, expireOldRequests } from './db/repos/hitl.js';
+import { loadPlugins, shutdownPlugins, type PluginConfig } from './plugins/index.js';
 import type { ActorContext } from '@crmy/shared';
 
 export interface ServerConfig {
@@ -15,6 +21,7 @@ export interface ServerConfig {
   jwtSecret: string;
   port: number;
   tenantSlug: string;
+  plugins?: PluginConfig[];
 }
 
 export function loadConfig(): ServerConfig {
@@ -51,9 +58,9 @@ export async function createApp(config: ServerConfig) {
   app.get('/health', async (_req, res) => {
     try {
       await db.query('SELECT 1');
-      res.json({ status: 'ok', db: 'ok', version: '0.1.0' });
+      res.json({ status: 'ok', db: 'ok', version: '0.3.0' });
     } catch {
-      res.status(503).json({ status: 'error', db: 'error', version: '0.1.0' });
+      res.status(503).json({ status: 'error', db: 'error', version: '0.3.0' });
     }
   });
 
@@ -110,6 +117,14 @@ export async function createApp(config: ServerConfig) {
   // Authenticated API routes
   app.use('/api/v1', authMiddleware(db, config.jwtSecret), apiRouter(db));
 
+  // Serve web UI static files
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const webDist = path.resolve(__dirname, '../../web/dist');
+  app.use('/app', express.static(webDist));
+  app.get('/app/*', (_req, res) => {
+    res.sendFile(path.join(webDist, 'index.html'));
+  });
+
   // HITL auto-approval worker (every 60 seconds)
   const hitlInterval = setInterval(async () => {
     try {
@@ -119,6 +134,11 @@ export async function createApp(config: ServerConfig) {
       console.error('HITL worker error:', err);
     }
   }, 60_000);
+
+  // Load plugins
+  if (config.plugins?.length) {
+    await loadPlugins(config.plugins, { db, config: {} });
+  }
 
   return { app, db, hitlInterval };
 }
@@ -146,6 +166,7 @@ async function main() {
   // Graceful shutdown
   const shutdown = async () => {
     clearInterval(hitlInterval);
+    await shutdownPlugins();
     server.close();
     await closePool();
     process.exit(0);
@@ -168,4 +189,7 @@ export { getPool, initPool, closePool } from './db/pool.js';
 export { runMigrations } from './db/migrate.js';
 export { createMcpServer, getAllTools } from './mcp/server.js';
 export { emitEvent } from './events/emitter.js';
+export { createWorkflowEngine } from './workflows/engine.js';
+export { loadPlugins, shutdownPlugins } from './plugins/index.js';
+export type { CrmyPlugin, PluginConfig } from './plugins/index.js';
 export type { ToolDef } from './mcp/server.js';
