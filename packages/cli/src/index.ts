@@ -21,6 +21,7 @@ import { emailsCommand } from './commands/emails.js';
 import { customFieldsCommand } from './commands/custom-fields.js';
 import { notesCommand } from './commands/notes.js';
 import { workflowsCommand } from './commands/workflows.js';
+import { authCommand } from './commands/auth.js';
 
 const program = new Command();
 
@@ -29,6 +30,7 @@ program
   .description('CRMy — The agent-first open source CRM')
   .version('0.3.0');
 
+program.addCommand(authCommand());
 program.addCommand(initCommand());
 program.addCommand(serverCommand());
 program.addCommand(mcpCommand());
@@ -47,5 +49,18 @@ program.addCommand(emailsCommand());
 program.addCommand(customFieldsCommand());
 program.addCommand(notesCommand());
 program.addCommand(workflowsCommand());
+
+// Top-level `crmy login` shortcut (delegates to `crmy auth login`)
+program.command('login')
+  .description('Sign in to a CRMy server (shortcut for `crmy auth login`)')
+  .option('-e, --email <email>', 'Email address')
+  .option('-p, --password <password>', 'Password')
+  .action(async (opts) => {
+    // Re-run as `auth login` with same args
+    const args = ['auth', 'login'];
+    if (opts.email) args.push('-e', opts.email);
+    if (opts.password) args.push('-p', opts.password);
+    await program.parseAsync(['node', 'crmy', ...args]);
+  });
 
 program.parse();
