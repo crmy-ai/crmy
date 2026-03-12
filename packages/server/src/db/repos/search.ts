@@ -1,3 +1,6 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import type { DbPool } from '../pool.js';
 import type { Contact, Account, Opportunity, UUID } from '@crmy/shared';
 

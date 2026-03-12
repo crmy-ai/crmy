@@ -1,10 +1,9 @@
 {
-  "name": "crmy-ai",
-  "version": "0.1.0",
-  "description": "crmy.ai CLI — Local CLI + stdio MCP server",
+  "name": "crmy",
+  "version": "0.2.0",
+  "description": "CRMy CLI — Local CLI + stdio MCP server",
   "type": "module",
   "bin": {
-    "crmy-ai": "dist/index.js",
     "crmy": "dist/index.js"
   },
   "main": "dist/index.js",
@@ -23,5 +22,5 @@
   "devDependencies": {
     "tsup": "^8.3.0"
   },
-  "license": "MIT"
+  "license": "Apache-2.0"
 }

@@ -1,4 +1,7 @@
 #!/usr/bin/env tsx
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import { initPool, closePool } from '../packages/server/src/db/pool.js';
 import { runMigrations, getMigrationStatus } from '../packages/server/src/db/migrate.js';
 

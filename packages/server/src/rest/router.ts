@@ -1,3 +1,6 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import { Router, type Request, type Response } from 'express';
 import type { DbPool } from '../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
@@ -9,6 +12,7 @@ import * as activityRepo from '../db/repos/activities.js';
 import * as hitlRepo from '../db/repos/hitl.js';
 import * as eventRepo from '../db/repos/events.js';
 import * as searchRepo from '../db/repos/search.js';
+import * as ucRepo from '../db/repos/use-cases.js';
 import { emitEvent } from '../events/emitter.js';
 import { getAllTools } from '../mcp/server.js';
 
@@ -326,6 +330,136 @@ export function apiRouter(db: DbPool): Router {
       const actor = getActor(req);
       const handler = toolHandler(db, 'hitl_resolve');
       const result = await handler({ request_id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Use Cases ---
+  router.get('/use-cases', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const result = await ucRepo.searchUseCases(db, actor.tenant_id, {
+        account_id: qs(req.query.account_id),
+        stage: qs(req.query.stage),
+        owner_id: qs(req.query.owner_id),
+        query: qs(req.query.q),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      });
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/use-cases', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'use_case_create');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/use-cases/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'use_case_get');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/use-cases/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      if (req.body.stage && !req.body.patch) {
+        const handler = toolHandler(db, 'use_case_advance_stage');
+        const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+        res.json(result);
+      } else {
+        const handler = toolHandler(db, 'use_case_update');
+        const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+        res.json(result);
+      }
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/use-cases/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'use_case_delete');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/use-cases/:id/consumption', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'use_case_update_consumption');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/use-cases/:id/health', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'use_case_set_health');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/use-cases/:id/contacts', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'use_case_list_contacts');
+      const result = await handler({ use_case_id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/use-cases/:id/contacts', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'use_case_link_contact');
+      const result = await handler({ use_case_id: p(req, 'id'), ...req.body }, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/use-cases/:ucId/contacts/:contactId', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'use_case_unlink_contact');
+      const result = await handler({
+        use_case_id: p(req, 'ucId'),
+        contact_id: p(req, 'contactId'),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/use-cases/:id/timeline', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'use_case_get_timeline');
+      const result = await handler({
+        id: p(req, 'id'),
+        limit: qn(req.query.limit, 50),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/analytics/use-cases', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'use_case_summary');
+      const result = await handler({
+        account_id: qs(req.query.account_id),
+        group_by: qs(req.query.group_by) ?? 'stage',
+      }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
   });

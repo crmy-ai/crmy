@@ -1,3 +1,6 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import { loadConfigFile } from './config.js';
 
 export interface CliClient {
@@ -10,7 +13,7 @@ export async function getClient(): Promise<CliClient> {
   const databaseUrl = process.env.DATABASE_URL ?? config.database?.url;
 
   if (!databaseUrl) {
-    console.error('No database URL. Run `crmy-ai init` first or set DATABASE_URL.');
+    console.error('No database URL. Run `crmy init` first or set DATABASE_URL.');
     process.exit(1);
   }
 

@@ -1,3 +1,6 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import { z } from 'zod';
 
 // -- Reusable primitives --
@@ -268,7 +271,7 @@ export const hitlResolve = z.object({
 // -- Meta schemas --
 
 export const schemaGet = z.object({
-  object_type: z.enum(['contact', 'account', 'opportunity', 'activity']),
+  object_type: z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case']),
 });
 
 export const tenantGetStats = z.object({});
@@ -291,4 +294,231 @@ export const apiKeyCreate = z.object({
   label: z.string().min(1),
   scopes: z.array(z.string()).default(['read', 'write']),
   expires_at: z.string().optional(),
+});
+
+// -- Use Case schemas --
+
+export const useCaseStage = z.enum(['discovery', 'onboarding', 'active', 'at_risk', 'churned', 'expansion']);
+
+export const useCaseCreate = z.object({
+  account_id: uuid,
+  name: z.string().min(1),
+  stage: useCaseStage.default('discovery'),
+  description: z.string().optional(),
+  opportunity_id: uuid.optional(),
+  unit_label: z.string().optional(),
+  consumption_unit: z.string().optional(),
+  consumption_capacity: z.number().int().optional(),
+  attributed_arr: z.number().int().optional(),
+  currency_code: z.string().length(3).default('USD'),
+  expansion_potential: z.number().int().optional(),
+  started_at: z.string().optional(),
+  target_prod_date: z.string().optional(),
+  sunset_date: z.string().optional(),
+  tags,
+  custom_fields: customFields,
+});
+
+export const useCaseUpdate = z.object({
+  id: uuid,
+  patch: z.object({
+    name: z.string().min(1).optional(),
+    stage: useCaseStage.optional(),
+    description: z.string().nullable().optional(),
+    opportunity_id: uuid.nullable().optional(),
+    owner_id: uuid.nullable().optional(),
+    unit_label: z.string().nullable().optional(),
+    consumption_unit: z.string().nullable().optional(),
+    consumption_capacity: z.number().int().nullable().optional(),
+    attributed_arr: z.number().int().nullable().optional(),
+    currency_code: z.string().length(3).optional(),
+    expansion_potential: z.number().int().nullable().optional(),
+    started_at: z.string().nullable().optional(),
+    target_prod_date: z.string().nullable().optional(),
+    sunset_date: z.string().nullable().optional(),
+    tags: z.array(z.string()).optional(),
+    custom_fields: z.record(z.unknown()).optional(),
+  }),
+});
+
+export const useCaseSearch = z.object({
+  account_id: uuid.optional(),
+  stage: useCaseStage.optional(),
+  owner_id: uuid.optional(),
+  product_line: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+  query: z.string().optional(),
+  limit,
+  cursor,
+});
+
+export const useCaseGet = z.object({ id: uuid });
+export const useCaseDelete = z.object({ id: uuid });
+
+export const useCaseAdvanceStage = z.object({
+  id: uuid,
+  stage: useCaseStage,
+  note: z.string().optional(),
+});
+
+export const useCaseUpdateConsumption = z.object({
+  id: uuid,
+  consumption_current: z.number().int(),
+  note: z.string().optional(),
+});
+
+export const useCaseSetHealth = z.object({
+  id: uuid,
+  score: z.number().int().min(0).max(100),
+  rationale: z.string().optional(),
+});
+
+export const useCaseLinkContact = z.object({
+  use_case_id: uuid,
+  contact_id: uuid,
+  role: z.string().default('stakeholder'),
+});
+
+export const useCaseUnlinkContact = z.object({
+  use_case_id: uuid,
+  contact_id: uuid,
+});
+
+export const useCaseListContacts = z.object({
+  use_case_id: uuid,
+});
+
+export const useCaseGetTimeline = z.object({
+  id: uuid,
+  limit: limit.default(50),
+  types: z.array(activityType).optional(),
+});
+
+export const useCaseSummary = z.object({
+  account_id: uuid.optional(),
+  group_by: z.enum(['stage', 'product_line', 'owner']).default('stage'),
+});
+
+// -- Webhook schemas --
+
+export const webhookCreate = z.object({
+  url: z.string().url(),
+  events: z.array(z.string()).min(1),
+  description: z.string().optional(),
+});
+
+export const webhookUpdate = z.object({
+  id: uuid,
+  patch: z.object({
+    url: z.string().url().optional(),
+    events: z.array(z.string()).optional(),
+    active: z.boolean().optional(),
+    description: z.string().nullable().optional(),
+  }),
+});
+
+export const webhookDelete = z.object({ id: uuid });
+export const webhookGet = z.object({ id: uuid });
+
+export const webhookList = z.object({
+  active: z.boolean().optional(),
+  limit,
+  cursor,
+});
+
+export const webhookListDeliveries = z.object({
+  endpoint_id: uuid.optional(),
+  status: z.enum(['pending', 'success', 'failed']).optional(),
+  limit,
+  cursor,
+});
+
+// -- Email schemas --
+
+export const emailCreate = z.object({
+  contact_id: uuid.optional(),
+  account_id: uuid.optional(),
+  opportunity_id: uuid.optional(),
+  use_case_id: uuid.optional(),
+  subject: z.string().min(1),
+  body_html: z.string().optional(),
+  body_text: z.string().optional(),
+  to_address: z.string().email(),
+  require_approval: z.boolean().default(true),
+});
+
+export const emailGet = z.object({ id: uuid });
+
+export const emailSearch = z.object({
+  contact_id: uuid.optional(),
+  status: z.enum(['draft', 'pending_approval', 'approved', 'sending', 'sent', 'failed', 'rejected']).optional(),
+  limit,
+  cursor,
+});
+
+export const emailSequenceCreate = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  steps: z.array(z.object({
+    delay_days: z.number().int().min(0),
+    subject: z.string().min(1),
+    body_html: z.string().optional(),
+    body_text: z.string().optional(),
+  })).min(1),
+});
+
+export const emailSequenceEnroll = z.object({
+  sequence_id: uuid,
+  contact_id: uuid,
+});
+
+// -- Custom field schemas --
+
+export const customFieldCreate = z.object({
+  object_type: z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case']),
+  field_name: z.string().min(1).regex(/^[a-z][a-z0-9_]*$/),
+  field_type: z.enum(['text', 'number', 'boolean', 'date', 'select', 'multi_select']),
+  label: z.string().min(1),
+  description: z.string().optional(),
+  required: z.boolean().default(false),
+  options: z.array(z.string()).optional(),
+  default_value: z.unknown().optional(),
+});
+
+export const customFieldUpdate = z.object({
+  id: uuid,
+  patch: z.object({
+    label: z.string().min(1).optional(),
+    description: z.string().nullable().optional(),
+    required: z.boolean().optional(),
+    options: z.array(z.string()).optional(),
+    default_value: z.unknown().optional(),
+    sort_order: z.number().int().optional(),
+  }),
+});
+
+export const customFieldDelete = z.object({ id: uuid });
+
+export const customFieldList = z.object({
+  object_type: z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case']),
+});
+
+// -- Bulk schemas --
+
+export const bulkImport = z.object({
+  object_type: z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case']),
+  records: z.array(z.record(z.unknown())).min(1).max(10000),
+});
+
+export const bulkExport = z.object({
+  object_type: z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case']),
+  filters: z.record(z.unknown()).default({}),
+});
+
+export const bulkJobGet = z.object({ id: uuid });
+
+export const bulkJobList = z.object({
+  status: z.enum(['pending', 'processing', 'completed', 'failed']).optional(),
+  limit,
+  cursor,
 });
