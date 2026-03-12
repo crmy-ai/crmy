@@ -17,7 +17,7 @@ export function serverCommand(): Command {
       process.env.CRMY_IMPORTED = '1';
 
       if (!process.env.DATABASE_URL) {
-        console.error('No database URL. Run `crmy-ai init` first or set DATABASE_URL.');
+        console.error('No database URL. Run `crmy init` first or set DATABASE_URL.');
         process.exit(1);
       }
 

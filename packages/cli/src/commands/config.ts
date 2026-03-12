@@ -11,7 +11,7 @@ export function configCommand(): Command {
     .action(() => {
       const config = loadConfigFile();
       if (Object.keys(config).length === 0) {
-        console.log('No .crmy.json found. Run `crmy-ai init` to create one.');
+        console.log('No .crmy.json found. Run `crmy init` to create one.');
         return;
       }
       // Redact sensitive values

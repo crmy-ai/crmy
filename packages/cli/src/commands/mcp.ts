@@ -15,7 +15,7 @@ export function mcpCommand(): Command {
       const apiKey = process.env.CRMY_API_KEY ?? config.apiKey;
 
       if (!databaseUrl) {
-        console.error('No database URL. Run `crmy-ai init` first or set DATABASE_URL.');
+        console.error('No database URL. Run `crmy init` first or set DATABASE_URL.');
         process.exit(1);
       }
 

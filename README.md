@@ -5,13 +5,13 @@ The agent-first open source CRM. MCP-native. Works with any PostgreSQL.
 ## Install
 
 ```bash
-npm install -g crmy-ai
+npm install -g crmy
 ```
 
 Or run directly with npx (no install needed):
 
 ```bash
-npx crmy-ai init
+npx crmy init
 ```
 
 ### Prerequisites
@@ -24,7 +24,7 @@ npx crmy-ai init
 ### 1. Initialize
 
 ```bash
-npx crmy-ai init
+npx crmy init
 ```
 
 Walks you through: connect to PostgreSQL, run migrations, create your user, generate an API key. Config is saved to `.crmy.json` (auto-added to `.gitignore`).
@@ -32,7 +32,7 @@ Walks you through: connect to PostgreSQL, run migrations, create your user, gene
 ### 2. Use with Claude Code
 
 ```bash
-claude mcp add crmy -- npx crmy-ai mcp
+claude mcp add crmy -- npx crmy mcp
 ```
 
 Then in Claude Code:
@@ -42,7 +42,7 @@ Then in Claude Code:
 ### 3. Start the HTTP server
 
 ```bash
-npx crmy-ai server
+npx crmy server
 # Server ready on :3000 with MCP + REST endpoints
 ```
 
@@ -70,7 +70,7 @@ npm run dev     # starts server with tsx watch
 packages/
   shared/   @crmy/shared   TypeScript types, Zod schemas, validation
   server/   @crmy/server   Express + PostgreSQL + MCP Streamable HTTP
-  cli/      crmy-ai        Local CLI + stdio MCP server
+  cli/      crmy        Local CLI + stdio MCP server
 docker/                    Dockerfile + docker-compose.yml
 scripts/                   Migration runner
 ```
@@ -115,48 +115,48 @@ scripts/                   Migration runner
 ## CLI Reference
 
 ```
-crmy-ai init                        Interactive setup
-crmy-ai server [--port 3000]        Start HTTP server
-crmy-ai mcp                         Start stdio MCP server
-crmy-ai contacts list [--q <query>] List contacts
-crmy-ai contacts create             Interactive create
-crmy-ai contacts get <id>           Get contact details
-crmy-ai accounts list               List accounts
-crmy-ai accounts get <id>           Get account + contacts + opps
-crmy-ai opps list [--stage <s>]     List opportunities
-crmy-ai opps advance <id> <stage>   Advance opportunity stage
-crmy-ai use-cases list              List use cases
-crmy-ai use-cases get <id>          Get use case details
-crmy-ai use-cases create            Interactive create
-crmy-ai use-cases summary           Use case summary
-crmy-ai webhooks list               List webhook endpoints
-crmy-ai webhooks create             Register new webhook
-crmy-ai webhooks delete <id>        Remove webhook
-crmy-ai webhooks deliveries         Delivery log
-crmy-ai emails list                 List outbound emails
-crmy-ai emails create               Draft email (with HITL)
-crmy-ai emails get <id>             Get email details
-crmy-ai custom-fields list <type>   List custom fields
-crmy-ai custom-fields create        Define custom field
-crmy-ai custom-fields delete <id>   Remove field definition
-crmy-ai notes list <type> <id>      List notes on an object
-crmy-ai notes add <type> <id>       Add note (--parent, --external, --pin)
-crmy-ai notes get <id>              Get note with replies
-crmy-ai notes delete <id>           Delete note
-crmy-ai workflows list              List automation workflows
-crmy-ai workflows get <id>          Get workflow + recent runs
-crmy-ai workflows create            Interactive create
-crmy-ai workflows delete <id>       Delete workflow
-crmy-ai workflows runs <id>         Execution history
-crmy-ai pipeline                    Pipeline summary
-crmy-ai search <query>              Cross-entity search
-crmy-ai hitl list                   Pending HITL requests
-crmy-ai hitl approve <id>           Approve request
-crmy-ai hitl reject <id> [--note]   Reject request
-crmy-ai events [--object <id>]      Audit log
-crmy-ai config show                 Show config
-crmy-ai migrate run                 Run migrations
-crmy-ai migrate status              Migration status
+crmy init                        Interactive setup
+crmy server [--port 3000]        Start HTTP server
+crmy mcp                         Start stdio MCP server
+crmy contacts list [--q <query>] List contacts
+crmy contacts create             Interactive create
+crmy contacts get <id>           Get contact details
+crmy accounts list               List accounts
+crmy accounts get <id>           Get account + contacts + opps
+crmy opps list [--stage <s>]     List opportunities
+crmy opps advance <id> <stage>   Advance opportunity stage
+crmy use-cases list              List use cases
+crmy use-cases get <id>          Get use case details
+crmy use-cases create            Interactive create
+crmy use-cases summary           Use case summary
+crmy webhooks list               List webhook endpoints
+crmy webhooks create             Register new webhook
+crmy webhooks delete <id>        Remove webhook
+crmy webhooks deliveries         Delivery log
+crmy emails list                 List outbound emails
+crmy emails create               Draft email (with HITL)
+crmy emails get <id>             Get email details
+crmy custom-fields list <type>   List custom fields
+crmy custom-fields create        Define custom field
+crmy custom-fields delete <id>   Remove field definition
+crmy notes list <type> <id>      List notes on an object
+crmy notes add <type> <id>       Add note (--parent, --external, --pin)
+crmy notes get <id>              Get note with replies
+crmy notes delete <id>           Delete note
+crmy workflows list              List automation workflows
+crmy workflows get <id>          Get workflow + recent runs
+crmy workflows create            Interactive create
+crmy workflows delete <id>       Delete workflow
+crmy workflows runs <id>         Execution history
+crmy pipeline                    Pipeline summary
+crmy search <query>              Cross-entity search
+crmy hitl list                   Pending HITL requests
+crmy hitl approve <id>           Approve request
+crmy hitl reject <id> [--note]   Reject request
+crmy events [--object <id>]      Audit log
+crmy config show                 Show config
+crmy migrate run                 Run migrations
+crmy migrate status              Migration status
 ```
 
 ## Documentation

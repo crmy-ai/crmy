@@ -118,9 +118,9 @@ export function initCommand(): Command {
 
         console.log('\n  ✓ crmy.ai initialized\n');
         console.log('  Add to Claude Code:');
-        console.log('  claude mcp add crmy -- npx crmy-ai mcp\n');
+        console.log('  claude mcp add crmy -- npx crmy mcp\n');
         console.log('  Or start the server:');
-        console.log('  npx crmy-ai server\n');
+        console.log('  npx crmy server\n');
       } catch (err) {
         console.error('\nSetup failed:', err instanceof Error ? err.message : err);
         process.exit(1);

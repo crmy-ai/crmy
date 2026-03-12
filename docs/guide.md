@@ -34,13 +34,13 @@ Complete documentation for crmy.ai — the agent-first open source CRM.
 ### Install
 
 ```bash
-npm install -g crmy-ai
+npm install -g crmy
 ```
 
 Or use with npx (no install):
 
 ```bash
-npx crmy-ai init
+npx crmy init
 ```
 
 ### Prerequisites
@@ -52,13 +52,13 @@ npx crmy-ai init
 
 ```bash
 # 1. Initialize (interactive — sets up DB, user, API key)
-npx crmy-ai init
+npx crmy init
 
 # 2. Add to Claude Code as an MCP server
-claude mcp add crmy -- npx crmy-ai mcp
+claude mcp add crmy -- npx crmy mcp
 
 # 3. Or start the HTTP server
-npx crmy-ai server
+npx crmy server
 ```
 
 ### Docker
@@ -85,7 +85,7 @@ npm run dev
 
 ### .crmy.json
 
-Created by `crmy-ai init`. Stored in your project root. Auto-added to `.gitignore`.
+Created by `crmy init`. Stored in your project root. Auto-added to `.gitignore`.
 
 ```json
 {
@@ -123,10 +123,10 @@ All CRM operations are defined as **MCP tools**. The REST API and CLI are thin w
 
 **Three ways to interact:**
 
-1. **MCP (stdio)** — `crmy-ai mcp` starts an MCP server over stdio for Claude Code
+1. **MCP (stdio)** — `crmy mcp` starts an MCP server over stdio for Claude Code
 2. **MCP (HTTP)** — `POST /mcp` endpoint for remote MCP clients (Streamable HTTP transport)
 3. **REST API** — `GET/POST/PATCH/DELETE /api/v1/*` endpoints for traditional integrations
-4. **CLI** — `crmy-ai <command>` for terminal workflows
+4. **CLI** — `crmy <command>` for terminal workflows
 
 ### Multi-Tenancy
 
@@ -141,7 +141,7 @@ Every mutation writes an append-only event row to the `events` table. Events cap
 - What object was affected (`object_type`, `object_id`)
 - Before and after state (`before_data`, `after_data`)
 
-Browse the audit log with `crmy-ai events` or `GET /api/v1/events`.
+Browse the audit log with `crmy events` or `GET /api/v1/events`.
 
 ### Pagination
 
@@ -185,9 +185,9 @@ Contacts are people you interact with. They can be linked to an account and have
 ### CLI
 
 ```bash
-crmy-ai contacts list --q "sarah"
-crmy-ai contacts create          # interactive
-crmy-ai contacts get <id>
+crmy contacts list --q "sarah"
+crmy contacts create          # interactive
+crmy contacts get <id>
 ```
 
 ### REST API
@@ -221,8 +221,8 @@ Accounts represent companies or organizations. Accounts can have parent/child hi
 ### CLI
 
 ```bash
-crmy-ai accounts list
-crmy-ai accounts get <id>
+crmy accounts list
+crmy accounts get <id>
 ```
 
 ### REST API
@@ -265,9 +265,9 @@ Opportunities track sales deals through a pipeline.
 ### CLI
 
 ```bash
-crmy-ai opps list --stage proposal
-crmy-ai opps advance <id> negotiation
-crmy-ai pipeline
+crmy opps list --stage proposal
+crmy opps advance <id> negotiation
+crmy pipeline
 ```
 
 ### REST API
@@ -340,9 +340,9 @@ Use cases track consumption-based workloads for customer success. They link to a
 ### CLI
 
 ```bash
-crmy-ai use-cases list --account <id>
-crmy-ai use-cases create
-crmy-ai use-cases summary --group-by stage
+crmy use-cases list --account <id>
+crmy use-cases create
+crmy use-cases summary --group-by stage
 ```
 
 ### REST API
@@ -394,11 +394,11 @@ Set `parent_id` when creating a note to reply to an existing note. Replies are r
 ### CLI
 
 ```bash
-crmy-ai notes list contact <contact-id>
-crmy-ai notes add account <account-id> --pin
-crmy-ai notes add contact <id> --parent <note-id>    # threaded reply
-crmy-ai notes get <note-id>
-crmy-ai notes delete <note-id>
+crmy notes list contact <contact-id>
+crmy notes add account <account-id> --pin
+crmy notes add contact <id> --parent <note-id>    # threaded reply
+crmy notes get <note-id>
+crmy notes delete <note-id>
 ```
 
 ### REST API
@@ -497,11 +497,11 @@ Every workflow execution creates a `workflow_run` record with:
 ### CLI
 
 ```bash
-crmy-ai workflows list --active
-crmy-ai workflows create         # interactive
-crmy-ai workflows get <id>
-crmy-ai workflows runs <id> --status failed
-crmy-ai workflows delete <id>
+crmy workflows list --active
+crmy workflows create         # interactive
+crmy workflows get <id>
+crmy workflows runs <id> --status failed
+crmy workflows delete <id>
 ```
 
 ### REST API
@@ -535,10 +535,10 @@ Register HTTP endpoints to receive event notifications. Webhooks include automat
 ### CLI
 
 ```bash
-crmy-ai webhooks create
-crmy-ai webhooks list --active
-crmy-ai webhooks deliveries --endpoint <id> --status failed
-crmy-ai webhooks delete <id>
+crmy webhooks create
+crmy webhooks list --active
+crmy webhooks deliveries --endpoint <id> --status failed
+crmy webhooks delete <id>
 ```
 
 ### REST API
@@ -577,9 +577,9 @@ Also: `failed`, `rejected`
 ### CLI
 
 ```bash
-crmy-ai emails create           # interactive
-crmy-ai emails list --status pending_approval
-crmy-ai emails get <id>
+crmy emails create           # interactive
+crmy emails list --status pending_approval
+crmy emails get <id>
 ```
 
 ### REST API
@@ -616,9 +616,9 @@ Define custom fields for any object type. Fields are stored as JSONB in the `cus
 ### CLI
 
 ```bash
-crmy-ai custom-fields list contact
-crmy-ai custom-fields create      # interactive
-crmy-ai custom-fields delete <id>
+crmy custom-fields list contact
+crmy custom-fields create      # interactive
+crmy custom-fields delete <id>
 ```
 
 ### REST API
@@ -640,7 +640,7 @@ Approval workflows for high-impact actions. Agents submit requests; humans appro
 
 1. Agent calls `hitl_submit_request` with action details
 2. Request enters `pending` status
-3. Human reviews via CLI (`crmy-ai hitl list`) or REST API
+3. Human reviews via CLI (`crmy hitl list`) or REST API
 4. Human approves or rejects with optional note
 5. Agent checks status with `hitl_check_status`
 
@@ -664,9 +664,9 @@ Set `auto_approve_after_seconds` to auto-approve if no human responds within the
 ### CLI
 
 ```bash
-crmy-ai hitl list
-crmy-ai hitl approve <id>
-crmy-ai hitl reject <id> --note "Not ready"
+crmy hitl list
+crmy hitl approve <id>
+crmy hitl reject <id> --note "Not ready"
 ```
 
 ### REST API
@@ -693,8 +693,8 @@ POST   /api/v1/hitl/:id/resolve   { decision: "approved", note: "..." }
 ### CLI
 
 ```bash
-crmy-ai pipeline
-crmy-ai search "acme"
+crmy pipeline
+crmy search "acme"
 ```
 
 ### REST API
@@ -945,7 +945,7 @@ See [mcp-tools.md](mcp-tools.md) for the original v0.1 tool reference. All v0.2 
 **Stdio (Claude Code):**
 
 ```bash
-claude mcp add crmy -- npx crmy-ai mcp
+claude mcp add crmy -- npx crmy mcp
 ```
 
 **HTTP (remote):**
@@ -1003,11 +1003,11 @@ DELETE /auth/api-keys/:id    Revoke a key
 ### Running migrations
 
 ```bash
-npx crmy-ai migrate run      # apply pending migrations
-npx crmy-ai migrate status   # show migration status
+npx crmy migrate run      # apply pending migrations
+npx crmy migrate status   # show migration status
 ```
 
-Migrations run automatically on server startup and during `crmy-ai init`.
+Migrations run automatically on server startup and during `crmy init`.
 
 ### Migration files
 
