@@ -36,17 +36,17 @@ export function DashboardPage() {
     ['production', 'scaling'].includes(g.label ?? g.stage) ? sum + (g.count ?? 0) : sum, 0);
 
   const stats = [
-    { label: 'Pipeline Value', value: formatCurrency(pipelineValue), icon: DollarSign, color: 'text-blue-600' },
-    { label: 'Open Deals', value: openDeals, icon: Target, color: 'text-emerald-600' },
-    { label: 'Active Use Cases', value: activeUcCount, icon: Briefcase, color: 'text-purple-600' },
-    { label: 'HITL Pending', value: pendingHitl, icon: ShieldCheck, color: pendingHitl > 0 ? 'text-red-600' : 'text-slate-600' },
+    { label: 'Pipeline Value', value: formatCurrency(pipelineValue), icon: DollarSign, color: 'text-accent' },
+    { label: 'Open Deals', value: openDeals, icon: Target, color: 'text-primary' },
+    { label: 'Active Use Cases', value: activeUcCount, icon: Briefcase, color: 'text-secondary' },
+    { label: 'HITL Pending', value: pendingHitl, icon: ShieldCheck, color: pendingHitl > 0 ? 'text-destructive' : 'text-muted-foreground' },
   ];
 
   const activities = (activityData as any)?.data ?? [];
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <h1 className="font-display text-2xl font-bold">Dashboard</h1>
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -56,7 +56,7 @@ export function DashboardPage() {
               <s.icon className={`h-8 w-8 ${s.color}`} />
               <div>
                 <p className="text-sm text-muted-foreground">{s.label}</p>
-                <p className="text-2xl font-bold">{s.value}</p>
+                <p className="font-display text-2xl font-bold">{s.value}</p>
               </div>
             </CardContent>
           </Card>

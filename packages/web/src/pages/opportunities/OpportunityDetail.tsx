@@ -35,7 +35,7 @@ export function OpportunityDetailPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">{opp.name}</h1>
+        <h1 className="font-display text-2xl font-bold">{opp.name}</h1>
         <div className="flex items-center gap-3 mt-1">
           <Badge variant="outline">{opp.stage?.replace('_', ' ')}</Badge>
           <span className="text-lg font-semibold">{formatCurrency(opp.amount)}</span>

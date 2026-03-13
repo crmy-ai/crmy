@@ -22,7 +22,7 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Settings</h1>
+      <h1 className="font-display text-2xl font-bold">Settings</h1>
       <div className="flex gap-2 border-b">
         {(['profile', 'api-keys', 'webhooks', 'custom-fields'] as Tab[]).map((t) => (
           <Button key={t} variant={tab === t ? 'default' : 'ghost'} size="sm" onClick={() => setTab(t)}>

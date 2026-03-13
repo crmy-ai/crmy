@@ -35,7 +35,7 @@ export function AccountDetailPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">{account.name}</h1>
+        <h1 className="font-display text-2xl font-bold">{account.name}</h1>
         <p className="text-muted-foreground">{account.industry ?? 'No industry'}{account.domain ? ` · ${account.domain}` : ''}</p>
       </div>
 

@@ -26,7 +26,7 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Analytics</h1>
+      <h1 className="font-display text-2xl font-bold">Analytics</h1>
 
       {/* Pipeline */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -71,7 +71,7 @@ export function AnalyticsPage() {
       </div>
 
       {/* Use Cases section */}
-      <h2 className="text-lg font-semibold">Use Cases</h2>
+      <h2 className="font-display text-lg font-semibold">Use Cases</h2>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader><CardTitle className="text-base">ARR by Stage</CardTitle></CardHeader>

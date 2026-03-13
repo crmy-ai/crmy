@@ -28,7 +28,7 @@ export function UseCaseListPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Use Cases</h1>
+        <h1 className="font-display text-2xl font-bold">Use Cases</h1>
         <Link to="/app/use-cases/new">
           <Button><Plus className="mr-2 h-4 w-4" />New Use Case</Button>
         </Link>
