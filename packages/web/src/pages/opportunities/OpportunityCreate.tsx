@@ -8,6 +8,7 @@ import { Input } from '../../components/ui/input';
 import { Select } from '../../components/ui/select';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
 import { useCreateOpportunity } from '../../api/hooks';
+import { CustomFieldsForm } from '../../components/CustomFields';
 
 export function OpportunityCreatePage() {
   const navigate = useNavigate();
@@ -15,12 +16,14 @@ export function OpportunityCreatePage() {
   const [form, setForm] = useState({
     name: '', stage: 'prospecting', amount: '', close_date: '', description: '',
   });
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const payload: Record<string, unknown> = {
       ...form,
       amount: form.amount ? Math.round(parseFloat(form.amount) * 100) : undefined,
+      custom_fields: customFields,
     };
     const result = await create.mutateAsync(payload);
     navigate(`/app/opportunities/${(result as any).id ?? (result as any).data?.id}`);
@@ -55,6 +58,7 @@ export function OpportunityCreatePage() {
               <label className="mb-1 block text-sm font-medium">Close date</label>
               <Input type="date" value={form.close_date} onChange={(e) => setForm({ ...form, close_date: e.target.value })} />
             </div>
+            <CustomFieldsForm objectType="opportunity" values={customFields} onChange={setCustomFields} />
             <div className="flex gap-2">
               <Button type="submit" disabled={create.isPending}>{create.isPending ? 'Creating...' : 'Create Deal'}</Button>
               <Button type="button" variant="outline" onClick={() => navigate('/app/pipeline')}>Cancel</Button>

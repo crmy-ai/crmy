@@ -8,6 +8,7 @@ import type { ActorContext } from '@crmy/shared';
 import * as activityRepo from '../../db/repos/activities.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
+import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import type { ToolDef } from '../server.js';
 
 export function activityTools(db: DbPool): ToolDef[] {
@@ -17,6 +18,9 @@ export function activityTools(db: DbPool): ToolDef[] {
       description: 'Create a standalone activity (call, email, meeting, note, task)',
       inputSchema: activityCreate,
       handler: async (input: z.infer<typeof activityCreate>, actor: ActorContext) => {
+        if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
+          input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'activity', input.custom_fields, { isCreate: true });
+        }
         const activity = await activityRepo.createActivity(db, actor.tenant_id, {
           ...input,
           source_agent: actor.actor_type === 'agent' ? actor.actor_id : undefined,
@@ -100,6 +104,9 @@ export function activityTools(db: DbPool): ToolDef[] {
         const before = await activityRepo.getActivity(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Activity', input.id);
 
+        if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
+          input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'activity', input.patch.custom_fields);
+        }
         const activity = await activityRepo.updateActivity(db, actor.tenant_id, input.id, input.patch);
         if (!activity) throw notFound('Activity', input.id);
 

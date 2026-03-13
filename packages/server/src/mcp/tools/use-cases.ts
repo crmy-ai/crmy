@@ -13,6 +13,7 @@ import type { ActorContext } from '@crmy/shared';
 import * as ucRepo from '../../db/repos/use-cases.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
+import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import type { ToolDef } from '../server.js';
 
 export function useCaseTools(db: DbPool): ToolDef[] {
@@ -22,6 +23,9 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       description: 'Create a new use case for an account. Use cases track consumption-based workloads.',
       inputSchema: useCaseCreate,
       handler: async (input: z.infer<typeof useCaseCreate>, actor: ActorContext) => {
+        if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
+          input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'use_case', input.custom_fields, { isCreate: true });
+        }
         const uc = await ucRepo.createUseCase(db, actor.tenant_id, {
           ...input,
           created_by: actor.actor_id,
@@ -69,6 +73,9 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         const before = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!before) throw notFound('UseCase', input.id);
 
+        if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
+          input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'use_case', input.patch.custom_fields);
+        }
         const uc = await ucRepo.updateUseCase(db, actor.tenant_id, input.id, input.patch);
         if (!uc) throw notFound('UseCase', input.id);
 

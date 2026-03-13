@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/ca
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { useAccount, useUseCases } from '../../api/hooks';
+import { CustomFieldsDisplay } from '../../components/CustomFields';
 
 function formatCurrency(cents?: number) {
   if (cents == null) return '—';
@@ -54,6 +55,7 @@ export function AccountDetailPage() {
               <div className="flex justify-between"><span className="text-muted-foreground">Employees</span><span>{account.employee_count ?? '—'}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Health</span><span>{account.health_score != null ? `${account.health_score}/100` : '—'}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Website</span><span>{account.website ?? '—'}</span></div>
+              <CustomFieldsDisplay objectType="account" customFields={account.custom_fields} />
             </CardContent>
           </Card>
 

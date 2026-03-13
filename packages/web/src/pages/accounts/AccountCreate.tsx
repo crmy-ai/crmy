@@ -7,15 +7,18 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
 import { useCreateAccount } from '../../api/hooks';
+import { CustomFieldsForm } from '../../components/CustomFields';
 
 export function AccountCreatePage() {
   const navigate = useNavigate();
   const create = useCreateAccount();
   const [form, setForm] = useState({ name: '', domain: '', industry: '', website: '' });
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const result = await create.mutateAsync(form);
+    const payload = { ...form, custom_fields: customFields };
+    const result = await create.mutateAsync(payload);
     navigate(`/app/accounts/${(result as any).id ?? (result as any).data?.id}`);
   };
 
@@ -41,6 +44,7 @@ export function AccountCreatePage() {
               <label className="mb-1 block text-sm font-medium">Website</label>
               <Input value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} />
             </div>
+            <CustomFieldsForm objectType="account" values={customFields} onChange={setCustomFields} />
             <div className="flex gap-2">
               <Button type="submit" disabled={create.isPending}>{create.isPending ? 'Creating...' : 'Create Account'}</Button>
               <Button type="button" variant="outline" onClick={() => navigate('/app/accounts')}>Cancel</Button>

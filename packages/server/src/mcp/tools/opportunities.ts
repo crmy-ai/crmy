@@ -8,6 +8,7 @@ import type { ActorContext } from '@crmy/shared';
 import * as oppRepo from '../../db/repos/opportunities.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, validationError } from '@crmy/shared';
+import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import type { ToolDef } from '../server.js';
 
 export function opportunityTools(db: DbPool): ToolDef[] {
@@ -17,6 +18,9 @@ export function opportunityTools(db: DbPool): ToolDef[] {
       description: 'Create a new sales opportunity',
       inputSchema: opportunityCreate,
       handler: async (input: z.infer<typeof opportunityCreate>, actor: ActorContext) => {
+        if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
+          input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'opportunity', input.custom_fields, { isCreate: true });
+        }
         const opportunity = await oppRepo.createOpportunity(db, actor.tenant_id, {
           ...input,
           created_by: actor.actor_id,
@@ -107,6 +111,9 @@ export function opportunityTools(db: DbPool): ToolDef[] {
         const before = await oppRepo.getOpportunity(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Opportunity', input.id);
 
+        if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
+          input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'opportunity', input.patch.custom_fields);
+        }
         const opportunity = await oppRepo.updateOpportunity(db, actor.tenant_id, input.id, input.patch);
         if (!opportunity) throw notFound('Opportunity', input.id);
 
