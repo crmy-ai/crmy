@@ -16,7 +16,7 @@ function formatCurrency(cents?: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(cents / 100);
 }
 
-const STAGES = ['', 'discovery', 'onboarding', 'active', 'at_risk', 'churned', 'expansion'];
+const STAGES = ['', 'discovery', 'poc', 'production', 'scaling', 'sunset'];
 
 export function UseCaseListPage() {
   const [searchParams] = useSearchParams();
@@ -28,7 +28,7 @@ export function UseCaseListPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Use Cases</h1>
+        <h1 className="font-display text-2xl font-bold">Use Cases</h1>
         <Link to="/app/use-cases/new">
           <Button><Plus className="mr-2 h-4 w-4" />New Use Case</Button>
         </Link>

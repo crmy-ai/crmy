@@ -7,6 +7,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/ca
 import { Badge } from '../../components/ui/badge';
 import { Button } from '../../components/ui/button';
 import { useOpportunity, useUseCases } from '../../api/hooks';
+import { CustomFieldsDisplay } from '../../components/CustomFields';
 
 function formatCurrency(cents?: number) {
   if (cents == null) return '—';
@@ -34,7 +35,7 @@ export function OpportunityDetailPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">{opp.name}</h1>
+        <h1 className="font-display text-2xl font-bold">{opp.name}</h1>
         <div className="flex items-center gap-3 mt-1">
           <Badge variant="outline">{opp.stage?.replace('_', ' ')}</Badge>
           <span className="text-lg font-semibold">{formatCurrency(opp.amount)}</span>
@@ -65,6 +66,7 @@ export function OpportunityDetailPage() {
                   <Link to={`/app/accounts/${opp.account_id}`} className="text-primary hover:underline">View</Link>
                 </div>
               )}
+              <CustomFieldsDisplay objectType="opportunity" customFields={opp.custom_fields} />
             </CardContent>
           </Card>
         </div>

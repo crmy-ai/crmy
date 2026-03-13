@@ -26,10 +26,10 @@ export function Sidebar() {
   return (
     <aside className="flex h-full w-56 flex-col border-r bg-card">
       <div className="flex h-14 items-center gap-2 border-b px-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold text-sm">
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-display font-bold text-sm shadow-xl shadow-primary/30">
           C
         </div>
-        <span className="font-semibold text-lg">CRMy</span>
+        <span className="font-display font-bold text-lg">CRMy</span>
       </div>
       <nav className="flex-1 space-y-1 p-2">
         {navItems.map((item) => (
@@ -42,7 +42,7 @@ export function Sidebar() {
                 'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
                 isActive
                   ? 'bg-primary/10 text-primary'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground',
               )
             }
           >
@@ -56,14 +56,14 @@ export function Sidebar() {
           className={({ isActive }) =>
             cn(
               'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-              isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent',
+              isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted',
             )
           }
         >
           <ShieldCheck className="h-4 w-4" />
           HITL Queue
           {pendingCount > 0 && (
-            <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+            <span className="ml-auto flex h-5 w-5 items-center justify-center rounded-full bg-destructive text-[10px] font-mono font-bold text-destructive-foreground">
               {pendingCount}
             </span>
           )}
@@ -74,7 +74,7 @@ export function Sidebar() {
           className={({ isActive }) =>
             cn(
               'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-              isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent',
+              isActive ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted',
             )
           }
         >

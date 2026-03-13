@@ -3,25 +3,48 @@
 @tailwind utilities;
 
 @layer base {
+  /* Light mode */
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    --background: 30 100% 98%;
+    --foreground: 15 100% 4%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
+    --card-foreground: 15 100% 4%;
+    --primary: 24 95% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 45 97% 65%;
+    --secondary-foreground: 15 100% 4%;
+    --muted: 30 30% 93%;
+    --muted-foreground: 15 10% 45%;
+    --accent: 199 90% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 30 20% 90%;
+    --input: 30 20% 88%;
+    --ring: 24 95% 53%;
+    --radius: 0.75rem;
+  }
+
+  /* Dark mode (default) */
+  .dark {
+    --background: 15 100% 4%;
+    --foreground: 30 100% 98%;
+    --card: 15 50% 8%;
+    --card-foreground: 30 100% 98%;
+    --primary: 24 95% 53%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 45 97% 65%;
+    --secondary-foreground: 15 100% 4%;
+    --muted: 15 20% 15%;
+    --muted-foreground: 30 15% 60%;
+    --accent: 199 90% 60%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 30 100% 98%;
+    --border: 15 20% 15%;
+    --input: 15 20% 15%;
+    --ring: 24 95% 53%;
+    --radius: 0.75rem;
   }
 }
 
@@ -32,4 +55,15 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* Scroll reveal animation */
+.reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.7s ease-out, transform 0.7s ease-out;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
 }

@@ -28,7 +28,7 @@ export function HITLPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">HITL Queue</h1>
+      <h1 className="font-display text-2xl font-bold">HITL Queue</h1>
       {isLoading ? (
         <p className="text-muted-foreground">Loading...</p>
       ) : requests.length === 0 ? (

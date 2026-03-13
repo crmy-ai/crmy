@@ -5,6 +5,7 @@ import { useParams, Link } from 'react-router-dom';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
 import { useContact } from '../../api/hooks';
+import { CustomFieldsDisplay } from '../../components/CustomFields';
 
 export function ContactDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -21,7 +22,7 @@ export function ContactDetailPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">{contact.first_name} {contact.last_name}</h1>
+          <h1 className="font-display text-2xl font-bold">{contact.first_name} {contact.last_name}</h1>
           <p className="text-muted-foreground">{contact.title}{contact.company_name ? ` at ${contact.company_name}` : ''}</p>
         </div>
         <Badge variant="outline">{contact.lifecycle_stage}</Badge>
@@ -45,6 +46,7 @@ export function ContactDetailPage() {
                 {contact.tags.map((t: string) => <Badge key={t} variant="secondary">{t}</Badge>)}
               </div>
             )}
+            <CustomFieldsDisplay objectType="contact" customFields={contact.custom_fields} />
           </CardContent>
         </Card>
 

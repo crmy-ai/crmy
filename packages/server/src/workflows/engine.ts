@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DbPool } from '../db/pool.js';
-import type { UUID } from '@crmy/shared';
+import type { UUID, Activity } from '@crmy/shared';
 import * as wfRepo from '../db/repos/workflows.js';
 import { emitEvent } from '../events/emitter.js';
 
@@ -62,8 +62,8 @@ async function executeAction(
 ): Promise<void> {
   switch (action.type) {
     case 'create_note': {
-      const { default: noteRepo } = await import('../db/repos/notes.js');
-      await noteRepo.createNote(db, tenantId, {
+      const { createNote } = await import('../db/repos/notes.js');
+      await createNote(db, tenantId, {
         object_type: action.config.object_type as string,
         object_id: action.config.object_id as string,
         body: action.config.body as string,
@@ -73,9 +73,9 @@ async function executeAction(
       break;
     }
     case 'create_activity': {
-      const { default: activityRepo } = await import('../db/repos/activities.js');
-      await activityRepo.createActivity(db, tenantId, {
-        type: (action.config.type as string) ?? 'task',
+      const { createActivity } = await import('../db/repos/activities.js');
+      await createActivity(db, tenantId, {
+        type: (action.config.type as Activity['type']) ?? 'task',
         subject: action.config.subject as string,
         body: action.config.body as string | undefined,
         contact_id: action.config.contact_id as string | undefined,

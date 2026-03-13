@@ -8,6 +8,7 @@ import type { ActorContext } from '@crmy/shared';
 import * as accountRepo from '../../db/repos/accounts.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
+import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import type { ToolDef } from '../server.js';
 
 export function accountTools(db: DbPool): ToolDef[] {
@@ -17,6 +18,9 @@ export function accountTools(db: DbPool): ToolDef[] {
       description: 'Create a new account (company/organization)',
       inputSchema: accountCreate,
       handler: async (input: z.infer<typeof accountCreate>, actor: ActorContext) => {
+        if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
+          input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'account', input.custom_fields, { isCreate: true });
+        }
         const account = await accountRepo.createAccount(db, actor.tenant_id, {
           ...input,
           created_by: actor.actor_id,
@@ -69,6 +73,9 @@ export function accountTools(db: DbPool): ToolDef[] {
         const before = await accountRepo.getAccount(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Account', input.id);
 
+        if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
+          input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'account', input.patch.custom_fields);
+        }
         const account = await accountRepo.updateAccount(db, actor.tenant_id, input.id, input.patch);
         if (!account) throw notFound('Account', input.id);
 

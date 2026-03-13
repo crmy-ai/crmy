@@ -22,7 +22,7 @@ export function AccountListPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Accounts</h1>
+        <h1 className="font-display text-2xl font-bold">Accounts</h1>
         <Link to="/app/accounts/new">
           <Button><Plus className="mr-2 h-4 w-4" />New Account</Button>
         </Link>

@@ -22,7 +22,7 @@ export function Badge({ className, variant = 'default', ...props }: BadgeProps) 
   return (
     <div
       className={cn(
-        'inline-flex items-center rounded-full border-transparent px-2.5 py-0.5 text-xs font-semibold transition-colors',
+        'inline-flex items-center rounded-full border-transparent px-2.5 py-0.5 font-mono text-xs font-semibold transition-colors',
         variantStyles[variant] || variantStyles.default,
         className,
       )}

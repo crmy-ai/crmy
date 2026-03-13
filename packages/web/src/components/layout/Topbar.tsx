@@ -37,7 +37,7 @@ export function Topbar() {
         />
       </form>
       <div className="flex items-center gap-3">
-        <span className="text-sm text-muted-foreground">{user?.name ?? user?.email}</span>
+        <span className="font-mono text-sm text-muted-foreground">{user?.name ?? user?.email}</span>
         <Button variant="ghost" size="icon" onClick={handleLogout} title="Sign out">
           <LogOut className="h-4 w-4" />
         </Button>

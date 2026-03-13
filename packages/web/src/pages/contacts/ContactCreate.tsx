@@ -8,6 +8,7 @@ import { Input } from '../../components/ui/input';
 import { Select } from '../../components/ui/select';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/card';
 import { useCreateContact } from '../../api/hooks';
+import { CustomFieldsForm } from '../../components/CustomFields';
 
 export function ContactCreatePage() {
   const navigate = useNavigate();
@@ -16,10 +17,12 @@ export function ContactCreatePage() {
     first_name: '', last_name: '', email: '', phone: '',
     title: '', company_name: '', lifecycle_stage: 'lead',
   });
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({});
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const result = await create.mutateAsync(form);
+    const payload = { ...form, custom_fields: customFields };
+    const result = await create.mutateAsync(payload);
     navigate(`/app/contacts/${(result as any).id ?? (result as any).data?.id}`);
   };
 
@@ -64,6 +67,7 @@ export function ContactCreatePage() {
                 <option value="churned">Churned</option>
               </Select>
             </div>
+            <CustomFieldsForm objectType="contact" values={customFields} onChange={setCustomFields} />
             <div className="flex gap-2">
               <Button type="submit" disabled={create.isPending}>
                 {create.isPending ? 'Creating...' : 'Create Contact'}

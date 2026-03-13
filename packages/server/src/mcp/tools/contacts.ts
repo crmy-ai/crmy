@@ -9,6 +9,7 @@ import * as contactRepo from '../../db/repos/contacts.js';
 import * as activityRepo from '../../db/repos/activities.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
+import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import type { ToolDef } from '../server.js';
 
 export function contactTools(db: DbPool): ToolDef[] {
@@ -18,6 +19,9 @@ export function contactTools(db: DbPool): ToolDef[] {
       description: 'Create a new contact in the CRM',
       inputSchema: contactCreate,
       handler: async (input: z.infer<typeof contactCreate>, actor: ActorContext) => {
+        if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
+          input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'contact', input.custom_fields, { isCreate: true });
+        }
         const contact = await contactRepo.createContact(db, actor.tenant_id, {
           ...input,
           created_by: actor.actor_id,
@@ -64,6 +68,9 @@ export function contactTools(db: DbPool): ToolDef[] {
         const before = await contactRepo.getContact(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Contact', input.id);
 
+        if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
+          input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'contact', input.patch.custom_fields);
+        }
         const contact = await contactRepo.updateContact(db, actor.tenant_id, input.id, input.patch);
         if (!contact) throw notFound('Contact', input.id);
 

@@ -16,7 +16,7 @@ import {
   useUseCaseTimeline,
 } from '../../api/hooks';
 
-const STAGES = ['discovery', 'onboarding', 'active', 'at_risk', 'churned', 'expansion'] as const;
+const STAGES = ['discovery', 'poc', 'production', 'scaling', 'sunset'] as const;
 
 function formatCurrency(cents?: number) {
   if (cents == null) return '$0';
@@ -303,9 +303,9 @@ export function UseCaseDetailPage() {
         <div className="space-y-3">
           <div>
             <label className="mb-1 block text-sm font-medium">
-              Note {stageModal === 'churned' ? '(required)' : '(optional)'}
+              Note {stageModal === 'sunset' ? '(required)' : '(optional)'}
             </label>
-            <Textarea value={stageNote} onChange={(e) => setStageNote(e.target.value)} required={stageModal === 'churned'} />
+            <Textarea value={stageNote} onChange={(e) => setStageNote(e.target.value)} required={stageModal === 'sunset'} />
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">Update ARR ($, optional)</label>
@@ -314,7 +314,7 @@ export function UseCaseDetailPage() {
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setStageModal(null)}>Cancel</Button>
-          <Button onClick={handleAdvance} disabled={advanceStage.isPending || (stageModal === 'churned' && !stageNote)}>
+          <Button onClick={handleAdvance} disabled={advanceStage.isPending || (stageModal === 'sunset' && !stageNote)}>
             Advance Stage
           </Button>
         </DialogFooter>

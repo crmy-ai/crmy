@@ -298,7 +298,7 @@ export const apiKeyCreate = z.object({
 
 // -- Use Case schemas --
 
-export const useCaseStage = z.enum(['discovery', 'onboarding', 'active', 'at_risk', 'churned', 'expansion']);
+export const useCaseStage = z.enum(['discovery', 'poc', 'production', 'scaling', 'sunset']);
 
 export const useCaseCreate = z.object({
   account_id: uuid,
