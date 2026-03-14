@@ -19,7 +19,7 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
 
   if (localStorage.getItem('crmy_token')) {
-    return <Navigate to="/app" replace />;
+    return <Navigate to="/" replace />;
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -33,7 +33,7 @@ export function LoginPage() {
           : await auth.register({ email, password, name, tenant_name: tenantName });
       setToken(result.token);
       setUser(result.user);
-      navigate('/app');
+      navigate('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
