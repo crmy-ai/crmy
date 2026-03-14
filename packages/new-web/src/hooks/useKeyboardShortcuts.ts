@@ -1,0 +1,95 @@
+import { useEffect, useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useAppStore } from '@/store/appStore';
+
+export function useKeyboardShortcuts() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { setCommandPaletteOpen, openDrawer, setShortcutsOpen, toggleZenMode, openQuickAdd } = useAppStore();
+
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    const target = e.target as HTMLElement;
+    const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+    // Cmd+K — command palette
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      setCommandPaletteOpen(true);
+      return;
+    }
+
+    // Cmd+J — AI agent
+    if ((e.metaKey || e.ctrlKey) && e.key === 'j') {
+      e.preventDefault();
+      navigate('/agent');
+      return;
+    }
+
+    // Cmd+Shift+Z — zen mode
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'Z') {
+      e.preventDefault();
+      toggleZenMode();
+      return;
+    }
+
+    // Escape
+    if (e.key === 'Escape') {
+      // On /agent, go back to previous page
+      if (location.pathname === '/agent') {
+        e.preventDefault();
+        navigate(-1);
+        return;
+      }
+      useAppStore.getState().closeDrawer();
+      useAppStore.getState().closeQuickAdd();
+      setCommandPaletteOpen(false);
+      setShortcutsOpen(false);
+      return;
+    }
+
+    if (isInput) return;
+
+    // ? — shortcuts
+    if (e.key === '?') {
+      e.preventDefault();
+      setShortcutsOpen(true);
+      return;
+    }
+
+    // N — new contact (on contacts page)
+    if (e.key === 'n' || e.key === 'N') {
+      if (location.pathname === '/contacts') {
+        e.preventDefault();
+        openQuickAdd('contact');
+        return;
+      }
+    }
+
+    // D — new deal (on deals page, not with meta key)
+    if (e.key === 'd' && !e.metaKey && !e.ctrlKey) {
+      if (location.pathname === '/deals') {
+        e.preventDefault();
+        openQuickAdd('deal');
+        return;
+      }
+    }
+
+    // G then navigation
+    if (e.key === 'g') {
+      const handler = (e2: KeyboardEvent) => {
+        window.removeEventListener('keydown', handler);
+        if (e2.key === 'h') navigate('/');
+        else if (e2.key === 'c') navigate('/contacts');
+        else if (e2.key === 'd') navigate('/deals');
+      };
+      window.addEventListener('keydown', handler);
+      setTimeout(() => window.removeEventListener('keydown', handler), 1000);
+      return;
+    }
+  }, [navigate, location.pathname, setCommandPaletteOpen, openDrawer, setShortcutsOpen, toggleZenMode, openQuickAdd]);
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+}

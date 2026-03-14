@@ -1,0 +1,175 @@
+import { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ContactAvatar } from '@/components/crm/ContactAvatar';
+import { TopBar } from '@/components/layout/TopBar';
+import { contacts, stageConfig } from '@/lib/mockData';
+import { useAppStore } from '@/store/appStore';
+import { StageBadge, LeadScoreBadge } from '@/components/crm/CrmWidgets';
+import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { motion } from 'framer-motion';
+import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
+import { useIsMobile } from '@/hooks/use-mobile';
+
+type ViewMode = 'table' | 'cards';
+
+const filterConfigs: FilterConfig[] = [
+  { key: 'stage', label: 'Stage', options: Object.entries(stageConfig).map(([k, v]) => ({ value: k, label: v.label })) },
+  { key: 'tags', label: 'Tags', options: [
+    { value: 'buyer', label: 'Buyer' }, { value: 'seller', label: 'Seller' }, { value: 'investor', label: 'Investor' },
+    { value: 'first-time-buyer', label: 'First-Time Buyer' }, { value: 'referral-partner', label: 'Referral Partner' },
+    { value: 'luxury', label: 'Luxury' }, { value: 'repeat', label: 'Repeat' },
+  ]},
+  { key: 'source', label: 'Source', options: [...new Set(contacts.map(c => c.source))].map(s => ({ value: s, label: s })) },
+];
+
+const sortOptions: SortOption[] = [
+  { key: 'name', label: 'Name' }, { key: 'company', label: 'Company' },
+  { key: 'lastContacted', label: 'Last Contacted' }, { key: 'leadScore', label: 'Score' }, { key: 'stage', label: 'Stage' },
+];
+
+export default function Contacts() {
+  const navigate = useNavigate();
+  const isMobile = useIsMobile();
+  const [view, setView] = useState<ViewMode>('table');
+  const effectiveView = isMobile ? 'cards' : view;
+  const { openDrawer, openQuickAdd, openAIWithContext } = useAppStore();
+  const [search, setSearch] = useState('');
+  const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+
+  const handleFilterChange = (key: string, values: string[]) => {
+    setActiveFilters(prev => { const next = { ...prev }; if (values.length === 0) delete next[key]; else next[key] = values; return next; });
+  };
+  const handleSortChange = (key: string) => {
+    setSort(prev => prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  };
+
+  const filtered = useMemo(() => {
+    let result = [...contacts];
+    if (search) { const q = search.toLowerCase(); result = result.filter(c => c.name.toLowerCase().includes(q) || c.company.toLowerCase().includes(q) || c.email.toLowerCase().includes(q)); }
+    if (activeFilters.stage?.length) result = result.filter(c => activeFilters.stage.includes(c.stage));
+    if (activeFilters.tags?.length) result = result.filter(c => c.tags.some(t => activeFilters.tags.includes(t)));
+    if (activeFilters.source?.length) result = result.filter(c => activeFilters.source.includes(c.source));
+    if (sort) {
+      result.sort((a, b) => {
+        let aVal: string | number = '', bVal: string | number = '';
+        if (sort.key === 'name') { aVal = a.name; bVal = b.name; }
+        else if (sort.key === 'company') { aVal = a.company; bVal = b.company; }
+        else if (sort.key === 'lastContacted') { aVal = a.lastContacted; bVal = b.lastContacted; }
+        else if (sort.key === 'leadScore') { aVal = a.leadScore; bVal = b.leadScore; }
+        else if (sort.key === 'stage') { aVal = a.stage; bVal = b.stage; }
+        if (typeof aVal === 'number' && typeof bVal === 'number') return sort.dir === 'asc' ? aVal - bVal : bVal - aVal;
+        return sort.dir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
+      });
+    }
+    return result;
+  }, [search, activeFilters, sort]);
+
+  const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
+    <th onClick={() => handleSortChange(sortKey)}
+      className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground cursor-pointer hover:text-foreground transition-colors select-none">
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {sort?.key === sortKey ? (sort.dir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : null}
+      </span>
+    </th>
+  );
+
+  return (
+    <div className="flex flex-col h-full">
+      <TopBar title="Contacts">
+        <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
+          <button onClick={() => setView('table')} className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
+            <List className="w-4 h-4" />
+          </button>
+          <button onClick={() => setView('cards')} className={`p-1.5 rounded-lg text-sm transition-all ${view === 'cards' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+        </div>
+      </TopBar>
+
+      <ListToolbar
+        searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search contacts..."
+        filters={filterConfigs} activeFilters={activeFilters} onFilterChange={handleFilterChange}
+        onClearFilters={() => setActiveFilters({})} sortOptions={sortOptions} currentSort={sort}
+        onSortChange={handleSortChange} onAdd={() => openQuickAdd('contact')} addLabel="New Contact" entityType="contacts"
+      />
+
+      <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <p className="text-sm">No contacts match your filters.</p>
+            <button onClick={() => { setSearch(''); setActiveFilters({}); }} className="mt-2 text-xs text-primary font-semibold hover:underline">Clear all filters</button>
+          </div>
+        ) : effectiveView === 'table' ? (
+          <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-surface-sunken/50">
+                    <SortHeader label="Name" sortKey="name" />
+                    <SortHeader label="Company" sortKey="company" />
+                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Phone</th>
+                    <SortHeader label="Last Contacted" sortKey="lastContacted" />
+                    <SortHeader label="Score" sortKey="leadScore" />
+                    <SortHeader label="Stage" sortKey="stage" />
+                    <th className="px-2 py-3 w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((c, i) => (
+                    <tr key={c.id} onClick={() => openDrawer('contact', c.id)}
+                      className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer group transition-colors ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <ContactAvatar name={c.name} className="w-8 h-8 text-xs" />
+                          <span className="font-semibold text-foreground">{c.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{c.company || '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs">{c.phone}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{c.lastContacted}</td>
+                      <td className="px-4 py-3"><LeadScoreBadge score={c.leadScore} /></td>
+                      <td className="px-4 py-3"><StageBadge stage={c.stage} /></td>
+                      <td className="px-2 py-3">
+                        <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id, name: c.name, detail: c.company }); navigate('/agent'); }}
+                          className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
+                          <Sparkles className="w-3.5 h-3.5 text-accent" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {filtered.map((c, i) => (
+              <motion.div key={c.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
+                onClick={() => openDrawer('contact', c.id)}
+                className="bg-card border border-border rounded-2xl p-4 cursor-pointer hover:shadow-lg hover:border-primary/20 transition-all press-scale group relative">
+                <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id, name: c.name, detail: c.company }); navigate('/agent'); }}
+                  className="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-accent/10 transition-all md:opacity-0 md:group-hover:opacity-100">
+                  <Sparkles className="w-3.5 h-3.5 text-accent" />
+                </button>
+                <div className="flex items-center gap-3 mb-3">
+                  <ContactAvatar name={c.name} className="w-11 h-11 rounded-2xl text-sm" />
+                  <div>
+                    <p className="font-display font-bold text-foreground">{c.name}</p>
+                    <p className="text-xs text-muted-foreground">{c.company || 'Individual'}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <StageBadge stage={c.stage} />
+                  <LeadScoreBadge score={c.leadScore} />
+                </div>
+                <p className="text-xs text-muted-foreground">Last contacted: {c.lastContacted}</p>
+              </motion.div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
