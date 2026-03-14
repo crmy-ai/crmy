@@ -1,121 +1,124 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link } from 'react-router-dom';
-import { DollarSign, Target, Briefcase, ShieldCheck } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
-import { usePipelineSummary, useUseCaseAnalytics, useHITLRequests, useActivities } from '../api/hooks';
+import { TopBar } from '@/components/layout/TopBar';
+import { PipelineSnapshot, ActivityFeed, AccountHealth } from '@/components/crm/CrmWidgets';
+import { useAppStore } from '@/store/appStore';
+import { useOpportunities } from '@/api/hooks';
+import { motion } from 'framer-motion';
+import { ArrowRight, TrendingUp, UserPlus, FolderKanban, Activity } from 'lucide-react';
+import { ContactAvatar } from '@/components/crm/ContactAvatar';
 
-const USE_CASE_STAGES = ['discovery', 'poc', 'production', 'scaling', 'sunset'] as const;
-const stageColors: Record<string, string> = {
-  discovery: 'bg-slate-100 text-slate-800',
-  poc: 'bg-slate-100 text-slate-800',
-  production: 'bg-emerald-100 text-emerald-800',
-  scaling: 'bg-teal-100 text-teal-800',
-  sunset: 'bg-red-100 text-red-800',
-};
-
-function formatCurrency(cents?: number) {
-  if (cents == null) return '$0';
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(cents / 100);
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
 }
 
-export function DashboardPage() {
-  const { data: pipeline } = usePipelineSummary();
-  const { data: ucData } = useUseCaseAnalytics({ group_by: 'stage' });
-  const { data: hitlData } = useHITLRequests();
-  const { data: activityData } = useActivities({ limit: 20 });
+export default function Dashboard() {
+  const { openDrawer, openQuickAdd } = useAppStore();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: oppsData } = useOpportunities({ limit: 10 }) as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const opps: any[] = oppsData?.data ?? [];
 
-  const pipelineValue = (pipeline as any)?.total_value ?? 0;
-  const openDeals = (pipeline as any)?.total_count ?? 0;
-  const pendingHitl = ((hitlData as any)?.data ?? []).length;
-
-  const ucGroups = (ucData as any)?.by_group ?? (ucData as any)?.data ?? [];
-  const activeUcCount = ucGroups.reduce((sum: number, g: any) =>
-    ['production', 'scaling'].includes(g.label ?? g.stage) ? sum + (g.count ?? 0) : sum, 0);
-
-  const stats = [
-    { label: 'Pipeline Value', value: formatCurrency(pipelineValue), icon: DollarSign, color: 'text-accent' },
-    { label: 'Open Deals', value: openDeals, icon: Target, color: 'text-primary' },
-    { label: 'Active Use Cases', value: activeUcCount, icon: Briefcase, color: 'text-secondary' },
-    { label: 'HITL Pending', value: pendingHitl, icon: ShieldCheck, color: pendingHitl > 0 ? 'text-destructive' : 'text-muted-foreground' },
-  ];
-
-  const activities = (activityData as any)?.data ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const hotDeals: any[] = opps
+    .filter((d: any) => d.stage === 'negotiation' || (d.stage === 'proposal' && d.probability > 50))
+    .slice(0, 3);
 
   return (
-    <div className="space-y-6">
-      <h1 className="font-display text-2xl font-bold">Dashboard</h1>
+    <div className="flex flex-col h-full">
+      <TopBar title="Dashboard" />
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
+        {/* Greeting */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
+          <h1 className="text-2xl md:text-3xl font-display font-extrabold">
+            <span className="gradient-text">{greeting()}</span>
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">Here's what needs your attention today.</p>
+        </motion.div>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {stats.map((s) => (
-          <Card key={s.label}>
-            <CardContent className="flex items-center gap-4 p-6">
-              <s.icon className={`h-8 w-8 ${s.color}`} />
-              <div>
-                <p className="text-sm text-muted-foreground">{s.label}</p>
-                <p className="font-display text-2xl font-bold">{s.value}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+        {/* Quick Actions */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-6"
+        >
+          {[
+            { icon: UserPlus, label: 'New Contact', gradient: 'from-primary/15 to-primary/5', color: 'text-primary', action: () => openQuickAdd('contact') },
+            { icon: TrendingUp, label: 'New Deal', gradient: 'from-accent/15 to-accent/5', color: 'text-accent', action: () => openQuickAdd('deal') },
+            { icon: FolderKanban, label: 'New Use Case', gradient: 'from-success/15 to-success/5', color: 'text-success', action: () => openQuickAdd('use-case') },
+            { icon: Activity, label: 'Log Activity', gradient: 'from-warning/15 to-warning/5', color: 'text-warning', action: () => openQuickAdd('activity') },
+          ].map((action) => (
+            <button
+              key={action.label}
+              onClick={action.action}
+              className={`flex items-center gap-3 p-3 md:p-4 rounded-2xl bg-gradient-to-br ${action.gradient} border border-border/50 hover:shadow-md transition-all press-scale`}
+            >
+              <action.icon className={`w-5 h-5 ${action.color}`} />
+              <span className="text-sm font-display font-semibold text-foreground">{action.label}</span>
+            </button>
+          ))}
+        </motion.div>
 
-      {/* Use Case stage summary strip */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Use Cases by Stage</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            {USE_CASE_STAGES.map((stage) => {
-              const group = ucGroups.find((g: any) => (g.label ?? g.stage) === stage);
-              const count = group?.count ?? 0;
-              const arr = group?.attributed_arr ?? group?.total_attributed_arr ?? 0;
-              return (
-                <Link
-                  key={stage}
-                  to={`/app/use-cases?stage=${stage}`}
-                  className="rounded-lg border p-3 hover:bg-accent transition-colors"
-                >
-                  <Badge className={stageColors[stage]}>{stage.replace('_', ' ')}</Badge>
-                  <p className="mt-2 text-xl font-bold">{count}</p>
-                  <p className="text-xs text-muted-foreground">{formatCurrency(arr)} ARR</p>
-                </Link>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Recent activity */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Recent Activity</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {activities.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No recent activity</p>
-          ) : (
-            <div className="space-y-3">
-              {activities.slice(0, 10).map((a: any) => (
-                <div key={a.id} className="flex items-start gap-3 border-b pb-3 last:border-0">
-                  <Badge variant="outline">{a.type}</Badge>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium truncate">{a.subject}</p>
-                    {a.body && <p className="text-xs text-muted-foreground truncate">{a.body}</p>}
-                  </div>
-                  <time className="text-xs text-muted-foreground whitespace-nowrap">
-                    {new Date(a.created_at).toLocaleDateString()}
-                  </time>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
+          {/* Left column */}
+          <div className="lg:col-span-2 space-y-4 md:space-y-5">
+            {hotDeals.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="bg-card border border-border rounded-2xl p-5 shadow-sm"
+              >
+                <h2 className="font-display font-bold text-foreground mb-4">Today's focus</h2>
+                <div className="space-y-2">
+                  {hotDeals.map((deal: Record<string, unknown>) => {
+                    const contactName = (deal.contact_name ?? deal.contactName ?? '') as string;
+                    const amount = (deal.amount as number) ?? 0;
+                    return (
+                      <div
+                        key={deal.id as string}
+                        onClick={() => openDrawer('deal', deal.id as string)}
+                        className="flex items-center gap-3 p-3 rounded-xl bg-surface hover:bg-surface-sunken cursor-pointer transition-all press-scale"
+                      >
+                        <ContactAvatar name={contactName} className="w-8 h-8 rounded-full text-xs" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-foreground truncate">{deal.name as string}</p>
+                          <p className="text-xs text-muted-foreground">
+                            ${amount >= 1000 ? `${(amount / 1000).toFixed(0)}K` : amount} · {contactName}
+                          </p>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              </motion.div>
+            )}
+
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+              <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
+                <h3 className="font-display font-bold text-foreground mb-3">Recent activity</h3>
+                <ActivityFeed limit={8} />
+              </div>
+            </motion.div>
+          </div>
+
+          {/* Right column */}
+          <div className="space-y-4 md:space-y-5">
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
+              <PipelineSnapshot />
+            </motion.div>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.11 }}>
+              <AccountHealth />
+            </motion.div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

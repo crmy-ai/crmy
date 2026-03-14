@@ -1,32 +1,29 @@
-// Copyright 2026 CRMy Contributors
-// SPDX-License-Identifier: Apache-2.0
+import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
 
-import type { HTMLAttributes } from 'react';
-import { cn } from './utils';
+import { cn } from "@/lib/utils";
 
-const variantStyles: Record<string, string> = {
-  default: 'bg-primary text-primary-foreground',
-  secondary: 'bg-secondary text-secondary-foreground',
-  destructive: 'bg-destructive text-destructive-foreground',
-  outline: 'border text-foreground',
-  success: 'bg-emerald-100 text-emerald-800',
-  warning: 'bg-amber-100 text-amber-800',
-  danger: 'bg-red-100 text-red-800',
-};
+const badgeVariants = cva(
+  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  {
+    variants: {
+      variant: {
+        default: "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
+        secondary: "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+        destructive: "border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80",
+        outline: "text-foreground",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+    },
+  },
+);
 
-interface BadgeProps extends HTMLAttributes<HTMLDivElement> {
-  variant?: keyof typeof variantStyles;
+export interface BadgeProps extends React.HTMLAttributes<HTMLDivElement>, VariantProps<typeof badgeVariants> {}
+
+function Badge({ className, variant, ...props }: BadgeProps) {
+  return <div className={cn(badgeVariants({ variant }), className)} {...props} />;
 }
 
-export function Badge({ className, variant = 'default', ...props }: BadgeProps) {
-  return (
-    <div
-      className={cn(
-        'inline-flex items-center rounded-full border-transparent px-2.5 py-0.5 font-mono text-xs font-semibold transition-colors',
-        variantStyles[variant] || variantStyles.default,
-        className,
-      )}
-      {...props}
-    />
-  );
-}
+export { Badge, badgeVariants };
