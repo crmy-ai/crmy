@@ -32,8 +32,9 @@ interface ContactAvatarProps {
 }
 
 export function ContactAvatar({ name, className, textClassName }: ContactAvatarProps) {
-  const entry = AVATAR_COLORS[hashName(name) % AVATAR_COLORS.length];
-  const initials = getInitials(name);
+  const safeName = name || '?';
+  const entry = AVATAR_COLORS[hashName(safeName) % AVATAR_COLORS.length];
+  const initials = getInitials(safeName);
 
   return (
     <div
@@ -41,7 +42,7 @@ export function ContactAvatar({ name, className, textClassName }: ContactAvatarP
       style={{ backgroundColor: entry.bg }}
     >
       <span className={cn('font-display font-bold select-none', entry.dark ? 'text-[#2A2A2E]' : 'text-white', textClassName)}>
-        {initials}
+        {safeName === '?' ? '?' : initials}
       </span>
     </div>
   );

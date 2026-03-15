@@ -16,7 +16,7 @@ import { ShortcutsOverlay } from '@/components/crm/ShortcutsOverlay';
 import { DrawerShell } from '@/components/crm/DrawerShell';
 import { QuickAddDrawer } from '@/components/crm/QuickAddDrawer';
 import { ContactDrawer } from '@/components/crm/ContactDrawer';
-import { DealDrawer } from '@/components/crm/DealDrawer';
+import { OpportunityDrawer } from '@/components/crm/OpportunityDrawer';
 import { UseCaseDrawer } from '@/components/crm/UseCaseDrawer';
 import { AccountDrawer } from '@/components/crm/AccountDrawer';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
@@ -27,7 +27,7 @@ import { LoginPage } from '@/pages/auth/Login';
 import Dashboard from '@/pages/Dashboard';
 import Contacts from '@/pages/Contacts';
 import Accounts from '@/pages/Accounts';
-import Deals from '@/pages/Deals';
+import Opportunities from '@/pages/Opportunities';
 import UseCasesPage from '@/pages/UseCases';
 import Activities from '@/pages/Activities';
 import Agent from '@/pages/Agent';
@@ -75,7 +75,7 @@ function AnimatedRoutes() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/accounts" element={<Accounts />} />
-          <Route path="/deals" element={<Deals />} />
+          <Route path="/opportunities" element={<Opportunities />} />
           <Route path="/use-cases" element={<UseCasesPage />} />
           <Route path="/activities" element={<Activities />} />
           <Route path="/agent" element={<Agent />} />
@@ -93,7 +93,7 @@ function AppContent() {
   const { drawerType, zenMode } = useAppStore();
 
   const drawerTitle = drawerType === 'contact' ? 'Contact Details'
-    : drawerType === 'deal' ? 'Deal Details'
+    : drawerType === 'opportunity' ? 'Opportunity Details'
     : drawerType === 'use-case' ? 'Use Case Details'
     : drawerType === 'account' ? 'Account Details'
     : '';
@@ -101,8 +101,8 @@ function AppContent() {
   return (
     <div className="flex h-screen w-full overflow-hidden">
       {!zenMode && <Sidebar />}
-      <main className="flex-1 flex flex-col overflow-hidden transition-all duration-200">
-        <div className="flex-1 flex flex-col overflow-hidden md:ml-14">
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden">
           <AnimatedRoutes />
         </div>
       </main>
@@ -112,7 +112,7 @@ function AppContent() {
       {/* Drawers */}
       <DrawerShell title={drawerTitle}>
         {drawerType === 'contact' && <ContactDrawer />}
-        {drawerType === 'deal' && <DealDrawer />}
+        {drawerType === 'opportunity' && <OpportunityDrawer />}
         {drawerType === 'use-case' && <UseCaseDrawer />}
         {drawerType === 'account' && <AccountDrawer />}
       </DrawerShell>

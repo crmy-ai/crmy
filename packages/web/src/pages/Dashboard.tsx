@@ -1,6 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
+import { useState } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { PipelineSnapshot, ActivityFeed, AccountHealth } from '@/components/crm/CrmWidgets';
 import { useAppStore } from '@/store/appStore';
@@ -18,6 +19,7 @@ function greeting() {
 
 export default function Dashboard() {
   const { openDrawer, openQuickAdd } = useAppStore();
+  const [activityWindow, setActivityWindow] = useState<'today' | 'week'>('today');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: oppsData } = useOpportunities({ limit: 10 }) as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -49,7 +51,7 @@ export default function Dashboard() {
         >
           {[
             { icon: UserPlus, label: 'New Contact', gradient: 'from-primary/15 to-primary/5', color: 'text-primary', action: () => openQuickAdd('contact') },
-            { icon: TrendingUp, label: 'New Deal', gradient: 'from-accent/15 to-accent/5', color: 'text-accent', action: () => openQuickAdd('deal') },
+            { icon: TrendingUp, label: 'New Opportunity', gradient: 'from-accent/15 to-accent/5', color: 'text-accent', action: () => openQuickAdd('opportunity') },
             { icon: FolderKanban, label: 'New Use Case', gradient: 'from-success/15 to-success/5', color: 'text-success', action: () => openQuickAdd('use-case') },
             { icon: Activity, label: 'Log Activity', gradient: 'from-warning/15 to-warning/5', color: 'text-warning', action: () => openQuickAdd('activity') },
           ].map((action) => (
@@ -82,7 +84,7 @@ export default function Dashboard() {
                     return (
                       <div
                         key={deal.id as string}
-                        onClick={() => openDrawer('deal', deal.id as string)}
+                        onClick={() => openDrawer('opportunity', deal.id as string)}
                         className="flex items-center gap-3 p-3 rounded-xl bg-surface hover:bg-surface-sunken cursor-pointer transition-all press-scale"
                       >
                         <ContactAvatar name={contactName} className="w-8 h-8 rounded-full text-xs" />
@@ -102,8 +104,24 @@ export default function Dashboard() {
 
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
               <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
-                <h3 className="font-display font-bold text-foreground mb-3">Recent activity</h3>
-                <ActivityFeed limit={8} />
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-display font-bold text-foreground">Recent activity</h3>
+                  <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
+                    <button
+                      onClick={() => setActivityWindow('today')}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${activityWindow === 'today' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      Today
+                    </button>
+                    <button
+                      onClick={() => setActivityWindow('week')}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${activityWindow === 'week' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                    >
+                      This Week
+                    </button>
+                  </div>
+                </div>
+                <ActivityFeed limit={8} filterWindow={activityWindow} />
               </div>
             </motion.div>
           </div>

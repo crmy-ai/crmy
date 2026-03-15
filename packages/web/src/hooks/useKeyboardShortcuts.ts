@@ -65,11 +65,11 @@ export function useKeyboardShortcuts() {
       }
     }
 
-    // D — new deal (on deals page, not with meta key)
+    // D — new opportunity (on opportunities page, not with meta key)
     if (e.key === 'd' && !e.metaKey && !e.ctrlKey) {
-      if (location.pathname === '/deals') {
+      if (location.pathname === '/opportunities') {
         e.preventDefault();
-        openQuickAdd('deal');
+        openQuickAdd('opportunity');
         return;
       }
     }
@@ -80,7 +80,7 @@ export function useKeyboardShortcuts() {
         window.removeEventListener('keydown', handler);
         if (e2.key === 'h') navigate('/');
         else if (e2.key === 'c') navigate('/contacts');
-        else if (e2.key === 'd') navigate('/deals');
+        else if (e2.key === 'd') navigate('/opportunities');
       };
       window.addEventListener('keydown', handler);
       setTimeout(() => window.removeEventListener('keydown', handler), 1000);

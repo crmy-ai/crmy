@@ -1,15 +1,15 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-type DrawerType = 'contact' | 'deal' | 'use-case' | 'account' | null;
+type DrawerType = 'contact' | 'opportunity' | 'use-case' | 'account' | null;
 
 export interface AIContextEntity {
-  type: 'contact' | 'deal' | 'use-case' | 'account';
+  type: 'contact' | 'opportunity' | 'use-case' | 'account';
   id: string;
   name: string;
   detail?: string;
 }
-type QuickAddType = 'contact' | 'deal' | 'use-case' | 'activity' | 'account' | null;
+type QuickAddType = 'contact' | 'opportunity' | 'use-case' | 'activity' | 'account' | null;
 
 interface AppState {
   darkVariant: 'warm' | 'charcoal';

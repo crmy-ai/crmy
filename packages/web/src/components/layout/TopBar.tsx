@@ -1,6 +1,8 @@
-import { Search, Command, Sun, Moon } from 'lucide-react';
+import { Search, Command, Sun, Moon, LogOut } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { useTheme } from '@/hooks/useTheme';
+import { useNavigate } from 'react-router-dom';
+import { clearToken } from '@/api/client';
 
 interface TopBarProps {
   title: string;
@@ -10,6 +12,12 @@ interface TopBarProps {
 export function TopBar({ title, children }: TopBarProps) {
   const { setCommandPaletteOpen } = useAppStore();
   const { theme, toggle } = useTheme();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    clearToken();
+    navigate('/login');
+  };
 
   return (
     <header className="sticky top-0 z-30 flex items-center justify-between h-12 px-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-md gap-2">
@@ -32,6 +40,13 @@ export function TopBar({ title, children }: TopBarProps) {
           <kbd className="hidden md:inline-flex items-center gap-0.5 text-xs font-mono bg-background px-1.5 py-0.5 rounded-md border border-border">
             <Command className="w-3 h-3" />K
           </kbd>
+        </button>
+        <button
+          onClick={handleLogout}
+          className="p-2 rounded-xl text-muted-foreground hover:text-destructive hover:bg-muted transition-colors"
+          title="Sign out"
+        >
+          <LogOut className="w-4 h-4" />
         </button>
       </div>
     </header>

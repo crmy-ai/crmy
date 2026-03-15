@@ -31,6 +31,12 @@ const sortOptions: SortOption[] = [
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Contact = any;
 
+function displayName(c: Contact): string {
+  const parts = [c.first_name, c.last_name].filter(Boolean);
+  if (parts.length > 0) return parts.join(' ');
+  return c.email || c.company_name || 'Unknown';
+}
+
 export default function Contacts() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -128,16 +134,16 @@ export default function Contacts() {
                       className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer group transition-colors ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
-                          <ContactAvatar name={c.name as string} className="w-8 h-8 text-xs" />
-                          <span className="font-semibold text-foreground">{c.name as string}</span>
+                          <ContactAvatar name={displayName(c)} className="w-8 h-8 text-xs" />
+                          <span className="font-semibold text-foreground">{displayName(c)}</span>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{(c.company as string) || '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{(c.company_name as string) || '—'}</td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{(c.phone as string) || '—'}</td>
                       <td className="px-4 py-3">{c.lead_score ? <LeadScoreBadge score={c.lead_score as number} /> : '—'}</td>
                       <td className="px-4 py-3">{c.stage ? <StageBadge stage={c.stage as string} /> : '—'}</td>
                       <td className="px-2 py-3">
-                        <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: c.name as string, detail: c.company as string }); navigate('/agent'); }}
+                        <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: c.company_name as string }); navigate('/agent'); }}
                           className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
                           <Sparkles className="w-3.5 h-3.5 text-accent" />
                         </button>
@@ -154,15 +160,15 @@ export default function Contacts() {
               <motion.div key={c.id as string} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
                 onClick={() => openDrawer('contact', c.id as string)}
                 className="bg-card border border-border rounded-2xl p-4 cursor-pointer hover:shadow-lg hover:border-primary/20 transition-all press-scale group relative">
-                <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: c.name as string, detail: c.company as string }); navigate('/agent'); }}
+                <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: c.company_name as string }); navigate('/agent'); }}
                   className="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-accent/10 transition-all md:opacity-0 md:group-hover:opacity-100">
                   <Sparkles className="w-3.5 h-3.5 text-accent" />
                 </button>
                 <div className="flex items-center gap-3 mb-3">
-                  <ContactAvatar name={c.name as string} className="w-11 h-11 rounded-2xl text-sm" />
+                  <ContactAvatar name={displayName(c)} className="w-11 h-11 rounded-2xl text-sm" />
                   <div>
-                    <p className="font-display font-bold text-foreground">{c.name as string}</p>
-                    <p className="text-xs text-muted-foreground">{(c.company as string) || 'Individual'}</p>
+                    <p className="font-display font-bold text-foreground">{displayName(c)}</p>
+                    <p className="text-xs text-muted-foreground">{(c.company_name as string) || 'Individual'}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 mb-2">

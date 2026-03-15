@@ -1,21 +1,188 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useContact, useActivities } from '@/api/hooks';
+import { useState } from 'react';
+import { useContact, useActivities, useUpdateContact, useUsers, useCustomFields } from '@/api/hooks';
 import { ContactAvatar } from './ContactAvatar';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
-import { StageBadge, LeadScoreBadge } from './CrmWidgets';
-import { Phone, Mail, StickyNote, Sparkles } from 'lucide-react';
+import { StageBadge, LeadScoreBadge, CustomFieldsSection } from './CrmWidgets';
+import { Phone, Mail, StickyNote, Sparkles, Pencil, ChevronLeft } from 'lucide-react';
+import { toast } from '@/components/ui/use-toast';
+
+const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
+const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
+
+const LIFECYCLE_STAGES = ['lead', 'qualified', 'opportunity', 'customer', 'churned'];
+
+function ContactEditForm({
+  contact,
+  onSave,
+  onCancel,
+  isSaving,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  contact: any;
+  onSave: (data: Record<string, unknown>) => void;
+  onCancel: () => void;
+  isSaving: boolean;
+}) {
+  const [fields, setFields] = useState<Record<string, string>>({
+    first_name: contact.first_name ?? '',
+    last_name: contact.last_name ?? '',
+    email: contact.email ?? '',
+    phone: contact.phone ?? '',
+    company_name: contact.company_name ?? '',
+    title: contact.title ?? '',
+    lifecycle_stage: contact.lifecycle_stage ?? 'lead',
+    source: contact.source ?? '',
+    owner_id: contact.owner_id ?? '',
+  });
+
+  const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    if (contact.custom_fields) {
+      for (const [k, v] of Object.entries(contact.custom_fields as Record<string, unknown>)) {
+        init[k] = String(v ?? '');
+      }
+    }
+    return init;
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: usersData } = useUsers() as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const users: any[] = usersData?.data ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: customFieldDefs } = useCustomFields('contact') as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fieldDefs: any[] = customFieldDefs?.fields ?? [];
+
+  const set = (key: string, val: string) => setFields(prev => ({ ...prev, [key]: val }));
+  const setCF = (key: string, val: string) => setCustomFieldValues(prev => ({ ...prev, [key]: val }));
+
+  const handleSave = () => {
+    const payload: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (v !== '') payload[k] = v;
+    }
+    const cfPayload: Record<string, unknown> = {};
+    for (const def of fieldDefs) {
+      const val = customFieldValues[def.field_key] ?? '';
+      if (val === '') continue;
+      if (def.field_type === 'number') cfPayload[def.field_key] = Number(val);
+      else if (def.field_type === 'boolean') cfPayload[def.field_key] = val === 'true';
+      else cfPayload[def.field_key] = val;
+    }
+    if (Object.keys(cfPayload).length > 0) payload.custom_fields = cfPayload;
+    onSave(payload);
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
+        <button onClick={onCancel} className="flex items-center gap-1 text-xs text-accent hover:underline">
+          <ChevronLeft className="w-3.5 h-3.5" /> Back
+        </button>
+        <span className="text-xs text-muted-foreground ml-auto">Editing contact</span>
+      </div>
+      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className={labelClass}>First Name<span className="text-destructive ml-0.5">*</span></label>
+            <input type="text" value={fields.first_name} onChange={e => set('first_name', e.target.value)} placeholder="First name" className={inputClass} />
+          </div>
+          <div className="space-y-1.5">
+            <label className={labelClass}>Last Name</label>
+            <input type="text" value={fields.last_name} onChange={e => set('last_name', e.target.value)} placeholder="Last name" className={inputClass} />
+          </div>
+        </div>
+        {[
+          { key: 'email', label: 'Email', type: 'email', placeholder: 'email@example.com' },
+          { key: 'phone', label: 'Phone', type: 'tel', placeholder: '(555) 123-4567' },
+          { key: 'company_name', label: 'Company', type: 'text', placeholder: 'Company name' },
+          { key: 'title', label: 'Title', type: 'text', placeholder: 'Job title' },
+          { key: 'source', label: 'Source', type: 'text', placeholder: 'e.g. inbound, referral' },
+        ].map(f => (
+          <div key={f.key} className="space-y-1.5">
+            <label className={labelClass}>{f.label}</label>
+            <input type={f.type} value={fields[f.key]} onChange={e => set(f.key, e.target.value)} placeholder={f.placeholder} className={inputClass} />
+          </div>
+        ))}
+        <div className="space-y-1.5">
+          <label className={labelClass}>Stage</label>
+          <select value={fields.lifecycle_stage} onChange={e => set('lifecycle_stage', e.target.value)} className={`${inputClass} pr-3`}>
+            {LIFECYCLE_STAGES.map(s => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+          </select>
+        </div>
+        {users.length > 0 && (
+          <div className="space-y-1.5">
+            <label className={labelClass}>Owner</label>
+            <select value={fields.owner_id} onChange={e => set('owner_id', e.target.value)} className={`${inputClass} pr-3`}>
+              <option value="">Unassigned</option>
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              {users.map((u: any) => (
+                <option key={u.id} value={u.id}>{u.name || u.email}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        {fieldDefs.length > 0 && (
+          <>
+            <div className="border-t border-border pt-2">
+              <p className={labelClass}>Custom Fields</p>
+            </div>
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+            {fieldDefs.map((def: any) => (
+              <div key={def.field_key} className="space-y-1.5">
+                <label className={labelClass}>{def.label}{def.required && <span className="text-destructive ml-0.5">*</span>}</label>
+                {(def.field_type === 'text' || !def.field_type) && (
+                  <input type="text" value={customFieldValues[def.field_key] ?? ''} onChange={e => setCF(def.field_key, e.target.value)} className={inputClass} />
+                )}
+                {def.field_type === 'number' && (
+                  <input type="number" value={customFieldValues[def.field_key] ?? ''} onChange={e => setCF(def.field_key, e.target.value)} className={inputClass} />
+                )}
+                {def.field_type === 'date' && (
+                  <input type="date" value={customFieldValues[def.field_key] ?? ''} onChange={e => setCF(def.field_key, e.target.value)} className={inputClass} />
+                )}
+                {def.field_type === 'boolean' && (
+                  <div className="flex items-center gap-2 h-10">
+                    <input type="checkbox" checked={customFieldValues[def.field_key] === 'true'} onChange={e => setCF(def.field_key, e.target.checked ? 'true' : 'false')} className="w-4 h-4 rounded border-border accent-primary" />
+                    <span className="text-sm text-foreground">Yes</span>
+                  </div>
+                )}
+                {(def.field_type === 'select' || def.field_type === 'multi_select') && (
+                  <select value={customFieldValues[def.field_key] ?? ''} onChange={e => setCF(def.field_key, e.target.value)} className={`${inputClass} pr-3`}>
+                    <option value="">Select…</option>
+                    {(def.options ?? []).map((opt: string) => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                )}
+              </div>
+            ))}
+          </>
+        )}
+        <button
+          onClick={handleSave}
+          disabled={!fields.first_name.trim() || isSaving}
+          className="w-full h-10 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors"
+        >
+          {isSaving ? 'Saving…' : 'Save Changes'}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function ContactDrawer() {
   const { drawerEntityId, openAIWithContext, closeDrawer } = useAppStore();
   const navigate = useNavigate();
+  const [editing, setEditing] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: contact, isLoading } = useContact(drawerEntityId ?? '') as any;
+  const { data: contactData, isLoading } = useContact(drawerEntityId ?? '') as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: activitiesData } = useActivities({ contact_id: drawerEntityId ?? undefined, limit: 20 }) as any;
   const activities: any[] = activitiesData?.data ?? [];
+  const updateContact = useUpdateContact(drawerEntityId ?? '');
 
   if (isLoading) {
     return (
@@ -31,14 +198,30 @@ export function ContactDrawer() {
     );
   }
 
-  if (!contact) {
+  if (!contactData?.contact) {
     return <div className="p-4 text-muted-foreground">Contact not found</div>;
   }
 
-  const name: string = contact.name ?? '';
-  const company: string = contact.company ?? '';
-  const stage: string = contact.stage ?? '';
-  const leadScore: number = contact.lead_score ?? contact.leadScore ?? 0;
+  const contact = contactData.contact;
+  const name: string = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || contact.email || '';
+  const company: string = contact.company_name ?? '';
+  const stage: string = contact.lifecycle_stage ?? '';
+  const leadScore: number = contact.lead_score ?? 0;
+
+  if (editing) {
+    return (
+      <ContactEditForm
+        contact={contact}
+        onSave={async (data) => {
+          await updateContact.mutateAsync(data);
+          setEditing(false);
+          toast({ title: 'Contact updated' });
+        }}
+        onCancel={() => setEditing(false)}
+        isSaving={updateContact.isPending}
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col">
@@ -76,6 +259,12 @@ export function ContactDrawer() {
             <StickyNote className="w-3.5 h-3.5" /> Note
           </button>
           <button
+            onClick={() => setEditing(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
+          >
+            <Pencil className="w-3.5 h-3.5" /> Edit
+          </button>
+          <button
             onClick={() => {
               openAIWithContext({ type: 'contact', id: contact.id, name, detail: company });
               closeDrawer();
@@ -83,7 +272,7 @@ export function ContactDrawer() {
             }}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-accent/30 bg-accent/5 text-accent text-sm font-semibold hover:bg-accent/10 transition-all ml-auto press-scale"
           >
-            <Sparkles className="w-3.5 h-3.5" /> Ask AI
+            <Sparkles className="w-3.5 h-3.5" /> Chat
           </button>
         </div>
       </div>
@@ -114,6 +303,9 @@ export function ContactDrawer() {
           </div>
         )}
       </div>
+
+      {/* Custom Fields */}
+      <CustomFieldsSection objectType="contact" values={(contact.custom_fields ?? {}) as Record<string, unknown>} />
 
       {/* Timeline */}
       <div className="p-4 mx-4 mt-4 mb-6">

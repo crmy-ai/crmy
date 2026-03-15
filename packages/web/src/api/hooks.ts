@@ -33,6 +33,16 @@ export function useCreateContact() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['contacts'] }),
   });
 }
+export function useUpdateContact(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.patch(`contacts/${id}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['contact', id] });
+      qc.invalidateQueries({ queryKey: ['contacts'] });
+    },
+  });
+}
 
 // Accounts
 export function useAccounts(params?: { q?: string; limit?: number; cursor?: string }) {
@@ -48,6 +58,16 @@ export function useCreateAccount() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['accounts'] }),
   });
 }
+export function useUpdateAccount(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.patch(`accounts/${id}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['account', id] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+    },
+  });
+}
 
 // Opportunities
 export function useOpportunities(params?: { q?: string; stage?: string; limit?: number; cursor?: string }) {
@@ -61,6 +81,16 @@ export function useCreateOpportunity() {
   return useMutation({
     mutationFn: (data: Record<string, unknown>) => api.post('opportunities', data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['opportunities'] }),
+  });
+}
+export function useUpdateOpportunity(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.patch(`opportunities/${id}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['opportunity', id] });
+      qc.invalidateQueries({ queryKey: ['opportunities'] });
+    },
   });
 }
 
@@ -226,6 +256,14 @@ export function useCreateCustomField() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['custom-fields'] }),
   });
 }
+export function useUpdateCustomField() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & Record<string, unknown>) =>
+      api.patch(`custom-fields/${id}`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['custom-fields'] }),
+  });
+}
 export function useDeleteCustomField() {
   const qc = useQueryClient();
   return useMutation({
@@ -257,6 +295,60 @@ export function useCreateEmail() {
   return useMutation({
     mutationFn: (data: Record<string, unknown>) => api.post('emails', data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['emails'] }),
+  });
+}
+
+// Admin: User Management
+type AdminUser = { id: string; email: string; name: string; role: string; created_at: string; updated_at?: string };
+
+export function useUsers() {
+  return useQuery({
+    queryKey: ['admin-users'],
+    queryFn: () => api.get<{ data: AdminUser[] }>('admin/users'),
+  });
+}
+export function useCreateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; email: string; password: string; role: string }) =>
+      api.post<AdminUser>('admin/users', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+  });
+}
+export function useUpdateUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; name?: string; email?: string; role?: string; password?: string }) =>
+      api.patch<AdminUser>(`admin/users/${id}`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+  });
+}
+export function useDeleteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`admin/users/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+  });
+}
+
+// Admin: Database Config
+export function useDbConfig() {
+  return useQuery({
+    queryKey: ['admin-db-config'],
+    queryFn: () => api.get<{ host: string; port: string; database: string; user: string; ssl: string | null }>('admin/db-config'),
+  });
+}
+export function useTestDbConfig() {
+  return useMutation({
+    mutationFn: (connection_string: string) => api.post<{ success: boolean }>('admin/db-config/test', { connection_string }),
+  });
+}
+export function useSaveDbConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (connection_string: string) =>
+      api.patch<{ success: boolean; message: string }>('admin/db-config', { connection_string }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-db-config'] }),
   });
 }
 

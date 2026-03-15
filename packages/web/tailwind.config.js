@@ -12,6 +12,7 @@ export default {
     extend: {
       fontFamily: {
         display: ["Plus Jakarta Sans", "sans-serif"],
+        brand: ["Syne", "sans-serif"],
         body: ["DM Sans", "sans-serif"],
         mono: ["Space Mono", "monospace"],
       },

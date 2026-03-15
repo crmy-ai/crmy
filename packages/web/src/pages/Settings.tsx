@@ -1,21 +1,42 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
-import { useApiKeys, useCreateApiKey, useRevokeApiKey, useWebhooks, useCreateWebhook, useDeleteWebhook, useCustomFields, useCreateCustomField, useDeleteCustomField } from '@/api/hooks';
+import { getUser } from '@/api/client';
+import { useApiKeys, useCreateApiKey, useRevokeApiKey, useWebhooks, useCreateWebhook, useDeleteWebhook, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useUsers, useCreateUser, useUpdateUser, useDeleteUser } from '@/api/hooks';
 
-const settingsNav = [
-  { icon: CircleUser, label: 'Profile', path: '/settings' },
-  { icon: Palette, label: 'Appearance', path: '/settings/appearance' },
-  { icon: Lock, label: 'API Keys', path: '/settings/api-keys' },
-  { icon: Link2, label: 'Webhooks', path: '/settings/webhooks' },
-  { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields' },
+type NavRole = 'member' | 'admin' | 'owner';
+
+const settingsNavConfig: { icon: React.ElementType; label: string; path: string; roles: NavRole[] }[] = [
+  { icon: CircleUser, label: 'Profile',       path: '/settings',              roles: ['member', 'admin', 'owner'] },
+  { icon: Palette,    label: 'Appearance',    path: '/settings/appearance',   roles: ['member', 'admin', 'owner'] },
+  { icon: Lock,       label: 'API Keys',      path: '/settings/api-keys',     roles: ['member', 'admin', 'owner'] },
+  { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'] },
+  { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
+  { icon: Users,      label: 'Users',         path: '/settings/users',        roles: ['admin', 'owner'] },
+  { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
 ];
+
+function AccessDenied() {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
+      <Lock className="w-8 h-8 opacity-25" />
+      <p className="text-sm font-semibold text-foreground">Access restricted</p>
+      <p className="text-xs">You don't have permission to view this section.</p>
+    </div>
+  );
+}
+
+function RequireRole({ roles, children }: { roles: NavRole[]; children: React.ReactNode }) {
+  const user = getUser();
+  if (!user || !roles.includes(user.role as NavRole)) return <AccessDenied />;
+  return <>{children}</>;
+}
 
 function ProfileSettings() {
   return (
@@ -247,30 +268,66 @@ const objectTypes = [
   { key: 'contact', label: 'Contact' },
   { key: 'account', label: 'Account' },
   { key: 'opportunity', label: 'Opportunity' },
-  { key: 'activity', label: 'Activity' },
   { key: 'use_case', label: 'Use Case' },
+  { key: 'activity', label: 'Activity' },
 ];
 
-const fieldTypes = ['Text', 'Number', 'Date', 'Dropdown', 'Checkbox', 'URL', 'Email'];
+const FIELD_TYPE_OPTIONS: { value: string; label: string; color: string }[] = [
+  { value: 'text',         label: 'Text',         color: 'bg-blue-500/10 text-blue-400 border-blue-500/20' },
+  { value: 'number',       label: 'Number',        color: 'bg-purple-500/10 text-purple-400 border-purple-500/20' },
+  { value: 'boolean',      label: 'Checkbox',      color: 'bg-green-500/10 text-green-400 border-green-500/20' },
+  { value: 'date',         label: 'Date',          color: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
+  { value: 'select',       label: 'Dropdown',      color: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' },
+  { value: 'multi_select', label: 'Multi-select',  color: 'bg-pink-500/10 text-pink-400 border-pink-500/20' },
+];
+
+function fieldTypeColor(type: string) {
+  return FIELD_TYPE_OPTIONS.find(o => o.value === type)?.color ?? 'bg-muted text-muted-foreground border-border';
+}
+function fieldTypeLabel(type: string) {
+  return FIELD_TYPE_OPTIONS.find(o => o.value === type)?.label ?? type;
+}
+function toFieldKey(label: string) {
+  return label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
 
 function CustomFieldsSettings() {
   const [activeTab, setActiveTab] = useState('contact');
   const [showCreate, setShowCreate] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newType, setNewType] = useState('Text');
+  const [newLabel, setNewLabel] = useState('');
+  const [newType, setNewType] = useState('text');
+  const [newRequired, setNewRequired] = useState(false);
+  const [newOptions, setNewOptions] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editLabel, setEditLabel] = useState('');
+  const [editRequired, setEditRequired] = useState(false);
+  const [editOptions, setEditOptions] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const { data, isLoading } = useCustomFields(activeTab);
   const createField = useCreateCustomField();
+  const updateField = useUpdateCustomField();
   const deleteField = useDeleteCustomField();
 
-  const fields = (data as any)?.data ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fields: any[] = (data as any)?.fields ?? [];
 
   const handleCreate = async () => {
-    if (!newName.trim()) return;
+    if (!newLabel.trim()) return;
     try {
-      await createField.mutateAsync({ label: newName.trim(), field_type: newType, object_type: activeTab });
-      setNewName('');
-      setNewType('Text');
+      const needsOptions = newType === 'select' || newType === 'multi_select';
+      const options = needsOptions && newOptions.trim()
+        ? newOptions.split(',').map(o => o.trim()).filter(Boolean)
+        : undefined;
+      await createField.mutateAsync({
+        label: newLabel.trim(),
+        field_name: toFieldKey(newLabel),
+        field_type: newType,
+        object_type: activeTab,
+        required: newRequired,
+        ...(options ? { options } : {}),
+      });
+      setNewLabel(''); setNewType('text'); setNewRequired(false); setNewOptions('');
       setShowCreate(false);
       toast({ title: 'Custom field created' });
     } catch {
@@ -278,73 +335,218 @@ function CustomFieldsSettings() {
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const startEdit = (f: any) => {
+    setEditingId(f.id);
+    setEditLabel(f.label ?? '');
+    setEditRequired(f.is_required ?? false);
+    setEditOptions(Array.isArray(f.options) ? f.options.join(', ') : '');
+    setShowCreate(false);
+  };
+
+  const handleUpdate = async () => {
+    if (!editingId || !editLabel.trim()) return;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const field = fields.find((f: any) => f.id === editingId);
+      const needsOptions = field?.field_type === 'select' || field?.field_type === 'multi_select';
+      const options = needsOptions && editOptions.trim()
+        ? editOptions.split(',').map(o => o.trim()).filter(Boolean)
+        : undefined;
+      await updateField.mutateAsync({
+        id: editingId,
+        label: editLabel.trim(),
+        required: editRequired,
+        ...(options !== undefined ? { options } : {}),
+      });
+      setEditingId(null);
+      toast({ title: 'Custom field updated' });
+    } catch {
+      toast({ title: 'Error', description: 'Failed to update field.', variant: 'destructive' });
+    }
+  };
+
   const handleDelete = async (id: string) => {
     try {
       await deleteField.mutateAsync(id);
+      setConfirmDeleteId(null);
       toast({ title: 'Custom field deleted' });
     } catch {
       toast({ title: 'Error', description: 'Failed to delete field.', variant: 'destructive' });
     }
   };
 
+  const inputCls = 'w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-2">
         <h2 className="font-display font-bold text-lg text-foreground">Custom Fields</h2>
-        <button onClick={() => setShowCreate(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors">
+        <button onClick={() => { setShowCreate(true); setEditingId(null); setConfirmDeleteId(null); }}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors">
           <Plus className="w-3.5 h-3.5" /> New Field
         </button>
       </div>
+      <p className="text-sm text-muted-foreground mb-5">
+        Define custom fields per object type. Values are type-checked and required fields are enforced by the server.
+      </p>
 
+      {/* Object type tabs */}
       <div className="flex gap-1 mb-5 overflow-x-auto no-scrollbar bg-muted rounded-xl p-0.5">
         {objectTypes.map((ot) => (
-          <button key={ot.key} onClick={() => { setActiveTab(ot.key); setShowCreate(false); }}
+          <button key={ot.key} onClick={() => { setActiveTab(ot.key); setShowCreate(false); setEditingId(null); setConfirmDeleteId(null); }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${activeTab === ot.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
             {ot.label}
           </button>
         ))}
       </div>
 
+      {/* Create form */}
       {showCreate && (
-        <div className="mb-5 p-4 rounded-xl border border-border bg-muted/30 space-y-3 max-w-md">
+        <div className="mb-5 p-4 rounded-xl border border-border bg-muted/30 space-y-3 max-w-lg">
+          <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">New Field</p>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Field Name</label>
-            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Preferred Language"
-              className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()} />
+            <label className="text-xs font-medium text-muted-foreground">Label <span className="text-destructive">*</span></label>
+            <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="e.g. Preferred Language"
+              className={inputCls} onKeyDown={e => e.key === 'Enter' && handleCreate()} />
+            {newLabel.trim() && (
+              <p className="text-[11px] text-muted-foreground font-mono">key: {toFieldKey(newLabel)}</p>
+            )}
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Field Type</label>
+            <label className="text-xs font-medium text-muted-foreground">Type</label>
             <div className="flex flex-wrap gap-1.5">
-              {fieldTypes.map((ft) => (
-                <button key={ft} onClick={() => setNewType(ft)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors border ${newType === ft ? 'bg-primary/15 border-primary/30 text-primary' : 'bg-muted/50 border-border text-muted-foreground hover:text-foreground'}`}>
-                  {ft}
+              {FIELD_TYPE_OPTIONS.map(ft => (
+                <button key={ft.value} onClick={() => setNewType(ft.value)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${newType === ft.value ? ft.color : 'bg-muted/50 border-border text-muted-foreground hover:text-foreground'}`}>
+                  {ft.label}
                 </button>
               ))}
             </div>
           </div>
-          <div className="flex gap-2">
-            <button onClick={handleCreate} disabled={!newName.trim() || createField.isPending} className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">Create</button>
-            <button onClick={() => { setShowCreate(false); setNewName(''); }} className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold">Cancel</button>
+          {(newType === 'select' || newType === 'multi_select') && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Options <span className="text-muted-foreground font-normal">(comma-separated)</span></label>
+              <input value={newOptions} onChange={e => setNewOptions(e.target.value)} placeholder="Option A, Option B, Option C"
+                className={inputCls} />
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setNewRequired(!newRequired)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+              newRequired
+                ? 'bg-destructive/10 border-destructive/30 text-destructive'
+                : 'bg-muted border-border text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center flex-shrink-0 transition-all ${
+              newRequired ? 'bg-destructive border-destructive' : 'border-border'
+            }`}>
+              {newRequired && <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 fill-none stroke-white stroke-[1.5]"><polyline points="1,4 4,7 9,1"/></svg>}
+            </span>
+            Required field
+          </button>
+          <div className="flex gap-2 pt-1">
+            <button onClick={handleCreate} disabled={!newLabel.trim() || createField.isPending}
+              className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+              {createField.isPending ? 'Creating…' : 'Create Field'}
+            </button>
+            <button onClick={() => { setShowCreate(false); setNewLabel(''); setNewRequired(false); setNewOptions(''); }}
+              className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
+              Cancel
+            </button>
           </div>
         </div>
       )}
 
+      {/* Fields list */}
       <div className="space-y-2 max-w-2xl">
         {isLoading ? (
-          <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-12 bg-muted/50 rounded-xl animate-pulse" />)}</div>
+          <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-14 bg-muted/50 rounded-xl animate-pulse" />)}</div>
         ) : fields.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4">No custom fields for this object type.</p>
+          <p className="text-sm text-muted-foreground py-4">No custom fields for this object type yet.</p>
         ) : fields.map((f: any) => (
-          <div key={f.id} className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card">
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-foreground">{f.label ?? f.name}</p>
-              <p className="text-xs text-muted-foreground">{f.field_type ?? f.type}</p>
-            </div>
-            <button onClick={() => handleDelete(f.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
+          <div key={f.id} className="rounded-xl border border-border bg-card overflow-hidden">
+            {editingId === f.id ? (
+              <div className="p-4 space-y-3">
+                <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Edit Field</p>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">Label</label>
+                  <input value={editLabel} onChange={e => setEditLabel(e.target.value)} className={inputCls} />
+                </div>
+                {(f.field_type === 'select' || f.field_type === 'multi_select') && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">Options <span className="text-muted-foreground font-normal">(comma-separated)</span></label>
+                    <input value={editOptions} onChange={e => setEditOptions(e.target.value)} placeholder="Option A, Option B" className={inputCls} />
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setEditRequired(!editRequired)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                    editRequired
+                      ? 'bg-destructive/10 border-destructive/30 text-destructive'
+                      : 'bg-muted border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center flex-shrink-0 transition-all ${
+                    editRequired ? 'bg-destructive border-destructive' : 'border-border'
+                  }`}>
+                    {editRequired && <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 fill-none stroke-white stroke-[1.5]"><polyline points="1,4 4,7 9,1"/></svg>}
+                  </span>
+                  Required field
+                </button>
+                <div className="flex gap-2">
+                  <button onClick={handleUpdate} disabled={!editLabel.trim() || updateField.isPending}
+                    className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                    {updateField.isPending ? 'Saving…' : 'Save'}
+                  </button>
+                  <button onClick={() => setEditingId(null)} className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">Cancel</button>
+                </div>
+              </div>
+            ) : confirmDeleteId === f.id ? (
+              <div className="p-4 flex items-center gap-3 flex-wrap">
+                <p className="text-sm text-foreground flex-1">Delete <strong>{f.label}</strong>? Existing values will remain but won't be validated.</p>
+                <button onClick={() => handleDelete(f.id)} disabled={deleteField.isPending}
+                  className="px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 disabled:opacity-40 transition-colors">
+                  {deleteField.isPending ? 'Deleting…' : 'Confirm Delete'}
+                </button>
+                <button onClick={() => setConfirmDeleteId(null)} className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold">Cancel</button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 px-4 py-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold text-foreground">{f.label}</p>
+                    {f.is_required && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded border bg-destructive/10 text-destructive border-destructive/20 font-semibold">Required</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono font-medium ${fieldTypeColor(f.field_type)}`}>
+                      {fieldTypeLabel(f.field_type)}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground font-mono">{f.field_key}</span>
+                    {Array.isArray(f.options) && f.options.length > 0 && (
+                      <span className="text-[10px] text-muted-foreground">
+                        {f.options.slice(0, 3).join(', ')}{f.options.length > 3 ? ` +${f.options.length - 3}` : ''}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button onClick={() => { startEdit(f); setConfirmDeleteId(null); }}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button onClick={() => { setConfirmDeleteId(f.id); setEditingId(null); }}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -352,14 +554,431 @@ function CustomFieldsSettings() {
   );
 }
 
+const PASSWORD_RULES = [
+  { label: 'At least 8 characters', test: (p: string) => p.length >= 8 },
+  { label: 'One uppercase letter', test: (p: string) => /[A-Z]/.test(p) },
+  { label: 'One number', test: (p: string) => /\d/.test(p) },
+  { label: 'One special character', test: (p: string) => /[^A-Za-z0-9]/.test(p) },
+];
+const ROLES = ['member', 'admin', 'owner'] as const;
+type Role = typeof ROLES[number];
+const roleLabels: Record<Role, string> = { member: 'Member', admin: 'Admin', owner: 'Owner' };
+
+function isValidEmail(email: string) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
+function isStrongPassword(p: string) { return PASSWORD_RULES.every(r => r.test(p)); }
+
+type UserRow = { id: string; email: string; name: string; role: string; created_at: string };
+
+interface UserFormState {
+  name: string; email: string; password: string; role: Role;
+  showPassword: boolean; touched: Record<string, boolean>;
+}
+
+function initForm(defaults?: Partial<UserFormState>): UserFormState {
+  return { name: '', email: '', password: '', role: 'member', showPassword: false, touched: {}, ...defaults };
+}
+
+function UserForm({
+  form, onChange, onTouch, isEdit, currentUserRole,
+}: {
+  form: UserFormState;
+  onChange: (patch: Partial<UserFormState>) => void;
+  onTouch: (field: string) => void;
+  isEdit: boolean;
+  currentUserRole: string;
+}) {
+  const nameErr = form.touched.name && !form.name.trim() ? 'Name is required' : '';
+  const emailErr = form.touched.email && !isValidEmail(form.email) ? 'Enter a valid email address' : '';
+  const passwordErr = form.touched.password && !isEdit && !isStrongPassword(form.password)
+    ? 'Password does not meet requirements'
+    : form.touched.password && !isEdit && !form.password ? 'Password is required' : '';
+  const optionalPasswordErr = isEdit && form.password && !isStrongPassword(form.password)
+    ? 'Password does not meet requirements' : '';
+
+  const fieldCls = (err: string) =>
+    `w-full h-9 px-3 rounded-lg border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring transition-colors ${err ? 'border-destructive focus:ring-destructive' : 'border-border'}`;
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Name <span className="text-destructive">*</span></label>
+          <input value={form.name} onChange={e => onChange({ name: e.target.value })} onBlur={() => onTouch('name')}
+            placeholder="Jane Smith" className={fieldCls(nameErr)} />
+          {nameErr && <p className="text-xs text-destructive">{nameErr}</p>}
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Email <span className="text-destructive">*</span></label>
+          <input type="email" value={form.email} onChange={e => onChange({ email: e.target.value })} onBlur={() => onTouch('email')}
+            placeholder="jane@company.com" className={fieldCls(emailErr)} />
+          {emailErr && <p className="text-xs text-destructive">{emailErr}</p>}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">
+            Password {isEdit ? <span className="text-muted-foreground font-normal">(leave blank to keep)</span> : <span className="text-destructive">*</span>}
+          </label>
+          <div className="relative">
+            <input type={form.showPassword ? 'text' : 'password'} value={form.password}
+              onChange={e => onChange({ password: e.target.value })} onBlur={() => onTouch('password')}
+              placeholder={isEdit ? '••••••••' : 'Min. 8 characters'} className={`${fieldCls(passwordErr || optionalPasswordErr)} pr-9`} />
+            <button type="button" onClick={() => onChange({ showPassword: !form.showPassword })}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              {form.showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+          {(form.touched.password || form.password) && (
+            <ul className="space-y-0.5 mt-1">
+              {PASSWORD_RULES.map(rule => {
+                const ok = rule.test(form.password);
+                return (
+                  <li key={rule.label} className={`flex items-center gap-1 text-[11px] ${ok ? 'text-success' : 'text-muted-foreground'}`}>
+                    <CheckCircle2 className={`w-3 h-3 ${ok ? 'opacity-100' : 'opacity-30'}`} /> {rule.label}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {passwordErr && <p className="text-xs text-destructive">{passwordErr}</p>}
+          {optionalPasswordErr && <p className="text-xs text-destructive">{optionalPasswordErr}</p>}
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Role <span className="text-destructive">*</span></label>
+          <select value={form.role} onChange={e => onChange({ role: e.target.value as Role })}
+            className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-1 focus:ring-ring appearance-none">
+            {ROLES.filter(r => r !== 'owner' || currentUserRole === 'owner').map(r => (
+              <option key={r} value={r}>{roleLabels[r]}</option>
+            ))}
+          </select>
+          <p className="text-[11px] text-muted-foreground">
+            {form.role === 'owner' ? 'Full access including billing and account deletion' : form.role === 'admin' ? 'Can manage users, settings, and all data' : 'Can access CRM data only'}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UsersSettings() {
+  const currentUser = getUser();
+  const currentUserRole = currentUser?.role ?? 'member';
+  const { data, isLoading } = useUsers();
+  const createUser = useCreateUser();
+  const updateUser = useUpdateUser();
+  const deleteUser = useDeleteUser();
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState<UserFormState>(initForm());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<UserFormState>(initForm());
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const users: UserRow[] = (data as { data: UserRow[] } | undefined)?.data ?? [];
+
+  const touchAll = (form: UserFormState): UserFormState => ({
+    ...form, touched: { name: true, email: true, password: true },
+  });
+
+  const handleCreate = async () => {
+    const f = touchAll(createForm);
+    setCreateForm(f);
+    if (!f.name.trim() || !isValidEmail(f.email) || !isStrongPassword(f.password)) return;
+    try {
+      await createUser.mutateAsync({ name: f.name.trim(), email: f.email.trim(), password: f.password, role: f.role });
+      setShowCreate(false);
+      setCreateForm(initForm());
+      toast({ title: 'User created' });
+    } catch (err) {
+      toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create user', variant: 'destructive' });
+    }
+  };
+
+  const startEdit = (u: UserRow) => {
+    setEditingId(u.id);
+    setEditForm(initForm({ name: u.name, email: u.email, role: u.role as Role }));
+  };
+
+  const handleUpdate = async () => {
+    const f = touchAll(editForm);
+    setEditForm(f);
+    if (!f.name.trim() || !isValidEmail(f.email)) return;
+    if (f.password && !isStrongPassword(f.password)) return;
+    try {
+      await updateUser.mutateAsync({
+        id: editingId!,
+        name: f.name.trim(),
+        email: f.email.trim(),
+        role: f.role,
+        ...(f.password ? { password: f.password } : {}),
+      });
+      setEditingId(null);
+      toast({ title: 'User updated' });
+    } catch (err) {
+      toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to update user', variant: 'destructive' });
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteUser.mutateAsync(id);
+      setConfirmDeleteId(null);
+      toast({ title: 'User deleted' });
+    } catch (err) {
+      toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to delete user', variant: 'destructive' });
+    }
+  };
+
+  const rolePillCls: Record<string, string> = {
+    owner: 'bg-accent/15 text-accent border-accent/30',
+    admin: 'bg-primary/15 text-primary border-primary/30',
+    member: 'bg-muted text-muted-foreground border-border',
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="font-display font-bold text-lg text-foreground">Team Members</h2>
+        {!showCreate && (
+          <button onClick={() => { setShowCreate(true); setEditingId(null); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors">
+            <Plus className="w-3.5 h-3.5" /> Add User
+          </button>
+        )}
+      </div>
+      <p className="text-sm text-muted-foreground mb-5">Manage who has access to your CRMy workspace.</p>
+
+      {showCreate && (
+        <div className="mb-5 p-4 rounded-xl border border-border bg-muted/30 space-y-4">
+          <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">New User</p>
+          <UserForm form={createForm} onChange={p => setCreateForm(f => ({ ...f, ...p }))}
+            onTouch={field => setCreateForm(f => ({ ...f, touched: { ...f.touched, [field]: true } }))}
+            isEdit={false} currentUserRole={currentUserRole} />
+          <div className="flex gap-2 pt-1">
+            <button onClick={handleCreate} disabled={createUser.isPending}
+              className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+              {createUser.isPending ? 'Creating...' : 'Create User'}
+            </button>
+            <button onClick={() => { setShowCreate(false); setCreateForm(initForm()); }}
+              className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2 max-w-2xl">
+        {isLoading ? (
+          <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-16 bg-muted/50 rounded-xl animate-pulse" />)}</div>
+        ) : users.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-4">No users found.</p>
+        ) : users.map(u => (
+          <div key={u.id} className="rounded-xl border border-border bg-card overflow-hidden">
+            {editingId === u.id ? (
+              <div className="p-4 space-y-4">
+                <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Edit User</p>
+                <UserForm form={editForm} onChange={p => setEditForm(f => ({ ...f, ...p }))}
+                  onTouch={field => setEditForm(f => ({ ...f, touched: { ...f.touched, [field]: true } }))}
+                  isEdit={true} currentUserRole={currentUserRole} />
+                <div className="flex gap-2">
+                  <button onClick={handleUpdate} disabled={updateUser.isPending}
+                    className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                    {updateUser.isPending ? 'Saving...' : 'Save Changes'}
+                  </button>
+                  <button onClick={() => setEditingId(null)}
+                    className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : confirmDeleteId === u.id ? (
+              <div className="p-4 flex items-center gap-3 flex-wrap">
+                <p className="text-sm text-foreground flex-1">Delete <strong>{u.name}</strong>? This cannot be undone.</p>
+                <button onClick={() => handleDelete(u.id)} disabled={deleteUser.isPending}
+                  className="px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 disabled:opacity-40 transition-colors">
+                  {deleteUser.isPending ? 'Deleting...' : 'Confirm Delete'}
+                </button>
+                <button onClick={() => setConfirmDeleteId(null)}
+                  className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold">
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 px-4 py-3">
+                <div className="w-8 h-8 rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0">
+                  <span className="text-xs font-display font-bold text-primary">
+                    {u.name.trim().split(/\s+/).map(n => n[0]).slice(0, 2).join('').toUpperCase() || '?'}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-foreground truncate">{u.name}</p>
+                    {u.id === currentUser?.id && (
+                      <span className="text-[10px] font-mono bg-muted text-muted-foreground px-1.5 py-0.5 rounded">you</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                </div>
+                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${rolePillCls[u.role] ?? rolePillCls.member}`}>
+                  {roleLabels[u.role as Role] ?? u.role}
+                </span>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button onClick={() => { startEdit(u); setConfirmDeleteId(null); }}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    disabled={u.id === currentUser?.id}
+                    onClick={() => { setConfirmDeleteId(u.id); setEditingId(null); }}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DatabaseSettings() {
+  const { data, isLoading } = useDbConfig();
+  const testConfig = useTestDbConfig();
+  const saveConfig = useSaveDbConfig();
+  const [editing, setEditing] = useState(false);
+  const [connStr, setConnStr] = useState('');
+  const [testResult, setTestResult] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [testError, setTestError] = useState('');
+  const [saveSuccess, setSaveSuccess] = useState('');
+
+  const dbInfo = data as { host: string; port: string; database: string; user: string; ssl: string | null } | undefined;
+
+  const handleTest = async () => {
+    setTestResult('testing');
+    setTestError('');
+    setSaveSuccess('');
+    try {
+      await testConfig.mutateAsync(connStr);
+      setTestResult('ok');
+    } catch (err) {
+      setTestResult('fail');
+      setTestError(err instanceof Error ? err.message : 'Connection failed');
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      const result = await saveConfig.mutateAsync(connStr) as { message: string };
+      setSaveSuccess(result.message);
+      setEditing(false);
+      setConnStr('');
+      setTestResult('idle');
+      toast({ title: 'Database config saved', description: result.message });
+    } catch (err) {
+      toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save', variant: 'destructive' });
+    }
+  };
+
+  return (
+    <div>
+      <h2 className="font-display font-bold text-lg text-foreground mb-2">Database Connection</h2>
+      <p className="text-sm text-muted-foreground mb-6">
+        View and update the PostgreSQL database connection. Changes are saved to <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">.env.db</code> and take effect after a server restart.
+      </p>
+
+      <div className="space-y-4 max-w-lg">
+        {isLoading ? (
+          <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-10 bg-muted/50 rounded-lg animate-pulse" />)}</div>
+        ) : (
+          <div className="p-4 rounded-xl border border-border bg-card space-y-3">
+            <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider mb-2">Current Connection</p>
+            {[
+              { label: 'Host', value: dbInfo?.host || '—' },
+              { label: 'Port', value: dbInfo?.port || '—' },
+              { label: 'Database', value: dbInfo?.database || '—' },
+              { label: 'User', value: dbInfo?.user || '—' },
+              { label: 'SSL', value: dbInfo?.ssl || 'default' },
+            ].map((row) => (
+              <div key={row.label} className="flex items-center gap-3">
+                <span className="text-xs font-medium text-muted-foreground w-20 flex-shrink-0">{row.label}</span>
+                <code className="text-sm font-mono text-foreground">{row.value}</code>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {saveSuccess && (
+          <div className="flex items-start gap-2 p-3 rounded-xl border border-success/30 bg-success/5 text-sm text-success">
+            <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            <span>{saveSuccess}</span>
+          </div>
+        )}
+
+        {!editing ? (
+          <button onClick={() => { setEditing(true); setSaveSuccess(''); setTestResult('idle'); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors">
+            <Database className="w-3.5 h-3.5" /> Edit Connection
+          </button>
+        ) : (
+          <div className="space-y-3 p-4 rounded-xl border border-border bg-muted/30">
+            <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">New Connection String</p>
+            <input
+              value={connStr}
+              onChange={(e) => { setConnStr(e.target.value); setTestResult('idle'); setTestError(''); }}
+              placeholder="postgresql://user:password@host:5432/dbname"
+              className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground font-mono outline-none focus:ring-1 focus:ring-ring"
+            />
+
+            {testResult === 'ok' && (
+              <div className="flex items-center gap-1.5 text-xs text-success">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Connection successful
+              </div>
+            )}
+            {testResult === 'fail' && (
+              <div className="flex items-start gap-1.5 text-xs text-destructive">
+                <XCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /> {testError}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 flex-wrap">
+              <button onClick={handleTest}
+                disabled={!connStr.trim() || testConfig.isPending}
+                className="px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-foreground/30 disabled:opacity-40 transition-colors">
+                {testConfig.isPending ? 'Testing...' : 'Test Connection'}
+              </button>
+              <button onClick={handleSave}
+                disabled={!connStr.trim() || testResult !== 'ok' || saveConfig.isPending}
+                className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                {saveConfig.isPending ? 'Saving...' : 'Save'}
+              </button>
+              <button onClick={() => { setEditing(false); setConnStr(''); setTestResult('idle'); setTestError(''); }}
+                className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
+                Cancel
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">Test the connection before saving. Save is only enabled after a successful test.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const location = useLocation();
+  const user = getUser();
+  const userRole = (user?.role ?? 'member') as NavRole;
+  const visibleNav = settingsNavConfig.filter(item => item.roles.includes(userRole));
+
   return (
     <div className="flex flex-col h-full">
       <TopBar title="Settings" />
 
       <div className="md:hidden flex gap-1 overflow-x-auto no-scrollbar px-4 pt-3 pb-1 border-b border-border">
-        {settingsNav.map((item) => {
+        {visibleNav.map((item) => {
           const active = item.path === '/settings' ? location.pathname === '/settings' : location.pathname.startsWith(item.path);
           return (
             <Link key={item.path} to={item.path}
@@ -373,7 +992,7 @@ export default function Settings() {
 
       <div className="flex-1 flex overflow-hidden">
         <nav className="hidden md:flex flex-col w-48 border-r border-border p-2 gap-0.5">
-          {settingsNav.map((item) => {
+          {visibleNav.map((item) => {
             const active = item.path === '/settings' ? location.pathname === '/settings' : location.pathname.startsWith(item.path);
             return (
               <Link key={item.path} to={item.path}
@@ -389,8 +1008,10 @@ export default function Settings() {
             <Route index element={<ProfileSettings />} />
             <Route path="appearance" element={<AppearanceSettings />} />
             <Route path="api-keys" element={<ApiKeysSettings />} />
-            <Route path="webhooks" element={<WebhooksSettings />} />
-            <Route path="custom-fields" element={<CustomFieldsSettings />} />
+            <Route path="webhooks" element={<RequireRole roles={['admin', 'owner']}><WebhooksSettings /></RequireRole>} />
+            <Route path="custom-fields" element={<RequireRole roles={['admin', 'owner']}><CustomFieldsSettings /></RequireRole>} />
+            <Route path="users" element={<RequireRole roles={['admin', 'owner']}><UsersSettings /></RequireRole>} />
+            <Route path="database" element={<RequireRole roles={['admin', 'owner']}><DatabaseSettings /></RequireRole>} />
           </Routes>
         </div>
       </div>

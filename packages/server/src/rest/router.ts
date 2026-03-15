@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Router, type Request, type Response } from 'express';
+import pg from 'pg';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import crypto from 'node:crypto';
 import type { DbPool } from '../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import { CrmyError } from '@crmy/shared';
@@ -226,8 +230,10 @@ export function apiRouter(db: DbPool): Router {
   router.patch('/opportunities/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      // Check if this is a stage advance (has 'stage' in body)
-      if (req.body.stage && !req.body.patch) {
+      // Only route to advance_stage when the body is exclusively a stage transition
+      const bodyKeys = Object.keys(req.body);
+      const isStageOnly = bodyKeys.length > 0 && bodyKeys.every(k => ['stage', 'lost_reason', 'note'].includes(k));
+      if (isStageOnly && req.body.stage) {
         const handler = toolHandler(db, 'opportunity_advance_stage');
         const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
         res.json(result);
@@ -371,7 +377,10 @@ export function apiRouter(db: DbPool): Router {
   router.patch('/use-cases/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      if (req.body.stage && !req.body.patch) {
+      // Only route to advance_stage when the body is exclusively a stage transition
+      const bodyKeys = Object.keys(req.body);
+      const isStageOnly = bodyKeys.length > 0 && bodyKeys.every(k => ['stage', 'note'].includes(k));
+      if (isStageOnly && req.body.stage) {
         const handler = toolHandler(db, 'use_case_advance_stage');
         const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
         res.json(result);
@@ -750,6 +759,253 @@ export function apiRouter(db: DbPool): Router {
         cursor: qs(req.query.cursor),
       });
       res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Admin: Database Config ---
+  function requireAdmin(req: Request, res: Response): boolean {
+    const actor = getActor(req);
+    if (actor.role !== 'admin' && actor.role !== 'owner') {
+      res.status(403).json({
+        type: 'https://crmy.ai/errors/permission_denied',
+        title: 'Permission Denied',
+        status: 403,
+        detail: 'Only admins can access database configuration',
+      });
+      return false;
+    }
+    return true;
+  }
+
+  router.get('/admin/db-config', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const url = process.env.DATABASE_URL ?? '';
+      try {
+        const parsed = new URL(url);
+        res.json({
+          host: parsed.hostname,
+          port: parsed.port || '5432',
+          database: parsed.pathname.slice(1),
+          user: parsed.username,
+          ssl: parsed.searchParams.get('sslmode') || null,
+        });
+      } catch {
+        res.json({ host: '', port: '5432', database: '', user: '', ssl: null });
+      }
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/admin/db-config/test', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const { connection_string } = req.body as { connection_string?: string };
+      if (!connection_string) {
+        res.status(400).json({
+          type: 'https://crmy.ai/errors/validation',
+          title: 'Validation Error',
+          status: 400,
+          detail: 'connection_string is required',
+        });
+        return;
+      }
+      const { Pool } = pg;
+      const testPool = new Pool({ connectionString: connection_string, max: 1, connectionTimeoutMillis: 5000 });
+      try {
+        const client = await testPool.connect();
+        client.release();
+        await testPool.end();
+        res.json({ success: true });
+      } catch (err) {
+        await testPool.end().catch(() => {});
+        res.status(400).json({
+          type: 'https://crmy.ai/errors/connection_failed',
+          title: 'Connection Failed',
+          status: 400,
+          detail: err instanceof Error ? err.message : 'Failed to connect to database',
+        });
+      }
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/admin/db-config', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const { connection_string } = req.body as { connection_string?: string };
+      if (!connection_string) {
+        res.status(400).json({
+          type: 'https://crmy.ai/errors/validation',
+          title: 'Validation Error',
+          status: 400,
+          detail: 'connection_string is required',
+        });
+        return;
+      }
+      const configPath = path.join(process.cwd(), '.env.db');
+      await fs.writeFile(configPath, `DATABASE_URL=${connection_string}\n`, 'utf-8');
+      res.json({ success: true, path: configPath, message: 'Saved to .env.db — restart the server to apply.' });
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Admin: User Management ---
+  const VALID_ROLES = ['member', 'admin', 'owner'];
+
+  router.get('/admin/users', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const result = await db.query(
+        `SELECT id, email, name, role, created_at, updated_at
+         FROM users WHERE tenant_id = $1 ORDER BY created_at ASC`,
+        [actor.tenant_id],
+      );
+      res.json({ data: result.rows });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/admin/users', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const { name, email, password, role } = req.body as {
+        name?: string; email?: string; password?: string; role?: string;
+      };
+
+      if (!name?.trim()) {
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Name is required' });
+        return;
+      }
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Valid email is required' });
+        return;
+      }
+      if (!password || password.length < 8) {
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Password must be at least 8 characters' });
+        return;
+      }
+      if (!role || !VALID_ROLES.includes(role)) {
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Role must be member, admin, or owner' });
+        return;
+      }
+      if (role === 'owner' && actor.role !== 'owner') {
+        res.status(403).json({ type: 'https://crmy.ai/errors/permission_denied', title: 'Permission Denied', status: 403, detail: 'Only owners can assign the owner role' });
+        return;
+      }
+
+      const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+      const result = await db.query(
+        `INSERT INTO users (tenant_id, email, name, role, password_hash)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, email, name, role, created_at`,
+        [actor.tenant_id, email.trim(), name.trim(), role, passwordHash],
+      );
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('duplicate') || msg.includes('unique')) {
+        res.status(409).json({ type: 'https://crmy.ai/errors/conflict', title: 'Conflict', status: 409, detail: 'A user with that email already exists' });
+        return;
+      }
+      handleError(res, err);
+    }
+  });
+
+  router.patch('/admin/users/:id', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const userId = p(req, 'id');
+      const { name, email, role, password } = req.body as {
+        name?: string; email?: string; role?: string; password?: string;
+      };
+
+      const existing = await db.query(
+        'SELECT * FROM users WHERE id = $1 AND tenant_id = $2',
+        [userId, actor.tenant_id],
+      );
+      if (existing.rows.length === 0) {
+        res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'User not found' });
+        return;
+      }
+
+      if (role && !VALID_ROLES.includes(role)) {
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Role must be member, admin, or owner' });
+        return;
+      }
+      if (role === 'owner' && actor.role !== 'owner') {
+        res.status(403).json({ type: 'https://crmy.ai/errors/permission_denied', title: 'Permission Denied', status: 403, detail: 'Only owners can assign the owner role' });
+        return;
+      }
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Valid email is required' });
+        return;
+      }
+      if (password && password.length < 8) {
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Password must be at least 8 characters' });
+        return;
+      }
+
+      const cols: string[] = ['updated_at = now()'];
+      const vals: unknown[] = [];
+      if (name?.trim()) { cols.push(`name = $${vals.length + 1}`); vals.push(name.trim()); }
+      if (email) { cols.push(`email = $${vals.length + 1}`); vals.push(email.trim()); }
+      if (role) { cols.push(`role = $${vals.length + 1}`); vals.push(role); }
+      if (password) {
+        const hash = crypto.createHash('sha256').update(password).digest('hex');
+        cols.push(`password_hash = $${vals.length + 1}`);
+        vals.push(hash);
+      }
+
+      vals.push(userId, actor.tenant_id);
+      const result = await db.query(
+        `UPDATE users SET ${cols.join(', ')}
+         WHERE id = $${vals.length - 1} AND tenant_id = $${vals.length}
+         RETURNING id, email, name, role, created_at, updated_at`,
+        vals,
+      );
+      res.json(result.rows[0]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('duplicate') || msg.includes('unique')) {
+        res.status(409).json({ type: 'https://crmy.ai/errors/conflict', title: 'Conflict', status: 409, detail: 'A user with that email already exists' });
+        return;
+      }
+      handleError(res, err);
+    }
+  });
+
+  router.delete('/admin/users/:id', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const userId = p(req, 'id');
+
+      if (userId === actor.actor_id) {
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Invalid Operation', status: 400, detail: 'You cannot delete your own account' });
+        return;
+      }
+
+      const target = await db.query(
+        'SELECT role FROM users WHERE id = $1 AND tenant_id = $2',
+        [userId, actor.tenant_id],
+      );
+      if (target.rows.length === 0) {
+        res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'User not found' });
+        return;
+      }
+      if (target.rows[0].role === 'owner') {
+        const ownerCount = await db.query(
+          `SELECT COUNT(*) FROM users WHERE tenant_id = $1 AND role = 'owner'`,
+          [actor.tenant_id],
+        );
+        if (parseInt(ownerCount.rows[0].count) <= 1) {
+          res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Invalid Operation', status: 400, detail: 'Cannot delete the last owner account' });
+          return;
+        }
+      }
+
+      await db.query('DELETE FROM users WHERE id = $1 AND tenant_id = $2', [userId, actor.tenant_id]);
+      res.json({ deleted: true });
     } catch (err) { handleError(res, err); }
   });
 

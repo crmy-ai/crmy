@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { Phone, Mail, StickyNote, CheckSquare, MessageSquare } from 'lucide-react';
+import { Phone, Mail, StickyNote, CheckSquare, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
 import { ContactAvatar } from './ContactAvatar';
-import { useOpportunities, useUseCases, useAccounts, useActivities } from '@/api/hooks';
+import { useOpportunities, useUseCases, useAccounts, useActivities, useCustomFields } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { stageConfig, useCaseStageConfig } from '@/lib/stageConfig';
 
@@ -60,11 +60,29 @@ interface Activity {
 interface ActivityFeedProps {
   limit?: number;
   activities?: Activity[];
+  filterWindow?: 'today' | 'week';
 }
 
-export function ActivityFeed({ limit, activities: propActivities }: ActivityFeedProps) {
-  const { data, isLoading } = useActivities(propActivities ? undefined : { limit: limit ?? 20 });
-  const items: Activity[] = (propActivities ?? data?.data ?? []) as Activity[];
+export function ActivityFeed({ limit, activities: propActivities, filterWindow }: ActivityFeedProps) {
+  const { openDrawer } = useAppStore();
+  const fetchLimit = filterWindow ? 100 : (limit ?? 20);
+  const { data, isLoading } = useActivities(propActivities ? undefined : { limit: fetchLimit });
+  let items: Activity[] = (propActivities ?? data?.data ?? []) as Activity[];
+
+  if (filterWindow) {
+    const cutoff = new Date();
+    if (filterWindow === 'today') {
+      cutoff.setHours(0, 0, 0, 0);
+    } else {
+      cutoff.setDate(cutoff.getDate() - 7);
+      cutoff.setHours(0, 0, 0, 0);
+    }
+    items = items.filter((a) => {
+      const ts = a.created_at ?? a.timestamp;
+      return ts ? new Date(ts) >= cutoff : false;
+    });
+  }
+
   const displayed = limit ? items.slice(0, limit) : items;
 
   if (isLoading && !propActivities) {
@@ -93,8 +111,13 @@ export function ActivityFeed({ limit, activities: propActivities }: ActivityFeed
         const name = a.contact_name ?? a.contactName ?? 'Unknown';
         const desc = a.description ?? a.body ?? '';
         const ts = a.created_at ?? a.timestamp ?? '';
+        const contactId = (a as unknown as Record<string, unknown>).contact_id as string | undefined;
         return (
-          <div key={a.id} className="flex gap-3">
+          <div
+            key={a.id}
+            className={`flex gap-3 ${contactId ? 'cursor-pointer hover:bg-muted/40 rounded-xl px-2 -mx-2 transition-colors' : ''}`}
+            onClick={() => contactId && openDrawer('contact', contactId)}
+          >
             <div className="w-7 h-7 rounded-xl bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
               {activityIcon(a.type)}
             </div>
@@ -148,7 +171,11 @@ export function PipelineSnapshot() {
 
   const data = view === 'opportunities' ? dealData : ucStateData;
   const maxTotal = Math.max(...data.map((s) => s.total), 1);
-  const valueLabel = (v: number) => v >= 1000 ? `$${(v / 1000).toFixed(0)}K` : v > 0 ? `$${v}` : '$0';
+  const valueLabel = (v: number) =>
+    v >= 1_000_000_000 ? `$${(v / 1_000_000_000).toFixed(1)}B`
+    : v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M`
+    : v >= 1_000 ? `$${(v / 1_000).toFixed(0)}K`
+    : v > 0 ? `$${v}` : '$0';
 
   return (
     <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
@@ -237,6 +264,59 @@ export function AccountHealth() {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function formatCustomFieldValue(fieldType: string, val: unknown): string {
+  if (val === null || val === undefined) return '—';
+  if (fieldType === 'boolean') return val ? 'Yes' : 'No';
+  if (fieldType === 'date') { try { return new Date(String(val)).toLocaleDateString(); } catch { return String(val); } }
+  if (Array.isArray(val)) return val.join(', ');
+  return String(val);
+}
+
+export function CustomFieldsSection({ objectType, values }: { objectType: string; values: Record<string, unknown> }) {
+  const [open, setOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = useCustomFields(objectType) as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fieldDefs: any[] = data?.fields ?? [];
+
+  if (fieldDefs.length === 0) return null;
+
+  return (
+    <div className="px-4 mx-4 mt-2 border-t border-border pt-3">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 w-full text-left"
+      >
+        <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide flex-1">
+          Custom Fields
+          <span className="ml-1.5 font-mono font-normal text-muted-foreground/50">({fieldDefs.length})</span>
+        </h3>
+        {open ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
+      </button>
+      {open && (
+        <div className="mt-3 space-y-2">
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          {fieldDefs.map((def: any) => {
+            const val = values?.[def.field_key];
+            const hasValue = val !== undefined && val !== null && val !== '';
+            return (
+              <div key={def.field_key} className="flex items-center justify-between gap-4">
+                <span className="text-xs text-muted-foreground shrink-0">
+                  {def.label}
+                  {def.is_required && <span className="text-destructive ml-0.5">*</span>}
+                </span>
+                <span className={hasValue ? 'text-sm text-foreground text-right' : 'text-xs text-muted-foreground/50'}>
+                  {hasValue ? formatCustomFieldValue(def.field_type, val) : '—'}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

@@ -19,7 +19,7 @@ export function DrawerShell({ children, title }: DrawerShellProps) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-sm"
+            className="fixed inset-0 z-[65] bg-foreground/20 backdrop-blur-sm"
             onClick={closeDrawer}
           />
 
@@ -29,7 +29,7 @@ export function DrawerShell({ children, title }: DrawerShellProps) {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="hidden md:flex fixed right-0 top-0 h-full w-[480px] z-50 bg-card border-l border-border shadow-2xl flex-col rounded-l-2xl"
+            className="hidden md:flex fixed right-0 top-0 h-full w-[480px] z-[70] bg-card border-l border-border shadow-2xl flex-col rounded-l-2xl"
           >
             <div className="flex items-center justify-between h-14 px-5 border-b border-border">
               {title && <h2 className="font-display font-bold text-foreground">{title}</h2>}
@@ -51,7 +51,7 @@ export function DrawerShell({ children, title }: DrawerShellProps) {
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="md:hidden fixed left-0 right-0 bottom-0 z-50 bg-card border-t border-border shadow-2xl flex flex-col rounded-t-3xl max-h-[90vh]"
+            className="md:hidden fixed left-0 right-0 bottom-0 z-[70] bg-card border-t border-border shadow-2xl flex flex-col rounded-t-3xl max-h-[90vh]"
           >
             {/* Drag handle */}
             <div className="flex justify-center py-2">

@@ -2,58 +2,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { useAccount, useUpdateAccount, useUsers, useCustomFields } from '@/api/hooks';
-import { ContactAvatar } from './ContactAvatar';
+import { useOpportunity, useUpdateOpportunity, useUsers, useCustomFields } from '@/api/hooks';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
-import { Sparkles, Globe, Users, DollarSign, Heart, Pencil, ChevronLeft } from 'lucide-react';
-import { CustomFieldsSection } from './CrmWidgets';
+import { StageBadge, CustomFieldsSection } from './CrmWidgets';
+import { Sparkles, TrendingUp, Calendar, User, Pencil, ChevronLeft } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
 
-function HealthBadge({ score }: { score: number }) {
-  const color = score >= 80 ? 'text-green-400 bg-green-500/15' : score >= 50 ? 'text-yellow-400 bg-yellow-500/15' : 'text-red-400 bg-red-500/15';
-  return (
-    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${color}`}>
-      <Heart className="w-3 h-3" /> {score}
-    </span>
-  );
-}
+const OPP_STAGES = ['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost'];
 
-function formatRevenue(revenue: number) {
-  if (revenue >= 1_000_000) return `$${(revenue / 1_000_000).toFixed(1)}M`;
-  if (revenue >= 1_000) return `$${(revenue / 1_000).toFixed(0)}K`;
-  return `$${revenue}`;
-}
-
-function AccountEditForm({
-  account,
+function OpportunityEditForm({
+  opportunity,
   onSave,
   onCancel,
   isSaving,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  account: any;
+  opportunity: any;
   onSave: (data: Record<string, unknown>) => void;
   onCancel: () => void;
   isSaving: boolean;
 }) {
   const [fields, setFields] = useState<Record<string, string>>({
-    name: account.name ?? '',
-    industry: account.industry ?? '',
-    website: account.website ?? '',
-    domain: account.domain ?? '',
-    employee_count: account.employee_count != null ? String(account.employee_count) : '',
-    annual_revenue: account.annual_revenue != null ? String(account.annual_revenue) : '',
-    owner_id: account.owner_id ?? '',
+    name: opportunity.name ?? '',
+    amount: opportunity.amount != null ? String(opportunity.amount) : '',
+    stage: opportunity.stage ?? 'prospecting',
+    close_date: opportunity.close_date ? opportunity.close_date.slice(0, 10) : '',
+    probability: opportunity.probability != null ? String(opportunity.probability) : '',
+    description: opportunity.description ?? '',
+    owner_id: opportunity.owner_id ?? '',
   });
 
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
-    if (account.custom_fields) {
-      for (const [k, v] of Object.entries(account.custom_fields as Record<string, unknown>)) {
+    if (opportunity.custom_fields) {
+      for (const [k, v] of Object.entries(opportunity.custom_fields as Record<string, unknown>)) {
         init[k] = String(v ?? '');
       }
     }
@@ -65,7 +51,7 @@ function AccountEditForm({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const users: any[] = usersData?.data ?? [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: customFieldDefs } = useCustomFields('account') as any;
+  const { data: customFieldDefs } = useCustomFields('opportunity') as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fieldDefs: any[] = customFieldDefs?.fields ?? [];
 
@@ -76,7 +62,7 @@ function AccountEditForm({
     const payload: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(fields)) {
       if (v === '') continue;
-      if (k === 'employee_count' || k === 'annual_revenue') payload[k] = Number(v) || 0;
+      if (k === 'amount' || k === 'probability') payload[k] = Number(v) || 0;
       else payload[k] = v;
     }
     const cfPayload: Record<string, unknown> = {};
@@ -97,19 +83,26 @@ function AccountEditForm({
         <button onClick={onCancel} className="flex items-center gap-1 text-xs text-accent hover:underline">
           <ChevronLeft className="w-3.5 h-3.5" /> Back
         </button>
-        <span className="text-xs text-muted-foreground ml-auto">Editing account</span>
+        <span className="text-xs text-muted-foreground ml-auto">Editing opportunity</span>
       </div>
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
+        <div className="space-y-1.5">
+          <label className={labelClass}>Opportunity Name<span className="text-destructive ml-0.5">*</span></label>
+          <input type="text" value={fields.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Acme Enterprise" className={inputClass} />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>Stage</label>
+          <select value={fields.stage} onChange={e => set('stage', e.target.value)} className={`${inputClass} pr-3`}>
+            {OPP_STAGES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+          </select>
+        </div>
         {[
-          { key: 'name', label: 'Company Name', type: 'text', placeholder: 'e.g. Acme Corp', required: true },
-          { key: 'industry', label: 'Industry', type: 'text', placeholder: 'e.g. Technology' },
-          { key: 'website', label: 'Website', type: 'url', placeholder: 'https://acme.com' },
-          { key: 'domain', label: 'Domain', type: 'text', placeholder: 'acme.com' },
-          { key: 'employee_count', label: 'Employees', type: 'number', placeholder: '250' },
-          { key: 'annual_revenue', label: 'Annual Revenue ($)', type: 'number', placeholder: '5000000' },
+          { key: 'amount', label: 'Amount ($)', type: 'number', placeholder: '50000' },
+          { key: 'close_date', label: 'Close Date', type: 'date', placeholder: '' },
+          { key: 'probability', label: 'Probability (%)', type: 'number', placeholder: '50' },
         ].map(f => (
           <div key={f.key} className="space-y-1.5">
-            <label className={labelClass}>{f.label}{f.required && <span className="text-destructive ml-0.5">*</span>}</label>
+            <label className={labelClass}>{f.label}</label>
             <input type={f.type} value={fields[f.key]} onChange={e => set(f.key, e.target.value)} placeholder={f.placeholder} className={inputClass} />
           </div>
         ))}
@@ -125,6 +118,16 @@ function AccountEditForm({
             </select>
           </div>
         )}
+        <div className="space-y-1.5">
+          <label className={labelClass}>Description</label>
+          <textarea
+            value={fields.description}
+            onChange={e => set('description', e.target.value)}
+            placeholder="Optional notes"
+            rows={3}
+            className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring resize-none"
+          />
+        </div>
         {fieldDefs.length > 0 && (
           <>
             <div className="border-t border-border pt-2">
@@ -159,6 +162,12 @@ function AccountEditForm({
             ))}
           </>
         )}
+        {opportunity.created_at && (
+          <div className="flex items-center justify-between py-2 border-t border-border mt-2">
+            <span className="text-xs text-muted-foreground">Created</span>
+            <span className="text-xs text-muted-foreground">{new Date(opportunity.created_at as string).toLocaleDateString()}</span>
+          </div>
+        )}
         <button
           onClick={handleSave}
           disabled={!fields.name.trim() || isSaving}
@@ -171,51 +180,46 @@ function AccountEditForm({
   );
 }
 
-export function AccountDrawer() {
+export function OpportunityDrawer() {
   const { drawerEntityId, openAIWithContext, closeDrawer } = useAppStore();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: accountData, isLoading } = useAccount(drawerEntityId ?? '') as any;
-  const updateAccount = useUpdateAccount(drawerEntityId ?? '');
+  const { data: oppData, isLoading } = useOpportunity(drawerEntityId ?? '') as any;
+  const updateOpportunity = useUpdateOpportunity(drawerEntityId ?? '');
 
   if (isLoading) {
     return (
       <div className="flex flex-col gap-4 p-6 animate-pulse">
-        <div className="flex gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-muted" />
-          <div className="flex-1 space-y-2">
-            <div className="h-4 bg-muted rounded w-3/4" />
-            <div className="h-3 bg-muted rounded w-1/2" />
-          </div>
-        </div>
+        <div className="h-6 bg-muted rounded w-3/4" />
+        <div className="h-4 bg-muted rounded w-1/2" />
       </div>
     );
   }
 
-  if (!accountData?.account) {
-    return <div className="p-4 text-muted-foreground">Account not found</div>;
+  if (!oppData?.opportunity) {
+    return <div className="p-4 text-muted-foreground">Opportunity not found</div>;
   }
 
-  const account = accountData.account;
-  const name: string = account.name ?? '';
-  const industry: string = account.industry ?? '';
-  const website: string = account.website ?? '';
-  const revenue: number = account.annual_revenue ?? 0;
-  const employeeCount: number = account.employee_count ?? 0;
-  const healthScore: number = account.health_score ?? 0;
+  const opportunity = oppData.opportunity;
+  const name: string = opportunity.name ?? '';
+  const amount: number = opportunity.amount ?? 0;
+  const stage: string = opportunity.stage ?? '';
+  const probability: number = opportunity.probability ?? 0;
+  const forecastCat: string = opportunity.forecast_cat ?? '';
+  const closeDate: string = opportunity.close_date ? new Date(opportunity.close_date as string).toLocaleDateString() : '—';
 
   if (editing) {
     return (
-      <AccountEditForm
-        account={account}
+      <OpportunityEditForm
+        opportunity={opportunity}
         onSave={async (data) => {
-          await updateAccount.mutateAsync(data);
+          await updateOpportunity.mutateAsync(data);
           setEditing(false);
-          toast({ title: 'Account updated' });
+          toast({ title: 'Opportunity updated' });
         }}
         onCancel={() => setEditing(false)}
-        isSaving={updateAccount.isPending}
+        isSaving={updateOpportunity.isPending}
       />
     );
   }
@@ -224,27 +228,19 @@ export function AccountDrawer() {
     <div className="flex flex-col">
       {/* Header */}
       <div className="p-6 border-b border-border">
-        <div className="flex items-start gap-4">
-          <ContactAvatar name={name} className="w-14 h-14 rounded-2xl text-lg" />
-          <div className="flex-1">
-            <h2 className="font-display font-extrabold text-xl text-foreground">{name}</h2>
-            {industry && <p className="text-sm text-muted-foreground">{industry}</p>}
-            <div className="flex items-center gap-2 mt-2">
-              {healthScore > 0 && <HealthBadge score={healthScore} />}
-            </div>
-          </div>
+        <h2 className="font-display font-extrabold text-xl text-foreground">{name}</h2>
+        <p className="text-3xl font-display font-extrabold text-foreground mt-2">
+          ${amount >= 1000 ? `${(amount / 1000).toFixed(0)}K` : amount}
+        </p>
+        <div className="flex items-center gap-2 mt-3">
+          {stage && <StageBadge stage={stage} />}
+          {probability > 0 && (
+            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-accent/10 text-accent">
+              {probability}% probability
+            </span>
+          )}
         </div>
         <div className="flex gap-2 mt-4">
-          {website && (
-            <a
-              href={website.startsWith('http') ? website : `https://${website}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
-            >
-              <Globe className="w-3.5 h-3.5" /> Website
-            </a>
-          )}
           <button
             onClick={() => setEditing(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
@@ -253,7 +249,7 @@ export function AccountDrawer() {
           </button>
           <button
             onClick={() => {
-              openAIWithContext({ type: 'account', id: account.id, name, detail: industry });
+              openAIWithContext({ type: 'opportunity', id: opportunity.id, name, detail: `$${(amount / 1000).toFixed(0)}K` });
               closeDrawer();
               navigate('/agent');
             }}
@@ -267,13 +263,13 @@ export function AccountDrawer() {
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 p-4 mx-4 mt-4">
         {[
-          { icon: DollarSign, label: 'Revenue', value: revenue ? formatRevenue(revenue) : '—' },
-          { icon: Users, label: 'Employees', value: employeeCount ? String(employeeCount) : '—' },
-          { icon: Heart, label: 'Health', value: healthScore ? String(healthScore) : '—' },
+          { icon: TrendingUp, label: 'Probability', value: `${probability}%` },
+          { icon: Calendar, label: 'Close Date', value: closeDate },
+          { icon: User, label: 'Forecast', value: forecastCat || '—' },
         ].map((stat) => (
           <div key={stat.label} className="bg-muted/50 rounded-xl p-3 text-center">
             <stat.icon className="w-4 h-4 text-muted-foreground mx-auto mb-1" />
-            <p className="text-sm font-display font-bold text-foreground">{stat.value}</p>
+            <p className="text-sm font-display font-bold text-foreground truncate">{stat.value}</p>
             <p className="text-[10px] text-muted-foreground">{stat.label}</p>
           </div>
         ))}
@@ -283,9 +279,9 @@ export function AccountDrawer() {
       <div className="p-4 mx-4 mt-2 space-y-3">
         <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide">Details</h3>
         {[
-          { label: 'Industry', value: industry },
-          { label: 'Website', value: website },
-          { label: 'Created', value: account.created_at ? new Date(account.created_at as string).toLocaleDateString() : undefined },
+          { label: 'Stage', value: stage },
+          { label: 'Forecast', value: forecastCat || undefined },
+          { label: 'Created', value: opportunity.created_at ? new Date(opportunity.created_at as string).toLocaleDateString() : undefined },
         ]
           .filter((f) => f.value)
           .map((field) => (
@@ -294,18 +290,16 @@ export function AccountDrawer() {
               <span className="text-sm text-foreground">{field.value}</span>
             </div>
           ))}
+        {opportunity.notes && (
+          <div>
+            <p className="text-xs text-muted-foreground mb-1">Notes</p>
+            <p className="text-sm text-foreground leading-relaxed">{opportunity.notes as string}</p>
+          </div>
+        )}
       </div>
 
       {/* Custom Fields */}
-      <CustomFieldsSection objectType="account" values={(account.custom_fields ?? {}) as Record<string, unknown>} />
-
-      {/* Description */}
-      {account.description && (
-        <div className="p-4 mx-4 mt-2 mb-6">
-          <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide mb-2">About</h3>
-          <p className="text-sm text-foreground leading-relaxed">{account.description as string}</p>
-        </div>
-      )}
+      <CustomFieldsSection objectType="opportunity" values={(opportunity.custom_fields ?? {}) as Record<string, unknown>} />
     </div>
   );
 }

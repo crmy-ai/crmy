@@ -12,7 +12,7 @@ const shortcuts = [
   { group: 'Navigation', items: [
     { keys: ['G', 'H'], label: 'Go to Dashboard' },
     { keys: ['G', 'C'], label: 'Go to Contacts' },
-    { keys: ['G', 'D'], label: 'Go to Deals' },
+    { keys: ['G', 'D'], label: 'Go to Opportunities' },
   ]},
 ];
 

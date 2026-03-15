@@ -53,7 +53,7 @@ export function CommandPalette() {
           ref={inputRef}
           value={query}
           onValueChange={setQuery}
-          placeholder="Search contacts, deals, or type a command..."
+          placeholder="Search contacts, opportunities, or type a command..."
           className="flex-1 py-3 text-sm bg-transparent text-foreground placeholder:text-muted-foreground outline-none"
         />
       </div>
@@ -68,7 +68,7 @@ export function CommandPalette() {
               { label: 'Dashboard', icon: LayoutDashboard, path: '/' },
               { label: 'Contacts', icon: Users, path: '/contacts' },
               { label: 'Accounts', icon: Building2, path: '/accounts' },
-              { label: 'Deals', icon: Briefcase, path: '/deals' },
+              { label: 'Opportunities', icon: Briefcase, path: '/opportunities' },
               { label: 'Use Cases', icon: FolderKanban, path: '/use-cases' },
               { label: 'Activities', icon: Activity, path: '/activities' },
               { label: 'AI Agent', icon: Bot, path: '/agent' },
@@ -105,12 +105,12 @@ export function CommandPalette() {
         )}
 
         {opportunities.length > 0 && (
-          <Command.Group heading="Deals" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
+          <Command.Group heading="Opportunities" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
             {opportunities.slice(0, 6).map((d) => (
               <Command.Item
                 key={d.id as string}
                 value={`${d.name} ${d.contact_name}`}
-                onSelect={() => runAction(() => { navigate('/deals'); openDrawer('deal', d.id as string); })}
+                onSelect={() => runAction(() => { navigate('/opportunities'); openDrawer('opportunity', d.id as string); })}
                 className={itemClass}
               >
                 <Briefcase className="w-4 h-4" />

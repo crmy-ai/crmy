@@ -13,14 +13,14 @@ const defaultMessages: Message[] = [
 
 const typeIcons: Record<string, typeof User> = {
   contact: User,
-  deal: Briefcase,
+  opportunity: Briefcase,
   'use-case': Layers,
   account: Building,
 };
 
 const typeLabels: Record<string, string> = {
   contact: 'Contact',
-  deal: 'Deal',
+  opportunity: 'Opportunity',
   'use-case': 'Use Case',
   account: 'Account',
 };
@@ -37,7 +37,7 @@ const mockSessions: Session[] = [
     { role: 'agent', content: "I drafted a follow-up email for **Sarah Chen** regarding the appraisal results. Ready for your review." },
     { role: 'user', content: "Looks good, send it." },
     { role: 'agent', content: "✅ Email sent to Sarah Chen." },
-  ], context: { type: 'deal', id: 'd1', name: "Sarah Chen's Deal", detail: '$850K' } },
+  ], context: { type: 'opportunity', id: 'd1', name: "Sarah Chen's Opportunity", detail: '$850K' } },
   { id: '2', label: 'Nurture sequence for Maria Santos', messages: [
     { role: 'agent', content: "I created a 4-email nurture sequence for **Maria Santos**. Starting with a home value assessment offer." },
     { role: 'user', content: "Add a market trends email as step 2." },

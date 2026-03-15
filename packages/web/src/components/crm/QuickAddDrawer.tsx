@@ -3,13 +3,13 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/appStore';
-import { X, Send, Sparkles, Check } from 'lucide-react';
-import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity } from '@/api/hooks';
+import { X, Send, Sparkles, Check, FileText, Pencil } from 'lucide-react';
+import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useAccounts } from '@/api/hooks';
 import { toast } from '@/components/ui/use-toast';
 
 const typeLabels: Record<string, string> = {
   contact: 'Contact',
-  deal: 'Deal',
+  opportunity: 'Opportunity',
   'use-case': 'Use Case',
   activity: 'Activity',
   account: 'Account',
@@ -17,7 +17,7 @@ const typeLabels: Record<string, string> = {
 
 const typeGreetings: Record<string, string> = {
   contact: "Hi! Tell me about the new contact — name, email, company, and any other details.",
-  deal: "Let's create a new deal! What's the deal name, amount, and who's the contact?",
+  opportunity: "Let's create a new opportunity! What's the name, amount, and who's the contact?",
   'use-case': "Let's set up a new use case. What's the name and which client is it for?",
   activity: "Log an activity — tell me the type (call/email/meeting/note), contact, and any notes.",
   account: "Let's add a new account. What's the company name and any other details?",
@@ -45,7 +45,7 @@ function parseFieldsFromText(text: string, type: string): Record<string, unknown
   const companyMatch = text.match(/(?:at|from|company|works at|with)\s+([A-Z][^\.,\n]+)/i);
   if (companyMatch) fields.company = companyMatch[1].trim();
 
-  if (type === 'deal') {
+  if (type === 'opportunity') {
     const amountMatch = text.match(/\$?([\d,]+(?:\.\d+)?)\s*[kKmM]?/);
     if (amountMatch) {
       let amount = parseFloat(amountMatch[1].replace(',', ''));
@@ -78,6 +78,7 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [extractedFields, setExtractedFields] = useState<Record<string, unknown> | null>(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [showForm, setShowForm] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -130,7 +131,7 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
     try {
       if (type === 'contact') await createContact.mutateAsync(extractedFields);
       else if (type === 'account') await createAccount.mutateAsync(extractedFields);
-      else if (type === 'deal') await createOpportunity.mutateAsync(extractedFields);
+      else if (type === 'opportunity') await createOpportunity.mutateAsync(extractedFields);
       else if (type === 'use-case') await createUseCase.mutateAsync(extractedFields);
       else if (type === 'activity') await createActivity.mutateAsync(extractedFields);
 
@@ -170,11 +171,28 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
           <Sparkles className="w-4 h-4 text-accent" />
           <span className="font-display font-bold text-foreground">New {typeLabels[type]}</span>
         </div>
-        <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-          <X className="w-4 h-4 text-muted-foreground" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors ${
+              showForm
+                ? 'border-border bg-muted text-foreground'
+                : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/50'
+            }`}
+          >
+            <FileText className="w-3 h-3" />
+            <span>Form</span>
+          </button>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
+            <X className="w-4 h-4 text-muted-foreground" />
+          </button>
+        </div>
       </div>
 
+      {showForm ? (
+        <ManualForm type={type} onClose={onClose} onBack={() => setShowForm(false)} />
+      ) : (
+      <>
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((msg, i) => (
@@ -236,6 +254,179 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
           className="p-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
         >
           <Send className="w-4 h-4" />
+        </button>
+      </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+type FieldConfig = {
+  key: string;
+  label: string;
+  placeholder?: string;
+  inputType?: 'text' | 'email' | 'tel' | 'number' | 'date' | 'url';
+  fieldType?: 'textarea' | 'select' | 'account-select';
+  options?: string[];
+  required?: boolean;
+};
+
+const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
+  contact: [
+    { key: 'first_name', label: 'First Name', placeholder: 'First name', required: true },
+    { key: 'last_name', label: 'Last Name', placeholder: 'Last name' },
+    { key: 'email', label: 'Email', placeholder: 'email@example.com', inputType: 'email' },
+    { key: 'phone', label: 'Phone', placeholder: '(555) 123-4567', inputType: 'tel' },
+    { key: 'company_name', label: 'Company', placeholder: 'Company name' },
+  ],
+  opportunity: [
+    { key: 'name', label: 'Opportunity Name', placeholder: 'e.g. Acme Enterprise', required: true },
+    { key: 'amount', label: 'Amount ($)', placeholder: '850000', inputType: 'number' },
+    { key: 'close_date', label: 'Close Date', inputType: 'date' },
+    { key: 'description', label: 'Description', placeholder: 'Optional notes', fieldType: 'textarea' },
+  ],
+  'use-case': [
+    { key: 'name', label: 'Name', placeholder: 'e.g. Corporate Relocation', required: true },
+    { key: 'account_id', label: 'Account', fieldType: 'account-select', required: true },
+    { key: 'description', label: 'Description', placeholder: 'Any additional details', fieldType: 'textarea' },
+  ],
+  activity: [
+    { key: 'type', label: 'Type', fieldType: 'select', options: ['call', 'email', 'meeting', 'note', 'task'], required: true },
+    { key: 'subject', label: 'Subject', placeholder: 'What was this activity about?', required: true },
+    { key: 'body', label: 'Notes', placeholder: 'Additional details...', fieldType: 'textarea' },
+  ],
+  account: [
+    { key: 'name', label: 'Company Name', placeholder: 'e.g. Acme Corp', required: true },
+    { key: 'industry', label: 'Industry', placeholder: 'e.g. Real Estate, Technology' },
+    { key: 'website', label: 'Website', placeholder: 'https://acme.com', inputType: 'url' },
+    { key: 'domain', label: 'Domain', placeholder: 'acme.com' },
+  ],
+};
+
+function ManualForm({ type, onClose, onBack }: { type: string; onClose: () => void; onBack: () => void }) {
+  const [fields, setFields] = useState<Record<string, string>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { data: accountsData } = useAccounts({ limit: 200 });
+  const accounts = (accountsData?.data ?? []) as Array<{ id: string; name: string }>;
+
+  const createContact = useCreateContact();
+  const createAccount = useCreateAccount();
+  const createOpportunity = useCreateOpportunity();
+  const createUseCase = useCreateUseCase();
+  const createActivity = useCreateActivity();
+
+  const config = FIELD_CONFIGS[type] ?? FIELD_CONFIGS.contact;
+
+  const isValid = () => {
+    if (type === 'contact') return !!fields.first_name?.trim();
+    if (type === 'activity') return !!fields.type && !!fields.subject?.trim();
+    if (type === 'use-case') return !!fields.name?.trim() && !!fields.account_id;
+    return !!fields.name?.trim();
+  };
+
+  const set = (key: string, val: string) => setFields(prev => ({ ...prev, [key]: val }));
+
+  const handleSubmit = async () => {
+    if (!isValid() || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const payload: Record<string, unknown> = { ...fields };
+
+      if (type === 'contact') {
+        delete payload.name; // server uses first_name/last_name
+      }
+      if (type === 'opportunity') {
+        if (fields.amount) payload.amount = parseFloat(fields.amount) || 0;
+        payload.stage = 'prospecting';
+      }
+      if (type === 'use-case') {
+        payload.stage = 'discovery';
+      }
+      if (type === 'account' && fields.website) {
+        payload.website = fields.website.startsWith('http') ? fields.website : `https://${fields.website}`;
+      }
+
+      if (type === 'contact') await createContact.mutateAsync(payload);
+      else if (type === 'account') await createAccount.mutateAsync(payload);
+      else if (type === 'opportunity') await createOpportunity.mutateAsync(payload);
+      else if (type === 'use-case') await createUseCase.mutateAsync(payload);
+      else if (type === 'activity') await createActivity.mutateAsync(payload);
+
+      const label = fields.first_name ?? fields.name ?? fields.subject ?? typeLabels[type];
+      toast({ title: `${typeLabels[type]} created`, description: `${label} has been added.` });
+      onClose();
+    } catch {
+      toast({ title: 'Error', description: 'Failed to create. Please try again.', variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
+
+  return (
+    <div className="flex-1 overflow-y-auto p-4">
+      <button onClick={onBack} className="flex items-center gap-1.5 text-xs text-accent hover:underline mb-5">
+        <Sparkles className="w-3 h-3" /> Back to AI chat
+      </button>
+      <div className="space-y-4">
+        {config.map(f => (
+          <div key={f.key} className="space-y-1.5">
+            <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
+              {f.label}{f.required && <span className="text-destructive ml-0.5">*</span>}
+            </label>
+
+            {f.fieldType === 'select' ? (
+              <select
+                value={fields[f.key] || ''}
+                onChange={(e) => set(f.key, e.target.value)}
+                className={`${inputClass} pr-3`}
+              >
+                <option value="">Select {f.label.toLowerCase()}…</option>
+                {f.options?.map(o => (
+                  <option key={o} value={o}>{o.charAt(0).toUpperCase() + o.slice(1)}</option>
+                ))}
+              </select>
+            ) : f.fieldType === 'account-select' ? (
+              <select
+                value={fields[f.key] || ''}
+                onChange={(e) => set(f.key, e.target.value)}
+                className={`${inputClass} pr-3`}
+              >
+                <option value="">Select account…</option>
+                {accounts.map(a => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+            ) : f.fieldType === 'textarea' ? (
+              <textarea
+                value={fields[f.key] || ''}
+                onChange={(e) => set(f.key, e.target.value)}
+                placeholder={f.placeholder}
+                rows={3}
+                className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring resize-none"
+              />
+            ) : (
+              <div className="relative">
+                <input
+                  type={f.inputType ?? 'text'}
+                  value={fields[f.key] || ''}
+                  onChange={(e) => set(f.key, e.target.value)}
+                  placeholder={f.placeholder}
+                  className={`${inputClass} pr-8`}
+                />
+                <Pencil className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/40 pointer-events-none" />
+              </div>
+            )}
+          </div>
+        ))}
+        <button
+          onClick={handleSubmit}
+          disabled={!isValid() || isSubmitting}
+          className="w-full h-10 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors mt-2"
+        >
+          {isSubmitting ? 'Creating...' : `Create ${typeLabels[type]}`}
         </button>
       </div>
     </div>

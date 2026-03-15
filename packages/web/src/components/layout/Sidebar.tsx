@@ -7,7 +7,6 @@ import {
   Briefcase,
   FolderKanban,
   Activity,
-  Sparkles,
   Settings,
   PanelLeftClose,
   PanelLeft,
@@ -19,10 +18,9 @@ const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
   { icon: Users, label: 'Contacts', path: '/contacts' },
   { icon: Building2, label: 'Accounts', path: '/accounts' },
-  { icon: Briefcase, label: 'Deals', path: '/deals' },
+  { icon: Briefcase, label: 'Opportunities', path: '/opportunities' },
   { icon: FolderKanban, label: 'Use Cases', path: '/use-cases' },
   { icon: Activity, label: 'Activities', path: '/activities' },
-  { icon: Sparkles, label: 'AI Agent', path: '/agent' },
 ];
 
 const bottomItems = [
@@ -35,7 +33,7 @@ export function Sidebar() {
 
   return (
     <motion.aside
-      className="hidden md:flex flex-col h-screen bg-sidebar border-r border-sidebar-border fixed left-0 top-0 z-40"
+      className="hidden md:flex flex-col h-screen bg-sidebar border-r border-sidebar-border flex-shrink-0"
       animate={{ width: sidebarExpanded ? 220 : 56 }}
       transition={{ duration: 0.2, ease: 'easeInOut' }}
     >

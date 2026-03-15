@@ -6,7 +6,7 @@ const tabs = [
   { icon: LayoutDashboard, label: 'Home', path: '/' },
   { icon: Users, label: 'Contacts', path: '/contacts' },
   { icon: Building2, label: 'Accounts', path: '/accounts' },
-  { icon: Briefcase, label: 'Deals', path: '/deals' },
+  { icon: Briefcase, label: 'Opps', path: '/opportunities' },
   { icon: Activity, label: 'Activity', path: '/activities' },
   { icon: Settings, label: 'Settings', path: '/settings' },
 ];
