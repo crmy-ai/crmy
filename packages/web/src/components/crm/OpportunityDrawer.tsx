@@ -7,7 +7,9 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge, CustomFieldsSection } from './CrmWidgets';
-import { Sparkles, TrendingUp, Calendar, User, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
+import { Sparkles, TrendingUp, Calendar, User, Pencil, ChevronLeft, Trash2, FileText } from 'lucide-react';
+import { ContextPanel } from './ContextPanel';
+import { BriefingPanel } from './BriefingPanel';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
 
@@ -219,6 +221,7 @@ export function OpportunityDrawer() {
   const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
+  const [briefing, setBriefing] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: oppData, isLoading } = useOpportunity(drawerEntityId ?? '') as any;
   const updateOpportunity = useUpdateOpportunity(drawerEntityId ?? '');
@@ -244,6 +247,10 @@ export function OpportunityDrawer() {
   const probability: number = opportunity.probability ?? 0;
   const forecastCat: string = opportunity.forecast_cat ?? '';
   const closeDate: string = opportunity.close_date ? new Date(opportunity.close_date as string).toLocaleDateString() : '—';
+
+  if (briefing) {
+    return <BriefingPanel subjectType="opportunity" subjectId={drawerEntityId!} onClose={() => setBriefing(false)} />;
+  }
 
   if (editing) {
     return (
@@ -287,6 +294,12 @@ export function OpportunityDrawer() {
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
+          </button>
+          <button
+            onClick={() => setBriefing(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
+          >
+            <FileText className="w-3.5 h-3.5" /> Brief
           </button>
           {agentEnabled && (
             <button
@@ -343,6 +356,9 @@ export function OpportunityDrawer() {
 
       {/* Custom Fields */}
       <CustomFieldsSection objectType="opportunity" values={(opportunity.custom_fields ?? {}) as Record<string, unknown>} />
+
+      {/* Context */}
+      <ContextPanel subjectType="opportunity" subjectId={drawerEntityId!} />
     </div>
   );
 }

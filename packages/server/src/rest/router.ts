@@ -965,6 +965,149 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  // --- Context: Search, Review, Stale ---
+  router.get('/context/search', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_search');
+      const result = await handler({
+        query: qs(req.query.q) ?? '',
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        context_type: qs(req.query.context_type),
+        tag: qs(req.query.tag),
+        current_only: req.query.current_only !== 'false',
+        limit: Math.min(qn(req.query.limit, 20), 100),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/:id/review', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_review');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/context/stale', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_stale');
+      const result = await handler({
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Activity Type Registry ---
+  router.get('/activity-types', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'activity_type_list');
+      const result = await handler({
+        category: qs(req.query.category),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/activity-types', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'activity_type_add');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/activity-types/:type_name', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'activity_type_remove');
+      const result = await handler({ type_name: p(req, 'type_name') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Context Type Registry ---
+  router.get('/context-types', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_type_list');
+      const result = await handler({}, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context-types', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_type_add');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/context-types/:type_name', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_type_remove');
+      const result = await handler({ type_name: p(req, 'type_name') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Briefing ---
+  router.get('/briefing/:subject_type/:subject_id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'briefing_get');
+      const result = await handler({
+        subject_type: p(req, 'subject_type'),
+        subject_id: p(req, 'subject_id'),
+        since: qs(req.query.since),
+        context_types: req.query.context_types ? (qs(req.query.context_types) ?? '').split(',') : undefined,
+        include_stale: req.query.include_stale === 'true',
+        format: qs(req.query.format) ?? 'json',
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Assignment: Start, Block, Cancel ---
+  router.post('/assignments/:id/start', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'assignment_start');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/assignments/:id/block', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'assignment_block');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/assignments/:id/cancel', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'assignment_cancel');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Events ---
   router.get('/events', async (req: Request, res: Response) => {
     try {

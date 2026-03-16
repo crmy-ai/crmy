@@ -12,8 +12,8 @@ export async function createContextEntry(
   const result = await db.query(
     `INSERT INTO context_entries (tenant_id, subject_type, subject_id,
        context_type, authored_by, title, body, structured_data,
-       confidence, source, source_ref)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       confidence, tags, source, source_ref, source_activity_id, valid_until)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      RETURNING *`,
     [
       tenantId,
@@ -25,8 +25,11 @@ export async function createContextEntry(
       data.body,
       JSON.stringify(data.structured_data ?? {}),
       data.confidence ?? null,
+      JSON.stringify(data.tags ?? []),
       data.source ?? null,
       data.source_ref ?? null,
+      data.source_activity_id ?? null,
+      data.valid_until ?? null,
     ],
   );
   return result.rows[0] as ContextEntry;
@@ -48,20 +51,29 @@ export async function getContextForSubject(
   tenantId: UUID,
   subjectType: string,
   subjectId: UUID,
-  filters?: { context_type?: string; limit?: number },
+  filters?: { context_type?: string; tag?: string; current_only?: boolean; limit?: number },
 ): Promise<ContextEntry[]> {
   const conditions: string[] = [
     'tenant_id = $1',
     'subject_type = $2',
     'subject_id = $3',
-    'is_current = true',
   ];
   const params: unknown[] = [tenantId, subjectType, subjectId];
   let idx = 4;
 
+  if (filters?.current_only !== false) {
+    conditions.push('is_current = true');
+  }
+
   if (filters?.context_type) {
     conditions.push(`context_type = $${idx}`);
     params.push(filters.context_type);
+    idx++;
+  }
+
+  if (filters?.tag) {
+    conditions.push(`tags @> $${idx}::jsonb`);
+    params.push(JSON.stringify([filters.tag]));
     idx++;
   }
 
@@ -72,6 +84,70 @@ export async function getContextForSubject(
     `SELECT * FROM context_entries
      WHERE ${conditions.join(' AND ')}
      ORDER BY created_at DESC
+     LIMIT $${idx}`,
+    params,
+  );
+  return result.rows as ContextEntry[];
+}
+
+/**
+ * Full-text search on context entries using the GIN-indexed search_vector.
+ */
+export async function fullTextSearch(
+  db: DbPool,
+  tenantId: UUID,
+  query: string,
+  filters?: {
+    subject_type?: string;
+    subject_id?: UUID;
+    context_type?: string;
+    tag?: string;
+    current_only?: boolean;
+    limit?: number;
+  },
+): Promise<ContextEntry[]> {
+  const conditions: string[] = [
+    'c.tenant_id = $1',
+    `c.search_vector @@ plainto_tsquery('english', $2)`,
+  ];
+  const params: unknown[] = [tenantId, query];
+  let idx = 3;
+
+  if (filters?.current_only !== false) {
+    conditions.push('c.is_current = true');
+  }
+
+  if (filters?.subject_type) {
+    conditions.push(`c.subject_type = $${idx}`);
+    params.push(filters.subject_type);
+    idx++;
+  }
+  if (filters?.subject_id) {
+    conditions.push(`c.subject_id = $${idx}`);
+    params.push(filters.subject_id);
+    idx++;
+  }
+  if (filters?.context_type) {
+    conditions.push(`c.context_type = $${idx}`);
+    params.push(filters.context_type);
+    idx++;
+  }
+  if (filters?.tag) {
+    conditions.push(`c.tags @> $${idx}::jsonb`);
+    params.push(JSON.stringify([filters.tag]));
+    idx++;
+  }
+
+  const lim = filters?.limit ?? 20;
+  params.push(lim);
+
+  const where = conditions.join(' AND ');
+
+  const result = await db.query(
+    `SELECT c.*, ts_rank(c.search_vector, plainto_tsquery('english', $2)) AS rank
+     FROM context_entries c
+     WHERE ${where}
+     ORDER BY rank DESC
      LIMIT $${idx}`,
     params,
   );
@@ -91,6 +167,7 @@ export async function supersedeContextEntry(
     title?: string;
     structured_data?: Record<string, unknown>;
     confidence?: number;
+    tags?: string[];
     authored_by: UUID;
   },
 ): Promise<{ old: ContextEntry; new: ContextEntry }> {
@@ -108,8 +185,9 @@ export async function supersedeContextEntry(
   const result = await db.query(
     `INSERT INTO context_entries (tenant_id, subject_type, subject_id,
        context_type, authored_by, title, body, structured_data,
-       confidence, is_current, supersedes_id, source, source_ref)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,true,$10,$11,$12)
+       confidence, tags, is_current, supersedes_id, source, source_ref,
+       source_activity_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11,$12,$13,$14)
      RETURNING *`,
     [
       tenantId,
@@ -121,13 +199,72 @@ export async function supersedeContextEntry(
       newData.body,
       JSON.stringify(newData.structured_data ?? oldEntry.structured_data),
       newData.confidence ?? oldEntry.confidence,
+      JSON.stringify(newData.tags ?? oldEntry.tags ?? []),
       existingId,
       oldEntry.source,
       oldEntry.source_ref,
+      oldEntry.source_activity_id,
     ],
   );
 
   return { old: oldEntry, new: result.rows[0] as ContextEntry };
+}
+
+/**
+ * Mark a context entry as reviewed (still accurate).
+ */
+export async function reviewContextEntry(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+): Promise<ContextEntry | null> {
+  const result = await db.query(
+    `UPDATE context_entries SET reviewed_at = now(), updated_at = now()
+     WHERE id = $1 AND tenant_id = $2
+     RETURNING *`,
+    [id, tenantId],
+  );
+  return (result.rows[0] as ContextEntry) ?? null;
+}
+
+/**
+ * List stale context entries (valid_until has passed, still current).
+ */
+export async function listStaleEntries(
+  db: DbPool,
+  tenantId: UUID,
+  filters?: { subject_type?: string; subject_id?: UUID; limit?: number },
+): Promise<ContextEntry[]> {
+  const conditions: string[] = [
+    'tenant_id = $1',
+    'valid_until < now()',
+    'is_current = TRUE',
+  ];
+  const params: unknown[] = [tenantId];
+  let idx = 2;
+
+  if (filters?.subject_type) {
+    conditions.push(`subject_type = $${idx}`);
+    params.push(filters.subject_type);
+    idx++;
+  }
+  if (filters?.subject_id) {
+    conditions.push(`subject_id = $${idx}`);
+    params.push(filters.subject_id);
+    idx++;
+  }
+
+  const lim = filters?.limit ?? 20;
+  params.push(lim);
+
+  const result = await db.query(
+    `SELECT * FROM context_entries
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY valid_until ASC
+     LIMIT $${idx}`,
+    params,
+  );
+  return result.rows as ContextEntry[];
 }
 
 export async function searchContextEntries(
@@ -139,6 +276,7 @@ export async function searchContextEntries(
     context_type?: string;
     authored_by?: UUID;
     is_current?: boolean;
+    tag?: string;
     query?: string;
     limit: number;
     cursor?: string;
@@ -171,6 +309,11 @@ export async function searchContextEntries(
   if (filters.is_current !== undefined) {
     conditions.push(`c.is_current = $${idx}`);
     params.push(filters.is_current);
+    idx++;
+  }
+  if (filters.tag) {
+    conditions.push(`c.tags @> $${idx}::jsonb`);
+    params.push(JSON.stringify([filters.tag]));
     idx++;
   }
   if (filters.query) {

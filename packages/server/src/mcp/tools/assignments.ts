@@ -5,6 +5,7 @@ import { z } from 'zod';
 import {
   assignmentCreate, assignmentGet, assignmentSearch,
   assignmentUpdate, assignmentAccept, assignmentComplete, assignmentDecline,
+  assignmentStart, assignmentBlock, assignmentCancel,
 } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
@@ -159,6 +160,92 @@ export function assignmentTools(db: DbPool): ToolDef[] {
           objectId: assignment.id,
           beforeData: { status: before.status },
           afterData: { status: 'declined' },
+          metadata: input.reason ? { reason: input.reason } : undefined,
+        });
+        return { assignment, event_id };
+      },
+    },
+    {
+      name: 'assignment_start',
+      description: 'Start working on an accepted assignment. Transitions from accepted to in_progress.',
+      inputSchema: assignmentStart,
+      handler: async (input: z.infer<typeof assignmentStart>, actor: ActorContext) => {
+        const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
+        if (!before) throw notFound('Assignment', input.id);
+
+        const assignment = await assignmentRepo.startAssignment(db, actor.tenant_id, input.id);
+        if (!assignment) throw notFound('Assignment', input.id);
+
+        const event_id = await emitEvent(db, {
+          tenantId: actor.tenant_id,
+          eventType: 'assignment.started',
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          objectType: 'assignment',
+          objectId: assignment.id,
+          beforeData: { status: before.status },
+          afterData: { status: 'in_progress' },
+        });
+        return { assignment, event_id };
+      },
+    },
+    {
+      name: 'assignment_block',
+      description: 'Mark an assignment as blocked. Optionally provide a reason.',
+      inputSchema: assignmentBlock,
+      handler: async (input: z.infer<typeof assignmentBlock>, actor: ActorContext) => {
+        const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
+        if (!before) throw notFound('Assignment', input.id);
+
+        const assignment = await assignmentRepo.blockAssignment(db, actor.tenant_id, input.id);
+        if (!assignment) throw notFound('Assignment', input.id);
+
+        if (input.reason) {
+          await assignmentRepo.updateAssignment(db, actor.tenant_id, input.id, {
+            metadata: { ...((assignment.metadata as Record<string, unknown>) ?? {}), block_reason: input.reason },
+          });
+        }
+
+        const event_id = await emitEvent(db, {
+          tenantId: actor.tenant_id,
+          eventType: 'assignment.blocked',
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          objectType: 'assignment',
+          objectId: assignment.id,
+          beforeData: { status: before.status },
+          afterData: { status: 'blocked' },
+          metadata: input.reason ? { reason: input.reason } : undefined,
+        });
+        return { assignment, event_id };
+      },
+    },
+    {
+      name: 'assignment_cancel',
+      description: 'Cancel an assignment. Optionally provide a reason. Works from any non-terminal state.',
+      inputSchema: assignmentCancel,
+      handler: async (input: z.infer<typeof assignmentCancel>, actor: ActorContext) => {
+        const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
+        if (!before) throw notFound('Assignment', input.id);
+
+        const assignment = await assignmentRepo.cancelAssignment(db, actor.tenant_id, input.id);
+        if (!assignment) throw notFound('Assignment', input.id);
+
+        if (input.reason) {
+          await assignmentRepo.updateAssignment(db, actor.tenant_id, input.id, {
+            metadata: { ...((assignment.metadata as Record<string, unknown>) ?? {}), cancel_reason: input.reason },
+          });
+        }
+
+        const event_id = await emitEvent(db, {
+          tenantId: actor.tenant_id,
+          eventType: 'assignment.cancelled',
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          objectType: 'assignment',
+          objectId: assignment.id,
+          beforeData: { status: before.status },
+          afterData: { status: 'cancelled' },
           metadata: input.reason ? { reason: input.reason } : undefined,
         });
         return { assignment, event_id };

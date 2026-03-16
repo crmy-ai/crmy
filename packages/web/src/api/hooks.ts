@@ -531,4 +531,113 @@ export function useSupersedeContextEntry() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['context-entries'] }),
   });
 }
+export function useContextSearch(query: string, params?: { subject_type?: string; subject_id?: string; context_type?: string; tag?: string; current_only?: boolean; limit?: number }) {
+  const searchParams = new URLSearchParams();
+  searchParams.set('query', query);
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== '') searchParams.set(k, String(v));
+    });
+  }
+  return useQuery({
+    queryKey: ['context-search', query, params],
+    queryFn: () => api.get(`context/search?${searchParams}`),
+    enabled: query.length >= 2,
+  });
+}
+export function useReviewContextEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`context/${id}/review`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-stale'] });
+    },
+  });
+}
+export function useStaleContextEntries(params?: { subject_type?: string; subject_id?: string; limit?: number }) {
+  return useList('context-stale', 'context/stale', params);
+}
+
+// Assignment actions (v0.5)
+export function useStartAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`assignments/${id}/start`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['assignments'] }),
+  });
+}
+export function useBlockAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      api.post(`assignments/${id}/block`, { reason }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['assignments'] }),
+  });
+}
+export function useCancelAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      api.post(`assignments/${id}/cancel`, { reason }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['assignments'] }),
+  });
+}
+
+// Activity Type Registry
+export function useActivityTypes(params?: { category?: string }) {
+  return useList('activity-types', 'activity-types', params);
+}
+export function useCreateActivityType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { type_name: string; label: string; category: string; description?: string }) =>
+      api.post('activity-types', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['activity-types'] }),
+  });
+}
+export function useDeleteActivityType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (typeName: string) => api.delete(`activity-types/${typeName}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['activity-types'] }),
+  });
+}
+
+// Context Type Registry
+export function useContextTypes() {
+  return useList('context-types', 'context-types');
+}
+export function useCreateContextType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { type_name: string; label: string; description?: string }) =>
+      api.post('context-types', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['context-types'] }),
+  });
+}
+export function useDeleteContextType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (typeName: string) => api.delete(`context-types/${typeName}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['context-types'] }),
+  });
+}
+
+// Briefing
+export function useBriefing(subjectType: string, subjectId: string, params?: { format?: string; since?: string; context_types?: string; include_stale?: boolean }) {
+  const searchParams = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== '') searchParams.set(k, String(v));
+    });
+  }
+  const qs = searchParams.toString();
+  const url = `briefing/${subjectType}/${subjectId}${qs ? `?${qs}` : ''}`;
+  return useQuery({
+    queryKey: ['briefing', subjectType, subjectId, params],
+    queryFn: () => api.get(url),
+    enabled: !!subjectType && !!subjectId,
+  });
+}
 

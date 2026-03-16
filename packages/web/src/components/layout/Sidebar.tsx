@@ -7,6 +7,7 @@ import {
   Briefcase,
   FolderKanban,
   Activity,
+  ClipboardList,
   Settings,
   PanelLeftClose,
   PanelLeft,
@@ -21,6 +22,7 @@ const navItems = [
   { icon: Briefcase, label: 'Opportunities', path: '/opportunities' },
   { icon: FolderKanban, label: 'Use Cases', path: '/use-cases' },
   { icon: Activity, label: 'Activities', path: '/activities' },
+  { icon: ClipboardList, label: 'Assignments', path: '/assignments' },
 ];
 
 const bottomItems = [

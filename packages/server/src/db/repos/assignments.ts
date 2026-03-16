@@ -124,6 +124,54 @@ export async function declineAssignment(
   return (result.rows[0] as Assignment) ?? null;
 }
 
+export async function startAssignment(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+): Promise<Assignment | null> {
+  const result = await db.query(
+    `UPDATE assignments
+     SET status = 'in_progress', updated_at = now()
+     WHERE tenant_id = $1 AND id = $2
+       AND status = 'accepted'
+     RETURNING *`,
+    [tenantId, id],
+  );
+  return (result.rows[0] as Assignment) ?? null;
+}
+
+export async function blockAssignment(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+): Promise<Assignment | null> {
+  const result = await db.query(
+    `UPDATE assignments
+     SET status = 'blocked', updated_at = now()
+     WHERE tenant_id = $1 AND id = $2
+       AND status IN ('accepted', 'in_progress')
+     RETURNING *`,
+    [tenantId, id],
+  );
+  return (result.rows[0] as Assignment) ?? null;
+}
+
+export async function cancelAssignment(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+): Promise<Assignment | null> {
+  const result = await db.query(
+    `UPDATE assignments
+     SET status = 'cancelled', updated_at = now()
+     WHERE tenant_id = $1 AND id = $2
+       AND status NOT IN ('completed', 'declined', 'cancelled')
+     RETURNING *`,
+    [tenantId, id],
+  );
+  return (result.rows[0] as Assignment) ?? null;
+}
+
 export async function searchAssignments(
   db: DbPool,
   tenantId: UUID,

@@ -7,7 +7,9 @@ import { ContactAvatar } from './ContactAvatar';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { Sparkles, Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
+import { Sparkles, Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2, FileText } from 'lucide-react';
+import { ContextPanel } from './ContextPanel';
+import { BriefingPanel } from './BriefingPanel';
 import { CustomFieldsSection } from './CrmWidgets';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -204,6 +206,7 @@ export function AccountDrawer() {
   const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
+  const [briefing, setBriefing] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: accountData, isLoading } = useAccount(drawerEntityId ?? '') as any;
   const updateAccount = useUpdateAccount(drawerEntityId ?? '');
@@ -234,6 +237,10 @@ export function AccountDrawer() {
   const revenue: number = account.annual_revenue ?? 0;
   const employeeCount: number = account.employee_count ?? 0;
   const healthScore: number = account.health_score ?? 0;
+
+  if (briefing) {
+    return <BriefingPanel subjectType="account" subjectId={drawerEntityId!} onClose={() => setBriefing(false)} />;
+  }
 
   if (editing) {
     return (
@@ -286,6 +293,12 @@ export function AccountDrawer() {
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
           </button>
+          <button
+            onClick={() => setBriefing(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
+          >
+            <FileText className="w-3.5 h-3.5" /> Brief
+          </button>
           {agentEnabled && (
             <button
               onClick={() => {
@@ -335,6 +348,9 @@ export function AccountDrawer() {
 
       {/* Custom Fields */}
       <CustomFieldsSection objectType="account" values={(account.custom_fields ?? {}) as Record<string, unknown>} />
+
+      {/* Context */}
+      <ContextPanel subjectType="account" subjectId={drawerEntityId!} />
 
       {/* Description */}
       {account.description && (

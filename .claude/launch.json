@@ -5,7 +5,8 @@
       "name": "web",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--workspace=packages/web"],
-      "port": 5173
+      "port": 5174,
+      "autoPort": false
     },
     {
       "name": "server",

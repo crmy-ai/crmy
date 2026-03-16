@@ -6,7 +6,9 @@ import { useUseCase, useUseCaseTimeline, useUpdateUseCase, useDeleteUseCase, use
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { Sparkles, Calendar, Bot, DollarSign, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
+import { Sparkles, Calendar, Bot, DollarSign, Pencil, ChevronLeft, Trash2, FileText } from 'lucide-react';
+import { ContextPanel } from './ContextPanel';
+import { BriefingPanel } from './BriefingPanel';
 import { CustomFieldsSection } from './CrmWidgets';
 import { ActivityTimeline } from './ActivityTimeline';
 import { useCaseStageConfig } from '@/lib/stageConfig';
@@ -303,6 +305,7 @@ export function UseCaseDrawer() {
   const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
+  const [briefing, setBriefing] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: useCaseData, isLoading } = useUseCase(drawerEntityId ?? '') as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -330,6 +333,10 @@ export function UseCaseDrawer() {
   const healthScore: number = useCase.health_score ?? 0;
 
   const timeline: Array<Record<string, unknown>> = timelineData?.data ?? timelineData ?? [];
+
+  if (briefing) {
+    return <BriefingPanel subjectType="use_case" subjectId={drawerEntityId!} onClose={() => setBriefing(false)} />;
+  }
 
   if (editing) {
     return (
@@ -365,6 +372,12 @@ export function UseCaseDrawer() {
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
+          </button>
+          <button
+            onClick={() => setBriefing(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
+          >
+            <FileText className="w-3.5 h-3.5" /> Brief
           </button>
           {agentEnabled && (
             <button
@@ -416,6 +429,9 @@ export function UseCaseDrawer() {
 
       {/* Custom Fields */}
       <CustomFieldsSection objectType="use_case" values={(useCase.custom_fields ?? {}) as Record<string, unknown>} />
+
+      {/* Context */}
+      <ContextPanel subjectType="use_case" subjectId={drawerEntityId!} />
 
       {/* Timeline */}
       {timeline.length > 0 && (

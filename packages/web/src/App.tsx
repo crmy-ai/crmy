@@ -35,6 +35,7 @@ import Agent from '@/pages/Agent';
 import Settings from '@/pages/Settings';
 import NotFound from '@/pages/NotFound';
 import { HITLPage } from '@/pages/hitl/HITL';
+import AssignmentsPage from '@/pages/Assignments';
 
 function ThemeApplier() {
   const { darkVariant } = useAppStore();
@@ -79,6 +80,7 @@ function AnimatedRoutes() {
           <Route path="/opportunities" element={<Opportunities />} />
           <Route path="/use-cases" element={<UseCasesPage />} />
           <Route path="/activities" element={<Activities />} />
+          <Route path="/assignments" element={<AssignmentsPage />} />
           <Route path="/agent" element={<Agent />} />
           <Route path="/hitl" element={<HITLPage />} />
           <Route path="/settings/*" element={<Settings />} />

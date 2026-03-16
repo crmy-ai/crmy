@@ -467,11 +467,80 @@ export interface ContextEntry {
   title?: string;
   body: string;
   structured_data: Record<string, unknown>;
+  tags: string[];
   confidence?: number;
   is_current: boolean;
   supersedes_id?: UUID;
   source?: string;
   source_ref?: string;
+  source_activity_id?: UUID;
+  valid_until?: string;
+  reviewed_at?: string;
   created_at: string;
   updated_at: string;
+}
+
+// -- v0.4/v0.5 Registry types --
+
+export interface ActivityTypeRegistryEntry {
+  type_name: string;
+  tenant_id: UUID;
+  label: string;
+  description?: string;
+  category: 'outreach' | 'meeting' | 'proposal' | 'contract' | 'internal' | 'lifecycle' | 'handoff';
+  is_default: boolean;
+  created_at: string;
+}
+
+export interface ContextTypeRegistryEntry {
+  type_name: string;
+  tenant_id: UUID;
+  label: string;
+  description?: string;
+  is_default: boolean;
+  created_at: string;
+}
+
+// -- Governor limits --
+
+export interface GovernorLimit {
+  tenant_id: UUID;
+  limit_name: string;
+  limit_value: number;
+}
+
+export const GOVERNOR_DEFAULTS: Record<string, Record<string, number>> = {
+  solo_agent: {
+    actors_max: 3,
+    activities_per_day: 500,
+    assignments_active: 50,
+    context_entries_max: 1000,
+    context_body_max_chars: 10000,
+  },
+  pro_agent: {
+    actors_max: 15,
+    activities_per_day: 5000,
+    assignments_active: 500,
+    context_entries_max: 10000,
+    context_body_max_chars: 50000,
+  },
+  team: {
+    actors_max: 50,
+    activities_per_day: 25000,
+    assignments_active: 2500,
+    context_entries_max: 50000,
+    context_body_max_chars: 50000,
+  },
+};
+
+// -- Briefing types --
+
+export interface Briefing {
+  subject: Record<string, unknown>;
+  subject_type: SubjectType;
+  related_objects: Record<string, unknown[]>;
+  activities: Activity[];
+  open_assignments: Assignment[];
+  context_entries: Record<string, ContextEntry[]>;
+  staleness_warnings: ContextEntry[];
 }

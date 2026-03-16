@@ -124,6 +124,27 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   context_get: { method: 'GET', path: (i) => `/api/v1/context/${i.id}` },
   context_list: { method: 'GET', path: (i) => `/api/v1/context?limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}${i.context_type ? `&context_type=${i.context_type}` : ''}` },
   context_supersede: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/supersede` },
+  context_search: { method: 'GET', path: (i) => `/api/v1/context/search?q=${encodeURIComponent(i.query as string)}&limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.context_type ? `&context_type=${i.context_type}` : ''}${i.tag ? `&tag=${i.tag}` : ''}${i.current_only === false ? '&current_only=false' : ''}` },
+  context_review: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/review` },
+  context_stale: { method: 'GET', path: (i) => `/api/v1/context/stale?limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}` },
+
+  // Activity Type Registry
+  activity_type_list: { method: 'GET', path: (i) => `/api/v1/activity-types${i.category ? `?category=${i.category}` : ''}` },
+  activity_type_add: { method: 'POST', path: () => '/api/v1/activity-types' },
+  activity_type_remove: { method: 'DELETE', path: (i) => `/api/v1/activity-types/${i.type_name}` },
+
+  // Context Type Registry
+  context_type_list: { method: 'GET', path: () => '/api/v1/context-types' },
+  context_type_add: { method: 'POST', path: () => '/api/v1/context-types' },
+  context_type_remove: { method: 'DELETE', path: (i) => `/api/v1/context-types/${i.type_name}` },
+
+  // Briefing
+  briefing_get: { method: 'GET', path: (i) => `/api/v1/briefing/${i.subject_type}/${i.subject_id}?format=${i.format ?? 'json'}${i.since ? `&since=${i.since}` : ''}${i.include_stale ? '&include_stale=true' : ''}${i.context_types ? `&context_types=${(i.context_types as string[]).join(',')}` : ''}` },
+
+  // Assignment: Start, Block, Cancel
+  assignment_start: { method: 'POST', path: (i) => `/api/v1/assignments/${i.id}/start` },
+  assignment_block: { method: 'POST', path: (i) => `/api/v1/assignments/${i.id}/block` },
+  assignment_cancel: { method: 'POST', path: (i) => `/api/v1/assignments/${i.id}/cancel` },
 
   // Activity Timeline (enhanced)
   activity_get_timeline: { method: 'GET', path: (i) => `/api/v1/activities?subject_type=${i.subject_type}&subject_id=${i.subject_id}&limit=${i.limit ?? 50}` },

@@ -9,7 +9,9 @@ import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge, LeadScoreBadge, CustomFieldsSection } from './CrmWidgets';
 import { ActivityTimeline } from './ActivityTimeline';
-import { Phone, Mail, StickyNote, Sparkles, Pencil, ChevronLeft, Send, Pin, Trash2 } from 'lucide-react';
+import { Phone, Mail, StickyNote, Sparkles, Pencil, ChevronLeft, Send, Pin, Trash2, FileText } from 'lucide-react';
+import { ContextPanel } from './ContextPanel';
+import { BriefingPanel } from './BriefingPanel';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
 
@@ -205,6 +207,7 @@ export function ContactDrawer() {
   const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
+  const [briefing, setBriefing] = useState(false);
   const [noting, setNoting] = useState(false);
   const [noteBody, setNoteBody] = useState('');
   const noteRef = useRef<HTMLTextAreaElement>(null);
@@ -243,6 +246,10 @@ export function ContactDrawer() {
   const company: string = contact.company_name ?? '';
   const stage: string = contact.lifecycle_stage ?? '';
   const leadScore: number = contact.lead_score ?? 0;
+
+  if (briefing) {
+    return <BriefingPanel subjectType="contact" subjectId={drawerEntityId!} onClose={() => setBriefing(false)} />;
+  }
 
   if (editing) {
     return (
@@ -307,6 +314,12 @@ export function ContactDrawer() {
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
+          </button>
+          <button
+            onClick={() => setBriefing(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
+          >
+            <FileText className="w-3.5 h-3.5" /> Brief
           </button>
           {agentEnabled && (
             <button
@@ -403,6 +416,9 @@ export function ContactDrawer() {
 
       {/* Custom Fields */}
       <CustomFieldsSection objectType="contact" values={(contact.custom_fields ?? {}) as Record<string, unknown>} />
+
+      {/* Context */}
+      <ContextPanel subjectType="contact" subjectId={drawerEntityId!} />
 
       {/* Timeline */}
       <div className="p-4 mx-4 mt-4 mb-6">

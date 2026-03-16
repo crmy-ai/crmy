@@ -100,5 +100,82 @@ export function contextCommand(): Command {
       await client.close();
     });
 
+  cmd.command('search <query>')
+    .description('Full-text search across context entries')
+    .option('--subject <subject>', 'Filter by subject (type:UUID)')
+    .option('--type <contextType>', 'Filter by context type')
+    .option('--tag <tag>', 'Filter by tag')
+    .option('--include-superseded', 'Include non-current entries')
+    .option('--limit <n>', 'Max results', '20')
+    .action(async (query, opts) => {
+      const input: Record<string, unknown> = {
+        query,
+        limit: parseInt(opts.limit, 10),
+        current_only: !opts.includeSuperseded,
+      };
+      if (opts.subject) {
+        const [st, si] = opts.subject.split(':');
+        input.subject_type = st;
+        input.subject_id = si;
+      }
+      if (opts.type) input.context_type = opts.type;
+      if (opts.tag) input.tag = opts.tag;
+
+      const client = await getClient();
+      const result = await client.call('context_search', input);
+      const data = JSON.parse(result);
+      if (data.context_entries?.length === 0) {
+        console.log('No results found.');
+        return;
+      }
+      console.table(data.context_entries?.map((c: Record<string, unknown>) => ({
+        id: (c.id as string).slice(0, 8),
+        type: c.context_type,
+        title: ((c.title as string) ?? '').slice(0, 40),
+        subject: `${c.subject_type}:${(c.subject_id as string).slice(0, 8)}`,
+        confidence: c.confidence ?? '—',
+      })));
+      await client.close();
+    });
+
+  cmd.command('review <id>')
+    .description('Mark a context entry as reviewed (still accurate)')
+    .action(async (id) => {
+      const client = await getClient();
+      const result = await client.call('context_review', { id });
+      const data = JSON.parse(result);
+      console.log(`\n  Reviewed context entry: ${data.context_entry.id} (reviewed_at: ${data.context_entry.reviewed_at})\n`);
+      await client.close();
+    });
+
+  cmd.command('stale')
+    .description('List stale context entries that need review')
+    .option('--subject <subject>', 'Filter by subject (type:UUID)')
+    .option('--limit <n>', 'Max results', '20')
+    .action(async (opts) => {
+      const input: Record<string, unknown> = { limit: parseInt(opts.limit, 10) };
+      if (opts.subject) {
+        const [st, si] = opts.subject.split(':');
+        input.subject_type = st;
+        input.subject_id = si;
+      }
+
+      const client = await getClient();
+      const result = await client.call('context_stale', input);
+      const data = JSON.parse(result);
+      if (data.stale_entries?.length === 0) {
+        console.log('No stale entries found.');
+        return;
+      }
+      console.table(data.stale_entries?.map((c: Record<string, unknown>) => ({
+        id: (c.id as string).slice(0, 8),
+        type: c.context_type,
+        title: ((c.title as string) ?? '').slice(0, 40),
+        expired: c.valid_until,
+        subject: `${c.subject_type}:${(c.subject_id as string).slice(0, 8)}`,
+      })));
+      await client.close();
+    });
+
   return cmd;
 }

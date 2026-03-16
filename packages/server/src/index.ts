@@ -144,14 +144,29 @@ export async function createApp(config: ServerConfig) {
 }
 
 async function seedDefaults(db: DbPool, tenantSlug: string): Promise<void> {
+  let tenantId: string;
   const existing = await db.query('SELECT id FROM tenants WHERE slug = $1', [tenantSlug]);
-  if (existing.rows.length > 0) return;
 
-  await db.query(
-    `INSERT INTO tenants (slug, name) VALUES ($1, $2)`,
-    [tenantSlug, tenantSlug === 'default' ? 'Default Tenant' : tenantSlug],
-  );
-  console.log(`Seeded default tenant: ${tenantSlug}`);
+  if (existing.rows.length > 0) {
+    tenantId = existing.rows[0].id;
+  } else {
+    const result = await db.query(
+      `INSERT INTO tenants (slug, name) VALUES ($1, $2) RETURNING id`,
+      [tenantSlug, tenantSlug === 'default' ? 'Default Tenant' : tenantSlug],
+    );
+    tenantId = result.rows[0].id;
+    console.log(`Seeded default tenant: ${tenantSlug}`);
+  }
+
+  // Seed registries (idempotent)
+  try {
+    const { seedDefaults: seedActivityTypes } = await import('./db/repos/activity-type-registry.js');
+    const { seedDefaults: seedContextTypes } = await import('./db/repos/context-type-registry.js');
+    await seedActivityTypes(db, tenantId);
+    await seedContextTypes(db, tenantId);
+  } catch {
+    // Tables may not exist yet if migration hasn't run
+  }
 }
 
 // Direct startup

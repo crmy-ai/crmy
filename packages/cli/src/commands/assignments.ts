@@ -122,5 +122,43 @@ export function assignmentsCommand(): Command {
       await client.close();
     });
 
+  cmd.command('start <id>')
+    .description('Start working on an accepted assignment')
+    .action(async (id) => {
+      const client = await getClient();
+      const result = await client.call('assignment_start', { id });
+      const data = JSON.parse(result);
+      console.log(`\n  Started assignment: ${data.assignment.id} (status: ${data.assignment.status})\n`);
+      await client.close();
+    });
+
+  cmd.command('block <id>')
+    .option('-r, --reason <reason>', 'Reason for blocking')
+    .description('Mark an assignment as blocked')
+    .action(async (id, opts) => {
+      const client = await getClient();
+      const result = await client.call('assignment_block', {
+        id,
+        reason: opts.reason || undefined,
+      });
+      const data = JSON.parse(result);
+      console.log(`\n  Blocked assignment: ${data.assignment.id}\n`);
+      await client.close();
+    });
+
+  cmd.command('cancel <id>')
+    .option('-r, --reason <reason>', 'Reason for cancelling')
+    .description('Cancel an assignment')
+    .action(async (id, opts) => {
+      const client = await getClient();
+      const result = await client.call('assignment_cancel', {
+        id,
+        reason: opts.reason || undefined,
+      });
+      const data = JSON.parse(result);
+      console.log(`\n  Cancelled assignment: ${data.assignment.id}\n`);
+      await client.close();
+    });
+
   return cmd;
 }

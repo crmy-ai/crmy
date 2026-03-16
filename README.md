@@ -72,12 +72,13 @@ http://localhost:3000/app
 | Page | Description |
 |------|-------------|
 | Dashboard | Stat cards, use case stage strip, recent activity feed |
-| Contacts | List, create, detail with activity timeline and linked use cases |
-| Accounts | List, create, detail with Use Cases tab showing ARR totals |
+| Contacts | List, create, detail with activity timeline, context panel, and briefing |
+| Accounts | List, create, detail with context panel and briefing |
 | Pipeline | Kanban board by opportunity stage |
-| Opportunities | Detail view with linked Use Cases tab |
-| Use Cases | List with filters, create form, 360 detail page |
+| Opportunities | Detail view with context panel and briefing |
+| Use Cases | List with filters, create form, 360 detail with context panel and briefing |
 | Activities | Activity log across all objects |
+| **Assignments** | Assignment queue with My Queue / Delegated / All tabs, status filters, and inline actions (accept, start, complete, block, cancel, decline) |
 | Analytics | Pipeline by stage, forecast, use case ARR/health distribution |
 | HITL Queue | Approve/reject agent actions with payload viewer |
 | Settings | Profile, API keys, webhooks, custom fields management |
@@ -92,7 +93,7 @@ The use case detail page provides a complete view:
 - **Contact management** — add/remove contacts with role assignment
 - **Activity timeline** — linked activities and events
 
-## Context Engine (v0.4)
+## Context Engine (v0.4 + v0.5)
 
 The Context Engine transforms CRMy from a system of record into a **system of action** — a shared workspace where AI agents and humans coordinate GTM workflows through four primitives:
 
@@ -100,16 +101,32 @@ The Context Engine transforms CRMy from a system of record into a **system of ac
 |-----------|-----------------|----------------|
 | **Actors** | Who is doing things (human or agent) | First-class identity enables agent-human coordination |
 | **Activities** (enhanced) | Everything that happened — with polymorphic subjects and structured payloads | Rich audit trail with `occurred_at`, `detail` JSONB, and `outcome` |
-| **Assignments** | Who owns what next — handoffs between agents and humans | The coordination layer for GTM workflows |
-| **Context Entries** | Structured knowledge attached to any CRM object | The memory layer — notes, research, objections, competitive intel |
+| **Assignments** | Who owns what next — handoffs between agents and humans | Full lifecycle: pending → accepted → in_progress → completed/blocked/cancelled |
+| **Context Entries** | Structured knowledge attached to any CRM object | The memory layer with tags, FTS, staleness tracking, and supersede chains |
+
+### v0.5 — Assignments, Context & Coordination
+
+v0.5 adds the coordination and knowledge management layers:
+
+- **Activity Type Registry** — 19 default activity types across 7 categories (outreach, meeting, proposal, contract, internal, lifecycle, handoff). Add custom types per tenant.
+- **Context Type Registry** — 12 default context types (note, transcript, summary, research, preference, objection, competitive_intel, relationship_map, meeting_notes, agent_reasoning, decision, action_item). Extensible.
+- **Full-text search** on context entries via PostgreSQL `tsvector`/`tsquery` with GIN indexes
+- **Context staleness** — entries have optional `valid_until` timestamps; stale entries surface in briefings and the UI
+- **Context tags** — JSONB array tags on context entries with GIN index for fast filtering
+- **Briefing service** — assembles a complete briefing for any CRM object: record, related objects, activities, open assignments, context entries grouped by type, and staleness warnings
+- **Assignment lifecycle** — full state machine: pending → accepted → in_progress → completed, with block/cancel/decline transitions
+- **Governor limits** — plan-based rate limiting (solo_agent, pro_agent, team) on actors, activities, assignments, and context entries
 
 ### Agent Workflow Example
 
 ```
 1. Agent logs a meeting activity (activity_create)
-2. Agent extracts key takeaways and stores them (context_add ×3)
+2. Agent extracts key takeaways and stores them (context_add ×3, with tags and confidence)
 3. Agent assigns follow-up to human rep (assignment_create)
-4. Human reviews context, sends proposal (assignment_complete)
+4. Human gets a briefing on the contact (briefing_get) — sees activities, context, stale warnings
+5. Human reviews context, sends proposal (assignment_complete)
+6. Agent searches context for competitive intel (context_search)
+7. Agent reviews stale entries and supersedes outdated ones (context_stale, context_supersede)
 ```
 
 ### Key Design Decisions
@@ -119,6 +136,8 @@ The Context Engine transforms CRMy from a system of record into a **system of ac
 - **`occurred_at` vs `created_at`**: Agents may log activities retroactively; the timeline shows when it happened, not when it was logged
 - **Context `confidence` field**: Agents signal certainty (1.0 for transcripts, 0.6 for sentiment analysis) so downstream consumers can weight decisions
 - **Supersede, don't delete**: Old context entries are marked `is_current = false` for audit trail; new entries point back via `supersedes_id`
+- **Type registries**: Activity types and context types are discoverable via registry tables, seeded with defaults, and extensible per tenant
+- **Briefings**: One API call assembles everything an agent or human needs before engaging with a CRM object
 
 ## Authentication
 
@@ -200,7 +219,7 @@ scripts/                   Migration runner
 | `CRMY_API_KEY` | No | — | API key for CLI/agent authentication |
 | `CRMY_SERVER_URL` | No | — | Server URL for remote CLI mode |
 
-## MCP Tools (70+)
+## MCP Tools (80+)
 
 | Category | Tools |
 |---|---|
@@ -210,8 +229,10 @@ scripts/                   Migration runner
 | Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
 | Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
 | **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
-| **Assignments** | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline` |
-| **Context** | `context_add`, `context_get`, `context_list`, `context_supersede` |
+| **Assignments** | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
+| **Context** | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_review`, `context_stale` |
+| **Briefing** | `briefing_get` |
+| **Registries** | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
 | Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
 | Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
@@ -290,19 +311,38 @@ crmy actors register             Interactive actor registration
 crmy actors get <id>             Get actor details
 crmy actors whoami               Show current actor identity
 
-Assignments (v0.4)
+Assignments (v0.4+v0.5)
 crmy assignments list [--mine]   List assignments
 crmy assignments create          Interactive create
 crmy assignments get <id>        Get assignment details
 crmy assignments accept <id>     Accept a pending assignment
+crmy assignments start <id>      Start working on an assignment
 crmy assignments complete <id>   Complete an assignment
 crmy assignments decline <id>    Decline an assignment
+crmy assignments block <id>      Mark an assignment as blocked
+crmy assignments cancel <id>     Cancel an assignment
 
-Context (v0.4)
+Context (v0.4+v0.5)
 crmy context list [--subject-type <t>] [--subject-id <id>]
 crmy context add                 Add context about a CRM object
 crmy context get <id>            Get context entry
 crmy context supersede <id>      Supersede with updated content
+crmy context search <query>      Full-text search across context
+crmy context review <id>         Mark entry as still accurate
+crmy context stale               List stale entries needing review
+
+Briefing (v0.5)
+crmy briefing <type:UUID>        Get a full briefing for an object
+
+Activity Types (v0.5)
+crmy activity-types list         List registered activity types
+crmy activity-types add <name>   Add a custom activity type
+crmy activity-types remove <name> Remove a custom activity type
+
+Context Types (v0.5)
+crmy context-types list          List registered context types
+crmy context-types add <name>    Add a custom context type
+crmy context-types remove <name> Remove a custom context type
 
 Other
 crmy pipeline                    Pipeline summary

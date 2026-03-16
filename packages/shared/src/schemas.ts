@@ -623,7 +623,7 @@ export const workflowRunList = z.object({
   cursor,
 });
 
-// -- v0.4 Context Engine schemas --
+// -- v0.4/v0.5 Context Engine schemas --
 
 export const actorType = z.enum(['human', 'agent']);
 export const assignmentStatus = z.enum([
@@ -631,6 +631,78 @@ export const assignmentStatus = z.enum([
   'completed', 'declined', 'cancelled',
 ]);
 export const assignmentPriority = z.enum(['low', 'normal', 'high', 'urgent']);
+export const activityTypeCategory = z.enum([
+  'outreach', 'meeting', 'proposal', 'contract',
+  'internal', 'lifecycle', 'handoff',
+]);
+
+// -- Activity Type Registry schemas --
+
+export const activityTypeRegistryAdd = z.object({
+  type_name: z.string().min(1).max(100).regex(/^[a-z][a-z0-9_]*$/),
+  label: z.string().min(1).max(200),
+  description: z.string().optional(),
+  category: activityTypeCategory,
+});
+
+export const activityTypeRegistryRemove = z.object({
+  type_name: z.string().min(1),
+});
+
+export const activityTypeRegistryList = z.object({
+  category: activityTypeCategory.optional(),
+});
+
+// -- Context Type Registry schemas --
+
+export const contextTypeRegistryAdd = z.object({
+  type_name: z.string().min(1).max(100).regex(/^[a-z][a-z0-9_]*$/),
+  label: z.string().min(1).max(200),
+  description: z.string().optional(),
+});
+
+export const contextTypeRegistryRemove = z.object({
+  type_name: z.string().min(1),
+});
+
+export const contextTypeRegistryList = z.object({});
+
+// -- Briefing schema --
+
+export const briefingGet = z.object({
+  subject_type: subjectType,
+  subject_id: uuid,
+  since: z.string().optional(),
+  context_types: z.array(z.string()).optional(),
+  include_stale: z.boolean().default(false),
+  format: z.enum(['json', 'text']).default('json'),
+});
+
+// -- Context search (full-text) schema --
+
+export const contextSearch = z.object({
+  query: z.string().min(1),
+  subject_type: subjectType.optional(),
+  subject_id: uuid.optional(),
+  context_type: z.string().optional(),
+  tag: z.string().optional(),
+  current_only: z.boolean().default(true),
+  limit: z.number().int().min(1).max(100).default(20),
+});
+
+// -- Context review schema --
+
+export const contextReview = z.object({
+  id: uuid,
+});
+
+// -- Context stale list schema --
+
+export const contextStaleList = z.object({
+  subject_type: subjectType.optional(),
+  subject_id: uuid.optional(),
+  limit: z.number().int().min(1).max(100).default(20),
+});
 
 // -- Actor schemas --
 
@@ -718,7 +790,21 @@ export const assignmentDecline = z.object({
   reason: z.string().optional(),
 });
 
+export const assignmentStart = z.object({ id: uuid });
+
+export const assignmentBlock = z.object({
+  id: uuid,
+  reason: z.string().optional(),
+});
+
+export const assignmentCancel = z.object({
+  id: uuid,
+  reason: z.string().optional(),
+});
+
 // -- Context Entry schemas --
+
+const contextTag = z.string().min(1).max(100).regex(/^[a-z0-9][a-z0-9-]*$/);
 
 export const contextEntryCreate = z.object({
   subject_type: subjectType,
@@ -728,8 +814,11 @@ export const contextEntryCreate = z.object({
   body: z.string().min(1).max(50000),
   structured_data: z.record(z.unknown()).default({}),
   confidence: z.number().min(0).max(1).optional(),
+  tags: z.array(contextTag).max(20).default([]),
   source: z.string().optional(),
   source_ref: z.string().optional(),
+  source_activity_id: uuid.optional(),
+  valid_until: z.string().optional(),
 });
 
 export const contextEntryGet = z.object({ id: uuid });
@@ -751,6 +840,7 @@ export const contextEntrySupersede = z.object({
   title: z.string().optional(),
   structured_data: z.record(z.unknown()).optional(),
   confidence: z.number().min(0).max(1).optional(),
+  tags: z.array(contextTag).max(20).optional(),
 });
 
 export const activityGetTimeline = z.object({
