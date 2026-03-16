@@ -9,10 +9,17 @@ export async function crmSearch(
   tenantId: UUID,
   query: string,
   limit: number,
-): Promise<{ contacts: Contact[]; accounts: Account[]; opportunities: Opportunity[] }> {
+): Promise<{
+  contacts: Contact[];
+  accounts: Account[];
+  opportunities: Opportunity[];
+  activities: Record<string, unknown>[];
+  useCases: Record<string, unknown>[];
+  assignments: Record<string, unknown>[];
+}> {
   const pattern = `%${query}%`;
 
-  const [contacts, accounts, opportunities] = await Promise.all([
+  const [contacts, accounts, opportunities, activities, useCases, assignments] = await Promise.all([
     db.query(
       `SELECT * FROM contacts
        WHERE tenant_id = $1
@@ -34,12 +41,36 @@ export async function crmSearch(
        ORDER BY updated_at DESC LIMIT $3`,
       [tenantId, pattern, limit],
     ),
+    db.query(
+      `SELECT * FROM activities
+       WHERE tenant_id = $1
+         AND body ILIKE $2
+       ORDER BY created_at DESC LIMIT $3`,
+      [tenantId, pattern, limit],
+    ),
+    db.query(
+      `SELECT * FROM use_cases
+       WHERE tenant_id = $1
+         AND (name ILIKE $2 OR description ILIKE $2)
+       ORDER BY updated_at DESC LIMIT $3`,
+      [tenantId, pattern, limit],
+    ),
+    db.query(
+      `SELECT * FROM assignments
+       WHERE tenant_id = $1
+         AND (title ILIKE $2 OR description ILIKE $2)
+       ORDER BY created_at DESC LIMIT $3`,
+      [tenantId, pattern, limit],
+    ),
   ]);
 
   return {
     contacts: contacts.rows as Contact[],
     accounts: accounts.rows as Account[],
     opportunities: opportunities.rows as Opportunity[],
+    activities: activities.rows,
+    useCases: useCases.rows,
+    assignments: assignments.rows,
   };
 }
 

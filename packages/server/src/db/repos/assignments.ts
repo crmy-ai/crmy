@@ -201,8 +201,14 @@ export async function searchAssignments(
     idx++;
   }
   if (filters.status) {
-    conditions.push(`a.status = $${idx}`);
-    params.push(filters.status);
+    const statuses = filters.status.split(',').map(s => s.trim()).filter(Boolean);
+    if (statuses.length === 1) {
+      conditions.push(`a.status = $${idx}`);
+      params.push(statuses[0]);
+    } else {
+      conditions.push(`a.status = ANY($${idx}::text[])`);
+      params.push(statuses);
+    }
     idx++;
   }
   if (filters.priority) {

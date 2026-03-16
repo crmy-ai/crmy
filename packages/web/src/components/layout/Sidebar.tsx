@@ -14,15 +14,18 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import crmyLogo from '@/assets/crmy-logo.png';
+import { ENTITY_COLORS } from '@/lib/entityColors';
+
+export { ENTITY_COLORS };
 
 const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-  { icon: Users, label: 'Contacts', path: '/contacts' },
-  { icon: Building2, label: 'Accounts', path: '/accounts' },
-  { icon: Briefcase, label: 'Opportunities', path: '/opportunities' },
-  { icon: FolderKanban, label: 'Use Cases', path: '/use-cases' },
-  { icon: Activity, label: 'Activities', path: '/activities' },
-  { icon: ClipboardList, label: 'Assignments', path: '/assignments' },
+  { icon: LayoutDashboard, label: 'Dashboard',    path: '/',              color: ENTITY_COLORS.dashboard },
+  { icon: Users,           label: 'Contacts',     path: '/contacts',      color: ENTITY_COLORS.contacts },
+  { icon: Building2,       label: 'Accounts',     path: '/accounts',      color: ENTITY_COLORS.accounts },
+  { icon: Briefcase,       label: 'Opportunities',path: '/opportunities', color: ENTITY_COLORS.opportunities },
+  { icon: FolderKanban,    label: 'Use Cases',    path: '/use-cases',     color: ENTITY_COLORS.useCases },
+  { icon: Activity,        label: 'Activities',   path: '/activities',    color: ENTITY_COLORS.activities },
+  { icon: ClipboardList,   label: 'Assignments',  path: '/assignments',   color: ENTITY_COLORS.assignments },
 ];
 
 const bottomItems = [
@@ -66,7 +69,7 @@ export function Sidebar() {
               to={item.path}
               className={`group relative flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-sm transition-all
                 ${active
-                  ? 'bg-sidebar-primary/15 text-sidebar-primary'
+                  ? `${item.color.bg} ${item.color.text}`
                   : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                 }`}
               title={!sidebarExpanded ? item.label : undefined}
@@ -87,7 +90,7 @@ export function Sidebar() {
               {active && (
                 <motion.div
                   layoutId="sidebar-active"
-                  className="absolute -left-2.5 top-1/2 -translate-y-1/2 w-[3px] h-6 bg-sidebar-primary rounded-r-full"
+                  className={`absolute -left-2 top-2 w-[3px] h-6 ${item.color.bar} rounded-r-full`}
                   transition={{ type: 'spring', damping: 25, stiffness: 300 }}
                 />
               )}
