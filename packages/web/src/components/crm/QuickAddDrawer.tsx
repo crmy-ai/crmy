@@ -3,9 +3,11 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/appStore';
-import { X, Send, Sparkles, Check, FileText, Pencil } from 'lucide-react';
-import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useAccounts } from '@/api/hooks';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
+import { X, Send, Sparkles, Check, FileText, Pencil, ChevronLeft } from 'lucide-react';
+import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useAccounts, useContacts, useOpportunities, useUseCases } from '@/api/hooks';
 import { toast } from '@/components/ui/use-toast';
+import { DatePicker, DateTimePicker } from '@/components/ui/date-picker';
 
 const typeLabels: Record<string, string> = {
   contact: 'Contact',
@@ -19,7 +21,7 @@ const typeGreetings: Record<string, string> = {
   contact: "Hi! Tell me about the new contact — name, email, company, and any other details.",
   opportunity: "Let's create a new opportunity! What's the name, amount, and who's the contact?",
   'use-case': "Let's set up a new use case. What's the name and which client is it for?",
-  activity: "Log an activity — tell me the type (call/email/meeting/note), contact, and any notes.",
+  activity: "Log an activity — tell me the type (call, email, meeting, note, demo, proposal, etc.), what it's about, and any outcome or notes.",
   account: "Let's add a new account. What's the company name and any other details?",
 };
 
@@ -57,10 +59,14 @@ function parseFieldsFromText(text: string, type: string): Record<string, unknown
   }
 
   if (type === 'activity') {
-    const types = ['call', 'email', 'meeting', 'note', 'task'];
-    const foundType = types.find(t => lower.includes(t));
+    const types = ['call', 'email', 'meeting', 'note', 'task', 'demo', 'proposal', 'research', 'handoff', 'status_update'];
+    const foundType = types.find(t => lower.includes(t.replace('_', ' ')) || lower.includes(t));
     fields.type = foundType ?? 'note';
     fields.description = text;
+    // Extract outcome keywords
+    const outcomes = ['connected', 'voicemail', 'positive', 'negative', 'neutral', 'no show', 'no_show', 'follow up needed', 'follow_up_needed'];
+    const foundOutcome = outcomes.find(o => lower.includes(o));
+    if (foundOutcome) fields.outcome = foundOutcome.replace(/ /g, '_');
   }
 
   if (type === 'use-case') {
@@ -190,7 +196,7 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
       </div>
 
       {showForm ? (
-        <ManualForm type={type} onClose={onClose} onBack={() => setShowForm(false)} />
+        <ManualForm type={type} onClose={onClose} onBack={() => setShowForm(false)} backLabel="Back to AI chat" />
       ) : (
       <>
       {/* Messages */}
@@ -266,10 +272,13 @@ type FieldConfig = {
   key: string;
   label: string;
   placeholder?: string;
-  inputType?: 'text' | 'email' | 'tel' | 'number' | 'date' | 'url';
-  fieldType?: 'textarea' | 'select' | 'account-select';
+  inputType?: 'text' | 'email' | 'tel' | 'number' | 'date' | 'url' | 'datetime-local';
+  fieldType?: 'textarea' | 'select' | 'account-select' | 'subject-type-select' | 'entity-select' | 'datalist';
   options?: string[];
+  datalistId?: string;
+  suggestions?: string[];
   required?: boolean;
+  dependsOn?: { key: string; values?: string[] };
 };
 
 const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
@@ -289,11 +298,18 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
   'use-case': [
     { key: 'name', label: 'Name', placeholder: 'e.g. Corporate Relocation', required: true },
     { key: 'account_id', label: 'Account', fieldType: 'account-select', required: true },
+    { key: 'stage', label: 'Stage', fieldType: 'select', options: ['discovery', 'poc', 'production', 'scaling', 'sunset'] },
+    { key: 'attributed_arr', label: 'Attributed ARR ($)', placeholder: '120000', inputType: 'number' },
+    { key: 'target_prod_date', label: 'Target Prod Date', inputType: 'date' },
     { key: 'description', label: 'Description', placeholder: 'Any additional details', fieldType: 'textarea' },
   ],
   activity: [
-    { key: 'type', label: 'Type', fieldType: 'select', options: ['call', 'email', 'meeting', 'note', 'task'], required: true },
+    { key: 'type', label: 'Type', fieldType: 'select', options: ['call', 'email', 'meeting', 'note', 'task', 'demo', 'proposal', 'research', 'handoff'], required: true },
     { key: 'subject', label: 'Subject', placeholder: 'What was this activity about?', required: true },
+    { key: 'subject_type', label: 'Linked To', fieldType: 'subject-type-select', placeholder: 'Link to a CRM record (optional)' },
+    { key: 'subject_id', label: 'Record', fieldType: 'entity-select', dependsOn: { key: 'subject_type' } },
+    { key: 'occurred_at', label: 'When', inputType: 'datetime-local', placeholder: 'When did this happen?' },
+    { key: 'outcome', label: 'Outcome', fieldType: 'datalist', datalistId: 'outcome-suggestions', suggestions: ['connected', 'voicemail', 'positive', 'negative', 'neutral', 'no_show', 'follow_up_needed'], placeholder: 'e.g. connected, positive, voicemail' },
     { key: 'body', label: 'Notes', placeholder: 'Additional details...', fieldType: 'textarea' },
   ],
   account: [
@@ -304,7 +320,51 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
   ],
 };
 
-function ManualForm({ type, onClose, onBack }: { type: string; onClose: () => void; onBack: () => void }) {
+const SUBJECT_TYPE_OPTIONS = [
+  { value: '', label: 'None (no link)' },
+  { value: 'contact', label: 'Contact' },
+  { value: 'account', label: 'Account' },
+  { value: 'opportunity', label: 'Opportunity' },
+  { value: 'use_case', label: 'Use Case' },
+];
+
+function EntitySelect({ subjectType, value, onChange }: { subjectType: string; value: string; onChange: (v: string) => void }) {
+  const { data: contactsData } = useContacts(subjectType === 'contact' ? { limit: 100 } : undefined);
+  const { data: accountsData } = useAccounts(subjectType === 'account' ? { limit: 100 } : undefined);
+  const { data: oppsData } = useOpportunities(subjectType === 'opportunity' ? { limit: 100 } : undefined);
+  const { data: ucsData } = useUseCases(subjectType === 'use_case' ? { limit: 100 } : undefined);
+
+  const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let entities: Array<{ id: string; label: string }> = [];
+  if (subjectType === 'contact') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    entities = ((contactsData?.data ?? []) as any[]).map(c => ({ id: c.id, label: `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.email || c.id }));
+  } else if (subjectType === 'account') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    entities = ((accountsData?.data ?? []) as any[]).map(a => ({ id: a.id, label: a.name ?? a.id }));
+  } else if (subjectType === 'opportunity') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    entities = ((oppsData?.data ?? []) as any[]).map(o => ({ id: o.id, label: o.name ?? o.id }));
+  } else if (subjectType === 'use_case') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    entities = ((ucsData?.data ?? []) as any[]).map(u => ({ id: u.id, label: u.name ?? u.id }));
+  }
+
+  if (!subjectType) return null;
+
+  return (
+    <select value={value} onChange={e => onChange(e.target.value)} className={`${inputClass} pr-3`}>
+      <option value="">Select {subjectType.replace('_', ' ')}…</option>
+      {entities.map(e => (
+        <option key={e.id} value={e.id}>{e.label}</option>
+      ))}
+    </select>
+  );
+}
+
+function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClose: () => void; onBack: () => void; backLabel?: string }) {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { data: accountsData } = useAccounts({ limit: 200 });
@@ -341,10 +401,22 @@ function ManualForm({ type, onClose, onBack }: { type: string; onClose: () => vo
         payload.stage = 'prospecting';
       }
       if (type === 'use-case') {
-        payload.stage = 'discovery';
+        if (!payload.stage) payload.stage = 'discovery';
+        if (fields.attributed_arr) payload.attributed_arr = parseFloat(fields.attributed_arr) || 0;
       }
       if (type === 'account' && fields.website) {
         payload.website = fields.website.startsWith('http') ? fields.website : `https://${fields.website}`;
+      }
+      if (type === 'activity') {
+        // Convert occurred_at from datetime-local to ISO string
+        if (fields.occurred_at) {
+          payload.occurred_at = new Date(fields.occurred_at).toISOString();
+        }
+        // Clean up empty optional fields
+        if (!fields.subject_type) { delete payload.subject_type; delete payload.subject_id; }
+        if (!fields.subject_id) delete payload.subject_id;
+        if (!fields.outcome) delete payload.outcome;
+        if (!fields.occurred_at) delete payload.occurred_at;
       }
 
       if (type === 'contact') await createContact.mutateAsync(payload);
@@ -365,13 +437,22 @@ function ManualForm({ type, onClose, onBack }: { type: string; onClose: () => vo
 
   const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 
+  // Check if a field should be visible based on its dependsOn condition
+  const isFieldVisible = (f: FieldConfig) => {
+    if (!f.dependsOn) return true;
+    const depVal = fields[f.dependsOn.key];
+    if (!depVal) return false;
+    if (f.dependsOn.values) return f.dependsOn.values.includes(depVal);
+    return true;
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-4">
       <button onClick={onBack} className="flex items-center gap-1.5 text-xs text-accent hover:underline mb-5">
-        <Sparkles className="w-3 h-3" /> Back to AI chat
+        {backLabel ? <><Sparkles className="w-3 h-3" /> {backLabel}</> : <><ChevronLeft className="w-3.5 h-3.5" /> Back</>}
       </button>
       <div className="space-y-4">
-        {config.map(f => (
+        {config.filter(isFieldVisible).map(f => (
           <div key={f.key} className="space-y-1.5">
             <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
               {f.label}{f.required && <span className="text-destructive ml-0.5">*</span>}
@@ -385,7 +466,7 @@ function ManualForm({ type, onClose, onBack }: { type: string; onClose: () => vo
               >
                 <option value="">Select {f.label.toLowerCase()}…</option>
                 {f.options?.map(o => (
-                  <option key={o} value={o}>{o.charAt(0).toUpperCase() + o.slice(1)}</option>
+                  <option key={o} value={o}>{o.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
                 ))}
               </select>
             ) : f.fieldType === 'account-select' ? (
@@ -399,6 +480,40 @@ function ManualForm({ type, onClose, onBack }: { type: string; onClose: () => vo
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
               </select>
+            ) : f.fieldType === 'subject-type-select' ? (
+              <select
+                value={fields[f.key] || ''}
+                onChange={(e) => { set(f.key, e.target.value); set('subject_id', ''); }}
+                className={`${inputClass} pr-3`}
+              >
+                {SUBJECT_TYPE_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            ) : f.fieldType === 'entity-select' ? (
+              <EntitySelect
+                subjectType={fields.subject_type || ''}
+                value={fields[f.key] || ''}
+                onChange={(v) => set(f.key, v)}
+              />
+            ) : f.fieldType === 'datalist' ? (
+              <>
+                <input
+                  type="text"
+                  value={fields[f.key] || ''}
+                  onChange={(e) => set(f.key, e.target.value)}
+                  placeholder={f.placeholder}
+                  list={f.datalistId}
+                  className={`${inputClass} pr-3`}
+                />
+                {f.datalistId && f.suggestions && (
+                  <datalist id={f.datalistId}>
+                    {f.suggestions.map(s => (
+                      <option key={s} value={s} />
+                    ))}
+                  </datalist>
+                )}
+              </>
             ) : f.fieldType === 'textarea' ? (
               <textarea
                 value={fields[f.key] || ''}
@@ -406,6 +521,18 @@ function ManualForm({ type, onClose, onBack }: { type: string; onClose: () => vo
                 placeholder={f.placeholder}
                 rows={3}
                 className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring resize-none"
+              />
+            ) : f.inputType === 'date' ? (
+              <DatePicker
+                value={fields[f.key] || ''}
+                onChange={(v) => set(f.key, v)}
+                required={f.required}
+              />
+            ) : f.inputType === 'datetime-local' ? (
+              <DateTimePicker
+                value={fields[f.key] || ''}
+                onChange={(v) => set(f.key, v)}
+                required={f.required}
               />
             ) : (
               <div className="relative">
@@ -435,6 +562,7 @@ function ManualForm({ type, onClose, onBack }: { type: string; onClose: () => vo
 
 export function QuickAddDrawer() {
   const { quickAddType, closeQuickAdd } = useAppStore();
+  const { enabled: agentEnabled } = useAgentSettings();
 
   if (!quickAddType) return null;
 
@@ -442,7 +570,10 @@ export function QuickAddDrawer() {
     <>
       <div className="fixed inset-0 bg-background/60 backdrop-blur-sm z-[80]" onClick={closeQuickAdd} />
       <div className="fixed right-0 top-0 h-full w-full max-w-md bg-card border-l border-border z-[90] shadow-2xl flex flex-col animate-slide-in-right">
-        <ChatAddPanel type={quickAddType} onClose={closeQuickAdd} />
+        {agentEnabled
+          ? <ChatAddPanel type={quickAddType} onClose={closeQuickAdd} />
+          : <ManualForm type={quickAddType} onClose={closeQuickAdd} onBack={closeQuickAdd} />
+        }
       </div>
     </>
   );

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { Phone, Mail, StickyNote, CheckSquare, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
+import { Phone, Mail, StickyNote, CheckSquare, MessageSquare, ChevronDown, ChevronUp, Presentation, FileText, Search, ArrowRightLeft, RefreshCw, Activity, Heart, Bot, User } from 'lucide-react';
 import { ContactAvatar } from './ContactAvatar';
 import { useOpportunities, useUseCases, useAccounts, useActivities, useCustomFields } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
@@ -36,30 +36,86 @@ export function AgentStatusDot() {
   return <div className="w-2.5 h-2.5 rounded-full bg-success animate-pulse-dot" />;
 }
 
-function activityIcon(type: string) {
+export function activityIcon(type: string) {
   switch (type) {
     case 'call': return <Phone className="w-3.5 h-3.5" />;
     case 'email': return <Mail className="w-3.5 h-3.5" />;
     case 'meeting': return <MessageSquare className="w-3.5 h-3.5" />;
     case 'task': return <CheckSquare className="w-3.5 h-3.5" />;
+    case 'demo': return <Presentation className="w-3.5 h-3.5" />;
+    case 'proposal': return <FileText className="w-3.5 h-3.5" />;
+    case 'research': return <Search className="w-3.5 h-3.5" />;
+    case 'handoff': return <ArrowRightLeft className="w-3.5 h-3.5" />;
+    case 'status_update': return <Activity className="w-3.5 h-3.5" />;
+    case 'stage_change': return <RefreshCw className="w-3.5 h-3.5" />;
+    case 'health_update': return <Heart className="w-3.5 h-3.5" />;
     default: return <StickyNote className="w-3.5 h-3.5" />;
   }
 }
 
-interface Activity {
+const OUTCOME_COLORS: Record<string, string> = {
+  connected: 'hsl(152, 55%, 42%)',
+  positive: 'hsl(152, 55%, 42%)',
+  voicemail: 'hsl(38, 92%, 50%)',
+  neutral: 'hsl(38, 92%, 50%)',
+  follow_up_needed: 'hsl(38, 92%, 50%)',
+  negative: 'hsl(var(--destructive))',
+  no_show: 'hsl(var(--destructive))',
+};
+
+function OutcomeBadge({ outcome }: { outcome: string }) {
+  const color = OUTCOME_COLORS[outcome] ?? 'hsl(var(--muted-foreground))';
+  const label = outcome.replace(/_/g, ' ');
+  return (
+    <span
+      className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium capitalize"
+      style={{ backgroundColor: color + '18', color }}
+    >
+      {label}
+    </span>
+  );
+}
+
+const SUBJECT_TYPE_LABELS: Record<string, string> = {
+  contact: 'Contact',
+  account: 'Account',
+  opportunity: 'Opp',
+  use_case: 'Use Case',
+};
+
+type DrawerType = 'contact' | 'opportunity' | 'use-case' | 'account';
+const SUBJECT_TYPE_DRAWER: Record<string, DrawerType> = {
+  contact: 'contact',
+  account: 'account',
+  opportunity: 'opportunity',
+  use_case: 'use-case',
+};
+
+export interface ActivityItem {
   id: string;
   type: string;
+  subject?: string;
   description?: string;
   body?: string;
   contact_name?: string;
   contactName?: string;
   created_at?: string;
   timestamp?: string;
+  // Context Engine fields
+  subject_type?: string;
+  subject_id?: string;
+  occurred_at?: string;
+  outcome?: string;
+  performed_by?: string;
+  performer_name?: string;
+  contact_id?: string;
+  account_id?: string;
+  opportunity_id?: string;
 }
 
 interface ActivityFeedProps {
   limit?: number;
-  activities?: Activity[];
+  activities?: ActivityItem[];
   filterWindow?: 'today' | 'week';
 }
 
@@ -67,7 +123,7 @@ export function ActivityFeed({ limit, activities: propActivities, filterWindow }
   const { openDrawer } = useAppStore();
   const fetchLimit = filterWindow ? 100 : (limit ?? 20);
   const { data, isLoading } = useActivities(propActivities ? undefined : { limit: fetchLimit });
-  let items: Activity[] = (propActivities ?? data?.data ?? []) as Activity[];
+  let items: ActivityItem[] = (propActivities ?? data?.data ?? []) as ActivityItem[];
 
   if (filterWindow) {
     const cutoff = new Date();
@@ -78,7 +134,7 @@ export function ActivityFeed({ limit, activities: propActivities, filterWindow }
       cutoff.setHours(0, 0, 0, 0);
     }
     items = items.filter((a) => {
-      const ts = a.created_at ?? a.timestamp;
+      const ts = a.occurred_at ?? a.created_at ?? a.timestamp;
       return ts ? new Date(ts) >= cutoff : false;
     });
   }
@@ -106,26 +162,62 @@ export function ActivityFeed({ limit, activities: propActivities, filterWindow }
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-1">
       {displayed.map((a) => {
-        const name = a.contact_name ?? a.contactName ?? 'Unknown';
-        const desc = a.description ?? a.body ?? '';
-        const ts = a.created_at ?? a.timestamp ?? '';
-        const contactId = (a as unknown as Record<string, unknown>).contact_id as string | undefined;
+        const name = a.contact_name ?? a.contactName ?? '';
+        const desc = a.description ?? a.body ?? a.subject ?? '';
+        const ts = a.occurred_at ?? a.created_at ?? a.timestamp ?? '';
+        const contactId = a.contact_id;
+        const hasSubjectLink = a.subject_type && a.subject_id;
+        const isClickable = hasSubjectLink || contactId;
+
+        const handleClick = () => {
+          if (hasSubjectLink) {
+            const drawerType = SUBJECT_TYPE_DRAWER[a.subject_type!];
+            if (drawerType) openDrawer(drawerType, a.subject_id!);
+          } else if (contactId) {
+            openDrawer('contact', contactId);
+          }
+        };
+
+        // Build metadata segments
+        const meta: string[] = [];
+        if (a.performer_name) meta.push(a.performer_name);
+        else if (name) meta.push(name);
+        if (ts) meta.push(new Date(ts).toLocaleDateString());
+
         return (
           <div
             key={a.id}
-            className={`flex gap-3 ${contactId ? 'cursor-pointer hover:bg-muted/40 rounded-xl px-2 -mx-2 transition-colors' : ''}`}
-            onClick={() => contactId && openDrawer('contact', contactId)}
+            className={`flex gap-3 py-2 ${isClickable ? 'cursor-pointer hover:bg-muted/40 rounded-xl px-2 -mx-2 transition-colors' : ''}`}
+            onClick={isClickable ? handleClick : undefined}
           >
-            <div className="w-7 h-7 rounded-xl bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
+            <div className="w-7 h-7 rounded-xl bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0 mt-0.5">
               {activityIcon(a.type)}
             </div>
-            <div>
-              <p className="text-sm text-foreground">{desc || `${a.type} with ${name}`}</p>
-              <p className="text-xs text-muted-foreground">
-                {name} · {ts ? new Date(ts).toLocaleDateString() : ''}
-              </p>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-start gap-2">
+                <p className="text-sm text-foreground flex-1 min-w-0 truncate">
+                  {desc || `${a.type}${name ? ` with ${name}` : ''}`}
+                </p>
+                {a.outcome && <OutcomeBadge outcome={a.outcome} />}
+              </div>
+              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                {hasSubjectLink && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-primary/80 bg-primary/8 px-1.5 py-0.5 rounded">
+                    {SUBJECT_TYPE_LABELS[a.subject_type!] ?? a.subject_type}
+                  </span>
+                )}
+                {a.performer_name && (
+                  <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                    {a.performed_by ? <Bot className="w-2.5 h-2.5" /> : <User className="w-2.5 h-2.5" />}
+                    {a.performer_name}
+                  </span>
+                )}
+                <span className="text-xs text-muted-foreground">
+                  {meta.filter(Boolean).join(' · ')}
+                </span>
+              </div>
             </div>
           </div>
         );
@@ -153,7 +245,7 @@ export function PipelineSnapshot() {
       label: cfg.label,
       color: cfg.color,
       count: stageDeals.length,
-      total: stageDeals.reduce((sum: number, d: Record<string, unknown>) => sum + ((d.amount as number) || 0), 0),
+      total: stageDeals.reduce((sum: number, d: Record<string, unknown>) => sum + (parseFloat(String(d.amount ?? 0)) || 0), 0),
     };
   });
 
@@ -165,17 +257,20 @@ export function PipelineSnapshot() {
       label: cfg.label,
       color: cfg.color,
       count: stageUCs.length,
-      total: stageUCs.reduce((sum: number, u: Record<string, unknown>) => sum + ((u.attributed_arr as number) || 0), 0),
+      total: stageUCs.reduce((sum: number, u: Record<string, unknown>) => sum + (parseFloat(String(u.attributed_arr ?? 0)) || 0), 0),
     };
   });
 
   const data = view === 'opportunities' ? dealData : ucStateData;
   const maxTotal = Math.max(...data.map((s) => s.total), 1);
-  const valueLabel = (v: number) =>
-    v >= 1_000_000_000 ? `$${(v / 1_000_000_000).toFixed(1)}B`
-    : v >= 1_000_000 ? `$${(v / 1_000_000).toFixed(1)}M`
-    : v >= 1_000 ? `$${(v / 1_000).toFixed(0)}K`
-    : v > 0 ? `$${v}` : '$0';
+  const valueLabel = (v: number): string => {
+    if (!isFinite(v) || isNaN(v) || v <= 0) return '$0';
+    if (v >= 1e12) return `$${(v / 1e12).toFixed(1)}T`;
+    if (v >= 1e9) return `$${v >= 10e9 ? Math.round(v / 1e9) : (v / 1e9).toFixed(1)}B`;
+    if (v >= 1e6) return `$${v >= 10e6 ? Math.round(v / 1e6) : (v / 1e6).toFixed(1)}M`;
+    if (v >= 1e3) return `$${v >= 10e3 ? Math.round(v / 1e3) : (v / 1e3).toFixed(1)}K`;
+    return `$${Math.round(v)}`;
+  };
 
   return (
     <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
@@ -202,19 +297,19 @@ export function PipelineSnapshot() {
             <div className="w-3 h-3 rounded-full mb-2" style={{ backgroundColor: s.color }} />
             <p className="text-[10px] text-muted-foreground font-medium truncate">{s.label}</p>
             <p className="text-lg font-display font-bold text-foreground">{s.count}</p>
-            <p className="text-[10px] text-muted-foreground font-mono">{valueLabel(s.total)}</p>
+            <p className="text-[10px] text-muted-foreground font-mono truncate">{valueLabel(s.total)}</p>
           </div>
         ))}
       </div>
       <div className="hidden md:block space-y-3">
         {data.map((s) => (
-          <div key={s.key} className="flex items-center gap-3">
-            <span className="text-xs w-28 truncate font-medium" style={{ color: s.color }}>{s.label}</span>
-            <div className="flex-1 h-2.5 bg-muted rounded-full overflow-hidden">
+          <div key={s.key} className="flex items-center gap-2">
+            <span className="text-xs w-24 flex-shrink-0 truncate font-medium" style={{ color: s.color }}>{s.label}</span>
+            <div className="flex-1 min-w-0 h-2.5 bg-muted rounded-full overflow-hidden">
               <div className="h-full rounded-full transition-all duration-700" style={{ width: `${(s.total / maxTotal) * 100}%`, backgroundColor: s.color }} />
             </div>
-            <span className="text-xs text-muted-foreground font-mono w-8 text-right">{s.count}</span>
-            <span className="text-xs text-foreground font-mono w-16 text-right">{valueLabel(s.total)}</span>
+            <span className="text-xs text-muted-foreground font-mono w-6 flex-shrink-0 text-right">{s.count}</span>
+            <span className="text-xs text-foreground font-mono w-[4.5rem] flex-shrink-0 text-right truncate">{valueLabel(s.total)}</span>
           </div>
         ))}
       </div>

@@ -43,6 +43,13 @@ export function useUpdateContact(id: string) {
     },
   });
 }
+export function useDeleteContact(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete(`contacts/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['contacts'] }),
+  });
+}
 
 // Accounts
 export function useAccounts(params?: { q?: string; limit?: number; cursor?: string }) {
@@ -66,6 +73,13 @@ export function useUpdateAccount(id: string) {
       qc.invalidateQueries({ queryKey: ['account', id] });
       qc.invalidateQueries({ queryKey: ['accounts'] });
     },
+  });
+}
+export function useDeleteAccount(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete(`accounts/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['accounts'] }),
   });
 }
 
@@ -93,6 +107,13 @@ export function useUpdateOpportunity(id: string) {
     },
   });
 }
+export function useDeleteOpportunity(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete(`opportunities/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['opportunities'] }),
+  });
+}
 
 // Use Cases
 export function useUseCases(params?: { account_id?: string; stage?: string; q?: string; limit?: number; cursor?: string }) {
@@ -116,6 +137,13 @@ export function useUpdateUseCase(id: string) {
       qc.invalidateQueries({ queryKey: ['use-case', id] });
       qc.invalidateQueries({ queryKey: ['use-cases'] });
     },
+  });
+}
+export function useDeleteUseCase(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete(`use-cases/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['use-cases'] }),
   });
 }
 export function useAdvanceUseCaseStage(id: string) {
@@ -173,7 +201,16 @@ export function useUseCaseTimeline(id: string) {
 }
 
 // Activities
-export function useActivities(params?: { contact_id?: string; account_id?: string; limit?: number }) {
+export function useActivities(params?: {
+  contact_id?: string;
+  account_id?: string;
+  type?: string;
+  subject_type?: string;
+  subject_id?: string;
+  performed_by?: string;
+  outcome?: string;
+  limit?: number;
+}) {
   return useList('activities', 'activities', params);
 }
 export function useCreateActivity() {
@@ -386,3 +423,112 @@ export function useRevokeApiKey() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['api-keys'] }),
   });
 }
+
+// -- Context Engine hooks (v0.4) --
+
+// Actors
+export function useActors(params?: { actor_type?: string; q?: string; is_active?: boolean; limit?: number }) {
+  return useList('actors', 'actors', params);
+}
+export function useActor(id: string) {
+  return useQuery({ queryKey: ['actor', id], queryFn: () => api.get(`actors/${id}`), enabled: !!id });
+}
+export function useCreateActor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('actors', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['actors'] }),
+  });
+}
+export function useWhoAmI() {
+  return useQuery({
+    queryKey: ['actor-whoami'],
+    queryFn: () => api.get('actors/whoami'),
+  });
+}
+
+// Assignments
+export function useAssignments(params?: {
+  assigned_to?: string;
+  assigned_by?: string;
+  status?: string;
+  priority?: string;
+  subject_type?: string;
+  subject_id?: string;
+  limit?: number;
+}) {
+  return useList('assignments', 'assignments', params);
+}
+export function useAssignment(id: string) {
+  return useQuery({ queryKey: ['assignment', id], queryFn: () => api.get(`assignments/${id}`), enabled: !!id });
+}
+export function useCreateAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('assignments', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['assignments'] }),
+  });
+}
+export function useUpdateAssignment(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.patch(`assignments/${id}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['assignment', id] });
+      qc.invalidateQueries({ queryKey: ['assignments'] });
+    },
+  });
+}
+export function useAcceptAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`assignments/${id}/accept`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['assignments'] }),
+  });
+}
+export function useCompleteAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; completed_by_activity_id?: string }) =>
+      api.post(`assignments/${id}/complete`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['assignments'] }),
+  });
+}
+export function useDeclineAssignment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; reason?: string }) =>
+      api.post(`assignments/${id}/decline`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['assignments'] }),
+  });
+}
+
+// Context Entries
+export function useContextEntries(params?: {
+  subject_type?: string;
+  subject_id?: string;
+  context_type?: string;
+  is_current?: boolean;
+  limit?: number;
+}) {
+  return useList('context-entries', 'context', params);
+}
+export function useContextEntry(id: string) {
+  return useQuery({ queryKey: ['context-entry', id], queryFn: () => api.get(`context/${id}`), enabled: !!id });
+}
+export function useCreateContextEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('context', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['context-entries'] }),
+  });
+}
+export function useSupersedeContextEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; body: string; title?: string }) =>
+      api.post(`context/${id}/supersede`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['context-entries'] }),
+  });
+}
+

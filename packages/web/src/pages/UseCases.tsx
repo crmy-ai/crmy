@@ -6,7 +6,9 @@ import { useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { useUseCases } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { DatePicker } from '@/components/ui/date-picker';
 import { motion } from 'framer-motion';
 import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
 import { useCaseStageConfig } from '@/lib/stageConfig';
@@ -69,12 +71,13 @@ type UseCase = any;
 
 export default function UseCases() {
   const { openDrawer, openQuickAdd, openAIWithContext } = useAppStore();
+  const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [view, setView] = useState<ViewMode>('table');
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
-  const [prodDate, setProdDate] = useState<ProdDatePreset>('this_quarter');
+  const [prodDate, setProdDate] = useState<ProdDatePreset>('all');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
 
@@ -105,7 +108,7 @@ export default function UseCases() {
         else { start = new Date(0); end = new Date(8640000000000000); }
       }
       result = result.filter(d => {
-        if (!d.target_prod_date) return false;
+        if (!d.target_prod_date) return true; // unscheduled use cases always visible
         const pd = new Date(d.target_prod_date);
         return pd >= start && pd <= end;
       });
@@ -163,11 +166,21 @@ export default function UseCases() {
         </div>
         {prodDate === 'custom' && (
           <div className="flex items-center gap-2">
-            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
-              className="h-8 px-2 text-xs rounded-lg border border-border bg-background text-foreground" />
+            <DatePicker
+              value={customFrom}
+              onChange={setCustomFrom}
+              size="sm"
+              placeholder="From"
+              className="w-36"
+            />
             <span className="text-xs text-muted-foreground">to</span>
-            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
-              className="h-8 px-2 text-xs rounded-lg border border-border bg-background text-foreground" />
+            <DatePicker
+              value={customTo}
+              onChange={setCustomTo}
+              size="sm"
+              placeholder="To"
+              className="w-36"
+            />
           </div>
         )}
       </div>
@@ -212,10 +225,12 @@ export default function UseCases() {
                             className="bg-card border border-border rounded-2xl p-3.5 cursor-pointer hover:border-primary/30 hover:shadow-md transition-all press-scale group">
                             <div className="flex items-start justify-between">
                               <p className="text-sm font-display font-bold text-foreground">{uc.name as string}</p>
-                              <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'use-case', id: uc.id as string, name: uc.name as string, detail: client }); navigate('/agent'); }}
-                                className="p-0.5 rounded-lg md:opacity-0 md:group-hover:opacity-100 hover:bg-accent/10 transition-all">
-                                <Sparkles className="w-3.5 h-3.5 text-accent" />
-                              </button>
+                              {agentEnabled && (
+                                <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'use-case', id: uc.id as string, name: uc.name as string, detail: client }); navigate('/agent'); }}
+                                  className="p-0.5 rounded-lg md:opacity-0 md:group-hover:opacity-100 hover:bg-accent/10 transition-all">
+                                  <Sparkles className="w-3.5 h-3.5 text-accent" />
+                                </button>
+                              )}
                             </div>
                             {client && <p className="text-xs text-muted-foreground mt-1">{client}</p>}
                             <div className="flex items-center justify-between mt-2.5">
@@ -263,7 +278,7 @@ export default function UseCases() {
                         <SortHeader label="Health" sortKey="health_score" />
                         <SortHeader label="Prod Date" sortKey="target_prod_date" />
                         <SortHeader label="Created" sortKey="created_at" />
-                        <th className="px-2 py-3 w-8"></th>
+                        {agentEnabled && <th className="px-2 py-3 w-8"></th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -298,12 +313,14 @@ export default function UseCases() {
                             <td className="px-4 py-3 text-muted-foreground text-xs">
                               {uc.created_at ? new Date(uc.created_at as string).toLocaleDateString() : '—'}
                             </td>
-                            <td className="px-2 py-3">
-                              <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'use-case', id: uc.id as string, name: uc.name as string, detail: client }); navigate('/agent'); }}
-                                className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
-                                <Sparkles className="w-3.5 h-3.5 text-accent" />
-                              </button>
-                            </td>
+                            {agentEnabled && (
+                              <td className="px-2 py-3">
+                                <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'use-case', id: uc.id as string, name: uc.name as string, detail: client }); navigate('/agent'); }}
+                                  className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
+                                  <Sparkles className="w-3.5 h-3.5 text-accent" />
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         );
                       })}

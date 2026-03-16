@@ -105,6 +105,15 @@ export interface Activity {
   created_by?: UUID;
   created_at: string;
   updated_at: string;
+  // Context Engine fields (v0.4)
+  performed_by?: UUID;
+  subject_type?: 'contact' | 'account' | 'opportunity' | 'use_case';
+  subject_id?: UUID;
+  related_type?: 'contact' | 'account' | 'opportunity' | 'use_case';
+  related_id?: UUID;
+  detail?: Record<string, unknown>;
+  occurred_at?: string;
+  outcome?: string;
 }
 
 export interface HITLRequest {
@@ -395,4 +404,74 @@ export interface WorkflowRun {
   error?: string;
   started_at: string;
   completed_at?: string;
+}
+
+// -- v0.4 Context Engine types --
+
+export type SubjectType = 'contact' | 'account' | 'opportunity' | 'use_case';
+
+export interface Actor {
+  id: UUID;
+  tenant_id: UUID;
+  actor_type: 'human' | 'agent';
+  display_name: string;
+  email?: string;
+  agent_identifier?: string;
+  agent_model?: string;
+  metadata: Record<string, unknown>;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AssignmentStatus =
+  | 'pending'
+  | 'accepted'
+  | 'in_progress'
+  | 'blocked'
+  | 'completed'
+  | 'declined'
+  | 'cancelled';
+
+export type AssignmentPriority = 'low' | 'normal' | 'high' | 'urgent';
+
+export interface Assignment {
+  id: UUID;
+  tenant_id: UUID;
+  title: string;
+  description?: string;
+  assignment_type: string;
+  assigned_by: UUID;
+  assigned_to: UUID;
+  subject_type: SubjectType;
+  subject_id: UUID;
+  status: AssignmentStatus;
+  priority: AssignmentPriority;
+  due_at?: string;
+  accepted_at?: string;
+  completed_at?: string;
+  completed_by_activity_id?: UUID;
+  context?: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContextEntry {
+  id: UUID;
+  tenant_id: UUID;
+  subject_type: SubjectType;
+  subject_id: UUID;
+  context_type: string;
+  authored_by: UUID;
+  title?: string;
+  body: string;
+  structured_data: Record<string, unknown>;
+  confidence?: number;
+  is_current: boolean;
+  supersedes_id?: UUID;
+  source?: string;
+  source_ref?: string;
+  created_at: string;
+  updated_at: string;
 }

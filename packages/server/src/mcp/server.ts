@@ -19,6 +19,9 @@ import { emailTools } from './tools/email.js';
 import { customFieldTools } from './tools/custom-fields.js';
 import { noteTools } from './tools/notes.js';
 import { workflowTools } from './tools/workflows.js';
+import { actorTools } from './tools/actors.js';
+import { assignmentTools } from './tools/assignments.js';
+import { contextEntryTools } from './tools/context-entries.js';
 
 export interface ToolDef {
   name: string;
@@ -42,6 +45,9 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...customFieldTools(db),
     ...noteTools(db),
     ...workflowTools(db),
+    ...actorTools(db),
+    ...assignmentTools(db),
+    ...contextEntryTools(db),
     ...metaTools(db),
   ];
 }
@@ -49,7 +55,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
 export function createMcpServer(db: DbPool, getActor: () => ActorContext): McpServer {
   const server = new McpServer({
     name: 'crmy',
-    version: '0.3.0',
+    version: '0.4.0',
   });
 
   const tools = getAllTools(db);

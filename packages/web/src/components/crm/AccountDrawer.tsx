@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { useAccount, useUpdateAccount, useUsers, useCustomFields } from '@/api/hooks';
+import { useAccount, useUpdateAccount, useDeleteAccount, useUsers, useCustomFields } from '@/api/hooks';
 import { ContactAvatar } from './ContactAvatar';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
-import { Sparkles, Globe, Users, DollarSign, Heart, Pencil, ChevronLeft } from 'lucide-react';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
+import { Sparkles, Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
 import { CustomFieldsSection } from './CrmWidgets';
 import { toast } from '@/components/ui/use-toast';
+import { DatePicker } from '@/components/ui/date-picker';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -32,14 +34,17 @@ function AccountEditForm({
   account,
   onSave,
   onCancel,
+  onDelete,
   isSaving,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   account: any;
   onSave: (data: Record<string, unknown>) => void;
   onCancel: () => void;
+  onDelete: () => void;
   isSaving: boolean;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [fields, setFields] = useState<Record<string, string>>({
     name: account.name ?? '',
     industry: account.industry ?? '',
@@ -47,6 +52,7 @@ function AccountEditForm({
     domain: account.domain ?? '',
     employee_count: account.employee_count != null ? String(account.employee_count) : '',
     annual_revenue: account.annual_revenue != null ? String(account.annual_revenue) : '',
+    health_score: account.health_score != null ? String(account.health_score) : '',
     owner_id: account.owner_id ?? '',
   });
 
@@ -76,7 +82,7 @@ function AccountEditForm({
     const payload: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(fields)) {
       if (v === '') continue;
-      if (k === 'employee_count' || k === 'annual_revenue') payload[k] = Number(v) || 0;
+      if (k === 'employee_count' || k === 'annual_revenue' || k === 'health_score') payload[k] = Number(v) || 0;
       else payload[k] = v;
     }
     const cfPayload: Record<string, unknown> = {};
@@ -107,6 +113,7 @@ function AccountEditForm({
           { key: 'domain', label: 'Domain', type: 'text', placeholder: 'acme.com' },
           { key: 'employee_count', label: 'Employees', type: 'number', placeholder: '250' },
           { key: 'annual_revenue', label: 'Annual Revenue ($)', type: 'number', placeholder: '5000000' },
+          { key: 'health_score', label: 'Health Score (0–100)', type: 'number', placeholder: '75' },
         ].map(f => (
           <div key={f.key} className="space-y-1.5">
             <label className={labelClass}>{f.label}{f.required && <span className="text-destructive ml-0.5">*</span>}</label>
@@ -141,7 +148,11 @@ function AccountEditForm({
                   <input type="number" value={customFieldValues[def.field_key] ?? ''} onChange={e => setCF(def.field_key, e.target.value)} className={inputClass} />
                 )}
                 {def.field_type === 'date' && (
-                  <input type="date" value={customFieldValues[def.field_key] ?? ''} onChange={e => setCF(def.field_key, e.target.value)} className={inputClass} />
+                  <DatePicker
+                    value={customFieldValues[def.field_key] ?? ''}
+                    onChange={val => setCF(def.field_key, val)}
+                    required={def.required}
+                  />
                 )}
                 {def.field_type === 'boolean' && (
                   <div className="flex items-center gap-2 h-10">
@@ -166,6 +177,23 @@ function AccountEditForm({
         >
           {isSaving ? 'Saving…' : 'Save Changes'}
         </button>
+        {!confirmDelete ? (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="w-full h-9 rounded-md border border-destructive/40 text-destructive text-sm font-medium hover:bg-destructive/10 transition-colors flex items-center justify-center gap-1.5"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Delete Account
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <button onClick={() => setConfirmDelete(false)} className="flex-1 h-9 rounded-md border border-border text-sm text-muted-foreground hover:bg-muted/50 transition-colors">
+              Cancel
+            </button>
+            <button onClick={onDelete} className="flex-1 h-9 rounded-md bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors">
+              Confirm Delete
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -173,11 +201,13 @@ function AccountEditForm({
 
 export function AccountDrawer() {
   const { drawerEntityId, openAIWithContext, closeDrawer } = useAppStore();
+  const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: accountData, isLoading } = useAccount(drawerEntityId ?? '') as any;
   const updateAccount = useUpdateAccount(drawerEntityId ?? '');
+  const deleteAccount = useDeleteAccount(drawerEntityId ?? '');
 
   if (isLoading) {
     return (
@@ -215,6 +245,11 @@ export function AccountDrawer() {
           toast({ title: 'Account updated' });
         }}
         onCancel={() => setEditing(false)}
+        onDelete={async () => {
+          await deleteAccount.mutateAsync();
+          closeDrawer();
+          toast({ title: 'Account deleted' });
+        }}
         isSaving={updateAccount.isPending}
       />
     );
@@ -251,16 +286,18 @@ export function AccountDrawer() {
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
           </button>
-          <button
-            onClick={() => {
-              openAIWithContext({ type: 'account', id: account.id, name, detail: industry });
-              closeDrawer();
-              navigate('/agent');
-            }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-accent/30 bg-accent/5 text-accent text-sm font-semibold hover:bg-accent/10 transition-all ml-auto press-scale"
-          >
-            <Sparkles className="w-3.5 h-3.5" /> Chat
-          </button>
+          {agentEnabled && (
+            <button
+              onClick={() => {
+                openAIWithContext({ type: 'account', id: account.id, name, detail: industry });
+                closeDrawer();
+                navigate('/agent');
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-accent/30 bg-accent/5 text-accent text-sm font-semibold hover:bg-accent/10 transition-all ml-auto press-scale"
+            >
+              <Sparkles className="w-3.5 h-3.5" /> Chat
+            </button>
+          )}
         </div>
       </div>
 

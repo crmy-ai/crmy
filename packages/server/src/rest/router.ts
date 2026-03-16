@@ -193,6 +193,28 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.delete('/accounts/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const before = await accountRepo.getAccount(db, actor.tenant_id, p(req, 'id'));
+      if (!before) {
+        res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'Account not found' });
+        return;
+      }
+      await accountRepo.deleteAccount(db, actor.tenant_id, p(req, 'id'));
+      await emitEvent(db, {
+        tenantId: actor.tenant_id,
+        eventType: 'account.deleted',
+        actorId: actor.actor_id,
+        actorType: actor.actor_type,
+        objectType: 'account',
+        objectId: p(req, 'id'),
+        beforeData: before,
+      });
+      res.json({ deleted: true });
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Opportunities ---
   router.get('/opportunities', async (req: Request, res: Response) => {
     try {
@@ -245,6 +267,28 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.delete('/opportunities/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const before = await oppRepo.getOpportunity(db, actor.tenant_id, p(req, 'id'));
+      if (!before) {
+        res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'Opportunity not found' });
+        return;
+      }
+      await oppRepo.deleteOpportunity(db, actor.tenant_id, p(req, 'id'));
+      await emitEvent(db, {
+        tenantId: actor.tenant_id,
+        eventType: 'opportunity.deleted',
+        actorId: actor.actor_id,
+        actorType: actor.actor_type,
+        objectType: 'opportunity',
+        objectId: p(req, 'id'),
+        beforeData: before,
+      });
+      res.json({ deleted: true });
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Activities ---
   router.get('/activities', async (req: Request, res: Response) => {
     try {
@@ -254,6 +298,10 @@ export function apiRouter(db: DbPool): Router {
         account_id: qs(req.query.account_id),
         opportunity_id: qs(req.query.opportunity_id),
         type: qs(req.query.type),
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        performed_by: qs(req.query.performed_by),
+        outcome: qs(req.query.outcome),
         limit: Math.min(qn(req.query.limit, 20), 100),
         cursor: qs(req.query.cursor),
       });
@@ -742,6 +790,177 @@ export function apiRouter(db: DbPool): Router {
         limit: Math.min(qn(req.query.limit, 20), 100),
         cursor: qs(req.query.cursor),
       }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Actors ---
+  router.get('/actors', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'actor_list');
+      const result = await handler({
+        actor_type: qs(req.query.actor_type),
+        query: qs(req.query.q),
+        is_active: req.query.is_active !== undefined ? req.query.is_active === 'true' : undefined,
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/actors', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'actor_register');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/actors/whoami', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'actor_whoami');
+      const result = await handler({}, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/actors/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'actor_get');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/actors/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'actor_update');
+      const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Assignments ---
+  router.get('/assignments', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'assignment_list');
+      const result = await handler({
+        assigned_to: qs(req.query.assigned_to),
+        assigned_by: qs(req.query.assigned_by),
+        status: qs(req.query.status),
+        priority: qs(req.query.priority),
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/assignments', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'assignment_create');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/assignments/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'assignment_get');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/assignments/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'assignment_update');
+      const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/assignments/:id/accept', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'assignment_accept');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/assignments/:id/complete', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'assignment_complete');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/assignments/:id/decline', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'assignment_decline');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Context Entries ---
+  router.get('/context', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_list');
+      const result = await handler({
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        context_type: qs(req.query.context_type),
+        authored_by: qs(req.query.authored_by),
+        is_current: req.query.is_current !== undefined ? req.query.is_current === 'true' : undefined,
+        query: qs(req.query.q),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_add');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/context/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_get');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/:id/supersede', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_supersede');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
   });

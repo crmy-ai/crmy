@@ -1,14 +1,19 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, Bot } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
+import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { motion } from 'framer-motion';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
 import { useApiKeys, useCreateApiKey, useRevokeApiKey, useWebhooks, useCreateWebhook, useDeleteWebhook, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useUsers, useCreateUser, useUpdateUser, useDeleteUser } from '@/api/hooks';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
+import AgentSettings from '@/pages/AgentSettings';
 
 type NavRole = 'member' | 'admin' | 'owner';
 
@@ -19,6 +24,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'] },
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
   { icon: Users,      label: 'Users',         path: '/settings/users',        roles: ['admin', 'owner'] },
+  { icon: Bot,        label: 'Local AI Agent', path: '/settings/agent',        roles: ['admin', 'owner'] },
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
 ];
 
@@ -436,12 +442,12 @@ function CustomFieldsSettings() {
             onClick={() => setNewRequired(!newRequired)}
             className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
               newRequired
-                ? 'bg-destructive/10 border-destructive/30 text-destructive'
+                ? 'bg-primary/10 border-primary/40 text-primary'
                 : 'bg-muted border-border text-muted-foreground hover:text-foreground'
             }`}
           >
             <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center flex-shrink-0 transition-all ${
-              newRequired ? 'bg-destructive border-destructive' : 'border-border'
+              newRequired ? 'bg-primary border-primary' : 'border-border'
             }`}>
               {newRequired && <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 fill-none stroke-white stroke-[1.5]"><polyline points="1,4 4,7 9,1"/></svg>}
             </span>
@@ -486,12 +492,12 @@ function CustomFieldsSettings() {
                   onClick={() => setEditRequired(!editRequired)}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
                     editRequired
-                      ? 'bg-destructive/10 border-destructive/30 text-destructive'
+                      ? 'bg-primary/10 border-primary/40 text-primary'
                       : 'bg-muted border-border text-muted-foreground hover:text-foreground'
                   }`}
                 >
                   <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center flex-shrink-0 transition-all ${
-                    editRequired ? 'bg-destructive border-destructive' : 'border-border'
+                    editRequired ? 'bg-primary border-primary' : 'border-border'
                   }`}>
                     {editRequired && <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 fill-none stroke-white stroke-[1.5]"><polyline points="1,4 4,7 9,1"/></svg>}
                   </span>
@@ -661,6 +667,16 @@ function UserForm({
   );
 }
 
+function UserAvatar({ name, size = 'sm' }: { name: string; size?: 'sm' | 'lg' }) {
+  const initials = name.trim().split(/\s+/).map(n => n[0]).slice(0, 2).join('').toUpperCase() || '?';
+  const sz = size === 'lg' ? 'w-10 h-10 text-sm' : 'w-8 h-8 text-xs';
+  return (
+    <div className={`${sz} rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0`}>
+      <span className="font-display font-bold text-primary">{initials}</span>
+    </div>
+  );
+}
+
 function UsersSettings() {
   const currentUser = getUser();
   const currentUserRole = currentUser?.role ?? 'member';
@@ -669,13 +685,62 @@ function UsersSettings() {
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
 
+  const isMobile = useIsMobile();
+  const [view, setView] = useState<'table' | 'cards'>('table');
+  const effectiveView = isMobile ? 'cards' : view;
+
+  const [search, setSearch] = useState('');
+  const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState<UserFormState>(initForm());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<UserFormState>(initForm());
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const users: UserRow[] = (data as { data: UserRow[] } | undefined)?.data ?? [];
+  const allUsers: UserRow[] = (data as { data: UserRow[] } | undefined)?.data ?? [];
+
+  const filtered = useMemo(() => {
+    let result = [...allUsers];
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(u => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q));
+    }
+    if (activeFilters.role?.length) result = result.filter(u => activeFilters.role.includes(u.role));
+    if (sort) {
+      result.sort((a, b) => {
+        const aVal = String(a[sort.key as keyof UserRow] ?? '');
+        const bVal = String(b[sort.key as keyof UserRow] ?? '');
+        return sort.dir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      });
+    }
+    return result;
+  }, [allUsers, search, activeFilters, sort]);
+
+  const filterConfigs: FilterConfig[] = [
+    {
+      key: 'role', label: 'Role', options: [
+        { value: 'owner', label: 'Owner' },
+        { value: 'admin', label: 'Admin' },
+        { value: 'member', label: 'Member' },
+      ],
+    },
+  ];
+
+  const sortOptions: SortOption[] = [
+    { key: 'name', label: 'Name' },
+    { key: 'email', label: 'Email' },
+    { key: 'role', label: 'Role' },
+    { key: 'created_at', label: 'Joined' },
+  ];
+
+  const handleFilterChange = (key: string, values: string[]) => {
+    setActiveFilters(prev => { const next = { ...prev }; if (values.length === 0) delete next[key]; else next[key] = values; return next; });
+  };
+  const handleSortChange = (key: string) => {
+    setSort(prev => prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  };
 
   const touchAll = (form: UserFormState): UserFormState => ({
     ...form, touched: { name: true, email: true, password: true },
@@ -736,109 +801,283 @@ function UsersSettings() {
     member: 'bg-muted text-muted-foreground border-border',
   };
 
+  const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
+    <th
+      onClick={() => handleSortChange(sortKey)}
+      className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground cursor-pointer hover:text-foreground transition-colors select-none"
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {sort?.key === sortKey ? (sort.dir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />) : null}
+      </span>
+    </th>
+  );
+
+  const InlineEditActions = ({ onSave, onCancel, isPending }: { onSave: () => void; onCancel: () => void; isPending: boolean }) => (
+    <div className="flex gap-2 pt-2">
+      <button onClick={onSave} disabled={isPending}
+        className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+        {isPending ? 'Saving…' : 'Save Changes'}
+      </button>
+      <button onClick={onCancel}
+        className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
+        Cancel
+      </button>
+    </div>
+  );
+
   return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="font-display font-bold text-lg text-foreground">Team Members</h2>
-        {!showCreate && (
-          <button onClick={() => { setShowCreate(true); setEditingId(null); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors">
-            <Plus className="w-3.5 h-3.5" /> Add User
-          </button>
-        )}
-      </div>
-      <p className="text-sm text-muted-foreground mb-5">Manage who has access to your CRMy workspace.</p>
-
-      {showCreate && (
-        <div className="mb-5 p-4 rounded-xl border border-border bg-muted/30 space-y-4">
-          <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">New User</p>
-          <UserForm form={createForm} onChange={p => setCreateForm(f => ({ ...f, ...p }))}
-            onTouch={field => setCreateForm(f => ({ ...f, touched: { ...f.touched, [field]: true } }))}
-            isEdit={false} currentUserRole={currentUserRole} />
-          <div className="flex gap-2 pt-1">
-            <button onClick={handleCreate} disabled={createUser.isPending}
-              className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
-              {createUser.isPending ? 'Creating...' : 'Create User'}
-            </button>
-            <button onClick={() => { setShowCreate(false); setCreateForm(initForm()); }}
-              className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
-              Cancel
-            </button>
-          </div>
+    <div className="-mx-6 -my-6 flex flex-col">
+      {/* Page header */}
+      <div className="flex items-start justify-between px-6 pt-6 pb-3">
+        <div>
+          <h2 className="font-display font-bold text-lg text-foreground">Team Members</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">Manage who has access to your CRMy workspace.</p>
         </div>
-      )}
+        <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5 mt-0.5">
+          <button
+            onClick={() => setView('table')}
+            className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            <List className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setView('cards')}
+            className={`p-1.5 rounded-lg text-sm transition-all ${view === 'cards' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
 
-      <div className="space-y-2 max-w-2xl">
+      {/* Toolbar */}
+      <ListToolbar
+        searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search users..."
+        filters={filterConfigs} activeFilters={activeFilters} onFilterChange={handleFilterChange}
+        onClearFilters={() => setActiveFilters({})} sortOptions={sortOptions} currentSort={sort}
+        onSortChange={handleSortChange}
+        onAdd={() => { setShowCreate(true); setEditingId(null); setConfirmDeleteId(null); }}
+        addLabel="New User" entityType="users"
+      />
+
+      <div className="px-4 md:px-6 pb-8 space-y-3 mt-1">
+        {/* Create form */}
+        {showCreate && (
+          <div className="p-4 rounded-xl border border-border bg-muted/30 space-y-4">
+            <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">New User</p>
+            <UserForm
+              form={createForm} onChange={p => setCreateForm(f => ({ ...f, ...p }))}
+              onTouch={field => setCreateForm(f => ({ ...f, touched: { ...f.touched, [field]: true } }))}
+              isEdit={false} currentUserRole={currentUserRole}
+            />
+            <div className="flex gap-2 pt-1">
+              <button onClick={handleCreate} disabled={createUser.isPending}
+                className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                {createUser.isPending ? 'Creating...' : 'Create User'}
+              </button>
+              <button onClick={() => { setShowCreate(false); setCreateForm(initForm()); }}
+                className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Content */}
         {isLoading ? (
-          <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-16 bg-muted/50 rounded-xl animate-pulse" />)}</div>
-        ) : users.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4">No users found.</p>
-        ) : users.map(u => (
-          <div key={u.id} className="rounded-xl border border-border bg-card overflow-hidden">
-            {editingId === u.id ? (
-              <div className="p-4 space-y-4">
-                <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Edit User</p>
-                <UserForm form={editForm} onChange={p => setEditForm(f => ({ ...f, ...p }))}
-                  onTouch={field => setEditForm(f => ({ ...f, touched: { ...f.touched, [field]: true } }))}
-                  isEdit={true} currentUserRole={currentUserRole} />
-                <div className="flex gap-2">
-                  <button onClick={handleUpdate} disabled={updateUser.isPending}
-                    className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
-                    {updateUser.isPending ? 'Saving...' : 'Save Changes'}
-                  </button>
-                  <button onClick={() => setEditingId(null)}
-                    className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : confirmDeleteId === u.id ? (
-              <div className="p-4 flex items-center gap-3 flex-wrap">
-                <p className="text-sm text-foreground flex-1">Delete <strong>{u.name}</strong>? This cannot be undone.</p>
-                <button onClick={() => handleDelete(u.id)} disabled={deleteUser.isPending}
-                  className="px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 disabled:opacity-40 transition-colors">
-                  {deleteUser.isPending ? 'Deleting...' : 'Confirm Delete'}
-                </button>
-                <button onClick={() => setConfirmDeleteId(null)}
-                  className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold">
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-3 px-4 py-3">
-                <div className="w-8 h-8 rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0">
-                  <span className="text-xs font-display font-bold text-primary">
-                    {u.name.trim().split(/\s+/).map(n => n[0]).slice(0, 2).join('').toUpperCase() || '?'}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold text-foreground truncate">{u.name}</p>
-                    {u.id === currentUser?.id && (
-                      <span className="text-[10px] font-mono bg-muted text-muted-foreground px-1.5 py-0.5 rounded">you</span>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground truncate">{u.email}</p>
-                </div>
-                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${rolePillCls[u.role] ?? rolePillCls.member}`}>
-                  {roleLabels[u.role as Role] ?? u.role}
-                </span>
-                <div className="flex items-center gap-1 flex-shrink-0">
-                  <button onClick={() => { startEdit(u); setConfirmDeleteId(null); }}
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    disabled={u.id === currentUser?.id}
-                    onClick={() => { setConfirmDeleteId(u.id); setEditingId(null); }}
-                    className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
+          <div className="space-y-2">
+            {[...Array(4)].map((_, i) => <div key={i} className="h-14 bg-muted/50 rounded-xl animate-pulse" />)}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+            <Users className="w-8 h-8 mb-3 opacity-30" />
+            <p className="text-sm">No users found.</p>
+            {(search || Object.keys(activeFilters).length > 0) && (
+              <button
+                onClick={() => { setSearch(''); setActiveFilters({}); }}
+                className="mt-2 text-xs text-primary font-semibold hover:underline"
+              >
+                Clear filters
+              </button>
             )}
           </div>
-        ))}
+        ) : effectiveView === 'table' ? (
+          /* ── Table view ── */
+          <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-surface-sunken/50">
+                    <SortHeader label="Name" sortKey="name" />
+                    <SortHeader label="Email" sortKey="email" />
+                    <SortHeader label="Role" sortKey="role" />
+                    <SortHeader label="Joined" sortKey="created_at" />
+                    <th className="px-2 py-3 w-20" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((u, i) => (
+                    <React.Fragment key={u.id}>
+                      {editingId === u.id ? (
+                        <tr>
+                          <td colSpan={5} className="p-4 bg-muted/20 border-b border-border last:border-0">
+                            <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider mb-3">Edit User</p>
+                            <UserForm
+                              form={editForm} onChange={p => setEditForm(f => ({ ...f, ...p }))}
+                              onTouch={field => setEditForm(f => ({ ...f, touched: { ...f.touched, [field]: true } }))}
+                              isEdit={true} currentUserRole={currentUserRole}
+                            />
+                            <InlineEditActions onSave={handleUpdate} onCancel={() => setEditingId(null)} isPending={updateUser.isPending} />
+                          </td>
+                        </tr>
+                      ) : confirmDeleteId === u.id ? (
+                        <tr className={`border-b border-border last:border-0 ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
+                          <td colSpan={5} className="px-4 py-3">
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <p className="text-sm text-foreground flex-1">Delete <strong>{u.name}</strong>? This cannot be undone.</p>
+                              <button onClick={() => handleDelete(u.id)} disabled={deleteUser.isPending}
+                                className="px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 disabled:opacity-40 transition-colors">
+                                {deleteUser.isPending ? 'Deleting...' : 'Confirm Delete'}
+                              </button>
+                              <button onClick={() => setConfirmDeleteId(null)}
+                                className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
+                                Cancel
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : (
+                        <tr className={`border-b border-border last:border-0 hover:bg-primary/5 transition-colors group ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <UserAvatar name={u.name} />
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-semibold text-foreground">{u.name}</span>
+                                  {u.id === currentUser?.id && (
+                                    <span className="text-[10px] font-mono bg-muted text-muted-foreground px-1.5 py-0.5 rounded">you</span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{u.email}</td>
+                          <td className="px-4 py-3">
+                            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${rolePillCls[u.role] ?? rolePillCls.member}`}>
+                              {roleLabels[u.role as Role] ?? u.role}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">
+                            {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
+                          </td>
+                          <td className="px-2 py-3">
+                            <div className="flex items-center gap-1 justify-end opacity-0 group-hover:opacity-100 transition-all">
+                              <button
+                                onClick={() => { startEdit(u); setConfirmDeleteId(null); }}
+                                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                disabled={u.id === currentUser?.id}
+                                onClick={() => { setConfirmDeleteId(u.id); setEditingId(null); }}
+                                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : (
+          /* ── Card view ── */
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {filtered.map((u, i) => (
+              editingId === u.id ? (
+                <motion.div
+                  key={u.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                  className="col-span-full bg-card border border-border rounded-2xl p-4 space-y-4"
+                >
+                  <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Edit User</p>
+                  <UserForm
+                    form={editForm} onChange={p => setEditForm(f => ({ ...f, ...p }))}
+                    onTouch={field => setEditForm(f => ({ ...f, touched: { ...f.touched, [field]: true } }))}
+                    isEdit={true} currentUserRole={currentUserRole}
+                  />
+                  <InlineEditActions onSave={handleUpdate} onCancel={() => setEditingId(null)} isPending={updateUser.isPending} />
+                </motion.div>
+              ) : confirmDeleteId === u.id ? (
+                <motion.div
+                  key={u.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                  className="bg-card border border-destructive/30 rounded-2xl p-4"
+                >
+                  <p className="text-sm text-foreground mb-3">Delete <strong>{u.name}</strong>? This cannot be undone.</p>
+                  <div className="flex gap-2">
+                    <button onClick={() => handleDelete(u.id)} disabled={deleteUser.isPending}
+                      className="px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 disabled:opacity-40 transition-colors">
+                      {deleteUser.isPending ? 'Deleting...' : 'Confirm Delete'}
+                    </button>
+                    <button onClick={() => setConfirmDeleteId(null)}
+                      className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                </motion.div>
+              ) : (
+                <motion.div
+                  key={u.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
+                  className="bg-card border border-border rounded-2xl p-4 hover:shadow-md hover:border-primary/20 transition-all group relative"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <UserAvatar name={u.name} size="lg" />
+                      <div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="font-display font-bold text-foreground">{u.name}</p>
+                          {u.id === currentUser?.id && (
+                            <span className="text-[10px] font-mono bg-muted text-muted-foreground px-1.5 py-0.5 rounded">you</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">{u.email}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0 md:opacity-0 md:group-hover:opacity-100 transition-all">
+                      <button
+                        onClick={() => { startEdit(u); setConfirmDeleteId(null); }}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        disabled={u.id === currentUser?.id}
+                        onClick={() => { setConfirmDeleteId(u.id); setEditingId(null); }}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between">
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${rolePillCls[u.role] ?? rolePillCls.member}`}>
+                      {roleLabels[u.role as Role] ?? u.role}
+                    </span>
+                    {u.created_at && (
+                      <span className="text-[10px] text-muted-foreground">
+                        {new Date(u.created_at).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                </motion.div>
+              )
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -972,6 +1211,7 @@ export default function Settings() {
   const user = getUser();
   const userRole = (user?.role ?? 'member') as NavRole;
   const visibleNav = settingsNavConfig.filter(item => item.roles.includes(userRole));
+  const { enabled: agentEnabled } = useAgentSettings();
 
   return (
     <div className="flex flex-col h-full">
@@ -985,6 +1225,9 @@ export default function Settings() {
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'}`}>
               <item.icon className="w-3.5 h-3.5" />
               {item.label}
+              {item.path === '/settings/agent' && (
+                <span className={`w-2 h-2 rounded-full ${agentEnabled ? 'bg-amber-500' : 'bg-muted-foreground/40'}`} />
+              )}
             </Link>
           );
         })}
@@ -999,6 +1242,9 @@ export default function Settings() {
                 className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${active ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
                 <item.icon className="w-4 h-4" />
                 {item.label}
+                {item.path === '/settings/agent' && (
+                  <span className={`ml-auto w-2 h-2 rounded-full ${agentEnabled ? 'bg-amber-500' : 'bg-muted-foreground/40'}`} />
+                )}
               </Link>
             );
           })}
@@ -1011,6 +1257,7 @@ export default function Settings() {
             <Route path="webhooks" element={<RequireRole roles={['admin', 'owner']}><WebhooksSettings /></RequireRole>} />
             <Route path="custom-fields" element={<RequireRole roles={['admin', 'owner']}><CustomFieldsSettings /></RequireRole>} />
             <Route path="users" element={<RequireRole roles={['admin', 'owner']}><UsersSettings /></RequireRole>} />
+            <Route path="agent" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
             <Route path="database" element={<RequireRole roles={['admin', 'owner']}><DatabaseSettings /></RequireRole>} />
           </Routes>
         </div>

@@ -102,6 +102,31 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   // Meta
   schema_get: { method: 'GET', path: () => '/health' },
   tenant_get_stats: { method: 'GET', path: () => '/health' },
+
+  // Actors
+  actor_register: { method: 'POST', path: () => '/api/v1/actors' },
+  actor_get: { method: 'GET', path: (i) => `/api/v1/actors/${i.id}` },
+  actor_list: { method: 'GET', path: (i) => `/api/v1/actors?limit=${i.limit ?? 20}${i.actor_type ? `&actor_type=${i.actor_type}` : ''}${i.query ? `&q=${encodeURIComponent(i.query as string)}` : ''}` },
+  actor_update: { method: 'PATCH', path: (i) => `/api/v1/actors/${i.id}` },
+  actor_whoami: { method: 'GET', path: () => '/api/v1/actors/whoami' },
+
+  // Assignments
+  assignment_create: { method: 'POST', path: () => '/api/v1/assignments' },
+  assignment_get: { method: 'GET', path: (i) => `/api/v1/assignments/${i.id}` },
+  assignment_list: { method: 'GET', path: (i) => `/api/v1/assignments?limit=${i.limit ?? 20}${i.assigned_to ? `&assigned_to=${i.assigned_to}` : ''}${i.assigned_by ? `&assigned_by=${i.assigned_by}` : ''}${i.status ? `&status=${i.status}` : ''}` },
+  assignment_update: { method: 'PATCH', path: (i) => `/api/v1/assignments/${i.id}` },
+  assignment_accept: { method: 'POST', path: (i) => `/api/v1/assignments/${i.id}/accept` },
+  assignment_complete: { method: 'POST', path: (i) => `/api/v1/assignments/${i.id}/complete` },
+  assignment_decline: { method: 'POST', path: (i) => `/api/v1/assignments/${i.id}/decline` },
+
+  // Context Entries
+  context_add: { method: 'POST', path: () => '/api/v1/context' },
+  context_get: { method: 'GET', path: (i) => `/api/v1/context/${i.id}` },
+  context_list: { method: 'GET', path: (i) => `/api/v1/context?limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}${i.context_type ? `&context_type=${i.context_type}` : ''}` },
+  context_supersede: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/supersede` },
+
+  // Activity Timeline (enhanced)
+  activity_get_timeline: { method: 'GET', path: (i) => `/api/v1/activities?subject_type=${i.subject_type}&subject_id=${i.subject_id}&limit=${i.limit ?? 50}` },
 };
 
 /**

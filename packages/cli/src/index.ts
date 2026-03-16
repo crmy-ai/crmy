@@ -21,6 +21,9 @@ import { emailsCommand } from './commands/emails.js';
 import { customFieldsCommand } from './commands/custom-fields.js';
 import { notesCommand } from './commands/notes.js';
 import { workflowsCommand } from './commands/workflows.js';
+import { actorsCommand } from './commands/actors.js';
+import { assignmentsCommand } from './commands/assignments.js';
+import { contextCommand } from './commands/context.js';
 import { authCommand } from './commands/auth.js';
 import { helpCommand } from './commands/help.js';
 
@@ -29,7 +32,7 @@ const program = new Command();
 program
   .name('crmy')
   .description('CRMy — The agent-first open source CRM')
-  .version('0.3.0');
+  .version('0.4.0');
 
 program.addCommand(authCommand());
 program.addCommand(initCommand());
@@ -50,6 +53,9 @@ program.addCommand(emailsCommand());
 program.addCommand(customFieldsCommand());
 program.addCommand(notesCommand());
 program.addCommand(workflowsCommand());
+program.addCommand(actorsCommand());
+program.addCommand(assignmentsCommand());
+program.addCommand(contextCommand());
 program.addCommand(helpCommand());
 
 // Top-level `crmy login` shortcut (delegates to `crmy auth login`)

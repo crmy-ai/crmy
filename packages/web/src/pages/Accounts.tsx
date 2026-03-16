@@ -7,22 +7,19 @@ import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { TopBar } from '@/components/layout/TopBar';
 import { useAccounts } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { motion } from 'framer-motion';
-import { LayoutGrid, List, ChevronUp, ChevronDown, Sparkles, Globe, DollarSign } from 'lucide-react';
+import { LayoutGrid, List, ChevronUp, ChevronDown, Sparkles, Globe, DollarSign, Heart } from 'lucide-react';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { accountStageConfig } from '@/lib/stageConfig';
-import { Heart } from 'lucide-react';
 
 type ViewMode = 'table' | 'cards';
 
-const filterConfigs: FilterConfig[] = [
-  { key: 'stage', label: 'Stage', options: Object.entries(accountStageConfig).map(([k, v]) => ({ value: k, label: v.label })) },
-];
+const filterConfigs: FilterConfig[] = [];
 
 const sortOptions: SortOption[] = [
   { key: 'name', label: 'Name' },
-  { key: 'revenue', label: 'Revenue' },
+  { key: 'annual_revenue', label: 'Revenue' },
   { key: 'health_score', label: 'Health' },
   { key: 'employee_count', label: 'Employees' },
 ];
@@ -39,16 +36,6 @@ function HealthBadge({ score }: { score: number }) {
   );
 }
 
-function AccountStageBadge({ stage }: { stage: string }) {
-  const config = accountStageConfig[stage] ?? { label: stage, color: '#94a3b8' };
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border"
-      style={{ borderColor: config.color, color: config.color, backgroundColor: `${config.color}15` }}>
-      {config.label}
-    </span>
-  );
-}
-
 function formatRevenue(revenue: number) {
   if (revenue >= 1_000_000) return `$${(revenue / 1_000_000).toFixed(1)}M`;
   if (revenue >= 1_000) return `$${(revenue / 1_000).toFixed(0)}K`;
@@ -60,6 +47,7 @@ export default function Accounts() {
   const [view, setView] = useState<ViewMode>('table');
   const effectiveView = isMobile ? 'cards' : view;
   const { openDrawer, openQuickAdd, openAIWithContext } = useAppStore();
+  const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
@@ -78,7 +66,6 @@ export default function Accounts() {
 
   const filtered = useMemo(() => {
     let result = [...allAccounts];
-    if (activeFilters.stage?.length) result = result.filter(a => activeFilters.stage.includes(a.stage as string));
     if (activeFilters.industry?.length) result = result.filter(a => activeFilters.industry.includes(a.industry as string));
     if (sort) {
       result.sort((a, b) => {
@@ -139,11 +126,10 @@ export default function Accounts() {
                   <tr className="border-b border-border bg-surface-sunken/50">
                     <SortHeader label="Name" sortKey="name" />
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Industry</th>
-                    <SortHeader label="Revenue" sortKey="revenue" />
+                    <SortHeader label="Revenue" sortKey="annual_revenue" />
                     <SortHeader label="Employees" sortKey="employee_count" />
                     <SortHeader label="Health" sortKey="health_score" />
-                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Stage</th>
-                    <th className="px-2 py-3 w-8"></th>
+                    {agentEnabled && <th className="px-2 py-3 w-8"></th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -160,16 +146,17 @@ export default function Accounts() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{(a.industry as string) || '—'}</td>
-                      <td className="px-4 py-3 text-foreground font-medium">{a.revenue ? formatRevenue(a.revenue as number) : '—'}</td>
+                      <td className="px-4 py-3 text-foreground font-medium">{a.annual_revenue ? formatRevenue(a.annual_revenue as number) : '—'}</td>
                       <td className="px-4 py-3 text-muted-foreground">{(a.employee_count as number) || '—'}</td>
                       <td className="px-4 py-3">{a.health_score ? <HealthBadge score={a.health_score as number} /> : '—'}</td>
-                      <td className="px-4 py-3">{a.stage ? <AccountStageBadge stage={a.stage as string} /> : '—'}</td>
-                      <td className="px-2 py-3">
-                        <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'account', id: a.id as string, name: a.name as string, detail: a.industry as string }); navigate('/agent'); }}
-                          className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
-                          <Sparkles className="w-3.5 h-3.5 text-accent" />
-                        </button>
-                      </td>
+                      {agentEnabled && (
+                        <td className="px-2 py-3">
+                          <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'account', id: a.id as string, name: a.name as string, detail: a.industry as string }); navigate('/agent'); }}
+                            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
+                            <Sparkles className="w-3.5 h-3.5 text-accent" />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -190,11 +177,10 @@ export default function Accounts() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 mb-3">
-                  {a.stage && <AccountStageBadge stage={a.stage as string} />}
                   {a.health_score && <HealthBadge score={a.health_score as number} />}
                 </div>
                 <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                  {a.revenue && <span className="inline-flex items-center gap-1"><DollarSign className="w-3 h-3" />{formatRevenue(a.revenue as number)}</span>}
+                  {a.annual_revenue && <span className="inline-flex items-center gap-1"><DollarSign className="w-3 h-3" />{formatRevenue(a.annual_revenue as number)}</span>}
                   {a.website && <span className="inline-flex items-center gap-1"><Globe className="w-3 h-3" />{a.website as string}</span>}
                 </div>
               </motion.div>

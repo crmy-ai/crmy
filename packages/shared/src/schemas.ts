@@ -14,6 +14,7 @@ export const forecastCat = z.enum(['pipeline', 'best_case', 'commit', 'closed'])
 export const activityType = z.enum(['call', 'email', 'meeting', 'note', 'task']);
 export const direction = z.enum(['inbound', 'outbound']);
 export const userRole = z.enum(['owner', 'admin', 'member']);
+export const subjectType = z.enum(['contact', 'account', 'opportunity', 'use_case']);
 
 const tags = z.array(z.string()).default([]);
 const customFields = z.record(z.unknown()).default({});
@@ -189,6 +190,15 @@ export const activityCreate = z.object({
   due_at: z.string().optional(),
   direction: direction.optional(),
   custom_fields: customFields,
+  // Context Engine optional fields
+  performed_by: uuid.optional(),
+  subject_type: subjectType.optional(),
+  subject_id: uuid.optional(),
+  related_type: subjectType.optional(),
+  related_id: uuid.optional(),
+  detail: z.record(z.unknown()).optional(),
+  occurred_at: z.string().optional(),
+  outcome: z.string().optional(),
 });
 
 export const activityUpdate = z.object({
@@ -207,6 +217,10 @@ export const activitySearch = z.object({
   account_id: uuid.optional(),
   opportunity_id: uuid.optional(),
   type: activityType.optional(),
+  subject_type: subjectType.optional(),
+  subject_id: uuid.optional(),
+  performed_by: uuid.optional(),
+  outcome: z.string().optional(),
   limit,
   cursor,
 });
@@ -607,4 +621,141 @@ export const workflowRunList = z.object({
   status: z.enum(['running', 'completed', 'failed']).optional(),
   limit,
   cursor,
+});
+
+// -- v0.4 Context Engine schemas --
+
+export const actorType = z.enum(['human', 'agent']);
+export const assignmentStatus = z.enum([
+  'pending', 'accepted', 'in_progress', 'blocked',
+  'completed', 'declined', 'cancelled',
+]);
+export const assignmentPriority = z.enum(['low', 'normal', 'high', 'urgent']);
+
+// -- Actor schemas --
+
+export const actorCreate = z.object({
+  actor_type: actorType,
+  display_name: z.string().min(1),
+  email: z.string().email().optional(),
+  agent_identifier: z.string().optional(),
+  agent_model: z.string().optional(),
+  metadata: z.record(z.unknown()).default({}),
+});
+
+export const actorUpdate = z.object({
+  id: uuid,
+  patch: z.object({
+    display_name: z.string().min(1).optional(),
+    email: z.string().email().nullable().optional(),
+    agent_identifier: z.string().nullable().optional(),
+    agent_model: z.string().nullable().optional(),
+    metadata: z.record(z.unknown()).optional(),
+    is_active: z.boolean().optional(),
+  }),
+});
+
+export const actorGet = z.object({ id: uuid });
+
+export const actorSearch = z.object({
+  actor_type: actorType.optional(),
+  query: z.string().optional(),
+  is_active: z.boolean().optional(),
+  limit,
+  cursor,
+});
+
+// -- Assignment schemas --
+
+export const assignmentCreate = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  assignment_type: z.string().min(1),
+  assigned_to: uuid,
+  subject_type: subjectType,
+  subject_id: uuid,
+  priority: assignmentPriority.default('normal'),
+  due_at: z.string().optional(),
+  context: z.string().optional(),
+  metadata: z.record(z.unknown()).default({}),
+});
+
+export const assignmentUpdate = z.object({
+  id: uuid,
+  patch: z.object({
+    title: z.string().min(1).optional(),
+    description: z.string().nullable().optional(),
+    priority: assignmentPriority.optional(),
+    due_at: z.string().nullable().optional(),
+    status: assignmentStatus.optional(),
+    context: z.string().nullable().optional(),
+    metadata: z.record(z.unknown()).optional(),
+  }),
+});
+
+export const assignmentGet = z.object({ id: uuid });
+
+export const assignmentSearch = z.object({
+  assigned_to: uuid.optional(),
+  assigned_by: uuid.optional(),
+  status: assignmentStatus.optional(),
+  priority: assignmentPriority.optional(),
+  subject_type: subjectType.optional(),
+  subject_id: uuid.optional(),
+  limit,
+  cursor,
+});
+
+export const assignmentAccept = z.object({ id: uuid });
+
+export const assignmentComplete = z.object({
+  id: uuid,
+  completed_by_activity_id: uuid.optional(),
+});
+
+export const assignmentDecline = z.object({
+  id: uuid,
+  reason: z.string().optional(),
+});
+
+// -- Context Entry schemas --
+
+export const contextEntryCreate = z.object({
+  subject_type: subjectType,
+  subject_id: uuid,
+  context_type: z.string().min(1),
+  title: z.string().optional(),
+  body: z.string().min(1).max(50000),
+  structured_data: z.record(z.unknown()).default({}),
+  confidence: z.number().min(0).max(1).optional(),
+  source: z.string().optional(),
+  source_ref: z.string().optional(),
+});
+
+export const contextEntryGet = z.object({ id: uuid });
+
+export const contextEntrySearch = z.object({
+  subject_type: subjectType.optional(),
+  subject_id: uuid.optional(),
+  context_type: z.string().optional(),
+  authored_by: uuid.optional(),
+  is_current: z.boolean().optional(),
+  query: z.string().optional(),
+  limit,
+  cursor,
+});
+
+export const contextEntrySupersede = z.object({
+  id: uuid,
+  body: z.string().min(1).max(50000),
+  title: z.string().optional(),
+  structured_data: z.record(z.unknown()).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+});
+
+export const activityGetTimeline = z.object({
+  subject_type: subjectType,
+  subject_id: uuid,
+  limit: limit.default(50),
+  types: z.array(activityType).optional(),
 });

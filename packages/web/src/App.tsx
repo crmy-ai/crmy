@@ -10,7 +10,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 import { Sidebar } from '@/components/layout/Sidebar';
 import { MobileNav } from '@/components/layout/MobileNav';
-import { AIFab } from '@/components/crm/AIFab';
 import { CommandPalette } from '@/components/crm/CommandPalette';
 import { ShortcutsOverlay } from '@/components/crm/ShortcutsOverlay';
 import { DrawerShell } from '@/components/crm/DrawerShell';
@@ -22,6 +21,8 @@ import { AccountDrawer } from '@/components/crm/AccountDrawer';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useAppStore } from '@/store/appStore';
 import { useTheme } from '@/hooks/useTheme';
+import { AgentSettingsProvider } from '@/contexts/AgentSettingsContext';
+import { AIFab } from '@/components/crm/AIFab';
 
 import { LoginPage } from '@/pages/auth/Login';
 import Dashboard from '@/pages/Dashboard';
@@ -107,8 +108,6 @@ function AppContent() {
         </div>
       </main>
       {!zenMode && <MobileNav />}
-      {!zenMode && <AIFab />}
-
       {/* Drawers */}
       <DrawerShell title={drawerTitle}>
         {drawerType === 'contact' && <ContactDrawer />}
@@ -121,29 +120,32 @@ function AppContent() {
       <CommandPalette />
       <ShortcutsOverlay />
       <QuickAddDrawer />
+      <AIFab />
     </div>
   );
 }
 
 export function App() {
   return (
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter basename="/app">
-        <ThemeApplier />
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/*"
-            element={
-              <AuthGuard>
-                <AppContent />
-              </AuthGuard>
-            }
-          />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
+    <AgentSettingsProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter basename="/app">
+          <ThemeApplier />
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+              path="/*"
+              element={
+                <AuthGuard>
+                  <AppContent />
+                </AuthGuard>
+              }
+            />
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
+    </AgentSettingsProvider>
   );
 }

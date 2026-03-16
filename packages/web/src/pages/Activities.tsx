@@ -7,6 +7,7 @@ import { useActivities } from '@/api/hooks';
 import { ActivityFeed } from '@/components/crm/CrmWidgets';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { DatePicker } from '@/components/ui/date-picker';
 
 const filterConfigs: FilterConfig[] = [
   {
@@ -17,13 +18,41 @@ const filterConfigs: FilterConfig[] = [
       { value: 'meeting', label: 'Meeting' },
       { value: 'note', label: 'Note' },
       { value: 'task', label: 'Task' },
+      { value: 'demo', label: 'Demo' },
+      { value: 'proposal', label: 'Proposal' },
+      { value: 'research', label: 'Research' },
+      { value: 'handoff', label: 'Handoff' },
+      { value: 'status_update', label: 'Status Update' },
+    ],
+  },
+  {
+    key: 'subject_type', label: 'Subject',
+    options: [
+      { value: 'contact', label: 'Contact' },
+      { value: 'account', label: 'Account' },
+      { value: 'opportunity', label: 'Opportunity' },
+      { value: 'use_case', label: 'Use Case' },
+    ],
+  },
+  {
+    key: 'outcome', label: 'Outcome',
+    options: [
+      { value: 'connected', label: 'Connected' },
+      { value: 'voicemail', label: 'Voicemail' },
+      { value: 'positive', label: 'Positive' },
+      { value: 'negative', label: 'Negative' },
+      { value: 'neutral', label: 'Neutral' },
+      { value: 'no_show', label: 'No Show' },
+      { value: 'follow_up_needed', label: 'Follow-up Needed' },
     ],
   },
 ];
 
 const sortOptions: SortOption[] = [
-  { key: 'created_at', label: 'Date' },
+  { key: 'occurred_at', label: 'When' },
+  { key: 'created_at', label: 'Logged' },
   { key: 'type', label: 'Type' },
+  { key: 'outcome', label: 'Outcome' },
 ];
 
 type TimeRangePreset = 'today' | 'this_week' | 'this_month' | 'this_quarter' | 'custom';
@@ -98,7 +127,7 @@ export default function Activities() {
   const filtered = useMemo(() => {
     let result = [...allActivities];
 
-    // Date range filtering
+    // Date range filtering — use occurred_at (falling back to created_at)
     let start: Date;
     let end: Date;
     if (timeRange === 'custom') {
@@ -108,25 +137,40 @@ export default function Activities() {
       ({ start, end } = getPresetDates(timeRange));
     }
     result = result.filter(a => {
-      const d = new Date(a.created_at);
+      const d = new Date(a.occurred_at ?? a.created_at);
       return d >= start && d <= end;
     });
 
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(a => {
-        const desc = ((a.description ?? a.body ?? '') as string).toLowerCase();
+        const desc = ((a.description ?? a.body ?? a.subject ?? '') as string).toLowerCase();
         const name = ((a.contact_name ?? '') as string).toLowerCase();
-        return desc.includes(q) || name.includes(q);
+        const outcome = ((a.outcome ?? '') as string).toLowerCase();
+        const subjectType = ((a.subject_type ?? '') as string).replace(/_/g, ' ').toLowerCase();
+        return desc.includes(q) || name.includes(q) || outcome.includes(q) || subjectType.includes(q);
       });
     }
     if (activeFilters.type?.length) {
       result = result.filter(a => activeFilters.type.includes(a.type as string));
     }
+    if (activeFilters.subject_type?.length) {
+      result = result.filter(a => activeFilters.subject_type.includes(a.subject_type as string));
+    }
+    if (activeFilters.outcome?.length) {
+      result = result.filter(a => activeFilters.outcome.includes(a.outcome as string));
+    }
     if (sort) {
       result.sort((a, b) => {
-        const aVal = (a[sort.key] ?? '') as string;
-        const bVal = (b[sort.key] ?? '') as string;
+        let aVal: string;
+        let bVal: string;
+        if (sort.key === 'occurred_at') {
+          aVal = a.occurred_at ?? a.created_at ?? '';
+          bVal = b.occurred_at ?? b.created_at ?? '';
+        } else {
+          aVal = (a[sort.key] ?? '') as string;
+          bVal = (b[sort.key] ?? '') as string;
+        }
         return sort.dir === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
       });
     }
@@ -158,18 +202,20 @@ export default function Activities() {
 
         {timeRange === 'custom' && (
           <div className="flex items-center gap-2">
-            <input
-              type="date"
+            <DatePicker
               value={customFrom}
-              onChange={e => setCustomFrom(e.target.value)}
-              className="h-8 px-2 text-xs rounded-lg border border-border bg-background text-foreground"
+              onChange={setCustomFrom}
+              size="sm"
+              placeholder="From"
+              className="w-36"
             />
             <span className="text-xs text-muted-foreground">to</span>
-            <input
-              type="date"
+            <DatePicker
               value={customTo}
-              onChange={e => setCustomTo(e.target.value)}
-              className="h-8 px-2 text-xs rounded-lg border border-border bg-background text-foreground"
+              onChange={setCustomTo}
+              size="sm"
+              placeholder="To"
+              className="w-36"
             />
           </div>
         )}

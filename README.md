@@ -1,6 +1,6 @@
 # CRMy
 
-An agent-first open source CRM. MCP-native. Works with any PostgreSQL.
+An agent-first open source CRM with a built-in Context Engine for agent-human GTM coordination. MCP-native. Works with any PostgreSQL.
 
 ## Install
 
@@ -92,6 +92,34 @@ The use case detail page provides a complete view:
 - **Contact management** — add/remove contacts with role assignment
 - **Activity timeline** — linked activities and events
 
+## Context Engine (v0.4)
+
+The Context Engine transforms CRMy from a system of record into a **system of action** — a shared workspace where AI agents and humans coordinate GTM workflows through four primitives:
+
+| Primitive | What it captures | Why it matters |
+|-----------|-----------------|----------------|
+| **Actors** | Who is doing things (human or agent) | First-class identity enables agent-human coordination |
+| **Activities** (enhanced) | Everything that happened — with polymorphic subjects and structured payloads | Rich audit trail with `occurred_at`, `detail` JSONB, and `outcome` |
+| **Assignments** | Who owns what next — handoffs between agents and humans | The coordination layer for GTM workflows |
+| **Context Entries** | Structured knowledge attached to any CRM object | The memory layer — notes, research, objections, competitive intel |
+
+### Agent Workflow Example
+
+```
+1. Agent logs a meeting activity (activity_create)
+2. Agent extracts key takeaways and stores them (context_add ×3)
+3. Agent assigns follow-up to human rep (assignment_create)
+4. Human reviews context, sends proposal (assignment_complete)
+```
+
+### Key Design Decisions
+
+- **Polymorphic subjects**: Activities, assignments, and context entries attach to any CRM object via `subject_type` + `subject_id`
+- **`activity_type` is a text field**: Agents can invent new activity types without schema changes
+- **`occurred_at` vs `created_at`**: Agents may log activities retroactively; the timeline shows when it happened, not when it was logged
+- **Context `confidence` field**: Agents signal certainty (1.0 for transcripts, 0.6 for sentiment analysis) so downstream consumers can weight decisions
+- **Supersede, don't delete**: Old context entries are marked `is_current = false` for audit trail; new entries point back via `supersedes_id`
+
 ## Authentication
 
 CRMy supports three authentication methods:
@@ -156,6 +184,7 @@ scripts/                   Migration runner
 - **MCP-first**: All CRM operations are MCP tools. REST API and CLI are thin wrappers.
 - **Raw SQL**: No ORM. Every query is readable and auditable.
 - **Event sourcing**: Every mutation writes an append-only event row for full audit trail.
+- **Context Engine**: Actors (who), Activities (what happened), Assignments (coordination), and Context Entries (memory) form a shared workspace where AI agents and humans run GTM together.
 - **HITL**: Agents request human approval before high-impact actions.
 - **Plugins**: Extensible plugin system with lifecycle hooks.
 - **Workflows**: Event-driven automation with configurable triggers and actions.
@@ -171,15 +200,18 @@ scripts/                   Migration runner
 | `CRMY_API_KEY` | No | — | API key for CLI/agent authentication |
 | `CRMY_SERVER_URL` | No | — | Server URL for remote CLI mode |
 
-## MCP Tools (60+)
+## MCP Tools (70+)
 
 | Category | Tools |
 |---|---|
 | Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline` |
 | Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy` |
 | Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `pipeline_summary` |
-| Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update` |
+| Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
 | Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
+| **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
+| **Assignments** | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline` |
+| **Context** | `context_add`, `context_get`, `context_list`, `context_supersede` |
 | Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
 | Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
@@ -251,6 +283,26 @@ crmy workflows get <id>          Get workflow + recent runs
 crmy workflows create            Interactive create
 crmy workflows delete <id>       Delete workflow
 crmy workflows runs <id>         Execution history
+
+Actors (v0.4)
+crmy actors list [--type <t>]    List actors (humans & agents)
+crmy actors register             Interactive actor registration
+crmy actors get <id>             Get actor details
+crmy actors whoami               Show current actor identity
+
+Assignments (v0.4)
+crmy assignments list [--mine]   List assignments
+crmy assignments create          Interactive create
+crmy assignments get <id>        Get assignment details
+crmy assignments accept <id>     Accept a pending assignment
+crmy assignments complete <id>   Complete an assignment
+crmy assignments decline <id>    Decline an assignment
+
+Context (v0.4)
+crmy context list [--subject-type <t>] [--subject-id <id>]
+crmy context add                 Add context about a CRM object
+crmy context get <id>            Get context entry
+crmy context supersede <id>      Supersede with updated content
 
 Other
 crmy pipeline                    Pipeline summary

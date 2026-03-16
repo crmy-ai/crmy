@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from 'zod';
-import { activityCreate, activityUpdate, activitySearch, activityComplete } from '@crmy/shared';
+import { activityCreate, activityUpdate, activitySearch, activityComplete, activityGetTimeline } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as activityRepo from '../../db/repos/activities.js';
@@ -15,7 +15,7 @@ export function activityTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'activity_create',
-      description: 'Create a standalone activity (call, email, meeting, note, task)',
+      description: 'Create an activity (call, email, meeting, note, task, etc.). Supports Context Engine fields: performed_by, subject_type/subject_id for polymorphic linking, occurred_at, outcome, and detail JSONB.',
       inputSchema: activityCreate,
       handler: async (input: z.infer<typeof activityCreate>, actor: ActorContext) => {
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
@@ -50,7 +50,7 @@ export function activityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'activity_search',
-      description: 'Search activities with filters. Supports contact_id, account_id, opportunity_id, and type.',
+      description: 'Search activities with filters. Supports contact_id, account_id, opportunity_id, type, subject_type, subject_id, performed_by, and outcome.',
       inputSchema: activitySearch,
       handler: async (input: z.infer<typeof activitySearch>, actor: ActorContext) => {
         const result = await activityRepo.searchActivities(db, actor.tenant_id, {
@@ -121,6 +121,21 @@ export function activityTools(db: DbPool): ToolDef[] {
           afterData: activity,
         });
         return { activity, event_id };
+      },
+    },
+    {
+      name: 'activity_get_timeline',
+      description: 'Get the activity timeline for any CRM object (contact, account, opportunity, use_case) via polymorphic subject.',
+      inputSchema: activityGetTimeline,
+      handler: async (input: z.infer<typeof activityGetTimeline>, actor: ActorContext) => {
+        const result = await activityRepo.getSubjectTimeline(
+          db,
+          actor.tenant_id,
+          input.subject_type,
+          input.subject_id,
+          { limit: input.limit ?? 50, types: input.types },
+        );
+        return { activities: result.activities, total: result.total };
       },
     },
   ];

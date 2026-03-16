@@ -2,13 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { useUseCase, useUseCaseTimeline, useUpdateUseCase, useUsers, useCustomFields } from '@/api/hooks';
+import { useUseCase, useUseCaseTimeline, useUpdateUseCase, useDeleteUseCase, useUsers, useCustomFields, useOpportunities } from '@/api/hooks';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
-import { Sparkles, Calendar, Bot, DollarSign, Pencil, ChevronLeft } from 'lucide-react';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
+import { Sparkles, Calendar, Bot, DollarSign, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
 import { CustomFieldsSection } from './CrmWidgets';
+import { ActivityTimeline } from './ActivityTimeline';
 import { useCaseStageConfig } from '@/lib/stageConfig';
 import { toast } from '@/components/ui/use-toast';
+import { DatePicker } from '@/components/ui/date-picker';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -31,20 +34,32 @@ function UseCaseEditForm({
   useCase,
   onSave,
   onCancel,
+  onDelete,
   isSaving,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   useCase: any;
   onSave: (data: Record<string, unknown>) => void;
   onCancel: () => void;
+  onDelete: () => void;
   isSaving: boolean;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [fields, setFields] = useState<Record<string, string>>({
     name: useCase.name ?? '',
     stage: useCase.stage ?? 'discovery',
     description: useCase.description ?? '',
     attributed_arr: useCase.attributed_arr != null ? String(useCase.attributed_arr) : '',
+    currency_code: useCase.currency_code ?? 'USD',
+    expansion_potential: useCase.expansion_potential != null ? String(useCase.expansion_potential) : '',
+    unit_label: useCase.unit_label ?? '',
+    consumption_unit: useCase.consumption_unit ?? '',
+    consumption_capacity: useCase.consumption_capacity != null ? String(useCase.consumption_capacity) : '',
+    started_at: useCase.started_at ? useCase.started_at.slice(0, 10) : '',
     target_prod_date: useCase.target_prod_date ? useCase.target_prod_date.slice(0, 10) : '',
+    sunset_date: useCase.sunset_date ? useCase.sunset_date.slice(0, 10) : '',
+    tags: Array.isArray(useCase.tags) ? useCase.tags.join(', ') : '',
+    opportunity_id: useCase.opportunity_id ?? '',
     owner_id: useCase.owner_id ?? '',
   });
 
@@ -63,6 +78,10 @@ function UseCaseEditForm({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const users: any[] = usersData?.data ?? [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: oppsData } = useOpportunities({ limit: 200 }) as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const opportunities: any[] = oppsData?.data ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: customFieldDefs } = useCustomFields('use_case') as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fieldDefs: any[] = customFieldDefs?.fields ?? [];
@@ -72,11 +91,16 @@ function UseCaseEditForm({
 
   const handleSave = () => {
     const payload: Record<string, unknown> = {};
+    const numericKeys = ['attributed_arr', 'expansion_potential', 'consumption_capacity'];
     for (const [k, v] of Object.entries(fields)) {
+      if (k === 'tags') continue; // handled separately
       if (v === '') continue;
-      if (k === 'attributed_arr') payload[k] = Number(v) || 0;
+      if (numericKeys.includes(k)) payload[k] = Number(v) || 0;
       else payload[k] = v;
     }
+    // Tags: parse comma-separated string into array
+    const tagsRaw = fields.tags.trim();
+    payload.tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
     const cfPayload: Record<string, unknown> = {};
     for (const def of fieldDefs) {
       const val = customFieldValues[def.field_key] ?? '';
@@ -89,6 +113,12 @@ function UseCaseEditForm({
     onSave(payload);
   };
 
+  const sectionLabel = (text: string) => (
+    <div className="border-t border-border pt-3 mt-1">
+      <p className={labelClass}>{text}</p>
+    </div>
+  );
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
@@ -98,6 +128,8 @@ function UseCaseEditForm({
         <span className="text-xs text-muted-foreground ml-auto">Editing use case</span>
       </div>
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
+
+        {/* Basic */}
         <div className="space-y-1.5">
           <label className={labelClass}>Name<span className="text-destructive ml-0.5">*</span></label>
           <input type="text" value={fields.name} onChange={e => set('name', e.target.value)} placeholder="Use case name" className={inputClass} />
@@ -111,13 +143,79 @@ function UseCaseEditForm({
           </select>
         </div>
         <div className="space-y-1.5">
+          <label className={labelClass}>Description</label>
+          <textarea
+            value={fields.description}
+            onChange={e => set('description', e.target.value)}
+            placeholder="Optional description"
+            rows={3}
+            className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring resize-none"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>Tags <span className="normal-case font-normal">(comma-separated)</span></label>
+          <input type="text" value={fields.tags} onChange={e => set('tags', e.target.value)} placeholder="e.g. ai, billing, high-priority" className={inputClass} />
+        </div>
+
+        {/* Commercial */}
+        {sectionLabel('Commercial')}
+        <div className="space-y-1.5">
           <label className={labelClass}>Attributed ARR ($)</label>
           <input type="number" value={fields.attributed_arr} onChange={e => set('attributed_arr', e.target.value)} placeholder="e.g. 120000" className={inputClass} />
         </div>
         <div className="space-y-1.5">
-          <label className={labelClass}>Production Date</label>
-          <input type="date" value={fields.target_prod_date} onChange={e => set('target_prod_date', e.target.value)} className={inputClass} />
+          <label className={labelClass}>Expansion Potential ($)</label>
+          <input type="number" value={fields.expansion_potential} onChange={e => set('expansion_potential', e.target.value)} placeholder="e.g. 50000" className={inputClass} />
         </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>Currency</label>
+          <input type="text" value={fields.currency_code} onChange={e => set('currency_code', e.target.value.toUpperCase().slice(0, 3))} placeholder="USD" maxLength={3} className={inputClass} />
+        </div>
+
+        {/* Consumption */}
+        {sectionLabel('Consumption')}
+        <div className="space-y-1.5">
+          <label className={labelClass}>Unit Label</label>
+          <input type="text" value={fields.unit_label} onChange={e => set('unit_label', e.target.value)} placeholder="e.g. API calls, seats, documents" className={inputClass} />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>Consumption Unit</label>
+          <input type="text" value={fields.consumption_unit} onChange={e => set('consumption_unit', e.target.value)} placeholder="e.g. calls/month" className={inputClass} />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>Consumption Capacity</label>
+          <input type="number" value={fields.consumption_capacity} onChange={e => set('consumption_capacity', e.target.value)} placeholder="e.g. 10000" className={inputClass} />
+        </div>
+
+        {/* Timeline */}
+        {sectionLabel('Timeline')}
+        <div className="space-y-1.5">
+          <label className={labelClass}>Start Date</label>
+          <DatePicker value={fields.started_at} onChange={val => set('started_at', val)} placeholder="Select start date" />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>Production Date</label>
+          <DatePicker value={fields.target_prod_date} onChange={val => set('target_prod_date', val)} placeholder="Select production date" />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>Sunset Date</label>
+          <DatePicker value={fields.sunset_date} onChange={val => set('sunset_date', val)} placeholder="Select sunset date" />
+        </div>
+
+        {/* Ownership */}
+        {sectionLabel('Ownership')}
+        {opportunities.length > 0 && (
+          <div className="space-y-1.5">
+            <label className={labelClass}>Linked Opportunity</label>
+            <select value={fields.opportunity_id} onChange={e => set('opportunity_id', e.target.value)} className={`${inputClass} pr-3`}>
+              <option value="">None</option>
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              {opportunities.map((o: any) => (
+                <option key={o.id} value={o.id}>{o.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         {users.length > 0 && (
           <div className="space-y-1.5">
             <label className={labelClass}>Owner</label>
@@ -130,21 +228,11 @@ function UseCaseEditForm({
             </select>
           </div>
         )}
-        <div className="space-y-1.5">
-          <label className={labelClass}>Description</label>
-          <textarea
-            value={fields.description}
-            onChange={e => set('description', e.target.value)}
-            placeholder="Optional description"
-            rows={3}
-            className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring resize-none"
-          />
-        </div>
+
+        {/* Custom Fields */}
         {fieldDefs.length > 0 && (
           <>
-            <div className="border-t border-border pt-2">
-              <p className={`${labelClass} mb-0`}>Custom Fields</p>
-            </div>
+            {sectionLabel('Custom Fields')}
             {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
             {fieldDefs.map((def: any) => (
               <div key={def.field_key} className="space-y-1.5">
@@ -156,7 +244,7 @@ function UseCaseEditForm({
                   <input type="number" value={customFieldValues[def.field_key] ?? ''} onChange={e => setCF(def.field_key, e.target.value)} className={inputClass} />
                 )}
                 {def.field_type === 'date' && (
-                  <input type="date" value={customFieldValues[def.field_key] ?? ''} onChange={e => setCF(def.field_key, e.target.value)} className={inputClass} />
+                  <DatePicker value={customFieldValues[def.field_key] ?? ''} onChange={val => setCF(def.field_key, val)} required={def.required} />
                 )}
                 {def.field_type === 'boolean' && (
                   <div className="flex items-center gap-2 h-10">
@@ -174,6 +262,7 @@ function UseCaseEditForm({
             ))}
           </>
         )}
+
         {useCase.created_at && (
           <div className="flex items-center justify-between py-2 border-t border-border mt-2">
             <span className="text-xs text-muted-foreground">Created</span>
@@ -187,6 +276,23 @@ function UseCaseEditForm({
         >
           {isSaving ? 'Saving…' : 'Save Changes'}
         </button>
+        {!confirmDelete ? (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="w-full h-9 rounded-md border border-destructive/40 text-destructive text-sm font-medium hover:bg-destructive/10 transition-colors flex items-center justify-center gap-1.5"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Delete Use Case
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <button onClick={() => setConfirmDelete(false)} className="flex-1 h-9 rounded-md border border-border text-sm text-muted-foreground hover:bg-muted/50 transition-colors">
+              Cancel
+            </button>
+            <button onClick={onDelete} className="flex-1 h-9 rounded-md bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors">
+              Confirm Delete
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -194,6 +300,7 @@ function UseCaseEditForm({
 
 export function UseCaseDrawer() {
   const { drawerEntityId, openAIWithContext, closeDrawer } = useAppStore();
+  const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -201,6 +308,7 @@ export function UseCaseDrawer() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: timelineData } = useUseCaseTimeline(drawerEntityId ?? '') as any;
   const updateUseCase = useUpdateUseCase(drawerEntityId ?? '');
+  const deleteUseCase = useDeleteUseCase(drawerEntityId ?? '');
 
   if (isLoading) {
     return (
@@ -233,6 +341,11 @@ export function UseCaseDrawer() {
           toast({ title: 'Use case updated' });
         }}
         onCancel={() => setEditing(false)}
+        onDelete={async () => {
+          await deleteUseCase.mutateAsync();
+          closeDrawer();
+          toast({ title: 'Use case deleted' });
+        }}
         isSaving={updateUseCase.isPending}
       />
     );
@@ -253,16 +366,18 @@ export function UseCaseDrawer() {
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
           </button>
-          <button
-            onClick={() => {
-              openAIWithContext({ type: 'use-case', id: useCase.id, name, detail: stage });
-              closeDrawer();
-              navigate('/agent');
-            }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-accent/30 bg-accent/5 text-accent text-sm font-semibold hover:bg-accent/10 transition-all ml-auto press-scale"
-          >
-            <Sparkles className="w-3.5 h-3.5" /> Chat
-          </button>
+          {agentEnabled && (
+            <button
+              onClick={() => {
+                openAIWithContext({ type: 'use-case', id: useCase.id, name, detail: stage });
+                closeDrawer();
+                navigate('/agent');
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-accent/30 bg-accent/5 text-accent text-sm font-semibold hover:bg-accent/10 transition-all ml-auto press-scale"
+            >
+              <Sparkles className="w-3.5 h-3.5" /> Chat
+            </button>
+          )}
         </div>
       </div>
 
@@ -306,21 +421,8 @@ export function UseCaseDrawer() {
       {timeline.length > 0 && (
         <div className="p-4 mx-4 mt-2 mb-6">
           <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide mb-3">Timeline</h3>
-          <div className="space-y-3">
-            {timeline.map((event, i) => (
-              <div key={(event.id as string) ?? i} className="flex gap-3">
-                <div className="w-7 h-7 rounded-xl bg-muted flex items-center justify-center text-xs flex-shrink-0">
-                  {event.type === 'stage_change' ? '🔄' : event.type === 'health_update' ? '💚' : '📝'}
-                </div>
-                <div>
-                  <p className="text-sm text-foreground">{(event.description ?? event.note ?? event.type) as string}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {event.created_at ? new Date(event.created_at as string).toLocaleDateString() : ''}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          <ActivityTimeline activities={timeline as any[]} />
         </div>
       )}
     </div>

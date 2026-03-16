@@ -1,14 +1,17 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from 'react';
-import { useContact, useActivities, useUpdateContact, useUsers, useCustomFields } from '@/api/hooks';
+import { useState, useRef } from 'react';
+import { useContact, useActivities, useUpdateContact, useDeleteContact, useUsers, useCustomFields, useNotes, useCreateNote } from '@/api/hooks';
 import { ContactAvatar } from './ContactAvatar';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge, LeadScoreBadge, CustomFieldsSection } from './CrmWidgets';
-import { Phone, Mail, StickyNote, Sparkles, Pencil, ChevronLeft } from 'lucide-react';
+import { ActivityTimeline } from './ActivityTimeline';
+import { Phone, Mail, StickyNote, Sparkles, Pencil, ChevronLeft, Send, Pin, Trash2 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
+import { DatePicker } from '@/components/ui/date-picker';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -19,14 +22,17 @@ function ContactEditForm({
   contact,
   onSave,
   onCancel,
+  onDelete,
   isSaving,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   contact: any;
   onSave: (data: Record<string, unknown>) => void;
   onCancel: () => void;
+  onDelete: () => void;
   isSaving: boolean;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [fields, setFields] = useState<Record<string, string>>({
     first_name: contact.first_name ?? '',
     last_name: contact.last_name ?? '',
@@ -143,7 +149,11 @@ function ContactEditForm({
                   <input type="number" value={customFieldValues[def.field_key] ?? ''} onChange={e => setCF(def.field_key, e.target.value)} className={inputClass} />
                 )}
                 {def.field_type === 'date' && (
-                  <input type="date" value={customFieldValues[def.field_key] ?? ''} onChange={e => setCF(def.field_key, e.target.value)} className={inputClass} />
+                  <DatePicker
+                    value={customFieldValues[def.field_key] ?? ''}
+                    onChange={val => setCF(def.field_key, val)}
+                    required={def.required}
+                  />
                 )}
                 {def.field_type === 'boolean' && (
                   <div className="flex items-center gap-2 h-10">
@@ -168,6 +178,23 @@ function ContactEditForm({
         >
           {isSaving ? 'Saving…' : 'Save Changes'}
         </button>
+        {!confirmDelete ? (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="w-full h-9 rounded-md border border-destructive/40 text-destructive text-sm font-medium hover:bg-destructive/10 transition-colors flex items-center justify-center gap-1.5"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Delete Contact
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <button onClick={() => setConfirmDelete(false)} className="flex-1 h-9 rounded-md border border-border text-sm text-muted-foreground hover:bg-muted/50 transition-colors">
+              Cancel
+            </button>
+            <button onClick={onDelete} className="flex-1 h-9 rounded-md bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors">
+              Confirm Delete
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -175,14 +202,23 @@ function ContactEditForm({
 
 export function ContactDrawer() {
   const { drawerEntityId, openAIWithContext, closeDrawer } = useAppStore();
+  const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
+  const [noting, setNoting] = useState(false);
+  const [noteBody, setNoteBody] = useState('');
+  const noteRef = useRef<HTMLTextAreaElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: contactData, isLoading } = useContact(drawerEntityId ?? '') as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: activitiesData } = useActivities({ contact_id: drawerEntityId ?? undefined, limit: 20 }) as any;
   const activities: any[] = activitiesData?.data ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: notesData } = useNotes({ object_type: 'contact', object_id: drawerEntityId ?? '' }) as any;
+  const notes: any[] = notesData?.data ?? [];
+  const createNote = useCreateNote();
   const updateContact = useUpdateContact(drawerEntityId ?? '');
+  const deleteContact = useDeleteContact(drawerEntityId ?? '');
 
   if (isLoading) {
     return (
@@ -218,6 +254,11 @@ export function ContactDrawer() {
           toast({ title: 'Contact updated' });
         }}
         onCancel={() => setEditing(false)}
+        onDelete={async () => {
+          await deleteContact.mutateAsync();
+          closeDrawer();
+          toast({ title: 'Contact deleted' });
+        }}
         isSaving={updateContact.isPending}
       />
     );
@@ -255,7 +296,10 @@ export function ContactDrawer() {
               <Mail className="w-3.5 h-3.5" /> Email
             </a>
           )}
-          <button className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale">
+          <button
+            onClick={() => { setNoting(v => !v); setTimeout(() => noteRef.current?.focus(), 50); }}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-medium transition-all press-scale ${noting ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-muted/80'}`}
+          >
             <StickyNote className="w-3.5 h-3.5" /> Note
           </button>
           <button
@@ -264,18 +308,71 @@ export function ContactDrawer() {
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
           </button>
-          <button
-            onClick={() => {
-              openAIWithContext({ type: 'contact', id: contact.id, name, detail: company });
-              closeDrawer();
-              navigate('/agent');
-            }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-accent/30 bg-accent/5 text-accent text-sm font-semibold hover:bg-accent/10 transition-all ml-auto press-scale"
-          >
-            <Sparkles className="w-3.5 h-3.5" /> Chat
-          </button>
+          {agentEnabled && (
+            <button
+              onClick={() => {
+                openAIWithContext({ type: 'contact', id: contact.id, name, detail: company });
+                closeDrawer();
+                navigate('/agent');
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-accent/30 bg-accent/5 text-accent text-sm font-semibold hover:bg-accent/10 transition-all ml-auto press-scale"
+            >
+              <Sparkles className="w-3.5 h-3.5" /> Chat
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Note compose panel */}
+      {noting && (
+        <div className="mx-4 mt-4 rounded-xl border border-border bg-card p-3 space-y-2">
+          <textarea
+            ref={noteRef}
+            value={noteBody}
+            onChange={e => setNoteBody(e.target.value)}
+            placeholder="Write a note…"
+            rows={3}
+            className="w-full px-3 py-2 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring resize-none"
+          />
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={() => { setNoting(false); setNoteBody(''); }} className="text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+            <button
+              disabled={!noteBody.trim() || createNote.isPending}
+              onClick={async () => {
+                await createNote.mutateAsync({ object_type: 'contact', object_id: drawerEntityId, body: noteBody.trim() });
+                setNoteBody('');
+                setNoting(false);
+                toast({ title: 'Note saved' });
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold disabled:opacity-40 transition-colors"
+            >
+              <Send className="w-3 h-3" /> Save
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Notes list */}
+      {notes.length > 0 && (
+        <div className="p-4 mx-4 mt-4 space-y-3">
+          <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide">Notes</h3>
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          {notes.map((note: any) => (
+            <div key={note.id} className="rounded-xl bg-muted/50 p-3 space-y-1">
+              <div className="flex items-center gap-1.5">
+                {note.pinned && <Pin className="w-3 h-3 text-accent" />}
+                <span className="text-[10px] text-muted-foreground ml-auto">
+                  {new Date(note.created_at).toLocaleDateString()}
+                </span>
+              </div>
+              <p className="text-sm text-foreground whitespace-pre-wrap">{note.body}</p>
+              {note.author_type && (
+                <p className="text-[10px] text-muted-foreground capitalize">{note.author_type === 'agent' ? 'AI Agent' : note.author_type}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Details */}
       <div className="p-4 mx-4 mt-4 space-y-3">
@@ -310,24 +407,7 @@ export function ContactDrawer() {
       {/* Timeline */}
       <div className="p-4 mx-4 mt-4 mb-6">
         <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide mb-3">Timeline</h3>
-        <div className="space-y-3">
-          {activities.map((a: any) => (
-            <div key={a.id as string} className="flex gap-3">
-              <div className="w-7 h-7 rounded-xl bg-muted flex items-center justify-center text-xs flex-shrink-0">
-                {a.type === 'call' ? '📞' : a.type === 'email' ? '✉️' : a.type === 'meeting' ? '🤝' : a.type === 'task' ? '✅' : '📝'}
-              </div>
-              <div>
-                <p className="text-sm text-foreground">{(a.description ?? a.body ?? a.type) as string}</p>
-                <p className="text-xs text-muted-foreground">
-                  {a.created_at ? new Date(a.created_at as string).toLocaleDateString() : ''}
-                </p>
-              </div>
-            </div>
-          ))}
-          {activities.length === 0 && (
-            <p className="text-sm text-muted-foreground">No activity yet.</p>
-          )}
-        </div>
+        <ActivityTimeline activities={activities} />
       </div>
     </div>
   );

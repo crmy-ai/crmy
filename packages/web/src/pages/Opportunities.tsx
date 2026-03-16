@@ -6,8 +6,10 @@ import { useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { useOpportunities } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { DatePicker } from '@/components/ui/date-picker';
 import { motion } from 'framer-motion';
 import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
 import { ContactAvatar } from '@/components/crm/ContactAvatar';
@@ -73,6 +75,7 @@ export default function Opportunities() {
   const navigate = useNavigate();
   const [view, setView] = useState<ViewMode>('table');
   const { openDrawer, openQuickAdd, openAIWithContext } = useAppStore();
+  const { enabled: agentEnabled } = useAgentSettings();
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
@@ -165,11 +168,21 @@ export default function Opportunities() {
         </div>
         {closeDate === 'custom' && (
           <div className="flex items-center gap-2">
-            <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
-              className="h-8 px-2 text-xs rounded-lg border border-border bg-background text-foreground" />
+            <DatePicker
+              value={customFrom}
+              onChange={setCustomFrom}
+              size="sm"
+              placeholder="From"
+              className="w-36"
+            />
             <span className="text-xs text-muted-foreground">to</span>
-            <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
-              className="h-8 px-2 text-xs rounded-lg border border-border bg-background text-foreground" />
+            <DatePicker
+              value={customTo}
+              onChange={setCustomTo}
+              size="sm"
+              placeholder="To"
+              className="w-36"
+            />
           </div>
         )}
       </div>
@@ -214,10 +227,12 @@ export default function Opportunities() {
                           className="bg-card border border-border rounded-2xl p-3.5 cursor-pointer hover:border-primary/30 hover:shadow-md transition-all press-scale group">
                           <div className="flex items-start justify-between">
                             <p className="text-sm font-display font-bold text-foreground">{opp.name as string}</p>
-                            <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: opp.id as string, name: opp.name as string, detail: `$${(amount / 1000).toFixed(0)}K` }); navigate('/agent'); }}
-                              className="p-0.5 rounded-lg md:opacity-0 md:group-hover:opacity-100 hover:bg-accent/10 transition-all">
-                              <Sparkles className="w-3.5 h-3.5 text-accent" />
-                            </button>
+                            {agentEnabled && (
+                              <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: opp.id as string, name: opp.name as string, detail: `$${(amount / 1000).toFixed(0)}K` }); navigate('/agent'); }}
+                                className="p-0.5 rounded-lg md:opacity-0 md:group-hover:opacity-100 hover:bg-accent/10 transition-all">
+                                <Sparkles className="w-3.5 h-3.5 text-accent" />
+                              </button>
+                            )}
                           </div>
                           {contactName && (
                             <div className="flex items-center gap-2 mt-2">
@@ -269,7 +284,7 @@ export default function Opportunities() {
                         <SortHeader label="Stage" sortKey="stage" />
                         <SortHeader label="Probability" sortKey="probability" />
                         <SortHeader label="Created" sortKey="created_at" />
-                        <th className="px-2 py-3 w-8"></th>
+                        {agentEnabled && <th className="px-2 py-3 w-8"></th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -296,12 +311,14 @@ export default function Opportunities() {
                             <td className="px-4 py-3 text-muted-foreground text-xs">
                               {d.created_at ? new Date(d.created_at as string).toLocaleDateString() : '—'}
                             </td>
-                            <td className="px-2 py-3">
-                              <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: d.id as string, name: d.name as string, detail: `$${(amount / 1000).toFixed(0)}K` }); navigate('/agent'); }}
-                                className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
-                                <Sparkles className="w-3.5 h-3.5 text-accent" />
-                              </button>
-                            </td>
+                            {agentEnabled && (
+                              <td className="px-2 py-3">
+                                <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: d.id as string, name: d.name as string, detail: `$${(amount / 1000).toFixed(0)}K` }); navigate('/agent'); }}
+                                  className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
+                                  <Sparkles className="w-3.5 h-3.5 text-accent" />
+                                </button>
+                              </td>
+                            )}
                           </tr>
                         );
                       })}

@@ -7,7 +7,8 @@ import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { TopBar } from '@/components/layout/TopBar';
 import { useContacts } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
-import { StageBadge, LeadScoreBadge } from '@/components/crm/CrmWidgets';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
+import { StageBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { motion } from 'framer-motion';
 import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
@@ -17,15 +18,14 @@ import { stageConfig } from '@/lib/stageConfig';
 type ViewMode = 'table' | 'cards';
 
 const filterConfigs: FilterConfig[] = [
-  { key: 'stage', label: 'Stage', options: Object.entries(stageConfig).map(([k, v]) => ({ value: k, label: v.label })) },
+  { key: 'lifecycle_stage', label: 'Stage', options: Object.entries(stageConfig).map(([k, v]) => ({ value: k, label: v.label })) },
 ];
 
 const sortOptions: SortOption[] = [
   { key: 'name', label: 'Name' },
   { key: 'company', label: 'Company' },
   { key: 'created_at', label: 'Created' },
-  { key: 'lead_score', label: 'Score' },
-  { key: 'stage', label: 'Stage' },
+  { key: 'lifecycle_stage', label: 'Stage' },
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,6 +43,7 @@ export default function Contacts() {
   const [view, setView] = useState<ViewMode>('table');
   const effectiveView = isMobile ? 'cards' : view;
   const { openDrawer, openQuickAdd, openAIWithContext } = useAppStore();
+  const { enabled: agentEnabled } = useAgentSettings();
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
@@ -60,7 +61,7 @@ export default function Contacts() {
 
   const filtered = useMemo(() => {
     let result = [...allContacts];
-    if (activeFilters.stage?.length) result = result.filter(c => activeFilters.stage.includes(c.stage as string));
+    if (activeFilters.lifecycle_stage?.length) result = result.filter(c => activeFilters.lifecycle_stage.includes(c.lifecycle_stage as string));
     if (sort) {
       result.sort((a, b) => {
         const aVal = (a[sort.key] ?? '') as string | number;
@@ -123,9 +124,8 @@ export default function Contacts() {
                     <SortHeader label="Name" sortKey="name" />
                     <SortHeader label="Company" sortKey="company" />
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Phone</th>
-                    <SortHeader label="Score" sortKey="lead_score" />
-                    <SortHeader label="Stage" sortKey="stage" />
-                    <th className="px-2 py-3 w-8"></th>
+                    <SortHeader label="Stage" sortKey="lifecycle_stage" />
+                    {agentEnabled && <th className="px-2 py-3 w-8"></th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -140,14 +140,15 @@ export default function Contacts() {
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{(c.company_name as string) || '—'}</td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{(c.phone as string) || '—'}</td>
-                      <td className="px-4 py-3">{c.lead_score ? <LeadScoreBadge score={c.lead_score as number} /> : '—'}</td>
-                      <td className="px-4 py-3">{c.stage ? <StageBadge stage={c.stage as string} /> : '—'}</td>
-                      <td className="px-2 py-3">
-                        <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: c.company_name as string }); navigate('/agent'); }}
-                          className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
-                          <Sparkles className="w-3.5 h-3.5 text-accent" />
-                        </button>
-                      </td>
+                      <td className="px-4 py-3">{c.lifecycle_stage ? <StageBadge stage={c.lifecycle_stage as string} /> : '—'}</td>
+                      {agentEnabled && (
+                        <td className="px-2 py-3">
+                          <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: c.company_name as string }); navigate('/agent'); }}
+                            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
+                            <Sparkles className="w-3.5 h-3.5 text-accent" />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -160,10 +161,12 @@ export default function Contacts() {
               <motion.div key={c.id as string} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
                 onClick={() => openDrawer('contact', c.id as string)}
                 className="bg-card border border-border rounded-2xl p-4 cursor-pointer hover:shadow-lg hover:border-primary/20 transition-all press-scale group relative">
-                <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: c.company_name as string }); navigate('/agent'); }}
-                  className="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-accent/10 transition-all md:opacity-0 md:group-hover:opacity-100">
-                  <Sparkles className="w-3.5 h-3.5 text-accent" />
-                </button>
+                {agentEnabled && (
+                  <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: c.company_name as string }); navigate('/agent'); }}
+                    className="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-accent/10 transition-all md:opacity-0 md:group-hover:opacity-100">
+                    <Sparkles className="w-3.5 h-3.5 text-accent" />
+                  </button>
+                )}
                 <div className="flex items-center gap-3 mb-3">
                   <ContactAvatar name={displayName(c)} className="w-11 h-11 rounded-2xl text-sm" />
                   <div>
@@ -172,8 +175,7 @@ export default function Contacts() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 mb-2">
-                  {c.stage && <StageBadge stage={c.stage as string} />}
-                  {c.lead_score && <LeadScoreBadge score={c.lead_score as number} />}
+                  {c.lifecycle_stage && <StageBadge stage={c.lifecycle_stage as string} />}
                 </div>
                 {c.email && <p className="text-xs text-muted-foreground">{c.email as string}</p>}
               </motion.div>

@@ -12,8 +12,11 @@ export async function createActivity(
   const result = await db.query(
     `INSERT INTO activities (tenant_id, type, subject, body, status, direction,
        due_at, contact_id, account_id, opportunity_id, owner_id,
-       source_agent, custom_fields, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       source_agent, custom_fields, created_by,
+       performed_by, subject_type, subject_id, related_type, related_id,
+       detail, occurred_at, outcome)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
+             $15,$16,$17,$18,$19,$20,$21,$22)
      RETURNING *`,
     [
       tenantId,
@@ -30,6 +33,15 @@ export async function createActivity(
       data.source_agent ?? null,
       JSON.stringify(data.custom_fields ?? {}),
       data.created_by ?? null,
+      // Context Engine fields
+      data.performed_by ?? null,
+      data.subject_type ?? null,
+      data.subject_id ?? null,
+      data.related_type ?? null,
+      data.related_id ?? null,
+      JSON.stringify(data.detail ?? {}),
+      data.occurred_at ?? new Date().toISOString(),
+      data.outcome ?? null,
     ],
   );
   return result.rows[0] as Activity;
@@ -51,6 +63,10 @@ export async function searchActivities(
     account_id?: UUID;
     opportunity_id?: UUID;
     type?: string;
+    subject_type?: string;
+    subject_id?: UUID;
+    performed_by?: UUID;
+    outcome?: string;
     limit: number;
     cursor?: string;
   },
@@ -77,6 +93,26 @@ export async function searchActivities(
   if (filters.type) {
     conditions.push(`a.type = $${idx}`);
     params.push(filters.type);
+    idx++;
+  }
+  if (filters.subject_type) {
+    conditions.push(`a.subject_type = $${idx}`);
+    params.push(filters.subject_type);
+    idx++;
+  }
+  if (filters.subject_id) {
+    conditions.push(`a.subject_id = $${idx}`);
+    params.push(filters.subject_id);
+    idx++;
+  }
+  if (filters.performed_by) {
+    conditions.push(`a.performed_by = $${idx}`);
+    params.push(filters.performed_by);
+    idx++;
+  }
+  if (filters.outcome) {
+    conditions.push(`a.outcome = $${idx}`);
+    params.push(filters.outcome);
     idx++;
   }
   if (filters.cursor) {
@@ -153,6 +189,45 @@ export async function completeActivity(
     [tenantId, id, completedAt ?? new Date().toISOString()],
   );
   return (result.rows[0] as Activity) ?? null;
+}
+
+/**
+ * Generic timeline for any CRM object via polymorphic subject_type + subject_id.
+ */
+export async function getSubjectTimeline(
+  db: DbPool,
+  tenantId: UUID,
+  subjectType: string,
+  subjectId: UUID,
+  filters: { limit: number; types?: string[] },
+): Promise<{ activities: Activity[]; total: number }> {
+  const conditions: string[] = ['tenant_id = $1', 'subject_type = $2', 'subject_id = $3'];
+  const params: unknown[] = [tenantId, subjectType, subjectId];
+  let idx = 4;
+
+  if (filters.types && filters.types.length > 0) {
+    conditions.push(`type = ANY($${idx})`);
+    params.push(filters.types);
+    idx++;
+  }
+
+  const where = conditions.join(' AND ');
+
+  const countResult = await db.query(
+    `SELECT count(*)::int as total FROM activities WHERE ${where}`,
+    params,
+  );
+
+  params.push(filters.limit);
+  const dataResult = await db.query(
+    `SELECT * FROM activities WHERE ${where} ORDER BY COALESCE(occurred_at, created_at) DESC LIMIT $${idx}`,
+    params,
+  );
+
+  return {
+    activities: dataResult.rows as Activity[],
+    total: countResult.rows[0].total,
+  };
 }
 
 export async function getContactTimeline(

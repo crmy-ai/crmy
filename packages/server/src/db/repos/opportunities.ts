@@ -286,3 +286,11 @@ export async function getPipelineForecast(
     avg_cycle_days: stats.rows[0].avg_cycle ?? 0,
   };
 }
+
+export async function deleteOpportunity(db: DbPool, tenantId: UUID, id: UUID): Promise<boolean> {
+  const result = await db.query(
+    'DELETE FROM opportunities WHERE tenant_id = $1 AND id = $2',
+    [tenantId, id],
+  );
+  return (result.rowCount ?? 0) > 0;
+}

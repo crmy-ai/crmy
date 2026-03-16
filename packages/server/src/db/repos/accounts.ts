@@ -197,3 +197,11 @@ export async function getAccountHierarchy(
     depth,
   };
 }
+
+export async function deleteAccount(db: DbPool, tenantId: UUID, id: UUID): Promise<boolean> {
+  const result = await db.query(
+    'DELETE FROM accounts WHERE tenant_id = $1 AND id = $2',
+    [tenantId, id],
+  );
+  return (result.rowCount ?? 0) > 0;
+}

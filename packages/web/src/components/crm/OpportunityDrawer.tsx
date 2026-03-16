@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { useOpportunity, useUpdateOpportunity, useUsers, useCustomFields } from '@/api/hooks';
+import { useOpportunity, useUpdateOpportunity, useDeleteOpportunity, useUsers, useCustomFields } from '@/api/hooks';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge, CustomFieldsSection } from './CrmWidgets';
-import { Sparkles, TrendingUp, Calendar, User, Pencil, ChevronLeft } from 'lucide-react';
+import { Sparkles, TrendingUp, Calendar, User, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
+import { DatePicker } from '@/components/ui/date-picker';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -18,14 +20,17 @@ function OpportunityEditForm({
   opportunity,
   onSave,
   onCancel,
+  onDelete,
   isSaving,
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   opportunity: any;
   onSave: (data: Record<string, unknown>) => void;
   onCancel: () => void;
+  onDelete: () => void;
   isSaving: boolean;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [fields, setFields] = useState<Record<string, string>>({
     name: opportunity.name ?? '',
     amount: opportunity.amount != null ? String(opportunity.amount) : '',
@@ -103,7 +108,15 @@ function OpportunityEditForm({
         ].map(f => (
           <div key={f.key} className="space-y-1.5">
             <label className={labelClass}>{f.label}</label>
-            <input type={f.type} value={fields[f.key]} onChange={e => set(f.key, e.target.value)} placeholder={f.placeholder} className={inputClass} />
+            {f.type === 'date' ? (
+              <DatePicker
+                value={fields[f.key] ?? ''}
+                onChange={val => set(f.key, val)}
+                placeholder="Select close date"
+              />
+            ) : (
+              <input type={f.type} value={fields[f.key]} onChange={e => set(f.key, e.target.value)} placeholder={f.placeholder} className={inputClass} />
+            )}
           </div>
         ))}
         {users.length > 0 && (
@@ -144,7 +157,11 @@ function OpportunityEditForm({
                   <input type="number" value={customFieldValues[def.field_key] ?? ''} onChange={e => setCF(def.field_key, e.target.value)} className={inputClass} />
                 )}
                 {def.field_type === 'date' && (
-                  <input type="date" value={customFieldValues[def.field_key] ?? ''} onChange={e => setCF(def.field_key, e.target.value)} className={inputClass} />
+                  <DatePicker
+                    value={customFieldValues[def.field_key] ?? ''}
+                    onChange={val => setCF(def.field_key, val)}
+                    required={def.required}
+                  />
                 )}
                 {def.field_type === 'boolean' && (
                   <div className="flex items-center gap-2 h-10">
@@ -175,6 +192,23 @@ function OpportunityEditForm({
         >
           {isSaving ? 'Saving…' : 'Save Changes'}
         </button>
+        {!confirmDelete ? (
+          <button
+            onClick={() => setConfirmDelete(true)}
+            className="w-full h-9 rounded-md border border-destructive/40 text-destructive text-sm font-medium hover:bg-destructive/10 transition-colors flex items-center justify-center gap-1.5"
+          >
+            <Trash2 className="w-3.5 h-3.5" /> Delete Opportunity
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <button onClick={() => setConfirmDelete(false)} className="flex-1 h-9 rounded-md border border-border text-sm text-muted-foreground hover:bg-muted/50 transition-colors">
+              Cancel
+            </button>
+            <button onClick={onDelete} className="flex-1 h-9 rounded-md bg-destructive text-destructive-foreground text-sm font-medium hover:bg-destructive/90 transition-colors">
+              Confirm Delete
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -182,11 +216,13 @@ function OpportunityEditForm({
 
 export function OpportunityDrawer() {
   const { drawerEntityId, openAIWithContext, closeDrawer } = useAppStore();
+  const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: oppData, isLoading } = useOpportunity(drawerEntityId ?? '') as any;
   const updateOpportunity = useUpdateOpportunity(drawerEntityId ?? '');
+  const deleteOpportunity = useDeleteOpportunity(drawerEntityId ?? '');
 
   if (isLoading) {
     return (
@@ -219,6 +255,11 @@ export function OpportunityDrawer() {
           toast({ title: 'Opportunity updated' });
         }}
         onCancel={() => setEditing(false)}
+        onDelete={async () => {
+          await deleteOpportunity.mutateAsync();
+          closeDrawer();
+          toast({ title: 'Opportunity deleted' });
+        }}
         isSaving={updateOpportunity.isPending}
       />
     );
@@ -247,16 +288,18 @@ export function OpportunityDrawer() {
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
           </button>
-          <button
-            onClick={() => {
-              openAIWithContext({ type: 'opportunity', id: opportunity.id, name, detail: `$${(amount / 1000).toFixed(0)}K` });
-              closeDrawer();
-              navigate('/agent');
-            }}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-accent/30 bg-accent/5 text-accent text-sm font-semibold hover:bg-accent/10 transition-all ml-auto press-scale"
-          >
-            <Sparkles className="w-3.5 h-3.5" /> Chat
-          </button>
+          {agentEnabled && (
+            <button
+              onClick={() => {
+                openAIWithContext({ type: 'opportunity', id: opportunity.id, name, detail: `$${(amount / 1000).toFixed(0)}K` });
+                closeDrawer();
+                navigate('/agent');
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-accent/30 bg-accent/5 text-accent text-sm font-semibold hover:bg-accent/10 transition-all ml-auto press-scale"
+            >
+              <Sparkles className="w-3.5 h-3.5" /> Chat
+            </button>
+          )}
         </div>
       </div>
 

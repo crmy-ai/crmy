@@ -5,6 +5,7 @@ import { Input } from './ui/input';
 import { Select } from './ui/select';
 import { Badge } from './ui/badge';
 import { useCustomFields } from '../api/hooks';
+import { DatePicker } from './ui/date-picker';
 
 interface CustomFieldDef {
   id: string;
@@ -112,10 +113,9 @@ function renderFieldInput(
 
     case 'date':
       return (
-        <Input
-          type="date"
+        <DatePicker
           value={(value as string) ?? ''}
-          onChange={(e) => setValue(key, e.target.value || null)}
+          onChange={(v) => setValue(key, v || null)}
           required={required}
         />
       );

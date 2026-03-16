@@ -7,8 +7,7 @@ import { PipelineSnapshot, ActivityFeed, AccountHealth } from '@/components/crm/
 import { useAppStore } from '@/store/appStore';
 import { useOpportunities } from '@/api/hooks';
 import { motion } from 'framer-motion';
-import { ArrowRight, TrendingUp, UserPlus, FolderKanban, Activity } from 'lucide-react';
-import { ContactAvatar } from '@/components/crm/ContactAvatar';
+import { ArrowRight, TrendingUp, UserPlus, FolderKanban, Activity, Briefcase } from 'lucide-react';
 
 function greeting() {
   const h = new Date().getHours();
@@ -87,7 +86,9 @@ export default function Dashboard() {
                         onClick={() => openDrawer('opportunity', deal.id as string)}
                         className="flex items-center gap-3 p-3 rounded-xl bg-surface hover:bg-surface-sunken cursor-pointer transition-all press-scale"
                       >
-                        <ContactAvatar name={contactName} className="w-8 h-8 rounded-full text-xs" />
+                        <div className="w-8 h-8 rounded-xl bg-accent/10 flex items-center justify-center flex-shrink-0">
+                          <Briefcase className="w-4 h-4 text-accent" />
+                        </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-foreground truncate">{deal.name as string}</p>
                           <p className="text-xs text-muted-foreground">
