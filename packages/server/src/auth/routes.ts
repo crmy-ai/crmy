@@ -420,7 +420,7 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
       // Fetch current user record
       const existing = await db.query(
         'SELECT * FROM users WHERE id = $1 AND tenant_id = $2',
-        [actor.user_id, actor.tenant_id],
+        [actor.actor_id, actor.tenant_id],
       );
       if (existing.rows.length === 0) {
         res.status(404).json({ detail: 'User not found' });
@@ -465,7 +465,7 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
         return;
       }
 
-      vals.push(actor.user_id, actor.tenant_id);
+      vals.push(actor.actor_id, actor.tenant_id);
       const result = await db.query(
         `UPDATE users SET ${cols.join(', ')}
          WHERE id = $${vals.length - 1} AND tenant_id = $${vals.length}

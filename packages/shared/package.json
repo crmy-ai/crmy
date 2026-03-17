@@ -1,8 +1,11 @@
 {
   "name": "@crmy/shared",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Shared types, Zod schemas, and validation for CRMy",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -13,6 +16,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "dev": "tsc --watch"
   },
   "dependencies": {

@@ -297,7 +297,7 @@ type FieldConfig = {
   label: string;
   placeholder?: string;
   inputType?: 'text' | 'email' | 'tel' | 'number' | 'date' | 'url' | 'datetime-local';
-  fieldType?: 'textarea' | 'select' | 'account-select' | 'subject-type-select' | 'entity-select' | 'datalist';
+  fieldType?: 'textarea' | 'select' | 'account-select' | 'subject-type-select' | 'entity-select' | 'datalist' | 'actor-select';
   options?: string[];
   datalistId?: string;
   suggestions?: string[];
