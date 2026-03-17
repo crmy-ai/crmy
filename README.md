@@ -38,12 +38,12 @@ postgresql://username:password@localhost:5432/crmy
 ## Install
 
 ```bash
-npm install -g @crmy/core
+npm install -g @crmy/cli
 ```
 
 Or run without installing (downloads automatically each time):
 ```bash
-npx crmy init
+npx @crmy/cli init
 ```
 
 ---
@@ -53,7 +53,7 @@ npx crmy init
 ### Step 1 — Run setup
 
 ```bash
-npx crmy init
+npx @crmy/cli init
 ```
 
 This walks you through an interactive setup:
@@ -65,7 +65,7 @@ This walks you through an interactive setup:
 ### Step 2 — Start the server
 
 ```bash
-npx crmy server
+npx @crmy/cli server
 ```
 
 The server starts on port 3000. You'll see:
@@ -91,7 +91,7 @@ You'll land on the Dashboard. From there you can:
 To give Claude access to your CRM via MCP tools:
 
 ```bash
-claude mcp add crmy -- npx crmy mcp
+claude mcp add crmy -- npx @crmy/cli mcp
 ```
 
 Then in Claude Code, you can say things like:
@@ -262,7 +262,7 @@ npm run dev     # starts server with tsx watch
 packages/
   shared/   @crmy/shared   TypeScript types, Zod schemas, validation
   server/   @crmy/server   Express + PostgreSQL + MCP Streamable HTTP
-  cli/      crmy           Local CLI + stdio MCP server
+  cli/      @crmy/cli      Local CLI + stdio MCP server
   web/      @crmy/web      React SPA (served at /app by Express)
 docker/                    Dockerfile + docker-compose.yml
 scripts/                   Migration runner

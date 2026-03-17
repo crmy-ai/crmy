@@ -1,14 +1,18 @@
 {
   "name": "@crmy/cli",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "CRMy CLI — Local CLI + stdio MCP server",
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "bin": {
     "crmy": "dist/index.js"
   },
   "main": "dist/index.js",
   "scripts": {
     "build": "tsup src/index.ts --format esm --clean",
+    "prepare": "npm run build",
     "dev": "tsx src/index.ts"
   },
   "dependencies": {
