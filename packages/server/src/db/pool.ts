@@ -17,8 +17,16 @@ export function getPool(): DbPool {
 }
 
 export async function initPool(databaseUrl: string, maxConnections = 10): Promise<DbPool> {
+  // Parse password explicitly — pg requires a string for SCRAM auth; undefined causes a crash
+  let password: string | undefined;
+  try {
+    password = new URL(databaseUrl).password || '';
+  } catch {
+    password = undefined;
+  }
   pool = new Pool({
     connectionString: databaseUrl,
+    ...(password !== undefined && { password }),
     max: maxConnections,
   });
 
