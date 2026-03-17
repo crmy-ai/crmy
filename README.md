@@ -2,179 +2,247 @@
 
 An agent-first open source CRM with a built-in Context Engine for agent-human GTM coordination. MCP-native. Works with any PostgreSQL.
 
+---
+
+## Before you start
+
+You need two things installed on your machine before setting up CRMy:
+
+### 1. Node.js (version 20 or newer)
+
+Check if you have it:
+```bash
+node --version
+```
+
+If not installed, download it from [nodejs.org](https://nodejs.org) — pick the **LTS** version.
+
+### 2. PostgreSQL (version 14 or newer)
+
+CRMy stores all data in a PostgreSQL database. You have a few options:
+
+| Option | Best for | Notes |
+|--------|----------|-------|
+| **Local install** | Development | [postgresql.org/download](https://www.postgresql.org/download/) |
+| **Docker** | Quick local setup | `docker run -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16` |
+| **Supabase** | Cloud, free tier available | [supabase.com](https://supabase.com) — free PostgreSQL in the cloud |
+| **Neon** | Cloud, serverless | [neon.tech](https://neon.tech) — free tier available |
+
+Once PostgreSQL is running, you'll need a connection string that looks like:
+```
+postgresql://username:password@localhost:5432/crmy
+```
+
+---
+
 ## Install
 
 ```bash
 npm install -g crmy
 ```
 
-Or run directly with npx (no install needed):
+Or run without installing (downloads automatically each time):
+```bash
+npx crmy init
+```
+
+---
+
+## Getting started
+
+### Step 1 — Run setup
 
 ```bash
 npx crmy init
 ```
 
-### Prerequisites
+This walks you through an interactive setup:
+- Connects to your PostgreSQL database (you'll paste your connection string)
+- Creates all the tables CRMy needs (migrations run automatically)
+- Creates your first user account (email + password)
+- Generates an API key stored in `.crmy.json`
 
-- **Node.js** >= 20.0.0
-- **PostgreSQL** >= 14 (any provider: local, Supabase, Neon, RDS, etc.)
-
-## Quickstart
-
-### Option A — Local mode (direct database)
+### Step 2 — Start the server
 
 ```bash
-npx crmy init
-# Walks you through: connect to PostgreSQL, run migrations, create user, generate API key.
-# Config saved to .crmy.json (auto-added to .gitignore).
-
 npx crmy server
-# Server ready on :3000 — REST API + MCP + Web UI at /app
 ```
 
-### Option B — Connect to a remote server
-
-```bash
-crmy auth setup https://crm.company.com
-crmy login
-# Prompts for email + password, stores JWT in ~/.crmy/auth.json
-# All subsequent CLI commands use the REST API
+The server starts on port 3000. You'll see:
+```
+CRMy server running on http://localhost:3000
+Web UI: http://localhost:3000/app
 ```
 
-### Use with Claude Code
+### Step 3 — Open the web interface
+
+Visit **[http://localhost:3000/app](http://localhost:3000/app)** in your browser.
+
+Log in with the email and password you set in Step 1.
+
+You'll land on the Dashboard. From there you can:
+- Add contacts, accounts, and opportunities
+- View the pipeline board
+- Check the HITL approval queue
+- Manage settings, API keys, and actors
+
+### Step 4 — Connect to Claude Code (optional)
+
+To give Claude access to your CRM via MCP tools:
 
 ```bash
 claude mcp add crmy -- npx crmy mcp
 ```
 
-Then in Claude Code:
-> "Create a contact for Sarah Chen at Acme Corp, set her stage to prospect,
->  and log a call we had today about their Q2 budget"
+Then in Claude Code, you can say things like:
+> "Create a contact for Sarah Chen at Acme Corp, set her stage to prospect, and log a call we had today about their Q2 budget"
 
-### Self-host with Docker
+Claude will use the CRMy MCP tools to create the contact and log the activity directly in your CRM.
+
+---
+
+## Docker (fastest option)
+
+If you have Docker installed, this starts everything — PostgreSQL and the CRMy server — with one command:
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
 ```
 
-Starts PostgreSQL + crmy server on port 3000 with auto-migrations.
+Then open [http://localhost:3000/app](http://localhost:3000/app).
 
-## Web UI
+Default credentials when using Docker:
+- **Email**: `admin@crmy.ai`
+- **Password**: `admin`
 
-The web interface is available at `/app` when running the server. Built with React 18 + Vite + Tailwind CSS.
+Change these after first login in Settings → Profile.
 
+---
+
+## Connect to a remote server
+
+If someone else is running a CRMy server and you want to connect your CLI to it:
+
+```bash
+# Tell the CLI where the server is
+crmy auth setup https://crm.yourcompany.com
+
+# Log in with your email + password
+crmy login
+
+# Now CLI commands go to that server
+crmy contacts list
 ```
-http://localhost:3000/app
-```
 
-### Pages
+---
 
-| Page | Description |
+## Web UI overview
+
+The web interface is available at `/app` when the server is running.
+
+| Page | What it does |
 |------|-------------|
-| Dashboard | Stat cards, use case stage strip, recent activity feed |
-| Contacts | List, create, detail with activity timeline, context panel, and briefing |
-| Accounts | List, create, detail with context panel and briefing |
-| Pipeline | Kanban board by opportunity stage |
-| Opportunities | Detail view with context panel and briefing |
-| Use Cases | List with filters, create form, 360 detail with context panel and briefing |
-| Activities | Activity log across all objects |
-| **Assignments** | Assignment queue with My Queue / Delegated / All tabs, status filters, and inline actions (accept, start, complete, block, cancel, decline) |
-| Analytics | Pipeline by stage, forecast, use case ARR/health distribution |
-| HITL Queue | Approve/reject agent actions with payload viewer |
-| Settings | Profile, API keys, webhooks, custom fields management |
-| Search | Global cross-entity search |
+| **Dashboard** | Stat cards (pipeline, deals, use cases, pending approvals), stage strip, recent activity |
+| **Contacts** | List, search, create, and view contacts with activity timelines |
+| **Accounts** | Companies with health scores, contacts, opportunities, and use cases |
+| **Pipeline** | Kanban board for tracking deals through stages |
+| **Use Cases** | Track consumption-based workloads (discovery → poc → production → scaling → sunset) |
+| **Assignments** | Queue of work items with My Queue / Delegated / All tabs |
+| **Analytics** | Pipeline by stage, forecast, use case health distribution |
+| **HITL Queue** | Approve or reject agent actions before they execute |
+| **Settings** | API keys, webhooks, custom fields, and the Actors panel |
 
-### Use Case 360
+---
 
-The use case detail page provides a complete view:
-- **Stage bar** — click to advance with confirmation modal (note required for sunset)
-- **Consumption bar** — green/amber/red thresholds at 70%/90%
-- **Health badge** — colored by score (green >= 70, amber 40-69, red < 40)
-- **Contact management** — add/remove contacts with role assignment
-- **Activity timeline** — linked activities and events
+## Context Engine
 
-## Context Engine (v0.4 + v0.5)
+The Context Engine is what makes CRMy agent-first — a shared workspace where AI agents and humans coordinate GTM workflows.
 
-The Context Engine transforms CRMy from a system of record into a **system of action** — a shared workspace where AI agents and humans coordinate GTM workflows through four primitives:
+Four building blocks:
 
-| Primitive | What it captures | Why it matters |
-|-----------|-----------------|----------------|
-| **Actors** | Who is doing things (human or agent) | First-class identity enables agent-human coordination |
-| **Activities** (enhanced) | Everything that happened — with polymorphic subjects and structured payloads | Rich audit trail with `occurred_at`, `detail` JSONB, and `outcome` |
-| **Assignments** | Who owns what next — handoffs between agents and humans | Full lifecycle: pending → accepted → in_progress → completed/blocked/cancelled |
-| **Context Entries** | Structured knowledge attached to any CRM object | The memory layer with tags, FTS, staleness tracking, and supersede chains |
+| Primitive | What it captures |
+|-----------|-----------------|
+| **Actors** | Who is doing things — humans and AI agents as first-class identities |
+| **Activities** | Everything that happened, with structured payloads, retroactive timestamps, and outcome tracking |
+| **Assignments** | Structured handoffs — "agent A should do X about contact Y by Thursday" |
+| **Context Entries** | The memory layer — typed, searchable, tagged knowledge attached to any CRM object |
 
-### v0.5 — Assignments, Context & Coordination
-
-v0.5 adds the coordination and knowledge management layers:
-
-- **Activity Type Registry** — 19 default activity types across 7 categories (outreach, meeting, proposal, contract, internal, lifecycle, handoff). Add custom types per tenant.
-- **Context Type Registry** — 12 default context types (note, transcript, summary, research, preference, objection, competitive_intel, relationship_map, meeting_notes, agent_reasoning, decision, action_item). Extensible.
-- **Full-text search** on context entries via PostgreSQL `tsvector`/`tsquery` with GIN indexes
-- **Context staleness** — entries have optional `valid_until` timestamps; stale entries surface in briefings and the UI
-- **Context tags** — JSONB array tags on context entries with GIN index for fast filtering
-- **Briefing service** — assembles a complete briefing for any CRM object: record, related objects, activities, open assignments, context entries grouped by type, and staleness warnings
-- **Assignment lifecycle** — full state machine: pending → accepted → in_progress → completed, with block/cancel/decline transitions
-- **Governor limits** — plan-based rate limiting (solo_agent, pro_agent, team) on actors, activities, assignments, and context entries
-
-### Agent Workflow Example
+### Agent workflow example
 
 ```
-1. Agent logs a meeting activity (activity_create)
-2. Agent extracts key takeaways and stores them (context_add ×3, with tags and confidence)
-3. Agent assigns follow-up to human rep (assignment_create)
-4. Human gets a briefing on the contact (briefing_get) — sees activities, context, stale warnings
-5. Human reviews context, sends proposal (assignment_complete)
-6. Agent searches context for competitive intel (context_search)
-7. Agent reviews stale entries and supersedes outdated ones (context_stale, context_supersede)
+1. Agent logs a discovery call (activity_create)
+2. Agent stores key takeaways as context entries (context_add × 3, with tags and confidence scores)
+3. Agent assigns follow-up to a human rep (assignment_create)
+4. Human gets a full briefing on the contact (briefing_get)
+   — sees record, related objects, activities, open assignments, context grouped by type, stale warnings
+5. Human sends the proposal and completes the assignment (assignment_complete)
+6. Agent searches context for competitor mentions later (context_search)
 ```
 
-### Key Design Decisions
-
-- **Polymorphic subjects**: Activities, assignments, and context entries attach to any CRM object via `subject_type` + `subject_id`
-- **`activity_type` is a text field**: Agents can invent new activity types without schema changes
-- **`occurred_at` vs `created_at`**: Agents may log activities retroactively; the timeline shows when it happened, not when it was logged
-- **Context `confidence` field**: Agents signal certainty (1.0 for transcripts, 0.6 for sentiment analysis) so downstream consumers can weight decisions
-- **Supersede, don't delete**: Old context entries are marked `is_current = false` for audit trail; new entries point back via `supersedes_id`
-- **Type registries**: Activity types and context types are discoverable via registry tables, seeded with defaults, and extensible per tenant
-- **Briefings**: One API call assembles everything an agent or human needs before engaging with a CRM object
+---
 
 ## Authentication
 
-CRMy supports three authentication methods:
-
-### JWT Login
+### Log in via web or CLI
 
 ```bash
-# From the CLI
+# Web UI: visit /app/login
+# CLI:
 crmy auth setup http://localhost:3000
 crmy login
-
-# From the Web UI
-# Visit /app/login — email + password
 ```
 
-### API Keys
+### API keys
+
+Create API keys for agents and integrations:
 
 ```bash
-# Create via CLI (after init)
-# Key is generated during `crmy init` and stored in .crmy.json
-
-# Create via REST
-POST /auth/api-keys  { "label": "my-agent", "scopes": ["*"] }
-# Returns the key once — store it securely
-
-# Use in requests
-Authorization: Bearer crmy_<key>
+# During init, a key is auto-generated in .crmy.json
+# Create additional keys via REST:
+POST /auth/api-keys  { "label": "my-agent", "scopes": ["contacts:read", "activities:write"] }
 ```
 
-### Environment Variables
-
-```bash
-export CRMY_SERVER_URL=http://localhost:3000
-export CRMY_API_KEY=crmy_abc123...
-crmy contacts list   # uses REST API with API key
+The key is shown **once** — copy and store it securely. Use it in API calls:
 ```
+Authorization: Bearer crmy_abc123...
+```
+
+### Scope-limited keys
+
+API keys can be restricted to specific capabilities:
+
+| Scope | What it allows |
+|-------|---------------|
+| `*` | Everything (full access) |
+| `read` | Read all resources |
+| `write` | Write all resources |
+| `contacts:read` | Read contacts only |
+| `contacts:write` | Create/update contacts |
+| `activities:write` | Log activities |
+| `context:read` / `context:write` | Read/write context entries |
+| *(and more — see [docs/guide.md](docs/guide.md))* | |
+
+A key with `["contacts:read", "activities:write"]` can read contacts and log activities, but cannot create new contacts or access other resources.
+
+### Agent self-registration
+
+Agents can register themselves without admin setup:
+
+```
+POST /auth/register-agent
+Authorization: Bearer <any-valid-key>
+
+{
+  "display_name": "Outreach Agent",
+  "agent_identifier": "outreach-v2",
+  "agent_model": "claude-sonnet-4-20250514",
+  "requested_scopes": ["contacts:read", "activities:write"]
+}
+```
+
+Returns the actor record and a bound API key. Calling this again with the same `agent_identifier` returns the existing actor — no duplicates. Admins can adjust scopes from **Settings → Actors**.
+
+---
 
 ## Develop from source
 
@@ -185,6 +253,8 @@ npm install
 npm run build
 npm run dev     # starts server with tsx watch
 ```
+
+---
 
 ## Architecture
 
@@ -198,15 +268,17 @@ docker/                    Dockerfile + docker-compose.yml
 scripts/                   Migration runner
 ```
 
-### Design Decisions
+### Key design decisions
 
-- **MCP-first**: All CRM operations are MCP tools. REST API and CLI are thin wrappers.
-- **Raw SQL**: No ORM. Every query is readable and auditable.
-- **Event sourcing**: Every mutation writes an append-only event row for full audit trail.
-- **Context Engine**: Actors (who), Activities (what happened), Assignments (coordination), and Context Entries (memory) form a shared workspace where AI agents and humans run GTM together.
-- **HITL**: Agents request human approval before high-impact actions.
-- **Plugins**: Extensible plugin system with lifecycle hooks.
-- **Workflows**: Event-driven automation with configurable triggers and actions.
+- **MCP-first** — All CRM operations are MCP tools. REST API and CLI are thin wrappers around the same handlers.
+- **Raw SQL** — No ORM. Every query is readable and auditable.
+- **Event sourcing** — Every mutation appends to an `events` table. Full audit trail.
+- **Scope enforcement** — API key scopes checked before every tool handler. JWT users (humans) bypass scoping and always have full access.
+- **Governor limits** — Plan-based quotas on actors, activities, assignments, and context entries. Prevents runaway agents.
+- **Context Engine** — Actors (who), Activities (what happened), Assignments (coordination), and Context Entries (memory) form a shared workspace for agent-human GTM workflows.
+- **HITL** — Agents request human approval before high-impact actions.
+- **Plugins** — Extensible plugin system with lifecycle hooks.
+- **Workflows** — Event-driven automation with configurable triggers and actions.
 
 ### Environment variables
 
@@ -218,6 +290,8 @@ scripts/                   Migration runner
 | `CRMY_TENANT_ID` | No | `default` | Default tenant slug |
 | `CRMY_API_KEY` | No | — | API key for CLI/agent authentication |
 | `CRMY_SERVER_URL` | No | — | Server URL for remote CLI mode |
+
+---
 
 ## MCP Tools (80+)
 
@@ -241,6 +315,8 @@ scripts/                   Migration runner
 | Analytics | `crm_search`, `pipeline_forecast`, `account_health_report` |
 | HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
 | Meta | `schema_get`, `tenant_get_stats` |
+
+---
 
 ## CLI Reference
 
@@ -305,13 +381,13 @@ crmy workflows create            Interactive create
 crmy workflows delete <id>       Delete workflow
 crmy workflows runs <id>         Execution history
 
-Actors (v0.4)
+Actors
 crmy actors list [--type <t>]    List actors (humans & agents)
 crmy actors register             Interactive actor registration
 crmy actors get <id>             Get actor details
 crmy actors whoami               Show current actor identity
 
-Assignments (v0.4+v0.5)
+Assignments
 crmy assignments list [--mine]   List assignments
 crmy assignments create          Interactive create
 crmy assignments get <id>        Get assignment details
@@ -322,7 +398,7 @@ crmy assignments decline <id>    Decline an assignment
 crmy assignments block <id>      Mark an assignment as blocked
 crmy assignments cancel <id>     Cancel an assignment
 
-Context (v0.4+v0.5)
+Context
 crmy context list [--subject-type <t>] [--subject-id <id>]
 crmy context add                 Add context about a CRM object
 crmy context get <id>            Get context entry
@@ -331,15 +407,15 @@ crmy context search <query>      Full-text search across context
 crmy context review <id>         Mark entry as still accurate
 crmy context stale               List stale entries needing review
 
-Briefing (v0.5)
+Briefing
 crmy briefing <type:UUID>        Get a full briefing for an object
 
-Activity Types (v0.5)
+Activity Types
 crmy activity-types list         List registered activity types
 crmy activity-types add <name>   Add a custom activity type
 crmy activity-types remove <name> Remove a custom activity type
 
-Context Types (v0.5)
+Context Types
 crmy context-types list          List registered context types
 crmy context-types add <name>    Add a custom context type
 crmy context-types remove <name> Remove a custom context type
@@ -356,9 +432,11 @@ crmy migrate run                 Run migrations
 crmy migrate status              Migration status
 ```
 
+---
+
 ## Documentation
 
-See the [complete user guide](docs/guide.md) for detailed documentation covering all features, REST API reference, plugin development, workflow configuration, and more.
+See the [complete user guide](docs/guide.md) for detailed documentation covering all features, the Context Engine, scope enforcement, governor limits, REST API reference, plugin development, workflow configuration, and more.
 
 ## License
 
