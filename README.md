@@ -38,7 +38,7 @@ postgresql://username:password@localhost:5432/crmy
 ## Install
 
 ```bash
-npm install -g crmy
+npm install -g @crmy/core
 ```
 
 Or run without installing (downloads automatically each time):
