@@ -4,15 +4,15 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, Bot } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
-import { useApiKeys, useCreateApiKey, useRevokeApiKey, useWebhooks, useCreateWebhook, useDeleteWebhook, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useUsers, useCreateUser, useUpdateUser, useDeleteUser } from '@/api/hooks';
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useDeleteWebhook, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useUsers, useCreateUser, useUpdateUser, useDeleteUser } from '@/api/hooks';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import AgentSettings from '@/pages/AgentSettings';
 import ActorsSettings from '@/components/settings/ActorsSettings';
@@ -47,22 +47,137 @@ function RequireRole({ roles, children }: { roles: NavRole[]; children: React.Re
 }
 
 function ProfileSettings() {
+  const user = getUser();
+  const updateProfile = useUpdateProfile();
+
+  const [name, setName] = useState(user?.name ?? '');
+  const [email, setEmail] = useState(user?.email ?? '');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPasswords, setShowPasswords] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const isOwner = user?.role === 'owner';
+  const isAdmin = user?.role === 'admin' || isOwner;
+
+  const inputCls = 'w-full h-10 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring transition-colors';
+  const readonlyCls = 'w-full h-10 px-3 flex items-center rounded-lg border border-border bg-muted/50 text-sm text-foreground';
+
+  const handleSave = async () => {
+    if (newPassword && newPassword !== confirmPassword) {
+      toast({ title: 'Passwords do not match', variant: 'destructive' });
+      return;
+    }
+    if (newPassword && newPassword.length < 8) {
+      toast({ title: 'Password too short', description: 'Must be at least 8 characters.', variant: 'destructive' });
+      return;
+    }
+    try {
+      const payload: { name?: string; email?: string; current_password?: string; new_password?: string } = {};
+      if (name.trim() && name.trim() !== user?.name) payload.name = name.trim();
+      if (email.trim() && email.trim() !== user?.email) payload.email = email.trim();
+      if (newPassword) { payload.current_password = currentPassword; payload.new_password = newPassword; }
+      if (Object.keys(payload).length === 0) {
+        toast({ title: 'No changes to save' });
+        return;
+      }
+      const updated = await updateProfile.mutateAsync(payload);
+      // Update localStorage so the topbar reflects changes immediately
+      const stored = localStorage.getItem('crmy_user');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        localStorage.setItem('crmy_user', JSON.stringify({ ...parsed, name: updated.name, email: updated.email }));
+      }
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+      toast({ title: 'Profile updated' });
+    } catch (err) {
+      toast({ title: 'Failed to update profile', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+    }
+  };
+
+  const roleBadge: Record<string, string> = {
+    owner: 'bg-accent/15 text-accent border-accent/30',
+    admin: 'bg-primary/15 text-primary border-primary/30',
+    member: 'bg-muted text-muted-foreground border-border',
+  };
+
   return (
-    <div>
-      <h2 className="font-display font-bold text-lg text-foreground mb-6">Profile</h2>
-      <div className="space-y-5 max-w-md">
-        {[
-          { label: 'Name', value: 'Admin' },
-          { label: 'Role', value: 'Admin' },
-        ].map((field) => (
-          <div key={field.label} className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{field.label}</label>
-            <div className="h-10 px-3 flex items-center rounded-lg border border-border bg-muted/50 text-sm text-foreground">
-              {field.value}
-            </div>
+    <div className="max-w-lg">
+      <h2 className="font-display font-bold text-lg text-foreground mb-1">Profile</h2>
+      <p className="text-sm text-muted-foreground mb-6">Update your name, email, and password.</p>
+
+      <div className="space-y-5">
+        {/* Read-only: Role */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Role</label>
+          <div className={readonlyCls}>
+            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border capitalize ${roleBadge[user?.role ?? 'member'] ?? roleBadge.member}`}>
+              {user?.role ?? '—'}
+            </span>
           </div>
-        ))}
-        <p className="text-xs text-muted-foreground">Profile details are managed by your organization administrator.</p>
+        </div>
+
+        {/* Editable: Name */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Name</label>
+          <input value={name} onChange={e => setName(e.target.value)} className={inputCls} placeholder="Your full name" />
+        </div>
+
+        {/* Editable: Email (admin/owner only) */}
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+            Email
+            {!isAdmin && <span className="text-[10px] text-muted-foreground/60 normal-case font-normal">contact an admin to change</span>}
+          </label>
+          {isAdmin ? (
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} placeholder="you@example.com" />
+          ) : (
+            <div className={readonlyCls}>{user?.email}</div>
+          )}
+        </div>
+
+        {/* Password change */}
+        <div className="pt-2 border-t border-border space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-foreground">Change Password</p>
+            <button onClick={() => setShowPasswords(p => !p)} className="text-xs text-primary hover:underline">
+              {showPasswords ? 'Cancel' : 'Change'}
+            </button>
+          </div>
+          {showPasswords && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Current Password</label>
+                <input type="password" value={currentPassword} onChange={e => setCurrentPassword(e.target.value)} className={inputCls} placeholder="Enter current password" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">New Password</label>
+                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} className={inputCls} placeholder="Min. 8 characters" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Confirm New Password</label>
+                <input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className={inputCls} placeholder="Repeat new password"
+                  onKeyDown={e => e.key === 'Enter' && handleSave()} />
+                {newPassword && confirmPassword && newPassword !== confirmPassword && (
+                  <p className="text-xs text-destructive mt-1">Passwords do not match</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 pt-1">
+          <button onClick={handleSave} disabled={updateProfile.isPending}
+            className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+            {updateProfile.isPending ? 'Saving…' : 'Save Changes'}
+          </button>
+          {saved && <span className="text-xs text-success flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Saved</span>}
+        </div>
       </div>
     </div>
   );
@@ -99,54 +214,215 @@ function AppearanceSettings() {
   );
 }
 
+const API_KEY_SCOPE_GROUPS = [
+  { label: 'General', scopes: [
+    { value: 'read', label: 'Read all' },
+    { value: 'write', label: 'Write all' },
+  ]},
+  { label: 'Contacts', scopes: [
+    { value: 'contacts:read', label: 'Read' },
+    { value: 'contacts:write', label: 'Write' },
+  ]},
+  { label: 'Accounts', scopes: [
+    { value: 'accounts:read', label: 'Read' },
+    { value: 'accounts:write', label: 'Write' },
+  ]},
+  { label: 'Opportunities', scopes: [
+    { value: 'opportunities:read', label: 'Read' },
+    { value: 'opportunities:write', label: 'Write' },
+  ]},
+  { label: 'Activities', scopes: [
+    { value: 'activities:read', label: 'Read' },
+    { value: 'activities:write', label: 'Write' },
+  ]},
+  { label: 'Assignments', scopes: [
+    { value: 'assignments:create', label: 'Create' },
+    { value: 'assignments:update', label: 'Update' },
+  ]},
+  { label: 'Context', scopes: [
+    { value: 'context:read', label: 'Read' },
+    { value: 'context:write', label: 'Write' },
+  ]},
+];
+
+const ALL_SCOPES = API_KEY_SCOPE_GROUPS.flatMap(g => g.scopes);
+
 function ApiKeysSettings() {
   const { data, isLoading } = useApiKeys();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: actorsData } = useActors({ is_active: true, limit: 100 }) as any;
   const createKey = useCreateApiKey();
+  const updateKey = useUpdateApiKey();
   const revokeKey = useRevokeApiKey();
-  const [newKeyName, setNewKeyName] = useState('');
-  const [showCreate, setShowCreate] = useState(false);
-  const [revealedKey, setRevealedKey] = useState<string | null>(null);
 
-  const keys = (data as any)?.data ?? [];
+  const [view, setView] = useState<'table' | 'card'>('table');
+  const [search, setSearch] = useState('');
+  const [scopeFilter, setScopeFilter] = useState('');
+  const [usageFilter, setUsageFilter] = useState<'all' | 'used' | 'never'>('all');
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'created_at', dir: 'desc' });
+  const [page, setPage] = useState(1);
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const [selectedScopes, setSelectedScopes] = useState<string[]>(['read', 'write']);
+  const [newActorId, setNewActorId] = useState('');
+  const [newExpiresAt, setNewExpiresAt] = useState('');
+
+  const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  const [revokeId, setRevokeId] = useState<string | null>(null);
+  const [expandedKeyId, setExpandedKeyId] = useState<string | null>(null);
+  const [editingKeyId, setEditingKeyId] = useState<string | null>(null);
+  const [editLabel, setEditLabel] = useState('');
+  const [editActorId, setEditActorId] = useState('');
+  const [editExpiresAt, setEditExpiresAt] = useState('');
+  const [editScopes, setEditScopes] = useState<string[]>([]);
+  const [editingScopes, setEditingScopes] = useState<string | null>(null); // keyId whose scopes panel is in edit mode
+
+  const PAGE_SIZE = 10;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const keys: any[] = (data as any)?.data ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const actors: any[] = actorsData?.data ?? [];
+
+  const filtered = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let result: any[] = [...keys];
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(k => k.label?.toLowerCase().includes(q) || k.actor_name?.toLowerCase().includes(q));
+    }
+    if (scopeFilter) result = result.filter(k => k.scopes?.includes(scopeFilter));
+    if (usageFilter === 'used') result = result.filter(k => !!k.last_used_at);
+    if (usageFilter === 'never') result = result.filter(k => !k.last_used_at);
+    result.sort((a, b) => {
+      const va: string = sort.key === 'label' ? (a.label ?? '') : (a[sort.key] ?? '');
+      const vb: string = sort.key === 'label' ? (b.label ?? '') : (b[sort.key] ?? '');
+      return sort.dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+    return result;
+  }, [keys, search, scopeFilter, usageFilter, sort]);
+
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const resetCreate = () => { setShowCreate(false); setNewLabel(''); setSelectedScopes(['read', 'write']); setNewActorId(''); setNewExpiresAt(''); };
 
   const handleCreate = async () => {
-    if (!newKeyName.trim()) return;
+    if (!newLabel.trim() || selectedScopes.length === 0) return;
     try {
-      const result = await createKey.mutateAsync({ label: newKeyName.trim(), scopes: ['read', 'write'] });
-      setRevealedKey((result as any).key ?? null);
-      setNewKeyName('');
-      setShowCreate(false);
-      toast({ title: 'API key created', description: 'Copy and store it safely — it won\'t be shown again.' });
-    } catch {
-      toast({ title: 'Error', description: 'Failed to create API key.', variant: 'destructive' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: any = { label: newLabel.trim(), scopes: selectedScopes };
+      if (newActorId) payload.actor_id = newActorId;
+      if (newExpiresAt) payload.expires_at = new Date(newExpiresAt).toISOString();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const result = await createKey.mutateAsync(payload) as any;
+      setRevealedKey(result.key ?? null);
+      resetCreate();
+      toast({ title: 'API key created', description: "Copy and store it safely — it won't be shown again." });
+    } catch (err) {
+      toast({ title: 'Failed to create API key', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
     }
   };
 
   const handleRevoke = async (id: string) => {
     try {
       await revokeKey.mutateAsync(id);
+      setRevokeId(null);
       toast({ title: 'API key revoked' });
-    } catch {
-      toast({ title: 'Error', description: 'Failed to revoke key.', variant: 'destructive' });
+    } catch (err) {
+      toast({ title: 'Failed to revoke key', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const startEdit = (k: any) => {
+    setEditingKeyId(k.id);
+    setEditLabel(k.label ?? '');
+    setEditActorId(k.actor_id ?? '');
+    setEditExpiresAt(k.expires_at ? new Date(k.expires_at).toISOString().slice(0, 10) : '');
+    setExpandedKeyId(null);
+  };
+
+  const cancelEdit = () => { setEditingKeyId(null); };
+
+  const handleUpdate = async () => {
+    if (!editingKeyId || !editLabel.trim()) return;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const payload: any = { id: editingKeyId, label: editLabel.trim() };
+      payload.actor_id = editActorId || null;
+      payload.expires_at = editExpiresAt ? new Date(editExpiresAt).toISOString() : null;
+      await updateKey.mutateAsync(payload);
+      setEditingKeyId(null);
+      toast({ title: 'API key updated' });
+    } catch (err) {
+      toast({ title: 'Failed to update API key', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+    }
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const startEditScopes = (k: any) => {
+    setEditingScopes(k.id);
+    setEditScopes(k.scopes ?? []);
+  };
+
+  const handleSaveScopes = async (keyId: string) => {
+    try {
+      await updateKey.mutateAsync({ id: keyId, scopes: editScopes });
+      setEditingScopes(null);
+      toast({ title: 'Scopes updated' });
+    } catch (err) {
+      toast({ title: 'Failed to update scopes', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+    }
+  };
+
+  const toggleScope = (scope: string) =>
+    setSelectedScopes(prev => prev.includes(scope) ? prev.filter(s => s !== scope) : [...prev, scope]);
+
+  const toggleEditScope = (scope: string) =>
+    setEditScopes(prev => prev.includes(scope) ? prev.filter(s => s !== scope) : [...prev, scope]);
+
+  const fmtDate = (d?: string) => d ? new Date(d).toLocaleDateString() : null;
+  const fmtLastUsed = (d?: string) => {
+    if (!d) return 'Never used';
+    const days = Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
+    if (days === 0) return 'Used today';
+    if (days === 1) return 'Used yesterday';
+    if (days < 30) return `Used ${days}d ago`;
+    return `Used ${fmtDate(d)}`;
+  };
+
+  const SortBtn = ({ sk, label }: { sk: string; label: string }) => (
+    <button
+      onClick={() => { setSort(s => s.key === sk ? { key: sk, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key: sk, dir: 'desc' }); setPage(1); }}
+      className="flex items-center gap-1 text-xs font-mono text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+    >
+      {label}
+      {sort.key === sk && (sort.dir === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
+    </button>
+  );
+
+  const ActorBadge = ({ name, type }: { name: string; type: string }) => (
+    <div className="flex items-center gap-1.5">
+      <span className="text-sm text-foreground truncate">{name}</span>
+      <span className={`text-[10px] px-1.5 py-0.5 rounded border capitalize flex-shrink-0 ${type === 'agent' ? 'bg-blue-500/10 text-blue-500 border-blue-500/30' : 'bg-amber-500/10 text-amber-600 border-amber-500/30'}`}>{type}</span>
+    </div>
+  );
+
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
+    <div className="space-y-4">
+      {/* Header */}
+      <div>
         <h2 className="font-display font-bold text-lg text-foreground">API Keys</h2>
-        <button onClick={() => setShowCreate(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors">
-          <Plus className="w-3.5 h-3.5" /> New Key
-        </button>
+        <p className="text-sm text-muted-foreground mt-0.5">Manage access tokens for the CRMy REST API and MCP server.</p>
       </div>
 
+      {/* Revealed key banner */}
       {revealedKey && (
-        <div className="mb-4 p-4 rounded-xl border border-success/30 bg-success/5">
-          <p className="text-xs font-semibold text-success mb-2">Your new API key (copy it now — it won't be shown again):</p>
+        <div className="p-4 rounded-xl border border-success/30 bg-success/5">
+          <p className="text-xs font-semibold text-success mb-2">Your new API key — copy it now, it won't be shown again:</p>
           <div className="flex items-center gap-2">
             <code className="flex-1 text-xs font-mono bg-background rounded px-2 py-1.5 border border-border truncate">{revealedKey}</code>
-            <button onClick={() => { navigator.clipboard.writeText(revealedKey); toast({ title: 'Copied!' }); }}
-              className="p-1.5 rounded-lg hover:bg-muted transition-colors flex-shrink-0">
+            <button onClick={() => { navigator.clipboard.writeText(revealedKey!); toast({ title: 'Copied!' }); }} className="p-1.5 rounded-lg hover:bg-muted transition-colors flex-shrink-0">
               <Copy className="w-3.5 h-3.5 text-muted-foreground" />
             </button>
           </div>
@@ -154,40 +430,370 @@ function ApiKeysSettings() {
         </div>
       )}
 
+      {/* Create form */}
       {showCreate && (
-        <div className="mb-4 p-4 rounded-xl border border-border bg-muted/30 flex items-center gap-2 max-w-md">
-          <input value={newKeyName} onChange={(e) => setNewKeyName(e.target.value)}
-            placeholder="Key name (e.g. Production)"
-            className="flex-1 h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
-            onKeyDown={(e) => e.key === 'Enter' && handleCreate()} />
-          <button onClick={handleCreate} disabled={!newKeyName.trim() || createKey.isPending}
-            className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
-            Create
-          </button>
-          <button onClick={() => { setShowCreate(false); setNewKeyName(''); }} className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold">Cancel</button>
+        <div className="p-5 rounded-xl border border-border bg-card space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-foreground">Create new API key</h3>
+            <button onClick={resetCreate} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Label <span className="text-destructive">*</span></label>
+              <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="e.g. Production, CI/CD"
+                className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
+                onKeyDown={e => e.key === 'Enter' && handleCreate()} autoFocus />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Bind to Actor (optional)</label>
+              <select value={newActorId} onChange={e => setNewActorId(e.target.value)}
+                className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-1 focus:ring-ring">
+                <option value="">No actor binding</option>
+                {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                {actors.map((a: any) => <option key={a.id} value={a.id}>{a.display_name} ({a.actor_type})</option>)}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Expires (optional)</label>
+              <input type="date" value={newExpiresAt} onChange={e => setNewExpiresAt(e.target.value)}
+                className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-1 focus:ring-ring" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Scopes <span className="text-destructive">*</span></label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3">
+              {API_KEY_SCOPE_GROUPS.map(group => (
+                <div key={group.label} className="space-y-1.5">
+                  <p className="text-xs font-semibold text-muted-foreground">{group.label}</p>
+                  {group.scopes.map(scope => (
+                    <label key={scope.value} className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={selectedScopes.includes(scope.value)} onChange={() => toggleScope(scope.value)}
+                        className="w-3.5 h-3.5 rounded border-border accent-primary" />
+                      <span className="text-xs text-foreground">{scope.label}</span>
+                    </label>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button onClick={handleCreate} disabled={!newLabel.trim() || selectedScopes.length === 0 || createKey.isPending}
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+              {createKey.isPending ? 'Creating…' : 'Create Key'}
+            </button>
+            <button onClick={resetCreate} className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
+          </div>
         </div>
       )}
 
-      <div className="space-y-2 max-w-2xl">
-        {isLoading ? (
-          <div className="space-y-2">{[...Array(2)].map((_, i) => <div key={i} className="h-14 bg-muted/50 rounded-xl animate-pulse" />)}</div>
-        ) : keys.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4">No API keys yet.</p>
-        ) : keys.map((k: any) => (
-          <div key={k.id} className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card">
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-foreground">{k.label ?? k.name}</p>
-              <p className="text-xs text-muted-foreground font-mono">{k.prefix ?? k.id.slice(0, 12) + '...'}</p>
-            </div>
-            <span className="text-xs text-muted-foreground hidden sm:block">
-              {k.created_at ? new Date(k.created_at).toLocaleDateString() : k.createdAt}
-            </span>
-            <button onClick={() => handleRevoke(k.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        ))}
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-0 max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="Search keys…"
+            className="w-full h-9 pl-9 pr-3 rounded-xl border border-border bg-card text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30 transition-all" />
+        </div>
+        <select value={scopeFilter} onChange={e => { setScopeFilter(e.target.value); setPage(1); }}
+          className="h-9 px-3 rounded-xl border border-border bg-card text-sm text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30 flex-shrink-0">
+          <option value="">All scopes</option>
+          {ALL_SCOPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+        </select>
+        <select value={usageFilter} onChange={e => { setUsageFilter(e.target.value as 'all' | 'used' | 'never'); setPage(1); }}
+          className="h-9 px-3 rounded-xl border border-border bg-card text-sm text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30 flex-shrink-0">
+          <option value="all">All usage</option>
+          <option value="used">Used</option>
+          <option value="never">Never used</option>
+        </select>
+        <select value={`${sort.key}_${sort.dir}`} onChange={e => { const [k, d] = e.target.value.split('_'); setSort({ key: k, dir: d as 'asc' | 'desc' }); setPage(1); }}
+          className="h-9 px-3 rounded-xl border border-border bg-card text-sm text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30 flex-shrink-0">
+          <option value="created_at_desc">Newest first</option>
+          <option value="created_at_asc">Oldest first</option>
+          <option value="label_asc">Label A–Z</option>
+          <option value="label_desc">Label Z–A</option>
+          <option value="last_used_at_desc">Recently used</option>
+          <option value="last_used_at_asc">Least used</option>
+        </select>
+        <div className="flex items-center border border-border rounded-xl overflow-hidden flex-shrink-0">
+          <button onClick={() => setView('table')} className={`p-2 transition-colors ${view === 'table' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'}`}><List className="w-4 h-4" /></button>
+          <button onClick={() => setView('card')} className={`p-2 transition-colors ${view === 'card' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50'}`}><LayoutGrid className="w-4 h-4" /></button>
+        </div>
+        <button onClick={() => setShowCreate(true)} disabled={showCreate}
+          className="h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale disabled:opacity-50">
+          <Plus className="w-4 h-4" /> New Key
+        </button>
       </div>
+
+      {/* Content */}
+      {isLoading ? (
+        <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-14 bg-muted/50 rounded-2xl animate-pulse" />)}</div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-14 text-center">
+          <Key className="w-8 h-8 text-muted-foreground/30 mb-3" />
+          <p className="text-sm text-muted-foreground">{keys.length === 0 ? 'No API keys yet. Create one to get started.' : 'No keys match your filters.'}</p>
+          {keys.length === 0 && <button onClick={() => setShowCreate(true)} className="mt-3 text-xs text-primary hover:underline">Create your first key</button>}
+        </div>
+      ) : view === 'table' ? (
+        <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-surface-sunken/50">
+                <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground"><SortBtn sk="label" label="Label" /></th>
+                <th className="text-left px-4 py-3 hidden md:table-cell text-xs font-display font-semibold text-muted-foreground">Scopes</th>
+                <th className="text-left px-4 py-3 hidden lg:table-cell text-xs font-display font-semibold text-muted-foreground">Actor</th>
+                <th className="text-left px-4 py-3 hidden sm:table-cell text-xs font-display font-semibold text-muted-foreground"><SortBtn sk="last_used_at" label="Last Used" /></th>
+                <th className="text-left px-4 py-3 hidden lg:table-cell text-xs font-display font-semibold text-muted-foreground"><SortBtn sk="created_at" label="Created" /></th>
+                <th className="px-2 py-3 w-20" />
+              </tr>
+            </thead>
+            <tbody>
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              {paginated.map((k: any, i: number) => (
+                <React.Fragment key={k.id}>
+                  {editingKeyId === k.id ? (
+                    /* ── Inline edit row ── */
+                    <tr className="border-b border-border">
+                      <td colSpan={6} className="p-4 bg-muted/20">
+                        <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider mb-3">Edit API Key</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium text-muted-foreground">Label <span className="text-destructive">*</span></label>
+                            <input value={editLabel} onChange={e => setEditLabel(e.target.value)}
+                              className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
+                              autoFocus />
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium text-muted-foreground">Bind to Actor</label>
+                            <select value={editActorId} onChange={e => setEditActorId(e.target.value)}
+                              className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-1 focus:ring-ring">
+                              <option value="">No actor binding</option>
+                              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                              {actors.map((a: any) => <option key={a.id} value={a.id}>{a.display_name} ({a.actor_type})</option>)}
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <label className="text-xs font-medium text-muted-foreground">Expires</label>
+                            <input type="date" value={editExpiresAt} onChange={e => setEditExpiresAt(e.target.value)}
+                              className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-1 focus:ring-ring" />
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button onClick={handleUpdate} disabled={!editLabel.trim() || updateKey.isPending}
+                            className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                            {updateKey.isPending ? 'Saving…' : 'Save Changes'}
+                          </button>
+                          <button onClick={cancelEdit}
+                            className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
+                            Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    <>
+                      <tr
+                        className={`border-b border-border last:border-0 hover:bg-primary/5 transition-colors group cursor-pointer ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}
+                        onClick={() => { setExpandedKeyId(prev => prev === k.id ? null : k.id); setEditingScopes(null); }}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                              <Key className="w-3.5 h-3.5 text-primary" />
+                            </div>
+                            <div>
+                              <p className="font-semibold text-foreground">{k.label}</p>
+                              <p className="text-[10px] font-mono text-muted-foreground">{k.id.slice(0, 14)}…</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 hidden md:table-cell" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => { setExpandedKeyId(prev => prev === k.id ? null : k.id); setEditingScopes(null); }}
+                            className="flex items-center gap-1.5 hover:text-foreground transition-colors"
+                          >
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border font-mono">
+                              {(k.scopes ?? []).length} scope{(k.scopes ?? []).length !== 1 ? 's' : ''}
+                            </span>
+                            <ChevronRight className={`w-3 h-3 text-muted-foreground transition-transform ${expandedKeyId === k.id ? 'rotate-90' : ''}`} />
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 hidden lg:table-cell">
+                          {k.actor_name ? <ActorBadge name={k.actor_name} type={k.actor_type} /> : <span className="text-xs text-muted-foreground">—</span>}
+                        </td>
+                        <td className="px-4 py-3 hidden sm:table-cell">
+                          <span className={`text-xs ${k.last_used_at ? 'text-foreground' : 'text-muted-foreground'}`}>{fmtLastUsed(k.last_used_at)}</span>
+                        </td>
+                        <td className="px-4 py-3 hidden lg:table-cell">
+                          <span className="text-xs text-muted-foreground">{fmtDate(k.created_at)}</span>
+                          {k.expires_at && <p className={`text-[10px] mt-0.5 ${new Date(k.expires_at) < new Date() ? 'text-destructive' : 'text-muted-foreground'}`}>Exp: {fmtDate(k.expires_at)}</p>}
+                        </td>
+                        <td className="px-2 py-3" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center gap-1 justify-end">
+                            {revokeId === k.id ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-muted-foreground">Revoke?</span>
+                                <button onClick={() => handleRevoke(k.id)} className="px-2 py-1 rounded bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 transition-colors">Yes</button>
+                                <button onClick={() => setRevokeId(null)} className="px-2 py-1 rounded bg-muted text-muted-foreground text-xs hover:bg-muted/80 transition-colors">No</button>
+                              </div>
+                            ) : (
+                              <>
+                                <button onClick={() => startEdit(k)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors opacity-0 group-hover:opacity-100" title="Edit">
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button onClick={() => setRevokeId(k.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100" title="Revoke">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
+                            <button
+                              onClick={() => { setExpandedKeyId(prev => prev === k.id ? null : k.id); setEditingScopes(null); }}
+                              className={`p-1.5 rounded-lg transition-colors ${expandedKeyId === k.id ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+                            >
+                              <ChevronRight className={`w-3.5 h-3.5 transition-transform ${expandedKeyId === k.id ? 'rotate-90' : ''}`} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      <AnimatePresence>
+                        {expandedKeyId === k.id && (
+                          <tr>
+                            <td colSpan={6} className="p-0 border-b border-border last:border-0">
+                              <motion.div
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="px-4 py-4 bg-muted/20">
+                                  <div className="rounded-lg border border-border bg-card overflow-hidden">
+                                    <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-semibold text-foreground">Scopes</span>
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+                                          {(k.scopes ?? []).length}
+                                        </span>
+                                      </div>
+                                      {editingScopes !== k.id ? (
+                                        <button onClick={() => startEditScopes(k)} className="text-xs font-semibold text-primary hover:underline">Edit</button>
+                                      ) : (
+                                        <div className="flex gap-2">
+                                          <button onClick={() => handleSaveScopes(k.id)} disabled={updateKey.isPending}
+                                            className="px-2.5 py-1 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40">
+                                            {updateKey.isPending ? 'Saving…' : 'Save'}
+                                          </button>
+                                          <button onClick={() => setEditingScopes(null)}
+                                            className="px-2.5 py-1 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground">
+                                            Cancel
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="px-4 py-3">
+                                      {editingScopes === k.id ? (
+                                        <div className="space-y-3">
+                                          {API_KEY_SCOPE_GROUPS.map(group => (
+                                            <div key={group.label}>
+                                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{group.label}</p>
+                                              <div className="flex flex-wrap gap-1.5">
+                                                {group.scopes.map(s => {
+                                                  const active = editScopes.includes(s.value);
+                                                  return (
+                                                    <button key={s.value} onClick={() => toggleEditScope(s.value)}
+                                                      className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${active ? 'bg-primary/10 text-primary border-primary/30' : 'bg-muted/50 border-border text-muted-foreground hover:text-foreground'}`}>
+                                                      {s.label}
+                                                    </button>
+                                                  );
+                                                })}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {(k.scopes ?? []).length === 0 ? (
+                                            <p className="text-xs text-muted-foreground">No scopes assigned.</p>
+                                          ) : (
+                                            (k.scopes ?? []).map((s: string) => (
+                                              <span key={s} className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-primary/10 text-primary border border-primary/20">{s}</span>
+                                            ))
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            </td>
+                          </tr>
+                        )}
+                      </AnimatePresence>
+                    </>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+          {paginated.map((k: any) => (
+            <div key={k.id} className="bg-card border border-border rounded-xl p-4 space-y-3 hover:shadow-md transition-shadow group">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start gap-2 min-w-0">
+                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                    <Key className="w-4 h-4 text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate">{k.label}</p>
+                    <p className="text-[10px] font-mono text-muted-foreground">{k.id.slice(0, 14)}…</p>
+                  </div>
+                </div>
+                {revokeId === k.id ? (
+                  <div className="flex items-center gap-1 flex-shrink-0">
+                    <button onClick={() => handleRevoke(k.id)} className="px-2 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold">Revoke</button>
+                    <button onClick={() => setRevokeId(null)} className="px-2 py-0.5 rounded bg-muted text-muted-foreground text-[10px]">✕</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setRevokeId(k.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {(k.scopes ?? []).map((s: string) => (
+                  <span key={s} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-muted text-muted-foreground border border-border">{s}</span>
+                ))}
+              </div>
+              <div className="space-y-1.5 pt-2 border-t border-border">
+                {k.actor_name && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-muted-foreground w-16 flex-shrink-0">Actor</span>
+                    <ActorBadge name={k.actor_name} type={k.actor_type} />
+                  </div>
+                )}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted-foreground w-16 flex-shrink-0">Last used</span>
+                  <span className={`text-xs ${k.last_used_at ? 'text-foreground' : 'text-muted-foreground'}`}>{fmtLastUsed(k.last_used_at)}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted-foreground w-16 flex-shrink-0">Created</span>
+                  <span className="text-xs text-muted-foreground">{fmtDate(k.created_at)}</span>
+                </div>
+                {k.expires_at && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-muted-foreground w-16 flex-shrink-0">Expires</span>
+                    <span className={`text-xs ${new Date(k.expires_at) < new Date() ? 'text-destructive font-medium' : 'text-foreground'}`}>{fmtDate(k.expires_at)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <PaginationBar page={page} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} />
     </div>
   );
 }
@@ -1245,12 +1851,12 @@ export default function Settings() {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        <nav className="hidden md:flex flex-col w-48 border-r border-border p-2 gap-0.5">
+        <nav className="hidden md:flex flex-col w-48 border-r border-border bg-muted p-2 gap-0.5">
           {visibleNav.map((item) => {
             const active = item.path === '/settings' ? location.pathname === '/settings' : location.pathname.startsWith(item.path);
             return (
               <Link key={item.path} to={item.path}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${active ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
+                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${active ? 'bg-primary/15 text-primary' : 'text-foreground/60 hover:bg-muted hover:text-foreground'}`}>
                 <item.icon className="w-4 h-4" />
                 {item.label}
                 {item.path === '/settings/agent' && (

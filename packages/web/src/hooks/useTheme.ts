@@ -14,7 +14,7 @@ export function useTheme() {
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle('dark', theme === 'dark');
-    root.classList.toggle('charcoal', theme === 'dark' && darkVariant === 'charcoal');
+    root.classList.toggle('charcoal', darkVariant === 'charcoal');
     localStorage.setItem('theme', theme);
   }, [theme, darkVariant]);
 

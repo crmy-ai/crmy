@@ -247,15 +247,23 @@ export function AccountDrawer() {
       <AccountEditForm
         account={account}
         onSave={async (data) => {
-          await updateAccount.mutateAsync(data);
-          setEditing(false);
-          toast({ title: 'Account updated' });
+          try {
+            await updateAccount.mutateAsync(data);
+            setEditing(false);
+            toast({ title: 'Account updated' });
+          } catch (err) {
+            toast({ title: 'Failed to update account', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+          }
         }}
         onCancel={() => setEditing(false)}
         onDelete={async () => {
-          await deleteAccount.mutateAsync();
-          closeDrawer();
-          toast({ title: 'Account deleted' });
+          try {
+            await deleteAccount.mutateAsync();
+            closeDrawer();
+            toast({ title: 'Account deleted' });
+          } catch (err) {
+            toast({ title: 'Failed to delete account', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+          }
         }}
         isSaving={updateAccount.isPending}
       />

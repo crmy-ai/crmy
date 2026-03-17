@@ -30,6 +30,15 @@ interface ListToolbarProps {
   entityType: string;
 }
 
+const ENTITY_GRADIENTS: Record<string, string> = {
+  contacts:      'from-primary to-primary/80',
+  accounts:      'from-[#8b5cf6] to-[#8b5cf6]/80',
+  opportunities: 'from-accent to-accent/80',
+  'use cases':   'from-success to-success/80',
+  activities:    'from-warning to-warning/80',
+  assignments:   'from-destructive to-destructive/80',
+};
+
 export function ListToolbar({
   searchValue,
   onSearchChange,
@@ -43,7 +52,9 @@ export function ListToolbar({
   onSortChange,
   onAdd,
   addLabel,
+  entityType,
 }: ListToolbarProps) {
+  const gradientClasses = ENTITY_GRADIENTS[entityType] ?? 'from-primary to-primary/80';
   const searchRef = useRef<HTMLInputElement>(null);
   const activeFilterCount = Object.values(activeFilters).reduce((sum, arr) => sum + arr.length, 0);
 
@@ -155,7 +166,7 @@ export function ListToolbar({
         {/* Add New */}
         <button
           onClick={onAdd}
-          className="h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale"
+          className={`h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r ${gradientClasses} text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale`}
         >
           <Plus className="w-4 h-4" />
           <span className="hidden sm:inline">{addLabel}</span>

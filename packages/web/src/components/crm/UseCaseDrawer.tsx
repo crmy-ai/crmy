@@ -343,15 +343,23 @@ export function UseCaseDrawer() {
       <UseCaseEditForm
         useCase={useCase}
         onSave={async (data) => {
-          await updateUseCase.mutateAsync(data);
-          setEditing(false);
-          toast({ title: 'Use case updated' });
+          try {
+            await updateUseCase.mutateAsync(data);
+            setEditing(false);
+            toast({ title: 'Use case updated' });
+          } catch (err) {
+            toast({ title: 'Failed to update use case', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+          }
         }}
         onCancel={() => setEditing(false)}
         onDelete={async () => {
-          await deleteUseCase.mutateAsync();
-          closeDrawer();
-          toast({ title: 'Use case deleted' });
+          try {
+            await deleteUseCase.mutateAsync();
+            closeDrawer();
+            toast({ title: 'Use case deleted' });
+          } catch (err) {
+            toast({ title: 'Failed to delete use case', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+          }
         }}
         isSaving={updateUseCase.isPending}
       />

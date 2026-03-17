@@ -118,32 +118,9 @@ export function apiRouter(db: DbPool): Router {
   router.delete('/contacts/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      requireScopes(actor, 'contacts:write');
-      if (actor.role !== 'admin' && actor.role !== 'owner') {
-        res.status(403).json({
-          type: 'https://crmy.ai/errors/permission_denied',
-          title: 'Permission Denied',
-          status: 403,
-          detail: 'Only admins can delete contacts',
-        });
-        return;
-      }
-      const before = await contactRepo.getContact(db, actor.tenant_id, p(req, 'id'));
-      if (!before) {
-        res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'Contact not found' });
-        return;
-      }
-      await contactRepo.deleteContact(db, actor.tenant_id, p(req, 'id'));
-      await emitEvent(db, {
-        tenantId: actor.tenant_id,
-        eventType: 'contact.deleted',
-        actorId: actor.actor_id,
-        actorType: actor.actor_type,
-        objectType: 'contact',
-        objectId: p(req, 'id'),
-        beforeData: before,
-      });
-      res.json({ deleted: true });
+      const handler = toolHandler(db, 'contact_delete');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
     } catch (err) { handleError(res, err); }
   });
 
@@ -205,23 +182,9 @@ export function apiRouter(db: DbPool): Router {
   router.delete('/accounts/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      requireScopes(actor, 'accounts:write');
-      const before = await accountRepo.getAccount(db, actor.tenant_id, p(req, 'id'));
-      if (!before) {
-        res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'Account not found' });
-        return;
-      }
-      await accountRepo.deleteAccount(db, actor.tenant_id, p(req, 'id'));
-      await emitEvent(db, {
-        tenantId: actor.tenant_id,
-        eventType: 'account.deleted',
-        actorId: actor.actor_id,
-        actorType: actor.actor_type,
-        objectType: 'account',
-        objectId: p(req, 'id'),
-        beforeData: before,
-      });
-      res.json({ deleted: true });
+      const handler = toolHandler(db, 'account_delete');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
     } catch (err) { handleError(res, err); }
   });
 
@@ -281,23 +244,9 @@ export function apiRouter(db: DbPool): Router {
   router.delete('/opportunities/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      requireScopes(actor, 'opportunities:write');
-      const before = await oppRepo.getOpportunity(db, actor.tenant_id, p(req, 'id'));
-      if (!before) {
-        res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'Opportunity not found' });
-        return;
-      }
-      await oppRepo.deleteOpportunity(db, actor.tenant_id, p(req, 'id'));
-      await emitEvent(db, {
-        tenantId: actor.tenant_id,
-        eventType: 'opportunity.deleted',
-        actorId: actor.actor_id,
-        actorType: actor.actor_type,
-        objectType: 'opportunity',
-        objectId: p(req, 'id'),
-        beforeData: before,
-      });
-      res.json({ deleted: true });
+      const handler = toolHandler(db, 'opportunity_delete');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
     } catch (err) { handleError(res, err); }
   });
 

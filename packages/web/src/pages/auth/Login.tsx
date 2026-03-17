@@ -9,6 +9,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../..
 import { auth, setToken, setUser } from '../../api/client';
 import crMyLogo from '../../assets/crmy-logo.png';
 import { X, Check, Sun, Moon } from 'lucide-react';
+import { useAppStore } from '../../store/appStore';
 
 const PASSWORD_RULES = [
   { label: 'At least 8 characters', test: (p: string) => p.length >= 8 },
@@ -25,8 +26,38 @@ function isValidPassword(password: string) {
   return PASSWORD_RULES.every((r) => r.test(password));
 }
 
+// Light-mode inline overrides: card always appears as a dark panel to contrast against the light page background
+const CHARCOAL_LIGHT_STYLE: React.CSSProperties = {
+  '--background': '220 10% 32%',
+  '--card': '220 14% 18%',
+  '--card-foreground': '36 15% 92%',
+  '--popover': '220 14% 22%',
+  '--popover-foreground': '36 15% 92%',
+  '--muted': '220 10% 24%',
+  '--muted-foreground': '220 8% 62%',
+  '--input': '220 10% 32%',
+  '--border': '220 10% 28%',
+  '--foreground': '36 15% 92%',
+} as React.CSSProperties;
+
+const WARM_LIGHT_STYLE: React.CSSProperties = {
+  '--background': '15 25% 32%',
+  '--card': '15 22% 18%',
+  '--card-foreground': '25 100% 95%',
+  '--popover': '15 22% 22%',
+  '--popover-foreground': '25 100% 95%',
+  '--muted': '15 20% 24%',
+  '--muted-foreground': '20 15% 62%',
+  '--input': '15 20% 32%',
+  '--border': '15 20% 28%',
+  '--foreground': '25 100% 95%',
+} as React.CSSProperties;
+
 export function LoginPage() {
   const navigate = useNavigate();
+  const { darkVariant } = useAppStore();
+  const isCharcoal = darkVariant === 'charcoal';
+
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -94,8 +125,16 @@ export function LoginPage() {
     setError('');
   };
 
+  // Page background: light mode uses a tinted background; dark mode uses CSS variable
+  const pageBg = isDark ? 'bg-background' : isCharcoal ? 'bg-[hsl(220_20%_93%)]' : 'bg-[hsl(30_25%_93%)]';
+
+  // Card wrapper: always rendered as a dark panel, variant-aware
+  const cardClass = isCharcoal ? 'dark charcoal' : 'dark';
+  // In light mode, override CSS vars so the card appears as a medium-dark panel against the light page
+  const cardStyle = !isDark ? (isCharcoal ? CHARCOAL_LIGHT_STYLE : WARM_LIGHT_STYLE) : undefined;
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div className={`flex min-h-screen items-center justify-center p-4 ${pageBg}`}>
       <button
         onClick={toggleTheme}
         className="fixed top-4 right-4 p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -103,7 +142,7 @@ export function LoginPage() {
       >
         {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
       </button>
-      <div className="dark w-full max-w-md">
+      <div className={`${cardClass} w-full max-w-md`} style={cardStyle}>
       <Card className="w-full">
         <CardHeader className="text-left">
           <div className="flex items-center gap-3 mb-1">

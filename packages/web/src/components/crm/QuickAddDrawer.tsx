@@ -5,7 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { X, Send, Sparkles, Check, FileText, Pencil, ChevronLeft } from 'lucide-react';
-import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useAccounts, useContacts, useOpportunities, useUseCases } from '@/api/hooks';
+import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useCreateAssignment, useAccounts, useContacts, useOpportunities, useUseCases, useActors } from '@/api/hooks';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker, DateTimePicker } from '@/components/ui/date-picker';
 
@@ -15,6 +15,7 @@ const typeLabels: Record<string, string> = {
   'use-case': 'Use Case',
   activity: 'Activity',
   account: 'Account',
+  assignment: 'Assignment',
 };
 
 const typeGreetings: Record<string, string> = {
@@ -23,6 +24,7 @@ const typeGreetings: Record<string, string> = {
   'use-case': "Let's set up a new use case. What's the name and which client is it for?",
   activity: "Log an activity — tell me the type (call, email, meeting, note, demo, proposal, etc.), what it's about, and any outcome or notes.",
   account: "Let's add a new account. What's the company name and any other details?",
+  assignment: "Let's create a new assignment. What's the title, type (call, email, research, etc.), and who should it be assigned to?",
 };
 
 type Message = { role: 'user' | 'assistant'; content: string };
@@ -73,6 +75,26 @@ function parseFieldsFromText(text: string, type: string): Record<string, unknown
     fields.stage = 'discovery';
   }
 
+  if (type === 'assignment') {
+    // Extract assignment type
+    const assignmentTypes = ['call', 'draft', 'email', 'follow_up', 'follow up', 'research', 'review', 'send'];
+    const foundType = assignmentTypes.find(t => lower.includes(t));
+    if (foundType) fields.assignment_type = foundType.replace(' ', '_');
+    // Use first sentence as title if no explicit name
+    if (!fields.name) {
+      const firstSentence = text.split(/[.!?]/)[0].trim();
+      if (firstSentence) fields.title = firstSentence;
+    } else {
+      fields.title = fields.name;
+      delete fields.name;
+    }
+    // Extract priority
+    if (lower.includes('urgent')) fields.priority = 'urgent';
+    else if (lower.includes('high priority') || lower.includes('high-priority')) fields.priority = 'high';
+    else if (lower.includes('low priority') || lower.includes('low-priority')) fields.priority = 'low';
+    else fields.priority = 'normal';
+  }
+
   return fields;
 }
 
@@ -93,6 +115,7 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
   const createOpportunity = useCreateOpportunity();
   const createUseCase = useCreateUseCase();
   const createActivity = useCreateActivity();
+  const createAssignment = useCreateAssignment();
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -140,12 +163,13 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
       else if (type === 'opportunity') await createOpportunity.mutateAsync(extractedFields);
       else if (type === 'use-case') await createUseCase.mutateAsync(extractedFields);
       else if (type === 'activity') await createActivity.mutateAsync(extractedFields);
+      else if (type === 'assignment') await createAssignment.mutateAsync(extractedFields);
 
       setConfirmed(true);
       toast({ title: `${typeLabels[type]} created!`, description: 'Successfully added to your CRM.' });
       setTimeout(onClose, 1200);
-    } catch {
-      toast({ title: 'Error', description: 'Failed to create record. Please try again.', variant: 'destructive' });
+    } catch (err) {
+      toast({ title: `Failed to create ${typeLabels[type]}`, description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
     }
@@ -318,6 +342,17 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
     { key: 'website', label: 'Website', placeholder: 'https://acme.com', inputType: 'url' },
     { key: 'domain', label: 'Domain', placeholder: 'acme.com' },
   ],
+  assignment: [
+    { key: 'title', label: 'Title', placeholder: 'e.g. Follow up with Acme about contract', required: true },
+    { key: 'assignment_type', label: 'Type', fieldType: 'select', options: ['call', 'draft', 'email', 'follow_up', 'research', 'review', 'send'], required: true },
+    { key: 'assigned_to', label: 'Assign To', fieldType: 'actor-select', required: true },
+    { key: 'subject_type', label: 'Linked To', fieldType: 'subject-type-select' },
+    { key: 'subject_id', label: 'Record', fieldType: 'entity-select', dependsOn: { key: 'subject_type' } },
+    { key: 'priority', label: 'Priority', fieldType: 'select', options: ['low', 'normal', 'high', 'urgent'] },
+    { key: 'due_at', label: 'Due Date', inputType: 'date' },
+    { key: 'context', label: 'Context', placeholder: 'Brief context for the assignee', fieldType: 'textarea' },
+    { key: 'description', label: 'Description', placeholder: 'Additional details', fieldType: 'textarea' },
+  ],
 };
 
 const SUBJECT_TYPE_OPTIONS = [
@@ -364,6 +399,23 @@ function EntitySelect({ subjectType, value, onChange }: { subjectType: string; v
   );
 }
 
+function ActorSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: actorsData } = useActors({ limit: 100, is_active: true }) as any;
+  const actors: Array<{ id: string; display_name: string; actor_type: string }> = actorsData?.data ?? actorsData?.actors ?? [];
+  const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
+  return (
+    <select value={value} onChange={e => onChange(e.target.value)} className={`${inputClass} pr-3`}>
+      <option value="">Select actor…</option>
+      {actors.map(a => (
+        <option key={a.id} value={a.id}>
+          {a.display_name} ({a.actor_type})
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClose: () => void; onBack: () => void; backLabel?: string }) {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -375,6 +427,7 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
   const createOpportunity = useCreateOpportunity();
   const createUseCase = useCreateUseCase();
   const createActivity = useCreateActivity();
+  const createAssignment = useCreateAssignment();
 
   const config = FIELD_CONFIGS[type] ?? FIELD_CONFIGS.contact;
 
@@ -382,6 +435,7 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
     if (type === 'contact') return !!fields.first_name?.trim();
     if (type === 'activity') return !!fields.type && !!fields.subject?.trim();
     if (type === 'use-case') return !!fields.name?.trim() && !!fields.account_id;
+    if (type === 'assignment') return !!fields.title?.trim() && !!fields.assignment_type && !!fields.assigned_to;
     return !!fields.name?.trim();
   };
 
@@ -419,17 +473,30 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
         if (!fields.occurred_at) delete payload.occurred_at;
       }
 
+      if (type === 'assignment') {
+        // Convert date string to ISO datetime
+        if (fields.due_at) payload.due_at = new Date(fields.due_at + 'T00:00:00').toISOString();
+        // Strip empty optional fields
+        if (!fields.subject_type) { delete payload.subject_type; delete payload.subject_id; }
+        if (!fields.subject_id) delete payload.subject_id;
+        if (!fields.context) delete payload.context;
+        if (!fields.description) delete payload.description;
+        if (!fields.due_at) delete payload.due_at;
+        if (!fields.priority) payload.priority = 'normal';
+      }
+
       if (type === 'contact') await createContact.mutateAsync(payload);
       else if (type === 'account') await createAccount.mutateAsync(payload);
       else if (type === 'opportunity') await createOpportunity.mutateAsync(payload);
       else if (type === 'use-case') await createUseCase.mutateAsync(payload);
       else if (type === 'activity') await createActivity.mutateAsync(payload);
+      else if (type === 'assignment') await createAssignment.mutateAsync(payload);
 
-      const label = fields.first_name ?? fields.name ?? fields.subject ?? typeLabels[type];
+      const label = fields.first_name ?? fields.title ?? fields.name ?? fields.subject ?? typeLabels[type];
       toast({ title: `${typeLabels[type]} created`, description: `${label} has been added.` });
       onClose();
-    } catch {
-      toast({ title: 'Error', description: 'Failed to create. Please try again.', variant: 'destructive' });
+    } catch (err) {
+      toast({ title: `Failed to create ${typeLabels[type]}`, description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
     } finally {
       setIsSubmitting(false);
     }
@@ -493,6 +560,11 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
             ) : f.fieldType === 'entity-select' ? (
               <EntitySelect
                 subjectType={fields.subject_type || ''}
+                value={fields[f.key] || ''}
+                onChange={(v) => set(f.key, v)}
+              />
+            ) : f.fieldType === 'actor-select' ? (
+              <ActorSelect
                 value={fields[f.key] || ''}
                 onChange={(v) => set(f.key, v)}
               />

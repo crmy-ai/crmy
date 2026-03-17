@@ -8,7 +8,7 @@ import type { ActorContext } from '@crmy/shared';
 import * as contactRepo from '../../db/repos/contacts.js';
 import * as activityRepo from '../../db/repos/activities.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound } from '@crmy/shared';
+import { notFound, permissionDenied } from '@crmy/shared';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import type { ToolDef } from '../server.js';
 
@@ -152,6 +152,30 @@ export function contactTools(db: DbPool): ToolDef[] {
           limit: input.limit ?? 50,
           types: input.types,
         });
+      },
+    },
+    {
+      name: 'contact_delete',
+      description: 'Permanently delete a contact. Requires admin or owner role.',
+      inputSchema: z.object({ id: z.string().uuid() }),
+      handler: async (input: { id: string }, actor: ActorContext) => {
+        if (actor.role !== 'admin' && actor.role !== 'owner') {
+          throw permissionDenied('Only admins and owners can delete contacts');
+        }
+        const before = await contactRepo.getContact(db, actor.tenant_id, input.id);
+        if (!before) throw notFound('Contact', input.id);
+
+        await contactRepo.deleteContact(db, actor.tenant_id, input.id);
+        await emitEvent(db, {
+          tenantId: actor.tenant_id,
+          eventType: 'contact.deleted',
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          objectType: 'contact',
+          objectId: input.id,
+          beforeData: before,
+        });
+        return { deleted: true };
       },
     },
   ];

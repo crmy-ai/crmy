@@ -316,6 +316,66 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
     res.json({ data: result.rows });
   });
 
+  // PATCH /auth/api-keys/:id
+  authenticated.patch('/api-keys/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = req.actor!;
+      const keyId = typeof req.params.id === 'string' ? req.params.id : '';
+      const { label, scopes, actor_id, expires_at } = req.body as {
+        label?: string;
+        scopes?: string[];
+        actor_id?: string | null;
+        expires_at?: string | null;
+      };
+
+      // Verify key belongs to this tenant
+      const existing = await db.query(
+        'SELECT id FROM api_keys WHERE id = $1 AND tenant_id = $2',
+        [keyId, actor.tenant_id],
+      );
+      if (existing.rows.length === 0) {
+        res.status(404).json({ detail: 'API key not found' });
+        return;
+      }
+
+      // If actor_id provided, verify it belongs to this tenant
+      if (actor_id) {
+        const actorCheck = await db.query(
+          'SELECT id FROM actors WHERE id = $1 AND tenant_id = $2',
+          [actor_id, actor.tenant_id],
+        );
+        if (actorCheck.rows.length === 0) {
+          res.status(404).json({ detail: 'Actor not found' });
+          return;
+        }
+      }
+
+      const sets: string[] = [];
+      const params: unknown[] = [];
+      let p = 1;
+      if (label !== undefined) { sets.push(`label = $${p++}`); params.push(label); }
+      if (scopes !== undefined) { sets.push(`scopes = $${p++}`); params.push(scopes); }
+      if ('actor_id' in req.body) { sets.push(`actor_id = $${p++}`); params.push(actor_id ?? null); }
+      if ('expires_at' in req.body) { sets.push(`expires_at = $${p++}`); params.push(expires_at ? new Date(expires_at) : null); }
+
+      if (sets.length === 0) {
+        res.status(400).json({ detail: 'No fields to update' });
+        return;
+      }
+
+      params.push(keyId, actor.tenant_id);
+      const result = await db.query(
+        `UPDATE api_keys SET ${sets.join(', ')} WHERE id = $${p} AND tenant_id = $${p + 1}
+         RETURNING id, label, scopes, actor_id, expires_at`,
+        params,
+      );
+
+      res.json(result.rows[0]);
+    } catch {
+      res.status(500).json({ detail: 'Failed to update API key' });
+    }
+  });
+
   // DELETE /auth/api-keys/:id
   authenticated.delete('/api-keys/:id', async (req: Request, res: Response) => {
     const actor = req.actor!;
@@ -344,6 +404,87 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
     });
 
     res.json({ deleted: true });
+  });
+
+  // PATCH /auth/profile — self-service profile update (any authenticated user)
+  authenticated.patch('/profile', async (req: Request, res: Response) => {
+    try {
+      const actor = req.actor!;
+      const { name, email, current_password, new_password } = req.body as {
+        name?: string;
+        email?: string;
+        current_password?: string;
+        new_password?: string;
+      };
+
+      // Fetch current user record
+      const existing = await db.query(
+        'SELECT * FROM users WHERE id = $1 AND tenant_id = $2',
+        [actor.user_id, actor.tenant_id],
+      );
+      if (existing.rows.length === 0) {
+        res.status(404).json({ detail: 'User not found' });
+        return;
+      }
+      const user = existing.rows[0];
+
+      // If changing password, verify current password first
+      if (new_password) {
+        if (!current_password) {
+          res.status(400).json({ detail: 'Current password is required to set a new password' });
+          return;
+        }
+        const currentHash = crypto.createHash('sha256').update(current_password).digest('hex');
+        if (currentHash !== user.password_hash) {
+          res.status(400).json({ detail: 'Current password is incorrect' });
+          return;
+        }
+        if (new_password.length < 8) {
+          res.status(400).json({ detail: 'New password must be at least 8 characters' });
+          return;
+        }
+      }
+
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        res.status(400).json({ detail: 'Valid email address is required' });
+        return;
+      }
+
+      const cols: string[] = ['updated_at = now()'];
+      const vals: unknown[] = [];
+      if (name?.trim()) { cols.push(`name = $${vals.length + 1}`); vals.push(name.trim()); }
+      if (email?.trim()) { cols.push(`email = $${vals.length + 1}`); vals.push(email.trim()); }
+      if (new_password) {
+        const hash = crypto.createHash('sha256').update(new_password).digest('hex');
+        cols.push(`password_hash = $${vals.length + 1}`);
+        vals.push(hash);
+      }
+
+      if (cols.length === 1) {
+        res.status(400).json({ detail: 'No fields to update' });
+        return;
+      }
+
+      vals.push(actor.user_id, actor.tenant_id);
+      const result = await db.query(
+        `UPDATE users SET ${cols.join(', ')}
+         WHERE id = $${vals.length - 1} AND tenant_id = $${vals.length}
+         RETURNING id, email, name, role, created_at, updated_at`,
+        vals,
+      );
+
+      // Also sync display_name on the linked actor
+      if (name?.trim() && actor.actor_id) {
+        await db.query(
+          'UPDATE actors SET display_name = $1, updated_at = now() WHERE id = $2 AND tenant_id = $3',
+          [name.trim(), actor.actor_id, actor.tenant_id],
+        );
+      }
+
+      res.json(result.rows[0]);
+    } catch {
+      res.status(500).json({ detail: 'Failed to update profile' });
+    }
   });
 
   router.use('/', authenticated);

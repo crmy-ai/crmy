@@ -18,6 +18,7 @@ import { ContactDrawer } from '@/components/crm/ContactDrawer';
 import { OpportunityDrawer } from '@/components/crm/OpportunityDrawer';
 import { UseCaseDrawer } from '@/components/crm/UseCaseDrawer';
 import { AccountDrawer } from '@/components/crm/AccountDrawer';
+import { AssignmentDrawer } from '@/components/crm/AssignmentDrawer';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useAppStore } from '@/store/appStore';
 import { useTheme } from '@/hooks/useTheme';
@@ -36,6 +37,7 @@ import Settings from '@/pages/Settings';
 import NotFound from '@/pages/NotFound';
 import { HITLPage } from '@/pages/hitl/HITL';
 import AssignmentsPage from '@/pages/Assignments';
+import InboxPage from '@/pages/Inbox';
 
 function ThemeApplier() {
   const { darkVariant } = useAppStore();
@@ -80,9 +82,10 @@ function AnimatedRoutes() {
           <Route path="/opportunities" element={<Opportunities />} />
           <Route path="/use-cases" element={<UseCasesPage />} />
           <Route path="/activities" element={<Activities />} />
-          <Route path="/assignments" element={<AssignmentsPage />} />
+          <Route path="/assignments" element={<InboxPage />} />
+          <Route path="/inbox" element={<Navigate to="/assignments" replace />} />
+          <Route path="/hitl" element={<Navigate to="/assignments" replace />} />
           <Route path="/agent" element={<Agent />} />
-          <Route path="/hitl" element={<HITLPage />} />
           <Route path="/settings/*" element={<Settings />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
@@ -99,6 +102,7 @@ function AppContent() {
     : drawerType === 'opportunity' ? 'Opportunity Details'
     : drawerType === 'use-case' ? 'Use Case Details'
     : drawerType === 'account' ? 'Account Details'
+    : drawerType === 'assignment' ? 'Assignment Details'
     : '';
 
   return (
@@ -116,6 +120,7 @@ function AppContent() {
         {drawerType === 'opportunity' && <OpportunityDrawer />}
         {drawerType === 'use-case' && <UseCaseDrawer />}
         {drawerType === 'account' && <AccountDrawer />}
+        {drawerType === 'assignment' && <AssignmentDrawer />}
       </DrawerShell>
 
       {/* Overlays */}

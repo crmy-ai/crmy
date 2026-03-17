@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-type DrawerType = 'contact' | 'opportunity' | 'use-case' | 'account' | null;
+type DrawerType = 'contact' | 'opportunity' | 'use-case' | 'account' | 'assignment' | null;
 
 export interface AIContextEntity {
   type: 'contact' | 'opportunity' | 'use-case' | 'account';
@@ -9,7 +9,7 @@ export interface AIContextEntity {
   name: string;
   detail?: string;
 }
-type QuickAddType = 'contact' | 'opportunity' | 'use-case' | 'activity' | 'account' | null;
+type QuickAddType = 'contact' | 'opportunity' | 'use-case' | 'activity' | 'account' | 'assignment' | null;
 
 interface AppState {
   darkVariant: 'warm' | 'charcoal';

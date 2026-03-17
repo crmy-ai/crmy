@@ -504,6 +504,7 @@ Contacts are people you interact with. They can be linked to an account and have
 | `contact_set_lifecycle` | Change stage with optional `reason` |
 | `contact_log_activity` | Log a call, email, meeting, note, or task for a contact |
 | `contact_get_timeline` | Get the activity timeline with optional type filter |
+| `contact_delete` | Permanently delete a contact. Admin/owner role required. |
 
 ### CLI
 
@@ -511,6 +512,7 @@ Contacts are people you interact with. They can be linked to an account and have
 crmy contacts list --q "sarah"
 crmy contacts create          # interactive
 crmy contacts get <id>
+crmy contacts delete <id>     # admin/owner only
 ```
 
 ### REST API
@@ -540,12 +542,15 @@ Accounts represent companies or organizations. Accounts can have parent/child hi
 | `account_update` | Patch any fields |
 | `account_set_health_score` | Set score (0-100) with `rationale` |
 | `account_get_hierarchy` | Get parent/child tree |
+| `account_delete` | Permanently delete an account. Admin/owner role required. |
 
 ### CLI
 
 ```bash
 crmy accounts list
+crmy accounts create          # interactive
 crmy accounts get <id>
+crmy accounts delete <id>     # admin/owner only
 ```
 
 ### REST API
@@ -555,6 +560,7 @@ GET    /api/v1/accounts?q=acme&industry=tech
 POST   /api/v1/accounts
 GET    /api/v1/accounts/:id
 PATCH  /api/v1/accounts/:id
+DELETE /api/v1/accounts/:id          (admin/owner only)
 ```
 
 ---
@@ -583,13 +589,18 @@ Opportunities track sales deals through a pipeline.
 | `opportunity_search` | Filter by `stage`, `owner_id`, `account_id`, `forecast_cat`, `close_date_before/after` |
 | `opportunity_advance_stage` | Move to next stage with optional `note`. `lost_reason` required for `closed_lost` |
 | `opportunity_update` | Patch any fields |
+| `opportunity_delete` | Permanently delete an opportunity. Admin/owner role required. |
 | `pipeline_summary` | Aggregate pipeline by `stage`, `owner`, or `forecast_cat` |
 
 ### CLI
 
 ```bash
 crmy opps list --stage proposal
+crmy opps get <id>
+crmy opps create
 crmy opps advance <id> negotiation
+crmy opps advance <id> closed_lost --lost-reason "No budget"
+crmy opps delete <id>
 crmy pipeline
 ```
 
@@ -600,6 +611,7 @@ GET    /api/v1/opportunities?stage=proposal
 POST   /api/v1/opportunities
 GET    /api/v1/opportunities/:id
 PATCH  /api/v1/opportunities/:id    { stage: "negotiation", note: "..." }
+DELETE /api/v1/opportunities/:id    (admin/owner only)
 GET    /api/v1/analytics/pipeline?group_by=stage
 GET    /api/v1/analytics/forecast?period=quarter
 ```
@@ -1137,7 +1149,9 @@ Use cases track consumption-based workloads for customer success. They link to a
 ```bash
 crmy use-cases list --account <id>
 crmy use-cases create
+crmy use-cases get <id>
 crmy use-cases summary --group-by stage
+crmy use-cases delete <id>    # admin/owner only
 ```
 
 ### REST API
@@ -1616,7 +1630,7 @@ Base URL: `/api/v1`
 | POST | `/contacts` | Create contact |
 | GET | `/contacts/:id` | Get contact |
 | PATCH | `/contacts/:id` | Update contact |
-| DELETE | `/contacts/:id` | Delete (admin only) |
+| DELETE | `/contacts/:id` | Delete (admin/owner only) |
 | GET | `/contacts/:id/timeline` | Activity timeline |
 
 ### Accounts
@@ -1627,6 +1641,7 @@ Base URL: `/api/v1`
 | POST | `/accounts` | Create account |
 | GET | `/accounts/:id` | Get with contacts + opps |
 | PATCH | `/accounts/:id` | Update account |
+| DELETE | `/accounts/:id` | Delete (admin/owner only) |
 
 ### Opportunities
 
@@ -1636,7 +1651,7 @@ Base URL: `/api/v1`
 | POST | `/opportunities` | Create opportunity |
 | GET | `/opportunities/:id` | Get with activities |
 | PATCH | `/opportunities/:id` | Update or advance stage |
-| DELETE | `/opportunities/:id` | Delete (admin only) |
+| DELETE | `/opportunities/:id` | Delete (admin/owner only) |
 
 ### Activities
 
@@ -1653,8 +1668,9 @@ Base URL: `/api/v1`
 | GET | `/actors` | List actors |
 | POST | `/actors` | Register actor |
 | GET | `/actors/:id` | Get actor |
-| PATCH | `/actors/:id` | Update actor (scopes, status) |
-| DELETE | `/actors/:id` | Deactivate actor |
+| PATCH | `/actors/:id` | Update actor (scopes, `is_active`, display name) |
+
+> Actors are deactivated, not hard-deleted. Use `PATCH /actors/:id` with `{ "is_active": false }` to disable an actor.
 
 ### Assignments
 
@@ -1811,9 +1827,9 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 
 | Category | Tools |
 |---|---|
-| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline` |
-| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy` |
-| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `pipeline_summary` |
+| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
+| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_delete` |
+| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete`, `pipeline_summary` |
 | Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
 | Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
 | Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |

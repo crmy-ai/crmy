@@ -256,15 +256,23 @@ export function ContactDrawer() {
       <ContactEditForm
         contact={contact}
         onSave={async (data) => {
-          await updateContact.mutateAsync(data);
-          setEditing(false);
-          toast({ title: 'Contact updated' });
+          try {
+            await updateContact.mutateAsync(data);
+            setEditing(false);
+            toast({ title: 'Contact updated' });
+          } catch (err) {
+            toast({ title: 'Failed to update contact', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+          }
         }}
         onCancel={() => setEditing(false)}
         onDelete={async () => {
-          await deleteContact.mutateAsync();
-          closeDrawer();
-          toast({ title: 'Contact deleted' });
+          try {
+            await deleteContact.mutateAsync();
+            closeDrawer();
+            toast({ title: 'Contact deleted' });
+          } catch (err) {
+            toast({ title: 'Failed to delete contact', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+          }
         }}
         isSaving={updateContact.isPending}
       />

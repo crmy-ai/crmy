@@ -257,15 +257,23 @@ export function OpportunityDrawer() {
       <OpportunityEditForm
         opportunity={opportunity}
         onSave={async (data) => {
-          await updateOpportunity.mutateAsync(data);
-          setEditing(false);
-          toast({ title: 'Opportunity updated' });
+          try {
+            await updateOpportunity.mutateAsync(data);
+            setEditing(false);
+            toast({ title: 'Opportunity updated' });
+          } catch (err) {
+            toast({ title: 'Failed to update opportunity', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+          }
         }}
         onCancel={() => setEditing(false)}
         onDelete={async () => {
-          await deleteOpportunity.mutateAsync();
-          closeDrawer();
-          toast({ title: 'Opportunity deleted' });
+          try {
+            await deleteOpportunity.mutateAsync();
+            closeDrawer();
+            toast({ title: 'Opportunity deleted' });
+          } catch (err) {
+            toast({ title: 'Failed to delete opportunity', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+          }
         }}
         isSaving={updateOpportunity.isPending}
       />

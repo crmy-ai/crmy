@@ -63,5 +63,21 @@ export function contactsCommand(): Command {
       await client.close();
     });
 
+  cmd.command('delete <id>')
+    .description('Permanently delete a contact (admin/owner only)')
+    .action(async (id) => {
+      const { default: inquirer } = await import('inquirer');
+      const { confirm } = await inquirer.prompt([
+        { type: 'confirm', name: 'confirm', message: `Delete contact ${id}? This cannot be undone.`, default: false },
+      ]);
+      if (!confirm) { console.log('  Cancelled.'); return; }
+
+      const client = await getClient();
+      const result = await client.call('contact_delete', { id });
+      const data = JSON.parse(result);
+      if (data.deleted) console.log(`  Deleted.`);
+      await client.close();
+    });
+
   return cmd;
 }

@@ -14,4 +14,5 @@ export const ENTITY_COLORS = {
   useCases:      { text: 'text-success',      bg: 'bg-success/15',    bar: 'bg-success' },
   activities:    { text: 'text-warning',      bg: 'bg-warning/15',    bar: 'bg-warning' },
   assignments:   { text: 'text-destructive',  bg: 'bg-destructive/15',bar: 'bg-destructive' },
+  inbox:         { text: 'text-destructive',  bg: 'bg-destructive/15',bar: 'bg-destructive' },
 } as const;

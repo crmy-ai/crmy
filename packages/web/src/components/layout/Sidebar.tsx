@@ -7,12 +7,13 @@ import {
   Briefcase,
   FolderKanban,
   Activity,
-  ClipboardList,
+  Inbox,
   Settings,
   PanelLeftClose,
   PanelLeft,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
+import { useInboxCounts } from '@/api/hooks';
 import crmyLogo from '@/assets/crmy-logo.png';
 import { ENTITY_COLORS } from '@/lib/entityColors';
 
@@ -25,7 +26,7 @@ const navItems = [
   { icon: Briefcase,       label: 'Opportunities',path: '/opportunities', color: ENTITY_COLORS.opportunities },
   { icon: FolderKanban,    label: 'Use Cases',    path: '/use-cases',     color: ENTITY_COLORS.useCases },
   { icon: Activity,        label: 'Activities',   path: '/activities',    color: ENTITY_COLORS.activities },
-  { icon: ClipboardList,   label: 'Assignments',  path: '/assignments',   color: ENTITY_COLORS.assignments },
+  { icon: Inbox,           label: 'Assignments',   path: '/assignments',   color: ENTITY_COLORS.inbox },
 ];
 
 const bottomItems = [
@@ -35,6 +36,7 @@ const bottomItems = [
 export function Sidebar() {
   const location = useLocation();
   const { sidebarExpanded, setSidebarExpanded } = useAppStore();
+  const { total: inboxCount } = useInboxCounts();
 
   return (
     <motion.aside
@@ -81,12 +83,17 @@ export function Sidebar() {
                     initial={{ opacity: 0, width: 0 }}
                     animate={{ opacity: 1, width: 'auto' }}
                     exit={{ opacity: 0, width: 0 }}
-                    className="whitespace-nowrap overflow-hidden font-medium"
+                    className="whitespace-nowrap overflow-hidden font-medium flex-1"
                   >
                     {item.label}
                   </motion.span>
                 )}
               </AnimatePresence>
+              {item.path === '/assignments' && inboxCount > 0 && (
+                <span className={`flex-shrink-0 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-destructive text-white text-[10px] font-bold ${sidebarExpanded ? '' : 'absolute -top-1 -right-1'}`}>
+                  {inboxCount > 99 ? '99+' : inboxCount}
+                </span>
+              )}
               {active && (
                 <motion.div
                   layoutId="sidebar-active"

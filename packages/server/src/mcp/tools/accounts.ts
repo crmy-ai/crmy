@@ -7,7 +7,7 @@ import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as accountRepo from '../../db/repos/accounts.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound } from '@crmy/shared';
+import { notFound, permissionDenied } from '@crmy/shared';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import type { ToolDef } from '../server.js';
 
@@ -127,6 +127,30 @@ export function accountTools(db: DbPool): ToolDef[] {
         const result = await accountRepo.getAccountHierarchy(db, actor.tenant_id, input.id);
         if (!result) throw notFound('Account', input.id);
         return result;
+      },
+    },
+    {
+      name: 'account_delete',
+      description: 'Permanently delete an account. Requires admin or owner role.',
+      inputSchema: z.object({ id: z.string().uuid() }),
+      handler: async (input: { id: string }, actor: ActorContext) => {
+        if (actor.role !== 'admin' && actor.role !== 'owner') {
+          throw permissionDenied('Only admins and owners can delete accounts');
+        }
+        const before = await accountRepo.getAccount(db, actor.tenant_id, input.id);
+        if (!before) throw notFound('Account', input.id);
+
+        await accountRepo.deleteAccount(db, actor.tenant_id, input.id);
+        await emitEvent(db, {
+          tenantId: actor.tenant_id,
+          eventType: 'account.deleted',
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          objectType: 'account',
+          objectId: input.id,
+          beforeData: before,
+        });
+        return { deleted: true };
       },
     },
   ];

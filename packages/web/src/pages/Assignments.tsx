@@ -17,7 +17,7 @@ import {
 import { useAppStore } from '@/store/appStore';
 import {
   ClipboardList, Play, CheckCircle2, XCircle, Ban, AlertOctagon,
-  Search, Filter, ArrowUpDown, X, ChevronDown, Calendar,
+  Search, Filter, ArrowUpDown, X, ChevronDown, Calendar, Plus,
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -25,7 +25,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { DatePicker } from '@/components/ui/date-picker';
 
 type Tab = 'mine' | 'delegated' | 'all';
-type DrawerType = 'contact' | 'opportunity' | 'use-case' | 'account';
+type DrawerType = 'contact' | 'opportunity' | 'use-case' | 'account' | 'assignment';
 type SortKey = 'created_at' | 'due_at' | 'priority' | 'status' | 'title';
 type SortDir = 'asc' | 'desc';
 type DatePreset = 'today' | 'this_week' | 'this_month' | 'this_quarter' | 'overdue' | 'no_due_date' | 'custom' | '';
@@ -186,6 +186,8 @@ export default function AssignmentsPage() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  const { openQuickAdd } = useAppStore();
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: whoami } = useWhoAmI() as any;
   const myActorId = whoami?.actor_id;
@@ -322,8 +324,8 @@ export default function AssignmentsPage() {
         case 'cancel': await cancelMutation.mutateAsync({ id }); break;
       }
       toast({ title: `Assignment ${action}ed` });
-    } catch {
-      toast({ title: `Failed to ${action} assignment`, variant: 'destructive' });
+    } catch (err) {
+      toast({ title: `Failed to ${action} assignment`, description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
     }
   };
 
@@ -512,6 +514,14 @@ export default function AssignmentsPage() {
               ))}
             </PopoverContent>
           </Popover>
+
+          <button
+            onClick={() => openQuickAdd('assignment')}
+            className="h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-destructive to-destructive/80 text-destructive-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">New Assignment</span>
+          </button>
         </div>
 
         {/* Active filter pills */}
@@ -567,7 +577,7 @@ export default function AssignmentsPage() {
             const isOverdue = a.due_at && new Date(a.due_at) < new Date() && !['completed', 'declined', 'cancelled'].includes(a.status);
 
             return (
-              <div key={a.id} className="bg-card border border-border rounded-xl p-4 hover:shadow-md transition-shadow">
+              <div key={a.id} onClick={() => openDrawer('assignment', a.id)} className="bg-card border border-border rounded-xl p-4 hover:shadow-md transition-shadow cursor-pointer">
                 <div className="flex items-start gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -592,7 +602,7 @@ export default function AssignmentsPage() {
                         {a.assignment_type.replace(/_/g, ' ')}
                       </span>
                       {canOpenSubject && (
-                        <button onClick={() => openDrawer(canOpenSubject, a.subject_id)} className="text-xs text-primary hover:underline">
+                        <button onClick={e => { e.stopPropagation(); openDrawer(canOpenSubject, a.subject_id); }} className="text-xs text-primary hover:underline">
                           View {a.subject_type.replace(/_/g, ' ')}
                         </button>
                       )}
@@ -614,7 +624,7 @@ export default function AssignmentsPage() {
                     {actions.map(act => (
                       <button
                         key={act.action}
-                        onClick={() => handleAction(act.action, a.id)}
+                        onClick={e => { e.stopPropagation(); handleAction(act.action, a.id); }}
                         className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                           act.variant === 'destructive' ? 'bg-destructive/10 text-destructive hover:bg-destructive/20'
                           : act.variant === 'warning' ? 'text-warning hover:bg-warning/10'

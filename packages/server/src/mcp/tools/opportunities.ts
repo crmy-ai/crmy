@@ -7,7 +7,7 @@ import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as oppRepo from '../../db/repos/opportunities.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound, validationError } from '@crmy/shared';
+import { notFound, validationError, permissionDenied } from '@crmy/shared';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import type { ToolDef } from '../server.js';
 
@@ -139,6 +139,30 @@ export function opportunityTools(db: DbPool): ToolDef[] {
           owner_id: input.owner_id,
           group_by: input.group_by ?? 'stage',
         });
+      },
+    },
+    {
+      name: 'opportunity_delete',
+      description: 'Permanently delete an opportunity. Requires admin or owner role.',
+      inputSchema: z.object({ id: z.string().uuid() }),
+      handler: async (input: { id: string }, actor: ActorContext) => {
+        if (actor.role !== 'admin' && actor.role !== 'owner') {
+          throw permissionDenied('Only admins and owners can delete opportunities');
+        }
+        const before = await oppRepo.getOpportunity(db, actor.tenant_id, input.id);
+        if (!before) throw notFound('Opportunity', input.id);
+
+        await oppRepo.deleteOpportunity(db, actor.tenant_id, input.id);
+        await emitEvent(db, {
+          tenantId: actor.tenant_id,
+          eventType: 'opportunity.deleted',
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          objectType: 'opportunity',
+          objectId: input.id,
+          beforeData: before,
+        });
+        return { deleted: true };
       },
     },
   ];

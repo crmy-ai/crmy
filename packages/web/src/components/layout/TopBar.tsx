@@ -20,7 +20,7 @@ export function TopBar({ title, children }: TopBarProps) {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between h-12 px-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-md gap-2">
+    <header className="sticky top-0 z-30 flex items-center justify-between h-14 px-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-md gap-2">
       <h1 className="font-display font-bold text-lg text-foreground truncate hidden md:block">{title}</h1>
       <div className="flex items-center gap-1.5 md:ml-auto w-full md:w-auto">
         {children}

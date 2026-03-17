@@ -297,9 +297,9 @@ scripts/                   Migration runner
 
 | Category | Tools |
 |---|---|
-| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline` |
-| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy` |
-| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `pipeline_summary` |
+| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
+| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_delete` |
+| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete`, `pipeline_summary` |
 | Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
 | Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
 | **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
@@ -337,20 +337,27 @@ Contacts
 crmy contacts list [--q <query>] List contacts
 crmy contacts create             Interactive create
 crmy contacts get <id>           Get contact details
+crmy contacts delete <id>        Delete contact (admin/owner only, confirms)
 
 Accounts
 crmy accounts list               List accounts
+crmy accounts create             Interactive create
 crmy accounts get <id>           Get account + contacts + opps
+crmy accounts delete <id>        Delete account (admin/owner only, confirms)
 
 Opportunities
 crmy opps list [--stage <s>]     List opportunities
+crmy opps get <id>               Get opportunity details
+crmy opps create                 Interactive create
 crmy opps advance <id> <stage>   Advance opportunity stage
+crmy opps delete <id>            Delete opportunity (admin/owner only, confirms)
 
 Use Cases
 crmy use-cases list              List use cases
 crmy use-cases get <id>          Get use case details
 crmy use-cases create            Interactive create
 crmy use-cases summary           Use case summary
+crmy use-cases delete <id>       Delete use case (admin/owner only, confirms)
 
 Webhooks
 crmy webhooks list               List webhook endpoints

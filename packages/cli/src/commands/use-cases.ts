@@ -77,5 +77,21 @@ export function useCasesCommand(): Command {
       await client.close();
     });
 
+  cmd.command('delete <id>')
+    .description('Delete a use case (admin/owner only)')
+    .action(async (id) => {
+      const { default: inquirer } = await import('inquirer');
+      const { confirm } = await inquirer.prompt([
+        { type: 'confirm', name: 'confirm', message: `Delete use case ${id}? This cannot be undone.`, default: false },
+      ]);
+      if (!confirm) { console.log('  Cancelled.'); return; }
+
+      const client = await getClient();
+      const result = await client.call('use_case_delete', { id });
+      const data = JSON.parse(result);
+      if (data.deleted) console.log(`  Deleted.`);
+      await client.close();
+    });
+
   return cmd;
 }

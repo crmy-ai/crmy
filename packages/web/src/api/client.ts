@@ -33,10 +33,15 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(path.startsWith('/') ? path : `${BASE}/${path}`, {
-    ...opts,
-    headers,
-  });
+  let res: Response;
+  try {
+    res = await fetch(path.startsWith('/') ? path : `${BASE}/${path}`, {
+      ...opts,
+      headers,
+    });
+  } catch {
+    throw new Error('Unable to reach the server. Check your connection and try again.');
+  }
 
   if (res.status === 401) {
     clearToken();

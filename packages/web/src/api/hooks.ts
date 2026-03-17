@@ -417,11 +417,27 @@ export function useCreateApiKey() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['api-keys'] }),
   });
 }
+export function useUpdateApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; label?: string; scopes?: string[]; actor_id?: string | null; expires_at?: string | null }) =>
+      api.patch(`/auth/api-keys/${id}`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['api-keys'] }),
+  });
+}
 export function useRevokeApiKey() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/auth/api-keys/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['api-keys'] }),
+  });
+}
+
+// Profile (self-service)
+export function useUpdateProfile() {
+  return useMutation({
+    mutationFn: (data: { name?: string; email?: string; current_password?: string; new_password?: string }) =>
+      api.patch<{ id: string; email: string; name: string; role: string }>('/auth/profile', data),
   });
 }
 
@@ -634,6 +650,24 @@ export function useDeleteContextType() {
     mutationFn: (typeName: string) => api.delete(`context-types/${typeName}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['context-types'] }),
   });
+}
+
+// Inbox counts (HITL pending + my active assignments) — used by nav badge
+export function useInboxCounts() {
+  const { data: whoami } = useWhoAmI() as any;
+  const myActorId: string | undefined = whoami?.actor_id;
+  const hitlQ = useHITLRequests();
+  const assignQ = useQuery<{ data: any[]; total: number }>({
+    queryKey: ['inbox-assignments', myActorId],
+    queryFn: () => api.get(`assignments?assigned_to=${encodeURIComponent(myActorId!)}&limit=200`),
+    enabled: !!myActorId,
+    refetchInterval: 30_000,
+  });
+  const hitlCount = ((hitlQ.data as any)?.data ?? []).filter((r: any) => r.status === 'pending').length;
+  const assignCount = ((assignQ.data as any)?.assignments ?? []).filter((a: any) =>
+    ['pending', 'accepted', 'in_progress', 'blocked'].includes(a.status)
+  ).length;
+  return { total: hitlCount + assignCount, hitlCount, assignCount };
 }
 
 // Briefing

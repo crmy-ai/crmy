@@ -4,11 +4,11 @@
 
 @layer base {
   :root {
-    --background: 30 50% 99%;
+    --background: 30 25% 95%;
     --foreground: 12 100% 4%;
-    --card: 30 40% 99%;
+    --card: 30 30% 100%;
     --card-foreground: 12 100% 4%;
-    --popover: 30 40% 99%;
+    --popover: 30 30% 100%;
     --popover-foreground: 12 100% 4%;
     --primary: 24 95% 53%;
     --primary-foreground: 0 0% 100%;
@@ -16,12 +16,12 @@
     --secondary-foreground: 12 100% 4%;
     --accent: 199 90% 60%;
     --accent-foreground: 0 0% 100%;
-    --muted: 30 30% 93%;
+    --muted: 30 20% 90%;
     --muted-foreground: 20 10% 44%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
-    --border: 30 20% 90%;
-    --input: 30 20% 88%;
+    --border: 30 15% 86%;
+    --input: 30 15% 88%;
     --ring: 24 95% 53%;
     --radius: 0.75rem;
 
@@ -32,9 +32,9 @@
     --info: 199 90% 60%;
     --info-foreground: 0 0% 100%;
 
-    --surface: 30 40% 98%;
-    --surface-raised: 0 0% 100%;
-    --surface-sunken: 30 25% 94%;
+    --surface: 30 25% 97%;
+    --surface-raised: 30 30% 100%;
+    --surface-sunken: 30 20% 91%;
 
     --sidebar-background: 15 25% 10%;
     --sidebar-foreground: 20 10% 55%;
@@ -43,6 +43,29 @@
     --sidebar-accent: 15 20% 15%;
     --sidebar-accent-foreground: 30 20% 92%;
     --sidebar-border: 15 20% 15%;
+    --sidebar-ring: 24 95% 53%;
+  }
+
+  /* Charcoal variant in light mode — sidebar uses cool blue-gray, content area uses cool light gray */
+  .charcoal:not(.dark) {
+    --background: 220 20% 94%;
+    --card: 0 0% 100%;
+    --popover: 0 0% 100%;
+    --muted: 220 16% 88%;
+    --border: 220 14% 84%;
+    --input: 220 14% 88%;
+
+    --surface: 220 18% 96%;
+    --surface-raised: 0 0% 100%;
+    --surface-sunken: 220 18% 90%;
+
+    --sidebar-background: 220 18% 10%;
+    --sidebar-foreground: 220 8% 55%;
+    --sidebar-primary: 24 95% 53%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 12% 16%;
+    --sidebar-accent-foreground: 36 15% 92%;
+    --sidebar-border: 220 12% 16%;
     --sidebar-ring: 24 95% 53%;
   }
 
