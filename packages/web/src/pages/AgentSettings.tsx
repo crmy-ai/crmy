@@ -2,26 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, KeyRound, Users, LayoutGrid, TriangleAlert, Eye, EyeOff, Bot, X } from 'lucide-react';
+import { Sparkles, KeyRound, Users, TriangleAlert, Eye, EyeOff, X } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/hooks/use-toast';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { AnimatePresence, motion } from 'framer-motion';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type Provider = 'anthropic' | 'openai' | 'openrouter' | 'ollama' | 'custom';
-type ActorType = 'human' | 'agent';
-type ActorStatus = 'active' | 'idle';
-
-interface Actor {
-  id: string;
-  type: ActorType;
-  name: string;
-  detail: string;
-  status: ActorStatus;
-}
-
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const providerModels: Record<Provider, string[]> = {
@@ -68,12 +56,6 @@ const defaultSettings = {
   canWriteObjects: false,
 };
 
-const mockActors: Actor[] = [
-  { id: '1', type: 'human', name: 'Cody Harris', detail: 'cody@crmy.ai', status: 'active' },
-  { id: '2', type: 'agent', name: 'Outreach Bot', detail: 'custom/outreach-bot · claude-sonnet-4-20250514', status: 'active' },
-  { id: '3', type: 'agent', name: 'Research Agent', detail: 'custom/research-v1 · last seen 8 days ago', status: 'idle' },
-];
-
 // ─── Shared style constants ───────────────────────────────────────────────────
 
 const inputCls = 'w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
@@ -109,17 +91,9 @@ export default function AgentSettings() {
   const [canWriteObjects, setCanWriteObjects] = useState(defaultSettings.canWriteObjects);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Section 4 — Actors
-  const [actors, setActors] = useState<Actor[]>(mockActors);
-  const [showRegisterForm, setShowRegisterForm] = useState(false);
-  const [newActorName, setNewActorName] = useState('');
-  const [newActorEmail, setNewActorEmail] = useState('');
-  const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
-
-  // Section 5 — Danger Zone
+  // Section 4 — Danger Zone
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearConfirmText, setClearConfirmText] = useState('');
-  const [showRevokeAllConfirm, setShowRevokeAllConfirm] = useState(false);
 
   // Focus textarea when prompt editor opens
   useEffect(() => {
@@ -160,42 +134,11 @@ export default function AgentSettings() {
     setTimeout(() => setSaveProviderDone(false), 3000);
   };
 
-  // Register actor
-  const handleRegisterActor = () => {
-    if (!newActorName.trim() || !newActorEmail.trim()) return;
-    const newActor: Actor = {
-      id: Date.now().toString(),
-      type: 'human',
-      name: newActorName.trim(),
-      detail: newActorEmail.trim(),
-      status: 'active',
-    };
-    setActors(prev => [newActor, ...prev]);
-    setShowRegisterForm(false);
-    setNewActorName('');
-    setNewActorEmail('');
-    toast({ title: 'Actor registered', description: `${newActor.name} has been registered.` });
-  };
-
-  // Revoke actor
-  const handleRevokeActor = (id: string) => {
-    setActors(prev => prev.filter(a => a.id !== id));
-    setRevokeConfirmId(null);
-    toast({ title: 'Actor revoked' });
-  };
-
   // Clear all histories
   const handleClearAll = () => {
     setShowClearConfirm(false);
     setClearConfirmText('');
     toast({ title: 'Chat histories cleared', description: 'All agent chat histories have been deleted.' });
-  };
-
-  // Revoke all actors
-  const handleRevokeAll = () => {
-    setActors([]);
-    setShowRevokeAllConfirm(false);
-    toast({ title: 'All actors revoked', description: 'All actor registrations have been removed.' });
   };
 
   const dimCls = !enabled ? 'opacity-40 pointer-events-none' : '';
@@ -500,141 +443,7 @@ export default function AgentSettings() {
         </div>
       </div>
 
-      {/* ── SECTION 4: Registered Actors ───────────────────────────────────── */}
-      <div className={`rounded-xl border border-border bg-card overflow-hidden transition-opacity ${dimCls}`} aria-disabled={!enabled}>
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center">
-              <LayoutGrid className="w-4 h-4 text-blue-500" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">Registered actors</h3>
-              <p className="text-xs text-muted-foreground">Humans and agents with access to the AI context engine</p>
-            </div>
-          </div>
-          <button
-            onClick={() => setShowRegisterForm(v => !v)}
-            className={primaryBtn}
-          >
-            + Register human
-          </button>
-        </div>
-
-        <div className="px-5">
-          {/* Inline register form */}
-          <AnimatePresence>
-            {showRegisterForm && (
-              <motion.div
-                initial={{ opacity: 0, y: -8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                className="py-4 border-b border-border space-y-3"
-              >
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">New actor</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <input
-                    value={newActorName}
-                    onChange={e => setNewActorName(e.target.value)}
-                    placeholder="Full name"
-                    className={inputCls}
-                  />
-                  <input
-                    value={newActorEmail}
-                    onChange={e => setNewActorEmail(e.target.value)}
-                    placeholder="Email address"
-                    className={inputCls}
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleRegisterActor}
-                    disabled={!newActorName.trim() || !newActorEmail.trim()}
-                    className={primaryBtn}
-                  >
-                    Register →
-                  </button>
-                  <button onClick={() => { setShowRegisterForm(false); setNewActorName(''); setNewActorEmail(''); }} className={ghostBtn}>
-                    Cancel
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Actors list */}
-          <div className="divide-y divide-border">
-            <AnimatePresence>
-              {actors.map(actor => (
-                <motion.div
-                  key={actor.id}
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                  transition={{ duration: 0.15 }}
-                >
-                  <div className="flex items-center gap-3 py-3">
-                    {/* Avatar */}
-                    {actor.type === 'human' ? (
-                      <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-                        <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400">
-                          {actor.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center flex-shrink-0">
-                        <Bot className="w-3.5 h-3.5 text-blue-500" />
-                      </div>
-                    )}
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-foreground truncate">{actor.name}</p>
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-muted text-muted-foreground border-border capitalize">{actor.type}</span>
-                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${actor.status === 'active' ? 'bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/30' : 'bg-muted text-muted-foreground border-border'}`}>
-                          {actor.status}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground truncate">{actor.detail}</p>
-                    </div>
-                    {/* Revoke */}
-                    <button
-                      onClick={() => setRevokeConfirmId(actor.id === revokeConfirmId ? null : actor.id)}
-                      className="px-2.5 py-1 rounded-lg border border-border text-[11px] font-semibold text-muted-foreground hover:text-destructive hover:border-destructive/30 transition-colors flex-shrink-0"
-                    >
-                      Revoke
-                    </button>
-                  </div>
-
-                  {/* Inline revoke confirm */}
-                  <AnimatePresence>
-                    {revokeConfirmId === actor.id && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="pb-3 flex items-center gap-2 flex-wrap">
-                          <p className="text-xs text-muted-foreground flex-1">Remove <strong className="text-foreground">{actor.name}</strong> from registered actors?</p>
-                          <button onClick={() => handleRevokeActor(actor.id)} className={dangerBtn}>Confirm revoke</button>
-                          <button onClick={() => setRevokeConfirmId(null)} className={ghostBtn}>Cancel</button>
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-
-            {actors.length === 0 && (
-              <p className="py-6 text-sm text-muted-foreground text-center">No registered actors.</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── SECTION 5: Danger Zone ─────────────────────────────────────────── */}
+      {/* ── SECTION 4: Danger Zone ─────────────────────────────────────────── */}
       <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-card overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-red-200 dark:border-red-900/50">
@@ -659,16 +468,6 @@ export default function AgentSettings() {
             </button>
           </div>
 
-          {/* Revoke all actors */}
-          <div className="flex items-center justify-between py-3 gap-4">
-            <div>
-              <p className="text-sm font-medium text-foreground">Revoke all actor registrations</p>
-              <p className="text-xs text-muted-foreground">Remove all registered humans and agents from the context engine</p>
-            </div>
-            <button onClick={() => setShowRevokeAllConfirm(true)} className={dangerBtn + ' whitespace-nowrap'}>
-              Revoke all actors
-            </button>
-          </div>
         </div>
       </div>
 
@@ -740,21 +539,6 @@ export default function AgentSettings() {
         </div>
       )}
 
-      {/* ── Revoke All Actors Modal ─────────────────────────────────────────── */}
-      {showRevokeAllConfirm && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center bg-foreground/20 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl space-y-4">
-            <h3 className="font-semibold text-foreground">Revoke all actor registrations?</h3>
-            <p className="text-sm text-muted-foreground">
-              This will remove all registered humans and agents from the context engine. This action cannot be undone.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowRevokeAllConfirm(false)} className={ghostBtn}>Cancel</button>
-              <button onClick={handleRevokeAll} className={dangerBtn}>Revoke all actors</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

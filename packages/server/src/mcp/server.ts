@@ -6,6 +6,7 @@ import type { ZodRawShape, ZodObject } from 'zod';
 import type { ActorContext } from '@crmy/shared';
 import { CrmyError } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
+import { enforceToolScopes } from '../auth/scopes.js';
 import { contactTools } from './tools/contacts.js';
 import { accountTools } from './tools/accounts.js';
 import { opportunityTools } from './tools/opportunities.js';
@@ -70,6 +71,7 @@ export function createMcpServer(db: DbPool, getActor: () => ActorContext): McpSe
       async (input) => {
         try {
           const actor = getActor();
+          enforceToolScopes(tool.name, actor);
           const result = await tool.handler(input, actor);
           return {
             content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],

@@ -308,6 +308,7 @@ export const apiKeyCreate = z.object({
   label: z.string().min(1),
   scopes: z.array(z.string()).default(['read', 'write']),
   expires_at: z.string().optional(),
+  actor_id: uuid.optional(),
 });
 
 // -- Use Case schemas --
@@ -710,6 +711,9 @@ export const actorCreate = z.object({
   actor_type: actorType,
   display_name: z.string().min(1),
   email: z.string().email().optional(),
+  phone: z.string().optional(),
+  user_id: uuid.optional(),
+  role: z.string().optional(),
   agent_identifier: z.string().optional(),
   agent_model: z.string().optional(),
   metadata: z.record(z.unknown()).default({}),
@@ -720,8 +724,11 @@ export const actorUpdate = z.object({
   patch: z.object({
     display_name: z.string().min(1).optional(),
     email: z.string().email().nullable().optional(),
+    phone: z.string().nullable().optional(),
+    role: z.string().nullable().optional(),
     agent_identifier: z.string().nullable().optional(),
     agent_model: z.string().nullable().optional(),
+    scopes: z.array(z.string()).optional(),
     metadata: z.record(z.unknown()).optional(),
     is_active: z.boolean().optional(),
   }),

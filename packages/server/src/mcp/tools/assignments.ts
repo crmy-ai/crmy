@@ -10,6 +10,7 @@ import {
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as assignmentRepo from '../../db/repos/assignments.js';
+import * as governorLimits from '../../db/repos/governor-limits.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
@@ -21,6 +22,10 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       description: 'Create a new assignment — assign work to a human or agent. The assigner is automatically set to the current actor.',
       inputSchema: assignmentCreate,
       handler: async (input: z.infer<typeof assignmentCreate>, actor: ActorContext) => {
+        // Enforce governor limit on active assignments
+        const activeCount = await governorLimits.countActiveAssignments(db, actor.tenant_id);
+        await governorLimits.enforceLimit(db, actor.tenant_id, 'assignments_active', activeCount);
+
         const assignment = await assignmentRepo.createAssignment(db, actor.tenant_id, {
           ...input,
           assigned_by: actor.actor_id,

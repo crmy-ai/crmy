@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { TopBar } from '@/components/layout/TopBar';
@@ -12,6 +12,7 @@ import { StageBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { motion } from 'framer-motion';
 import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
+import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { stageConfig } from '@/lib/stageConfig';
 
@@ -47,6 +48,8 @@ export default function Contacts() {
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, isLoading } = useContacts({ q: search || undefined, limit: 200 }) as any;
@@ -72,6 +75,9 @@ export default function Contacts() {
     }
     return result;
   }, [allContacts, activeFilters, sort]);
+
+  useEffect(() => { setPage(1); }, [search, activeFilters, sort]);
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
     <th onClick={() => handleSortChange(sortKey)}
@@ -129,7 +135,7 @@ export default function Contacts() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((c, i) => (
+                  {paginated.map((c, i) => (
                     <tr key={c.id as string} onClick={() => openDrawer('contact', c.id as string)}
                       className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer group transition-colors ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
                       <td className="px-4 py-3">
@@ -154,10 +160,14 @@ export default function Contacts() {
                 </tbody>
               </table>
             </div>
+            <div className="px-4">
+              <PaginationBar page={page} pageSize={pageSize} total={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
+            </div>
           </div>
         ) : (
+          <>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {filtered.map((c, i) => (
+            {paginated.map((c, i) => (
               <motion.div key={c.id as string} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
                 onClick={() => openDrawer('contact', c.id as string)}
                 className="bg-card border border-border rounded-2xl p-4 cursor-pointer hover:shadow-lg hover:border-primary/20 transition-all press-scale group relative">
@@ -181,6 +191,8 @@ export default function Contacts() {
               </motion.div>
             ))}
           </div>
+          <PaginationBar page={page} pageSize={pageSize} total={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
+          </>
         )}
       </div>
     </div>

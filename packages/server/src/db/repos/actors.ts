@@ -10,17 +10,21 @@ export async function createActor(
   data: Partial<Actor>,
 ): Promise<Actor> {
   const result = await db.query(
-    `INSERT INTO actors (tenant_id, actor_type, display_name, email,
-       agent_identifier, agent_model, metadata)
-     VALUES ($1,$2,$3,$4,$5,$6,$7)
+    `INSERT INTO actors (tenant_id, actor_type, display_name, email, phone, user_id, role,
+       agent_identifier, agent_model, scopes, metadata)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      RETURNING *`,
     [
       tenantId,
       data.actor_type,
       data.display_name,
       data.email ?? null,
+      data.phone ?? null,
+      data.user_id ?? null,
+      data.role ?? null,
       data.agent_identifier ?? null,
       data.agent_model ?? null,
+      data.scopes ?? (data.actor_type === 'human' ? ['read', 'write'] : ['read']),
       JSON.stringify(data.metadata ?? {}),
     ],
   );
@@ -39,6 +43,14 @@ export async function findByEmail(db: DbPool, tenantId: UUID, email: string): Pr
   const result = await db.query(
     'SELECT * FROM actors WHERE tenant_id = $1 AND email = $2',
     [tenantId, email],
+  );
+  return (result.rows[0] as Actor) ?? null;
+}
+
+export async function findByUserId(db: DbPool, tenantId: UUID, userId: UUID): Promise<Actor | null> {
+  const result = await db.query(
+    'SELECT * FROM actors WHERE tenant_id = $1 AND user_id = $2',
+    [tenantId, userId],
   );
   return (result.rows[0] as Actor) ?? null;
 }
@@ -64,6 +76,10 @@ export async function ensureActor(
     const existing = await findByEmail(db, tenantId, data.email);
     if (existing) return existing;
   }
+  if (data.user_id) {
+    const existing = await findByUserId(db, tenantId, data.user_id);
+    if (existing) return existing;
+  }
   if (data.agent_identifier) {
     const existing = await findByAgentIdentifier(db, tenantId, data.agent_identifier);
     if (existing) return existing;
@@ -77,7 +93,7 @@ export async function updateActor(
   id: UUID,
   patch: Record<string, unknown>,
 ): Promise<Actor | null> {
-  const allowedFields = ['display_name', 'email', 'agent_identifier', 'agent_model', 'metadata', 'is_active'];
+  const allowedFields = ['display_name', 'email', 'phone', 'role', 'agent_identifier', 'agent_model', 'scopes', 'metadata', 'is_active'];
 
   const sets: string[] = ['updated_at = now()'];
   const params: unknown[] = [tenantId, id];
@@ -127,7 +143,7 @@ export async function searchActors(
     idx++;
   }
   if (filters.query) {
-    conditions.push(`(a.display_name ILIKE $${idx} OR a.email ILIKE $${idx} OR a.agent_identifier ILIKE $${idx})`);
+    conditions.push(`(a.display_name ILIKE $${idx} OR a.email ILIKE $${idx} OR a.phone ILIKE $${idx} OR a.agent_identifier ILIKE $${idx})`);
     params.push(`%${filters.query}%`);
     idx++;
   }

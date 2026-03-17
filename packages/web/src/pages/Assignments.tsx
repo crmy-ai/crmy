@@ -3,6 +3,7 @@
 
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
+import { PaginationBar } from '@/components/crm/PaginationBar';
 import {
   useAssignments,
   useWhoAmI,
@@ -157,6 +158,8 @@ function getPresetRange(preset: DatePreset): { start: Date; end: Date } | null {
 
 export default function AssignmentsPage() {
   const [tab, setTab] = useState<Tab>('mine');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 25;
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({ status: ['open'] });
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'created_at', dir: 'desc' });
@@ -281,6 +284,9 @@ export default function AssignmentsPage() {
 
     return list;
   }, [raw, search, activeFilters, sort, dueDatePreset, dueFrom, dueTo, createdPreset, createdFrom, createdTo]);
+
+  useEffect(() => { setPage(1); }, [tab, search, activeFilters, sort, dueDatePreset, dueFrom, dueTo, createdPreset, createdFrom, createdTo]);
+  const paginated = assignments.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const handleFilterChange = (key: string, values: string[]) => setActiveFilters(prev => ({ ...prev, [key]: values }));
   const handleClearFilters = () => {
@@ -552,7 +558,8 @@ export default function AssignmentsPage() {
             )}
           </div>
         ) : (
-          assignments.map(a => {
+          <>
+          {paginated.map(a => {
             const statusColor = STATUS_COLORS[a.status] ?? '#94a3b8';
             const priorityColor = PRIORITY_COLORS[a.priority] ?? '#94a3b8';
             const actions = getActions(a);
@@ -622,7 +629,9 @@ export default function AssignmentsPage() {
                 )}
               </div>
             );
-          })
+          })}
+          <PaginationBar page={page} pageSize={PAGE_SIZE} total={assignments.length} onPageChange={setPage} />
+          </>
         )}
       </div>
     </>

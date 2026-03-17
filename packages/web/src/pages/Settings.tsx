@@ -1,19 +1,21 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, Bot } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
 import { useApiKeys, useCreateApiKey, useRevokeApiKey, useWebhooks, useCreateWebhook, useDeleteWebhook, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useUsers, useCreateUser, useUpdateUser, useDeleteUser } from '@/api/hooks';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import AgentSettings from '@/pages/AgentSettings';
+import ActorsSettings from '@/components/settings/ActorsSettings';
 
 type NavRole = 'member' | 'admin' | 'owner';
 
@@ -23,7 +25,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Lock,       label: 'API Keys',      path: '/settings/api-keys',     roles: ['member', 'admin', 'owner'] },
   { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'] },
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
-  { icon: Users,      label: 'Users',         path: '/settings/users',        roles: ['admin', 'owner'] },
+  { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'] },
   { icon: Bot,        label: 'Local AI Agent', path: '/settings/agent',        roles: ['admin', 'owner'] },
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
 ];
@@ -692,6 +694,8 @@ function UsersSettings() {
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState<UserFormState>(initForm());
@@ -717,6 +721,9 @@ function UsersSettings() {
     }
     return result;
   }, [allUsers, search, activeFilters, sort]);
+
+  useEffect(() => { setPage(1); }, [search, activeFilters, sort]);
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const filterConfigs: FilterConfig[] = [
     {
@@ -916,7 +923,7 @@ function UsersSettings() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((u, i) => (
+                  {paginated.map((u, i) => (
                     <React.Fragment key={u.id}>
                       {editingId === u.id ? (
                         <tr>
@@ -994,11 +1001,13 @@ function UsersSettings() {
                 </tbody>
               </table>
             </div>
+            <PaginationBar page={page} pageSize={pageSize} total={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} className="px-4" />
           </div>
         ) : (
           /* ── Card view ── */
+          <>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {filtered.map((u, i) => (
+            {paginated.map((u, i) => (
               editingId === u.id ? (
                 <motion.div
                   key={u.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
@@ -1077,6 +1086,8 @@ function UsersSettings() {
               )
             ))}
           </div>
+          <PaginationBar page={page} pageSize={pageSize} total={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
+          </>
         )}
       </div>
     </div>
@@ -1256,7 +1267,7 @@ export default function Settings() {
             <Route path="api-keys" element={<ApiKeysSettings />} />
             <Route path="webhooks" element={<RequireRole roles={['admin', 'owner']}><WebhooksSettings /></RequireRole>} />
             <Route path="custom-fields" element={<RequireRole roles={['admin', 'owner']}><CustomFieldsSettings /></RequireRole>} />
-            <Route path="users" element={<RequireRole roles={['admin', 'owner']}><UsersSettings /></RequireRole>} />
+            <Route path="actors" element={<RequireRole roles={['admin', 'owner']}><ActorsSettings /></RequireRole>} />
             <Route path="agent" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
             <Route path="database" element={<RequireRole roles={['admin', 'owner']}><DatabaseSettings /></RequireRole>} />
           </Routes>

@@ -17,8 +17,11 @@ import * as hitlRepo from '../db/repos/hitl.js';
 import * as eventRepo from '../db/repos/events.js';
 import * as searchRepo from '../db/repos/search.js';
 import * as ucRepo from '../db/repos/use-cases.js';
+import * as actorRepo from '../db/repos/actors.js';
 import { emitEvent } from '../events/emitter.js';
 import { getAllTools } from '../mcp/server.js';
+import { enforceToolScopes, requireScopes } from '../auth/scopes.js';
+import * as governorLimits from '../db/repos/governor-limits.js';
 
 function getActor(req: Request): ActorContext {
   return req.actor!;
@@ -54,12 +57,15 @@ function handleError(res: Response, err: unknown): void {
   });
 }
 
-// Helper: use tool handler from MCP tools for reuse
+// Helper: use tool handler from MCP tools for reuse (with scope enforcement)
 function toolHandler(db: DbPool, toolName: string) {
   const tools = getAllTools(db);
   const tool = tools.find(t => t.name === toolName);
   if (!tool) throw new Error(`Tool ${toolName} not found`);
-  return async (input: unknown, actor: ActorContext) => tool.handler(input, actor);
+  return async (input: unknown, actor: ActorContext) => {
+    enforceToolScopes(toolName, actor);
+    return tool.handler(input, actor);
+  };
 }
 
 export function apiRouter(db: DbPool): Router {
@@ -69,6 +75,7 @@ export function apiRouter(db: DbPool): Router {
   router.get('/contacts', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      requireScopes(actor, 'contacts:read');
       const result = await contactRepo.searchContacts(db, actor.tenant_id, {
         query: qs(req.query.q),
         lifecycle_stage: qs(req.query.stage),
@@ -111,6 +118,7 @@ export function apiRouter(db: DbPool): Router {
   router.delete('/contacts/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      requireScopes(actor, 'contacts:write');
       if (actor.role !== 'admin' && actor.role !== 'owner') {
         res.status(403).json({
           type: 'https://crmy.ai/errors/permission_denied',
@@ -155,6 +163,7 @@ export function apiRouter(db: DbPool): Router {
   router.get('/accounts', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      requireScopes(actor, 'accounts:read');
       const result = await accountRepo.searchAccounts(db, actor.tenant_id, {
         query: qs(req.query.q),
         industry: qs(req.query.industry),
@@ -196,6 +205,7 @@ export function apiRouter(db: DbPool): Router {
   router.delete('/accounts/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      requireScopes(actor, 'accounts:write');
       const before = await accountRepo.getAccount(db, actor.tenant_id, p(req, 'id'));
       if (!before) {
         res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'Account not found' });
@@ -219,6 +229,7 @@ export function apiRouter(db: DbPool): Router {
   router.get('/opportunities', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      requireScopes(actor, 'opportunities:read');
       const result = await oppRepo.searchOpportunities(db, actor.tenant_id, {
         query: qs(req.query.q),
         stage: qs(req.query.stage),
@@ -270,6 +281,7 @@ export function apiRouter(db: DbPool): Router {
   router.delete('/opportunities/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      requireScopes(actor, 'opportunities:write');
       const before = await oppRepo.getOpportunity(db, actor.tenant_id, p(req, 'id'));
       if (!before) {
         res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'Opportunity not found' });
@@ -293,6 +305,7 @@ export function apiRouter(db: DbPool): Router {
   router.get('/activities', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      requireScopes(actor, 'activities:read');
       const result = await activityRepo.searchActivities(db, actor.tenant_id, {
         contact_id: qs(req.query.contact_id),
         account_id: qs(req.query.account_id),
@@ -798,14 +811,14 @@ export function apiRouter(db: DbPool): Router {
   router.get('/actors', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      const handler = toolHandler(db, 'actor_list');
-      const result = await handler({
+      requireScopes(actor, 'read');
+      const result = await actorRepo.searchActors(db, actor.tenant_id, {
         actor_type: qs(req.query.actor_type),
         query: qs(req.query.q),
         is_active: req.query.is_active !== undefined ? req.query.is_active === 'true' : undefined,
-        limit: Math.min(qn(req.query.limit, 20), 100),
+        limit: Math.min(qn(req.query.limit, 20), 200),
         cursor: qs(req.query.cursor),
-      }, actor);
+      });
       res.json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -1261,6 +1274,16 @@ export function apiRouter(db: DbPool): Router {
          RETURNING id, email, name, role, created_at`,
         [actor.tenant_id, email.trim(), name.trim(), role, passwordHash],
       );
+
+      // Auto-create linked actor
+      await actorRepo.ensureActor(db, actor.tenant_id, {
+        actor_type: 'human',
+        display_name: name.trim(),
+        email: email.trim(),
+        user_id: result.rows[0].id,
+        role: role,
+      });
+
       res.status(201).json(result.rows[0]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
@@ -1325,6 +1348,19 @@ export function apiRouter(db: DbPool): Router {
          RETURNING id, email, name, role, created_at, updated_at`,
         vals,
       );
+
+      // Sync linked actor
+      const linkedActor = await actorRepo.findByUserId(db, actor.tenant_id, userId);
+      if (linkedActor) {
+        const actorPatch: Record<string, unknown> = {};
+        if (name?.trim()) actorPatch.display_name = name.trim();
+        if (email) actorPatch.email = email.trim();
+        if (role) actorPatch.role = role;
+        if (Object.keys(actorPatch).length > 0) {
+          await actorRepo.updateActor(db, actor.tenant_id, linkedActor.id, actorPatch);
+        }
+      }
+
       res.json(result.rows[0]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
@@ -1364,6 +1400,12 @@ export function apiRouter(db: DbPool): Router {
           res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Invalid Operation', status: 400, detail: 'Cannot delete the last owner account' });
           return;
         }
+      }
+
+      // Deactivate linked actor
+      const linkedActor = await actorRepo.findByUserId(db, actor.tenant_id, userId);
+      if (linkedActor) {
+        await actorRepo.updateActor(db, actor.tenant_id, linkedActor.id, { is_active: false });
       }
 
       await db.query('DELETE FROM users WHERE id = $1 AND tenant_id = $2', [userId, actor.tenant_id]);

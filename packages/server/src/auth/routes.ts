@@ -5,9 +5,12 @@ import { Router, type Request, type Response } from 'express';
 import * as jose from 'jose';
 import crypto from 'node:crypto';
 import type { DbPool } from '../db/pool.js';
-import { authRegister, authLogin, apiKeyCreate } from '@crmy/shared';
+import { z } from 'zod';
+import { authRegister, authLogin, apiKeyCreate, CrmyError } from '@crmy/shared';
 import { emitEvent } from '../events/emitter.js';
 import { authMiddleware } from './middleware.js';
+import * as actorRepo from '../db/repos/actors.js';
+import * as governorLimits from '../db/repos/governor-limits.js';
 
 export function authRouter(db: DbPool, jwtSecret: string): Router {
   const router = Router();
@@ -139,6 +142,93 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
     }
   });
 
+  // POST /auth/register-agent — Self-registration for agents with minimal scopes.
+  // Requires an existing API key with 'write' scope for the tenant.
+  const agentRegisterSchema = z.object({
+    display_name: z.string().min(1).max(200),
+    agent_identifier: z.string().min(1).max(200),
+    agent_model: z.string().max(200).optional(),
+    requested_scopes: z.array(z.string()).optional(),
+  });
+
+  const agentRegistration = Router();
+  agentRegistration.use(authMiddleware(db, jwtSecret));
+
+  agentRegistration.post('/register-agent', async (req: Request, res: Response) => {
+    try {
+      const data = agentRegisterSchema.parse(req.body);
+      const actor = req.actor!;
+
+      // Enforce governor limit on actor count
+      const activeCount = await governorLimits.countActiveActors(db, actor.tenant_id);
+      await governorLimits.enforceLimit(db, actor.tenant_id, 'actors_max', activeCount);
+
+      // Find-or-create the agent actor with minimal scopes
+      const minimalScopes = ['read']; // agents start read-only; admin grants more
+      const agentActor = await actorRepo.ensureActor(db, actor.tenant_id, {
+        actor_type: 'agent',
+        display_name: data.display_name,
+        agent_identifier: data.agent_identifier,
+        agent_model: data.agent_model ?? null,
+        scopes: minimalScopes,
+        metadata: {},
+      } as Parameters<typeof actorRepo.ensureActor>[2]);
+
+      // Generate an API key bound to this agent actor
+      const rawKey = 'crmy_' + crypto.randomBytes(32).toString('hex');
+      const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
+
+      const keyResult = await db.query(
+        `INSERT INTO api_keys (tenant_id, actor_id, key_hash, label, scopes, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, label, scopes, actor_id, created_at`,
+        [actor.tenant_id, agentActor.id, keyHash, `${data.display_name} auto`, minimalScopes, null],
+      );
+
+      await emitEvent(db, {
+        tenantId: actor.tenant_id,
+        eventType: 'actor.self_registered',
+        actorId: agentActor.id,
+        actorType: 'agent',
+        objectType: 'actor',
+        objectId: agentActor.id,
+        afterData: { display_name: data.display_name, agent_identifier: data.agent_identifier },
+      });
+
+      res.status(201).json({
+        actor: agentActor,
+        api_key: {
+          ...keyResult.rows[0],
+          key: rawKey, // Only returned once
+        },
+      });
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'name' in err && err.name === 'ZodError') {
+        res.status(422).json({
+          type: 'https://crmy.ai/errors/validation',
+          title: 'Validation Error',
+          status: 422,
+          detail: 'Invalid input',
+          errors: (err as unknown as { errors: unknown[] }).errors,
+        });
+        return;
+      }
+      if (err instanceof CrmyError) {
+        res.status(err.status).json(err.toJSON());
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Registration failed';
+      res.status(500).json({
+        type: 'https://crmy.ai/errors/internal',
+        title: 'Internal Error',
+        status: 500,
+        detail: message,
+      });
+    }
+  });
+
+  router.use('/', agentRegistration);
+
   // Authenticated API key routes
   const authenticated = Router();
   authenticated.use(authMiddleware(db, jwtSecret));
@@ -153,11 +243,29 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
       const rawKey = 'crmy_' + crypto.randomBytes(32).toString('hex');
       const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
 
+      // If actor_id provided, verify it belongs to this tenant
+      const actorId = data.actor_id ?? null;
+      if (actorId) {
+        const actorCheck = await db.query(
+          'SELECT id FROM actors WHERE id = $1 AND tenant_id = $2',
+          [actorId, actor.tenant_id],
+        );
+        if (actorCheck.rows.length === 0) {
+          res.status(404).json({
+            type: 'https://crmy.ai/errors/not_found',
+            title: 'Not Found',
+            status: 404,
+            detail: 'Actor not found',
+          });
+          return;
+        }
+      }
+
       const result = await db.query(
-        `INSERT INTO api_keys (tenant_id, user_id, key_hash, label, scopes, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, label, scopes, created_at, expires_at`,
-        [actor.tenant_id, actor.actor_id, keyHash, data.label, data.scopes, data.expires_at ?? null],
+        `INSERT INTO api_keys (tenant_id, user_id, actor_id, key_hash, label, scopes, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, label, scopes, actor_id, created_at, expires_at`,
+        [actor.tenant_id, actorId ? null : actor.actor_id, actorId, keyHash, data.label, data.scopes, data.expires_at ?? null],
       );
 
       await emitEvent(db, {
@@ -187,11 +295,23 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
   // GET /auth/api-keys
   authenticated.get('/api-keys', async (req: Request, res: Response) => {
     const actor = req.actor!;
+    // Optionally filter by actor_id
+    const actorFilter = req.query.actor_id as string | undefined;
+    const params: unknown[] = [actor.tenant_id];
+    let where = 'ak.tenant_id = $1';
+    if (actorFilter) {
+      where += ' AND ak.actor_id = $2';
+      params.push(actorFilter);
+    }
     const result = await db.query(
-      `SELECT id, label, scopes, last_used_at, expires_at, created_at
-       FROM api_keys WHERE tenant_id = $1
-       ORDER BY created_at DESC`,
-      [actor.tenant_id],
+      `SELECT ak.id, ak.label, ak.scopes, ak.actor_id, ak.user_id,
+              ak.last_used_at, ak.expires_at, ak.created_at,
+              a.display_name as actor_name, a.actor_type as actor_type
+       FROM api_keys ak
+       LEFT JOIN actors a ON ak.actor_id = a.id
+       WHERE ${where}
+       ORDER BY ak.created_at DESC`,
+      params,
     );
     res.json({ data: result.rows });
   });

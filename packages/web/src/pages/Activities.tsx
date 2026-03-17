@@ -1,10 +1,11 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { useActivities } from '@/api/hooks';
 import { ActivityFeed } from '@/components/crm/CrmWidgets';
+import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -107,6 +108,8 @@ export default function Activities() {
   const [timeRange, setTimeRange] = useState<TimeRangePreset>('this_week');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, isLoading } = useActivities({ limit: 200 }) as any;
@@ -177,6 +180,9 @@ export default function Activities() {
     return result;
   }, [allActivities, search, activeFilters, sort, timeRange, customFrom, customTo]);
 
+  useEffect(() => { setPage(1); }, [search, activeFilters, sort, timeRange, customFrom, customTo]);
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   return (
     <div className="flex flex-col h-full">
       <TopBar title="Activities" />
@@ -235,7 +241,8 @@ export default function Activities() {
           </div>
         ) : (
           <div className="bg-card border border-border rounded-2xl p-4 shadow-sm">
-            <ActivityFeed activities={filtered} />
+            <ActivityFeed activities={paginated} />
+            <PaginationBar page={page} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} />
           </div>
         )}
       </div>

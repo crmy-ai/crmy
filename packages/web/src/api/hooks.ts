@@ -402,16 +402,17 @@ export function useCreateNote() {
 }
 
 // API Keys
-export function useApiKeys() {
+export function useApiKeys(actorId?: string) {
+  const params = actorId ? `?actor_id=${actorId}` : '';
   return useQuery({
-    queryKey: ['api-keys'],
-    queryFn: () => api.get<{ data: Array<{ id: string; label: string; scopes: string[]; created_at: string; last_used_at?: string }> }>('/auth/api-keys'),
+    queryKey: ['api-keys', actorId],
+    queryFn: () => api.get<{ data: Array<{ id: string; label: string; scopes: string[]; actor_id?: string; actor_name?: string; actor_type?: string; created_at: string; last_used_at?: string }> }>(`/auth/api-keys${params}`),
   });
 }
 export function useCreateApiKey() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { label: string; scopes: string[] }) =>
+    mutationFn: (data: { label: string; scopes: string[]; actor_id?: string }) =>
       api.post<{ id: string; key: string; label: string }>('/auth/api-keys', data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['api-keys'] }),
   });
@@ -438,6 +439,17 @@ export function useCreateActor() {
   return useMutation({
     mutationFn: (data: Record<string, unknown>) => api.post('actors', data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['actors'] }),
+  });
+}
+export function useUpdateActor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...patch }: { id: string; [key: string]: unknown }) =>
+      api.patch(`actors/${id}`, { patch }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['actors'] });
+      qc.invalidateQueries({ queryKey: ['actor'] });
+    },
   });
 }
 export function useWhoAmI() {

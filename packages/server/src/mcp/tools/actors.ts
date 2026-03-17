@@ -6,6 +6,7 @@ import { actorCreate, actorGet, actorSearch, actorUpdate } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as actorRepo from '../../db/repos/actors.js';
+import * as governorLimits from '../../db/repos/governor-limits.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
@@ -17,6 +18,10 @@ export function actorTools(db: DbPool): ToolDef[] {
       description: 'Register a new actor (human or agent). Agents auto-register on first MCP connect.',
       inputSchema: actorCreate,
       handler: async (input: z.infer<typeof actorCreate>, actor: ActorContext) => {
+        // Enforce governor limit on active actor count
+        const activeCount = await governorLimits.countActiveActors(db, actor.tenant_id);
+        await governorLimits.enforceLimit(db, actor.tenant_id, 'actors_max', activeCount);
+
         const created = await actorRepo.createActor(db, actor.tenant_id, input);
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,

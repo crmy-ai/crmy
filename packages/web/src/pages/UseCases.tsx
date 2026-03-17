@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { useUseCases } from '@/api/hooks';
@@ -11,6 +11,7 @@ import { ListToolbar, type FilterConfig, type SortOption } from '@/components/cr
 import { DatePicker } from '@/components/ui/date-picker';
 import { motion } from 'framer-motion';
 import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
+import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useCaseStageConfig } from '@/lib/stageConfig';
 
 type ViewMode = 'kanban' | 'table' | 'dashboard';
@@ -80,6 +81,8 @@ export default function UseCases() {
   const [prodDate, setProdDate] = useState<ProdDatePreset>('all');
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, isLoading } = useUseCases({ q: search || undefined, limit: 200 }) as any;
@@ -124,6 +127,9 @@ export default function UseCases() {
     }
     return result;
   }, [allUseCases, activeFilters, sort, prodDate, customFrom, customTo]);
+
+  useEffect(() => { setPage(1); }, [search, activeFilters, sort, prodDate, customFrom, customTo]);
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
     <th onClick={() => handleSortChange(sortKey)} className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground cursor-pointer hover:text-foreground transition-colors select-none">
@@ -282,7 +288,7 @@ export default function UseCases() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.map((uc, i) => {
+                      {paginated.map((uc, i) => {
                         const stage = (uc.stage ?? '') as string;
                         const config = useCaseStageConfig[stage] ?? { label: stage, color: '#94a3b8' };
                         const arr = (uc.attributed_arr ?? 0) as number;
@@ -326,6 +332,9 @@ export default function UseCases() {
                       })}
                     </tbody>
                   </table>
+                </div>
+                <div className="px-4">
+                  <PaginationBar page={page} pageSize={pageSize} total={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
                 </div>
               </div>
             )}

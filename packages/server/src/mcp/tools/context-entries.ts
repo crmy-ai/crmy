@@ -9,9 +9,10 @@ import {
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext, SubjectType } from '@crmy/shared';
 import * as contextRepo from '../../db/repos/context-entries.js';
+import * as governorLimits from '../../db/repos/governor-limits.js';
 import { assembleBriefing, formatBriefingText } from '../../services/briefing.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound } from '@crmy/shared';
+import { notFound, validationError } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
 
 export function contextEntryTools(db: DbPool): ToolDef[] {
@@ -21,6 +22,18 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'Store context/knowledge about a CRM object (note, transcript, research, objection, competitive intel, etc.). Supports tags, source_activity_id, and valid_until for staleness tracking.',
       inputSchema: contextEntryCreate,
       handler: async (input: z.infer<typeof contextEntryCreate>, actor: ActorContext) => {
+        // Enforce governor limit on context entry count
+        const entryCount = await governorLimits.countContextEntries(db, actor.tenant_id);
+        await governorLimits.enforceLimit(db, actor.tenant_id, 'context_entries_max', entryCount);
+
+        // Enforce body length limit
+        if (input.body) {
+          const maxChars = await governorLimits.getLimit(db, actor.tenant_id, 'context_body_max_chars');
+          if (input.body.length > maxChars) {
+            throw validationError(`Context body exceeds maximum length (${input.body.length} > ${maxChars} chars)`);
+          }
+        }
+
         const entry = await contextRepo.createContextEntry(db, actor.tenant_id, {
           ...input,
           authored_by: actor.actor_id,

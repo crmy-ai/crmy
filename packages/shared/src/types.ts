@@ -151,6 +151,7 @@ export interface ApiKey {
   id: UUID;
   tenant_id: UUID;
   user_id?: UUID;
+  actor_id?: UUID;
   label: string;
   scopes: string[];
   last_used_at?: string;
@@ -416,12 +417,42 @@ export interface Actor {
   actor_type: 'human' | 'agent';
   display_name: string;
   email?: string;
+  phone?: string;
+  user_id?: UUID;
+  role?: string;
   agent_identifier?: string;
   agent_model?: string;
+  scopes: string[];
   metadata: Record<string, unknown>;
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export const AVAILABLE_SCOPES = [
+  'read',
+  'write',
+  'contacts:read',
+  'contacts:write',
+  'accounts:read',
+  'accounts:write',
+  'opportunities:read',
+  'opportunities:write',
+  'activities:read',
+  'activities:write',
+  'assignments:create',
+  'assignments:update',
+  'context:read',
+  'context:write',
+] as const;
+
+export type Scope = typeof AVAILABLE_SCOPES[number];
+
+export interface ContactChannel {
+  channel_type: 'email' | 'phone' | 'slack' | 'teams' | 'discord' | 'whatsapp' | string;
+  handle: string;
+  verified?: boolean;
+  primary?: boolean;
 }
 
 export type AssignmentStatus =

@@ -6,6 +6,7 @@ import { activityCreate, activityUpdate, activitySearch, activityComplete, activ
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as activityRepo from '../../db/repos/activities.js';
+import * as governorLimits from '../../db/repos/governor-limits.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
@@ -18,6 +19,10 @@ export function activityTools(db: DbPool): ToolDef[] {
       description: 'Create an activity (call, email, meeting, note, task, etc.). Supports Context Engine fields: performed_by, subject_type/subject_id for polymorphic linking, occurred_at, outcome, and detail JSONB.',
       inputSchema: activityCreate,
       handler: async (input: z.infer<typeof activityCreate>, actor: ActorContext) => {
+        // Enforce governor limit on daily activity count
+        const todayCount = await governorLimits.countActivitiesToday(db, actor.tenant_id);
+        await governorLimits.enforceLimit(db, actor.tenant_id, 'activities_per_day', todayCount);
+
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
           input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'activity', input.custom_fields, { isCreate: true });
         }

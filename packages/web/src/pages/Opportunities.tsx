@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { useOpportunities } from '@/api/hooks';
@@ -12,6 +12,7 @@ import { ListToolbar, type FilterConfig, type SortOption } from '@/components/cr
 import { DatePicker } from '@/components/ui/date-picker';
 import { motion } from 'framer-motion';
 import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
+import { PaginationBar } from '@/components/crm/PaginationBar';
 import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { stageConfig } from '@/lib/stageConfig';
 
@@ -80,6 +81,8 @@ export default function Opportunities() {
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [closeDate, setCloseDate] = useState<CloseDatePreset>('this_quarter');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
 
@@ -126,6 +129,9 @@ export default function Opportunities() {
     }
     return result;
   }, [allOpportunities, activeFilters, sort]);
+
+  useEffect(() => { setPage(1); }, [search, activeFilters, sort, closeDate, customFrom, customTo]);
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
     <th onClick={() => handleSortChange(sortKey)} className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground cursor-pointer hover:text-foreground transition-colors select-none">
@@ -288,7 +294,7 @@ export default function Opportunities() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.map((d, i) => {
+                      {paginated.map((d, i) => {
                         const contactName = (d.contact_name ?? d.contactName ?? '') as string;
                         const amount = (d.amount as number) ?? 0;
                         return (
@@ -324,6 +330,9 @@ export default function Opportunities() {
                       })}
                     </tbody>
                   </table>
+                </div>
+                <div className="px-4">
+                  <PaginationBar page={page} pageSize={pageSize} total={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
                 </div>
               </div>
             )}
