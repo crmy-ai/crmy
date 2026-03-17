@@ -1,7 +1,7 @@
 {
   "name": "@crmy/web",
-  "version": "0.4.0",
-  "private": true,
+  "version": "0.5.1",
+  "private": false,
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {

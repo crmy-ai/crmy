@@ -1,6 +1,6 @@
 {
   "name": "@crmy/server",
-  "version": "0.4.0",
+  "version": "0.5.1",
   "description": "CRMy server — Express + PostgreSQL + MCP endpoint",
   "type": "module",
   "main": "dist/index.js",
