@@ -15,18 +15,25 @@ Complete documentation for CRMy — the agent-first open source CRM.
 7. [Accounts](#accounts)
 8. [Opportunities](#opportunities)
 9. [Activities](#activities)
-10. [Use Cases](#use-cases)
-11. [Notes & Comments](#notes--comments)
-12. [Workflows & Automation](#workflows--automation)
-13. [Webhooks](#webhooks)
-14. [Email](#email)
-15. [Custom Fields](#custom-fields)
-16. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
-17. [Analytics & Reporting](#analytics--reporting)
-18. [Plugins](#plugins)
-19. [REST API Reference](#rest-api-reference)
-20. [MCP Tools Reference](#mcp-tools-reference)
-21. [Database & Migrations](#database--migrations)
+10. [Actors](#actors)
+11. [Assignments](#assignments)
+12. [Context Engine](#context-engine)
+13. [Briefings](#briefings)
+14. [Type Registries](#type-registries)
+15. [Scope Enforcement](#scope-enforcement)
+16. [Governor Limits](#governor-limits)
+17. [Use Cases](#use-cases)
+18. [Notes & Comments](#notes--comments)
+19. [Workflows & Automation](#workflows--automation)
+20. [Webhooks](#webhooks)
+21. [Email](#email)
+22. [Custom Fields](#custom-fields)
+23. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
+24. [Analytics & Reporting](#analytics--reporting)
+25. [Plugins](#plugins)
+26. [REST API Reference](#rest-api-reference)
+27. [MCP Tools Reference](#mcp-tools-reference)
+28. [Database & Migrations](#database--migrations)
 
 ---
 
@@ -223,6 +230,71 @@ GET    /auth/api-keys        List all keys
 DELETE /auth/api-keys/:id    Revoke a key
 ```
 
+#### API Key Scopes
+
+API keys can be created with a restricted set of scopes to limit what the key is permitted to do. This is the primary access-control mechanism for agents and integrations.
+
+**Scope format:** `<resource>:<action>` — for example `contacts:read`, `activities:write`.
+
+**Wildcard shortcuts:**
+- `read` — grants read access to all resources (equivalent to `contacts:read`, `accounts:read`, `opportunities:read`, etc.)
+- `write` — grants write access to all resources
+- `*` — full access (read + write everything)
+
+**Available resource scopes:**
+
+| Scope | Grants access to |
+|---|---|
+| `contacts:read` / `contacts:write` | Contact records and timelines |
+| `accounts:read` / `accounts:write` | Account records and use cases |
+| `opportunities:read` / `opportunities:write` | Pipeline and deal records |
+| `activities:read` / `activities:write` | Activities, notes, emails |
+| `assignments:create` / `assignments:update` | Assignment lifecycle |
+| `context:read` / `context:write` | Context entries and briefings |
+| `read` | All `:read` scopes (wildcard) |
+| `write` | All `:write` scopes (wildcard) |
+| `*` | Everything |
+
+**How scopes are enforced:**
+
+- JWT tokens (human login) bypass scope enforcement and always have full access.
+- API key requests have their scopes checked against `TOOL_SCOPES` before any tool handler runs.
+- If a required scope is missing, the server returns HTTP 403 with a message identifying exactly which scope was needed.
+
+See the [Scope Enforcement](#scope-enforcement) section for the complete reference.
+
+#### Agent Self-Registration
+
+Agents can register themselves without admin intervention via:
+
+```
+POST /auth/register-agent
+Authorization: Bearer <jwt-or-api-key>
+
+{
+  "display_name": "Outreach Agent",
+  "agent_identifier": "outreach-pipeline-v2",
+  "agent_model": "claude-sonnet-4-20250514",
+  "requested_scopes": ["contacts:read", "activities:write"]
+}
+```
+
+Response includes the created (or existing) actor record and a bound API key:
+
+```json
+{
+  "actor": { "id": "...", "display_name": "Outreach Agent", ... },
+  "api_key": {
+    "id": "...",
+    "label": "Outreach Agent auto",
+    "key": "crmy_...",
+    "scopes": ["contacts:read", "activities:write"]
+  }
+}
+```
+
+The operation is idempotent — calling it twice with the same `agent_identifier` returns the existing actor (no duplicate). New agents start with `['read']` scopes by default if `requested_scopes` is not provided. An admin can expand scopes from the Settings → Actors panel.
+
 ### Roles
 
 - `owner` — full access, can manage users and keys
@@ -298,6 +370,14 @@ Detail view with tabs:
 
 **Right panel**: activity timeline
 
+#### Assignments (`/app/assignments`)
+
+Assignment queue with three tabs: **My Queue**, **Delegated**, and **All**.
+
+Each assignment card shows: title, subject object, assignee, due date, priority, and status. Inline action buttons let users accept, start, complete, block, cancel, or decline assignments directly from the list.
+
+Status filter chips let you narrow by `pending`, `accepted`, `in_progress`, `blocked`, etc.
+
 #### Analytics (`/app/analytics`)
 
 - Pipeline by stage (deal count + value)
@@ -325,6 +405,36 @@ Tabbed interface:
 - **API Keys**: create new keys (shown once), list existing, revoke
 - **Webhooks**: add endpoint URL + event types, list existing, delete
 - **Custom Fields**: tabbed by object type (contact, account, opportunity, activity, use_case) — create field definitions, list, delete
+- **Actors**: manage registered actors (humans and agents) — see below
+
+#### Actors Settings Panel
+
+The Actors tab in Settings provides a full view of every registered identity in your tenant.
+
+**Table view**: columns for Name/Type, Role/Model, Scopes, Status, and Created date. Click any row to expand an inline detail panel.
+
+**Card view** (mobile/narrow): chevron button on each card expands the detail panel inline.
+
+**Actor Detail Panel** (expanded inline):
+
+*Scopes viewer*: chip list of all active scopes. Clicking **Edit** opens an interactive scope editor with toggles grouped by category:
+
+| Group | Scopes |
+|---|---|
+| General | `read`, `write` (wildcard) |
+| Contacts | `contacts:read`, `contacts:write` |
+| Accounts | `accounts:read`, `accounts:write` |
+| Opportunities | `opportunities:read`, `opportunities:write` |
+| Activities | `activities:read`, `activities:write` |
+| Assignments | `assignments:create`, `assignments:update` |
+| Context | `context:read`, `context:write` |
+
+*API Keys section*: lists all API keys bound to this actor. Each key shows label, creation date, expiry, and last-used date. Actions:
+- **Create key** — generates a new key bound to the actor; the raw value is shown once in a dismissible banner
+- **Copy** — copies the key value (only available immediately after creation)
+- **Revoke** — permanently disables the key
+
+**`agent_model` field**: shown in the Role/Model column for agent-type actors. This is informational metadata — it records which model version the agent reported at registration time. It is not used in authentication or scope enforcement. Useful for governance (spotting deprecated model versions), auditing, and incident triage when correlating behavior changes to model updates.
 
 ---
 
@@ -334,7 +444,7 @@ Tabbed interface:
 
 All CRM operations are defined as **MCP tools**. The REST API and CLI are thin wrappers that call the same tool handlers. This means any AI agent that speaks MCP has full CRM access.
 
-**Three ways to interact:**
+**Four ways to interact:**
 
 1. **MCP (stdio)** — `crmy mcp` starts an MCP server over stdio for Claude Code
 2. **MCP (HTTP)** — `POST /mcp` endpoint for remote MCP clients (Streamable HTTP transport)
@@ -498,21 +608,45 @@ GET    /api/v1/analytics/forecast?period=quarter
 
 ## Activities
 
-Activities are logged interactions: calls, emails, meetings, notes, and tasks.
+Activities are logged interactions: calls, emails, meetings, notes, and tasks. The activity model supports polymorphic subjects (any CRM object), structured `detail` payloads, `occurred_at` timestamps (for retroactive logging), and `outcome` tracking.
 
 ### Activity types
 
-`call` | `email` | `meeting` | `note` | `task`
+Default types are seeded and organized by category. You can also add custom types per tenant via the [Type Registries](#type-registries).
+
+| Category | Types |
+|---|---|
+| `outreach` | cold_call, warm_call, email_sent, linkedin_outreach, sms |
+| `meeting` | discovery_call, demo, qbr, exec_briefing |
+| `proposal` | proposal_sent, proposal_reviewed |
+| `contract` | contract_sent, contract_signed |
+| `internal` | internal_note, research |
+| `lifecycle` | stage_change, renewal, expansion |
+| `handoff` | handoff_to_human, handoff_to_agent |
+
+The `activity_type` field accepts any string — agents can use custom types without schema changes.
+
+### Key fields
+
+| Field | Notes |
+|---|---|
+| `activity_type` | String from the type registry (or any custom string) |
+| `subject_type` / `subject_id` | Polymorphic attachment to any CRM object |
+| `occurred_at` | When the activity happened (may differ from `created_at` for retroactive logging) |
+| `detail` | JSONB — structured payload (call recording URL, email thread ID, etc.) |
+| `outcome` | String describing what resulted from this activity |
+| `direction` | `inbound` or `outbound` |
 
 ### MCP tools
 
 | Tool | Description |
 |---|---|
-| `activity_create` | Create an activity. Required: `type`, `subject`. Optional: `body`, `contact_id`, `account_id`, `opportunity_id`, `due_at`, `direction` (inbound/outbound) |
+| `activity_create` | Create an activity. Required: `type`, `subject`. Optional: `body`, `contact_id`, `account_id`, `opportunity_id`, `due_at`, `direction`, `detail`, `outcome`, `occurred_at` |
 | `activity_get` | Get by ID |
 | `activity_search` | Filter by `contact_id`, `account_id`, `opportunity_id`, `type` |
 | `activity_complete` | Mark as completed with optional timestamp and note |
 | `activity_update` | Patch `subject`, `body`, `status`, `due_at` |
+| `activity_get_timeline` | Get timeline for any subject object |
 
 ### REST API
 
@@ -520,6 +654,446 @@ Activities are logged interactions: calls, emails, meetings, notes, and tasks.
 GET    /api/v1/activities?contact_id=...&type=call
 POST   /api/v1/activities
 PATCH  /api/v1/activities/:id
+```
+
+---
+
+## Actors
+
+Actors are the first-class identity layer in CRMy — every action is attributed to an actor. Actors bridge human users (from the `users` auth table) and AI agents into a single identity model.
+
+### Actor types
+
+| Type | Description |
+|---|---|
+| `human` | A human user linked to a `users` record via `user_id` |
+| `agent` | An AI agent registered via `actor_register` or self-registration |
+| `system` | Automated system processes (e.g., workflow engine, scheduler) |
+
+### Key fields
+
+| Field | Description |
+|---|---|
+| `display_name` | Human-readable name shown in the UI and audit log |
+| `actor_type` | `human`, `agent`, or `system` |
+| `agent_identifier` | Stable external identifier for agents (e.g., `"outreach-pipeline-v2"`) |
+| `agent_model` | The model version the agent reported at registration (informational only) |
+| `scopes` | `TEXT[]` of scope strings controlling what this actor can do |
+| `is_active` | Whether the actor is currently enabled |
+| `metadata` | JSONB — additional context (e.g., team, version, deployment info) |
+
+### Effective scopes
+
+When an API key is used to authenticate, the **effective scopes** are the intersection of:
+1. The API key's own `scopes`
+2. The bound actor's `scopes` (if the key is linked to an actor)
+
+The narrower of the two always wins. This allows creating a key with broad scopes but bounding it to an actor with narrow scopes, or vice versa.
+
+### MCP tools
+
+| Tool | Description |
+|---|---|
+| `actor_register` | Register a new actor (human or agent). Required: `display_name`, `actor_type`. Optional: `agent_identifier`, `agent_model`, `scopes`, `metadata` |
+| `actor_get` | Get actor by ID |
+| `actor_list` | List actors. Filter by `actor_type`, `is_active` |
+| `actor_update` | Update `display_name`, `scopes`, `is_active`, `metadata` |
+| `actor_whoami` | Return the actor identity for the current request (always allowed, no scope required) |
+
+### CLI
+
+```bash
+crmy actors list --type agent
+crmy actors register             # interactive
+crmy actors get <id>
+crmy actors whoami
+```
+
+### REST API
+
+```
+GET    /api/v1/actors?type=agent&active=true
+POST   /api/v1/actors              { display_name, actor_type, agent_identifier, ... }
+GET    /api/v1/actors/:id
+PATCH  /api/v1/actors/:id          { scopes, is_active, ... }
+DELETE /api/v1/actors/:id          (admin/owner only)
+```
+
+---
+
+## Assignments
+
+Assignments are the coordination layer — structured handoffs of work between agents and humans. An assignment says "this actor should do this thing about this CRM object by this time."
+
+### Lifecycle
+
+```
+pending → accepted → in_progress → completed
+                  ↘ declined
+       ↘ cancelled
+         (any non-terminal state) → blocked → in_progress (unblocked)
+```
+
+| Status | Meaning |
+|---|---|
+| `pending` | Created, awaiting acceptance |
+| `accepted` | Assignee has acknowledged |
+| `in_progress` | Actively being worked |
+| `blocked` | Cannot proceed; `blocked_reason` is set |
+| `completed` | Work is done |
+| `declined` | Assignee refused with optional reason |
+| `cancelled` | Cancelled by creator or admin |
+
+### Key fields
+
+| Field | Description |
+|---|---|
+| `title` | Short description of what needs to be done |
+| `subject_type` / `subject_id` | The CRM object this assignment is about |
+| `assignee_actor_id` | Who should do it |
+| `assigner_actor_id` | Who created it |
+| `due_at` | Optional deadline |
+| `priority` | `low`, `normal`, `high`, `urgent` |
+| `instructions` | Freeform guidance for the assignee |
+| `outcome` | Filled in when completing the assignment |
+| `blocked_reason` | Filled in when blocking |
+
+### MCP tools
+
+| Tool | Description |
+|---|---|
+| `assignment_create` | Create an assignment. Required: `title`, `assignee_actor_id`. Optional: `subject_type`, `subject_id`, `instructions`, `priority`, `due_at` |
+| `assignment_get` | Get by ID |
+| `assignment_list` | List with filters: `assignee_actor_id`, `assigner_actor_id`, `status`, `subject_type`, `subject_id` |
+| `assignment_update` | Patch `title`, `instructions`, `due_at`, `priority` |
+| `assignment_accept` | Accept a pending assignment |
+| `assignment_start` | Transition to `in_progress` |
+| `assignment_complete` | Mark complete with optional `outcome` |
+| `assignment_decline` | Decline with optional `reason` |
+| `assignment_block` | Mark as blocked with required `blocked_reason` |
+| `assignment_cancel` | Cancel the assignment |
+
+### CLI
+
+```bash
+crmy assignments list --mine
+crmy assignments create
+crmy assignments get <id>
+crmy assignments accept <id>
+crmy assignments start <id>
+crmy assignments complete <id>
+crmy assignments block <id>
+crmy assignments decline <id>
+crmy assignments cancel <id>
+```
+
+### REST API
+
+```
+GET    /api/v1/assignments?assignee_actor_id=...&status=pending
+POST   /api/v1/assignments
+GET    /api/v1/assignments/:id
+PATCH  /api/v1/assignments/:id
+POST   /api/v1/assignments/:id/accept
+POST   /api/v1/assignments/:id/start
+POST   /api/v1/assignments/:id/complete   { outcome }
+POST   /api/v1/assignments/:id/decline    { reason }
+POST   /api/v1/assignments/:id/block      { blocked_reason }
+POST   /api/v1/assignments/:id/cancel
+```
+
+---
+
+## Context Engine
+
+The Context Engine is the memory and knowledge layer. Context entries are structured pieces of information attached to any CRM object — meeting transcripts, competitive intel, relationship maps, agent reasoning, decisions, and more.
+
+### What makes it different from notes
+
+Notes are human-written text. Context entries are structured, typed, searchable, and carry metadata for agent consumption:
+
+- **`context_type`** — typed from a registry (transcript, summary, objection, etc.)
+- **`confidence`** — how certain the source is (1.0 for verbatim transcripts, 0.6 for inferred sentiment)
+- **`valid_until`** — when the entry becomes stale (e.g., pricing info valid for 30 days)
+- **`tags`** — filterable JSONB array for fast lookup
+- **Full-text search** — PostgreSQL `tsvector`/`tsquery` with GIN index
+- **Supersede chain** — old entries are marked `is_current = false` rather than deleted; new entries point back via `supersedes_id`
+
+### Context types
+
+Default types are seeded per tenant:
+
+`note`, `transcript`, `summary`, `research`, `preference`, `objection`, `competitive_intel`, `relationship_map`, `meeting_notes`, `agent_reasoning`, `decision`, `action_item`
+
+Custom types can be added via the [Type Registries](#type-registries).
+
+### Key fields
+
+| Field | Description |
+|---|---|
+| `subject_type` / `subject_id` | Polymorphic attachment to any CRM object |
+| `context_type` | Type string from the context type registry |
+| `body` | The content (max size enforced by governor limit `context_body_max_chars`) |
+| `confidence` | Float 0.0–1.0 signaling how reliable this information is |
+| `tags` | String array for filtering (e.g., `["pricing", "q2-2026"]`) |
+| `source_actor_id` | Which actor created this entry |
+| `valid_until` | Optional expiry timestamp; entries past this date are marked stale |
+| `is_current` | `false` if superseded by a newer entry |
+| `supersedes_id` | Foreign key to the entry this one replaces |
+
+### Staleness
+
+Entries with a `valid_until` in the past are considered stale. The briefing service surfaces stale entries with warnings. Use `context_stale` to list entries that need review, and `context_review` to confirm an entry is still accurate (bumps the `reviewed_at` timestamp).
+
+### Superseding entries
+
+When information changes, supersede the old entry rather than deleting it:
+
+```
+context_supersede { supersedes_id: "<old-id>", body: "Updated pricing...", ... }
+```
+
+The old entry's `is_current` is set to `false`. Queries for context automatically filter to `is_current = true` unless explicitly requesting the full history.
+
+### MCP tools
+
+| Tool | Description |
+|---|---|
+| `context_add` | Add a context entry. Required: `subject_type`, `subject_id`, `context_type`, `body`. Optional: `confidence`, `tags`, `valid_until`, `source_actor_id` |
+| `context_get` | Get by ID (includes superseded entry if applicable) |
+| `context_list` | List entries for an object. Filter by `context_type`, `tags`, `is_current` |
+| `context_search` | Full-text search across all context entries. Filter by `subject_type`, `tags`, `context_type` |
+| `context_supersede` | Replace an entry with updated content |
+| `context_review` | Mark an entry as reviewed (confirm still accurate) |
+| `context_stale` | List entries that are past `valid_until` and may need updating |
+
+### CLI
+
+```bash
+crmy context list --subject-type contact --subject-id <id>
+crmy context add
+crmy context get <id>
+crmy context supersede <id>
+crmy context search "competitor pricing"
+crmy context review <id>
+crmy context stale
+```
+
+### REST API
+
+```
+GET    /api/v1/context?subject_type=contact&subject_id=...
+POST   /api/v1/context
+GET    /api/v1/context/:id
+POST   /api/v1/context/:id/supersede
+POST   /api/v1/context/:id/review
+GET    /api/v1/context/stale
+GET    /api/v1/context/search?q=pricing&tags=q2
+```
+
+---
+
+## Briefings
+
+A briefing is a single API call that assembles everything an agent or human needs before engaging with a CRM object. It replaces the need to make 5–10 separate queries.
+
+### What a briefing includes
+
+1. The core record (contact, account, opportunity, or use case)
+2. Related records (e.g., the account a contact belongs to, or contacts linked to a use case)
+3. Recent activities (last 10 by default)
+4. Open assignments for this object
+5. Context entries grouped by `context_type` (only `is_current = true` entries)
+6. Staleness warnings for any context entries past `valid_until`
+
+### MCP tool
+
+```
+briefing_get { subject_type: "contact", subject_id: "<id>" }
+```
+
+Returns a structured object:
+
+```json
+{
+  "record": { ... },
+  "related": { ... },
+  "activities": [ ... ],
+  "open_assignments": [ ... ],
+  "context": {
+    "transcript": [ ... ],
+    "objection": [ ... ],
+    "competitive_intel": [ ... ]
+  },
+  "stale_warnings": [
+    { "id": "...", "context_type": "research", "valid_until": "2026-01-01", "body": "..." }
+  ]
+}
+```
+
+### CLI
+
+```bash
+crmy briefing contact:<id>
+crmy briefing account:<id>
+crmy briefing use_case:<id>
+```
+
+### REST API
+
+```
+GET /api/v1/briefing/:subject_type/:subject_id
+```
+
+---
+
+## Type Registries
+
+Activity types and context types are discoverable via per-tenant registries. Defaults are seeded on tenant creation. You can add and remove custom types without schema changes.
+
+### Activity Types
+
+19 default types across 7 categories (see [Activities](#activities) for the full list).
+
+#### MCP tools
+
+| Tool | Description |
+|---|---|
+| `activity_type_list` | List all registered activity types for the tenant |
+| `activity_type_add` | Add a custom type. Required: `name` (snake_case). Optional: `category`, `description` |
+| `activity_type_remove` | Remove a custom type by `name` |
+
+#### CLI
+
+```bash
+crmy activity-types list
+crmy activity-types add partner_call
+crmy activity-types remove partner_call
+```
+
+### Context Types
+
+12 default types (note, transcript, summary, research, preference, objection, competitive_intel, relationship_map, meeting_notes, agent_reasoning, decision, action_item).
+
+#### MCP tools
+
+| Tool | Description |
+|---|---|
+| `context_type_list` | List all registered context types for the tenant |
+| `context_type_add` | Add a custom type. Required: `name` (snake_case). Optional: `description` |
+| `context_type_remove` | Remove a custom type by `name` |
+
+#### CLI
+
+```bash
+crmy context-types list
+crmy context-types add deal_risk
+crmy context-types remove deal_risk
+```
+
+---
+
+## Scope Enforcement
+
+Scope enforcement is the authorization layer for API key and agent access. Every MCP tool and REST route that is called by a non-JWT actor is checked against a central `TOOL_SCOPES` map before the handler runs.
+
+### How it works
+
+1. Request arrives with `Authorization: Bearer crmy_<key>`
+2. API key is resolved to an `ActorContext` (including the actor's scopes)
+3. For MCP tool calls: `enforceToolScopes(toolName, actor)` is called before the handler
+4. For REST routes: `enforceToolScopes(toolName, actor)` or `requireScopes(actor, ...scopes)` is called
+5. If any required scope is missing → HTTP 403 with an explanatory message
+
+**JWT users (human login) bypass all scope checks** — they always have full access.
+
+### Wildcard resolution
+
+| Actor has | Grants |
+|---|---|
+| `read` | All scopes ending in `:read` |
+| `write` | All scopes ending in `:write` |
+| `*` | Everything |
+| `contacts:read` | Only `contacts:read` |
+
+### Tool scope map (reference)
+
+| Tool | Required scopes |
+|---|---|
+| `contact_get`, `contact_search`, `contact_get_timeline` | `contacts:read` |
+| `contact_create`, `contact_update`, `contact_set_lifecycle` | `contacts:write` |
+| `contact_log_activity` | `contacts:write`, `activities:write` |
+| `account_get`, `account_search` | `accounts:read` |
+| `account_create`, `account_update`, `account_set_health_score` | `accounts:write` |
+| `opportunity_get`, `opportunity_search` | `opportunities:read` |
+| `opportunity_create`, `opportunity_update`, `opportunity_advance_stage` | `opportunities:write` |
+| `activity_get`, `activity_search` | `activities:read` |
+| `activity_create`, `activity_update`, `activity_complete` | `activities:write` |
+| `assignment_get`, `assignment_list`, `assignment_create` | `assignments:create` |
+| `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` | `assignments:update` |
+| `context_get`, `context_search`, `context_list`, `context_stale`, `briefing_get` | `context:read` |
+| `context_add`, `context_supersede`, `context_review` | `context:write` |
+| `webhook_*`, `custom_field_*`, `workflow_*`, `actor_register`, `actor_update` | `read` or `write` (general) |
+| `actor_whoami`, `crm_schema` | *(always allowed)* |
+
+### Error response
+
+When a scope check fails:
+
+```json
+{
+  "code": "PERMISSION_DENIED",
+  "message": "Scope 'contacts:write' is required for 'contact_create'. Your scopes: [read]",
+  "status": 403
+}
+```
+
+---
+
+## Governor Limits
+
+Governor limits are plan-based rate and quota controls. They prevent runaway agents from writing unbounded data and enforce plan tier constraints.
+
+### Plans
+
+| Plan | Who it's for |
+|---|---|
+| `solo_agent` | Single-agent deployments or personal use |
+| `pro_agent` | Production single-agent workloads |
+| `team` | Multi-human + multi-agent teams |
+
+### Limits enforced
+
+| Limit name | Enforced on | Description |
+|---|---|---|
+| `actors_max` | `actor_register` | Maximum number of active actors |
+| `activities_per_day` | `activity_create` | Maximum activities created per calendar day (UTC) |
+| `assignments_active` | `assignment_create` | Maximum concurrently active (non-terminal) assignments |
+| `context_entries_max` | `context_add` | Maximum total context entries in the tenant |
+| `context_body_max_chars` | `context_add` | Maximum character length of a single context entry body |
+
+### Tenant overrides
+
+Limits can be overridden per-tenant via the `governor_limits` table:
+
+```sql
+INSERT INTO governor_limits (tenant_id, limit_name, limit_value)
+VALUES ('<tenant-id>', 'actors_max', 50);
+```
+
+Tenant-specific overrides take precedence over plan defaults.
+
+### Quota exceeded response
+
+When a limit is hit:
+
+```json
+{
+  "code": "QUOTA_EXCEEDED",
+  "message": "Governor limit exceeded: activities_per_day (current: 500, max: 500)",
+  "status": 429,
+  "data": { "limit_name": "activities_per_day", "current": 500, "max": 500 }
+}
 ```
 
 ---
@@ -650,6 +1224,7 @@ Any event type from the audit log can trigger a workflow:
 - `email.created`, `email.sent`
 - `hitl.submitted`, `hitl.resolved`
 - `use_case.stage_changed`, `use_case.health_changed`
+- `actor.self_registered`
 
 ### Trigger filters
 
@@ -984,7 +1559,6 @@ A built-in sample plugin at `packages/server/src/plugins/slack-notifier.ts` post
 ```typescript
 import slackNotifier from './plugins/slack-notifier.js';
 
-// The plugin is a factory function:
 const plugin = slackNotifier({
   webhookUrl: 'https://hooks.slack.com/services/...',
   channel: '#crm-alerts',
@@ -1007,7 +1581,6 @@ export default function myPlugin(options: MyOptions): CrmyPlugin {
       // Access ctx.db for database queries
     },
     async onEvent(event) {
-      // React to CRM events
       if (event.event_type === 'contact.created') {
         // do something
       }
@@ -1023,6 +1596,17 @@ export default function myPlugin(options: MyOptions): CrmyPlugin {
 All endpoints require `Authorization: Bearer <jwt-or-api-key>`.
 
 Base URL: `/api/v1`
+
+### Auth
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/auth/register` | Register a new user + tenant |
+| POST | `/auth/login` | Login, receive JWT |
+| GET | `/auth/api-keys` | List API keys |
+| POST | `/auth/api-keys` | Create API key |
+| DELETE | `/auth/api-keys/:id` | Revoke API key |
+| POST | `/auth/register-agent` | Agent self-registration (returns actor + bound key) |
 
 ### Contacts
 
@@ -1052,6 +1636,7 @@ Base URL: `/api/v1`
 | POST | `/opportunities` | Create opportunity |
 | GET | `/opportunities/:id` | Get with activities |
 | PATCH | `/opportunities/:id` | Update or advance stage |
+| DELETE | `/opportunities/:id` | Delete (admin only) |
 
 ### Activities
 
@@ -1060,6 +1645,49 @@ Base URL: `/api/v1`
 | GET | `/activities` | List/search activities |
 | POST | `/activities` | Create activity |
 | PATCH | `/activities/:id` | Update activity |
+
+### Actors
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/actors` | List actors |
+| POST | `/actors` | Register actor |
+| GET | `/actors/:id` | Get actor |
+| PATCH | `/actors/:id` | Update actor (scopes, status) |
+| DELETE | `/actors/:id` | Deactivate actor |
+
+### Assignments
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/assignments` | List assignments |
+| POST | `/assignments` | Create assignment |
+| GET | `/assignments/:id` | Get assignment |
+| PATCH | `/assignments/:id` | Update assignment |
+| POST | `/assignments/:id/accept` | Accept |
+| POST | `/assignments/:id/start` | Start |
+| POST | `/assignments/:id/complete` | Complete |
+| POST | `/assignments/:id/decline` | Decline |
+| POST | `/assignments/:id/block` | Block |
+| POST | `/assignments/:id/cancel` | Cancel |
+
+### Context
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/context` | List context entries |
+| POST | `/context` | Add context entry |
+| GET | `/context/:id` | Get entry |
+| POST | `/context/:id/supersede` | Supersede with updated content |
+| POST | `/context/:id/review` | Mark as reviewed |
+| GET | `/context/stale` | List stale entries |
+| GET | `/context/search` | Full-text search |
+
+### Briefings
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/briefing/:subject_type/:subject_id` | Get full briefing for an object |
 
 ### Use Cases
 
@@ -1159,7 +1787,7 @@ Base URL: `/api/v1`
 
 ## MCP Tools Reference
 
-See [mcp-tools.md](mcp-tools.md) for the original v0.1 tool reference. All v0.2 and v0.3 tools follow the same patterns documented above in each feature section.
+See [mcp-tools.md](mcp-tools.md) for the original core tool reference. All tools follow the patterns documented in each feature section above.
 
 ### MCP connection
 
@@ -1178,6 +1806,29 @@ Content-Type: application/json
 ```
 
 Uses the MCP Streamable HTTP transport. Each request creates a new session.
+
+### Full tool list (80+)
+
+| Category | Tools |
+|---|---|
+| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline` |
+| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy` |
+| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `pipeline_summary` |
+| Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
+| Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
+| Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
+| Context | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_review`, `context_stale` |
+| Briefing | `briefing_get` |
+| Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
+| Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
+| Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
+| Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
+| Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
+| Emails | `email_create`, `email_get`, `email_search` |
+| Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
+| Analytics | `crm_search`, `pipeline_forecast`, `account_health_report` |
+| HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
+| Meta | `schema_get`, `tenant_get_stats` |
 
 ---
 
@@ -1209,3 +1860,8 @@ Located in `packages/server/migrations/`:
 | 009_bulk.sql | bulk_jobs |
 | 010_notes.sql | notes |
 | 011_workflows.sql | workflows, workflow_runs |
+| 012_actors.sql | actors, actor scopes, actor↔user bridge |
+| 013_assignments.sql | assignments, assignment status history |
+| 014_context.sql | context_entries, context type registry, FTS indexes |
+| 015_activity_types.sql | activity type registry, default types seed |
+| 016_governor.sql | governor_limits, plan defaults |
