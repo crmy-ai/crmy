@@ -1,8 +1,8 @@
 {
   "name": "crmy",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "CRMy — the agent-first open source CRM",
-  "private": true,
+  "private": false,
   "workspaces": [
     "packages/shared",
     "packages/server",
