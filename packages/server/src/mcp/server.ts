@@ -2,7 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import type { ZodRawShape, ZodObject } from 'zod';
+
+const _require = createRequire(import.meta.url);
+function getServerVersion(): string {
+  try {
+    const pkg = _require(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../package.json'),
+    ) as { version: string };
+    return pkg.version;
+  } catch {
+    return '0.5.9';
+  }
+}
 import type { ActorContext } from '@crmy/shared';
 import { CrmyError } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
@@ -57,8 +72,8 @@ export function getAllTools(db: DbPool): ToolDef[] {
 
 export function createMcpServer(db: DbPool, getActor: () => ActorContext): McpServer {
   const server = new McpServer({
-    name: 'crmy',
-    version: '0.5.0',
+    name: 'CRMy',
+    version: getServerVersion(),
   });
 
   const tools = getAllTools(db);

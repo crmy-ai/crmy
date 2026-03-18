@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createSpinner } from '../spinner.js';
+import { saveConfigFile } from '../config.js';
 
 // ── Input validators ───────────────────────────────────────────────────────────
 function validateEmail(input: string): boolean | string {
@@ -34,8 +35,8 @@ export function initCommand(): Command {
       console.log('    Step 3 \u2014 Create your admin account\n');
 
       // ── Detect existing config ──────────────────────────────────────────────
-      const configPath = path.join(process.cwd(), '.crmy.json');
-      if (fs.existsSync(configPath)) {
+      const localConfigPath = path.join(process.cwd(), '.crmy.json');
+      if (fs.existsSync(localConfigPath)) {
         console.log('  \x1b[33m\u26a0\x1b[0m  A .crmy.json already exists in this directory.\n');
         const { overwrite } = await inquirer.prompt([
           {
@@ -210,9 +211,10 @@ export function initCommand(): Command {
           },
         };
 
-        fs.writeFileSync(configPath, JSON.stringify(crmmyConfig, null, 2) + '\n');
+        // Write to ~/.crmy/config.json (global) + process.cwd()/.crmy.json (local)
+        saveConfigFile(crmmyConfig);
 
-        // Add to .gitignore
+        // Add local .crmy.json to .gitignore
         const gitignorePath    = path.join(process.cwd(), '.gitignore');
         const gitignoreContent = fs.existsSync(gitignorePath)
           ? fs.readFileSync(gitignorePath, 'utf-8')

@@ -17,16 +17,47 @@ export function getPool(): DbPool {
 }
 
 export async function initPool(databaseUrl: string, maxConnections = 10): Promise<DbPool> {
-  // Parse password explicitly — pg requires a string for SCRAM auth; undefined causes a crash
+  // Parse the URL to extract password and sslmode explicitly.
+  // - pg requires password to be a string (not undefined) for SCRAM auth.
+  // - Passing sslmode via the connection string triggers a pg-connection-string
+  //   deprecation warning in pg ≥8.x. We remove it and set ssl via Pool options
+  //   instead, which is the forward-compatible approach.
   let password: string | undefined;
+  let ssl: boolean | { rejectUnauthorized: boolean } | undefined;
+  let cleanUrl = databaseUrl;
+
   try {
-    password = new URL(databaseUrl).password || '';
+    const url = new URL(databaseUrl);
+    password = url.password || '';
+
+    const sslMode = url.searchParams.get('sslmode');
+    const isLocal =
+      url.hostname === 'localhost' ||
+      url.hostname === '127.0.0.1' ||
+      url.hostname === '::1';
+
+    if (sslMode === 'disable' || (!sslMode && isLocal)) {
+      ssl = false;
+    } else if (sslMode === 'require' || sslMode === 'prefer' || sslMode === 'verify-ca') {
+      // Cloud providers (Supabase, Neon, etc.) use these modes.
+      // rejectUnauthorized:false mirrors historical pg behaviour for these modes.
+      ssl = { rejectUnauthorized: false };
+    } else if (sslMode === 'verify-full') {
+      ssl = { rejectUnauthorized: true };
+    }
+    // sslMode === null && !isLocal → leave ssl undefined (pg decides)
+
+    // Strip sslmode from the URL so pg-connection-string never sees it
+    url.searchParams.delete('sslmode');
+    cleanUrl = url.toString();
   } catch {
     password = undefined;
   }
+
   pool = new Pool({
-    connectionString: databaseUrl,
+    connectionString: cleanUrl,
     ...(password !== undefined && { password }),
+    ...(ssl !== undefined && { ssl }),
     max: maxConnections,
   });
 
