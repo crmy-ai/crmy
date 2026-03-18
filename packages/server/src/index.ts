@@ -156,9 +156,11 @@ export async function createApp(config: ServerConfig) {
   // Authenticated API routes
   app.use('/api/v1', authMiddleware(db, config.jwtSecret), apiRouter(db));
 
-  // Serve web UI static files
+  // Serve web UI — public/ is populated at build time by scripts/copy-web.cjs
+  // and ships inside the @crmy/server npm tarball alongside dist/.
+  // Path: dist/index.js -> ../public  (both in monorepo and after npm install)
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const webDist = path.resolve(__dirname, '../../web/dist');
+  const webDist = path.resolve(__dirname, '../public');
   app.use('/app', express.static(webDist));
   app.get('/app/*', (_req, res) => {
     res.sendFile(path.join(webDist, 'index.html'));
