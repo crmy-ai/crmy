@@ -100,18 +100,57 @@ You'll land on the Dashboard. From there you can:
 - Check the HITL approval queue
 - Manage settings, API keys, and actors
 
-### Step 4 — Connect to Claude Code (optional)
+### Step 4 — Connect to an AI assistant (optional)
 
-To give Claude access to your CRM via MCP tools:
+CRMy exposes all its tools via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). Run `npx @crmy/cli init` first — it saves your config to `~/.crmy/config.json` so the MCP server can always find it, regardless of which directory your AI client launches it from.
+
+#### Claude Code
 
 ```bash
 claude mcp add crmy -- npx @crmy/cli mcp
 ```
 
-Then in Claude Code, you can say things like:
+#### Claude Desktop
+
+Edit the Claude Desktop config file:
+
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "crmy": {
+      "command": "npx",
+      "args": ["@crmy/cli", "mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop after saving. CRMy tools will appear in the tool picker.
+
+#### Cursor / Windsurf
+
+Add to `.cursor/mcp.json` (Cursor) or the equivalent Windsurf MCP config:
+
+```json
+{
+  "mcpServers": {
+    "crmy": {
+      "command": "npx",
+      "args": ["@crmy/cli", "mcp"]
+    }
+  }
+}
+```
+
+#### Using the tools
+
+Once connected, you can say things like:
 > "Create a contact for Sarah Chen at Acme Corp, set her stage to prospect, and log a call we had today about their Q2 budget"
 
-Claude will use the CRMy MCP tools to create the contact and log the activity directly in your CRM.
+Your AI assistant will use CRMy's MCP tools to create the contact and log the activity directly in your CRM.
 
 ---
 
