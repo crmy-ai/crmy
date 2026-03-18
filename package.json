@@ -7,7 +7,8 @@
     "packages/shared",
     "packages/server",
     "packages/cli",
-    "packages/web"
+    "packages/web",
+    "packages/openclaw-plugin"
   ],
   "scripts": {
     "build": "npm run build --workspaces",

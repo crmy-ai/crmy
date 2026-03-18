@@ -130,6 +130,53 @@ Edit the Claude Desktop config file:
 
 Restart Claude Desktop after saving. CRMy tools will appear in the tool picker.
 
+#### OpenClaw
+
+OpenClaw uses its own plugin system instead of MCP. Install the official CRMy plugin:
+
+```bash
+# 1. Run init first (writes ~/.crmy/config.json that the plugin reads)
+npx @crmy/cli init
+
+# 2. Install the plugin
+openclaw plugins install @crmy/openclaw-plugin
+```
+
+The plugin reads `~/.crmy/config.json` automatically — no extra config needed. If your CRMy server is running on a non-default URL, you can override it in `~/.openclaw/openclaw.json`:
+
+```json5
+{
+  "plugins": {
+    "entries": {
+      "crmy": {
+        "enabled": true,
+        "config": {
+          "serverUrl": "https://crm.yourcompany.com",
+          "apiKey": "crmy_..."
+        }
+      }
+    }
+  }
+}
+```
+
+**Tools available in OpenClaw after installation:**
+
+| Tool | What it does |
+|---|---|
+| `crmy_search` | Global search across all CRM records |
+| `crmy_contact_search` | Find contacts by name, email, or company |
+| `crmy_contact_create` | Create a new contact |
+| `crmy_contact_update` | Update contact fields |
+| `crmy_contact_log_activity` | Log a call, meeting, or email |
+| `crmy_contact_set_lifecycle` | Change a contact's lifecycle stage |
+| `crmy_account_search` | Find companies/accounts |
+| `crmy_account_create` | Create a new company record |
+| `crmy_opportunity_search` | Find deals by name, account, or stage |
+| `crmy_opportunity_create` | Create a new deal |
+| `crmy_opportunity_advance_stage` | Move a deal to the next stage |
+| `crmy_pipeline_summary` | Get pipeline totals by stage |
+
 #### Cursor / Windsurf
 
 Add to `.cursor/mcp.json` (Cursor) or the equivalent Windsurf MCP config:

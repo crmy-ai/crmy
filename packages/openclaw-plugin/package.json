@@ -1,0 +1,27 @@
+{
+  "name": "@crmy/openclaw-plugin",
+  "version": "0.5.9",
+  "description": "CRMy plugin for OpenClaw — expose CRM tools (contacts, accounts, opportunities, pipeline) in any AI assistant running OpenClaw",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "openclaw.plugin.json"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "prepare": "npm run build",
+    "dev": "tsup src/index.ts --format esm --watch"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.3"
+  },
+  "license": "Apache-2.0",
+  "keywords": ["openclaw", "crm", "mcp", "crmy", "plugin"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/codycharris/crmy"
+  }
+}
