@@ -3,7 +3,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Command } from 'commander';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { initCommand } from './commands/init.js';
+
+const _require = createRequire(import.meta.url);
+function getCLIVersion(): string {
+  try {
+    const pkg = _require(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../package.json'),
+    ) as { version: string };
+    return pkg.version;
+  } catch {
+    return '0.5.5';
+  }
+}
 import { serverCommand } from './commands/server.js';
 import { mcpCommand } from './commands/mcp.js';
 import { contactsCommand } from './commands/contacts.js';
@@ -35,7 +50,7 @@ const program = new Command();
 program
   .name('crmy')
   .description('CRMy — The agent-first open source CRM')
-  .version('0.5.0');
+  .version(getCLIVersion());
 
 program.addCommand(authCommand());
 program.addCommand(initCommand());

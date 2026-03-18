@@ -5,6 +5,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { initPool, getPool, closePool, type DbPool } from './db/pool.js';
 import { runMigrations } from './db/migrate.js';
@@ -16,12 +17,30 @@ import { autoApproveExpired, expireOldRequests } from './db/repos/hitl.js';
 import { loadPlugins, shutdownPlugins, type PluginConfig } from './plugins/index.js';
 import type { ActorContext } from '@crmy/shared';
 
+// Read package version at runtime — avoids hardcoding across builds
+const _require = createRequire(import.meta.url);
+const SERVER_VERSION: string = (() => {
+  try {
+    const pkg = _require(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../package.json'),
+    ) as { version: string };
+    return pkg.version;
+  } catch {
+    return '0.5.5';
+  }
+})();
+
+export type ProgressStep = 'db_connect' | 'migrations' | 'seed_defaults';
+export type ProgressStatus = 'start' | 'done' | 'error';
+
 export interface ServerConfig {
   databaseUrl: string;
   jwtSecret: string;
   port: number;
   tenantSlug: string;
   plugins?: PluginConfig[];
+  /** Optional progress callback for CLI startup UI */
+  onProgress?: (step: ProgressStep, status: ProgressStatus, detail?: string) => void;
 }
 
 export function loadConfig(): ServerConfig {
@@ -40,16 +59,36 @@ export function loadConfig(): ServerConfig {
 }
 
 export async function createApp(config: ServerConfig) {
-  const db = await initPool(config.databaseUrl);
+  const progress = config.onProgress ?? (() => {});
 
-  // Run migrations
-  const ran = await runMigrations(db);
-  if (ran.length > 0) {
-    console.log(`Ran ${ran.length} migration(s): ${ran.join(', ')}`);
+  progress('db_connect', 'start');
+  let db: DbPool;
+  try {
+    db = await initPool(config.databaseUrl);
+    progress('db_connect', 'done');
+  } catch (err) {
+    progress('db_connect', 'error', (err as Error).message);
+    throw err;
   }
 
-  // Seed default tenant if first run
-  await seedDefaults(db, config.tenantSlug);
+  progress('migrations', 'start');
+  let ran: string[];
+  try {
+    ran = await runMigrations(db);
+    progress('migrations', 'done', ran.length > 0 ? `${ran.length} applied` : 'up to date');
+  } catch (err) {
+    progress('migrations', 'error', (err as Error).message);
+    throw err;
+  }
+
+  progress('seed_defaults', 'start');
+  try {
+    await seedDefaults(db, config.tenantSlug);
+    progress('seed_defaults', 'done');
+  } catch (err) {
+    progress('seed_defaults', 'error', (err as Error).message);
+    throw err;
+  }
 
   const app = express();
   app.use(express.json());
@@ -58,9 +97,9 @@ export async function createApp(config: ServerConfig) {
   app.get('/health', async (_req, res) => {
     try {
       await db.query('SELECT 1');
-      res.json({ status: 'ok', db: 'ok', version: '0.3.0' });
+      res.json({ status: 'ok', db: 'ok', version: SERVER_VERSION });
     } catch {
-      res.status(503).json({ status: 'error', db: 'error', version: '0.3.0' });
+      res.status(503).json({ status: 'error', db: 'error', version: SERVER_VERSION });
     }
   });
 

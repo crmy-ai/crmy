@@ -1,6 +1,6 @@
 {
   "name": "@crmy/web",
-  "version": "0.5.1",
+  "version": "0.5.5",
   "private": false,
   "type": "module",
   "license": "Apache-2.0",

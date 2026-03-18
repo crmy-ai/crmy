@@ -56,11 +56,13 @@ npx @crmy/cli init
 npx @crmy/cli init
 ```
 
-This walks you through an interactive setup:
-- Connects to your PostgreSQL database (you'll paste your connection string)
-- Creates all the tables CRMy needs (migrations run automatically)
-- Creates your first user account (email + password)
-- Generates an API key stored in `.crmy.json`
+This runs a 3-step setup wizard:
+
+- **Step 1** — Connects to your PostgreSQL database (paste your connection string)
+- **Step 2** — Creates all CRMy tables (migrations run automatically)
+- **Step 3** — Creates your admin account (email + password for the CRMy web UI — _not_ your database credentials)
+
+An API key is generated and saved to `.crmy.json` (auto-added to `.gitignore`).
 
 ### Step 2 — Start the server
 
@@ -68,10 +70,22 @@ This walks you through an interactive setup:
 npx @crmy/cli server
 ```
 
-The server starts on port 3000. You'll see:
+The server shows startup progress and then prints all URLs when ready:
+
 ```
-CRMy server running on http://localhost:3000
-Web UI: http://localhost:3000/app
+  ✓  Connected to database
+  ✓  Migrations complete  (already up to date)
+  ✓  Default tenant ready
+  ✓  Server listening on port 3000
+
+  ┌─────────────────────────────────────────────┐
+  │  Web UI  →  http://localhost:3000/app       │
+  │  API     →  http://localhost:3000/api/v1    │
+  │  MCP     →  http://localhost:3000/mcp       │
+  │  Health  →  http://localhost:3000/health    │
+  └─────────────────────────────────────────────┘
+
+  Log file: ~/.crmy/crmy-server.log
 ```
 
 ### Step 3 — Open the web interface
