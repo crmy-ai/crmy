@@ -1,8 +1,11 @@
 {
   "name": "@crmy/web",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "private": false,
   "type": "module",
+  "files": [
+    "dist"
+  ],
   "license": "Apache-2.0",
   "scripts": {
     "dev": "vite",
