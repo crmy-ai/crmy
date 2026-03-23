@@ -1,15 +1,21 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Sparkles, KeyRound, Users, TriangleAlert, Eye, EyeOff, X } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/hooks/use-toast';
-import { useAgentSettings } from '@/contexts/AgentSettingsContext';
+import {
+  useAgentConfig,
+  useSaveAgentConfig,
+  useTestAgentConnection,
+  useClearAllAgentSessions,
+} from '@/api/hooks';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type Provider = 'anthropic' | 'openai' | 'openrouter' | 'ollama' | 'custom';
+
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const providerModels: Record<Provider, string[]> = {
@@ -43,18 +49,7 @@ const tokenCosts: Record<number, string> = {
   16000: '~$0.024 / turn at current model pricing',
 };
 
-const defaultSettings = {
-  provider: 'anthropic' as Provider,
-  baseUrl: 'https://api.anthropic.com/v1',
-  apiKey: 'sk-ant-api03-••••••••••••••••••••••••••••••••',
-  model: 'claude-sonnet-4-20250514',
-  historyRetentionDays: 90,
-  systemPrompt: `You are a CRMy AI agent helping [User Name] manage their real estate/mortgage/insurance pipeline. You have access to their contacts, accounts, opportunities, use cases, and activity history via MCP tools. Be concise, accurate, and always confirm before making changes to CRM objects.`,
-  maxTokensPerTurn: 4000,
-  canCreateAssignments: true,
-  canLogActivities: true,
-  canWriteObjects: false,
-};
+const defaultSystemPrompt = `You are a CRMy AI agent helping manage a CRM pipeline. You have access to contacts, accounts, opportunities, use cases, and activity history via tools. Be concise, accurate, and always confirm before making changes to CRM objects.`;
 
 // ─── Shared style constants ───────────────────────────────────────────────────
 
@@ -67,39 +62,63 @@ const dangerBtn = 'px-3 py-1.5 rounded-lg bg-destructive text-destructive-foregr
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AgentSettings() {
-  const { enabled, setEnabled } = useAgentSettings();
+  const { data: configData, isLoading } = useAgentConfig();
+  const saveConfig = useSaveAgentConfig();
+  const testConnection = useTestAgentConnection();
+  const clearSessions = useClearAllAgentSessions();
+
+  const config = configData?.data;
+
+  // Section 1 — Enable
+  const [enabled, setEnabled] = useState(false);
 
   // Section 2 — Provider & Model
-  const [provider, setProvider] = useState<Provider>(defaultSettings.provider);
-  const [baseUrl, setBaseUrl] = useState(defaultSettings.baseUrl);
-  const [apiKey, setApiKey] = useState(defaultSettings.apiKey);
+  const [provider, setProvider] = useState<Provider>('anthropic');
+  const [baseUrl, setBaseUrl] = useState(providerUrls.anthropic);
+  const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [model, setModel] = useState(defaultSettings.model);
+  const [model, setModel] = useState('claude-sonnet-4-20250514');
   const [customModel, setCustomModel] = useState('');
-  const [testingConn, setTestingConn] = useState(false);
-  const [savingProvider, setSavingProvider] = useState(false);
-  const [saveProviderDone, setSaveProviderDone] = useState(false);
 
   // Section 3 — Per-User Behaviour
-  const [historyRetention, setHistoryRetention] = useState(defaultSettings.historyRetentionDays);
-  const [systemPrompt, setSystemPrompt] = useState(defaultSettings.systemPrompt);
+  const [historyRetention, setHistoryRetention] = useState(90);
+  const [systemPrompt, setSystemPrompt] = useState(defaultSystemPrompt);
   const [editingPrompt, setEditingPrompt] = useState(false);
-  const [promptDraft, setPromptDraft] = useState(defaultSettings.systemPrompt);
-  const [maxTokens, setMaxTokens] = useState(defaultSettings.maxTokensPerTurn);
-  const [canCreateAssignments, setCanCreateAssignments] = useState(defaultSettings.canCreateAssignments);
-  const [canLogActivities, setCanLogActivities] = useState(defaultSettings.canLogActivities);
-  const [canWriteObjects, setCanWriteObjects] = useState(defaultSettings.canWriteObjects);
+  const [promptDraft, setPromptDraft] = useState(defaultSystemPrompt);
+  const [maxTokens, setMaxTokens] = useState(4000);
+  const [canCreateAssignments, setCanCreateAssignments] = useState(true);
+  const [canLogActivities, setCanLogActivities] = useState(true);
+  const [canWriteObjects, setCanWriteObjects] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Section 4 — Danger Zone
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [clearConfirmText, setClearConfirmText] = useState('');
 
+  // Hydrate state from API config
+  useEffect(() => {
+    if (!config) return;
+    setEnabled(config.enabled);
+    setProvider(config.provider);
+    setBaseUrl(config.base_url);
+    setModel(config.model);
+    setApiKey(config.api_key_enc ?? '');
+    setHistoryRetention(config.history_retention_days);
+    setSystemPrompt(config.system_prompt ?? defaultSystemPrompt);
+    setPromptDraft(config.system_prompt ?? defaultSystemPrompt);
+    setMaxTokens(config.max_tokens_per_turn);
+    setCanCreateAssignments(config.can_create_assignments);
+    setCanLogActivities(config.can_log_activities);
+    setCanWriteObjects(config.can_write_objects);
+    // If model is not in known list, assume custom
+    if (config.provider === 'custom' || (config.provider !== 'custom' && !providerModels[config.provider]?.includes(config.model))) {
+      setCustomModel(config.model);
+    }
+  }, [config]);
+
   // Focus textarea when prompt editor opens
   useEffect(() => {
-    if (editingPrompt && textareaRef.current) {
-      textareaRef.current.focus();
-    }
+    if (editingPrompt && textareaRef.current) textareaRef.current.focus();
   }, [editingPrompt]);
 
   // Provider change — update URL and model
@@ -109,37 +128,76 @@ export default function AgentSettings() {
     const models = providerModels[p];
     setModel(models[0] ?? '');
     setCustomModel('');
-    setSaveProviderDone(false);
+  };
+
+  // Handle enable toggle — immediately persist
+  const handleToggleEnabled = async (val: boolean) => {
+    setEnabled(val);
+    try {
+      await saveConfig.mutateAsync({ enabled: val });
+      toast({ title: val ? 'Agent enabled' : 'Agent disabled' });
+    } catch (err) {
+      setEnabled(!val);
+      toast({ title: 'Failed to update', variant: 'destructive' });
+    }
   };
 
   // Test connection
   const handleTestConnection = async () => {
-    setTestingConn(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setTestingConn(false);
-    if (Math.random() > 0.3) {
+    // Save current provider config first, then test
+    const result = await testConnection.mutateAsync();
+    if (result.ok) {
       toast({ title: 'Connection successful', description: `Connected to ${provider} at ${baseUrl}` });
     } else {
-      toast({ title: 'Connection failed', description: 'Could not reach the provider. Check your API key and base URL.', variant: 'destructive' });
+      toast({ title: 'Connection failed', description: result.error ?? 'Check your API key and base URL.', variant: 'destructive' });
     }
   };
 
   // Save provider settings
   const handleSaveProvider = async () => {
-    setSavingProvider(true);
-    await new Promise(r => setTimeout(r, 1500));
-    setSavingProvider(false);
-    setSaveProviderDone(true);
-    toast({ title: 'Settings saved', description: 'Provider configuration updated.' });
-    setTimeout(() => setSaveProviderDone(false), 3000);
+    const payload: Record<string, unknown> = {
+      provider,
+      base_url: baseUrl,
+      model: provider === 'custom' ? customModel : model,
+      system_prompt: systemPrompt,
+      max_tokens_per_turn: maxTokens,
+      history_retention_days: historyRetention,
+      can_write_objects: canWriteObjects,
+      can_log_activities: canLogActivities,
+      can_create_assignments: canCreateAssignments,
+    };
+    // Only send API key if user entered a new one (not masked)
+    if (apiKey && !apiKey.startsWith('sk-')) {
+      payload.api_key = apiKey;
+    }
+    try {
+      await saveConfig.mutateAsync(payload);
+      toast({ title: 'Settings saved', description: 'Agent configuration updated.' });
+    } catch {
+      toast({ title: 'Save failed', variant: 'destructive' });
+    }
   };
 
   // Clear all histories
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     setShowClearConfirm(false);
     setClearConfirmText('');
-    toast({ title: 'Chat histories cleared', description: 'All agent chat histories have been deleted.' });
+    try {
+      await clearSessions.mutateAsync();
+      toast({ title: 'Chat histories cleared', description: 'All agent chat histories have been deleted.' });
+    } catch {
+      toast({ title: 'Failed to clear histories', variant: 'destructive' });
+    }
   };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-5 max-w-2xl">
+        <div className="h-8 bg-muted rounded animate-pulse" />
+        <div className="h-48 bg-muted rounded animate-pulse" />
+      </div>
+    );
+  }
 
   const dimCls = !enabled ? 'opacity-40 pointer-events-none' : '';
 
@@ -163,24 +221,11 @@ export default function AgentSettings() {
               <p className="text-xs text-muted-foreground">Toggle AI features on or off for this workspace</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-muted text-muted-foreground border-border">
-              Coming soon
-            </span>
-            <Switch
-              checked={false}
-              onCheckedChange={() => {}}
-              disabled
-              aria-label="Enable In-App AI agent"
-            />
-          </div>
-        </div>
-
-        {/* Info banner */}
-        <div className="px-5 py-3 bg-muted/40 border-b border-border">
-          <p className="text-xs text-muted-foreground">
-            Backend support for the AI agent is not yet available. This toggle will be enabled once the agent service is configured and deployed.
-          </p>
+          <Switch
+            checked={enabled}
+            onCheckedChange={handleToggleEnabled}
+            aria-label="Enable In-App AI agent"
+          />
         </div>
 
         {/* Feature tags */}
@@ -213,10 +258,12 @@ export default function AgentSettings() {
               <p className="text-xs text-muted-foreground">Connect to an LLM gateway or direct provider</p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="text-xs text-muted-foreground">Connected</span>
-          </div>
+          {config?.api_key_enc && (
+            <div className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-green-500" />
+              <span className="text-xs text-muted-foreground">Key configured</span>
+            </div>
+          )}
         </div>
 
         <div className="divide-y divide-border px-5">
@@ -305,17 +352,17 @@ export default function AgentSettings() {
           <div className="py-4 flex items-center gap-2 flex-wrap">
             <button
               onClick={handleTestConnection}
-              disabled={testingConn}
+              disabled={testConnection.isPending}
               className={ghostBtn + ' disabled:opacity-40'}
             >
-              {testingConn ? 'Testing…' : 'Test connection'}
+              {testConnection.isPending ? 'Testing...' : 'Test connection'}
             </button>
             <button
               onClick={handleSaveProvider}
-              disabled={savingProvider}
+              disabled={saveConfig.isPending}
               className={primaryBtn}
             >
-              {savingProvider ? 'Saving…' : saveProviderDone ? 'Saved ✓' : 'Save changes'}
+              {saveConfig.isPending ? 'Saving...' : 'Save changes'}
             </button>
           </div>
         </div>
@@ -364,7 +411,7 @@ export default function AgentSettings() {
                 onClick={() => { setPromptDraft(systemPrompt); setEditingPrompt(true); }}
                 className="text-xs font-semibold text-primary hover:underline whitespace-nowrap"
               >
-                Edit prompt →
+                Edit prompt &rarr;
               </button>
             </div>
             <div className="p-3 rounded-lg bg-muted/30 border border-border">
@@ -398,11 +445,7 @@ export default function AgentSettings() {
               <p className="text-sm font-medium text-foreground">Allow agent to create assignments</p>
               <p className="text-xs text-muted-foreground">Agent can assign tasks to users and actors</p>
             </div>
-            <Switch
-              checked={canCreateAssignments}
-              onCheckedChange={setCanCreateAssignments}
-              aria-label="Allow agent to create assignments"
-            />
+            <Switch checked={canCreateAssignments} onCheckedChange={setCanCreateAssignments} aria-label="Allow agent to create assignments" />
           </div>
 
           {/* Can log activities */}
@@ -411,11 +454,7 @@ export default function AgentSettings() {
               <p className="text-sm font-medium text-foreground">Allow agent to log activities</p>
               <p className="text-xs text-muted-foreground">Agent can record calls, notes, and emails</p>
             </div>
-            <Switch
-              checked={canLogActivities}
-              onCheckedChange={setCanLogActivities}
-              aria-label="Allow agent to log activities"
-            />
+            <Switch checked={canLogActivities} onCheckedChange={setCanLogActivities} aria-label="Allow agent to log activities" />
           </div>
 
           {/* Can write objects */}
@@ -425,11 +464,7 @@ export default function AgentSettings() {
                 <p className="text-sm font-medium text-foreground">Allow agent to write CRM objects</p>
                 <p className="text-xs text-muted-foreground">Agent can create and edit contacts, accounts, and opportunities</p>
               </div>
-              <Switch
-                checked={canWriteObjects}
-                onCheckedChange={setCanWriteObjects}
-                aria-label="Allow agent to write CRM objects"
-              />
+              <Switch checked={canWriteObjects} onCheckedChange={setCanWriteObjects} aria-label="Allow agent to write CRM objects" />
             </div>
             {canWriteObjects && (
               <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
@@ -467,7 +502,6 @@ export default function AgentSettings() {
               Clear all histories
             </button>
           </div>
-
         </div>
       </div>
 
@@ -489,14 +523,9 @@ export default function AgentSettings() {
               className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring font-mono resize-none"
             />
             <div className="flex gap-2 justify-end">
+              <button onClick={() => setEditingPrompt(false)} className={ghostBtn}>Cancel</button>
               <button
-                onClick={() => setEditingPrompt(false)}
-                className={ghostBtn}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => { setSystemPrompt(promptDraft); setEditingPrompt(false); toast({ title: 'System prompt saved' }); }}
+                onClick={() => { setSystemPrompt(promptDraft); setEditingPrompt(false); toast({ title: 'System prompt updated' }); }}
                 className={primaryBtn}
               >
                 Save prompt
@@ -521,12 +550,7 @@ export default function AgentSettings() {
               className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm font-mono outline-none focus:ring-1 focus:ring-ring"
             />
             <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => { setShowClearConfirm(false); setClearConfirmText(''); }}
-                className={ghostBtn}
-              >
-                Cancel
-              </button>
+              <button onClick={() => { setShowClearConfirm(false); setClearConfirmText(''); }} className={ghostBtn}>Cancel</button>
               <button
                 disabled={clearConfirmText !== 'CLEAR'}
                 onClick={handleClearAll}
@@ -538,7 +562,6 @@ export default function AgentSettings() {
           </div>
         </div>
       )}
-
     </div>
   );
 }

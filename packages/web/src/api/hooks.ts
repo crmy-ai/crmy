@@ -687,3 +687,96 @@ export function useBriefing(subjectType: string, subjectId: string, params?: { f
   });
 }
 
+// ── Agent ──
+
+export interface AgentConfigData {
+  id: string;
+  tenant_id: string;
+  enabled: boolean;
+  provider: 'anthropic' | 'openai' | 'openrouter' | 'ollama' | 'custom';
+  base_url: string;
+  api_key_enc: string | null;
+  model: string;
+  system_prompt: string | null;
+  max_tokens_per_turn: number;
+  history_retention_days: number;
+  can_write_objects: boolean;
+  can_log_activities: boolean;
+  can_create_assignments: boolean;
+}
+
+export interface AgentSessionSummary {
+  id: string;
+  label: string | null;
+  context_type: string | null;
+  context_id: string | null;
+  context_name: string | null;
+  token_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentSessionFull extends AgentSessionSummary {
+  messages: { role: string; content: string; tool_calls?: unknown[]; tool_call_id?: string }[];
+}
+
+export function useAgentConfig() {
+  return useQuery<{ data: AgentConfigData | null }>({
+    queryKey: ['agent-config'],
+    queryFn: () => api.get('agent/config'),
+  });
+}
+
+export function useSaveAgentConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.put('agent/config', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-config'] }),
+  });
+}
+
+export function useTestAgentConnection() {
+  return useMutation<{ ok: boolean; error?: string }>({
+    mutationFn: () => api.post('agent/config/test'),
+  });
+}
+
+export function useAgentSessions() {
+  return useQuery<{ data: AgentSessionSummary[] }>({
+    queryKey: ['agent-sessions'],
+    queryFn: () => api.get('agent/sessions'),
+  });
+}
+
+export function useAgentSession(id: string | null) {
+  return useQuery<{ data: AgentSessionFull }>({
+    queryKey: ['agent-session', id],
+    queryFn: () => api.get(`agent/sessions/${id}`),
+    enabled: !!id,
+  });
+}
+
+export function useCreateAgentSession() {
+  const qc = useQueryClient();
+  return useMutation<{ data: AgentSessionFull }, Error, { context_type?: string; context_id?: string; context_name?: string }>({
+    mutationFn: (data) => api.post('agent/sessions', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-sessions'] }),
+  });
+}
+
+export function useDeleteAgentSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`agent/sessions/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-sessions'] }),
+  });
+}
+
+export function useClearAllAgentSessions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete('agent/sessions'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-sessions'] }),
+  });
+}
+

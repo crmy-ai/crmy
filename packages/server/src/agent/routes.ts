@@ -1,0 +1,277 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
+import { Router, type Request, type Response } from 'express';
+import type { DbPool } from '../db/pool.js';
+import type { ActorContext } from '@crmy/shared';
+import { CrmyError, permissionDenied } from '@crmy/shared';
+import * as agentRepo from '../db/repos/agent.js';
+import { encrypt } from './crypto.js';
+import { runAgentTurn } from './engine.js';
+import type { AgentEvent, ConversationMessage } from './types.js';
+
+function getActor(req: Request): ActorContext {
+  return req.actor!;
+}
+
+function handleError(res: Response, err: unknown): void {
+  if (err instanceof CrmyError) {
+    res.status(err.status).json(err.toJSON());
+    return;
+  }
+  const message = err instanceof Error ? err.message : 'Internal error';
+  res.status(500).json({ type: 'https://crmy.ai/errors/internal', title: 'Internal Error', status: 500, detail: message });
+}
+
+function requireAdmin(actor: ActorContext): void {
+  if (actor.role !== 'owner' && actor.role !== 'admin') {
+    throw permissionDenied('Admin role required');
+  }
+}
+
+/** Mask an API key for safe client display. */
+function maskApiKey(key: string | null): string | null {
+  if (!key) return null;
+  return 'sk-••••••••';
+}
+
+export function agentRouter(db: DbPool): Router {
+  const router = Router();
+
+  // ── Config ──────────────────────────────────────────────────────────────
+
+  /** GET /agent/config — get agent config for this tenant. */
+  router.get('/config', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const config = await agentRepo.getConfig(db, actor.tenant_id);
+      if (!config) {
+        res.json({ data: null });
+        return;
+      }
+      // Never return the real API key
+      res.json({ data: { ...config, api_key_enc: maskApiKey(config.api_key_enc) } });
+    } catch (err) { handleError(res, err); }
+  });
+
+  /** PUT /agent/config — create or update agent config (admin only). */
+  router.put('/config', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdmin(actor);
+
+      const body = req.body as Record<string, unknown>;
+      const update: Record<string, unknown> = {};
+
+      // Pick allowed fields
+      const boolFields = ['enabled', 'can_write_objects', 'can_log_activities', 'can_create_assignments'];
+      const strFields = ['provider', 'base_url', 'model', 'system_prompt'];
+      const intFields = ['max_tokens_per_turn', 'history_retention_days'];
+
+      for (const f of boolFields) {
+        if (typeof body[f] === 'boolean') update[f] = body[f];
+      }
+      for (const f of strFields) {
+        if (typeof body[f] === 'string') update[f] = body[f];
+      }
+      for (const f of intFields) {
+        if (typeof body[f] === 'number') update[f] = body[f];
+      }
+
+      // Encrypt API key if provided (non-masked value)
+      if (typeof body.api_key === 'string' && body.api_key && !body.api_key.startsWith('sk-••')) {
+        update.api_key_enc = encrypt(body.api_key);
+      }
+
+      const config = await agentRepo.upsertConfig(db, actor.tenant_id, update);
+      res.json({ data: { ...config, api_key_enc: maskApiKey(config.api_key_enc) } });
+    } catch (err) { handleError(res, err); }
+  });
+
+  /** POST /agent/config/test — test LLM connection. */
+  router.post('/config/test', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdmin(actor);
+
+      const config = await agentRepo.getConfig(db, actor.tenant_id);
+      if (!config || !config.enabled) {
+        res.json({ ok: false, error: 'Agent is not configured or not enabled' });
+        return;
+      }
+
+      // Attempt a minimal LLM call
+      const { decrypt } = await import('./crypto.js');
+      const apiKey = config.api_key_enc ? decrypt(config.api_key_enc) : '';
+
+      const isAnthropic = config.provider === 'anthropic';
+      const baseUrl = config.base_url.replace(/\/+$/, '');
+
+      if (isAnthropic) {
+        const testRes = await fetch(`${baseUrl}/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: config.model,
+            max_tokens: 10,
+            messages: [{ role: 'user', content: 'Hi' }],
+          }),
+        });
+        if (!testRes.ok) {
+          const err = await testRes.text();
+          res.json({ ok: false, error: `${testRes.status}: ${err.slice(0, 200)}` });
+          return;
+        }
+      } else {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+        const testRes = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: config.model,
+            max_tokens: 10,
+            messages: [{ role: 'user', content: 'Hi' }],
+          }),
+        });
+        if (!testRes.ok) {
+          const err = await testRes.text();
+          res.json({ ok: false, error: `${testRes.status}: ${err.slice(0, 200)}` });
+          return;
+        }
+      }
+
+      res.json({ ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Connection failed';
+      res.json({ ok: false, error: message });
+    }
+  });
+
+  // ── Sessions ────────────────────────────────────────────────────────────
+
+  /** GET /agent/sessions — list current user's sessions. */
+  router.get('/sessions', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const sessions = await agentRepo.listSessions(db, actor.tenant_id, actor.actor_id);
+      res.json({ data: sessions });
+    } catch (err) { handleError(res, err); }
+  });
+
+  /** POST /agent/sessions — create a new session. */
+  router.post('/sessions', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const body = req.body as { context_type?: string; context_id?: string; context_name?: string };
+      const session = await agentRepo.createSession(db, actor.tenant_id, actor.actor_id, body);
+      res.status(201).json({ data: session });
+    } catch (err) { handleError(res, err); }
+  });
+
+  /** GET /agent/sessions/:id — get session with messages. */
+  router.get('/sessions/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const session = await agentRepo.getSession(db, actor.tenant_id, req.params.id);
+      if (!session || session.user_id !== actor.actor_id) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      res.json({ data: session });
+    } catch (err) { handleError(res, err); }
+  });
+
+  /** DELETE /agent/sessions/:id — delete a session. */
+  router.delete('/sessions/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      await agentRepo.deleteSession(db, actor.tenant_id, req.params.id);
+      res.status(204).end();
+    } catch (err) { handleError(res, err); }
+  });
+
+  /** DELETE /agent/sessions — clear all sessions for tenant (admin only). */
+  router.delete('/sessions', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdmin(actor);
+      const count = await agentRepo.deleteAllSessions(db, actor.tenant_id);
+      res.json({ deleted: count });
+    } catch (err) { handleError(res, err); }
+  });
+
+  /** POST /agent/sessions/:id/chat — send a message and stream the response via SSE. */
+  router.post('/sessions/:id/chat', async (req: Request, res: Response) => {
+    const actor = getActor(req);
+    const { message } = req.body as { message: string };
+
+    if (!message?.trim()) {
+      res.status(400).json({ error: 'message is required' });
+      return;
+    }
+
+    // Load config
+    const config = await agentRepo.getConfig(db, actor.tenant_id);
+    if (!config?.enabled) {
+      res.status(400).json({ error: 'Agent is not enabled for this workspace' });
+      return;
+    }
+
+    // Load or verify session
+    let session = await agentRepo.getSession(db, actor.tenant_id, req.params.id);
+    if (!session || session.user_id !== actor.actor_id) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    // Set up SSE headers
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no', // disable nginx buffering
+    });
+
+    const sendEvent = (event: AgentEvent) => {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+
+    try {
+      // Build conversation history from session
+      const history: ConversationMessage[] = [...(session.messages as ConversationMessage[])];
+
+      // Add user message
+      history.push({ role: 'user', content: message });
+
+      // Run the agent turn
+      const updatedHistory = await runAgentTurn(history, config, actor, db, sendEvent);
+
+      // Auto-label: use first user message as label if not set
+      let label = session.label;
+      if (!label) {
+        label = message.length > 60 ? message.slice(0, 57) + '...' : message;
+      }
+
+      // Persist updated session
+      await agentRepo.updateSession(db, actor.tenant_id, session.id, {
+        messages: updatedHistory,
+        label,
+      });
+
+      sendEvent({ type: 'done', session_id: session.id, label });
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : 'Agent error';
+      sendEvent({ type: 'error', message: errMsg });
+    } finally {
+      res.end();
+    }
+  });
+
+  return router;
+}

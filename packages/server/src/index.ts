@@ -12,8 +12,10 @@ import { runMigrations } from './db/migrate.js';
 import { authRouter } from './auth/routes.js';
 import { authMiddleware } from './auth/middleware.js';
 import { apiRouter } from './rest/router.js';
+import { agentRouter } from './agent/routes.js';
 import { createMcpServer } from './mcp/server.js';
 import { autoApproveExpired, expireOldRequests } from './db/repos/hitl.js';
+import { cleanExpiredSessions } from './db/repos/agent.js';
 import { loadPlugins, shutdownPlugins, type PluginConfig } from './plugins/index.js';
 import type { ActorContext } from '@crmy/shared';
 
@@ -155,6 +157,7 @@ export async function createApp(config: ServerConfig) {
 
   // Authenticated API routes
   app.use('/api/v1', authMiddleware(db, config.jwtSecret), apiRouter(db));
+  app.use('/api/v1/agent', authMiddleware(db, config.jwtSecret), agentRouter(db));
 
   // Serve web UI — public/ is populated at build time by scripts/copy-web.cjs
   // and ships inside the @crmy/server npm tarball alongside dist/.
@@ -166,13 +169,14 @@ export async function createApp(config: ServerConfig) {
     res.sendFile(path.join(webDist, 'index.html'));
   });
 
-  // HITL auto-approval worker (every 60 seconds)
+  // Background workers (every 60 seconds)
   const hitlInterval = setInterval(async () => {
     try {
       await autoApproveExpired(db);
       await expireOldRequests(db);
+      await cleanExpiredSessions(db);
     } catch (err) {
-      console.error('HITL worker error:', err);
+      console.error('Background worker error:', err);
     }
   }, 60_000);
 
