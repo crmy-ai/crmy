@@ -16,26 +16,7 @@ Your agent takes an action — sends an email, advances a deal, books a follow-u
 - Are there open assignments on this contact right now?
 - What context is stale and might be wrong?
 
-Assembling that from raw queries is 5–10 API calls, schema knowledge, and brittle glue code. CRMy's `briefing_get` returns it in one:
-
-```json
-GET /api/v1/briefing/contact/{id}
-
-{
-  "record": { "first_name": "Sarah", "lifecycle_stage": "prospect", ... },
-  "related": { "account": { "name": "Acme Corp", "health_score": 72, ... } },
-  "activities": [ ... ],
-  "open_assignments": [ ... ],
-  "context": {
-    "objection": [{ "body": "Concerned about procurement timeline", "confidence": 0.9, ... }],
-    "competitive_intel": [ ... ],
-    "transcript": [ ... ]
-  },
-  "stale_warnings": [{ "context_type": "research", "valid_until": "2026-01-15", ... }]
-}
-```
-
-Write activities after every interaction. CRMy auto-extracts context entries. The next agent turn — or the same agent tomorrow — starts with full, typed, versioned memory.
+Assembling that from raw queries is 5–10 API calls, schema knowledge, and brittle glue code. CRMy's `briefing_get` returns it in one shot — via MCP, CLI, or REST.
 
 ---
 
@@ -58,102 +39,9 @@ npx @crmy/cli init     # connect to PostgreSQL, run migrations, create admin acc
 npx @crmy/cli server   # starts on :3000
 ```
 
-Server URLs when running:
+### 2. Connect via MCP
 
-```
-Web UI    →  http://localhost:3000/app
-REST API  →  http://localhost:3000/api/v1
-MCP HTTP  →  http://localhost:3000/mcp
-Health    →  http://localhost:3000/health
-```
-
-### 2. Register your agent
-
-Agents self-register. No admin setup required:
-
-```
-POST /auth/register-agent
-Authorization: Bearer <bootstrap-key>
-
-{
-  "display_name": "Outreach Agent",
-  "agent_identifier": "outreach-v1",
-  "agent_model": "claude-sonnet-4-20250514",
-  "requested_scopes": ["contacts:read", "activities:write", "context:write", "assignments:create"]
-}
-```
-
-Returns an actor record and a bound API key. Call this again with the same `agent_identifier` and you get the same actor back — idempotent. Admins can adjust scopes from **Settings → Actors**.
-
-### 3. Call briefing_get before every action
-
-```
-GET /api/v1/briefing/contact/{contact_id}
-Authorization: Bearer crmy_<your-agent-key>
-```
-
-Or via MCP: `briefing_get { subject_type: "contact", subject_id: "..." }`
-
-Works on contacts, accounts, opportunities, and use cases.
-
-### 4. Write activities after every interaction
-
-```
-POST /api/v1/activities
-Authorization: Bearer crmy_<your-agent-key>
-
-{
-  "type": "discovery_call",
-  "subject": "Q2 discovery with Sarah Chen",
-  "body": "Discussed budget, timeline, and technical fit.",
-  "contact_id": "...",
-  "outcome": "Champion identified. Pricing concern raised.",
-  "occurred_at": "2026-03-24T14:00:00Z"
-}
-```
-
-CRMy auto-extracts context entries from activities when an LLM backend is configured.
-
-### 5. Add context explicitly
-
-```
-POST /api/v1/context
-Authorization: Bearer crmy_<your-agent-key>
-
-{
-  "subject_type": "contact",
-  "subject_id": "...",
-  "context_type": "objection",
-  "body": "Concerned about procurement timeline — deal may slip to Q3",
-  "confidence": 0.85,
-  "valid_until": "2026-04-30",
-  "tags": ["pricing", "timeline"]
-}
-```
-
-Context entries are typed, tagged, versioned (supersede when beliefs change), and full-text searchable.
-
-### 6. Escalate to a human when needed
-
-```
-POST /api/v1/hitl
-Authorization: Bearer crmy_<your-agent-key>
-
-{
-  "action_type": "send_proposal",
-  "action_summary": "Send $180K proposal to Sarah Chen at Acme Corp",
-  "action_payload": { ... },
-  "auto_approve_after_seconds": 3600
-}
-```
-
-Poll `GET /api/v1/hitl/{id}` or check the HITL queue in the web UI. Proceed only on `approved`.
-
----
-
-## MCP integration
-
-All CRM operations are MCP tools. Connect to any MCP client:
+Add CRMy as an MCP server so any agent or IDE can call it directly:
 
 #### Claude Code
 
@@ -189,28 +77,133 @@ Add to `.cursor/mcp.json` or equivalent:
 }
 ```
 
-#### HTTP transport (remote agents)
+Once connected, your agent has access to 80+ MCP tools. No API calls, no auth wiring — just tool calls.
+
+### 3. Get a briefing before every action
+
+Via MCP:
 
 ```
-POST /mcp
-Authorization: Bearer crmy_<key>
-Content-Type: application/json
+briefing_get { subject_type: "contact", subject_id: "<id>" }
 ```
+
+Via CLI:
+
+```bash
+crmy briefing contact:<id>
+```
+
+Response:
+
+```json
+{
+  "record": { "first_name": "Sarah", "lifecycle_stage": "prospect", ... },
+  "related": { "account": { "name": "Acme Corp", "health_score": 72, ... } },
+  "activities": [ ... ],
+  "open_assignments": [ ... ],
+  "context": {
+    "objection": [{ "body": "Concerned about procurement timeline", "confidence": 0.9, ... }],
+    "competitive_intel": [ ... ]
+  },
+  "stale_warnings": [{ "context_type": "research", "valid_until": "2026-01-15", ... }]
+}
+```
+
+Works on contacts, accounts, opportunities, and use cases.
+
+### 4. Write activities after every interaction
+
+Via MCP:
+
+```
+activity_create {
+  type: "discovery_call",
+  subject: "Q2 discovery with Sarah Chen",
+  body: "Discussed budget, timeline, and technical fit.",
+  contact_id: "...",
+  outcome: "Champion identified. Pricing concern raised.",
+  occurred_at: "2026-03-24T14:00:00Z"
+}
+```
+
+Via CLI:
+
+```bash
+crmy activities create
+```
+
+CRMy auto-extracts context entries from activities when an LLM backend is configured.
+
+### 5. Add context explicitly
+
+Via MCP:
+
+```
+context_add {
+  subject_type: "contact",
+  subject_id: "...",
+  context_type: "objection",
+  body: "Concerned about procurement timeline — deal may slip to Q3",
+  confidence: 0.85,
+  valid_until: "2026-04-30",
+  tags: ["pricing", "timeline"]
+}
+```
+
+Via CLI:
+
+```bash
+crmy context add
+```
+
+Context entries are typed, tagged, versioned (supersede when beliefs change), and full-text searchable.
+
+### 6. Escalate to a human when needed
+
+Via MCP:
+
+```
+hitl_submit_request {
+  action_type: "send_proposal",
+  action_summary: "Send $180K proposal to Sarah Chen at Acme Corp",
+  action_payload: { ... },
+  auto_approve_after_seconds: 3600
+}
+```
+
+Via CLI:
+
+```bash
+crmy hitl list
+crmy hitl approve <id>
+```
+
+Poll `hitl_check_status` or check the HITL queue in the web UI. Proceed only on `approved`.
+
+### 7. Register your agent
+
+Agents self-register — no admin setup required. Via MCP:
+
+```
+actor_register {
+  display_name: "Outreach Agent",
+  agent_identifier: "outreach-v1",
+  agent_model: "claude-sonnet-4-20250514",
+  requested_scopes: ["contacts:read", "activities:write", "context:write", "assignments:create"]
+}
+```
+
+Via CLI:
+
+```bash
+crmy actors register
+```
+
+Call again with the same `agent_identifier` and you get the same actor back — idempotent. Admins can adjust scopes from **Settings → Actors**.
 
 ---
 
-## Context Engine
-
-Four primitives that form the agent's shared workspace:
-
-| Primitive | What it does |
-|-----------|-------------|
-| **Actors** | First-class identity for humans and AI agents. Every action is attributed to an actor. Agents self-register via API — no admin setup. |
-| **Activities** | Everything that happened — calls, emails, meetings. Structured `detail` payloads, polymorphic subjects, retroactive `occurred_at` timestamps, and auto-extraction into context entries. |
-| **Assignments** | Structured handoffs. Agents create assignments for humans; humans create assignments for agents. Stateful lifecycle: `pending → accepted → in_progress → completed`. |
-| **Context Entries** | The memory layer. Typed, tagged, versioned knowledge attached to any CRM object. Supersede stale beliefs. Confidence scores. Full-text search. `valid_until` staleness tracking. |
-
-### Agent workflow example
+## Agent workflow example
 
 ```
 1. agent: briefing_get { subject_type: "contact", subject_id: "abc" }
@@ -234,91 +227,16 @@ Four primitives that form the agent's shared workspace:
 
 ---
 
-## Authentication
+## Context Engine
 
-All `/api/v1/*` endpoints require:
+Four primitives that form the agent's shared workspace:
 
-```
-Authorization: Bearer <jwt-token>          # human login
-Authorization: Bearer crmy_<api-key>       # agent or integration
-```
-
-### API keys
-
-Create scoped keys for agents and integrations:
-
-```
-POST /auth/api-keys   { "label": "my-agent", "scopes": ["contacts:read", "activities:write"] }
-```
-
-The key is shown once. Store it securely.
-
-### Scope reference
-
-| Scope | Grants access to |
-|-------|-----------------|
-| `*` | Everything |
-| `read` | All read operations |
-| `write` | All write operations |
-| `contacts:read` / `contacts:write` | Contact records |
-| `accounts:read` / `accounts:write` | Account records |
-| `opportunities:read` / `opportunities:write` | Pipeline and deals |
-| `activities:read` / `activities:write` | Activities |
-| `assignments:create` / `assignments:update` | Assignment lifecycle |
-| `context:read` / `context:write` | Context entries and briefings |
-
-API key scopes are checked before every tool handler. JWT users (human login) bypass scoping and always have full access.
-
----
-
-## Architecture
-
-```
-packages/
-  shared/   @crmy/shared   TypeScript types, Zod schemas
-  server/   @crmy/server   Express + PostgreSQL + MCP Streamable HTTP
-  cli/      @crmy/cli      Local CLI + stdio MCP server
-  web/      @crmy/web      React SPA at /app
-docker/                    Dockerfile + docker-compose.yml
-```
-
-### Design decisions
-
-- **MCP-first** — All CRM operations are MCP tools. REST API and CLI are thin wrappers around the same handlers.
-- **Raw SQL** — No ORM. Every query is readable and auditable.
-- **Event sourcing** — Every mutation appends to an `events` table. Full audit trail, never overwritten.
-- **Scope enforcement** — API key scopes checked before every handler. JWT users always have full access.
-- **Governor limits** — Plan-based quotas on actors, activities, and context entries. Prevents runaway agents.
-- **Plugins** — Extensible lifecycle hooks for custom integrations.
-- **Workflows** — Event-driven automation with configurable triggers and actions.
-
-### Environment variables
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
-| `JWT_SECRET` | Yes | — | JWT signing secret |
-| `PORT` | No | `3000` | HTTP port |
-| `CRMY_TENANT_ID` | No | `default` | Tenant slug |
-| `CRMY_API_KEY` | No | — | API key for CLI auth |
-| `CRMY_SERVER_URL` | No | — | Remote server URL for CLI |
-
----
-
-## Web UI
-
-Available at `/app` when the server is running. Useful for human review, HITL approvals, and managing agents — not the primary interface for agent builders.
-
-| Page | What it does |
-|------|-------------|
-| Dashboard | Pipeline stats, recent activity feed |
-| Contacts / Accounts / Pipeline | Standard CRM views |
-| Use Cases | Consumption-based workload tracking (discovery → poc → production → scaling → sunset) |
-| Assignments | Work queue with My Queue / Delegated / All tabs |
-| HITL Queue | Approve or reject pending agent action requests |
-| Settings | API keys, actors, webhooks, custom fields |
-
-Docker default credentials: `admin@crmy.ai` / `admin` — change after first login.
+| Primitive | What it does |
+|-----------|-------------|
+| **Actors** | First-class identity for humans and AI agents. Every action is attributed to an actor. Agents self-register — no admin setup. |
+| **Activities** | Everything that happened — calls, emails, meetings. Structured `detail` payloads, polymorphic subjects, retroactive `occurred_at` timestamps, and auto-extraction into context entries. |
+| **Assignments** | Structured handoffs. Agents create assignments for humans; humans create assignments for agents. Stateful lifecycle: `pending → accepted → in_progress → completed`. |
+| **Context Entries** | The memory layer. Typed, tagged, versioned knowledge attached to any CRM object. Supersede stale beliefs. Confidence scores. Full-text search. `valid_until` staleness tracking. |
 
 ---
 
@@ -442,6 +360,111 @@ crmy config show                         Show config
 crmy migrate run                         Run migrations
 crmy migrate status                      Migration status
 ```
+
+---
+
+## REST API
+
+All MCP tools have a corresponding REST endpoint at `/api/v1/*`. Use the API directly for integrations that can't run MCP, or when building custom tooling.
+
+Server URLs when running:
+
+```
+Web UI    →  http://localhost:3000/app
+REST API  →  http://localhost:3000/api/v1
+MCP HTTP  →  http://localhost:3000/mcp
+Health    →  http://localhost:3000/health
+```
+
+All endpoints require:
+
+```
+Authorization: Bearer <jwt-token>          # human login
+Authorization: Bearer crmy_<api-key>       # agent or integration
+```
+
+Create scoped API keys for agents and integrations:
+
+```
+POST /auth/api-keys   { "label": "my-agent", "scopes": ["contacts:read", "activities:write"] }
+```
+
+The key is shown once. Store it securely.
+
+#### HTTP MCP transport (remote agents)
+
+```
+POST /mcp
+Authorization: Bearer crmy_<key>
+Content-Type: application/json
+```
+
+### Scope reference
+
+| Scope | Grants access to |
+|-------|-----------------|
+| `*` | Everything |
+| `read` | All read operations |
+| `write` | All write operations |
+| `contacts:read` / `contacts:write` | Contact records |
+| `accounts:read` / `accounts:write` | Account records |
+| `opportunities:read` / `opportunities:write` | Pipeline and deals |
+| `activities:read` / `activities:write` | Activities |
+| `assignments:create` / `assignments:update` | Assignment lifecycle |
+| `context:read` / `context:write` | Context entries and briefings |
+
+API key scopes are checked before every tool handler. JWT users (human login) bypass scoping and always have full access.
+
+---
+
+## Architecture
+
+```
+packages/
+  shared/   @crmy/shared   TypeScript types, Zod schemas
+  server/   @crmy/server   Express + PostgreSQL + MCP Streamable HTTP
+  cli/      @crmy/cli      Local CLI + stdio MCP server
+  web/      @crmy/web      React SPA at /app
+docker/                    Dockerfile + docker-compose.yml
+```
+
+### Design decisions
+
+- **MCP-first** — All CRM operations are MCP tools. REST API and CLI are thin wrappers around the same handlers.
+- **Raw SQL** — No ORM. Every query is readable and auditable.
+- **Event sourcing** — Every mutation appends to an `events` table. Full audit trail, never overwritten.
+- **Scope enforcement** — API key scopes checked before every handler. JWT users always have full access.
+- **Governor limits** — Plan-based quotas on actors, activities, and context entries. Prevents runaway agents.
+- **Plugins** — Extensible lifecycle hooks for custom integrations.
+- **Workflows** — Event-driven automation with configurable triggers and actions.
+
+### Environment variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
+| `JWT_SECRET` | Yes | — | JWT signing secret |
+| `PORT` | No | `3000` | HTTP port |
+| `CRMY_TENANT_ID` | No | `default` | Tenant slug |
+| `CRMY_API_KEY` | No | — | API key for CLI auth |
+| `CRMY_SERVER_URL` | No | — | Remote server URL for CLI |
+
+---
+
+## Web UI
+
+Available at `/app` when the server is running. Useful for human review, HITL approvals, and managing agents — not the primary interface for agent builders.
+
+| Page | What it does |
+|------|-------------|
+| Dashboard | Pipeline stats, recent activity feed |
+| Contacts / Accounts / Pipeline | Standard CRM views |
+| Use Cases | Consumption-based workload tracking (discovery → poc → production → scaling → sunset) |
+| Assignments | Work queue with My Queue / Delegated / All tabs |
+| HITL Queue | Approve or reject pending agent action requests |
+| Settings | API keys, actors, webhooks, custom fields |
+
+Docker default credentials: `admin@crmy.ai` / `admin` — change after first login.
 
 ---
 
