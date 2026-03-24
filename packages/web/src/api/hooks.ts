@@ -687,3 +687,150 @@ export function useBriefing(subjectType: string, subjectId: string, params?: { f
   });
 }
 
+// ── Agent ──
+
+export interface AgentConfigData {
+  id: string;
+  tenant_id: string;
+  enabled: boolean;
+  provider: 'anthropic' | 'openai' | 'openrouter' | 'ollama' | 'custom';
+  base_url: string;
+  api_key_enc: string | null;
+  model: string;
+  system_prompt: string | null;
+  max_tokens_per_turn: number;
+  history_retention_days: number;
+  can_write_objects: boolean;
+  can_log_activities: boolean;
+  can_create_assignments: boolean;
+}
+
+export interface AgentSessionSummary {
+  id: string;
+  label: string | null;
+  context_type: string | null;
+  context_id: string | null;
+  context_name: string | null;
+  token_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentSessionFull extends AgentSessionSummary {
+  messages: { role: string; content: string; tool_calls?: unknown[]; tool_call_id?: string }[];
+}
+
+export function useAgentConfig() {
+  return useQuery<{ data: AgentConfigData | null }>({
+    queryKey: ['agent-config'],
+    queryFn: () => api.get('agent/config'),
+  });
+}
+
+export function useSaveAgentConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.put('agent/config', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-config'] }),
+  });
+}
+
+export function useTestAgentConnection() {
+  return useMutation<{ ok: boolean; error?: string }>({
+    mutationFn: () => api.post('agent/config/test'),
+  });
+}
+
+export function useAgentSessions() {
+  return useQuery<{ data: AgentSessionSummary[] }>({
+    queryKey: ['agent-sessions'],
+    queryFn: () => api.get('agent/sessions'),
+  });
+}
+
+export function useAgentSession(id: string | null) {
+  return useQuery<{ data: AgentSessionFull }>({
+    queryKey: ['agent-session', id],
+    queryFn: () => api.get(`agent/sessions/${id}`),
+    enabled: !!id,
+  });
+}
+
+export function useCreateAgentSession() {
+  const qc = useQueryClient();
+  return useMutation<{ data: AgentSessionFull }, Error, { context_type?: string; context_id?: string; context_name?: string }>({
+    mutationFn: (data) => api.post('agent/sessions', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-sessions'] }),
+  });
+}
+
+export function useDeleteAgentSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`agent/sessions/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-sessions'] }),
+  });
+}
+
+export function useClearAllAgentSessions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete('agent/sessions'),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-sessions'] }),
+  });
+}
+
+export interface ActivityLogEntry {
+  id: string;
+  tenant_id: string;
+  session_id: string;
+  session_label: string | null;
+  user_id: string;
+  user_name: string | null;
+  turn_index: number;
+  tool_name: string;
+  tool_args: Record<string, unknown>;
+  tool_result: unknown;
+  is_error: boolean;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export interface ActivityFilters {
+  user_id?: string;
+  tool_name?: string;
+  is_error?: boolean;
+  since?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export function useAgentActivity(filters?: ActivityFilters) {
+  return useQuery<{ data: ActivityLogEntry[]; total: number; next_cursor?: string }>({
+    queryKey: ['agent-activity', filters],
+    queryFn: () => {
+      const p: Record<string, string | number | boolean | undefined> = {};
+      if (filters?.user_id) p.user_id = filters.user_id;
+      if (filters?.tool_name) p.tool_name = filters.tool_name;
+      if (filters?.is_error !== undefined) p.is_error = filters.is_error;
+      if (filters?.since) p.since = filters.since;
+      if (filters?.limit) p.limit = filters.limit;
+      if (filters?.cursor) p.cursor = filters.cursor;
+      const qs = new URLSearchParams(
+        Object.entries(p)
+          .filter(([, v]) => v !== undefined)
+          .map(([k, v]) => [k, String(v)]),
+      ).toString();
+      return api.get(`agent/activity${qs ? '?' + qs : ''}`);
+    },
+  });
+}
+
+export function useSessionActivity(sessionId: string | null) {
+  return useQuery<{ activity: ActivityLogEntry[] }>({
+    queryKey: ['session-activity', sessionId],
+    queryFn: () => api.get(`agent/sessions/${sessionId}/activity`),
+    enabled: !!sessionId,
+  });
+}
+

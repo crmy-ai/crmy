@@ -3,6 +3,7 @@
 
 import type { DbPool } from '../db/pool.js';
 import type { UUID } from '@crmy/shared';
+import { eventBus } from './bus.js';
 
 export interface EmitEventOpts {
   tenantId: UUID;
@@ -34,5 +35,9 @@ export async function emitEvent(db: DbPool, opts: EmitEventOpts): Promise<number
       JSON.stringify(opts.metadata ?? {}),
     ],
   );
-  return result.rows[0].id;
+  const event_id: number = result.rows[0].id;
+  // Broadcast to in-process subscribers (e.g. MCP session registry)
+  eventBus.emit('crmy:event', { ...opts, event_id });
+  return event_id;
 }
+

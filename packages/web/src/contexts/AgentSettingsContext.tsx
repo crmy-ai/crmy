@@ -1,19 +1,31 @@
-import React, { createContext, useContext, useState } from 'react';
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
+import React, { createContext, useContext } from 'react';
+import { useAgentConfig, type AgentConfigData } from '@/api/hooks';
 
 export interface AgentSettings {
+  /** Whether the agent is enabled for this tenant. */
   enabled: boolean;
-  setEnabled: (v: boolean) => void;
+  /** Full config object (null if never configured). */
+  config: AgentConfigData | null;
+  /** True while the config is being fetched. */
+  loading: boolean;
 }
 
 const AgentSettingsContext = createContext<AgentSettings>({
   enabled: false,
-  setEnabled: () => {},
+  config: null,
+  loading: true,
 });
 
 export function AgentSettingsProvider({ children }: { children: React.ReactNode }) {
-  const [enabled, setEnabled] = useState(false);
+  const { data, isLoading } = useAgentConfig();
+  const config = data?.data ?? null;
+  const enabled = config?.enabled ?? false;
+
   return (
-    <AgentSettingsContext.Provider value={{ enabled, setEnabled }}>
+    <AgentSettingsContext.Provider value={{ enabled, config, loading: isLoading }}>
       {children}
     </AgentSettingsContext.Provider>
   );

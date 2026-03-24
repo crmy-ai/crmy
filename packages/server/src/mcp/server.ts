@@ -22,6 +22,7 @@ import type { ActorContext } from '@crmy/shared';
 import { CrmyError } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
 import { enforceToolScopes } from '../auth/scopes.js';
+import { registerResources } from './resources.js';
 import { contactTools } from './tools/contacts.js';
 import { accountTools } from './tools/accounts.js';
 import { opportunityTools } from './tools/opportunities.js';
@@ -77,6 +78,8 @@ export function createMcpServer(db: DbPool, getActor: () => ActorContext): McpSe
   });
 
   const tools = getAllTools(db);
+
+  registerResources(server, db, getActor);
 
   for (const tool of tools) {
     server.tool(
