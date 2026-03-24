@@ -19,21 +19,22 @@ Complete documentation for CRMy — the agent-first open source CRM.
 11. [Assignments](#assignments)
 12. [Context Engine](#context-engine)
 13. [Briefings](#briefings)
-14. [Type Registries](#type-registries)
-15. [Scope Enforcement](#scope-enforcement)
-16. [Governor Limits](#governor-limits)
-17. [Use Cases](#use-cases)
-18. [Notes & Comments](#notes--comments)
-19. [Workflows & Automation](#workflows--automation)
-20. [Webhooks](#webhooks)
-21. [Email](#email)
-22. [Custom Fields](#custom-fields)
-23. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
-24. [Analytics & Reporting](#analytics--reporting)
-25. [Plugins](#plugins)
-26. [MCP Tools Reference](#mcp-tools-reference)
-27. [REST API Reference](#rest-api-reference)
-28. [Database & Migrations](#database--migrations)
+14. [Identity Resolution](#identity-resolution)
+15. [Type Registries](#type-registries)
+16. [Scope Enforcement](#scope-enforcement)
+17. [Governor Limits](#governor-limits)
+18. [Use Cases](#use-cases)
+19. [Notes & Comments](#notes--comments)
+20. [Workflows & Automation](#workflows--automation)
+21. [Webhooks](#webhooks)
+22. [Email](#email)
+23. [Custom Fields](#custom-fields)
+24. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
+25. [Analytics & Reporting](#analytics--reporting)
+26. [Plugins](#plugins)
+27. [MCP Tools Reference](#mcp-tools-reference)
+28. [REST API Reference](#rest-api-reference)
+29. [Database & Migrations](#database--migrations)
 
 ---
 
@@ -340,13 +341,13 @@ http://localhost:3000/app
 
 ### Pages
 
-#### Dashboard (`/app`)
+#### Memory Hub (`/app`)
 
-Four stat cards at the top: Pipeline Value, Open Deals, Active Use Cases, HITL Pending.
+The operator's overview of agent activity. Four stat cards link to their respective pages: **Pending Approvals**, **Context Entries**, **Active Agents**, and **Open Handoffs**.
 
-Below that, a **Use Case stage summary strip** showing count and attributed ARR per stage. Click any stage to filter the use cases list.
+Below the stat cards, up to three pending HITL requests are shown inline with approve/reject buttons — no need to navigate to the Approvals page for quick decisions.
 
-Bottom section shows the 10 most recent activities.
+The right column shows active agents with status indicators and a context health widget (total entries + stale count). The left column shows the agent activity feed.
 
 #### Contacts (`/app/contacts`)
 
@@ -405,7 +406,7 @@ Status filter chips let you narrow by `pending`, `accepted`, `in_progress`, `blo
 - Use case ARR by account
 - Health distribution (healthy / at-risk / critical)
 
-#### HITL Queue (`/app/hitl`)
+#### Approvals (`/app/hitl`)
 
 Cards for each pending approval request showing:
 - Action type and agent ID
@@ -416,6 +417,19 @@ Cards for each pending approval request showing:
 - Empty state: "No pending approvals — your agents are running autonomously"
 
 Polls every 10 seconds.
+
+#### Agents (`/app/agents`)
+
+Full list of registered actors (humans and AI agents) with their role, model, scopes, and status. Click any row to expand the inline detail panel for scope editing and API key management. This is the same as the Actors tab in Settings, surfaced at the top level because agents are first-class citizens.
+
+#### Context (`/app/context`)
+
+Browse and manage all context entries stored in the memory layer. Supports:
+- **Search** by content text
+- **Filter** by subject type (contact, account, opportunity, …) and context type
+- **Stale-only toggle** to surface entries past their `valid_until` date
+- Confidence score pills, expiry date highlighting, and `is_current` badges
+- Inline **"Mark reviewed"** action for stale entries
 
 #### Settings (`/app/settings`)
 
@@ -516,10 +530,10 @@ Contacts are people you interact with. They can be linked to an account and have
 
 | Tool | Description |
 |---|---|
-| `contact_create` | Create a contact. Required: `first_name`. Optional: `last_name`, `email`, `phone`, `title`, `company_name`, `account_id`, `lifecycle_stage`, `tags`, `custom_fields`, `source` |
+| `contact_create` | Create a contact. Required: `first_name`. Optional: `last_name`, `email`, `phone`, `title`, `company_name`, `account_id`, `lifecycle_stage`, `aliases`, `tags`, `custom_fields`, `source` |
 | `contact_get` | Get a contact by ID |
-| `contact_search` | Search with filters: `query`, `lifecycle_stage`, `account_id`, `owner_id`, `tags` |
-| `contact_update` | Patch any fields via `{ id, patch: { ... } }` |
+| `contact_search` | Search with filters: `query`, `lifecycle_stage`, `account_id`, `owner_id`, `tags`. Query matches name, email, company, and any alias. |
+| `contact_update` | Patch any fields via `{ id, patch: { ... } }`. Supports `aliases` array. |
 | `contact_set_lifecycle` | Change stage with optional `reason` |
 | `contact_log_activity` | Log a call, email, meeting, note, or task for a contact |
 | `contact_get_timeline` | Get the activity timeline with optional type filter |
@@ -555,10 +569,10 @@ Accounts represent companies or organizations. Accounts can have parent/child hi
 
 | Tool | Description |
 |---|---|
-| `account_create` | Create an account. Required: `name`. Optional: `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `tags`, `custom_fields` |
+| `account_create` | Create an account. Required: `name`. Optional: `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `aliases`, `tags`, `custom_fields` |
 | `account_get` | Get account with its contacts and open opportunities |
-| `account_search` | Search with filters: `query`, `industry`, `owner_id`, `min_revenue`, `tags` |
-| `account_update` | Patch any fields |
+| `account_search` | Search with filters: `query`, `industry`, `owner_id`, `min_revenue`, `tags`. Query matches name, domain, and any alias. |
+| `account_update` | Patch any fields. Supports `aliases` array. |
 | `account_set_health_score` | Set score (0-100) with `rationale` |
 | `account_get_hierarchy` | Get parent/child tree |
 | `account_delete` | Permanently delete an account. Admin/owner role required. |
@@ -983,6 +997,127 @@ crmy briefing use_case:<id>
 ```
 GET /api/v1/briefing/:subject_type/:subject_id
 ```
+
+---
+
+## Identity Resolution
+
+When an agent or user references an entity by a name that doesn't exactly match what's in the database — "JPMC" instead of "JP Morgan Chase", a nickname, a typo, or a common abbreviation — CRMy resolves it automatically before performing any operation.
+
+### How resolution works
+
+Resolution runs through five tiers in order, returning as soon as a confident match is found:
+
+| Tier | Method | Confidence |
+|---|---|---|
+| 1 | Email exact match (contacts) / domain exact match (accounts) | `HIGH` |
+| 2 | Full name exact match (case-insensitive) | `HIGH` |
+| 3 | Alias array exact match | `HIGH` |
+| 4 | ILIKE substring match on name/email/domain/aliases | `MEDIUM` |
+| 5 | pg_trgm trigram similarity fallback (handles typos) | `LOW` |
+
+If a single `MEDIUM` or `HIGH` candidate is found, it is returned as `status: "resolved"`. If multiple candidates survive, `status: "ambiguous"` is returned with the full candidate list for HITL disambiguation.
+
+### Aliases
+
+Both contacts and accounts have an `aliases` field — a string array of known alternate names, abbreviations, and nicknames. These are indexed with a GIN index for fast lookup.
+
+```json
+// Account example
+{
+  "name": "JP Morgan Chase",
+  "domain": "jpmorgan.com",
+  "aliases": ["JPMC", "JPMorgan", "J.P. Morgan"]
+}
+```
+
+Populate aliases when creating or updating a record:
+
+```
+PATCH /api/v1/accounts/:id
+{ "aliases": ["JPMC", "JPMorgan", "J.P. Morgan"] }
+```
+
+Or via MCP:
+
+```
+account_update { id: "...", patch: { aliases: ["JPMC", "JPMorgan"] } }
+```
+
+Aliases are also searched by `contact_search`, `account_search`, and `crm_search`.
+
+### Actor affinity scoring
+
+When multiple candidates are ambiguous, CRMy scores each one by how much the requesting actor has previously interacted with it — across activities, context entries, and assignments. The intuition: agents typically work a fixed book of accounts, so prior history is a strong disambiguation signal.
+
+Affinity is computed as:
+
+```
+score = activities.performed_by count
+      + context_entries.authored_by count
+      + assignments.assigned_to/assigned_by count
+```
+
+If a single candidate has non-zero affinity and no other candidate matches at a higher tier, it is auto-resolved. If multiple HIGH-confidence candidates exist and one has substantially more affinity, it is preferred.
+
+### HITL fallback
+
+When resolution returns `status: "ambiguous"` and actor affinity cannot break the tie, the agent should surface the candidates to a human via `hitl_submit_request` before proceeding. The response includes a `candidates` array with IDs, names, and confidence scores to populate the approval payload.
+
+### `entity_resolve` MCP tool
+
+Always call `entity_resolve` before `contact_get` or `account_get` when you have a name but not a UUID.
+
+**Input:**
+
+| Field | Type | Description |
+|---|---|---|
+| `query` | string (required) | The name, abbreviation, or partial string to resolve |
+| `entity_type` | `contact` \| `account` \| `any` | Limit search to one type (default `any`) |
+| `context_hints` | object | Optional hints: `company_name`, `email_domain`, `title`, `email` |
+| `actor_id` | uuid | Actor whose affinity history to use (defaults to requesting actor) |
+| `limit` | 1–10 | Max candidates to return (default 5) |
+
+**Output:**
+
+```json
+{
+  "status": "resolved",          // "resolved" | "ambiguous" | "not_found"
+  "entity_type": "account",
+  "resolved": {
+    "id": "uuid",
+    "name": "JP Morgan Chase",
+    "confidence": "HIGH",
+    "match_tier": "alias",
+    "affinity_score": 12
+  },
+  "candidates": []               // populated when status = "ambiguous"
+}
+```
+
+### `POST /resolve` REST endpoint
+
+```
+POST /api/v1/resolve
+Authorization: Bearer <key>
+
+{
+  "query": "JPMC",
+  "entity_type": "account",
+  "actor_id": "uuid",
+  "context_hints": { "email_domain": "jpmorgan.com" },
+  "limit": 5
+}
+```
+
+Returns the same shape as the MCP tool output.
+
+### Database
+
+Migration `018_identity_resolution.sql` adds:
+- `pg_trgm` extension
+- `aliases text[]` column on `contacts` and `accounts` (GIN indexed)
+- Trigram indexes on `contacts.first_name`, `contacts.last_name`, `accounts.name`
 
 ---
 
@@ -1682,6 +1817,7 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
 | Emails | `email_create`, `email_get`, `email_search` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
+| Identity | `entity_resolve` |
 | Analytics | `crm_search`, `pipeline_forecast`, `account_health_report` |
 | Meta | `schema_get`, `tenant_get_stats` |
 
@@ -1875,11 +2011,12 @@ Base URL: `/api/v1`
 |---|---|---|
 | GET | `/events` | Audit log |
 
-### Search
+### Search & Identity
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/search` | Cross-entity search (requires `q`) |
+| POST | `/resolve` | Resolve a name/abbreviation to a contact or account UUID. Body: `{ query, entity_type?, actor_id?, context_hints?, limit? }` |
 
 ---
 

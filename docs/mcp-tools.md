@@ -4,7 +4,7 @@
 
 ### contact_create
 Create a new contact in the CRM.
-- **Input**: `first_name` (required), `last_name`, `email`, `phone`, `title`, `company_name`, `account_id`, `lifecycle_stage`, `tags`, `custom_fields`, `source`
+- **Input**: `first_name` (required), `last_name`, `email`, `phone`, `title`, `company_name`, `account_id`, `lifecycle_stage`, `aliases`, `tags`, `custom_fields`, `source`
 - **Output**: `{ contact, event_id }`
 
 ### contact_get
@@ -19,7 +19,7 @@ Search contacts with filters.
 
 ### contact_update
 Update a contact.
-- **Input**: `id` (required), `patch` (object with fields to update)
+- **Input**: `id` (required), `patch` (object with fields to update, including `aliases: string[]`)
 - **Output**: `{ contact, event_id }`
 
 ### contact_set_lifecycle
@@ -41,7 +41,7 @@ Get the activity timeline for a contact.
 
 ### account_create
 Create a new account.
-- **Input**: `name` (required), `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `tags`, `custom_fields`
+- **Input**: `name` (required), `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `aliases`, `tags`, `custom_fields`
 - **Output**: `{ account, event_id }`
 
 ### account_get
@@ -56,7 +56,7 @@ Search accounts.
 
 ### account_update
 Update an account.
-- **Input**: `id` (required), `patch`
+- **Input**: `id` (required), `patch` (object with fields to update, including `aliases: string[]`)
 - **Output**: `{ account, event_id }`
 
 ### account_set_health_score
@@ -127,6 +127,21 @@ Mark an activity as completed.
 Update an activity.
 - **Input**: `id` (required), `patch`
 - **Output**: `{ activity, event_id }`
+
+## Identity Tools
+
+### entity_resolve
+Resolve a name, abbreviation, or partial string to a contact or account UUID. **Always call this before `contact_get` or `account_get` when you have a name but not a UUID — never guess an ID.**
+
+- **Input**: `query` (required), `entity_type` (`contact` | `account` | `any`, default `any`), `context_hints` (`{ company_name?, email_domain?, title?, email? }`), `actor_id` (defaults to requesting actor), `limit` (1–10, default 5)
+- **Output**: `{ status, entity_type, resolved, candidates }`
+  - `status`: `"resolved"` | `"ambiguous"` | `"not_found"`
+  - `resolved`: `{ id, name, confidence, match_tier, affinity_score }` — present when `status = "resolved"`
+  - `candidates`: array of the same shape — present when `status = "ambiguous"`
+
+Resolution tiers (in order): email/domain exact → name exact → alias exact → ILIKE substring → trigram similarity. Actor affinity (prior interaction history) is used as a tiebreaker when multiple candidates match at the same tier.
+
+When `status = "ambiguous"`, surface the candidates to a human via `hitl_submit_request` before proceeding.
 
 ## Analytics Tools
 
