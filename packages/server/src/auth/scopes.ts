@@ -13,19 +13,22 @@ const TOOL_SCOPES: Record<string, string[]> = {
   // ── Contacts ──
   contact_get: ['contacts:read'],
   contact_search: ['contacts:read'],
+  contact_get_timeline: ['contacts:read'],
   contact_create: ['contacts:write'],
   contact_update: ['contacts:write'],
   contact_delete: ['contacts:write'],
   contact_set_lifecycle: ['contacts:write'],
-  contact_get_timeline: ['contacts:read'],
   contact_log_activity: ['contacts:write', 'activities:write'],
 
   // ── Accounts ──
   account_get: ['accounts:read'],
   account_search: ['accounts:read'],
+  account_get_hierarchy: ['accounts:read'],
+  account_health_report: ['accounts:read'],
   account_create: ['accounts:write'],
   account_update: ['accounts:write'],
   account_delete: ['accounts:write'],
+  account_set_health_score: ['accounts:write'],
 
   // ── Opportunities ──
   opportunity_get: ['opportunities:read'],
@@ -38,6 +41,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   // ── Activities ──
   activity_get: ['activities:read'],
   activity_search: ['activities:read'],
+  activity_get_timeline: ['activities:read'],
   activity_create: ['activities:write'],
   activity_update: ['activities:write'],
   activity_complete: ['activities:write'],
@@ -59,81 +63,93 @@ const TOOL_SCOPES: Record<string, string[]> = {
   context_search: ['context:read'],
   context_list: ['context:read'],
   context_stale: ['context:read'],
+  context_diff: ['context:read'],
+  briefing_get: ['context:read'],
   context_add: ['context:write'],
   context_supersede: ['context:write'],
   context_review: ['context:write'],
-  briefing_get: ['context:read'],
+  context_extract: ['context:write'],
+  context_ingest: ['context:write'],
+  context_stale_assign: ['context:write'],
 
   // ── Use Cases ──
   use_case_get: ['accounts:read'],
   use_case_search: ['accounts:read'],
+  use_case_list_contacts: ['accounts:read'],
+  use_case_get_timeline: ['accounts:read'],
+  use_case_summary: ['accounts:read'],
   use_case_create: ['accounts:write'],
   use_case_update: ['accounts:write'],
   use_case_delete: ['accounts:write'],
+  use_case_advance_stage: ['accounts:write'],
   use_case_update_consumption: ['accounts:write'],
   use_case_set_health: ['accounts:write'],
   use_case_link_contact: ['accounts:write', 'contacts:read'],
   use_case_unlink_contact: ['accounts:write'],
 
   // ── Notes ──
+  note_get: ['activities:read'],
+  note_list: ['activities:read'],
   note_create: ['activities:write'],
   note_update: ['activities:write'],
   note_delete: ['activities:write'],
-  note_get: ['activities:read'],
-  note_search: ['activities:read'],
 
   // ── Emails ──
-  email_create: ['activities:write'],
   email_get: ['activities:read'],
   email_search: ['activities:read'],
+  email_create: ['activities:write'],
 
   // ── Webhooks ──
+  webhook_get: ['read'],
+  webhook_list: ['read'],
+  webhook_list_deliveries: ['read'],
   webhook_create: ['write'],
   webhook_update: ['write'],
   webhook_delete: ['write'],
-  webhook_get: ['read'],
-  webhook_list: ['read'],
 
   // ── Custom Fields ──
+  custom_field_list: ['read'],
   custom_field_create: ['write'],
   custom_field_update: ['write'],
   custom_field_delete: ['write'],
-  custom_field_list: ['read'],
 
   // ── Workflows ──
+  workflow_get: ['read'],
+  workflow_list: ['read'],
+  workflow_run_list: ['read'],
   workflow_create: ['write'],
   workflow_update: ['write'],
   workflow_delete: ['write'],
-  workflow_get: ['read'],
-  workflow_list: ['read'],
-  workflow_runs: ['read'],
 
   // ── Registries ──
   activity_type_list: ['read'],
+  context_type_list: ['read'],
   activity_type_add: ['write'],
   activity_type_remove: ['write'],
-  context_type_list: ['read'],
   context_type_add: ['write'],
   context_type_remove: ['write'],
 
   // ── Actors ──
-  actor_register: ['write'],
   actor_get: ['read'],
-  actor_update: ['write'],
   actor_list: ['read'],
+  actor_expertise: ['read'],
+  actor_register: ['write'],
+  actor_update: ['write'],
   actor_whoami: [],  // always allowed
 
   // ── HITL ──
-  hitl_create: ['write'],
-  hitl_get: ['read'],
-  hitl_list: ['read'],
+  hitl_check_status: ['read'],
+  hitl_list_pending: ['read'],
+  hitl_submit_request: ['write'],
   hitl_resolve: ['write'],
 
-  // ── Analytics/Meta ──
-  analytics_pipeline: ['read'],
-  analytics_activity_summary: ['read'],
-  crm_schema: [],  // always allowed
-  search: ['read'],
+  // ── Analytics / Meta ──
+  pipeline_summary: ['opportunities:read'],
+  pipeline_forecast: ['opportunities:read'],
+  crm_search: ['read'],
+  tenant_get_stats: ['read'],
+  entity_resolve: [],  // always allowed
+  schema_get: [],      // always allowed
 };
 
 /**

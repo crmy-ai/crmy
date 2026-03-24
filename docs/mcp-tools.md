@@ -22,6 +22,11 @@ Update a contact.
 - **Input**: `id` (required), `patch` (object with fields to update, including `aliases: string[]`)
 - **Output**: `{ contact, event_id }`
 
+### contact_delete
+Delete a contact (admin/owner only).
+- **Input**: `id` (required)
+- **Output**: `{ deleted: true, event_id }`
+
 ### contact_set_lifecycle
 Set the lifecycle stage of a contact.
 - **Input**: `id` (required), `lifecycle_stage` (required), `reason`
@@ -69,6 +74,11 @@ Get parent/child hierarchy.
 - **Input**: `id` (required)
 - **Output**: `{ root, children, depth }`
 
+### account_delete
+Delete an account (admin/owner only).
+- **Input**: `id` (required)
+- **Output**: `{ deleted: true, event_id }`
+
 ## Opportunity Tools
 
 ### opportunity_create
@@ -96,6 +106,11 @@ Update an opportunity.
 - **Input**: `id` (required), `patch`
 - **Output**: `{ opportunity, event_id }`
 
+### opportunity_delete
+Delete an opportunity (admin/owner only).
+- **Input**: `id` (required)
+- **Output**: `{ deleted: true, event_id }`
+
 ### pipeline_summary
 Get pipeline summary.
 - **Input**: `owner_id`, `group_by` (stage|owner|forecast_cat)
@@ -118,6 +133,11 @@ Search activities.
 - **Input**: `contact_id`, `account_id`, `opportunity_id`, `type`, `limit`, `cursor`
 - **Output**: `{ activities, next_cursor, total }`
 
+### activity_get_timeline
+Get paginated activity timeline for any CRM object.
+- **Input**: `subject_type` (required: contact|account|opportunity|use_case), `subject_id` (required), `limit`, `types`
+- **Output**: `{ activities, total }`
+
 ### activity_complete
 Mark an activity as completed.
 - **Input**: `id` (required), `completed_at`, `note`
@@ -127,6 +147,287 @@ Mark an activity as completed.
 Update an activity.
 - **Input**: `id` (required), `patch`
 - **Output**: `{ activity, event_id }`
+
+## Assignment Tools
+
+### assignment_create
+Create a structured handoff between a human and an agent.
+- **Input**: `title` (required), `assignee_actor_id` (required), `subject_type`, `subject_id`, `instructions`, `priority` (low|normal|high|urgent), `due_at`, `context`, `metadata`
+- **Output**: `{ assignment, event_id }`
+
+### assignment_get
+Get an assignment by ID.
+- **Input**: `id` (required)
+- **Output**: `{ assignment }`
+
+### assignment_list
+List assignments with filters.
+- **Input**: `assignee_actor_id`, `assigner_actor_id`, `status`, `subject_type`, `subject_id`, `limit`, `cursor`
+- **Output**: `{ assignments, next_cursor, total }`
+
+### assignment_accept
+Accept a pending assignment.
+- **Input**: `id` (required)
+- **Output**: `{ assignment, event_id }`
+
+### assignment_start
+Transition an assignment to in_progress.
+- **Input**: `id` (required)
+- **Output**: `{ assignment, event_id }`
+
+### assignment_complete
+Mark an assignment as completed.
+- **Input**: `id` (required), `outcome`
+- **Output**: `{ assignment, event_id }`
+
+### assignment_decline
+Decline an assignment with an optional reason.
+- **Input**: `id` (required), `reason`
+- **Output**: `{ assignment, event_id }`
+
+### assignment_block
+Mark an assignment as blocked.
+- **Input**: `id` (required), `blocked_reason` (required)
+- **Output**: `{ assignment, event_id }`
+
+### assignment_cancel
+Cancel an assignment.
+- **Input**: `id` (required)
+- **Output**: `{ assignment, event_id }`
+
+### assignment_update
+Update assignment fields.
+- **Input**: `id` (required), `patch` (title, instructions, due_at, priority)
+- **Output**: `{ assignment, event_id }`
+
+## Note Tools
+
+### note_create
+Add a threaded note to any CRM object.
+- **Input**: `object_type` (required: contact|account|opportunity|activity|use_case), `object_id` (required), `body` (required), `parent_id`, `visibility` (internal|external), `mentions`, `pinned`
+- **Output**: `{ note }`
+
+### note_get
+Get a note with its threaded replies.
+- **Input**: `id` (required)
+- **Output**: `{ note, replies }`
+
+### note_list
+List notes for a CRM object. Pinned notes appear first.
+- **Input**: `object_type` (required), `object_id` (required), `visibility`, `pinned`, `limit`, `cursor`
+- **Output**: `{ notes, next_cursor, total }`
+
+### note_update
+Update a note's body, visibility, or pinned status.
+- **Input**: `id` (required), `body`, `visibility`, `pinned`
+- **Output**: `{ note }`
+
+### note_delete
+Delete a note and its replies.
+- **Input**: `id` (required)
+- **Output**: `{ deleted: true }`
+
+## Use Case Tools
+
+### use_case_create
+Create a use case (consumption-based workload) for an account.
+- **Input**: `account_id` (required), `name` (required), `stage`, `unit_label`, `consumption_capacity`, `attributed_arr`, `expansion_potential`, `tags`, `custom_fields`
+- **Output**: `{ use_case, event_id }`
+
+### use_case_get
+Get a use case by ID.
+- **Input**: `id` (required)
+- **Output**: `{ use_case }`
+
+### use_case_search
+Search use cases.
+- **Input**: `account_id`, `stage`, `owner_id`, `product_line`, `tags`, `limit`, `cursor`
+- **Output**: `{ use_cases, next_cursor, total }`
+
+### use_case_update
+Update a use case.
+- **Input**: `id` (required), `patch`
+- **Output**: `{ use_case, event_id }`
+
+### use_case_delete
+Soft delete a use case.
+- **Input**: `id` (required)
+- **Output**: `{ deleted: true }`
+
+### use_case_advance_stage
+Advance a use case to the next stage.
+- **Input**: `id` (required), `stage` (required: discovery|poc|production|scaling|sunset), `note`
+- **Output**: `{ use_case, event_id }`
+
+### use_case_update_consumption
+Update current consumption value.
+- **Input**: `id` (required), `consumption_current` (required), `note`
+- **Output**: `{ use_case, event_id }`
+
+### use_case_set_health
+Set use case health score.
+- **Input**: `id` (required), `score` (0–100, required), `rationale`
+- **Output**: `{ use_case, event_id }`
+
+### use_case_link_contact
+Link a contact to a use case with a role.
+- **Input**: `use_case_id` (required), `contact_id` (required), `role`
+- **Output**: `{ linked: true }`
+
+### use_case_unlink_contact
+Remove a contact link from a use case.
+- **Input**: `use_case_id` (required), `contact_id` (required)
+- **Output**: `{ unlinked: true }`
+
+### use_case_list_contacts
+List contacts linked to a use case.
+- **Input**: `use_case_id` (required)
+- **Output**: `{ contacts }`
+
+### use_case_get_timeline
+Get activity timeline for a use case.
+- **Input**: `id` (required), `limit`, `types`
+- **Output**: `{ activities, total }`
+
+### use_case_summary
+Aggregate use cases by stage, product line, or owner.
+- **Input**: `group_by` (stage|product_line|owner), `account_id`
+- **Output**: `{ groups, total }`
+
+## Registry Tools
+
+### activity_type_list
+List all registered activity types for the tenant.
+- **Input**: (none)
+- **Output**: `{ activity_types }`
+
+### activity_type_add
+Register a custom activity type.
+- **Input**: `name` (required, snake_case), `category` (required), `description`
+- **Output**: `{ activity_type }`
+
+### activity_type_remove
+Remove a custom activity type.
+- **Input**: `name` (required)
+- **Output**: `{ removed: true }`
+
+### context_type_list
+List all registered context types for the tenant, including `priority_weight` and `confidence_half_life_days`.
+- **Input**: (none)
+- **Output**: `{ context_types }`
+
+### context_type_add
+Register a custom context type.
+- **Input**: `name` (required, snake_case), `description`, `priority_weight` (default 1.0), `confidence_half_life_days`
+- **Output**: `{ context_type }`
+
+### context_type_remove
+Remove a custom context type (default types cannot be removed).
+- **Input**: `name` (required)
+- **Output**: `{ removed: true }`
+
+## Workflow Tools
+
+### workflow_create
+Create an event-driven automation workflow.
+- **Input**: `name` (required), `trigger_event` (required), `trigger_filter`, `actions` (required array), `is_active`
+- **Output**: `{ workflow }`
+
+### workflow_get
+Get a workflow with its 5 most recent runs.
+- **Input**: `id` (required)
+- **Output**: `{ workflow, recent_runs }`
+
+### workflow_list
+List workflows.
+- **Input**: `trigger_event`, `is_active`, `limit`, `cursor`
+- **Output**: `{ workflows, next_cursor, total }`
+
+### workflow_update
+Update a workflow.
+- **Input**: `id` (required), `patch` (name, trigger_event, trigger_filter, actions, is_active)
+- **Output**: `{ workflow }`
+
+### workflow_delete
+Delete a workflow and its run history.
+- **Input**: `id` (required)
+- **Output**: `{ deleted: true }`
+
+### workflow_run_list
+List execution runs for a workflow.
+- **Input**: `workflow_id` (required), `status` (running|completed|failed), `limit`, `cursor`
+- **Output**: `{ runs, next_cursor, total }`
+
+## Webhook Tools
+
+### webhook_create
+Register an HTTP endpoint to receive event notifications.
+- **Input**: `url` (required), `events` (required array of event types), `description`
+- **Output**: `{ webhook }` — includes `signing_secret`
+
+### webhook_get
+Get endpoint details.
+- **Input**: `id` (required)
+- **Output**: `{ webhook }` — includes `signing_secret`
+
+### webhook_list
+List registered endpoints.
+- **Input**: `active`, `limit`, `cursor`
+- **Output**: `{ webhooks, next_cursor, total }`
+
+### webhook_list_deliveries
+List delivery attempts for an endpoint.
+- **Input**: `endpoint_id` (required), `status` (delivered|failed|pending), `limit`, `cursor`
+- **Output**: `{ deliveries, next_cursor, total }`
+
+### webhook_update
+Update endpoint URL, events, active status, or description.
+- **Input**: `id` (required), `patch`
+- **Output**: `{ webhook }`
+
+### webhook_delete
+Remove a webhook endpoint.
+- **Input**: `id` (required)
+- **Output**: `{ deleted: true }`
+
+## Custom Field Tools
+
+### custom_field_create
+Define a custom field for a CRM object type.
+- **Input**: `object_type` (required: contact|account|opportunity|activity|use_case), `field_name` (required, snake_case), `field_type` (required: text|number|boolean|date|select|multi_select), `label` (required), `required`, `options` (for select types), `default_value`
+- **Output**: `{ custom_field }`
+
+### custom_field_list
+List all custom fields for an object type.
+- **Input**: `object_type` (required)
+- **Output**: `{ custom_fields }`
+
+### custom_field_update
+Update a field's label, required flag, options, or sort order.
+- **Input**: `id` (required), `patch`
+- **Output**: `{ custom_field }`
+
+### custom_field_delete
+Remove a custom field definition.
+- **Input**: `id` (required)
+- **Output**: `{ deleted: true }`
+
+## Email Tools
+
+### email_create
+Draft an outbound email. When `require_approval` is true (default), automatically submits a HITL approval request.
+- **Input**: `to_address` (required), `subject` (required), `body_html`, `body_text`, `contact_id`, `account_id`, `opportunity_id`, `use_case_id`, `require_approval`
+- **Output**: `{ email, hitl_request_id? }`
+
+### email_get
+Get an email by ID.
+- **Input**: `id` (required)
+- **Output**: `{ email }`
+
+### email_search
+Search emails.
+- **Input**: `contact_id`, `status`, `limit`, `cursor`
+- **Output**: `{ emails, next_cursor, total }`
 
 ## Identity Tools
 

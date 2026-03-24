@@ -661,13 +661,13 @@ Default types are seeded and organized by category. You can also add custom type
 
 | Category | Types |
 |---|---|
-| `outreach` | cold_call, warm_call, email_sent, linkedin_outreach, sms |
-| `meeting` | discovery_call, demo, qbr, exec_briefing |
-| `proposal` | proposal_sent, proposal_reviewed |
+| `outreach` | outreach_email, outreach_call, outreach_sms, outreach_social |
+| `meeting` | meeting_scheduled, meeting_held, meeting_cancelled |
+| `proposal` | proposal_drafted, proposal_sent, proposal_viewed |
 | `contract` | contract_sent, contract_signed |
-| `internal` | internal_note, research |
-| `lifecycle` | stage_change, renewal, expansion |
-| `handoff` | handoff_to_human, handoff_to_agent |
+| `internal` | note_added, research_completed, task_completed |
+| `lifecycle` | stage_change, field_update |
+| `handoff` | handoff_initiated, handoff_accepted |
 
 The `activity_type` field accepts any string — agents can use custom types without schema changes.
 
@@ -922,24 +922,37 @@ Notes are human-written text. Context entries are structured, typed, searchable,
 
 ### Context types
 
-Default types are seeded per tenant:
+17 default types are seeded per tenant across two groups:
 
-`note`, `transcript`, `summary`, `research`, `preference`, `objection`, `competitive_intel`, `relationship_map`, `meeting_notes`, `agent_reasoning`, `decision`, `action_item`
+**Structured (auto-extractable from activities):**
+`commitment`, `next_step`, `stakeholder`, `deal_risk`, `competitive_intel`, `objection`, `key_fact`
+
+**Unstructured (written explicitly):**
+`note`, `transcript`, `summary`, `research`, `preference`, `sentiment_analysis`, `decision`, `relationship_map`, `meeting_notes`, `agent_reasoning`
 
 Custom types can be added via the [Type Registries](#type-registries).
 
-**Default priority weights and half-lives:**
+**Default priority weights and half-lives (all types):**
 
-| Type | Priority weight | Half-life (days) | Notes |
-|---|---|---|---|
-| `commitment` | 2.0 | 90 | Highest priority — promises and agreed actions |
-| `deal_risk` | 2.0 | 60 | Critical deal blockers |
-| `next_step` | 1.8 | 30 | Action items decay fast — stale next steps are noise |
-| `objection` | 1.8 | 45 | Important but resolve or go stale |
-| `stakeholder` | 1.5 | 180 | Slow-changing relationship context |
-| `competitive_intel` | 1.5 | 60 | Competitive landscapes shift |
-| `key_fact` | 1.3 | — | Important but doesn't decay |
-| `transcript` | 0.5 | — | High volume, low priority for briefing packing |
+| Type | Priority weight | Half-life (days) |
+|---|---|---|
+| `commitment` | 2.0 | 90 |
+| `deal_risk` | 2.0 | 60 |
+| `next_step` | 1.8 | 30 |
+| `objection` | 1.8 | 45 |
+| `stakeholder` | 1.5 | 180 |
+| `competitive_intel` | 1.5 | 60 |
+| `relationship_map` | 1.3 | 365 |
+| `key_fact` | 1.3 | — |
+| `summary` | 1.2 | — |
+| `meeting_notes` | 1.2 | — |
+| `preference` | 1.0 | 180 |
+| `sentiment_analysis` | 1.0 | 30 |
+| `decision` | 1.0 | — |
+| `research` | 0.8 | — |
+| `note` | 0.7 | — |
+| `agent_reasoning` | 0.6 | — |
+| `transcript` | 0.5 | — |
 
 Custom types default to weight 1.0, no decay.
 
@@ -1327,7 +1340,7 @@ crmy activity-types remove partner_call
 
 ### Context Types
 
-12 default types (note, transcript, summary, research, preference, objection, competitive_intel, relationship_map, meeting_notes, agent_reasoning, decision, action_item).
+17 default types: `commitment`, `next_step`, `stakeholder`, `deal_risk`, `competitive_intel`, `objection`, `key_fact`, `note`, `transcript`, `summary`, `research`, `preference`, `sentiment_analysis`, `decision`, `relationship_map`, `meeting_notes`, `agent_reasoning`.
 
 Each type has two additional fields that control how it is prioritized in token-budget-aware briefings:
 
@@ -1382,20 +1395,32 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 | Tool | Required scopes |
 |---|---|
 | `contact_get`, `contact_search`, `contact_get_timeline` | `contacts:read` |
-| `contact_create`, `contact_update`, `contact_set_lifecycle` | `contacts:write` |
+| `contact_create`, `contact_update`, `contact_delete`, `contact_set_lifecycle` | `contacts:write` |
 | `contact_log_activity` | `contacts:write`, `activities:write` |
-| `account_get`, `account_search` | `accounts:read` |
-| `account_create`, `account_update`, `account_set_health_score` | `accounts:write` |
+| `account_get`, `account_search`, `account_get_hierarchy`, `account_health_report` | `accounts:read` |
+| `account_create`, `account_update`, `account_delete`, `account_set_health_score` | `accounts:write` |
 | `opportunity_get`, `opportunity_search` | `opportunities:read` |
-| `opportunity_create`, `opportunity_update`, `opportunity_advance_stage` | `opportunities:write` |
-| `activity_get`, `activity_search` | `activities:read` |
+| `opportunity_create`, `opportunity_update`, `opportunity_advance_stage`, `opportunity_delete` | `opportunities:write` |
+| `pipeline_summary`, `pipeline_forecast` | `opportunities:read` |
+| `activity_get`, `activity_search`, `activity_get_timeline` | `activities:read` |
 | `activity_create`, `activity_update`, `activity_complete` | `activities:write` |
 | `assignment_get`, `assignment_list`, `assignment_create` | `assignments:create` |
 | `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` | `assignments:update` |
-| `context_get`, `context_search`, `context_list`, `context_stale`, `briefing_get` | `context:read` |
-| `context_add`, `context_supersede`, `context_review` | `context:write` |
-| `webhook_*`, `custom_field_*`, `workflow_*`, `actor_register`, `actor_update` | `read` or `write` (general) |
-| `actor_whoami`, `crm_schema` | *(always allowed)* |
+| `use_case_get`, `use_case_search`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` | `accounts:read` |
+| `use_case_create`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_unlink_contact` | `accounts:write` |
+| `use_case_link_contact` | `accounts:write`, `contacts:read` |
+| `context_get`, `context_search`, `context_list`, `context_stale`, `context_diff`, `briefing_get` | `context:read` |
+| `context_add`, `context_supersede`, `context_review`, `context_extract`, `context_ingest`, `context_stale_assign` | `context:write` |
+| `note_get`, `note_list` | `activities:read` |
+| `note_create`, `note_update`, `note_delete` | `activities:write` |
+| `email_get`, `email_search` | `activities:read` |
+| `email_create` | `activities:write` |
+| `hitl_check_status`, `hitl_list_pending` | `read` |
+| `hitl_submit_request`, `hitl_resolve` | `write` |
+| `actor_get`, `actor_list`, `actor_expertise`, `crm_search`, `tenant_get_stats` | `read` |
+| `actor_register`, `actor_update` | `write` |
+| `webhook_*`, `custom_field_*`, `workflow_*` | `read` or `write` (general) |
+| `actor_whoami`, `entity_resolve`, `schema_get` | *(always allowed)* |
 
 ### Error response
 

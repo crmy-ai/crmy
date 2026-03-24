@@ -77,7 +77,7 @@ Add to `.cursor/mcp.json` or equivalent:
 }
 ```
 
-Once connected, your agent has access to 80+ MCP tools. No API calls, no auth wiring — just tool calls.
+Once connected, your agent has access to 100+ MCP tools. No API calls, no auth wiring — just tool calls.
 
 ### 3. Get a briefing before every action
 
