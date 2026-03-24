@@ -752,6 +752,52 @@ The narrower of the two always wins. This allows creating a key with broad scope
 | `actor_list` | List actors. Filter by `actor_type`, `is_active` |
 | `actor_update` | Update `display_name`, `scopes`, `is_active`, `metadata` |
 | `actor_whoami` | Return the actor identity for the current request (always allowed, no scope required) |
+| `actor_expertise` | Query actor knowledge contributions — two modes (see below) |
+
+### Actor expertise
+
+`actor_expertise` has two modes depending on what you provide:
+
+**Mode 1 — what does this actor know?** Pass `actor_id` to see which subjects an actor has contributed context about, ordered by contribution count. Useful for routing reviews to the right person.
+
+```
+actor_expertise { actor_id: "<agent-uuid>", limit: 20 }
+```
+
+Returns:
+```json
+{
+  "mode": "by_actor",
+  "actor_id": "...",
+  "total_entries": 142,
+  "subjects": [
+    { "subject_type": "account", "subject_id": "...", "entry_count": 28, "last_authored_at": "...", "context_types": ["objection", "competitive_intel"] }
+  ],
+  "top_context_types": [
+    { "context_type": "objection", "count": 45 }
+  ]
+}
+```
+
+**Mode 2 — who knows the most about this entity?** Pass `subject_type` + `subject_id` to find the actors with the most context contributions. Useful before creating a stale review assignment or asking for a human opinion.
+
+```
+actor_expertise { subject_type: "account", subject_id: "<uuid>", limit: 5 }
+```
+
+Returns:
+```json
+{
+  "mode": "by_subject",
+  "subject_type": "account",
+  "subject_id": "...",
+  "experts": [
+    { "actor_id": "...", "entry_count": 28, "last_authored_at": "..." }
+  ]
+}
+```
+
+At least one of `actor_id` or (`subject_type` + `subject_id`) must be provided.
 
 ### CLI
 
@@ -871,6 +917,8 @@ Notes are human-written text. Context entries are structured, typed, searchable,
 - **`tags`** — filterable JSONB array for fast lookup
 - **Full-text search** — PostgreSQL `tsvector`/`tsquery` with GIN index
 - **Supersede chain** — old entries are marked `is_current = false` rather than deleted; new entries point back via `supersedes_id`
+- **Priority weights** — each context type carries a `priority_weight` (0.5–2.0) used when ranking entries in token-budget-aware briefings
+- **Confidence decay** — each type can have a `confidence_half_life_days`; effective confidence decays as `stored_confidence × 0.5^(age / half_life)`, so old intel does not crowd out fresh knowledge
 
 ### Context types
 
@@ -880,6 +928,21 @@ Default types are seeded per tenant:
 
 Custom types can be added via the [Type Registries](#type-registries).
 
+**Default priority weights and half-lives:**
+
+| Type | Priority weight | Half-life (days) | Notes |
+|---|---|---|---|
+| `commitment` | 2.0 | 90 | Highest priority — promises and agreed actions |
+| `deal_risk` | 2.0 | 60 | Critical deal blockers |
+| `next_step` | 1.8 | 30 | Action items decay fast — stale next steps are noise |
+| `objection` | 1.8 | 45 | Important but resolve or go stale |
+| `stakeholder` | 1.5 | 180 | Slow-changing relationship context |
+| `competitive_intel` | 1.5 | 60 | Competitive landscapes shift |
+| `key_fact` | 1.3 | — | Important but doesn't decay |
+| `transcript` | 0.5 | — | High volume, low priority for briefing packing |
+
+Custom types default to weight 1.0, no decay.
+
 ### Key fields
 
 | Field | Description |
@@ -887,38 +950,105 @@ Custom types can be added via the [Type Registries](#type-registries).
 | `subject_type` / `subject_id` | Polymorphic attachment to any CRM object |
 | `context_type` | Type string from the context type registry |
 | `body` | The content (max size enforced by governor limit `context_body_max_chars`) |
+| `structured_data` | Optional JSONB payload for typed context (e.g., objection status, competitor details) |
 | `confidence` | Float 0.0–1.0 signaling how reliable this information is |
 | `tags` | String array for filtering (e.g., `["pricing", "q2-2026"]`) |
-| `source_actor_id` | Which actor created this entry |
+| `authored_by` | Which actor created this entry |
 | `valid_until` | Optional expiry timestamp; entries past this date are marked stale |
 | `is_current` | `false` if superseded by a newer entry |
 | `supersedes_id` | Foreign key to the entry this one replaces |
 
-### Staleness
+### Staleness and automatic assignments
 
-Entries with a `valid_until` in the past are considered stale. The briefing service surfaces stale entries with warnings. Use `context_stale` to list entries that need review, and `context_review` to confirm an entry is still accurate (bumps the `reviewed_at` timestamp).
+Entries with a `valid_until` in the past are considered stale. The briefing service surfaces stale entries with warnings.
+
+CRMy automatically assigns stale entries for review — a background worker runs every 60 seconds, finds all expired entries, identifies the actor with the most context contributions to that subject (the most knowledgeable reviewer), and creates a `stale_context_review` assignment. Duplicate assignments are never created for the same entry.
+
+Tools:
+- `context_stale` — list entries that need review
+- `context_review` — confirm an entry is still accurate (bumps `reviewed_at`)
+- `context_stale_assign` — trigger the stale review loop on-demand (normally runs automatically)
+
+### Structured data queries
+
+The `structured_data` field is JSONB and supports containment queries via `structured_data_filter`. This lets you query across typed context using domain-specific predicates:
+
+```
+# Find all open objections on this account
+context_list {
+  subject_type: "account",
+  subject_id: "...",
+  context_type: "objection",
+  structured_data_filter: { "status": "open" }
+}
+
+# Full-text search only among critical deal risks
+context_search {
+  query: "security compliance",
+  context_type: "deal_risk",
+  structured_data_filter: { "severity": "critical" }
+}
+```
 
 ### Superseding entries
 
 When information changes, supersede the old entry rather than deleting it:
 
 ```
-context_supersede { supersedes_id: "<old-id>", body: "Updated pricing...", ... }
+context_supersede { id: "<old-id>", body: "Updated pricing...", ... }
 ```
 
 The old entry's `is_current` is set to `false`. Queries for context automatically filter to `is_current = true` unless explicitly requesting the full history.
+
+### Bulk ingestion
+
+`context_ingest` takes a raw document (transcript, email, meeting notes) and runs the full extraction pipeline, creating an activity as provenance and returning all structured context entries produced:
+
+```
+context_ingest {
+  subject_type: "opportunity",
+  subject_id: "...",
+  document: "<full meeting transcript>",
+  source_label: "Q2 kickoff call"
+}
+```
+
+Returns `{ extracted_count, context_entries, activity_id }`.
+
+### Catch-up diff
+
+`context_diff` shows what changed about a subject since a timestamp — useful for daily agent check-ins:
+
+```
+context_diff {
+  subject_type: "account",
+  subject_id: "...",
+  since: "7d"    // or "24h", "30m", or ISO timestamp
+}
+```
+
+Returns:
+- `new_entries` — context created since the timestamp
+- `superseded_entries` — entries that were replaced (the old, now-inactive versions)
+- `newly_stale` — entries whose `valid_until` fell within the window
+- `resolved_entries` — entries that were reviewed (confirmed accurate) in the window
+- `summary` — counts of each category
 
 ### MCP tools
 
 | Tool | Description |
 |---|---|
-| `context_add` | Add a context entry. Required: `subject_type`, `subject_id`, `context_type`, `body`. Optional: `confidence`, `tags`, `valid_until`, `source_actor_id` |
+| `context_add` | Add a context entry. Required: `subject_type`, `subject_id`, `context_type`, `body`. Optional: `confidence`, `tags`, `valid_until`, `structured_data`, `source_activity_id` |
 | `context_get` | Get by ID (includes superseded entry if applicable) |
-| `context_list` | List entries for an object. Filter by `context_type`, `tags`, `is_current` |
-| `context_search` | Full-text search across all context entries. Filter by `subject_type`, `tags`, `context_type` |
+| `context_list` | List entries for an object. Filter by `context_type`, `tags`, `is_current`, `authored_by`, `structured_data_filter` |
+| `context_search` | Full-text search across all context entries. Filter by `subject_type`, `tags`, `context_type`, `structured_data_filter` |
 | `context_supersede` | Replace an entry with updated content |
 | `context_review` | Mark an entry as reviewed (confirm still accurate) |
 | `context_stale` | List entries that are past `valid_until` and may need updating |
+| `context_diff` | Catch-up diff since a timestamp: new, superseded, stale, and resolved entries |
+| `context_ingest` | Ingest a raw document and auto-extract all structured context entries |
+| `context_extract` | Re-run the extraction pipeline on a specific activity (backfill or retry) |
+| `context_stale_assign` | Trigger the stale review loop on-demand for the current tenant |
 
 ### CLI
 
@@ -958,6 +1088,7 @@ A briefing is a single API call that assembles everything an agent or human need
 4. Open assignments for this object
 5. Context entries grouped by `context_type` (only `is_current = true` entries)
 6. Staleness warnings for any context entries past `valid_until`
+7. Adjacent context from related entities (when `context_radius` is set)
 
 ### MCP tool
 
@@ -984,6 +1115,55 @@ Returns a structured object:
 }
 ```
 
+### Context radius
+
+By default, `briefing_get` only includes context entries directly attached to the requested subject (`context_radius: "direct"`). Pass a wider radius to pull in context from related entities:
+
+| Radius | What's included |
+|---|---|
+| `direct` (default) | Only entries on the requested subject |
+| `adjacent` | The subject plus all directly related objects (the account a contact belongs to, contacts linked to a use case, etc.) |
+| `account_wide` | Everything in `adjacent` plus all contacts and opportunities under the same account |
+
+```
+briefing_get {
+  subject_type: "opportunity",
+  subject_id: "...",
+  context_radius: "adjacent"
+}
+```
+
+When `adjacent_context` is present in the response, it lists each related subject alongside its context entries.
+
+### Token budget
+
+Pass `token_budget` (integer, minimum 100) to get a priority-ranked, budget-constrained context pack that fits within a caller-specified token estimate. This is the primary mechanism for loading the right context into an LLM without overflow.
+
+```
+briefing_get {
+  subject_type: "contact",
+  subject_id: "...",
+  token_budget: 4000
+}
+```
+
+How it works:
+
+1. Each context entry is scored: `effective_confidence × priority_weight`, where `effective_confidence = stored_confidence × 0.5^(age_days / half_life_days)` (from the type registry)
+2. Entries are sorted by score descending (most important, freshest first)
+3. Entries are greedily packed until the budget is exhausted; the last entry that partially fits has its body truncated
+4. The response includes `token_estimate` (actual tokens used) and `truncated: true` if any body was cut
+
+When no `token_budget` is given, all entries are returned sorted by score, and `token_estimate` is still included for reference.
+
+### Text format
+
+Pass `format: "text"` to receive a single `briefing_text` string formatted for direct injection into a prompt:
+
+```
+briefing_get { subject_type: "account", subject_id: "...", format: "text", token_budget: 3000 }
+```
+
 ### CLI
 
 ```bash
@@ -995,7 +1175,7 @@ crmy briefing use_case:<id>
 ### REST API
 
 ```
-GET /api/v1/briefing/:subject_type/:subject_id
+GET /api/v1/briefing/:subject_type/:subject_id?context_radius=adjacent&token_budget=4000
 ```
 
 ---
@@ -1149,12 +1329,19 @@ crmy activity-types remove partner_call
 
 12 default types (note, transcript, summary, research, preference, objection, competitive_intel, relationship_map, meeting_notes, agent_reasoning, decision, action_item).
 
+Each type has two additional fields that control how it is prioritized in token-budget-aware briefings:
+
+| Field | Description |
+|---|---|
+| `priority_weight` | Multiplier (default 1.0) applied when scoring entries for briefing packing. Higher = surfaces first. |
+| `confidence_half_life_days` | If set, confidence decays as `stored_confidence × 0.5^(age_days / half_life_days)`. `null` means no decay. |
+
 #### MCP tools
 
 | Tool | Description |
 |---|---|
 | `context_type_list` | List all registered context types for the tenant |
-| `context_type_add` | Add a custom type. Required: `name` (snake_case). Optional: `description` |
+| `context_type_add` | Add a custom type. Required: `name` (snake_case). Optional: `description`, `priority_weight`, `confidence_half_life_days` |
 | `context_type_remove` | Remove a custom type by `name` |
 
 #### CLI

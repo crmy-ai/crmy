@@ -233,10 +233,10 @@ Four primitives that form the agent's shared workspace:
 
 | Primitive | What it does |
 |-----------|-------------|
-| **Actors** | First-class identity for humans and AI agents. Every action is attributed to an actor. Agents self-register — no admin setup. |
-| **Activities** | Everything that happened — calls, emails, meetings. Structured `detail` payloads, polymorphic subjects, retroactive `occurred_at` timestamps, and auto-extraction into context entries. |
-| **Assignments** | Structured handoffs. Agents create assignments for humans; humans create assignments for agents. Stateful lifecycle: `pending → accepted → in_progress → completed`. |
-| **Context Entries** | The memory layer. Typed, tagged, versioned knowledge attached to any CRM object. Supersede stale beliefs. Confidence scores. Full-text search. `valid_until` staleness tracking. |
+| **Actors** | First-class identity for humans and AI agents. Every action is attributed to an actor. Agents self-register — no admin setup. Query `actor_expertise` to route reviews to the person who knows most about an account. |
+| **Activities** | Everything that happened — calls, emails, meetings. Structured `detail` payloads, polymorphic subjects, retroactive `occurred_at` timestamps, and auto-extraction into context entries. Bulk-ingest raw documents with `context_ingest`. |
+| **Assignments** | Structured handoffs. Agents create assignments for humans; humans create assignments for agents. Stateful lifecycle: `pending → accepted → in_progress → completed`. Stale context entries automatically generate review assignments. |
+| **Context Entries** | The memory layer. Typed, tagged, versioned knowledge attached to any CRM object. Priority weights and confidence half-life decay ensure the most important, fresh context surfaces first. `context_radius` expands briefings to adjacent entities. Token-budget-aware packing fits context into any LLM context window. |
 
 ---
 
@@ -244,9 +244,9 @@ Four primitives that form the agent's shared workspace:
 
 | Category | Tools |
 |---|---|
-| **Briefing** | `briefing_get` |
-| **Context** | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_review`, `context_stale` |
-| **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
+| **Briefing** | `briefing_get` — with `context_radius` (direct/adjacent/account_wide) and `token_budget` |
+| **Context** | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_review`, `context_stale`, `context_diff`, `context_ingest`, `context_extract`, `context_stale_assign` |
+| **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise` |
 | **Assignments** | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | **HITL** | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
 | Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
