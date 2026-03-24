@@ -39,6 +39,8 @@ import NotFound from '@/pages/NotFound';
 import { HITLPage } from '@/pages/hitl/HITL';
 import AssignmentsPage from '@/pages/Assignments';
 import InboxPage from '@/pages/Inbox';
+import ContextPage from '@/pages/Context';
+import AgentsPage from '@/pages/Agents';
 
 function ThemeApplier() {
   const { darkVariant } = useAppStore();
@@ -85,7 +87,9 @@ function AnimatedRoutes() {
           <Route path="/activities" element={<Activities />} />
           <Route path="/assignments" element={<InboxPage />} />
           <Route path="/inbox" element={<Navigate to="/assignments" replace />} />
-          <Route path="/hitl" element={<Navigate to="/assignments" replace />} />
+          <Route path="/hitl" element={<HITLPage />} />
+          <Route path="/context" element={<ContextPage />} />
+          <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agent" element={<Agent />} />
           <Route path="/agent/activity" element={<AgentActivity />} />
           <Route path="/settings/*" element={<Settings />} />

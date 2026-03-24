@@ -1,14 +1,16 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Users, Building2, Briefcase, Activity, Settings } from 'lucide-react';
+import { Brain, ShieldCheck, Bot, Library, Inbox } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const tabs = [
-  { icon: LayoutDashboard, label: 'Home', path: '/' },
-  { icon: Users, label: 'Contacts', path: '/contacts' },
-  { icon: Building2, label: 'Accounts', path: '/accounts' },
-  { icon: Briefcase, label: 'Opps', path: '/opportunities' },
-  { icon: Activity, label: 'Activity', path: '/activities' },
-  { icon: Settings, label: 'Settings', path: '/settings' },
+  { icon: Brain,       label: 'Hub',       path: '/' },
+  { icon: ShieldCheck, label: 'Approvals', path: '/hitl' },
+  { icon: Bot,         label: 'Agents',    path: '/agents' },
+  { icon: Library,     label: 'Context',   path: '/context' },
+  { icon: Inbox,       label: 'Handoffs',  path: '/assignments' },
 ];
 
 export function MobileNav() {

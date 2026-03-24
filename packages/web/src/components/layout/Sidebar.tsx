@@ -1,13 +1,20 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
+import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  LayoutDashboard,
+  Brain,
+  ShieldCheck,
+  Bot,
+  Library,
+  Inbox,
   Users,
   Building2,
   Briefcase,
   FolderKanban,
   Activity,
-  Inbox,
   Settings,
   PanelLeftClose,
   PanelLeft,
@@ -19,24 +26,101 @@ import { ENTITY_COLORS } from '@/lib/entityColors';
 
 export { ENTITY_COLORS };
 
-const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard',    path: '/',              color: ENTITY_COLORS.dashboard },
-  { icon: Users,           label: 'Contacts',     path: '/contacts',      color: ENTITY_COLORS.contacts },
-  { icon: Building2,       label: 'Accounts',     path: '/accounts',      color: ENTITY_COLORS.accounts },
-  { icon: Briefcase,       label: 'Opportunities',path: '/opportunities', color: ENTITY_COLORS.opportunities },
-  { icon: FolderKanban,    label: 'Use Cases',    path: '/use-cases',     color: ENTITY_COLORS.useCases },
-  { icon: Activity,        label: 'Activities',   path: '/activities',    color: ENTITY_COLORS.activities },
-  { icon: Inbox,           label: 'Assignments',   path: '/assignments',   color: ENTITY_COLORS.inbox },
+// Agent-facing tier — top of nav
+const agentNavItems = [
+  { icon: Brain,       label: 'Memory Hub',  path: '/',            color: ENTITY_COLORS.dashboard },
+  { icon: ShieldCheck, label: 'Approvals',   path: '/hitl',        color: ENTITY_COLORS.hitl },
+  { icon: Bot,         label: 'Agents',      path: '/agents',      color: ENTITY_COLORS.agents },
+  { icon: Library,     label: 'Context',     path: '/context',     color: ENTITY_COLORS.context },
+  { icon: Inbox,       label: 'Handoffs',    path: '/assignments', color: ENTITY_COLORS.assignments },
+];
+
+// Data tier — knowledge base objects
+const dataNavItems = [
+  { icon: Users,       label: 'Contacts',      path: '/contacts',      color: ENTITY_COLORS.contacts },
+  { icon: Building2,   label: 'Accounts',      path: '/accounts',      color: ENTITY_COLORS.accounts },
+  { icon: Briefcase,   label: 'Opportunities', path: '/opportunities', color: ENTITY_COLORS.opportunities },
+  { icon: FolderKanban,label: 'Use Cases',     path: '/use-cases',     color: ENTITY_COLORS.useCases },
+  { icon: Activity,    label: 'Activities',    path: '/activities',    color: ENTITY_COLORS.activities },
 ];
 
 const bottomItems = [
   { icon: Settings, label: 'Settings', path: '/settings' },
 ];
 
+interface NavItemDef {
+  icon: React.ElementType;
+  label: string;
+  path: string;
+  color: { text: string; bg: string; bar: string };
+}
+
+function NavItem({ item, active, badge }: {
+  item: NavItemDef;
+  active: boolean;
+  badge?: number;
+}) {
+  const { sidebarExpanded } = useAppStore();
+
+  return (
+    <Link
+      to={item.path}
+      className={`group relative flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-sm transition-all
+        ${active
+          ? `${item.color.bg} ${item.color.text}`
+          : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+        }`}
+      title={!sidebarExpanded ? item.label : undefined}
+    >
+      <item.icon className="w-5 h-5 flex-shrink-0" />
+      <AnimatePresence>
+        {sidebarExpanded && (
+          <motion.span
+            initial={{ opacity: 0, width: 0 }}
+            animate={{ opacity: 1, width: 'auto' }}
+            exit={{ opacity: 0, width: 0 }}
+            className="whitespace-nowrap overflow-hidden font-medium flex-1"
+          >
+            {item.label}
+          </motion.span>
+        )}
+      </AnimatePresence>
+      {badge !== undefined && badge > 0 && (
+        <span className={`flex-shrink-0 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-destructive text-white text-[10px] font-bold ${sidebarExpanded ? '' : 'absolute -top-1 -right-1'}`}>
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
+      {active && (
+        <motion.div
+          layoutId="sidebar-active"
+          className={`absolute -left-2 top-2 w-[3px] h-6 ${item.color.bar} rounded-r-full`}
+          transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+        />
+      )}
+      {/* Tooltip when collapsed */}
+      {!sidebarExpanded && (
+        <div className="absolute left-full ml-2 px-2.5 py-1.5 rounded-lg bg-popover text-popover-foreground text-xs shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 font-medium">
+          {item.label}
+        </div>
+      )}
+    </Link>
+  );
+}
+
 export function Sidebar() {
   const location = useLocation();
   const { sidebarExpanded, setSidebarExpanded } = useAppStore();
-  const { total: inboxCount } = useInboxCounts();
+  const { hitlCount, assignCount } = useInboxCounts();
+
+  function isActive(path: string) {
+    return path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
+  }
+
+  function badge(path: string) {
+    if (path === '/hitl') return hitlCount > 0 ? hitlCount : undefined;
+    if (path === '/assignments') return assignCount > 0 ? assignCount : undefined;
+    return undefined;
+  }
 
   return (
     <motion.aside
@@ -62,54 +146,33 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 flex flex-col py-3 gap-1 px-2">
-        {navItems.map((item) => {
-          const active = item.path === '/' ? location.pathname === '/' : location.pathname.startsWith(item.path);
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={`group relative flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-sm transition-all
-                ${active
-                  ? `${item.color.bg} ${item.color.text}`
-                  : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-                }`}
-              title={!sidebarExpanded ? item.label : undefined}
-            >
-              <item.icon className="w-5 h-5 flex-shrink-0" />
-              <AnimatePresence>
-                {sidebarExpanded && (
-                  <motion.span
-                    initial={{ opacity: 0, width: 0 }}
-                    animate={{ opacity: 1, width: 'auto' }}
-                    exit={{ opacity: 0, width: 0 }}
-                    className="whitespace-nowrap overflow-hidden font-medium flex-1"
-                  >
-                    {item.label}
-                  </motion.span>
-                )}
-              </AnimatePresence>
-              {item.path === '/assignments' && inboxCount > 0 && (
-                <span className={`flex-shrink-0 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-destructive text-white text-[10px] font-bold ${sidebarExpanded ? '' : 'absolute -top-1 -right-1'}`}>
-                  {inboxCount > 99 ? '99+' : inboxCount}
-                </span>
-              )}
-              {active && (
-                <motion.div
-                  layoutId="sidebar-active"
-                  className={`absolute -left-2 top-2 w-[3px] h-6 ${item.color.bar} rounded-r-full`}
-                  transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                />
-              )}
-              {/* Tooltip when collapsed */}
-              {!sidebarExpanded && (
-                <div className="absolute left-full ml-2 px-2.5 py-1.5 rounded-lg bg-popover text-popover-foreground text-xs shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 font-medium">
-                  {item.label}
-                </div>
-              )}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 flex flex-col py-3 gap-1 px-2 overflow-y-auto">
+        {/* Agent-facing tier */}
+        {agentNavItems.map((item) => (
+          <NavItem key={item.path} item={item} active={isActive(item.path)} badge={badge(item.path)} />
+        ))}
+
+        {/* Divider */}
+        <div className="mt-2 mb-1">
+          <div className="border-t border-sidebar-border" />
+          <AnimatePresence>
+            {sidebarExpanded && (
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest px-2.5 pt-2 pb-0.5"
+              >
+                Knowledge Base
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Data tier */}
+        {dataNavItems.map((item) => (
+          <NavItem key={item.path} item={item} active={isActive(item.path)} />
+        ))}
       </nav>
 
       {/* Bottom */}

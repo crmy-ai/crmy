@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { ShieldCheck } from 'lucide-react';
-import { Card, CardContent } from '../../components/ui/card';
-import { Badge } from '../../components/ui/badge';
-import { Button } from '../../components/ui/button';
-import { Input } from '../../components/ui/input';
-import { useHITLRequests, useResolveHITL } from '../../api/hooks';
+import { ShieldCheck, Clock } from 'lucide-react';
+import { TopBar } from '@/components/layout/TopBar';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { useHITLRequests, useResolveHITL } from '@/api/hooks';
 
 function timeAgo(date: string) {
   const diff = Date.now() - new Date(date).getTime();
@@ -27,34 +28,44 @@ export function HITLPage() {
   const requests = (data as any)?.data ?? [];
 
   return (
-    <div className="space-y-4">
-      <h1 className="font-display text-2xl font-bold">HITL Queue</h1>
-      {isLoading ? (
-        <p className="text-muted-foreground">Loading...</p>
-      ) : requests.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-            <ShieldCheck className="h-12 w-12 text-emerald-500 mb-3" />
-            <p className="text-lg font-medium">No pending approvals</p>
-            <p className="text-sm text-muted-foreground">Your agents are running autonomously</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-4">
-          {requests.map((r: any) => (
+    <div className="flex flex-col h-full">
+      <TopBar title="Approvals" />
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6 space-y-4">
+        {isLoading ? (
+          <p className="text-muted-foreground text-sm">Loading…</p>
+        ) : requests.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-16 text-center">
+              <ShieldCheck className="h-14 w-14 text-emerald-500 mb-4" />
+              <p className="text-lg font-display font-semibold">No pending approvals</p>
+              <p className="text-sm text-muted-foreground mt-1">Your agents are running autonomously</p>
+            </CardContent>
+          </Card>
+        ) : (
+          requests.map((r: any) => (
             <Card key={r.id}>
               <CardContent className="p-4 space-y-3">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                   <Badge variant="outline">{r.action_type}</Badge>
-                  <span className="text-sm text-muted-foreground">Submitted by: {r.agent_id ?? r.created_by ?? 'agent'}</span>
-                  <span className="text-sm text-muted-foreground">{timeAgo(r.created_at)}</span>
+                  <span className="text-sm text-muted-foreground">
+                    Agent action pending approval
+                  </span>
+                  <span className="text-xs text-muted-foreground ml-auto flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {timeAgo(r.created_at)}
+                  </span>
                   {r.expires_at && (
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      Expires: {new Date(r.expires_at).toLocaleString()}
+                    <span className="text-xs text-muted-foreground">
+                      Expires {new Date(r.expires_at).toLocaleString()}
                     </span>
                   )}
                 </div>
-                <p className="text-sm">{r.action_summary}</p>
+                <div>
+                  <p className="text-xs text-muted-foreground mb-0.5">
+                    Submitted by {r.agent_id ?? r.created_by ?? 'agent'}
+                  </p>
+                  <p className="text-sm text-foreground">{r.action_summary}</p>
+                </div>
                 <div>
                   <button
                     className="text-xs text-primary hover:underline"
@@ -93,9 +104,9 @@ export function HITLPage() {
                 </div>
               </CardContent>
             </Card>
-          ))}
-        </div>
-      )}
+          ))
+        )}
+      </div>
     </div>
   );
 }
