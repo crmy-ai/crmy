@@ -33,6 +33,7 @@ import Opportunities from '@/pages/Opportunities';
 import UseCasesPage from '@/pages/UseCases';
 import Activities from '@/pages/Activities';
 import Agent from '@/pages/Agent';
+import AgentActivity from '@/pages/AgentActivity';
 import Settings from '@/pages/Settings';
 import NotFound from '@/pages/NotFound';
 import { HITLPage } from '@/pages/hitl/HITL';
@@ -86,6 +87,7 @@ function AnimatedRoutes() {
           <Route path="/inbox" element={<Navigate to="/assignments" replace />} />
           <Route path="/hitl" element={<Navigate to="/assignments" replace />} />
           <Route path="/agent" element={<Agent />} />
+          <Route path="/agent/activity" element={<AgentActivity />} />
           <Route path="/settings/*" element={<Settings />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

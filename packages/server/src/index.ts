@@ -14,6 +14,7 @@ import { authMiddleware } from './auth/middleware.js';
 import { apiRouter } from './rest/router.js';
 import { agentRouter } from './agent/routes.js';
 import { createMcpServer } from './mcp/server.js';
+import { mcpSessions, registerMcpSession, removeMcpSession } from './mcp/session-registry.js';
 import { autoApproveExpired, expireOldRequests } from './db/repos/hitl.js';
 import { cleanExpiredSessions } from './db/repos/agent.js';
 import { processPendingExtractions } from './agent/extraction.js';
@@ -109,33 +110,57 @@ export async function createApp(config: ServerConfig) {
   // Auth routes (no /api/v1 prefix)
   app.use('/auth', authRouter(db, config.jwtSecret));
 
-  // MCP Streamable HTTP endpoint
-  app.post('/mcp', async (req, res) => {
-    try {
-      // Extract actor from auth header
-      let actor: ActorContext = {
-        tenant_id: '',
-        actor_id: 'anonymous',
-        actor_type: 'agent',
-        role: 'member',
-      };
+  // Helper: authenticate and return actor from Authorization header
+  async function extractMcpActor(req: express.Request): Promise<ActorContext> {
+    let actor: ActorContext = {
+      tenant_id: '',
+      actor_id: 'anonymous',
+      actor_type: 'agent',
+      role: 'member',
+    };
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      const fakeReq = { headers: req.headers, actor: undefined } as express.Request;
+      const fakeRes = { status: () => ({ json: () => {} }) } as unknown as express.Response;
+      await new Promise<void>((resolve) => {
+        authMiddleware(db, config.jwtSecret)(fakeReq, fakeRes, () => resolve());
+      });
+      if (fakeReq.actor) actor = fakeReq.actor;
+    }
+    return actor;
+  }
 
-      // Try to authenticate
-      const authHeader = req.headers.authorization;
-      if (authHeader?.startsWith('Bearer ')) {
-        // Reuse auth middleware logic inline for MCP
-        const fakeReq = { headers: req.headers, actor: undefined } as express.Request;
-        const fakeRes = { status: () => ({ json: () => {} }) } as unknown as express.Response;
-        await new Promise<void>((resolve) => {
-          authMiddleware(db, config.jwtSecret)(fakeReq, fakeRes, () => resolve());
-        });
-        if (fakeReq.actor) actor = fakeReq.actor;
+  // MCP Streamable HTTP endpoint — stateful sessions for resource subscriptions
+  const handleMcpRequest = async (req: express.Request, res: express.Response): Promise<void> => {
+    try {
+      const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+      // Reuse existing session (subsequent GET/POST from same client)
+      if (sessionId && mcpSessions.has(sessionId)) {
+        const session = mcpSessions.get(sessionId)!;
+        await session.transport.handleRequest(req, res, req.body);
+        return;
       }
 
+      // New session — authenticate and create
+      const actor = await extractMcpActor(req);
       const server = createMcpServer(db, () => actor);
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (sid) => {
+          registerMcpSession(sid, server, transport, actor);
+        },
       });
+
+      transport.onclose = () => {
+        // Clean up registry when the session closes
+        for (const [sid, s] of mcpSessions) {
+          if (s.transport === transport) {
+            removeMcpSession(sid);
+            break;
+          }
+        }
+      };
 
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
@@ -145,16 +170,12 @@ export async function createApp(config: ServerConfig) {
         res.status(500).json({ error: 'MCP request failed' });
       }
     }
-  });
+  };
 
-  // Handle MCP GET and DELETE for session management
-  app.get('/mcp', async (req, res) => {
-    res.writeHead(405).end(JSON.stringify({ error: 'Method not allowed. Use POST for MCP requests.' }));
-  });
-
-  app.delete('/mcp', async (req, res) => {
-    res.writeHead(405).end(JSON.stringify({ error: 'Method not allowed.' }));
-  });
+  // POST for tool calls / initialize; GET for SSE notification stream; DELETE for session termination
+  app.post('/mcp', handleMcpRequest);
+  app.get('/mcp', handleMcpRequest);
+  app.delete('/mcp', handleMcpRequest);
 
   // Authenticated API routes
   app.use('/api/v1', authMiddleware(db, config.jwtSecret), apiRouter(db));

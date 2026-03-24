@@ -8,6 +8,7 @@ import { enforceToolScopes } from '../auth/scopes.js';
 import { decrypt } from './crypto.js';
 import { callAnthropic } from './providers/anthropic.js';
 import { callOpenAICompat } from './providers/openai-compat.js';
+import { logToolCall } from '../db/repos/agent-activity.js';
 import type {
   AgentConfig,
   AgentEvent,
@@ -152,6 +153,7 @@ export async function runAgentTurn(
   actor: ActorContext,
   db: DbPool,
   onEvent: (event: AgentEvent) => void,
+  opts?: { sessionId?: string },
 ): Promise<ConversationMessage[]> {
   const apiKey = config.api_key_enc ? decrypt(config.api_key_enc) : '';
   const agentScopes = buildAgentScopes(config);
@@ -172,6 +174,9 @@ export async function runAgentTurn(
       'You are a CRM assistant. You have access to tools for managing contacts, accounts, opportunities, activities, and more. Be concise and accurate. Always confirm before making changes.';
     history.unshift({ role: 'system', content: sysPrompt });
   }
+
+  const sessionId = opts?.sessionId;
+  let turnIndex = 0;
 
   // Agent loop: LLM call → tool execution → repeat
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -221,6 +226,7 @@ export async function runAgentTurn(
       const handler = handlers.get(tc.name);
       let toolResult: unknown;
       let isError = false;
+      const callStart = Date.now();
 
       if (!handler) {
         toolResult = { error: `Unknown tool: ${tc.name}` };
@@ -232,6 +238,23 @@ export async function runAgentTurn(
           toolResult = { error: err instanceof Error ? err.message : 'Tool execution failed' };
           isError = true;
         }
+      }
+
+      const durationMs = Date.now() - callStart;
+
+      // Fire-and-forget activity log
+      if (sessionId) {
+        logToolCall(db, {
+          tenantId: actor.tenant_id,
+          sessionId,
+          userId: actor.actor_id,
+          turnIndex: turnIndex++,
+          toolName: tc.name,
+          toolArgs: args,
+          toolResult,
+          isError,
+          durationMs,
+        }).catch((err) => console.error('[agent-activity] logToolCall error:', err));
       }
 
       const resultStr = JSON.stringify(toolResult, null, 2);

@@ -780,3 +780,57 @@ export function useClearAllAgentSessions() {
   });
 }
 
+export interface ActivityLogEntry {
+  id: string;
+  tenant_id: string;
+  session_id: string;
+  session_label: string | null;
+  user_id: string;
+  user_name: string | null;
+  turn_index: number;
+  tool_name: string;
+  tool_args: Record<string, unknown>;
+  tool_result: unknown;
+  is_error: boolean;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export interface ActivityFilters {
+  user_id?: string;
+  tool_name?: string;
+  is_error?: boolean;
+  since?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export function useAgentActivity(filters?: ActivityFilters) {
+  return useQuery<{ data: ActivityLogEntry[]; total: number; next_cursor?: string }>({
+    queryKey: ['agent-activity', filters],
+    queryFn: () => {
+      const p: Record<string, string | number | boolean | undefined> = {};
+      if (filters?.user_id) p.user_id = filters.user_id;
+      if (filters?.tool_name) p.tool_name = filters.tool_name;
+      if (filters?.is_error !== undefined) p.is_error = filters.is_error;
+      if (filters?.since) p.since = filters.since;
+      if (filters?.limit) p.limit = filters.limit;
+      if (filters?.cursor) p.cursor = filters.cursor;
+      const qs = new URLSearchParams(
+        Object.entries(p)
+          .filter(([, v]) => v !== undefined)
+          .map(([k, v]) => [k, String(v)]),
+      ).toString();
+      return api.get(`agent/activity${qs ? '?' + qs : ''}`);
+    },
+  });
+}
+
+export function useSessionActivity(sessionId: string | null) {
+  return useQuery<{ activity: ActivityLogEntry[] }>({
+    queryKey: ['session-activity', sessionId],
+    queryFn: () => api.get(`agent/sessions/${sessionId}/activity`),
+    enabled: !!sessionId,
+  });
+}
+

@@ -6,6 +6,7 @@ import type { DbPool } from '../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import { CrmyError, permissionDenied } from '@crmy/shared';
 import * as agentRepo from '../db/repos/agent.js';
+import * as activityRepo from '../db/repos/agent-activity.js';
 import { encrypt } from './crypto.js';
 import { runAgentTurn } from './engine.js';
 import type { AgentEvent, ConversationMessage } from './types.js';
@@ -250,7 +251,7 @@ export function agentRouter(db: DbPool): Router {
       history.push({ role: 'user', content: message });
 
       // Run the agent turn
-      const updatedHistory = await runAgentTurn(history, config, actor, db, sendEvent);
+      const updatedHistory = await runAgentTurn(history, config, actor, db, sendEvent, { sessionId: session.id });
 
       // Auto-label: use first user message as label if not set
       let label = session.label;
@@ -273,5 +274,49 @@ export function agentRouter(db: DbPool): Router {
     }
   });
 
+  // ─── Activity log (admin: tenant-wide, user: own sessions only) ──────────────
+
+  // GET /agent/activity — tenant-wide tool call log (admin) or own-session log (user)
+  router.get('/activity', async (req: Request, res: Response) => {
+    const actor = getActor(req);
+    const isAdmin = actor.role === 'admin';
+
+    const filters: activityRepo.ListActivityFilters = {
+      limit: req.query.limit ? parseInt(req.query.limit as string, 10) : 50,
+      cursor: req.query.cursor as string | undefined,
+      toolName: req.query.tool_name as string | undefined,
+      isError: req.query.is_error === 'true' ? true : req.query.is_error === 'false' ? false : undefined,
+      since: req.query.since as string | undefined,
+    };
+
+    // Non-admins can only see their own tool calls
+    if (!isAdmin) {
+      filters.userId = actor.actor_id;
+    } else if (req.query.user_id) {
+      filters.userId = req.query.user_id as string;
+    }
+
+    const result = await activityRepo.listActivity(db, actor.tenant_id, filters);
+    res.json(result);
+  });
+
+  // GET /agent/sessions/:id/activity — all tool calls in a specific session
+  router.get('/sessions/:id/activity', async (req: Request, res: Response) => {
+    const actor = getActor(req);
+    const session = await agentRepo.getSession(db, actor.tenant_id, req.params.id);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    // Non-admins can only view their own sessions
+    if (actor.role !== 'admin' && session.user_id !== actor.actor_id) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    const activity = await activityRepo.getSessionActivity(db, actor.tenant_id, session.id);
+    res.json({ activity });
+  });
+
   return router;
 }
+

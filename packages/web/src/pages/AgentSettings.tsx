@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useRef, useEffect } from 'react';
-import { Sparkles, KeyRound, Users, TriangleAlert, Eye, EyeOff, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Sparkles, KeyRound, Users, TriangleAlert, Eye, EyeOff, X, ActivitySquare, ArrowRight } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/hooks/use-toast';
 import {
@@ -478,7 +479,32 @@ export default function AgentSettings() {
         </div>
       </div>
 
-      {/* ── SECTION 4: Danger Zone ─────────────────────────────────────────── */}
+      {/* ── SECTION 4: Observability ───────────────────────────────────────── */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
+          <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
+            <ActivitySquare className="w-4 h-4 text-primary" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Observability</h3>
+            <p className="text-xs text-muted-foreground">Review what the agent has been doing across the workspace</p>
+          </div>
+        </div>
+        <div className="px-5 py-3">
+          <Link
+            to="/agent/activity"
+            className="flex items-center justify-between py-1 group"
+          >
+            <div>
+              <p className="text-sm font-medium text-foreground">Agent activity log</p>
+              <p className="text-xs text-muted-foreground">Browse every tool call the agent has made — with arguments, results, session, and timing</p>
+            </div>
+            <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors shrink-0 ml-4" />
+          </Link>
+        </div>
+      </div>
+
+      {/* ── SECTION 5: Danger Zone ─────────────────────────────────────────── */}
       <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-card overflow-hidden">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-red-200 dark:border-red-900/50">
