@@ -40,6 +40,7 @@ import { actorTools } from './tools/actors.js';
 import { assignmentTools } from './tools/assignments.js';
 import { contextEntryTools } from './tools/context-entries.js';
 import { registryTools } from './tools/registries.js';
+import { entityResolveTools } from './tools/entity-resolve.js';
 
 export interface ToolDef {
   name: string;
@@ -67,6 +68,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...assignmentTools(db),
     ...contextEntryTools(db),
     ...registryTools(db),
+    ...entityResolveTools(db),
     ...metaTools(db),
   ];
 }

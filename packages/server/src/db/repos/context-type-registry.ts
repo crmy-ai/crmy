@@ -24,6 +24,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'General-purpose note or observation',
     is_default: true,
     is_extractable: false,
+    priority_weight: 0.7,
+    confidence_half_life_days: null,
   },
   {
     type_name: 'transcript',
@@ -31,6 +33,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'Verbatim or near-verbatim record of a conversation',
     is_default: true,
     is_extractable: false,
+    priority_weight: 0.5,
+    confidence_half_life_days: null,
   },
   {
     type_name: 'summary',
@@ -38,6 +42,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'Condensed version of a longer interaction or document',
     is_default: true,
     is_extractable: false,
+    priority_weight: 1.2,
+    confidence_half_life_days: null,
   },
   {
     type_name: 'research',
@@ -45,6 +51,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'Background research on a person, company, or market',
     is_default: true,
     is_extractable: false,
+    priority_weight: 0.8,
+    confidence_half_life_days: null,
   },
   {
     type_name: 'preference',
@@ -52,6 +60,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'Known preference of a contact or account (communication style, timing, etc.)',
     is_default: true,
     is_extractable: false,
+    priority_weight: 1.0,
+    confidence_half_life_days: 180,
   },
   {
     type_name: 'decision',
@@ -59,6 +69,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'A decision that was made and the reasoning behind it',
     is_default: true,
     is_extractable: false,
+    priority_weight: 1.0,
+    confidence_half_life_days: null,
   },
   {
     type_name: 'relationship_map',
@@ -66,6 +78,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'Key people, their roles, influence, and relationships to each other',
     is_default: true,
     is_extractable: false,
+    priority_weight: 1.3,
+    confidence_half_life_days: 365,
   },
   {
     type_name: 'agent_reasoning',
@@ -73,6 +87,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: "An AI agent's internal reasoning or analysis about next steps",
     is_default: true,
     is_extractable: false,
+    priority_weight: 0.6,
+    confidence_half_life_days: null,
   },
   {
     type_name: 'sentiment_analysis',
@@ -80,6 +96,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'Assessment of prospect sentiment or engagement level',
     is_default: true,
     is_extractable: false,
+    priority_weight: 1.0,
+    confidence_half_life_days: 30,
   },
 
   // ── Extractable structured types ─────────────────────────────────────────
@@ -90,6 +108,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'A specific commitment made by the prospect or customer (budget, timeline, resource, decision)',
     is_default: true,
     is_extractable: true,
+    priority_weight: 2.0,
+    confidence_half_life_days: 90,
     extraction_prompt: 'Extract explicit commitments made by the prospect/customer — budget approvals, timeline confirmations, resource allocations, or specific decisions. Only extract clearly stated commitments, not wishes or possibilities.',
     json_schema: {
       type: 'object',
@@ -122,6 +142,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'A concrete action item agreed upon during an interaction',
     is_default: true,
     is_extractable: true,
+    priority_weight: 1.8,
+    confidence_half_life_days: 30,
     extraction_prompt: 'Extract agreed-upon next steps and action items — who will do what by when. Only include explicitly agreed actions, not suggestions.',
     json_schema: {
       type: 'object',
@@ -153,6 +175,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'Information about a person involved in the deal — their role, influence, and sentiment',
     is_default: true,
     is_extractable: true,
+    priority_weight: 1.5,
+    confidence_half_life_days: 180,
     extraction_prompt: "Extract information about individuals mentioned in the activity — their role in the decision, attitude toward the deal, and level of influence. Create one entry per person if multiple people are discussed.",
     json_schema: {
       type: 'object',
@@ -190,6 +214,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'A risk or blocker that could jeopardize the deal or relationship',
     is_default: true,
     is_extractable: true,
+    priority_weight: 2.0,
+    confidence_half_life_days: 60,
     extraction_prompt: 'Extract risks, blockers, or red flags that could slow or kill the deal — budget cuts, internal politics, competitor threats, technical blockers, champion changes, or legal/compliance issues.',
     json_schema: {
       type: 'object',
@@ -223,6 +249,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'Information about competitors relevant to this deal or account',
     is_default: true,
     is_extractable: true,
+    priority_weight: 1.5,
+    confidence_half_life_days: 60,
     extraction_prompt: 'Extract information about competing vendors — who they are, whether they are actively competing, what the customer said about them, and any strengths/weaknesses mentioned.',
     json_schema: {
       type: 'object',
@@ -255,6 +283,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'A concern, pushback, or blocker raised by the prospect',
     is_default: true,
     is_extractable: true,
+    priority_weight: 1.8,
+    confidence_half_life_days: 45,
     extraction_prompt: 'Extract objections, concerns, or pushback raised by the prospect — price concerns, feature gaps, timing issues, internal resistance, etc. Note whether the objection was addressed.',
     json_schema: {
       type: 'object',
@@ -288,6 +318,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'Structured takeaways from a meeting (distinct from raw transcript)',
     is_default: true,
     is_extractable: false, // written explicitly, not extracted
+    priority_weight: 1.2,
+    confidence_half_life_days: null,
   },
 
   {
@@ -296,6 +328,8 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
     description: 'An important fact about the contact, account, or deal that does not fit another category',
     is_default: true,
     is_extractable: true,
+    priority_weight: 1.3,
+    confidence_half_life_days: null,
     extraction_prompt: 'Extract important standalone facts that do not fit the other categories — company news, org changes, technology stack details, budget cycles, contract end dates, etc.',
   },
 ];
@@ -306,14 +340,17 @@ export async function seedDefaults(db: DbPool, tenantId: UUID): Promise<void> {
   for (const entry of DEFAULT_CONTEXT_TYPES) {
     await db.query(
       `INSERT INTO context_type_registry
-         (type_name, tenant_id, label, description, is_default, json_schema, extraction_prompt, is_extractable)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         (type_name, tenant_id, label, description, is_default, json_schema,
+          extraction_prompt, is_extractable, priority_weight, confidence_half_life_days)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        ON CONFLICT (type_name) DO UPDATE SET
-         label             = EXCLUDED.label,
-         description       = EXCLUDED.description,
-         json_schema       = EXCLUDED.json_schema,
-         extraction_prompt = EXCLUDED.extraction_prompt,
-         is_extractable    = EXCLUDED.is_extractable`,
+         label                     = EXCLUDED.label,
+         description               = EXCLUDED.description,
+         json_schema               = EXCLUDED.json_schema,
+         extraction_prompt         = EXCLUDED.extraction_prompt,
+         is_extractable            = EXCLUDED.is_extractable,
+         priority_weight           = EXCLUDED.priority_weight,
+         confidence_half_life_days = EXCLUDED.confidence_half_life_days`,
       [
         entry.type_name,
         tenantId,
@@ -323,6 +360,8 @@ export async function seedDefaults(db: DbPool, tenantId: UUID): Promise<void> {
         entry.json_schema ? JSON.stringify(entry.json_schema) : null,
         entry.extraction_prompt ?? null,
         entry.is_extractable,
+        entry.priority_weight,
+        entry.confidence_half_life_days ?? null,
       ],
     );
   }
@@ -368,12 +407,22 @@ export async function getContextTypeSchema(
 export async function addContextType(
   db: DbPool,
   tenantId: UUID,
-  data: { type_name: string; label: string; description?: string; json_schema?: Record<string, unknown>; extraction_prompt?: string; is_extractable?: boolean },
+  data: {
+    type_name: string;
+    label: string;
+    description?: string;
+    json_schema?: Record<string, unknown>;
+    extraction_prompt?: string;
+    is_extractable?: boolean;
+    priority_weight?: number;
+    confidence_half_life_days?: number | null;
+  },
 ): Promise<ContextTypeRegistryEntry> {
   const result = await db.query(
     `INSERT INTO context_type_registry
-       (type_name, tenant_id, label, description, is_default, json_schema, extraction_prompt, is_extractable)
-     VALUES ($1, $2, $3, $4, FALSE, $5, $6, $7)
+       (type_name, tenant_id, label, description, is_default, json_schema,
+        extraction_prompt, is_extractable, priority_weight, confidence_half_life_days)
+     VALUES ($1, $2, $3, $4, FALSE, $5, $6, $7, $8, $9)
      RETURNING *`,
     [
       data.type_name,
@@ -383,9 +432,34 @@ export async function addContextType(
       data.json_schema ? JSON.stringify(data.json_schema) : null,
       data.extraction_prompt ?? null,
       data.is_extractable ?? false,
+      data.priority_weight ?? 1.0,
+      data.confidence_half_life_days ?? null,
     ],
   );
   return result.rows[0] as ContextTypeRegistryEntry;
+}
+
+/**
+ * Return a map of context_type → { priority_weight, confidence_half_life_days }
+ * used by the briefing service for priority scoring.
+ */
+export async function getTypeWeightsMap(
+  db: DbPool,
+  tenantId: UUID,
+): Promise<Map<string, { priority_weight: number; confidence_half_life_days: number | null }>> {
+  const result = await db.query(
+    `SELECT type_name, priority_weight, confidence_half_life_days
+     FROM context_type_registry WHERE tenant_id = $1`,
+    [tenantId],
+  );
+  const map = new Map<string, { priority_weight: number; confidence_half_life_days: number | null }>();
+  for (const row of result.rows as Array<{ type_name: string; priority_weight: number; confidence_half_life_days: number | null }>) {
+    map.set(row.type_name, {
+      priority_weight: row.priority_weight ?? 1.0,
+      confidence_half_life_days: row.confidence_half_life_days ?? null,
+    });
+  }
+  return map;
 }
 
 export async function removeContextType(

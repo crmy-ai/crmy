@@ -16,12 +16,14 @@ import * as activityRepo from '../db/repos/activities.js';
 import * as hitlRepo from '../db/repos/hitl.js';
 import * as eventRepo from '../db/repos/events.js';
 import * as searchRepo from '../db/repos/search.js';
+import { entityResolve } from '../services/entity-resolve.js';
 import * as ucRepo from '../db/repos/use-cases.js';
 import * as actorRepo from '../db/repos/actors.js';
 import { emitEvent } from '../events/emitter.js';
 import { getAllTools } from '../mcp/server.js';
 import { enforceToolScopes, requireScopes } from '../auth/scopes.js';
 import * as governorLimits from '../db/repos/governor-limits.js';
+import { getSpec } from '../openapi/spec.js';
 
 function getActor(req: Request): ActorContext {
   return req.actor!;
@@ -70,6 +72,11 @@ function toolHandler(db: DbPool, toolName: string) {
 
 export function apiRouter(db: DbPool): Router {
   const router = Router();
+
+  // --- OpenAPI spec (no auth required) ---
+  router.get('/openapi.json', (_req, res) => {
+    res.json(getSpec());
+  });
 
   // --- Contacts ---
   router.get('/contacts', async (req: Request, res: Response) => {
@@ -1359,6 +1366,36 @@ export function apiRouter(db: DbPool): Router {
 
       await db.query('DELETE FROM users WHERE id = $1 AND tenant_id = $2', [userId, actor.tenant_id]);
       res.json({ deleted: true });
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Entity resolution ---
+  router.post('/resolve', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const { query, entity_type, context_hints, limit } = req.body as {
+        query?: string;
+        entity_type?: 'contact' | 'account' | 'any';
+        context_hints?: Record<string, string>;
+        limit?: number;
+      };
+      if (!query || !query.trim()) {
+        res.status(400).json({
+          type: 'https://crmy.ai/errors/validation',
+          title: 'Validation Error',
+          status: 400,
+          detail: 'query is required',
+        });
+        return;
+      }
+      const result = await entityResolve(db, actor.tenant_id, {
+        query,
+        entity_type: entity_type ?? 'any',
+        context_hints,
+        actor_id: actor.actor_id,
+        limit: limit ? Math.min(Math.max(Number(limit), 1), 10) : 5,
+      });
+      res.json(result);
     } catch (err) { handleError(res, err); }
   });
 

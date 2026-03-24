@@ -30,6 +30,7 @@ export const contactCreate = z.object({
   company_name: z.string().optional(),
   account_id: uuid.optional(),
   lifecycle_stage: lifecycleStage.default('lead'),
+  aliases: z.array(z.string()).default([]),
   tags,
   custom_fields: customFields,
   source: z.string().optional(),
@@ -48,6 +49,7 @@ export const contactUpdate = z.object({
     owner_id: uuid.nullable().optional(),
     lifecycle_stage: lifecycleStage.optional(),
     source: z.string().optional(),
+    aliases: z.array(z.string()).optional(),
     tags: z.array(z.string()).optional(),
     custom_fields: z.record(z.unknown()).optional(),
   }),
@@ -86,6 +88,7 @@ export const accountCreate = z.object({
   currency_code: z.string().length(3).default('USD'),
   website: z.string().url().optional(),
   parent_id: uuid.optional(),
+  aliases: z.array(z.string()).default([]),
   tags,
   custom_fields: customFields,
 });
@@ -102,6 +105,7 @@ export const accountUpdate = z.object({
     website: z.string().url().nullable().optional(),
     parent_id: uuid.nullable().optional(),
     owner_id: uuid.nullable().optional(),
+    aliases: z.array(z.string()).optional(),
     tags: z.array(z.string()).optional(),
     custom_fields: z.record(z.unknown()).optional(),
   }),
@@ -677,6 +681,20 @@ export const briefingGet = z.object({
   context_types: z.array(z.string()).optional(),
   include_stale: z.boolean().default(false),
   format: z.enum(['json', 'text']).default('json'),
+  /**
+   * How far to reach into the CRM entity graph when pulling context:
+   *   'direct'       — only the subject's own context (default)
+   *   'adjacent'     — subject + directly related entities (e.g. account + opportunities for a contact)
+   *   'account_wide' — subject + all entities under the same account hierarchy
+   */
+  context_radius: z.enum(['direct', 'adjacent', 'account_wide']).default('direct'),
+  /**
+   * Maximum tokens to budget for context entries.
+   * When set, entries are ranked by priority score (confidence × recency × type weight)
+   * and packed within the budget. The response includes token_estimate and truncated flag.
+   * Estimated at ~4 chars/token (body + title + overhead per entry).
+   */
+  token_budget: z.number().int().min(100).optional(),
 });
 
 // -- Context search (full-text) schema --
@@ -689,6 +707,12 @@ export const contextSearch = z.object({
   tag: z.string().optional(),
   current_only: z.boolean().default(true),
   limit: z.number().int().min(1).max(100).default(20),
+  /**
+   * Partial JSONB match against structured_data (PostgreSQL @> operator).
+   * Example: { "status": "open" } matches all entries where structured_data contains status=open.
+   * Combine with context_type to query e.g. all open objections, high-severity deal risks, etc.
+   */
+  structured_data_filter: z.record(z.unknown()).optional(),
 });
 
 // -- Context review schema --
@@ -837,6 +861,8 @@ export const contextEntrySearch = z.object({
   authored_by: uuid.optional(),
   is_current: z.boolean().optional(),
   query: z.string().optional(),
+  /** Partial JSONB match against structured_data. Example: { "severity": "critical" } */
+  structured_data_filter: z.record(z.unknown()).optional(),
   limit,
   cursor,
 });
@@ -855,4 +881,40 @@ export const activityGetTimeline = z.object({
   subject_id: uuid,
   limit: limit.default(50),
   types: z.array(activityType).optional(),
+});
+
+// -- Priority 5-8 schemas --
+
+/** context_diff — catch-up briefing showing what changed since a given timestamp */
+export const contextDiff = z.object({
+  subject_type: subjectType,
+  subject_id: uuid,
+  /** Relative ("7d", "24h", "30m") or ISO timestamp */
+  since: z.string(),
+});
+
+/**
+ * actor_expertise — query actor knowledge contributions.
+ * Provide actor_id to see what subjects an actor knows about.
+ * Provide subject_type + subject_id to see which actors know most about a subject.
+ * At least one must be provided.
+ */
+export const actorExpertise = z.object({
+  actor_id: uuid.optional(),
+  subject_type: subjectType.optional(),
+  subject_id: uuid.optional(),
+  limit: z.number().int().min(1).max(50).default(10),
+});
+
+/**
+ * context_ingest — ingest a raw document (transcript, email, notes) and auto-extract context.
+ * Creates an activity from the document and runs the full extraction pipeline.
+ * Returns all context entries that were extracted.
+ */
+export const contextIngest = z.object({
+  subject_type: subjectType,
+  subject_id: uuid,
+  document: z.string().min(1).max(100000),
+  /** Short description of the document (appears as the activity subject) */
+  source_label: z.string().optional(),
 });

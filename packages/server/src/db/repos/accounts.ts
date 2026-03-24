@@ -12,8 +12,8 @@ export async function createAccount(
   const result = await db.query(
     `INSERT INTO accounts (tenant_id, name, domain, industry, employee_count,
        annual_revenue, currency_code, website, parent_id, owner_id,
-       tags, custom_fields, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       aliases, tags, custom_fields, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      RETURNING *`,
     [
       tenantId,
@@ -26,6 +26,7 @@ export async function createAccount(
       data.website ?? null,
       data.parent_id ?? null,
       data.owner_id ?? data.created_by ?? null,
+      data.aliases ?? [],
       data.tags ?? [],
       JSON.stringify(data.custom_fields ?? {}),
       data.created_by ?? null,
@@ -79,7 +80,10 @@ export async function searchAccounts(
   let idx = 2;
 
   if (filters.query) {
-    conditions.push(`(a.name ILIKE $${idx} OR a.domain ILIKE $${idx})`);
+    conditions.push(
+      `(a.name ILIKE $${idx} OR a.domain ILIKE $${idx}` +
+      ` OR EXISTS (SELECT 1 FROM unnest(a.aliases) _a WHERE _a ILIKE $${idx}))`,
+    );
     params.push(`%${filters.query}%`);
     idx++;
   }
@@ -142,7 +146,7 @@ export async function updateAccount(
   const allowedFields = [
     'name', 'domain', 'industry', 'employee_count', 'annual_revenue',
     'currency_code', 'website', 'parent_id', 'owner_id', 'health_score',
-    'tags', 'custom_fields',
+    'aliases', 'tags', 'custom_fields',
   ];
 
   const sets: string[] = ['updated_at = now()'];

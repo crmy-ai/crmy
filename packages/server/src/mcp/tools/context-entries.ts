@@ -5,13 +5,16 @@ import { z } from 'zod';
 import {
   contextEntryCreate, contextEntryGet, contextEntrySearch, contextEntrySupersede,
   contextSearch, contextReview, contextStaleList, briefingGet,
+  contextDiff, contextIngest,
 } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext, SubjectType } from '@crmy/shared';
 import * as contextRepo from '../../db/repos/context-entries.js';
+import * as activityRepo from '../../db/repos/activities.js';
 import * as contextTypeRepo from '../../db/repos/context-type-registry.js';
 import * as governorLimits from '../../db/repos/governor-limits.js';
 import { assembleBriefing, formatBriefingText } from '../../services/briefing.js';
+import { processStaleEntriesForTenant } from '../../services/staleness.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, validationError } from '@crmy/shared';
 import { extractContextFromActivity } from '../../agent/extraction.js';
@@ -104,11 +107,12 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_list',
-      description: 'List context entries with filters. Supports subject_type, subject_id, context_type, authored_by, is_current, query.',
+      description: 'List context entries with filters. Supports subject_type, subject_id, context_type, authored_by, is_current, query, and structured_data_filter for typed queries (e.g. { "status": "open" } on objections).',
       inputSchema: contextEntrySearch,
       handler: async (input: z.infer<typeof contextEntrySearch>, actor: ActorContext) => {
         const result = await contextRepo.searchContextEntries(db, actor.tenant_id, {
           ...input,
+          structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
           limit: input.limit ?? 20,
         });
         return { context_entries: result.data, next_cursor: result.next_cursor, total: result.total };
@@ -151,7 +155,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_search',
-      description: 'Full-text search across context entries using PostgreSQL GIN index. Returns results ranked by relevance.',
+      description: 'Full-text search across context entries using PostgreSQL GIN index. Returns results ranked by relevance. Supports structured_data_filter for typed queries (e.g. find all open objections, critical deal risks).',
       inputSchema: contextSearch,
       handler: async (input: z.infer<typeof contextSearch>, actor: ActorContext) => {
         const entries = await contextRepo.fullTextSearch(db, actor.tenant_id, input.query, {
@@ -161,6 +165,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           tag: input.tag,
           current_only: input.current_only,
           limit: input.limit,
+          structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
         });
         return { context_entries: entries, total: entries.length };
       },
@@ -199,7 +204,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'briefing_get',
-      description: 'Get a unified briefing for any CRM object — assembles the object record, related objects, activity timeline, open assignments, context entries, and staleness warnings in one call. This is the most important context engine tool.',
+      description: 'Get a unified briefing for any CRM object — assembles the object record, related objects, activity timeline, open assignments, context entries, and staleness warnings in one call. Use context_radius to pull context from related entities. Use token_budget to get a priority-ranked, budget-constrained context pack. This is the most important context engine tool.',
       inputSchema: briefingGet,
       handler: async (input: z.infer<typeof briefingGet>, actor: ActorContext) => {
         const briefing = await assembleBriefing(
@@ -211,6 +216,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             since: input.since,
             context_types: input.context_types,
             include_stale: input.include_stale,
+            context_radius: input.context_radius,
+            token_budget: input.token_budget,
           },
         );
 
@@ -218,6 +225,90 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           return { briefing_text: formatBriefingText(briefing) };
         }
         return { briefing };
+      },
+    },
+    {
+      name: 'context_diff',
+      description: 'Catch-up diff for a CRM subject: shows what changed since a given timestamp. Returns new context entries, superseded entries, freshly stale entries, and recently reviewed entries. Ideal for daily agent check-ins.',
+      inputSchema: contextDiff,
+      handler: async (input: z.infer<typeof contextDiff>, actor: ActorContext) => {
+        // Parse relative durations ("7d", "24h", "30m") into ISO timestamps
+        let since = input.since;
+        if (!since.includes('T') && !since.includes('-')) {
+          const match = since.match(/^(\d+)([dhm])$/);
+          if (match) {
+            const [, num, unit] = match;
+            const ms = parseInt(num, 10) * (unit === 'd' ? 86400000 : unit === 'h' ? 3600000 : 60000);
+            since = new Date(Date.now() - ms).toISOString();
+          }
+        }
+        const diff = await contextRepo.diffContextEntries(
+          db, actor.tenant_id,
+          input.subject_type as SubjectType,
+          input.subject_id,
+          since,
+        );
+        return {
+          subject_type: input.subject_type,
+          subject_id: input.subject_id,
+          since,
+          ...diff,
+          summary: {
+            new: diff.new_entries.length,
+            superseded: diff.superseded_entries.length,
+            newly_stale: diff.newly_stale.length,
+            resolved: diff.resolved_entries.length,
+          },
+        };
+      },
+    },
+    {
+      name: 'context_ingest',
+      description: 'Ingest a raw document (transcript, email, meeting notes, etc.) and auto-extract all structured context entries from it. Creates an activity as provenance and runs the full extraction pipeline. Returns all context entries produced.',
+      inputSchema: contextIngest,
+      handler: async (input: z.infer<typeof contextIngest>, actor: ActorContext) => {
+        // Enforce body length limit
+        const maxChars = await governorLimits.getLimit(db, actor.tenant_id, 'context_body_max_chars');
+        if (input.document.length > maxChars * 2) {
+          // Allow up to 2× the per-entry limit for ingest documents
+          throw validationError(`Document exceeds maximum ingest length (${input.document.length} chars)`);
+        }
+
+        // Create an activity as provenance for the ingested content
+        const activity = await activityRepo.createActivity(db, actor.tenant_id, {
+          type: 'note',
+          subject: input.source_label ?? 'Ingested document',
+          body: input.document,
+          subject_type: input.subject_type,
+          subject_id: input.subject_id,
+          performed_by: actor.actor_id,
+          occurred_at: new Date().toISOString(),
+        });
+
+        // Run the extraction pipeline
+        const extracted_count = await extractContextFromActivity(db, actor.tenant_id, activity.id);
+
+        // Fetch the entries produced by this activity
+        const entries = await contextRepo.getContextForSubject(
+          db, actor.tenant_id, input.subject_type, input.subject_id,
+          { source_activity_id: activity.id, current_only: true, limit: 50 },
+        );
+
+        return { extracted_count, context_entries: entries, activity_id: activity.id };
+      },
+    },
+    {
+      name: 'context_stale_assign',
+      description: 'Trigger the stale context review loop for the current tenant: finds all expired context entries and creates review assignments for the most knowledgeable actors. Normally runs automatically in the background every 60 seconds. Use this to trigger it on-demand.',
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(100).default(20)
+          .describe('Maximum number of stale entries to process in this call'),
+      }),
+      handler: async (input: { limit: number }, actor: ActorContext) => {
+        const assignments_created = await processStaleEntriesForTenant(
+          db, actor.tenant_id, input.limit,
+        );
+        return { assignments_created };
       },
     },
   ];

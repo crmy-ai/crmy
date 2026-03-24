@@ -19,21 +19,22 @@ Complete documentation for CRMy — the agent-first open source CRM.
 11. [Assignments](#assignments)
 12. [Context Engine](#context-engine)
 13. [Briefings](#briefings)
-14. [Type Registries](#type-registries)
-15. [Scope Enforcement](#scope-enforcement)
-16. [Governor Limits](#governor-limits)
-17. [Use Cases](#use-cases)
-18. [Notes & Comments](#notes--comments)
-19. [Workflows & Automation](#workflows--automation)
-20. [Webhooks](#webhooks)
-21. [Email](#email)
-22. [Custom Fields](#custom-fields)
-23. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
-24. [Analytics & Reporting](#analytics--reporting)
-25. [Plugins](#plugins)
-26. [REST API Reference](#rest-api-reference)
+14. [Identity Resolution](#identity-resolution)
+15. [Type Registries](#type-registries)
+16. [Scope Enforcement](#scope-enforcement)
+17. [Governor Limits](#governor-limits)
+18. [Use Cases](#use-cases)
+19. [Notes & Comments](#notes--comments)
+20. [Workflows & Automation](#workflows--automation)
+21. [Webhooks](#webhooks)
+22. [Email](#email)
+23. [Custom Fields](#custom-fields)
+24. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
+25. [Analytics & Reporting](#analytics--reporting)
+26. [Plugins](#plugins)
 27. [MCP Tools Reference](#mcp-tools-reference)
-28. [Database & Migrations](#database--migrations)
+28. [REST API Reference](#rest-api-reference)
+29. [Database & Migrations](#database--migrations)
 
 ---
 
@@ -62,7 +63,7 @@ npx crmy init
 # 1. Initialize (interactive — sets up DB, user, API key)
 npx crmy init
 
-# 2. Start the server (REST API + Web UI at /app)
+# 2. Start the server (REST API + MCP + Web UI at /app)
 npx crmy server
 
 # 3. Add to Claude Code as an MCP server
@@ -265,7 +266,26 @@ See the [Scope Enforcement](#scope-enforcement) section for the complete referen
 
 #### Agent Self-Registration
 
-Agents can register themselves without admin intervention via:
+Agents can register themselves without admin intervention.
+
+Via MCP:
+
+```
+actor_register {
+  display_name: "Outreach Agent",
+  agent_identifier: "outreach-pipeline-v2",
+  agent_model: "claude-sonnet-4-20250514",
+  scopes: ["contacts:read", "activities:write"]
+}
+```
+
+Via CLI:
+
+```bash
+crmy actors register
+```
+
+Via REST API:
 
 ```
 POST /auth/register-agent
@@ -321,13 +341,13 @@ http://localhost:3000/app
 
 ### Pages
 
-#### Dashboard (`/app`)
+#### Memory Hub (`/app`)
 
-Four stat cards at the top: Pipeline Value, Open Deals, Active Use Cases, HITL Pending.
+The operator's overview of agent activity. Four stat cards link to their respective pages: **Pending Approvals**, **Context Entries**, **Active Agents**, and **Open Handoffs**.
 
-Below that, a **Use Case stage summary strip** showing count and attributed ARR per stage. Click any stage to filter the use cases list.
+Below the stat cards, up to three pending HITL requests are shown inline with approve/reject buttons — no need to navigate to the Approvals page for quick decisions.
 
-Bottom section shows the 10 most recent activities.
+The right column shows active agents with status indicators and a context health widget (total entries + stale count). The left column shows the agent activity feed.
 
 #### Contacts (`/app/contacts`)
 
@@ -386,7 +406,7 @@ Status filter chips let you narrow by `pending`, `accepted`, `in_progress`, `blo
 - Use case ARR by account
 - Health distribution (healthy / at-risk / critical)
 
-#### HITL Queue (`/app/hitl`)
+#### Approvals (`/app/hitl`)
 
 Cards for each pending approval request showing:
 - Action type and agent ID
@@ -397,6 +417,19 @@ Cards for each pending approval request showing:
 - Empty state: "No pending approvals — your agents are running autonomously"
 
 Polls every 10 seconds.
+
+#### Agents (`/app/agents`)
+
+Full list of registered actors (humans and AI agents) with their role, model, scopes, and status. Click any row to expand the inline detail panel for scope editing and API key management. This is the same as the Actors tab in Settings, surfaced at the top level because agents are first-class citizens.
+
+#### Context (`/app/context`)
+
+Browse and manage all context entries stored in the memory layer. Supports:
+- **Search** by content text
+- **Filter** by subject type (contact, account, opportunity, …) and context type
+- **Stale-only toggle** to surface entries past their `valid_until` date
+- Confidence score pills, expiry date highlighting, and `is_current` badges
+- Inline **"Mark reviewed"** action for stale entries
 
 #### Settings (`/app/settings`)
 
@@ -497,10 +530,10 @@ Contacts are people you interact with. They can be linked to an account and have
 
 | Tool | Description |
 |---|---|
-| `contact_create` | Create a contact. Required: `first_name`. Optional: `last_name`, `email`, `phone`, `title`, `company_name`, `account_id`, `lifecycle_stage`, `tags`, `custom_fields`, `source` |
+| `contact_create` | Create a contact. Required: `first_name`. Optional: `last_name`, `email`, `phone`, `title`, `company_name`, `account_id`, `lifecycle_stage`, `aliases`, `tags`, `custom_fields`, `source` |
 | `contact_get` | Get a contact by ID |
-| `contact_search` | Search with filters: `query`, `lifecycle_stage`, `account_id`, `owner_id`, `tags` |
-| `contact_update` | Patch any fields via `{ id, patch: { ... } }` |
+| `contact_search` | Search with filters: `query`, `lifecycle_stage`, `account_id`, `owner_id`, `tags`. Query matches name, email, company, and any alias. |
+| `contact_update` | Patch any fields via `{ id, patch: { ... } }`. Supports `aliases` array. |
 | `contact_set_lifecycle` | Change stage with optional `reason` |
 | `contact_log_activity` | Log a call, email, meeting, note, or task for a contact |
 | `contact_get_timeline` | Get the activity timeline with optional type filter |
@@ -536,10 +569,10 @@ Accounts represent companies or organizations. Accounts can have parent/child hi
 
 | Tool | Description |
 |---|---|
-| `account_create` | Create an account. Required: `name`. Optional: `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `tags`, `custom_fields` |
+| `account_create` | Create an account. Required: `name`. Optional: `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `aliases`, `tags`, `custom_fields` |
 | `account_get` | Get account with its contacts and open opportunities |
-| `account_search` | Search with filters: `query`, `industry`, `owner_id`, `min_revenue`, `tags` |
-| `account_update` | Patch any fields |
+| `account_search` | Search with filters: `query`, `industry`, `owner_id`, `min_revenue`, `tags`. Query matches name, domain, and any alias. |
+| `account_update` | Patch any fields. Supports `aliases` array. |
 | `account_set_health_score` | Set score (0-100) with `rationale` |
 | `account_get_hierarchy` | Get parent/child tree |
 | `account_delete` | Permanently delete an account. Admin/owner role required. |
@@ -660,6 +693,14 @@ The `activity_type` field accepts any string — agents can use custom types wit
 | `activity_update` | Patch `subject`, `body`, `status`, `due_at` |
 | `activity_get_timeline` | Get timeline for any subject object |
 
+### CLI
+
+```bash
+crmy activities list --contact <id>
+crmy activities create          # interactive
+crmy activities get <id>
+```
+
 ### REST API
 
 ```
@@ -711,6 +752,52 @@ The narrower of the two always wins. This allows creating a key with broad scope
 | `actor_list` | List actors. Filter by `actor_type`, `is_active` |
 | `actor_update` | Update `display_name`, `scopes`, `is_active`, `metadata` |
 | `actor_whoami` | Return the actor identity for the current request (always allowed, no scope required) |
+| `actor_expertise` | Query actor knowledge contributions — two modes (see below) |
+
+### Actor expertise
+
+`actor_expertise` has two modes depending on what you provide:
+
+**Mode 1 — what does this actor know?** Pass `actor_id` to see which subjects an actor has contributed context about, ordered by contribution count. Useful for routing reviews to the right person.
+
+```
+actor_expertise { actor_id: "<agent-uuid>", limit: 20 }
+```
+
+Returns:
+```json
+{
+  "mode": "by_actor",
+  "actor_id": "...",
+  "total_entries": 142,
+  "subjects": [
+    { "subject_type": "account", "subject_id": "...", "entry_count": 28, "last_authored_at": "...", "context_types": ["objection", "competitive_intel"] }
+  ],
+  "top_context_types": [
+    { "context_type": "objection", "count": 45 }
+  ]
+}
+```
+
+**Mode 2 — who knows the most about this entity?** Pass `subject_type` + `subject_id` to find the actors with the most context contributions. Useful before creating a stale review assignment or asking for a human opinion.
+
+```
+actor_expertise { subject_type: "account", subject_id: "<uuid>", limit: 5 }
+```
+
+Returns:
+```json
+{
+  "mode": "by_subject",
+  "subject_type": "account",
+  "subject_id": "...",
+  "experts": [
+    { "actor_id": "...", "entry_count": 28, "last_authored_at": "..." }
+  ]
+}
+```
+
+At least one of `actor_id` or (`subject_type` + `subject_id`) must be provided.
 
 ### CLI
 
@@ -830,6 +917,8 @@ Notes are human-written text. Context entries are structured, typed, searchable,
 - **`tags`** — filterable JSONB array for fast lookup
 - **Full-text search** — PostgreSQL `tsvector`/`tsquery` with GIN index
 - **Supersede chain** — old entries are marked `is_current = false` rather than deleted; new entries point back via `supersedes_id`
+- **Priority weights** — each context type carries a `priority_weight` (0.5–2.0) used when ranking entries in token-budget-aware briefings
+- **Confidence decay** — each type can have a `confidence_half_life_days`; effective confidence decays as `stored_confidence × 0.5^(age / half_life)`, so old intel does not crowd out fresh knowledge
 
 ### Context types
 
@@ -839,6 +928,21 @@ Default types are seeded per tenant:
 
 Custom types can be added via the [Type Registries](#type-registries).
 
+**Default priority weights and half-lives:**
+
+| Type | Priority weight | Half-life (days) | Notes |
+|---|---|---|---|
+| `commitment` | 2.0 | 90 | Highest priority — promises and agreed actions |
+| `deal_risk` | 2.0 | 60 | Critical deal blockers |
+| `next_step` | 1.8 | 30 | Action items decay fast — stale next steps are noise |
+| `objection` | 1.8 | 45 | Important but resolve or go stale |
+| `stakeholder` | 1.5 | 180 | Slow-changing relationship context |
+| `competitive_intel` | 1.5 | 60 | Competitive landscapes shift |
+| `key_fact` | 1.3 | — | Important but doesn't decay |
+| `transcript` | 0.5 | — | High volume, low priority for briefing packing |
+
+Custom types default to weight 1.0, no decay.
+
 ### Key fields
 
 | Field | Description |
@@ -846,38 +950,105 @@ Custom types can be added via the [Type Registries](#type-registries).
 | `subject_type` / `subject_id` | Polymorphic attachment to any CRM object |
 | `context_type` | Type string from the context type registry |
 | `body` | The content (max size enforced by governor limit `context_body_max_chars`) |
+| `structured_data` | Optional JSONB payload for typed context (e.g., objection status, competitor details) |
 | `confidence` | Float 0.0–1.0 signaling how reliable this information is |
 | `tags` | String array for filtering (e.g., `["pricing", "q2-2026"]`) |
-| `source_actor_id` | Which actor created this entry |
+| `authored_by` | Which actor created this entry |
 | `valid_until` | Optional expiry timestamp; entries past this date are marked stale |
 | `is_current` | `false` if superseded by a newer entry |
 | `supersedes_id` | Foreign key to the entry this one replaces |
 
-### Staleness
+### Staleness and automatic assignments
 
-Entries with a `valid_until` in the past are considered stale. The briefing service surfaces stale entries with warnings. Use `context_stale` to list entries that need review, and `context_review` to confirm an entry is still accurate (bumps the `reviewed_at` timestamp).
+Entries with a `valid_until` in the past are considered stale. The briefing service surfaces stale entries with warnings.
+
+CRMy automatically assigns stale entries for review — a background worker runs every 60 seconds, finds all expired entries, identifies the actor with the most context contributions to that subject (the most knowledgeable reviewer), and creates a `stale_context_review` assignment. Duplicate assignments are never created for the same entry.
+
+Tools:
+- `context_stale` — list entries that need review
+- `context_review` — confirm an entry is still accurate (bumps `reviewed_at`)
+- `context_stale_assign` — trigger the stale review loop on-demand (normally runs automatically)
+
+### Structured data queries
+
+The `structured_data` field is JSONB and supports containment queries via `structured_data_filter`. This lets you query across typed context using domain-specific predicates:
+
+```
+# Find all open objections on this account
+context_list {
+  subject_type: "account",
+  subject_id: "...",
+  context_type: "objection",
+  structured_data_filter: { "status": "open" }
+}
+
+# Full-text search only among critical deal risks
+context_search {
+  query: "security compliance",
+  context_type: "deal_risk",
+  structured_data_filter: { "severity": "critical" }
+}
+```
 
 ### Superseding entries
 
 When information changes, supersede the old entry rather than deleting it:
 
 ```
-context_supersede { supersedes_id: "<old-id>", body: "Updated pricing...", ... }
+context_supersede { id: "<old-id>", body: "Updated pricing...", ... }
 ```
 
 The old entry's `is_current` is set to `false`. Queries for context automatically filter to `is_current = true` unless explicitly requesting the full history.
+
+### Bulk ingestion
+
+`context_ingest` takes a raw document (transcript, email, meeting notes) and runs the full extraction pipeline, creating an activity as provenance and returning all structured context entries produced:
+
+```
+context_ingest {
+  subject_type: "opportunity",
+  subject_id: "...",
+  document: "<full meeting transcript>",
+  source_label: "Q2 kickoff call"
+}
+```
+
+Returns `{ extracted_count, context_entries, activity_id }`.
+
+### Catch-up diff
+
+`context_diff` shows what changed about a subject since a timestamp — useful for daily agent check-ins:
+
+```
+context_diff {
+  subject_type: "account",
+  subject_id: "...",
+  since: "7d"    // or "24h", "30m", or ISO timestamp
+}
+```
+
+Returns:
+- `new_entries` — context created since the timestamp
+- `superseded_entries` — entries that were replaced (the old, now-inactive versions)
+- `newly_stale` — entries whose `valid_until` fell within the window
+- `resolved_entries` — entries that were reviewed (confirmed accurate) in the window
+- `summary` — counts of each category
 
 ### MCP tools
 
 | Tool | Description |
 |---|---|
-| `context_add` | Add a context entry. Required: `subject_type`, `subject_id`, `context_type`, `body`. Optional: `confidence`, `tags`, `valid_until`, `source_actor_id` |
+| `context_add` | Add a context entry. Required: `subject_type`, `subject_id`, `context_type`, `body`. Optional: `confidence`, `tags`, `valid_until`, `structured_data`, `source_activity_id` |
 | `context_get` | Get by ID (includes superseded entry if applicable) |
-| `context_list` | List entries for an object. Filter by `context_type`, `tags`, `is_current` |
-| `context_search` | Full-text search across all context entries. Filter by `subject_type`, `tags`, `context_type` |
+| `context_list` | List entries for an object. Filter by `context_type`, `tags`, `is_current`, `authored_by`, `structured_data_filter` |
+| `context_search` | Full-text search across all context entries. Filter by `subject_type`, `tags`, `context_type`, `structured_data_filter` |
 | `context_supersede` | Replace an entry with updated content |
 | `context_review` | Mark an entry as reviewed (confirm still accurate) |
 | `context_stale` | List entries that are past `valid_until` and may need updating |
+| `context_diff` | Catch-up diff since a timestamp: new, superseded, stale, and resolved entries |
+| `context_ingest` | Ingest a raw document and auto-extract all structured context entries |
+| `context_extract` | Re-run the extraction pipeline on a specific activity (backfill or retry) |
+| `context_stale_assign` | Trigger the stale review loop on-demand for the current tenant |
 
 ### CLI
 
@@ -917,6 +1088,7 @@ A briefing is a single API call that assembles everything an agent or human need
 4. Open assignments for this object
 5. Context entries grouped by `context_type` (only `is_current = true` entries)
 6. Staleness warnings for any context entries past `valid_until`
+7. Adjacent context from related entities (when `context_radius` is set)
 
 ### MCP tool
 
@@ -943,6 +1115,55 @@ Returns a structured object:
 }
 ```
 
+### Context radius
+
+By default, `briefing_get` only includes context entries directly attached to the requested subject (`context_radius: "direct"`). Pass a wider radius to pull in context from related entities:
+
+| Radius | What's included |
+|---|---|
+| `direct` (default) | Only entries on the requested subject |
+| `adjacent` | The subject plus all directly related objects (the account a contact belongs to, contacts linked to a use case, etc.) |
+| `account_wide` | Everything in `adjacent` plus all contacts and opportunities under the same account |
+
+```
+briefing_get {
+  subject_type: "opportunity",
+  subject_id: "...",
+  context_radius: "adjacent"
+}
+```
+
+When `adjacent_context` is present in the response, it lists each related subject alongside its context entries.
+
+### Token budget
+
+Pass `token_budget` (integer, minimum 100) to get a priority-ranked, budget-constrained context pack that fits within a caller-specified token estimate. This is the primary mechanism for loading the right context into an LLM without overflow.
+
+```
+briefing_get {
+  subject_type: "contact",
+  subject_id: "...",
+  token_budget: 4000
+}
+```
+
+How it works:
+
+1. Each context entry is scored: `effective_confidence × priority_weight`, where `effective_confidence = stored_confidence × 0.5^(age_days / half_life_days)` (from the type registry)
+2. Entries are sorted by score descending (most important, freshest first)
+3. Entries are greedily packed until the budget is exhausted; the last entry that partially fits has its body truncated
+4. The response includes `token_estimate` (actual tokens used) and `truncated: true` if any body was cut
+
+When no `token_budget` is given, all entries are returned sorted by score, and `token_estimate` is still included for reference.
+
+### Text format
+
+Pass `format: "text"` to receive a single `briefing_text` string formatted for direct injection into a prompt:
+
+```
+briefing_get { subject_type: "account", subject_id: "...", format: "text", token_budget: 3000 }
+```
+
 ### CLI
 
 ```bash
@@ -954,8 +1175,129 @@ crmy briefing use_case:<id>
 ### REST API
 
 ```
-GET /api/v1/briefing/:subject_type/:subject_id
+GET /api/v1/briefing/:subject_type/:subject_id?context_radius=adjacent&token_budget=4000
 ```
+
+---
+
+## Identity Resolution
+
+When an agent or user references an entity by a name that doesn't exactly match what's in the database — "JPMC" instead of "JP Morgan Chase", a nickname, a typo, or a common abbreviation — CRMy resolves it automatically before performing any operation.
+
+### How resolution works
+
+Resolution runs through five tiers in order, returning as soon as a confident match is found:
+
+| Tier | Method | Confidence |
+|---|---|---|
+| 1 | Email exact match (contacts) / domain exact match (accounts) | `HIGH` |
+| 2 | Full name exact match (case-insensitive) | `HIGH` |
+| 3 | Alias array exact match | `HIGH` |
+| 4 | ILIKE substring match on name/email/domain/aliases | `MEDIUM` |
+| 5 | pg_trgm trigram similarity fallback (handles typos) | `LOW` |
+
+If a single `MEDIUM` or `HIGH` candidate is found, it is returned as `status: "resolved"`. If multiple candidates survive, `status: "ambiguous"` is returned with the full candidate list for HITL disambiguation.
+
+### Aliases
+
+Both contacts and accounts have an `aliases` field — a string array of known alternate names, abbreviations, and nicknames. These are indexed with a GIN index for fast lookup.
+
+```json
+// Account example
+{
+  "name": "JP Morgan Chase",
+  "domain": "jpmorgan.com",
+  "aliases": ["JPMC", "JPMorgan", "J.P. Morgan"]
+}
+```
+
+Populate aliases when creating or updating a record:
+
+```
+PATCH /api/v1/accounts/:id
+{ "aliases": ["JPMC", "JPMorgan", "J.P. Morgan"] }
+```
+
+Or via MCP:
+
+```
+account_update { id: "...", patch: { aliases: ["JPMC", "JPMorgan"] } }
+```
+
+Aliases are also searched by `contact_search`, `account_search`, and `crm_search`.
+
+### Actor affinity scoring
+
+When multiple candidates are ambiguous, CRMy scores each one by how much the requesting actor has previously interacted with it — across activities, context entries, and assignments. The intuition: agents typically work a fixed book of accounts, so prior history is a strong disambiguation signal.
+
+Affinity is computed as:
+
+```
+score = activities.performed_by count
+      + context_entries.authored_by count
+      + assignments.assigned_to/assigned_by count
+```
+
+If a single candidate has non-zero affinity and no other candidate matches at a higher tier, it is auto-resolved. If multiple HIGH-confidence candidates exist and one has substantially more affinity, it is preferred.
+
+### HITL fallback
+
+When resolution returns `status: "ambiguous"` and actor affinity cannot break the tie, the agent should surface the candidates to a human via `hitl_submit_request` before proceeding. The response includes a `candidates` array with IDs, names, and confidence scores to populate the approval payload.
+
+### `entity_resolve` MCP tool
+
+Always call `entity_resolve` before `contact_get` or `account_get` when you have a name but not a UUID.
+
+**Input:**
+
+| Field | Type | Description |
+|---|---|---|
+| `query` | string (required) | The name, abbreviation, or partial string to resolve |
+| `entity_type` | `contact` \| `account` \| `any` | Limit search to one type (default `any`) |
+| `context_hints` | object | Optional hints: `company_name`, `email_domain`, `title`, `email` |
+| `actor_id` | uuid | Actor whose affinity history to use (defaults to requesting actor) |
+| `limit` | 1–10 | Max candidates to return (default 5) |
+
+**Output:**
+
+```json
+{
+  "status": "resolved",          // "resolved" | "ambiguous" | "not_found"
+  "entity_type": "account",
+  "resolved": {
+    "id": "uuid",
+    "name": "JP Morgan Chase",
+    "confidence": "HIGH",
+    "match_tier": "alias",
+    "affinity_score": 12
+  },
+  "candidates": []               // populated when status = "ambiguous"
+}
+```
+
+### `POST /resolve` REST endpoint
+
+```
+POST /api/v1/resolve
+Authorization: Bearer <key>
+
+{
+  "query": "JPMC",
+  "entity_type": "account",
+  "actor_id": "uuid",
+  "context_hints": { "email_domain": "jpmorgan.com" },
+  "limit": 5
+}
+```
+
+Returns the same shape as the MCP tool output.
+
+### Database
+
+Migration `018_identity_resolution.sql` adds:
+- `pg_trgm` extension
+- `aliases text[]` column on `contacts` and `accounts` (GIN indexed)
+- Trigram indexes on `contacts.first_name`, `contacts.last_name`, `accounts.name`
 
 ---
 
@@ -987,12 +1329,19 @@ crmy activity-types remove partner_call
 
 12 default types (note, transcript, summary, research, preference, objection, competitive_intel, relationship_map, meeting_notes, agent_reasoning, decision, action_item).
 
+Each type has two additional fields that control how it is prioritized in token-budget-aware briefings:
+
+| Field | Description |
+|---|---|
+| `priority_weight` | Multiplier (default 1.0) applied when scoring entries for briefing packing. Higher = surfaces first. |
+| `confidence_half_life_days` | If set, confidence decays as `stored_confidence × 0.5^(age_days / half_life_days)`. `null` means no decay. |
+
 #### MCP tools
 
 | Tool | Description |
 |---|---|
 | `context_type_list` | List all registered context types for the tenant |
-| `context_type_add` | Add a custom type. Required: `name` (snake_case). Optional: `description` |
+| `context_type_add` | Add a custom type. Required: `name` (snake_case). Optional: `description`, `priority_weight`, `confidence_half_life_days` |
 | `context_type_remove` | Remove a custom type by `name` |
 
 #### CLI
@@ -1605,6 +1954,62 @@ export default function myPlugin(options: MyOptions): CrmyPlugin {
 
 ---
 
+## MCP Tools Reference
+
+See [mcp-tools.md](mcp-tools.md) for the original core tool reference. All tools follow the patterns documented in each feature section above.
+
+### MCP connection
+
+**Stdio (Claude Code, Claude Desktop, Cursor, Windsurf):**
+
+```bash
+# Claude Code
+claude mcp add crmy -- npx crmy mcp
+
+# claude_desktop_config.json / .cursor/mcp.json
+{
+  "mcpServers": {
+    "crmy": { "command": "npx", "args": ["@crmy/cli", "mcp"] }
+  }
+}
+```
+
+**HTTP (remote agents):**
+
+```
+POST /mcp
+Authorization: Bearer <jwt-or-api-key>
+Content-Type: application/json
+```
+
+Uses the MCP Streamable HTTP transport. Each request creates a new session.
+
+### Full tool list (80+)
+
+| Category | Tools |
+|---|---|
+| Briefing | `briefing_get` |
+| Context | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_review`, `context_stale` |
+| Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
+| Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
+| HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
+| Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
+| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
+| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_delete` |
+| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete`, `pipeline_summary` |
+| Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
+| Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
+| Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
+| Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
+| Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
+| Emails | `email_create`, `email_get`, `email_search` |
+| Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
+| Identity | `entity_resolve` |
+| Analytics | `crm_search`, `pipeline_forecast`, `account_health_report` |
+| Meta | `schema_get`, `tenant_get_stats` |
+
+---
+
 ## REST API Reference
 
 All endpoints require `Authorization: Bearer <jwt-or-api-key>`.
@@ -1793,58 +2198,12 @@ Base URL: `/api/v1`
 |---|---|---|
 | GET | `/events` | Audit log |
 
-### Search
+### Search & Identity
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/search` | Cross-entity search (requires `q`) |
-
----
-
-## MCP Tools Reference
-
-See [mcp-tools.md](mcp-tools.md) for the original core tool reference. All tools follow the patterns documented in each feature section above.
-
-### MCP connection
-
-**Stdio (Claude Code):**
-
-```bash
-claude mcp add crmy -- npx crmy mcp
-```
-
-**HTTP (remote):**
-
-```
-POST /mcp
-Authorization: Bearer <jwt-or-api-key>
-Content-Type: application/json
-```
-
-Uses the MCP Streamable HTTP transport. Each request creates a new session.
-
-### Full tool list (80+)
-
-| Category | Tools |
-|---|---|
-| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
-| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_delete` |
-| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete`, `pipeline_summary` |
-| Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
-| Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
-| Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
-| Context | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_review`, `context_stale` |
-| Briefing | `briefing_get` |
-| Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
-| Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
-| Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
-| Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
-| Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
-| Emails | `email_create`, `email_get`, `email_search` |
-| Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
-| Analytics | `crm_search`, `pipeline_forecast`, `account_health_report` |
-| HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
-| Meta | `schema_get`, `tenant_get_stats` |
+| POST | `/resolve` | Resolve a name/abbreviation to a contact or account UUID. Body: `{ query, entity_type?, actor_id?, context_hints?, limit? }` |
 
 ---
 

@@ -12,8 +12,8 @@ export async function createContact(
   const result = await db.query(
     `INSERT INTO contacts (tenant_id, first_name, last_name, email, phone,
        title, company_name, account_id, owner_id, lifecycle_stage,
-       source, tags, custom_fields, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       source, aliases, tags, custom_fields, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
      RETURNING *`,
     [
       tenantId,
@@ -27,6 +27,7 @@ export async function createContact(
       data.owner_id ?? data.created_by ?? null,
       data.lifecycle_stage ?? 'lead',
       data.source ?? null,
+      data.aliases ?? [],
       data.tags ?? [],
       JSON.stringify(data.custom_fields ?? {}),
       data.created_by ?? null,
@@ -62,7 +63,8 @@ export async function searchContacts(
 
   if (filters.query) {
     conditions.push(
-      `(c.first_name ILIKE $${idx} OR c.last_name ILIKE $${idx} OR c.email ILIKE $${idx} OR c.company_name ILIKE $${idx})`,
+      `(c.first_name ILIKE $${idx} OR c.last_name ILIKE $${idx} OR c.email ILIKE $${idx} OR c.company_name ILIKE $${idx}` +
+      ` OR EXISTS (SELECT 1 FROM unnest(c.aliases) _a WHERE _a ILIKE $${idx}))`,
     );
     params.push(`%${filters.query}%`);
     idx++;
@@ -125,7 +127,7 @@ export async function updateContact(
 ): Promise<Contact | null> {
   const allowedFields = [
     'first_name', 'last_name', 'email', 'phone', 'title', 'company_name',
-    'account_id', 'owner_id', 'lifecycle_stage', 'source', 'tags', 'custom_fields',
+    'account_id', 'owner_id', 'lifecycle_stage', 'source', 'aliases', 'tags', 'custom_fields',
   ];
 
   const sets: string[] = ['updated_at = now()'];

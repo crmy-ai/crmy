@@ -13,6 +13,9 @@ export const ENTITY_COLORS = {
   opportunities: { text: 'text-accent',       bg: 'bg-accent/15',     bar: 'bg-accent' },
   useCases:      { text: 'text-success',      bg: 'bg-success/15',    bar: 'bg-success' },
   activities:    { text: 'text-warning',      bg: 'bg-warning/15',    bar: 'bg-warning' },
-  assignments:   { text: 'text-destructive',  bg: 'bg-destructive/15',bar: 'bg-destructive' },
-  inbox:         { text: 'text-destructive',  bg: 'bg-destructive/15',bar: 'bg-destructive' },
+  assignments:   { text: 'text-destructive',  bg: 'bg-destructive/15', bar: 'bg-destructive' },
+  inbox:         { text: 'text-destructive',  bg: 'bg-destructive/15', bar: 'bg-destructive' },
+  hitl:          { text: 'text-destructive',  bg: 'bg-destructive/15', bar: 'bg-destructive' },
+  agents:        { text: 'text-[#6366f1]',   bg: 'bg-[#6366f1]/15',  bar: 'bg-[#6366f1]' },
+  context:       { text: 'text-[#0ea5e9]',   bg: 'bg-[#0ea5e9]/15',  bar: 'bg-[#0ea5e9]' },
 } as const;
