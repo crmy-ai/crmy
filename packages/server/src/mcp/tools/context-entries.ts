@@ -9,11 +9,43 @@ import {
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext, SubjectType } from '@crmy/shared';
 import * as contextRepo from '../../db/repos/context-entries.js';
+import * as contextTypeRepo from '../../db/repos/context-type-registry.js';
 import * as governorLimits from '../../db/repos/governor-limits.js';
 import { assembleBriefing, formatBriefingText } from '../../services/briefing.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, validationError } from '@crmy/shared';
+import { extractContextFromActivity } from '../../agent/extraction.js';
 import type { ToolDef } from '../server.js';
+
+/**
+ * Soft-validate structured_data against a JSON Schema.
+ * Returns a list of warning strings (missing required fields).
+ * Does not throw — agents get warnings, not errors, so they can iterate.
+ */
+function validateAgainstSchema(
+  data: Record<string, unknown>,
+  schema: Record<string, unknown>,
+): string[] {
+  const warnings: string[] = [];
+  const props = schema.properties as Record<string, unknown> | undefined;
+  const required = schema.required as string[] | undefined;
+
+  if (!props || !required) return warnings;
+
+  for (const field of required) {
+    if (data[field] === undefined || data[field] === null || data[field] === '') {
+      warnings.push(`structured_data is missing required field '${field}'`);
+    }
+  }
+
+  for (const [key] of Object.entries(data)) {
+    if (!props[key]) {
+      warnings.push(`structured_data contains unknown field '${key}' (not in schema)`);
+    }
+  }
+
+  return warnings;
+}
 
 export function contextEntryTools(db: DbPool): ToolDef[] {
   return [
@@ -47,7 +79,17 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           objectId: entry.id,
           afterData: entry,
         });
-        return { context_entry: entry, event_id };
+
+        // Soft-validate structured_data against the context type's JSON Schema
+        const schema = await contextTypeRepo.getContextTypeSchema(db, input.context_type);
+        const validation_warnings = schema && input.structured_data
+          ? validateAgainstSchema(input.structured_data as Record<string, unknown>, schema)
+          : [];
+        return {
+          context_entry: entry,
+          event_id,
+          ...(validation_warnings.length > 0 ? { validation_warnings } : {}),
+        };
       },
     },
     {
@@ -144,6 +186,15 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           limit: input.limit,
         });
         return { stale_entries: entries, total: entries.length };
+      },
+    },
+    {
+      name: 'context_extract',
+      description: 'Re-run the automatic context extraction pipeline on a specific activity. Useful for backfilling entries on older activities or retrying after an error. Returns the number of context entries created.',
+      inputSchema: z.object({ activity_id: z.string().uuid().describe('ID of the activity to extract context from') }),
+      handler: async (input: { activity_id: string }, actor: ActorContext) => {
+        const count = await extractContextFromActivity(db, actor.tenant_id, input.activity_id);
+        return { extracted_count: count };
       },
     },
     {

@@ -16,6 +16,7 @@ import { agentRouter } from './agent/routes.js';
 import { createMcpServer } from './mcp/server.js';
 import { autoApproveExpired, expireOldRequests } from './db/repos/hitl.js';
 import { cleanExpiredSessions } from './db/repos/agent.js';
+import { processPendingExtractions } from './agent/extraction.js';
 import { loadPlugins, shutdownPlugins, type PluginConfig } from './plugins/index.js';
 import type { ActorContext } from '@crmy/shared';
 
@@ -175,6 +176,7 @@ export async function createApp(config: ServerConfig) {
       await autoApproveExpired(db);
       await expireOldRequests(db);
       await cleanExpiredSessions(db);
+      await processPendingExtractions(db);
     } catch (err) {
       console.error('Background worker error:', err);
     }

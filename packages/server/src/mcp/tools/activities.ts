@@ -10,6 +10,7 @@ import * as governorLimits from '../../db/repos/governor-limits.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
+import { triggerExtraction } from '../../agent/extraction.js';
 import type { ToolDef } from '../server.js';
 
 export function activityTools(db: DbPool): ToolDef[] {
@@ -40,6 +41,12 @@ export function activityTools(db: DbPool): ToolDef[] {
           objectId: activity.id,
           afterData: activity,
         });
+
+        // Fire-and-forget extraction — does not affect the response
+        triggerExtraction(db, actor.tenant_id, activity.id).catch(err =>
+          console.error('[extraction] trigger failed:', err),
+        );
+
         return { activity, event_id };
       },
     },
@@ -86,6 +93,10 @@ export function activityTools(db: DbPool): ToolDef[] {
           await activityRepo.updateActivity(db, actor.tenant_id, input.id, {
             body: before.body ? `${before.body}\n\n---\n${input.note}` : input.note,
           });
+          // Re-extract now that body has changed
+          triggerExtraction(db, actor.tenant_id, input.id).catch(err =>
+            console.error('[extraction] trigger on complete failed:', err),
+          );
         }
 
         const event_id = await emitEvent(db, {
@@ -114,6 +125,13 @@ export function activityTools(db: DbPool): ToolDef[] {
         }
         const activity = await activityRepo.updateActivity(db, actor.tenant_id, input.id, input.patch);
         if (!activity) throw notFound('Activity', input.id);
+
+        // Re-extract if body content changed
+        if (input.patch.body != null) {
+          triggerExtraction(db, actor.tenant_id, input.id).catch(err =>
+            console.error('[extraction] trigger on update failed:', err),
+          );
+        }
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
