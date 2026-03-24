@@ -104,6 +104,7 @@ export async function fullTextSearch(
     tag?: string;
     current_only?: boolean;
     limit?: number;
+    structured_data_filter?: Record<string, unknown>;
   },
 ): Promise<ContextEntry[]> {
   const conditions: string[] = [
@@ -137,6 +138,11 @@ export async function fullTextSearch(
     params.push(JSON.stringify([filters.tag]));
     idx++;
   }
+  if (filters?.structured_data_filter) {
+    conditions.push(`c.structured_data @> $${idx}::jsonb`);
+    params.push(JSON.stringify(filters.structured_data_filter));
+    idx++;
+  }
 
   const lim = filters?.limit ?? 20;
   params.push(lim);
@@ -148,6 +154,44 @@ export async function fullTextSearch(
      FROM context_entries c
      WHERE ${where}
      ORDER BY rank DESC
+     LIMIT $${idx}`,
+    params,
+  );
+  return result.rows as ContextEntry[];
+}
+
+/**
+ * Get all current context for a list of CRM subjects in one query.
+ * Used by the briefing service when context_radius is 'adjacent' or 'account_wide'.
+ * Returns entries tagged with their origin subject_type and subject_id (already on ContextEntry).
+ */
+export async function getContextForSubjectList(
+  db: DbPool,
+  tenantId: UUID,
+  subjects: Array<{ subject_type: string; subject_id: UUID }>,
+  filters?: { current_only?: boolean; limit?: number },
+): Promise<ContextEntry[]> {
+  if (subjects.length === 0) return [];
+
+  const subjectIds = subjects.map(s => s.subject_id);
+  const conditions: string[] = [
+    'tenant_id = $1',
+    `subject_id = ANY($2::uuid[])`,
+  ];
+  const params: unknown[] = [tenantId, subjectIds];
+  let idx = 3;
+
+  if (filters?.current_only !== false) {
+    conditions.push('is_current = true');
+  }
+
+  const lim = filters?.limit ?? 500;
+  params.push(lim);
+
+  const result = await db.query(
+    `SELECT * FROM context_entries
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY created_at DESC
      LIMIT $${idx}`,
     params,
   );
@@ -278,6 +322,7 @@ export async function searchContextEntries(
     is_current?: boolean;
     tag?: string;
     query?: string;
+    structured_data_filter?: Record<string, unknown>;
     limit: number;
     cursor?: string;
   },
@@ -319,6 +364,11 @@ export async function searchContextEntries(
   if (filters.query) {
     conditions.push(`(c.title ILIKE $${idx} OR c.body ILIKE $${idx})`);
     params.push(`%${filters.query}%`);
+    idx++;
+  }
+  if (filters.structured_data_filter) {
+    conditions.push(`c.structured_data @> $${idx}::jsonb`);
+    params.push(JSON.stringify(filters.structured_data_filter));
     idx++;
   }
   if (filters.cursor) {

@@ -531,6 +531,10 @@ export interface ContextTypeRegistryEntry {
   label: string;
   description?: string;
   is_default: boolean;
+  /** Multiplier applied to effective_confidence when ranking entries in briefings. */
+  priority_weight: number;
+  /** Half-life in days for confidence decay. null = no decay. */
+  confidence_half_life_days: number | null;
   created_at: string;
 }
 
@@ -568,6 +572,12 @@ export const GOVERNOR_DEFAULTS: Record<string, Record<string, number>> = {
 
 // -- Briefing types --
 
+export interface AdjacentContext {
+  subject_type: SubjectType;
+  subject_id: UUID;
+  context_entries: Record<string, ContextEntry[]>;
+}
+
 export interface Briefing {
   subject: Record<string, unknown>;
   subject_type: SubjectType;
@@ -576,4 +586,10 @@ export interface Briefing {
   open_assignments: Assignment[];
   context_entries: Record<string, ContextEntry[]>;
   staleness_warnings: ContextEntry[];
+  /** Context from related entities (populated when context_radius !== 'direct'). */
+  adjacent_context?: AdjacentContext[];
+  /** Estimated token count for this briefing (populated when token_budget is set). */
+  token_estimate?: number;
+  /** True if context entries were truncated to fit within token_budget. */
+  truncated?: boolean;
 }

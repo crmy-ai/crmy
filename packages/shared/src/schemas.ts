@@ -681,6 +681,20 @@ export const briefingGet = z.object({
   context_types: z.array(z.string()).optional(),
   include_stale: z.boolean().default(false),
   format: z.enum(['json', 'text']).default('json'),
+  /**
+   * How far to reach into the CRM entity graph when pulling context:
+   *   'direct'       — only the subject's own context (default)
+   *   'adjacent'     — subject + directly related entities (e.g. account + opportunities for a contact)
+   *   'account_wide' — subject + all entities under the same account hierarchy
+   */
+  context_radius: z.enum(['direct', 'adjacent', 'account_wide']).default('direct'),
+  /**
+   * Maximum tokens to budget for context entries.
+   * When set, entries are ranked by priority score (confidence × recency × type weight)
+   * and packed within the budget. The response includes token_estimate and truncated flag.
+   * Estimated at ~4 chars/token (body + title + overhead per entry).
+   */
+  token_budget: z.number().int().min(100).optional(),
 });
 
 // -- Context search (full-text) schema --
@@ -693,6 +707,12 @@ export const contextSearch = z.object({
   tag: z.string().optional(),
   current_only: z.boolean().default(true),
   limit: z.number().int().min(1).max(100).default(20),
+  /**
+   * Partial JSONB match against structured_data (PostgreSQL @> operator).
+   * Example: { "status": "open" } matches all entries where structured_data contains status=open.
+   * Combine with context_type to query e.g. all open objections, high-severity deal risks, etc.
+   */
+  structured_data_filter: z.record(z.unknown()).optional(),
 });
 
 // -- Context review schema --
@@ -841,6 +861,8 @@ export const contextEntrySearch = z.object({
   authored_by: uuid.optional(),
   is_current: z.boolean().optional(),
   query: z.string().optional(),
+  /** Partial JSONB match against structured_data. Example: { "severity": "critical" } */
+  structured_data_filter: z.record(z.unknown()).optional(),
   limit,
   cursor,
 });

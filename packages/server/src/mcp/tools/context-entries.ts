@@ -104,11 +104,12 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_list',
-      description: 'List context entries with filters. Supports subject_type, subject_id, context_type, authored_by, is_current, query.',
+      description: 'List context entries with filters. Supports subject_type, subject_id, context_type, authored_by, is_current, query, and structured_data_filter for typed queries (e.g. { "status": "open" } on objections).',
       inputSchema: contextEntrySearch,
       handler: async (input: z.infer<typeof contextEntrySearch>, actor: ActorContext) => {
         const result = await contextRepo.searchContextEntries(db, actor.tenant_id, {
           ...input,
+          structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
           limit: input.limit ?? 20,
         });
         return { context_entries: result.data, next_cursor: result.next_cursor, total: result.total };
@@ -151,7 +152,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_search',
-      description: 'Full-text search across context entries using PostgreSQL GIN index. Returns results ranked by relevance.',
+      description: 'Full-text search across context entries using PostgreSQL GIN index. Returns results ranked by relevance. Supports structured_data_filter for typed queries (e.g. find all open objections, critical deal risks).',
       inputSchema: contextSearch,
       handler: async (input: z.infer<typeof contextSearch>, actor: ActorContext) => {
         const entries = await contextRepo.fullTextSearch(db, actor.tenant_id, input.query, {
@@ -161,6 +162,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           tag: input.tag,
           current_only: input.current_only,
           limit: input.limit,
+          structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
         });
         return { context_entries: entries, total: entries.length };
       },
@@ -199,7 +201,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'briefing_get',
-      description: 'Get a unified briefing for any CRM object — assembles the object record, related objects, activity timeline, open assignments, context entries, and staleness warnings in one call. This is the most important context engine tool.',
+      description: 'Get a unified briefing for any CRM object — assembles the object record, related objects, activity timeline, open assignments, context entries, and staleness warnings in one call. Use context_radius to pull context from related entities. Use token_budget to get a priority-ranked, budget-constrained context pack. This is the most important context engine tool.',
       inputSchema: briefingGet,
       handler: async (input: z.infer<typeof briefingGet>, actor: ActorContext) => {
         const briefing = await assembleBriefing(
@@ -211,6 +213,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             since: input.since,
             context_types: input.context_types,
             include_stale: input.include_stale,
+            context_radius: input.context_radius,
+            token_budget: input.token_budget,
           },
         );
 
