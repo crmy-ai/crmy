@@ -23,14 +23,16 @@ export async function crmSearch(
     db.query(
       `SELECT * FROM contacts
        WHERE tenant_id = $1
-         AND (first_name ILIKE $2 OR last_name ILIKE $2 OR email ILIKE $2 OR company_name ILIKE $2)
+         AND (first_name ILIKE $2 OR last_name ILIKE $2 OR email ILIKE $2 OR company_name ILIKE $2
+              OR EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE _a ILIKE $2))
        ORDER BY updated_at DESC LIMIT $3`,
       [tenantId, pattern, limit],
     ),
     db.query(
       `SELECT * FROM accounts
        WHERE tenant_id = $1
-         AND (name ILIKE $2 OR domain ILIKE $2)
+         AND (name ILIKE $2 OR domain ILIKE $2
+              OR EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE _a ILIKE $2))
        ORDER BY updated_at DESC LIMIT $3`,
       [tenantId, pattern, limit],
     ),

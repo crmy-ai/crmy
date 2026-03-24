@@ -37,6 +37,7 @@ export interface Contact {
   owner_id?: UUID;
   lifecycle_stage: 'lead' | 'prospect' | 'customer' | 'churned';
   source?: string;
+  aliases: string[];
   tags: string[];
   custom_fields: Record<string, unknown>;
   created_by?: UUID;
@@ -57,6 +58,7 @@ export interface Account {
   parent_id?: UUID;
   owner_id?: UUID;
   health_score?: number;
+  aliases: string[];
   tags: string[];
   custom_fields: Record<string, unknown>;
   created_by?: UUID;
