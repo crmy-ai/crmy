@@ -22,6 +22,7 @@ import { emitEvent } from '../events/emitter.js';
 import { getAllTools } from '../mcp/server.js';
 import { enforceToolScopes, requireScopes } from '../auth/scopes.js';
 import * as governorLimits from '../db/repos/governor-limits.js';
+import { getSpec } from '../openapi/spec.js';
 
 function getActor(req: Request): ActorContext {
   return req.actor!;
@@ -70,6 +71,11 @@ function toolHandler(db: DbPool, toolName: string) {
 
 export function apiRouter(db: DbPool): Router {
   const router = Router();
+
+  // --- OpenAPI spec (no auth required) ---
+  router.get('/openapi.json', (_req, res) => {
+    res.json(getSpec());
+  });
 
   // --- Contacts ---
   router.get('/contacts', async (req: Request, res: Response) => {

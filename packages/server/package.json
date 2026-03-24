@@ -1,7 +1,7 @@
 {
   "name": "@crmy/server",
   "version": "0.5.10",
-  "description": "CRMy server — Express + PostgreSQL + MCP endpoint",
+  "description": "CRMy server \u2014 Express + PostgreSQL + MCP endpoint",
   "type": "module",
   "files": [
     "dist",
@@ -14,9 +14,11 @@
     "build": "tsc -b && node scripts/copy-web.cjs",
     "prepare": "npm run build",
     "dev": "tsx watch --env-file=.env src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "generate:openapi": "tsx scripts/generate-openapi.ts"
   },
   "dependencies": {
+    "@asteasolutions/zod-to-openapi": "^7.0.0",
     "@crmy/shared": "*",
     "@modelcontextprotocol/sdk": "^1.27.0",
     "express": "^4.21.0",
