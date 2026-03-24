@@ -572,6 +572,53 @@ export const GOVERNOR_DEFAULTS: Record<string, Record<string, number>> = {
 
 // -- Briefing types --
 
+/**
+ * Catch-up diff for a CRM subject — what changed since a given timestamp.
+ * Used by the context_diff tool to give agents a quick "what's new" summary
+ * without re-reading all context entries.
+ */
+export interface ContextDiff {
+  subject_type: SubjectType;
+  subject_id: UUID;
+  since: string;
+  /** Context entries created for the first time in this window. */
+  new_entries: ContextEntry[];
+  /** Entries that were replaced (superseded) in this window. The old entry is returned. */
+  superseded_entries: ContextEntry[];
+  /** Entries whose valid_until fell within this window (freshly stale). */
+  newly_stale: ContextEntry[];
+  /** Entries that were explicitly reviewed/confirmed in this window. */
+  resolved_entries: ContextEntry[];
+}
+
+/**
+ * Result row for actor expertise queries.
+ */
+export interface ActorExpertiseSubject {
+  subject_type: SubjectType;
+  subject_id: UUID;
+  entry_count: number;
+  last_authored_at: string;
+  context_types: string[];
+}
+
+export interface ActorExpertiseResult {
+  actor_id: UUID;
+  total_entries: number;
+  subjects: ActorExpertiseSubject[];
+  top_context_types: Array<{ context_type: string; count: number }>;
+}
+
+export interface SubjectExpertResult {
+  subject_type: SubjectType;
+  subject_id: UUID;
+  experts: Array<{
+    actor_id: UUID;
+    entry_count: number;
+    last_authored_at: string;
+  }>;
+}
+
 export interface AdjacentContext {
   subject_type: SubjectType;
   subject_id: UUID;

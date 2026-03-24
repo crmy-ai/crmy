@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from 'zod';
-import { actorCreate, actorGet, actorSearch, actorUpdate } from '@crmy/shared';
+import { actorCreate, actorGet, actorSearch, actorUpdate, actorExpertise } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as actorRepo from '../../db/repos/actors.js';
 import * as governorLimits from '../../db/repos/governor-limits.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound } from '@crmy/shared';
+import { notFound, validationError } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
 
 export function actorTools(db: DbPool): ToolDef[] {
@@ -92,6 +92,78 @@ export function actorTools(db: DbPool): ToolDef[] {
           actor_type: actor.actor_type,
           role: actor.role,
         };
+      },
+    },
+    {
+      name: 'actor_expertise',
+      description: `Query actor knowledge contributions. Two modes:
+• actor_id only — returns the subjects this actor has contributed context to, ordered by contribution count. Useful for understanding who knows what and routing reviews to the right person.
+• subject_type + subject_id — returns the actors who have contributed the most context about a given CRM entity. Useful for finding the best person to ask about an account or opportunity.
+At least one of actor_id or (subject_type + subject_id) must be provided.`,
+      inputSchema: actorExpertise,
+      handler: async (input: z.infer<typeof actorExpertise>, actor: ActorContext) => {
+        if (!input.actor_id && !(input.subject_type && input.subject_id)) {
+          throw validationError('Provide either actor_id or both subject_type and subject_id');
+        }
+
+        if (input.actor_id) {
+          // Mode 1: what subjects does this actor know about?
+          const subjectsResult = await db.query(
+            `SELECT subject_type, subject_id,
+                    count(*)::int AS entry_count,
+                    max(created_at) AS last_authored_at,
+                    array_agg(DISTINCT context_type) AS context_types
+             FROM context_entries
+             WHERE tenant_id = $1 AND authored_by = $2 AND is_current = true
+             GROUP BY subject_type, subject_id
+             ORDER BY entry_count DESC, last_authored_at DESC
+             LIMIT $3`,
+            [actor.tenant_id, input.actor_id, input.limit],
+          );
+
+          const typesResult = await db.query(
+            `SELECT context_type, count(*)::int AS count
+             FROM context_entries
+             WHERE tenant_id = $1 AND authored_by = $2 AND is_current = true
+             GROUP BY context_type
+             ORDER BY count DESC
+             LIMIT 10`,
+            [actor.tenant_id, input.actor_id],
+          );
+
+          const totalResult = await db.query(
+            `SELECT count(*)::int AS total FROM context_entries
+             WHERE tenant_id = $1 AND authored_by = $2 AND is_current = true`,
+            [actor.tenant_id, input.actor_id],
+          );
+
+          return {
+            mode: 'by_actor',
+            actor_id: input.actor_id,
+            total_entries: totalResult.rows[0].total,
+            subjects: subjectsResult.rows,
+            top_context_types: typesResult.rows,
+          };
+        } else {
+          // Mode 2: who knows the most about this subject?
+          const expertsResult = await db.query(
+            `SELECT authored_by AS actor_id, count(*)::int AS entry_count,
+                    max(created_at) AS last_authored_at
+             FROM context_entries
+             WHERE tenant_id = $1 AND subject_type = $2 AND subject_id = $3 AND is_current = true
+             GROUP BY authored_by
+             ORDER BY entry_count DESC, last_authored_at DESC
+             LIMIT $4`,
+            [actor.tenant_id, input.subject_type, input.subject_id, input.limit],
+          );
+
+          return {
+            mode: 'by_subject',
+            subject_type: input.subject_type,
+            subject_id: input.subject_id,
+            experts: expertsResult.rows,
+          };
+        }
       },
     },
   ];

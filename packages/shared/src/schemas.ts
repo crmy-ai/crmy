@@ -882,3 +882,39 @@ export const activityGetTimeline = z.object({
   limit: limit.default(50),
   types: z.array(activityType).optional(),
 });
+
+// -- Priority 5-8 schemas --
+
+/** context_diff — catch-up briefing showing what changed since a given timestamp */
+export const contextDiff = z.object({
+  subject_type: subjectType,
+  subject_id: uuid,
+  /** Relative ("7d", "24h", "30m") or ISO timestamp */
+  since: z.string(),
+});
+
+/**
+ * actor_expertise — query actor knowledge contributions.
+ * Provide actor_id to see what subjects an actor knows about.
+ * Provide subject_type + subject_id to see which actors know most about a subject.
+ * At least one must be provided.
+ */
+export const actorExpertise = z.object({
+  actor_id: uuid.optional(),
+  subject_type: subjectType.optional(),
+  subject_id: uuid.optional(),
+  limit: z.number().int().min(1).max(50).default(10),
+});
+
+/**
+ * context_ingest — ingest a raw document (transcript, email, notes) and auto-extract context.
+ * Creates an activity from the document and runs the full extraction pipeline.
+ * Returns all context entries that were extracted.
+ */
+export const contextIngest = z.object({
+  subject_type: subjectType,
+  subject_id: uuid,
+  document: z.string().min(1).max(100000),
+  /** Short description of the document (appears as the activity subject) */
+  source_label: z.string().optional(),
+});

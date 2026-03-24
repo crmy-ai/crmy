@@ -51,7 +51,13 @@ export async function getContextForSubject(
   tenantId: UUID,
   subjectType: string,
   subjectId: UUID,
-  filters?: { context_type?: string; tag?: string; current_only?: boolean; limit?: number },
+  filters?: {
+    context_type?: string;
+    tag?: string;
+    current_only?: boolean;
+    limit?: number;
+    source_activity_id?: UUID;
+  },
 ): Promise<ContextEntry[]> {
   const conditions: string[] = [
     'tenant_id = $1',
@@ -77,6 +83,12 @@ export async function getContextForSubject(
     idx++;
   }
 
+  if (filters?.source_activity_id) {
+    conditions.push(`source_activity_id = $${idx}`);
+    params.push(filters.source_activity_id);
+    idx++;
+  }
+
   const lim = filters?.limit ?? 50;
   params.push(lim);
 
@@ -88,6 +100,89 @@ export async function getContextForSubject(
     params,
   );
   return result.rows as ContextEntry[];
+}
+
+/**
+ * Fetch all context entries created by a specific activity (via source_activity_id).
+ * Used by context_ingest to return extracted entries after running the pipeline.
+ */
+export async function getContextByActivityId(
+  db: DbPool,
+  tenantId: UUID,
+  activityId: UUID,
+): Promise<ContextEntry[]> {
+  const result = await db.query(
+    `SELECT * FROM context_entries
+     WHERE tenant_id = $1 AND source_activity_id = $2 AND is_current = true
+     ORDER BY created_at ASC`,
+    [tenantId, activityId],
+  );
+  return result.rows as ContextEntry[];
+}
+
+/**
+ * Compute a context diff for a subject since a given timestamp.
+ * Returns new entries, superseded entries, freshly stale entries, and reviewed entries.
+ */
+export async function diffContextEntries(
+  db: DbPool,
+  tenantId: UUID,
+  subjectType: string,
+  subjectId: UUID,
+  since: string,
+): Promise<{
+  new_entries: ContextEntry[];
+  superseded_entries: ContextEntry[];
+  newly_stale: ContextEntry[];
+  resolved_entries: ContextEntry[];
+}> {
+  const base = [tenantId, subjectType, subjectId, since];
+
+  // New entries: created in the window and currently active
+  const newResult = await db.query(
+    `SELECT * FROM context_entries
+     WHERE tenant_id = $1 AND subject_type = $2 AND subject_id = $3
+       AND created_at >= $4 AND is_current = true
+       AND supersedes_id IS NULL
+     ORDER BY created_at DESC`,
+    base,
+  );
+
+  // Superseded: entries that WERE replaced in this window (the old, now-inactive entry)
+  const supersededResult = await db.query(
+    `SELECT old.* FROM context_entries old
+     JOIN context_entries replacement ON old.id = replacement.supersedes_id
+     WHERE old.tenant_id = $1 AND old.subject_type = $2 AND old.subject_id = $3
+       AND replacement.created_at >= $4
+     ORDER BY replacement.created_at DESC`,
+    base,
+  );
+
+  // Newly stale: valid_until fell within the window
+  const staleResult = await db.query(
+    `SELECT * FROM context_entries
+     WHERE tenant_id = $1 AND subject_type = $2 AND subject_id = $3
+       AND valid_until >= $4 AND valid_until < now()
+       AND is_current = true
+     ORDER BY valid_until ASC`,
+    base,
+  );
+
+  // Resolved: reviewed_at set within the window
+  const resolvedResult = await db.query(
+    `SELECT * FROM context_entries
+     WHERE tenant_id = $1 AND subject_type = $2 AND subject_id = $3
+       AND reviewed_at >= $4
+     ORDER BY reviewed_at DESC`,
+    base,
+  );
+
+  return {
+    new_entries: newResult.rows as ContextEntry[],
+    superseded_entries: supersededResult.rows as ContextEntry[],
+    newly_stale: staleResult.rows as ContextEntry[],
+    resolved_entries: resolvedResult.rows as ContextEntry[],
+  };
 }
 
 /**

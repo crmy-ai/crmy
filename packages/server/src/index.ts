@@ -18,6 +18,7 @@ import { mcpSessions, registerMcpSession, removeMcpSession } from './mcp/session
 import { autoApproveExpired, expireOldRequests } from './db/repos/hitl.js';
 import { cleanExpiredSessions } from './db/repos/agent.js';
 import { processPendingExtractions } from './agent/extraction.js';
+import { processStaleEntries } from './services/staleness.js';
 import { loadPlugins, shutdownPlugins, type PluginConfig } from './plugins/index.js';
 import type { ActorContext } from '@crmy/shared';
 
@@ -198,6 +199,7 @@ export async function createApp(config: ServerConfig) {
       await expireOldRequests(db);
       await cleanExpiredSessions(db);
       await processPendingExtractions(db);
+      await processStaleEntries(db);
     } catch (err) {
       console.error('Background worker error:', err);
     }
