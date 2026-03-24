@@ -31,8 +31,8 @@ Complete documentation for CRMy — the agent-first open source CRM.
 23. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
 24. [Analytics & Reporting](#analytics--reporting)
 25. [Plugins](#plugins)
-26. [REST API Reference](#rest-api-reference)
-27. [MCP Tools Reference](#mcp-tools-reference)
+26. [MCP Tools Reference](#mcp-tools-reference)
+27. [REST API Reference](#rest-api-reference)
 28. [Database & Migrations](#database--migrations)
 
 ---
@@ -62,7 +62,7 @@ npx crmy init
 # 1. Initialize (interactive — sets up DB, user, API key)
 npx crmy init
 
-# 2. Start the server (REST API + Web UI at /app)
+# 2. Start the server (REST API + MCP + Web UI at /app)
 npx crmy server
 
 # 3. Add to Claude Code as an MCP server
@@ -265,7 +265,26 @@ See the [Scope Enforcement](#scope-enforcement) section for the complete referen
 
 #### Agent Self-Registration
 
-Agents can register themselves without admin intervention via:
+Agents can register themselves without admin intervention.
+
+Via MCP:
+
+```
+actor_register {
+  display_name: "Outreach Agent",
+  agent_identifier: "outreach-pipeline-v2",
+  agent_model: "claude-sonnet-4-20250514",
+  scopes: ["contacts:read", "activities:write"]
+}
+```
+
+Via CLI:
+
+```bash
+crmy actors register
+```
+
+Via REST API:
 
 ```
 POST /auth/register-agent
@@ -659,6 +678,14 @@ The `activity_type` field accepts any string — agents can use custom types wit
 | `activity_complete` | Mark as completed with optional timestamp and note |
 | `activity_update` | Patch `subject`, `body`, `status`, `due_at` |
 | `activity_get_timeline` | Get timeline for any subject object |
+
+### CLI
+
+```bash
+crmy activities list --contact <id>
+crmy activities create          # interactive
+crmy activities get <id>
+```
 
 ### REST API
 
@@ -1605,6 +1632,61 @@ export default function myPlugin(options: MyOptions): CrmyPlugin {
 
 ---
 
+## MCP Tools Reference
+
+See [mcp-tools.md](mcp-tools.md) for the original core tool reference. All tools follow the patterns documented in each feature section above.
+
+### MCP connection
+
+**Stdio (Claude Code, Claude Desktop, Cursor, Windsurf):**
+
+```bash
+# Claude Code
+claude mcp add crmy -- npx crmy mcp
+
+# claude_desktop_config.json / .cursor/mcp.json
+{
+  "mcpServers": {
+    "crmy": { "command": "npx", "args": ["@crmy/cli", "mcp"] }
+  }
+}
+```
+
+**HTTP (remote agents):**
+
+```
+POST /mcp
+Authorization: Bearer <jwt-or-api-key>
+Content-Type: application/json
+```
+
+Uses the MCP Streamable HTTP transport. Each request creates a new session.
+
+### Full tool list (80+)
+
+| Category | Tools |
+|---|---|
+| Briefing | `briefing_get` |
+| Context | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_review`, `context_stale` |
+| Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
+| Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
+| HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
+| Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
+| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
+| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_delete` |
+| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete`, `pipeline_summary` |
+| Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
+| Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
+| Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
+| Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
+| Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
+| Emails | `email_create`, `email_get`, `email_search` |
+| Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
+| Analytics | `crm_search`, `pipeline_forecast`, `account_health_report` |
+| Meta | `schema_get`, `tenant_get_stats` |
+
+---
+
 ## REST API Reference
 
 All endpoints require `Authorization: Bearer <jwt-or-api-key>`.
@@ -1798,53 +1880,6 @@ Base URL: `/api/v1`
 | Method | Path | Description |
 |---|---|---|
 | GET | `/search` | Cross-entity search (requires `q`) |
-
----
-
-## MCP Tools Reference
-
-See [mcp-tools.md](mcp-tools.md) for the original core tool reference. All tools follow the patterns documented in each feature section above.
-
-### MCP connection
-
-**Stdio (Claude Code):**
-
-```bash
-claude mcp add crmy -- npx crmy mcp
-```
-
-**HTTP (remote):**
-
-```
-POST /mcp
-Authorization: Bearer <jwt-or-api-key>
-Content-Type: application/json
-```
-
-Uses the MCP Streamable HTTP transport. Each request creates a new session.
-
-### Full tool list (80+)
-
-| Category | Tools |
-|---|---|
-| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
-| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_delete` |
-| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete`, `pipeline_summary` |
-| Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
-| Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
-| Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
-| Context | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_review`, `context_stale` |
-| Briefing | `briefing_get` |
-| Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
-| Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
-| Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
-| Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
-| Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
-| Emails | `email_create`, `email_get`, `email_search` |
-| Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
-| Analytics | `crm_search`, `pipeline_forecast`, `account_health_report` |
-| HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
-| Meta | `schema_get`, `tenant_get_stats` |
 
 ---
 
