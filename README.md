@@ -1,108 +1,159 @@
 # CRMy
 
-An agent-first open source CRM with a built-in Context Engine for agent-human GTM coordination. MCP-native. Works with any PostgreSQL.
+The context backend for sales agents. Deploy CRMy alongside your AI agent to give it typed, versioned memory about every contact, account, and deal — and a single `briefing_get` call that assembles everything it needs before each action.
+
+MCP-native. PostgreSQL-backed. Open source.
 
 ---
 
-## Before you start
+## The problem
 
-You need two things installed on your machine before setting up CRMy:
+Your agent takes an action — sends an email, advances a deal, books a follow-up call. Before it acts, it needs to know:
 
-### 1. Node.js (version 20 or newer)
+- Who is this contact? What's their lifecycle stage?
+- What happened last week? Last quarter?
+- What did prior agent turns learn about this account?
+- Are there open assignments on this contact right now?
+- What context is stale and might be wrong?
 
-Check if you have it:
-```bash
-node --version
+Assembling that from raw queries is 5–10 API calls, schema knowledge, and brittle glue code. CRMy's `briefing_get` returns it in one:
+
+```json
+GET /api/v1/briefing/contact/{id}
+
+{
+  "record": { "first_name": "Sarah", "lifecycle_stage": "prospect", ... },
+  "related": { "account": { "name": "Acme Corp", "health_score": 72, ... } },
+  "activities": [ ... ],
+  "open_assignments": [ ... ],
+  "context": {
+    "objection": [{ "body": "Concerned about procurement timeline", "confidence": 0.9, ... }],
+    "competitive_intel": [ ... ],
+    "transcript": [ ... ]
+  },
+  "stale_warnings": [{ "context_type": "research", "valid_until": "2026-01-15", ... }]
+}
 ```
 
-If not installed, download it from [nodejs.org](https://nodejs.org) — pick the **LTS** version.
-
-### 2. PostgreSQL (version 14 or newer)
-
-CRMy stores all data in a PostgreSQL database. You have a few options:
-
-| Option | Best for | Notes |
-|--------|----------|-------|
-| **Local install** | Development | [postgresql.org/download](https://www.postgresql.org/download/) |
-| **Docker** | Quick local setup | `docker run -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16` |
-| **Supabase** | Cloud, free tier available | [supabase.com](https://supabase.com) — free PostgreSQL in the cloud |
-| **Neon** | Cloud, serverless | [neon.tech](https://neon.tech) — free tier available |
-
-Once PostgreSQL is running, you'll need a connection string that looks like:
-```
-postgresql://username:password@localhost:5432/crmy
-```
+Write activities after every interaction. CRMy auto-extracts context entries. The next agent turn — or the same agent tomorrow — starts with full, typed, versioned memory.
 
 ---
 
-## Install
+## Quickstart
+
+### Prerequisites
+
+- Node.js >= 20
+- PostgreSQL >= 14
+
+### 1. Deploy
 
 ```bash
+# Docker (fastest — starts PostgreSQL + server together)
+docker compose -f docker/docker-compose.yml up -d
+
+# Or with npm
 npm install -g @crmy/cli
+npx @crmy/cli init     # connect to PostgreSQL, run migrations, create admin account
+npx @crmy/cli server   # starts on :3000
 ```
 
-Or run without installing (downloads automatically each time):
-```bash
-npx @crmy/cli init
+Server URLs when running:
+
 ```
+Web UI    →  http://localhost:3000/app
+REST API  →  http://localhost:3000/api/v1
+MCP HTTP  →  http://localhost:3000/mcp
+Health    →  http://localhost:3000/health
+```
+
+### 2. Register your agent
+
+Agents self-register. No admin setup required:
+
+```
+POST /auth/register-agent
+Authorization: Bearer <bootstrap-key>
+
+{
+  "display_name": "Outreach Agent",
+  "agent_identifier": "outreach-v1",
+  "agent_model": "claude-sonnet-4-20250514",
+  "requested_scopes": ["contacts:read", "activities:write", "context:write", "assignments:create"]
+}
+```
+
+Returns an actor record and a bound API key. Call this again with the same `agent_identifier` and you get the same actor back — idempotent. Admins can adjust scopes from **Settings → Actors**.
+
+### 3. Call briefing_get before every action
+
+```
+GET /api/v1/briefing/contact/{contact_id}
+Authorization: Bearer crmy_<your-agent-key>
+```
+
+Or via MCP: `briefing_get { subject_type: "contact", subject_id: "..." }`
+
+Works on contacts, accounts, opportunities, and use cases.
+
+### 4. Write activities after every interaction
+
+```
+POST /api/v1/activities
+Authorization: Bearer crmy_<your-agent-key>
+
+{
+  "type": "discovery_call",
+  "subject": "Q2 discovery with Sarah Chen",
+  "body": "Discussed budget, timeline, and technical fit.",
+  "contact_id": "...",
+  "outcome": "Champion identified. Pricing concern raised.",
+  "occurred_at": "2026-03-24T14:00:00Z"
+}
+```
+
+CRMy auto-extracts context entries from activities when an LLM backend is configured.
+
+### 5. Add context explicitly
+
+```
+POST /api/v1/context
+Authorization: Bearer crmy_<your-agent-key>
+
+{
+  "subject_type": "contact",
+  "subject_id": "...",
+  "context_type": "objection",
+  "body": "Concerned about procurement timeline — deal may slip to Q3",
+  "confidence": 0.85,
+  "valid_until": "2026-04-30",
+  "tags": ["pricing", "timeline"]
+}
+```
+
+Context entries are typed, tagged, versioned (supersede when beliefs change), and full-text searchable.
+
+### 6. Escalate to a human when needed
+
+```
+POST /api/v1/hitl
+Authorization: Bearer crmy_<your-agent-key>
+
+{
+  "action_type": "send_proposal",
+  "action_summary": "Send $180K proposal to Sarah Chen at Acme Corp",
+  "action_payload": { ... },
+  "auto_approve_after_seconds": 3600
+}
+```
+
+Poll `GET /api/v1/hitl/{id}` or check the HITL queue in the web UI. Proceed only on `approved`.
 
 ---
 
-## Getting started
+## MCP integration
 
-### Step 1 — Run setup
-
-```bash
-npx @crmy/cli init
-```
-
-This runs a 3-step setup wizard:
-
-- **Step 1** — Connects to your PostgreSQL database (paste your connection string)
-- **Step 2** — Creates all CRMy tables (migrations run automatically)
-- **Step 3** — Creates your admin account (email + password for the CRMy web UI — _not_ your database credentials)
-
-An API key is generated and saved to `.crmy.json` (auto-added to `.gitignore`).
-
-### Step 2 — Start the server
-
-```bash
-npx @crmy/cli server
-```
-
-The server shows startup progress and then prints all URLs when ready:
-
-```
-  ✓  Connected to database
-  ✓  Migrations complete  (already up to date)
-  ✓  Default tenant ready
-  ✓  Server listening on port 3000
-
-  ┌─────────────────────────────────────────────┐
-  │  Web UI  →  http://localhost:3000/app       │
-  │  API     →  http://localhost:3000/api/v1    │
-  │  MCP     →  http://localhost:3000/mcp       │
-  │  Health  →  http://localhost:3000/health    │
-  └─────────────────────────────────────────────┘
-
-  Log file: ~/.crmy/crmy-server.log
-```
-
-### Step 3 — Open the web interface
-
-Visit **[http://localhost:3000/app](http://localhost:3000/app)** in your browser.
-
-Log in with the email and password you set in Step 1.
-
-You'll land on the Dashboard. From there you can:
-- Add contacts, accounts, and opportunities
-- View the pipeline board
-- Check the HITL approval queue
-- Manage settings, API keys, and actors
-
-### Step 4 — Connect to an AI assistant (optional)
-
-CRMy exposes all its tools via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io). Run `npx @crmy/cli init` first — it saves your config to `~/.crmy/config.json` so the MCP server can always find it, regardless of which directory your AI client launches it from.
+All CRM operations are MCP tools. Connect to any MCP client:
 
 #### Claude Code
 
@@ -112,11 +163,6 @@ claude mcp add crmy -- npx @crmy/cli mcp
 
 #### Claude Desktop
 
-Edit the Claude Desktop config file:
-
-- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
 ```json
 {
   "mcpServers": {
@@ -127,59 +173,10 @@ Edit the Claude Desktop config file:
   }
 }
 ```
-
-Restart Claude Desktop after saving. CRMy tools will appear in the tool picker.
-
-#### OpenClaw
-
-OpenClaw uses its own plugin system instead of MCP. Install the official CRMy plugin:
-
-```bash
-# 1. Run init first (writes ~/.crmy/config.json that the plugin reads)
-npx @crmy/cli init
-
-# 2. Install the plugin
-openclaw plugins install @crmy/openclaw-plugin
-```
-
-The plugin reads `~/.crmy/config.json` automatically — no extra config needed. If your CRMy server is running on a non-default URL, you can override it in `~/.openclaw/openclaw.json`:
-
-```json5
-{
-  "plugins": {
-    "entries": {
-      "crmy": {
-        "enabled": true,
-        "config": {
-          "serverUrl": "https://crm.yourcompany.com",
-          "apiKey": "crmy_..."
-        }
-      }
-    }
-  }
-}
-```
-
-**Tools available in OpenClaw after installation:**
-
-| Tool | What it does |
-|---|---|
-| `crmy_search` | Global search across all CRM records |
-| `crmy_contact_search` | Find contacts by name, email, or company |
-| `crmy_contact_create` | Create a new contact |
-| `crmy_contact_update` | Update contact fields |
-| `crmy_contact_log_activity` | Log a call, meeting, or email |
-| `crmy_contact_set_lifecycle` | Change a contact's lifecycle stage |
-| `crmy_account_search` | Find companies/accounts |
-| `crmy_account_create` | Create a new company record |
-| `crmy_opportunity_search` | Find deals by name, account, or stage |
-| `crmy_opportunity_create` | Create a new deal |
-| `crmy_opportunity_advance_stage` | Move a deal to the next stage |
-| `crmy_pipeline_summary` | Get pipeline totals by stage |
 
 #### Cursor / Windsurf
 
-Add to `.cursor/mcp.json` (Cursor) or the equivalent Windsurf MCP config:
+Add to `.cursor/mcp.json` or equivalent:
 
 ```json
 {
@@ -192,155 +189,259 @@ Add to `.cursor/mcp.json` (Cursor) or the equivalent Windsurf MCP config:
 }
 ```
 
-#### Using the tools
+#### HTTP transport (remote agents)
 
-Once connected, you can say things like:
-> "Create a contact for Sarah Chen at Acme Corp, set her stage to prospect, and log a call we had today about their Q2 budget"
-
-Your AI assistant will use CRMy's MCP tools to create the contact and log the activity directly in your CRM.
-
----
-
-## Docker (fastest option)
-
-If you have Docker installed, this starts everything — PostgreSQL and the CRMy server — with one command:
-
-```bash
-docker compose -f docker/docker-compose.yml up -d
 ```
-
-Then open [http://localhost:3000/app](http://localhost:3000/app).
-
-Default credentials when using Docker:
-- **Email**: `admin@crmy.ai`
-- **Password**: `admin`
-
-Change these after first login in Settings → Profile.
-
----
-
-## Connect to a remote server
-
-If someone else is running a CRMy server and you want to connect your CLI to it:
-
-```bash
-# Tell the CLI where the server is
-crmy auth setup https://crm.yourcompany.com
-
-# Log in with your email + password
-crmy login
-
-# Now CLI commands go to that server
-crmy contacts list
+POST /mcp
+Authorization: Bearer crmy_<key>
+Content-Type: application/json
 ```
-
----
-
-## Web UI overview
-
-The web interface is available at `/app` when the server is running.
-
-| Page | What it does |
-|------|-------------|
-| **Dashboard** | Stat cards (pipeline, deals, use cases, pending approvals), stage strip, recent activity |
-| **Contacts** | List, search, create, and view contacts with activity timelines |
-| **Accounts** | Companies with health scores, contacts, opportunities, and use cases |
-| **Pipeline** | Kanban board for tracking deals through stages |
-| **Use Cases** | Track consumption-based workloads (discovery → poc → production → scaling → sunset) |
-| **Assignments** | Queue of work items with My Queue / Delegated / All tabs |
-| **Analytics** | Pipeline by stage, forecast, use case health distribution |
-| **HITL Queue** | Approve or reject agent actions before they execute |
-| **Settings** | API keys, webhooks, custom fields, and the Actors panel |
 
 ---
 
 ## Context Engine
 
-The Context Engine is what makes CRMy agent-first — a shared workspace where AI agents and humans coordinate GTM workflows.
+Four primitives that form the agent's shared workspace:
 
-Four building blocks:
-
-| Primitive | What it captures |
-|-----------|-----------------|
-| **Actors** | Who is doing things — humans and AI agents as first-class identities |
-| **Activities** | Everything that happened, with structured payloads, retroactive timestamps, and outcome tracking |
-| **Assignments** | Structured handoffs — "agent A should do X about contact Y by Thursday" |
-| **Context Entries** | The memory layer — typed, searchable, tagged knowledge attached to any CRM object |
+| Primitive | What it does |
+|-----------|-------------|
+| **Actors** | First-class identity for humans and AI agents. Every action is attributed to an actor. Agents self-register via API — no admin setup. |
+| **Activities** | Everything that happened — calls, emails, meetings. Structured `detail` payloads, polymorphic subjects, retroactive `occurred_at` timestamps, and auto-extraction into context entries. |
+| **Assignments** | Structured handoffs. Agents create assignments for humans; humans create assignments for agents. Stateful lifecycle: `pending → accepted → in_progress → completed`. |
+| **Context Entries** | The memory layer. Typed, tagged, versioned knowledge attached to any CRM object. Supersede stale beliefs. Confidence scores. Full-text search. `valid_until` staleness tracking. |
 
 ### Agent workflow example
 
 ```
-1. Agent logs a discovery call (activity_create)
-2. Agent stores key takeaways as context entries (context_add × 3, with tags and confidence scores)
-3. Agent assigns follow-up to a human rep (assignment_create)
-4. Human gets a full briefing on the contact (briefing_get)
-   — sees record, related objects, activities, open assignments, context grouped by type, stale warnings
-5. Human sends the proposal and completes the assignment (assignment_complete)
-6. Agent searches context for competitor mentions later (context_search)
+1. agent: briefing_get { subject_type: "contact", subject_id: "abc" }
+   ← record + recent activities + open assignments + typed context + stale warnings
+
+2. agent: activity_create { type: "discovery_call", outcome: "Champion identified" }
+   → activity logged; extraction pipeline creates context entries automatically
+
+3. agent: context_add { context_type: "objection", body: "...", confidence: 0.9 }
+   → stored, tagged, searchable; visible in future briefings
+
+4. agent: assignment_create { title: "Send proposal", assignee_actor_id: "<rep-id>" }
+   → appears in the rep's assignment queue
+
+5. human: briefing_get { subject_type: "contact", ... }
+   ← same context the agent built, plus the open assignment
+
+6. human: assignment_complete { outcome: "Proposal sent" }
+   → logged to audit trail; context entry written
 ```
 
 ---
 
 ## Authentication
 
-### Log in via web or CLI
+All `/api/v1/*` endpoints require:
 
-```bash
-# Web UI: visit /app/login
-# CLI:
-crmy auth setup http://localhost:3000
-crmy login
+```
+Authorization: Bearer <jwt-token>          # human login
+Authorization: Bearer crmy_<api-key>       # agent or integration
 ```
 
 ### API keys
 
-Create API keys for agents and integrations:
-
-```bash
-# During init, a key is auto-generated in .crmy.json
-# Create additional keys via REST:
-POST /auth/api-keys  { "label": "my-agent", "scopes": ["contacts:read", "activities:write"] }
-```
-
-The key is shown **once** — copy and store it securely. Use it in API calls:
-```
-Authorization: Bearer crmy_abc123...
-```
-
-### Scope-limited keys
-
-API keys can be restricted to specific capabilities:
-
-| Scope | What it allows |
-|-------|---------------|
-| `*` | Everything (full access) |
-| `read` | Read all resources |
-| `write` | Write all resources |
-| `contacts:read` | Read contacts only |
-| `contacts:write` | Create/update contacts |
-| `activities:write` | Log activities |
-| `context:read` / `context:write` | Read/write context entries |
-| *(and more — see [docs/guide.md](docs/guide.md))* | |
-
-A key with `["contacts:read", "activities:write"]` can read contacts and log activities, but cannot create new contacts or access other resources.
-
-### Agent self-registration
-
-Agents can register themselves without admin setup:
+Create scoped keys for agents and integrations:
 
 ```
-POST /auth/register-agent
-Authorization: Bearer <any-valid-key>
-
-{
-  "display_name": "Outreach Agent",
-  "agent_identifier": "outreach-v2",
-  "agent_model": "claude-sonnet-4-20250514",
-  "requested_scopes": ["contacts:read", "activities:write"]
-}
+POST /auth/api-keys   { "label": "my-agent", "scopes": ["contacts:read", "activities:write"] }
 ```
 
-Returns the actor record and a bound API key. Calling this again with the same `agent_identifier` returns the existing actor — no duplicates. Admins can adjust scopes from **Settings → Actors**.
+The key is shown once. Store it securely.
+
+### Scope reference
+
+| Scope | Grants access to |
+|-------|-----------------|
+| `*` | Everything |
+| `read` | All read operations |
+| `write` | All write operations |
+| `contacts:read` / `contacts:write` | Contact records |
+| `accounts:read` / `accounts:write` | Account records |
+| `opportunities:read` / `opportunities:write` | Pipeline and deals |
+| `activities:read` / `activities:write` | Activities |
+| `assignments:create` / `assignments:update` | Assignment lifecycle |
+| `context:read` / `context:write` | Context entries and briefings |
+
+API key scopes are checked before every tool handler. JWT users (human login) bypass scoping and always have full access.
+
+---
+
+## Architecture
+
+```
+packages/
+  shared/   @crmy/shared   TypeScript types, Zod schemas
+  server/   @crmy/server   Express + PostgreSQL + MCP Streamable HTTP
+  cli/      @crmy/cli      Local CLI + stdio MCP server
+  web/      @crmy/web      React SPA at /app
+docker/                    Dockerfile + docker-compose.yml
+```
+
+### Design decisions
+
+- **MCP-first** — All CRM operations are MCP tools. REST API and CLI are thin wrappers around the same handlers.
+- **Raw SQL** — No ORM. Every query is readable and auditable.
+- **Event sourcing** — Every mutation appends to an `events` table. Full audit trail, never overwritten.
+- **Scope enforcement** — API key scopes checked before every handler. JWT users always have full access.
+- **Governor limits** — Plan-based quotas on actors, activities, and context entries. Prevents runaway agents.
+- **Plugins** — Extensible lifecycle hooks for custom integrations.
+- **Workflows** — Event-driven automation with configurable triggers and actions.
+
+### Environment variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
+| `JWT_SECRET` | Yes | — | JWT signing secret |
+| `PORT` | No | `3000` | HTTP port |
+| `CRMY_TENANT_ID` | No | `default` | Tenant slug |
+| `CRMY_API_KEY` | No | — | API key for CLI auth |
+| `CRMY_SERVER_URL` | No | — | Remote server URL for CLI |
+
+---
+
+## Web UI
+
+Available at `/app` when the server is running. Useful for human review, HITL approvals, and managing agents — not the primary interface for agent builders.
+
+| Page | What it does |
+|------|-------------|
+| Dashboard | Pipeline stats, recent activity feed |
+| Contacts / Accounts / Pipeline | Standard CRM views |
+| Use Cases | Consumption-based workload tracking (discovery → poc → production → scaling → sunset) |
+| Assignments | Work queue with My Queue / Delegated / All tabs |
+| HITL Queue | Approve or reject pending agent action requests |
+| Settings | API keys, actors, webhooks, custom fields |
+
+Docker default credentials: `admin@crmy.ai` / `admin` — change after first login.
+
+---
+
+## MCP Tools (80+)
+
+| Category | Tools |
+|---|---|
+| **Briefing** | `briefing_get` |
+| **Context** | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_review`, `context_stale` |
+| **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
+| **Assignments** | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
+| **HITL** | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
+| Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
+| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
+| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_delete` |
+| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete`, `pipeline_summary` |
+| Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
+| Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
+| Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
+| Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
+| Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
+| Emails | `email_create`, `email_get`, `email_search` |
+| Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
+| Analytics | `crm_search`, `pipeline_forecast`, `account_health_report` |
+| Meta | `schema_get`, `tenant_get_stats` |
+
+---
+
+## CLI Reference
+
+```
+Setup & Server
+npx @crmy/cli init                       Interactive setup (DB, migrations, admin account)
+npx @crmy/cli server [--port 3000]       Start HTTP server + Web UI
+npx @crmy/cli mcp                        Start stdio MCP server
+
+Authentication
+crmy auth setup [url]                    Configure server URL
+crmy auth login                          Sign in (stores JWT)
+crmy auth status                         Show auth state + token expiry
+crmy auth logout                         Clear stored credentials
+
+Contacts
+crmy contacts list [--q <query>]         List contacts
+crmy contacts create                     Interactive create
+crmy contacts get <id>                   Get contact details
+crmy contacts delete <id>                Delete (admin/owner only)
+
+Accounts
+crmy accounts list                       List accounts
+crmy accounts create                     Interactive create
+crmy accounts get <id>                   Get account + contacts + opps
+crmy accounts delete <id>                Delete (admin/owner only)
+
+Opportunities
+crmy opps list [--stage <s>]             List opportunities
+crmy opps get <id>                       Get opportunity details
+crmy opps create                         Interactive create
+crmy opps advance <id> <stage>           Advance opportunity stage
+crmy opps delete <id>                    Delete (admin/owner only)
+
+Use Cases
+crmy use-cases list                      List use cases
+crmy use-cases get <id>                  Get use case details
+crmy use-cases create                    Interactive create
+crmy use-cases summary                   Use case summary
+crmy use-cases delete <id>               Delete (admin/owner only)
+
+Actors
+crmy actors list [--type <t>]            List actors (humans & agents)
+crmy actors register                     Interactive actor registration
+crmy actors get <id>                     Get actor details
+crmy actors whoami                       Show current actor identity
+
+Assignments
+crmy assignments list [--mine]           List assignments
+crmy assignments create                  Interactive create
+crmy assignments get <id>                Get assignment details
+crmy assignments accept <id>             Accept a pending assignment
+crmy assignments start <id>              Start working on an assignment
+crmy assignments complete <id>           Complete an assignment
+crmy assignments decline <id>            Decline an assignment
+crmy assignments block <id>              Mark as blocked
+crmy assignments cancel <id>             Cancel an assignment
+
+Context
+crmy context list [--subject-type <t>] [--subject-id <id>]
+crmy context add                         Add context about a CRM object
+crmy context get <id>                    Get context entry
+crmy context supersede <id>              Supersede with updated content
+crmy context search <query>              Full-text search across context
+crmy context review <id>                 Mark entry as still accurate
+crmy context stale                       List stale entries needing review
+
+Briefing
+crmy briefing <type:UUID>                Get a full briefing for an object
+
+HITL
+crmy hitl list                           Pending HITL requests
+crmy hitl approve <id>                   Approve request
+crmy hitl reject <id> [--note]           Reject request
+
+Workflows
+crmy workflows list                      List automation workflows
+crmy workflows get <id>                  Get workflow + recent runs
+crmy workflows create                    Interactive create
+crmy workflows delete <id>               Delete workflow
+crmy workflows runs <id>                 Execution history
+
+Webhooks
+crmy webhooks list                       List webhook endpoints
+crmy webhooks create                     Register new webhook
+crmy webhooks delete <id>                Remove webhook
+crmy webhooks deliveries                 Delivery log
+
+Other
+crmy pipeline                            Pipeline summary
+crmy search <query>                      Cross-entity search
+crmy events [--object <id>]              Audit log
+crmy config show                         Show config
+crmy migrate run                         Run migrations
+crmy migrate status                      Migration status
+```
 
 ---
 
@@ -356,194 +457,9 @@ npm run dev     # starts server with tsx watch
 
 ---
 
-## Architecture
-
-```
-packages/
-  shared/   @crmy/shared   TypeScript types, Zod schemas, validation
-  server/   @crmy/server   Express + PostgreSQL + MCP Streamable HTTP
-  cli/      @crmy/cli      Local CLI + stdio MCP server
-  web/      @crmy/web      React SPA (served at /app by Express)
-docker/                    Dockerfile + docker-compose.yml
-scripts/                   Migration runner
-```
-
-### Key design decisions
-
-- **MCP-first** — All CRM operations are MCP tools. REST API and CLI are thin wrappers around the same handlers.
-- **Raw SQL** — No ORM. Every query is readable and auditable.
-- **Event sourcing** — Every mutation appends to an `events` table. Full audit trail.
-- **Scope enforcement** — API key scopes checked before every tool handler. JWT users (humans) bypass scoping and always have full access.
-- **Governor limits** — Plan-based quotas on actors, activities, assignments, and context entries. Prevents runaway agents.
-- **Context Engine** — Actors (who), Activities (what happened), Assignments (coordination), and Context Entries (memory) form a shared workspace for agent-human GTM workflows.
-- **HITL** — Agents request human approval before high-impact actions.
-- **Plugins** — Extensible plugin system with lifecycle hooks.
-- **Workflows** — Event-driven automation with configurable triggers and actions.
-
-### Environment variables
-
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `DATABASE_URL` | Yes | — | PostgreSQL connection string |
-| `JWT_SECRET` | Yes | — | Secret for signing JWT tokens |
-| `PORT` | No | `3000` | HTTP server port |
-| `CRMY_TENANT_ID` | No | `default` | Default tenant slug |
-| `CRMY_API_KEY` | No | — | API key for CLI/agent authentication |
-| `CRMY_SERVER_URL` | No | — | Server URL for remote CLI mode |
-
----
-
-## MCP Tools (80+)
-
-| Category | Tools |
-|---|---|
-| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
-| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_delete` |
-| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete`, `pipeline_summary` |
-| Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
-| Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
-| **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
-| **Assignments** | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
-| **Context** | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_review`, `context_stale` |
-| **Briefing** | `briefing_get` |
-| **Registries** | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
-| Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
-| Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
-| Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
-| Emails | `email_create`, `email_get`, `email_search` |
-| Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
-| Analytics | `crm_search`, `pipeline_forecast`, `account_health_report` |
-| HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
-| Meta | `schema_get`, `tenant_get_stats` |
-
----
-
-## CLI Reference
-
-```
-Authentication
-crmy auth setup [url]            Configure server URL
-crmy auth login                  Sign in (or use `crmy login`)
-crmy auth status                 Show auth state + token expiry
-crmy auth logout                 Clear stored credentials
-crmy login                       Shortcut for `crmy auth login`
-
-Setup & Server
-crmy init                        Interactive local setup
-crmy server [--port 3000]        Start HTTP server + Web UI
-crmy mcp                         Start stdio MCP server
-
-Contacts
-crmy contacts list [--q <query>] List contacts
-crmy contacts create             Interactive create
-crmy contacts get <id>           Get contact details
-crmy contacts delete <id>        Delete contact (admin/owner only, confirms)
-
-Accounts
-crmy accounts list               List accounts
-crmy accounts create             Interactive create
-crmy accounts get <id>           Get account + contacts + opps
-crmy accounts delete <id>        Delete account (admin/owner only, confirms)
-
-Opportunities
-crmy opps list [--stage <s>]     List opportunities
-crmy opps get <id>               Get opportunity details
-crmy opps create                 Interactive create
-crmy opps advance <id> <stage>   Advance opportunity stage
-crmy opps delete <id>            Delete opportunity (admin/owner only, confirms)
-
-Use Cases
-crmy use-cases list              List use cases
-crmy use-cases get <id>          Get use case details
-crmy use-cases create            Interactive create
-crmy use-cases summary           Use case summary
-crmy use-cases delete <id>       Delete use case (admin/owner only, confirms)
-
-Webhooks
-crmy webhooks list               List webhook endpoints
-crmy webhooks create             Register new webhook
-crmy webhooks delete <id>        Remove webhook
-crmy webhooks deliveries         Delivery log
-
-Email
-crmy emails list                 List outbound emails
-crmy emails create               Draft email (with HITL)
-crmy emails get <id>             Get email details
-
-Custom Fields
-crmy custom-fields list <type>   List custom fields
-crmy custom-fields create        Define custom field
-crmy custom-fields delete <id>   Remove field definition
-
-Notes
-crmy notes list <type> <id>      List notes on an object
-crmy notes add <type> <id>       Add note (--parent, --external, --pin)
-crmy notes get <id>              Get note with replies
-crmy notes delete <id>           Delete note
-
-Workflows
-crmy workflows list              List automation workflows
-crmy workflows get <id>          Get workflow + recent runs
-crmy workflows create            Interactive create
-crmy workflows delete <id>       Delete workflow
-crmy workflows runs <id>         Execution history
-
-Actors
-crmy actors list [--type <t>]    List actors (humans & agents)
-crmy actors register             Interactive actor registration
-crmy actors get <id>             Get actor details
-crmy actors whoami               Show current actor identity
-
-Assignments
-crmy assignments list [--mine]   List assignments
-crmy assignments create          Interactive create
-crmy assignments get <id>        Get assignment details
-crmy assignments accept <id>     Accept a pending assignment
-crmy assignments start <id>      Start working on an assignment
-crmy assignments complete <id>   Complete an assignment
-crmy assignments decline <id>    Decline an assignment
-crmy assignments block <id>      Mark an assignment as blocked
-crmy assignments cancel <id>     Cancel an assignment
-
-Context
-crmy context list [--subject-type <t>] [--subject-id <id>]
-crmy context add                 Add context about a CRM object
-crmy context get <id>            Get context entry
-crmy context supersede <id>      Supersede with updated content
-crmy context search <query>      Full-text search across context
-crmy context review <id>         Mark entry as still accurate
-crmy context stale               List stale entries needing review
-
-Briefing
-crmy briefing <type:UUID>        Get a full briefing for an object
-
-Activity Types
-crmy activity-types list         List registered activity types
-crmy activity-types add <name>   Add a custom activity type
-crmy activity-types remove <name> Remove a custom activity type
-
-Context Types
-crmy context-types list          List registered context types
-crmy context-types add <name>    Add a custom context type
-crmy context-types remove <name> Remove a custom context type
-
-Other
-crmy pipeline                    Pipeline summary
-crmy search <query>              Cross-entity search
-crmy hitl list                   Pending HITL requests
-crmy hitl approve <id>           Approve request
-crmy hitl reject <id> [--note]   Reject request
-crmy events [--object <id>]      Audit log
-crmy config show                 Show config
-crmy migrate run                 Run migrations
-crmy migrate status              Migration status
-```
-
----
-
 ## Documentation
 
-See the [complete user guide](docs/guide.md) for detailed documentation covering all features, the Context Engine, scope enforcement, governor limits, REST API reference, plugin development, workflow configuration, and more.
+See [docs/guide.md](docs/guide.md) for the complete developer reference: agent builder quickstart, Context Engine deep dive, REST API reference, scope enforcement, governor limits, plugin development, workflow configuration, and more.
 
 ## License
 
