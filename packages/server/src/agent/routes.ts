@@ -179,7 +179,7 @@ export function agentRouter(db: DbPool): Router {
   router.get('/sessions/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      const session = await agentRepo.getSession(db, actor.tenant_id, req.params.id);
+      const session = await agentRepo.getSession(db, actor.tenant_id, String(req.params.id));
       if (!session || session.user_id !== actor.actor_id) {
         res.status(404).json({ error: 'Session not found' });
         return;
@@ -192,7 +192,7 @@ export function agentRouter(db: DbPool): Router {
   router.delete('/sessions/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      await agentRepo.deleteSession(db, actor.tenant_id, req.params.id);
+      await agentRepo.deleteSession(db, actor.tenant_id, String(req.params.id));
       res.status(204).end();
     } catch (err) { handleError(res, err); }
   });
@@ -225,7 +225,7 @@ export function agentRouter(db: DbPool): Router {
     }
 
     // Load or verify session
-    let session = await agentRepo.getSession(db, actor.tenant_id, req.params.id);
+    let session = await agentRepo.getSession(db, actor.tenant_id, String(req.params.id));
     if (!session || session.user_id !== actor.actor_id) {
       res.status(404).json({ error: 'Session not found' });
       return;
@@ -303,7 +303,7 @@ export function agentRouter(db: DbPool): Router {
   // GET /agent/sessions/:id/activity — all tool calls in a specific session
   router.get('/sessions/:id/activity', async (req: Request, res: Response) => {
     const actor = getActor(req);
-    const session = await agentRepo.getSession(db, actor.tenant_id, req.params.id);
+    const session = await agentRepo.getSession(db, actor.tenant_id, String(req.params.id));
     if (!session) {
       res.status(404).json({ error: 'Session not found' });
       return;

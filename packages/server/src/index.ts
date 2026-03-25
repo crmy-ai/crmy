@@ -14,7 +14,7 @@ import { authMiddleware } from './auth/middleware.js';
 import { apiRouter } from './rest/router.js';
 import { agentRouter } from './agent/routes.js';
 import { createMcpServer } from './mcp/server.js';
-import { mcpSessions, registerMcpSession, removeMcpSession } from './mcp/session-registry.js';
+import { mcpSessions, registerMcpSession, removeMcpSession, touchMcpSession, evictStaleMcpSessions } from './mcp/session-registry.js';
 import { autoApproveExpired, expireOldRequests } from './db/repos/hitl.js';
 import { cleanExpiredSessions } from './db/repos/agent.js';
 import { processPendingExtractions } from './agent/extraction.js';
@@ -96,7 +96,9 @@ export async function createApp(config: ServerConfig) {
   }
 
   const app = express();
-  app.use(express.json());
+  // Limit JSON payloads to 1 MB to prevent DoS via oversized bodies.
+  // MCP tool calls may include context blobs — 1 MB is generous but bounded.
+  app.use(express.json({ limit: '1mb' }));
 
   // Health check (no auth)
   app.get('/health', async (_req, res) => {
@@ -138,6 +140,7 @@ export async function createApp(config: ServerConfig) {
 
       // Reuse existing session (subsequent GET/POST from same client)
       if (sessionId && mcpSessions.has(sessionId)) {
+        touchMcpSession(sessionId); // reset idle TTL
         const session = mcpSessions.get(sessionId)!;
         await session.transport.handleRequest(req, res, req.body);
         return;
@@ -200,7 +203,11 @@ export async function createApp(config: ServerConfig) {
       await cleanExpiredSessions(db);
       await processPendingExtractions(db);
       await processStaleEntries(db);
+      // Evict idle MCP sessions (30-minute TTL)
+      evictStaleMcpSessions();
     } catch (err) {
+      // Log the error but keep the interval running — a transient DB error
+      // should not permanently disable all background maintenance tasks.
       console.error('Background worker error:', err);
     }
   }, 60_000);
