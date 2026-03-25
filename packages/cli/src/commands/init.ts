@@ -176,7 +176,10 @@ export function initCommand(): Command {
       spinner = createSpinner('Creating admin account\u2026');
 
       try {
-        const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
+        // scrypt — same params as auth/routes.ts so passwords are portable
+        const salt = crypto.randomBytes(16);
+        const hash = crypto.scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 });
+        const passwordHash = `scrypt:${salt.toString('hex')}:${hash.toString('hex')}`;
         const userResult = await db.query(
           `INSERT INTO users (tenant_id, email, name, role, password_hash)
            VALUES ($1, $2, $3, 'owner', $4)
