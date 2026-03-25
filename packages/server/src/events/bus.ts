@@ -15,12 +15,14 @@ export interface BusEvent extends EmitEventOpts {
 
 class CrmyEventBus extends EventEmitter {
   emit(event: 'crmy:event', data: BusEvent): boolean;
-  emit(event: string, ...args: unknown[]): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  emit(event: string, ...args: any[]): boolean {
     return super.emit(event, ...args);
   }
 
   on(event: 'crmy:event', listener: (data: BusEvent) => void): this;
-  on(event: string, listener: (...args: unknown[]) => void): this {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  on(event: string, listener: (...args: any[]) => void): this {
     return super.on(event, listener);
   }
 }

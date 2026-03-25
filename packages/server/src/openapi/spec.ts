@@ -7,7 +7,9 @@ import './paths.js'; // side-effect: registers all route paths into the registry
 
 export function buildSpec() {
   const generator = new OpenApiGeneratorV31(registry.definitions);
-  return generator.generateDocument({
+  // generateDocument does not accept `components` in its config type; merge
+  // security schemes into the generated document after the fact.
+  const doc = generator.generateDocument({
     openapi: '3.1.0',
     info: {
       title: 'CRMy API',
@@ -20,15 +22,6 @@ export function buildSpec() {
     servers: [
       { url: '/api/v1', description: 'Default (relative to server root)' },
     ],
-    components: {
-      securitySchemes: {
-        BearerAuth: {
-          type: 'http',
-          scheme: 'bearer',
-          description: 'JWT from `/auth/login` or a `crmy_` prefixed API key from `/auth/api-keys`',
-        },
-      },
-    },
     tags: [
       { name: 'Auth', description: 'Authentication and API key management' },
       { name: 'Contacts', description: 'Contact records and lifecycle management' },
@@ -52,6 +45,17 @@ export function buildSpec() {
       { name: 'Search', description: 'Cross-entity full-text search' },
     ],
   });
+
+  // Merge BearerAuth security scheme into the generated components block
+  doc.components ??= {};
+  doc.components.securitySchemes ??= {};
+  doc.components.securitySchemes['BearerAuth'] = {
+    type: 'http',
+    scheme: 'bearer',
+    description: 'JWT from `/auth/login` or a `crmy_` prefixed API key from `/auth/api-keys`',
+  };
+
+  return doc;
 }
 
 let _cached: ReturnType<typeof buildSpec> | null = null;

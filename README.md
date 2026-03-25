@@ -77,15 +77,13 @@ Add to `.cursor/mcp.json` or equivalent:
 }
 ```
 
-Once connected, your agent has access to 80+ MCP tools. No API calls, no auth wiring — just tool calls.
+Once connected, your agent has access to 100+ MCP tools. No API calls, no auth wiring — just tool calls.
 
 ### 3. Get a briefing before every action
 
-Via MCP:
+Via MCP (natural language):
 
-```
-briefing_get { subject_type: "contact", subject_id: "<id>" }
-```
+> Get me a full briefing on contact `<id>` before I reach out.
 
 Via CLI:
 
@@ -113,18 +111,9 @@ Works on contacts, accounts, opportunities, and use cases.
 
 ### 4. Write activities after every interaction
 
-Via MCP:
+Via MCP (natural language):
 
-```
-activity_create {
-  type: "discovery_call",
-  subject: "Q2 discovery with Sarah Chen",
-  body: "Discussed budget, timeline, and technical fit.",
-  contact_id: "...",
-  outcome: "Champion identified. Pricing concern raised.",
-  occurred_at: "2026-03-24T14:00:00Z"
-}
-```
+> Log a discovery call with Sarah Chen today. We discussed budget and technical fit. Champion identified, pricing concern raised.
 
 Via CLI:
 
@@ -136,19 +125,9 @@ CRMy auto-extracts context entries from activities when an LLM backend is config
 
 ### 5. Add context explicitly
 
-Via MCP:
+Via MCP (natural language):
 
-```
-context_add {
-  subject_type: "contact",
-  subject_id: "...",
-  context_type: "objection",
-  body: "Concerned about procurement timeline — deal may slip to Q3",
-  confidence: 0.85,
-  valid_until: "2026-04-30",
-  tags: ["pricing", "timeline"]
-}
-```
+> Add an objection for contact `<id>`: concerned about procurement timeline, deal may slip to Q3. Confidence 0.85, valid until end of April, tags: pricing, timeline.
 
 Via CLI:
 
@@ -160,16 +139,9 @@ Context entries are typed, tagged, versioned (supersede when beliefs change), an
 
 ### 6. Escalate to a human when needed
 
-Via MCP:
+Via MCP (natural language):
 
-```
-hitl_submit_request {
-  action_type: "send_proposal",
-  action_summary: "Send $180K proposal to Sarah Chen at Acme Corp",
-  action_payload: { ... },
-  auto_approve_after_seconds: 3600
-}
-```
+> Submit a HITL request to send a $180K proposal to Sarah Chen at Acme Corp. Auto-approve after 1 hour if no response.
 
 Via CLI:
 
@@ -182,16 +154,9 @@ Poll `hitl_check_status` or check the HITL queue in the web UI. Proceed only on 
 
 ### 7. Register your agent
 
-Agents self-register — no admin setup required. Via MCP:
+Agents self-register — no admin setup required. Via MCP (natural language):
 
-```
-actor_register {
-  display_name: "Outreach Agent",
-  agent_identifier: "outreach-v1",
-  agent_model: "claude-sonnet-4-20250514",
-  requested_scopes: ["contacts:read", "activities:write", "context:write", "assignments:create"]
-}
-```
+> Register me as an agent called "Outreach Agent" with identifier outreach-v1. I need contacts:read, activities:write, context:write, and assignments:create scopes.
 
 Via CLI:
 
@@ -206,22 +171,22 @@ Call again with the same `agent_identifier` and you get the same actor back — 
 ## Agent workflow example
 
 ```
-1. agent: briefing_get { subject_type: "contact", subject_id: "abc" }
+1. agent: "Get me a full briefing on contact abc."
    ← record + recent activities + open assignments + typed context + stale warnings
 
-2. agent: activity_create { type: "discovery_call", outcome: "Champion identified" }
+2. agent: "Log a discovery call with abc — champion identified, pricing concern raised."
    → activity logged; extraction pipeline creates context entries automatically
 
-3. agent: context_add { context_type: "objection", body: "...", confidence: 0.9 }
+3. agent: "Add an objection for abc: budget approval needed from CFO. Confidence 0.9."
    → stored, tagged, searchable; visible in future briefings
 
-4. agent: assignment_create { title: "Send proposal", assignee_actor_id: "<rep-id>" }
+4. agent: "Create an assignment for rep Sarah to send the proposal."
    → appears in the rep's assignment queue
 
-5. human: briefing_get { subject_type: "contact", ... }
+5. human: "Get me a briefing on contact abc."
    ← same context the agent built, plus the open assignment
 
-6. human: assignment_complete { outcome: "Proposal sent" }
+6. human: "Mark assignment 123 complete — proposal sent."
    → logged to audit trail; context entry written
 ```
 

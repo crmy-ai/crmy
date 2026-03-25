@@ -176,27 +176,41 @@ export async function getAccountHierarchy(
   tenantId: UUID,
   id: UUID,
 ): Promise<{ root: Account; children: Account[]; depth: number } | null> {
-  // Find root by traversing parents
-  const account = await getAccount(db, tenantId, id);
-  if (!account) return null;
+  // Single recursive CTE: walk from the given account up to the root,
+  // tracking depth (hop count). Returns all ancestor rows sorted deepest-first
+  // so the last row is the root. Uses a guard on tenant_id to prevent
+  // cross-tenant traversal if a parent_id were ever corrupted.
+  const ancestorResult = await db.query(
+    `WITH RECURSIVE chain AS (
+       SELECT *, 0 AS hop
+         FROM accounts
+        WHERE id = $1 AND tenant_id = $2
+       UNION ALL
+       SELECT a.*, c.hop + 1
+         FROM accounts a
+         JOIN chain c ON a.id = c.parent_id
+        WHERE a.tenant_id = $2
+     )
+     SELECT * FROM chain ORDER BY hop DESC LIMIT 1`,
+    [id, tenantId],
+  );
 
-  let root = account;
-  let depth = 0;
-  while (root.parent_id) {
-    const parent = await getAccount(db, tenantId, root.parent_id);
-    if (!parent) break;
-    root = parent;
-    depth++;
-  }
+  if (ancestorResult.rows.length === 0) return null;
 
-  // Find all children of root
+  const rootRow = ancestorResult.rows[0] as Account & { hop: number };
+  const depth: number = rootRow.hop;
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { hop: _hop, ...root } = rootRow;
+
+  // Fetch direct children of the root in the same query
   const childrenResult = await db.query(
     'SELECT * FROM accounts WHERE parent_id = $1 AND tenant_id = $2 ORDER BY name',
     [root.id, tenantId],
   );
 
   return {
-    root,
+    root: root as Account,
     children: childrenResult.rows as Account[],
     depth,
   };

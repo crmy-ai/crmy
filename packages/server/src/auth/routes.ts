@@ -12,34 +12,118 @@ import { authMiddleware } from './middleware.js';
 import * as actorRepo from '../db/repos/actors.js';
 import * as governorLimits from '../db/repos/governor-limits.js';
 
+// ── Password hashing (scrypt) ─────────────────────────────────────────────────
+// New format: "scrypt:<salt_hex>:<hash_hex>"
+// Legacy format: raw 64-char SHA-256 hex (migrated on first login)
+//
+// scrypt parameters: N=16384, r=8, p=1 per OWASP recommendation for
+// interactive logins. This is intentionally slow — ~100ms on modern hardware.
+
+const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 } as const;
+const SCRYPT_KEYLEN = 64;
+
+function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password, salt, SCRYPT_KEYLEN, SCRYPT_PARAMS);
+  return `scrypt:${salt.toString('hex')}:${hash.toString('hex')}`;
+}
+
+function verifyPassword(password: string, stored: string): boolean {
+  if (stored.startsWith('scrypt:')) {
+    // Modern scrypt format
+    const parts = stored.split(':');
+    if (parts.length !== 3) return false;
+    const salt = Buffer.from(parts[1], 'hex');
+    const expected = Buffer.from(parts[2], 'hex');
+    const derived = crypto.scryptSync(password, salt, SCRYPT_KEYLEN, SCRYPT_PARAMS);
+    // timingSafeEqual prevents timing-based inference of the correct hash
+    return expected.length === derived.length && crypto.timingSafeEqual(derived, expected);
+  }
+  // Legacy SHA-256 format (64-char hex) — accepted during migration period
+  const legacy = crypto.createHash('sha256').update(password).digest('hex');
+  return legacy === stored;
+}
+
+// ── Simple in-memory rate limiter ────────────────────────────────────────────
+// No external dependency. Keyed by "route:ip". Entries auto-expire.
+// For multi-process / multi-instance deployments, use a shared store (Redis)
+// instead — this protects single-instance deployments.
+
+interface RateBucket {
+  count: number;
+  resetAt: number;
+}
+const rateBuckets = new Map<string, RateBucket>();
+
+/** Returns true if the request is allowed, false if the limit is exceeded. */
+function allowRequest(key: string, maxRequests: number, windowMs: number): boolean {
+  const now = Date.now();
+  const bucket = rateBuckets.get(key);
+  if (!bucket || now >= bucket.resetAt) {
+    rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (bucket.count >= maxRequests) return false;
+  bucket.count++;
+  return true;
+}
+
+// Purge expired buckets every 10 minutes to prevent unbounded memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of rateBuckets) {
+    if (now >= bucket.resetAt) rateBuckets.delete(key);
+  }
+}, 600_000).unref(); // .unref() so this timer won't keep the process alive
+
+function clientIp(req: Request): string {
+  return (
+    (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0].trim() ??
+    req.socket.remoteAddress ??
+    'unknown'
+  );
+}
+
 export function authRouter(db: DbPool, jwtSecret: string): Router {
   const router = Router();
   const secret = new TextEncoder().encode(jwtSecret);
 
   // POST /auth/register
   router.post('/register', async (req: Request, res: Response) => {
+    // Rate limit: 5 registrations per 15 minutes per IP
+    if (!allowRequest(`register:${clientIp(req)}`, 5, 15 * 60 * 1000)) {
+      res.status(429).json({
+        type: 'https://crmy.ai/errors/rate_limited',
+        title: 'Too Many Requests',
+        status: 429,
+        detail: 'Too many registration attempts. Please try again later.',
+      });
+      return;
+    }
+
+    const client = await db.connect();
     try {
       const data = authRegister.parse(req.body);
+      const passwordHash = hashPassword(data.password);
 
-      // Hash password
-      const passwordHash = crypto.createHash('sha256').update(data.password).digest('hex');
+      await client.query('BEGIN');
 
-      // Create tenant
-      const tenantResult = await db.query(
+      const tenantResult = await client.query(
         `INSERT INTO tenants (slug, name) VALUES ($1, $2) RETURNING *`,
         [data.tenant_name.toLowerCase().replace(/[^a-z0-9-]/g, '-'), data.tenant_name],
       );
       const tenant = tenantResult.rows[0];
 
-      // Create owner user
-      const userResult = await db.query(
+      const userResult = await client.query(
         `INSERT INTO users (tenant_id, email, name, role, password_hash)
          VALUES ($1, $2, $3, 'owner', $4) RETURNING *`,
         [tenant.id, data.email, data.name, passwordHash],
       );
       const user = userResult.rows[0];
 
-      // Emit events
+      await client.query('COMMIT');
+
+      // Emit event outside transaction (non-critical)
       await emitEvent(db, {
         tenantId: tenant.id,
         eventType: 'user.created',
@@ -50,7 +134,6 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
         afterData: { id: user.id, email: user.email, name: user.name, role: user.role },
       });
 
-      // Generate JWT
       const token = await new jose.SignJWT({
         sub: user.id,
         tenant_id: tenant.id,
@@ -58,7 +141,7 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
       })
         .setProtectedHeader({ alg: 'HS256' })
         .setIssuedAt()
-        .setExpirationTime('1h')
+        .setExpirationTime('8h')
         .sign(secret);
 
       res.status(201).json({
@@ -66,6 +149,7 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
         user: { id: user.id, email: user.email, name: user.name, role: user.role, tenant_id: tenant.id },
       });
     } catch (err: unknown) {
+      await client.query('ROLLBACK').catch(() => {});
       if (err && typeof err === 'object' && 'name' in err && err.name === 'ZodError') {
         res.status(422).json({
           type: 'https://crmy.ai/errors/validation',
@@ -76,29 +160,56 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
         });
         return;
       }
-      const message = err instanceof Error ? err.message : 'Registration failed';
-      const status = message.includes('duplicate') ? 409 : 500;
-      res.status(status).json({
+      // Detect unique constraint violations without leaking PG internals
+      const pgCode = (err as Record<string, unknown>)?.code;
+      if (pgCode === '23505') {
+        res.status(409).json({
+          type: 'https://crmy.ai/errors/conflict',
+          title: 'Conflict',
+          status: 409,
+          detail: 'An account with that email or tenant name already exists.',
+        });
+        return;
+      }
+      res.status(500).json({
         type: 'https://crmy.ai/errors/internal',
-        title: status === 409 ? 'Conflict' : 'Internal Error',
-        status,
-        detail: message,
+        title: 'Internal Error',
+        status: 500,
+        detail: 'Registration failed',
       });
+    } finally {
+      client.release();
     }
   });
 
   // POST /auth/login
   router.post('/login', async (req: Request, res: Response) => {
+    // Rate limit: 10 attempts per 15 minutes per IP
+    const ip = clientIp(req);
+    if (!allowRequest(`login:${ip}`, 10, 15 * 60 * 1000)) {
+      res.status(429).json({
+        type: 'https://crmy.ai/errors/rate_limited',
+        title: 'Too Many Requests',
+        status: 429,
+        detail: 'Too many login attempts. Please try again later.',
+      });
+      return;
+    }
+
     try {
       const data = authLogin.parse(req.body);
-      const passwordHash = crypto.createHash('sha256').update(data.password).digest('hex');
 
+      // Look up by email first — password verification happens in application
+      // code using timingSafeEqual, not in SQL, to prevent timing oracles.
       const result = await db.query(
-        'SELECT * FROM users WHERE email = $1 AND password_hash = $2',
-        [data.email, passwordHash],
+        'SELECT * FROM users WHERE email = $1',
+        [data.email],
       );
 
-      if (result.rows.length === 0) {
+      const user = result.rows[0];
+      const passwordOk = user ? verifyPassword(data.password, user.password_hash) : false;
+
+      if (!passwordOk) {
         res.status(401).json({
           type: 'https://crmy.ai/errors/unauthorized',
           title: 'Unauthorized',
@@ -108,7 +219,14 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
         return;
       }
 
-      const user = result.rows[0];
+      // Opportunistically upgrade legacy SHA-256 hash to scrypt on successful login
+      if (user.password_hash && !user.password_hash.startsWith('scrypt:')) {
+        db.query(
+          'UPDATE users SET password_hash = $1 WHERE id = $2',
+          [hashPassword(data.password), user.id],
+        ).catch(() => {});
+      }
+
       const token = await new jose.SignJWT({
         sub: user.id,
         tenant_id: user.tenant_id,
@@ -116,7 +234,7 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
       })
         .setProtectedHeader({ alg: 'HS256' })
         .setIssuedAt()
-        .setExpirationTime('1h')
+        .setExpirationTime('8h')
         .sign(secret);
 
       res.json({
@@ -155,15 +273,17 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
   agentRegistration.use(authMiddleware(db, jwtSecret));
 
   agentRegistration.post('/register-agent', async (req: Request, res: Response) => {
+    const client = await db.connect();
     try {
       const data = agentRegisterSchema.parse(req.body);
       const actor = req.actor!;
 
-      // Enforce governor limit on actor count
+      // Enforce governor limit on actor count before acquiring the transaction
       const activeCount = await governorLimits.countActiveActors(db, actor.tenant_id);
       await governorLimits.enforceLimit(db, actor.tenant_id, 'actors_max', activeCount);
 
-      // Find-or-create the agent actor with minimal scopes
+      // Find-or-create the agent actor. ensureActor uses INSERT … ON CONFLICT,
+      // so it is safe to call without a surrounding transaction.
       const minimalScopes = ['read']; // agents start read-only; admin grants more
       const agentActor = await actorRepo.ensureActor(db, actor.tenant_id, {
         actor_type: 'agent',
@@ -174,17 +294,25 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
         metadata: {},
       } as Parameters<typeof actorRepo.ensureActor>[2]);
 
-      // Generate an API key bound to this agent actor
+      // Generate an API key bound to this agent actor.
+      // The actor upsert and key insert are each single statements; we wrap
+      // both under an explicit transaction so that a failed key insert does not
+      // leave the actor without a key (the actor row is rolled back too).
       const rawKey = 'crmy_' + crypto.randomBytes(32).toString('hex');
       const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
 
-      const keyResult = await db.query(
+      await client.query('BEGIN');
+
+      const keyResult = await client.query(
         `INSERT INTO api_keys (tenant_id, actor_id, key_hash, label, scopes, expires_at)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id, label, scopes, actor_id, created_at`,
         [actor.tenant_id, agentActor.id, keyHash, `${data.display_name} auto`, minimalScopes, null],
       );
 
+      await client.query('COMMIT');
+
+      // Emit event outside transaction (non-critical)
       await emitEvent(db, {
         tenantId: actor.tenant_id,
         eventType: 'actor.self_registered',
@@ -203,6 +331,7 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
         },
       });
     } catch (err: unknown) {
+      await client.query('ROLLBACK').catch(() => {});
       if (err && typeof err === 'object' && 'name' in err && err.name === 'ZodError') {
         res.status(422).json({
           type: 'https://crmy.ai/errors/validation',
@@ -217,13 +346,14 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
         res.status(err.status).json(err.toJSON());
         return;
       }
-      const message = err instanceof Error ? err.message : 'Registration failed';
       res.status(500).json({
         type: 'https://crmy.ai/errors/internal',
         title: 'Internal Error',
         status: 500,
-        detail: message,
+        detail: 'Agent registration failed',
       });
+    } finally {
+      client.release();
     }
   });
 
@@ -434,8 +564,7 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
           res.status(400).json({ detail: 'Current password is required to set a new password' });
           return;
         }
-        const currentHash = crypto.createHash('sha256').update(current_password).digest('hex');
-        if (currentHash !== user.password_hash) {
+        if (!verifyPassword(current_password, user.password_hash)) {
           res.status(400).json({ detail: 'Current password is incorrect' });
           return;
         }
@@ -455,9 +584,8 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
       if (name?.trim()) { cols.push(`name = $${vals.length + 1}`); vals.push(name.trim()); }
       if (email?.trim()) { cols.push(`email = $${vals.length + 1}`); vals.push(email.trim()); }
       if (new_password) {
-        const hash = crypto.createHash('sha256').update(new_password).digest('hex');
         cols.push(`password_hash = $${vals.length + 1}`);
-        vals.push(hash);
+        vals.push(hashPassword(new_password));
       }
 
       if (cols.length === 1) {

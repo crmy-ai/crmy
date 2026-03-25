@@ -170,12 +170,12 @@ export async function extractContextFromActivity(
         title: entry.title,
         body: entry.body,
         structured_data: entry.structured_data ?? {},
-        confidence: entry.confidence ?? null,
+        confidence: entry.confidence ?? undefined,
         tags: entry.tags ?? ['extracted', activity.type],
         source: 'extraction',
         source_ref: activityId,
         source_activity_id: activityId,
-        valid_until: entry.valid_until ?? null,
+        valid_until: entry.valid_until ?? undefined,
         is_current: true,
       });
       written++;
