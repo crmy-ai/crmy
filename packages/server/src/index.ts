@@ -5,6 +5,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { initPool, getPool, closePool, type DbPool } from './db/pool.js';
@@ -94,6 +95,9 @@ export async function createApp(config: ServerConfig) {
     progress('seed_defaults', 'error', (err as Error).message);
     throw err;
   }
+
+  // First-run: create admin from env vars or warn if no users exist
+  await checkFirstRun(db, config.tenantSlug);
 
   const app = express();
   // Limit JSON payloads to 1 MB to prevent DoS via oversized bodies.
@@ -218,6 +222,63 @@ export async function createApp(config: ServerConfig) {
   }
 
   return { app, db, hitlInterval };
+}
+
+/**
+ * First-run check: if no users exist, either create the first admin user from
+ * CRMY_ADMIN_EMAIL + CRMY_ADMIN_PASSWORD env vars (useful for Docker / CI), or
+ * print a prominent warning so the operator knows to create one.
+ *
+ * This prevents ships-with-defaults security footguns: there are no hardcoded
+ * credentials, and a freshly started server that has no users will loudly say so.
+ */
+async function checkFirstRun(db: DbPool, tenantSlug: string): Promise<void> {
+  const { rows } = await db.query('SELECT id FROM users LIMIT 1');
+  if (rows.length > 0) return; // Users already exist — nothing to do
+
+  const adminEmail    = process.env.CRMY_ADMIN_EMAIL?.trim();
+  const adminPassword = process.env.CRMY_ADMIN_PASSWORD;
+  const adminName     = process.env.CRMY_ADMIN_NAME?.trim() ?? 'Admin';
+
+  if (adminEmail && adminPassword) {
+    // Create first admin user from env vars (Docker / headless init path)
+    const tenantResult = await db.query(
+      `SELECT id FROM tenants WHERE slug = $1`,
+      [tenantSlug],
+    );
+    if (tenantResult.rows.length === 0) {
+      console.warn('[crmy] checkFirstRun: tenant not found, skipping user creation');
+      return;
+    }
+    const tenantId = tenantResult.rows[0].id as string;
+
+    // scrypt — same params as auth/routes.ts
+    const salt = crypto.randomBytes(16);
+    const hash = crypto.scryptSync(adminPassword, salt, 64, { N: 16384, r: 8, p: 1 });
+    const passwordHash = `scrypt:${salt.toString('hex')}:${hash.toString('hex')}`;
+
+    await db.query(
+      `INSERT INTO users (tenant_id, email, name, role, password_hash)
+       VALUES ($1, $2, $3, 'owner', $4)
+       ON CONFLICT (tenant_id, email) DO NOTHING`,
+      [tenantId, adminEmail, adminName, passwordHash],
+    );
+    console.log(`[crmy] First-run: admin user created for ${adminEmail}`);
+    return;
+  }
+
+  // No env vars set — warn loudly so the operator knows they need to create a user
+  console.warn('');
+  console.warn('┌─────────────────────────────────────────────────────────────┐');
+  console.warn('│  WARNING: No users exist in this CRMy instance.             │');
+  console.warn('│                                                              │');
+  console.warn('│  Create your first admin account:                           │');
+  console.warn('│    • CLI:  npx @crmy/cli init                               │');
+  console.warn('│    • API:  POST /auth/register                               │');
+  console.warn('│    • ENV:  set CRMY_ADMIN_EMAIL and CRMY_ADMIN_PASSWORD      │');
+  console.warn('│            then restart the server                           │');
+  console.warn('└─────────────────────────────────────────────────────────────┘');
+  console.warn('');
 }
 
 async function seedDefaults(db: DbPool, tenantSlug: string): Promise<void> {

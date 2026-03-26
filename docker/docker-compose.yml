@@ -9,6 +9,11 @@ services:
     environment:
       DATABASE_URL: postgres://crmy:crmy@db:5432/crmy
       JWT_SECRET: change-me-in-production
+      # First-run: set these to auto-create the initial admin account.
+      # Remove after first boot or use a secrets manager.
+      # CRMY_ADMIN_EMAIL: admin@yourcompany.com
+      # CRMY_ADMIN_PASSWORD: choose-a-strong-password
+      # CRMY_ADMIN_NAME: Admin
     depends_on:
       db:
         condition: service_healthy

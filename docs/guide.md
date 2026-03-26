@@ -95,6 +95,36 @@ docker compose -f docker/docker-compose.yml up -d
 
 This starts PostgreSQL and the crmy server on port 3000 with auto-migrations.
 
+**First-run setup — there are no default credentials.** After the server starts, create the first admin account using one of these methods:
+
+**Option A — CLI wizard (recommended for local installs)**
+```bash
+npx @crmy/cli init
+```
+
+**Option B — REST API (works against any running server)**
+```bash
+curl -X POST http://localhost:3000/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"strongpassword","name":"Your Name","tenant_name":"My Org"}'
+```
+
+**Option C — Environment variables (headless / Docker / CI)**
+
+Set `CRMY_ADMIN_EMAIL`, `CRMY_ADMIN_PASSWORD`, and optionally `CRMY_ADMIN_NAME` in your environment or `docker-compose.yml` before starting the server. On first boot with no existing users, the server will create the admin account automatically:
+
+```yaml
+# docker-compose.yml
+environment:
+  DATABASE_URL: postgres://crmy:crmy@db:5432/crmy
+  JWT_SECRET: your-secret-here
+  CRMY_ADMIN_EMAIL: admin@yourcompany.com
+  CRMY_ADMIN_PASSWORD: choose-a-strong-password
+  CRMY_ADMIN_NAME: "Admin"
+```
+
+If the server starts with no users and none of the above methods has been used, it will print a prominent warning in the logs with setup instructions.
+
 ### Develop from source
 
 ```bash

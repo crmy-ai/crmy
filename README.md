@@ -429,7 +429,21 @@ Available at `/app` when the server is running. Useful for human review, HITL ap
 | HITL Queue | Approve or reject pending agent action requests |
 | Settings | API keys, actors, webhooks, custom fields |
 
-Docker default credentials: `admin@crmy.ai` / `admin` — change after first login.
+**First-run setup (Docker):** There are no default credentials. After `docker compose up`, create your first admin account using one of these methods:
+
+```bash
+# Option A — CLI wizard (recommended)
+npx @crmy/cli init
+
+# Option B — REST API
+curl -X POST http://localhost:3000/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"you@example.com","password":"...","name":"Your Name","tenant_name":"My Org"}'
+
+# Option C — Environment variables (headless / CI)
+# Set CRMY_ADMIN_EMAIL, CRMY_ADMIN_PASSWORD (and optionally CRMY_ADMIN_NAME)
+# in docker-compose.yml before starting the server
+```
 
 ---
 
