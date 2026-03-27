@@ -112,7 +112,7 @@ export default function AgentSettings() {
     setCanLogActivities(config.can_log_activities);
     setCanWriteObjects(config.can_write_objects);
     // If model is not in known list, assume custom
-    if (config.provider === 'custom' || (config.provider !== 'custom' && !providerModels[config.provider]?.includes(config.model))) {
+    if (!providerModels[config.provider as keyof typeof providerModels]?.includes(config.model)) {
       setCustomModel(config.model);
     }
   }, [config]);

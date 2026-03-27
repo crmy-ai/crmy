@@ -50,7 +50,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'contact_search',
-      description: 'Search contacts with flexible filters. The query parameter searches across name, email, and company fields simultaneously. Filter by lifecycle_stage to find prospects or champions, account_id to see contacts at a specific company, owner_id for contacts owned by a specific rep, and tags for custom categorization. Returns paginated results.',,
+      description: 'Search contacts with flexible filters. The query parameter searches across name, email, and company fields simultaneously. Filter by lifecycle_stage to find prospects or champions, account_id to see contacts at a specific company, owner_id for contacts owned by a specific rep, and tags for custom categorization. Returns paginated results.',
       inputSchema: contactSearch,
       handler: async (input: z.infer<typeof contactSearch>, actor: ActorContext) => {
         const result = await contactRepo.searchContacts(db, actor.tenant_id, {
