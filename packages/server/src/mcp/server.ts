@@ -51,24 +51,34 @@ export interface ToolDef {
 }
 
 export function getAllTools(db: DbPool): ToolDef[] {
+  // Order signals importance to the LLM scanning the tool list.
+  // High-frequency agent tools first, infrastructure tools last.
   return [
+    // 1. Briefing + context (most important agent tools)
+    ...contextEntryTools(db),    // briefing_get, context_add/get/list/search/supersede, context_stale
+    // 2. Actor identity
+    ...actorTools(db),           // actor_whoami, actor_register, actor_expertise
+    // 3. Activities
+    ...activityTools(db),        // activity_create, activity_get_timeline
+    // 4. Assignments
+    ...assignmentTools(db),      // assignment_create, assignment_list, assignment_update
+    // 5. HITL
+    ...hitlTools(db),            // hitl_submit_request, hitl_check_status
+    // 6. Core CRM entities
     ...contactTools(db),
     ...accountTools(db),
     ...opportunityTools(db),
-    ...activityTools(db),
+    // 7. Analytics
     ...analyticsTools(db),
-    ...hitlTools(db),
+    // 8. Remaining tools
     ...useCaseTools(db),
-    ...webhookTools(db),
     ...emailTools(db),
-    ...customFieldTools(db),
     ...noteTools(db),
-    ...workflowTools(db),
-    ...actorTools(db),
-    ...assignmentTools(db),
-    ...contextEntryTools(db),
-    ...registryTools(db),
     ...entityResolveTools(db),
+    ...registryTools(db),
+    ...webhookTools(db),
+    ...workflowTools(db),
+    ...customFieldTools(db),
     ...metaTools(db),
   ];
 }

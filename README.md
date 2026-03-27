@@ -22,21 +22,40 @@ Assembling that from raw queries is 5–10 API calls, schema knowledge, and brit
 
 ## Quickstart
 
-### Prerequisites
+Choose your deploy path:
 
-- Node.js >= 20
-- PostgreSQL >= 14
+### Path A — Try it in 60 seconds (Railway)
 
-### 1. Deploy
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/crmy)
+
+One click. No local setup. Demo data loads automatically.
+
+### Path B — Docker (local, recommended for dev)
 
 ```bash
-# Docker (fastest — starts PostgreSQL + server together)
-docker compose -f docker/docker-compose.yml up -d
+# Clone and start PostgreSQL + server together
+git clone https://github.com/crmy-ai/crmy.git && cd crmy
+CRMY_SEED_DEMO=true docker compose -f docker/docker-compose.yml up -d
+```
 
-# Or with npm
+Set `CRMY_ADMIN_EMAIL` and `CRMY_ADMIN_PASSWORD` in `docker/docker-compose.yml` to create your admin account on first boot.
+
+### Path C — npm (bring your own Postgres)
+
+```bash
 npm install -g @crmy/cli
-npx @crmy/cli init     # connect to PostgreSQL, run migrations, create admin account
+npx @crmy/cli init     # connect to PostgreSQL, run migrations, create admin, seed demo data
 npx @crmy/cli server   # starts on :3000
+```
+
+### Try it
+
+Regardless of how you deployed, run these to see CRMy in action with the demo data:
+
+```bash
+crmy briefing contact:d0000000-0000-4000-c000-000000000001   # Sarah Chen at Acme Corp
+crmy briefing account:d0000000-0000-4000-b000-000000000001   # Acme Corp — full account context
+crmy assignments list --mine                                   # Open assignments queue
 ```
 
 ### 2. Connect via MCP

@@ -14,7 +14,7 @@ export function customFieldTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'custom_field_create',
-      description: 'Define a new custom field for an object type (contact, account, opportunity, activity, use_case)',
+      description: 'Define a new custom field for a CRM object type (contact, account, opportunity, activity, or use_case). Specify the field name, label, data type, whether it is required, and any enum options. Custom fields appear in all API responses and can be used in search filters.',
       inputSchema: customFieldCreate,
       handler: async (input: z.infer<typeof customFieldCreate>, actor: ActorContext) => {
         const field = await cfRepo.createCustomField(db, actor.tenant_id, {
@@ -35,7 +35,7 @@ export function customFieldTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'custom_field_update',
-      description: 'Update a custom field definition (label, required, options, sort_order)',
+      description: 'Update an existing custom field definition. Supports changing the label, required flag, available options for enum fields, and sort_order for display ordering. Does not affect existing data values.',
       inputSchema: customFieldUpdate,
       handler: async (input: z.infer<typeof customFieldUpdate>, actor: ActorContext) => {
         const before = await cfRepo.getCustomField(db, actor.tenant_id, input.id);
@@ -46,7 +46,7 @@ export function customFieldTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'custom_field_delete',
-      description: 'Delete a custom field definition',
+      description: 'Delete a custom field definition. Removes the field schema — existing data in records is not affected but will no longer be validated or displayed. Use with caution in production.',
       inputSchema: customFieldDelete,
       handler: async (input: z.infer<typeof customFieldDelete>, actor: ActorContext) => {
         const deleted = await cfRepo.deleteCustomField(db, actor.tenant_id, input.id);
@@ -56,7 +56,7 @@ export function customFieldTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'custom_field_list',
-      description: 'List all custom field definitions for an object type',
+      description: 'List all custom field definitions for a specific object type. Returns field names, types, labels, required constraints, and options. Use this alongside schema_get to understand the complete data model for a CRM entity.',
       inputSchema: customFieldList,
       handler: async (input: z.infer<typeof customFieldList>, actor: ActorContext) => {
         const fields = await cfRepo.listCustomFields(db, actor.tenant_id, input.object_type);

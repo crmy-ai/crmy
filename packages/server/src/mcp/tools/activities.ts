@@ -17,7 +17,7 @@ export function activityTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'activity_create',
-      description: 'Create an activity (call, email, meeting, note, task, etc.). Supports Context Engine fields: performed_by, subject_type/subject_id for polymorphic linking, occurred_at, outcome, and detail JSONB.',
+      description: 'Log a meaningful action: outreach sent, call made, meeting held, stage changed, proposal drafted, research completed. Set occurred_at to when the event actually happened, not when you are logging it — this is critical for accurate timelines when logging retroactively. The detail field is a free JSONB payload for type-specific data: for outreach_email include {to, subject, channel}, for meeting_held include {duration_minutes, attendees}, for stage_change include {from_stage, to_stage}. If an LLM backend is configured, CRMy auto-extracts context entries from the activity description.',
       inputSchema: activityCreate,
       handler: async (input: z.infer<typeof activityCreate>, actor: ActorContext) => {
         // Enforce governor limit on daily activity count
@@ -52,7 +52,7 @@ export function activityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'activity_get',
-      description: 'Get an activity by ID',
+      description: 'Retrieve a single activity by UUID including its full body, detail payload, outcome, and linked subject. Use this when you need the complete activity record from a timeline or search result.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input: { id: string }, actor: ActorContext) => {
         const activity = await activityRepo.getActivity(db, actor.tenant_id, input.id);
@@ -62,7 +62,7 @@ export function activityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'activity_search',
-      description: 'Search activities with filters. Supports contact_id, account_id, opportunity_id, type, subject_type, subject_id, performed_by, and outcome.',
+      description: 'Search activities across the CRM with flexible filters. Use type to filter by activity kind (outreach_email, meeting_held, stage_change, etc.), performed_by to see a specific actor contributions, outcome to find activities with a particular result, or subject_type/subject_id to scope to a specific CRM record. Returns paginated results sorted by occurred_at descending.',
       inputSchema: activitySearch,
       handler: async (input: z.infer<typeof activitySearch>, actor: ActorContext) => {
         const result = await activityRepo.searchActivities(db, actor.tenant_id, {
@@ -74,7 +74,7 @@ export function activityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'activity_complete',
-      description: 'Mark an activity as completed',
+      description: 'Mark an activity as completed, setting its status and completed_at timestamp. Optionally add a completion note that appends to the activity body. If a note is added and an LLM backend is configured, context extraction re-runs on the updated content.',
       inputSchema: activityComplete,
       handler: async (input: z.infer<typeof activityComplete>, actor: ActorContext) => {
         const before = await activityRepo.getActivity(db, actor.tenant_id, input.id);
@@ -114,7 +114,7 @@ export function activityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'activity_update',
-      description: 'Update an activity. Pass id and a patch object with fields to update.',
+      description: 'Update an existing activity record. Pass the id and a patch object with fields to change (body, subject, outcome, detail, custom_fields, etc.). If the body content changes, context extraction automatically re-runs to capture any new information.',
       inputSchema: activityUpdate,
       handler: async (input: z.infer<typeof activityUpdate>, actor: ActorContext) => {
         const before = await activityRepo.getActivity(db, actor.tenant_id, input.id);
@@ -148,7 +148,7 @@ export function activityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'activity_get_timeline',
-      description: 'Get the activity timeline for any CRM object (contact, account, opportunity, use_case) via polymorphic subject.',
+      description: 'Get a chronological activity timeline for any CRM object (contact, account, opportunity, or use_case) via polymorphic subject_type and subject_id. Optionally filter by activity types to see only specific kinds of activities. Returns activities sorted by occurred_at descending with the total count for pagination.',
       inputSchema: activityGetTimeline,
       handler: async (input: z.infer<typeof activityGetTimeline>, actor: ActorContext) => {
         const result = await activityRepo.getSubjectTimeline(

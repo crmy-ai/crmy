@@ -70,7 +70,7 @@ export function metaTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'schema_get',
-      description: 'Get the schema (standard fields and custom fields) for a CRM object type',
+      description: 'Get the full schema for a CRM object type including standard fields and any custom fields defined by the tenant. Agents should call this on first connect to understand the data model — it returns field names, types, required constraints, and available options for enum fields. Pass object_type as "contact", "account", "opportunity", "activity", or "use_case".',
       inputSchema: schemaGet,
       handler: async (input: z.infer<typeof schemaGet>, _actor: ActorContext) => {
         return {
@@ -81,7 +81,7 @@ export function metaTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'tenant_get_stats',
-      description: 'Get high-level statistics for the current tenant (counts and pipeline value)',
+      description: 'Get high-level statistics for the current tenant including total counts of contacts, accounts, opportunities, activities, and pipeline value. Useful for quick health checks and dashboard summaries.',
       inputSchema: tenantGetStats,
       handler: async (_input: z.infer<typeof tenantGetStats>, actor: ActorContext) => {
         return searchRepo.getTenantStats(db, actor.tenant_id);

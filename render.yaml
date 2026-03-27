@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CRMy.ai
+#
+# Render.com deploy blueprint for CRMy.
+
+services:
+  - type: web
+    name: crmy
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:server
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: crmy-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CRMY_SEED_DEMO
+        value: "true"
+
+databases:
+  - name: crmy-db
+    plan: free

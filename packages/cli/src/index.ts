@@ -44,6 +44,7 @@ import { contextTypesCommand } from './commands/context-types.js';
 import { briefingCommand } from './commands/briefing.js';
 import { authCommand } from './commands/auth.js';
 import { helpCommand } from './commands/help.js';
+import { seedDemoCommand } from './commands/seed-demo.js';
 
 const program = new Command();
 
@@ -77,6 +78,7 @@ program.addCommand(contextCommand());
 program.addCommand(activityTypesCommand());
 program.addCommand(contextTypesCommand());
 program.addCommand(briefingCommand());
+program.addCommand(seedDemoCommand());
 program.addCommand(helpCommand());
 
 // Top-level `crmy login` shortcut (delegates to `crmy auth login`)

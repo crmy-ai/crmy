@@ -16,7 +16,7 @@ function validateEmail(input: string): boolean | string {
 }
 
 function validatePassword(input: string): boolean | string {
-  return input.length >= 8 ? true : 'Password must be at least 8 characters';
+  return input.length >= 12 ? true : 'Password must be at least 12 characters';
 }
 
 export function initCommand(): Command {
@@ -147,31 +147,82 @@ export function initCommand(): Command {
 
       // ── Step 3: Admin account ────────────────────────────────────────────────
       console.log('\n  \u2500\u2500 Step 3 of 3: Admin Account \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n');
-      console.log('  Create the first admin account for the CRMy web UI and CLI.\n');
-      console.log(
-        '  \x1b[33mNOTE:\x1b[0m These are your \x1b[1mCRMy login credentials\x1b[0m \u2014 NOT your database credentials.\n',
-      );
 
-      const { name, email, password } = await inquirer.prompt([
-        {
-          type: 'input',
-          name: 'name',
-          message: '  Your full name:',
-        },
-        {
-          type: 'input',
-          name: 'email',
-          message: '  Email address (used to log in):',
-          validate: validateEmail,
-        },
-        {
-          type: 'password',
-          name: 'password',
-          message: '  Password (min 8 characters):',
-          mask: '*',
-          validate: validatePassword,
-        },
-      ]);
+      // Support non-interactive (CI / Docker) via env vars
+      const envEmail    = process.env.CRMY_ADMIN_EMAIL;
+      const envPassword = process.env.CRMY_ADMIN_PASSWORD;
+      const envName     = process.env.CRMY_ADMIN_NAME;
+      const isInteractive = process.stdin.isTTY !== false && !envEmail;
+
+      let name: string;
+      let email: string;
+      let password: string;
+
+      if (isInteractive) {
+        console.log('  Create the first admin account for the CRMy web UI and CLI.\n');
+        console.log(
+          '  \x1b[33mNOTE:\x1b[0m These are your \x1b[1mCRMy login credentials\x1b[0m \u2014 NOT your database credentials.\n',
+        );
+
+        const answers = await inquirer.prompt([
+          {
+            type: 'input',
+            name: 'name',
+            message: '  Your full name:',
+          },
+          {
+            type: 'input',
+            name: 'email',
+            message: '  Admin email:',
+            validate: validateEmail,
+          },
+          {
+            type: 'password',
+            name: 'password',
+            message: '  Admin password (min 12 chars):',
+            mask: '*',
+            validate: validatePassword,
+          },
+          {
+            type: 'password',
+            name: 'confirmPassword',
+            message: '  Confirm password:',
+            mask: '*',
+            validate: (input: string, answers: Record<string, string> | undefined) =>
+              input === answers?.password ? true : 'Passwords do not match',
+          },
+        ]);
+        name = answers.name;
+        email = answers.email;
+        password = answers.password;
+      } else {
+        // Non-interactive: require env vars
+        if (!envEmail || !envPassword) {
+          console.error(
+            '\n  Error: Non-interactive environment detected.\n\n' +
+            '  Set CRMY_ADMIN_EMAIL and CRMY_ADMIN_PASSWORD environment variables\n' +
+            '  to create the admin account without interactive prompts.\n',
+          );
+          await closePool();
+          process.exit(1);
+        }
+        const emailValid = validateEmail(envEmail);
+        if (emailValid !== true) {
+          console.error(`\n  Error: CRMY_ADMIN_EMAIL is invalid — ${emailValid}\n`);
+          await closePool();
+          process.exit(1);
+        }
+        const pwValid = validatePassword(envPassword);
+        if (pwValid !== true) {
+          console.error(`\n  Error: CRMY_ADMIN_PASSWORD is invalid — ${pwValid}\n`);
+          await closePool();
+          process.exit(1);
+        }
+        name = envName ?? 'Admin';
+        email = envEmail;
+        password = envPassword;
+        console.log('  Creating admin account from environment variables…\n');
+      }
 
       spinner = createSpinner('Creating admin account\u2026');
 
@@ -232,7 +283,35 @@ export function initCommand(): Command {
         process.exit(1);
       }
 
+      // ── Demo data prompt ──────────────────────────────────────────────────────
+      let seedDemo = false;
+      if (isInteractive) {
+        const { loadDemo } = await inquirer.prompt([
+          {
+            type: 'confirm',
+            name: 'loadDemo',
+            message: '  Load demo data to explore CRMy?',
+            default: true,
+          },
+        ]);
+        seedDemo = loadDemo;
+      }
+
       await closePool();
+
+      if (seedDemo) {
+        console.log('');
+        // Re-use the seed-demo command by importing and running it
+        const { execSync } = await import('node:child_process');
+        try {
+          execSync(`DATABASE_URL="${databaseUrl}" npx tsx ${path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../../../scripts/seed-demo.ts')}`, {
+            stdio: 'inherit',
+            env: { ...process.env, DATABASE_URL: databaseUrl },
+          });
+        } catch {
+          console.log('  \x1b[33m\u26a0\x1b[0m  Demo data seeding failed — you can run it later with: crmy seed-demo\n');
+        }
+      }
 
       // ── Success ───────────────────────────────────────────────────────────────
       console.log('\n  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510');

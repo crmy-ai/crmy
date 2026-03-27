@@ -14,7 +14,7 @@ export function noteTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'note_create',
-      description: 'Add a note or comment to any CRM object (contact, account, opportunity, use_case). Supports threading via parent_id and @mentions.',
+      description: 'Add a note or comment to any CRM object (contact, account, opportunity, or use_case). Notes support threading via parent_id for conversations and @mentions for notifications. Set visibility to "internal" for team-only notes or "external" for client-visible ones. Pin important notes with pinned: true so they appear first.',
       inputSchema: noteCreate,
       handler: async (input: z.infer<typeof noteCreate>, actor: ActorContext) => {
         const note = await noteRepo.createNote(db, actor.tenant_id, {
@@ -36,7 +36,7 @@ export function noteTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'note_get',
-      description: 'Get a note by ID, including its threaded replies',
+      description: 'Retrieve a single note by UUID including its body, author, visibility, pinned status, and all threaded replies. Use this to read a complete note conversation.',
       inputSchema: noteGet,
       handler: async (input: z.infer<typeof noteGet>, actor: ActorContext) => {
         const note = await noteRepo.getNote(db, actor.tenant_id, input.id);
@@ -47,7 +47,7 @@ export function noteTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'note_update',
-      description: 'Update a note (body, visibility, pinned status)',
+      description: 'Update an existing note by changing its body, visibility, or pinned status. Use this to correct or expand note content or to pin/unpin important notes.',
       inputSchema: noteUpdate,
       handler: async (input: z.infer<typeof noteUpdate>, actor: ActorContext) => {
         const before = await noteRepo.getNote(db, actor.tenant_id, input.id);
@@ -68,7 +68,7 @@ export function noteTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'note_delete',
-      description: 'Delete a note and all its replies',
+      description: 'Delete a note and all its threaded replies. This is a destructive action — the note and its entire conversation thread are permanently removed.',
       inputSchema: noteDelete,
       handler: async (input: z.infer<typeof noteDelete>, actor: ActorContext) => {
         const note = await noteRepo.getNote(db, actor.tenant_id, input.id);
@@ -88,7 +88,7 @@ export function noteTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'note_list',
-      description: 'List notes for a CRM object. Pinned notes appear first. Filter by visibility.',
+      description: 'List notes attached to a CRM object (contact, account, opportunity, or use_case). Pinned notes always appear first, followed by recent notes. Filter by visibility to see only internal or external notes.',
       inputSchema: noteList,
       handler: async (input: z.infer<typeof noteList>, actor: ActorContext) => {
         const result = await noteRepo.listNotes(db, actor.tenant_id, {

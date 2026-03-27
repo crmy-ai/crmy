@@ -17,7 +17,7 @@ export function workflowTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'workflow_create',
-      description: 'Create an automation workflow triggered by a CRM event (e.g. contact.created, opportunity.stage_changed)',
+      description: 'Create an automation workflow triggered by a CRM event (e.g. "contact.created", "opportunity.stage_changed", "assignment.created"). Define the trigger event, filter conditions, and a sequence of actions to execute. Workflows enable event-driven automation without custom code.',
       inputSchema: workflowCreate,
       handler: async (input: z.infer<typeof workflowCreate>, actor: ActorContext) => {
         const workflow = await wfRepo.createWorkflow(db, actor.tenant_id, {
@@ -38,7 +38,7 @@ export function workflowTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'workflow_get',
-      description: 'Get a workflow by ID with recent run history',
+      description: 'Retrieve a workflow configuration by UUID including its trigger event, filter conditions, actions, and recent execution history. Use this to inspect or debug a workflow.',
       inputSchema: workflowGet,
       handler: async (input: z.infer<typeof workflowGet>, actor: ActorContext) => {
         const workflow = await wfRepo.getWorkflow(db, actor.tenant_id, input.id);
@@ -49,7 +49,7 @@ export function workflowTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'workflow_update',
-      description: 'Update a workflow configuration, trigger, or actions',
+      description: 'Update a workflow configuration including its trigger event, filter conditions, actions, and active status. Use this to modify automation behavior or temporarily disable a workflow.',
       inputSchema: workflowUpdate,
       handler: async (input: z.infer<typeof workflowUpdate>, actor: ActorContext) => {
         const before = await wfRepo.getWorkflow(db, actor.tenant_id, input.id);
@@ -60,7 +60,7 @@ export function workflowTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'workflow_delete',
-      description: 'Delete a workflow and its run history',
+      description: 'Delete a workflow and its entire run history. This is a destructive action — the workflow stops executing and all execution records are removed.',
       inputSchema: workflowDelete,
       handler: async (input: z.infer<typeof workflowDelete>, actor: ActorContext) => {
         const deleted = await wfRepo.deleteWorkflow(db, actor.tenant_id, input.id);
@@ -70,7 +70,7 @@ export function workflowTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'workflow_list',
-      description: 'List workflows, optionally filtered by trigger event or active status',
+      description: 'List all workflows for the current tenant, optionally filtered by trigger event type or active status. Returns workflow configurations with their most recent execution status.',
       inputSchema: workflowList,
       handler: async (input: z.infer<typeof workflowList>, actor: ActorContext) => {
         const result = await wfRepo.listWorkflows(db, actor.tenant_id, {
@@ -84,7 +84,7 @@ export function workflowTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'workflow_run_list',
-      description: 'List execution runs for a workflow',
+      description: 'List execution runs for a specific workflow. Shows each run status (success, failed, skipped), trigger event, execution duration, and any error details. Useful for monitoring and debugging automation.',
       inputSchema: workflowRunList,
       handler: async (input: z.infer<typeof workflowRunList>, actor: ActorContext) => {
         const workflow = await wfRepo.getWorkflow(db, actor.tenant_id, input.workflow_id);

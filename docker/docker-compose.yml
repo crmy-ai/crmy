@@ -14,6 +14,8 @@ services:
       # CRMY_ADMIN_EMAIL: admin@yourcompany.com
       # CRMY_ADMIN_PASSWORD: choose-a-strong-password
       # CRMY_ADMIN_NAME: Admin
+      # Seed demo data on container start (set to "true" to enable)
+      # CRMY_SEED_DEMO: "true"
     depends_on:
       db:
         condition: service_healthy

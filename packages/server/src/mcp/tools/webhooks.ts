@@ -17,7 +17,7 @@ export function webhookTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'webhook_create',
-      description: 'Register a new webhook endpoint to receive event notifications',
+      description: 'Register a new webhook endpoint to receive real-time event notifications. Specify the URL, events to subscribe to (e.g. "contact.created", "opportunity.stage_changed"), and an optional secret for HMAC signature verification. CRMy sends POST requests with the event payload to your endpoint.',
       inputSchema: webhookCreate,
       handler: async (input: z.infer<typeof webhookCreate>, actor: ActorContext) => {
         const webhook = await webhookRepo.createWebhook(db, actor.tenant_id, {
@@ -38,7 +38,7 @@ export function webhookTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'webhook_get',
-      description: 'Get a webhook endpoint by ID',
+      description: 'Retrieve a webhook endpoint configuration by UUID, including its URL, subscribed events, active status, and delivery statistics.',
       inputSchema: webhookGet,
       handler: async (input: z.infer<typeof webhookGet>, actor: ActorContext) => {
         const webhook = await webhookRepo.getWebhook(db, actor.tenant_id, input.id);
@@ -48,7 +48,7 @@ export function webhookTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'webhook_update',
-      description: 'Update a webhook endpoint configuration',
+      description: 'Update a webhook endpoint configuration including its URL, subscribed events, active status, and secret. Use this to change event subscriptions or temporarily disable a webhook.',
       inputSchema: webhookUpdate,
       handler: async (input: z.infer<typeof webhookUpdate>, actor: ActorContext) => {
         const before = await webhookRepo.getWebhook(db, actor.tenant_id, input.id);
@@ -59,7 +59,7 @@ export function webhookTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'webhook_delete',
-      description: 'Delete a webhook endpoint',
+      description: 'Delete a webhook endpoint and stop all future deliveries. Past delivery records are retained for debugging.',
       inputSchema: webhookDelete,
       handler: async (input: z.infer<typeof webhookDelete>, actor: ActorContext) => {
         const deleted = await webhookRepo.deleteWebhook(db, actor.tenant_id, input.id);
@@ -69,7 +69,7 @@ export function webhookTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'webhook_list',
-      description: 'List webhook endpoints',
+      description: 'List all registered webhook endpoints for the current tenant, including their URLs, subscribed events, and active status.',
       inputSchema: webhookList,
       handler: async (input: z.infer<typeof webhookList>, actor: ActorContext) => {
         const result = await webhookRepo.listWebhooks(db, actor.tenant_id, {
@@ -82,7 +82,7 @@ export function webhookTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'webhook_list_deliveries',
-      description: 'List webhook delivery attempts with optional filters',
+      description: 'List webhook delivery attempts with optional filters for a specific webhook. Shows delivery status (success, failed, pending), response codes, and timestamps. Useful for debugging webhook integration issues.',
       inputSchema: webhookListDeliveries,
       handler: async (input: z.infer<typeof webhookListDeliveries>, _actor: ActorContext) => {
         const result = await webhookRepo.listDeliveries(db, {

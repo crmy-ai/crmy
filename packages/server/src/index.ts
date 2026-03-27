@@ -99,6 +99,16 @@ export async function createApp(config: ServerConfig) {
   // First-run: create admin from env vars or warn if no users exist
   await checkFirstRun(db, config.tenantSlug);
 
+  // Seed demo data if requested via CRMY_SEED_DEMO=true (Docker / CI path)
+  if (process.env.CRMY_SEED_DEMO === 'true') {
+    try {
+      await seedDemoData(db);
+      console.log('[crmy] Demo data seeded successfully');
+    } catch (err) {
+      console.warn('[crmy] Demo data seeding failed:', (err as Error).message);
+    }
+  }
+
   const app = express();
   // Limit JSON payloads to 1 MB to prevent DoS via oversized bodies.
   // MCP tool calls may include context blobs — 1 MB is generous but bounded.
@@ -305,6 +315,63 @@ async function seedDefaults(db: DbPool, tenantSlug: string): Promise<void> {
   } catch {
     // Tables may not exist yet if migration hasn't run
   }
+}
+
+/**
+ * Seed demo data using the same stable UUIDs as scripts/seed-demo.ts.
+ * Called when CRMY_SEED_DEMO=true (Docker / container startup).
+ */
+async function seedDemoData(db: DbPool): Promise<void> {
+  const tenantRes = await db.query(`SELECT id FROM tenants LIMIT 1`);
+  if (tenantRes.rows.length === 0) return;
+  const tenantId = tenantRes.rows[0].id as string;
+
+  const IDS = {
+    ACTOR_CODY: 'd0000000-0000-4000-a000-000000000001',
+    ACTOR_SARAH_R: 'd0000000-0000-4000-a000-000000000002',
+    ACTOR_OUTREACH: 'd0000000-0000-4000-a000-000000000003',
+    ACTOR_RESEARCH: 'd0000000-0000-4000-a000-000000000004',
+    ACCT_ACME: 'd0000000-0000-4000-b000-000000000001',
+    ACCT_BRIGHTSIDE: 'd0000000-0000-4000-b000-000000000002',
+    ACCT_VERTEX: 'd0000000-0000-4000-b000-000000000003',
+    CT_SARAH_CHEN: 'd0000000-0000-4000-c000-000000000001',
+    CT_MARCUS_WEBB: 'd0000000-0000-4000-c000-000000000002',
+    CT_PRIYA_NAIR: 'd0000000-0000-4000-c000-000000000003',
+    CT_JORDAN_LIU: 'd0000000-0000-4000-c000-000000000004',
+    CT_TOMAS_RIVERA: 'd0000000-0000-4000-c000-000000000005',
+    CT_KEIKO_YAMAMOTO: 'd0000000-0000-4000-c000-000000000006',
+    OPP_ACME: 'd0000000-0000-4000-d000-000000000001',
+    OPP_BRIGHTSIDE: 'd0000000-0000-4000-d000-000000000002',
+    OPP_VERTEX: 'd0000000-0000-4000-d000-000000000003',
+  };
+
+  // Check if already seeded
+  const check = await db.query('SELECT id FROM actors WHERE id = $1', [IDS.ACTOR_CODY]);
+  if (check.rows.length > 0) return; // already seeded
+
+  // Actors
+  await db.query(`INSERT INTO actors (id, tenant_id, actor_type, display_name, email) VALUES ($1, $2, 'human', 'Cody Harris', 'cody@crmy.ai') ON CONFLICT (id) DO NOTHING`, [IDS.ACTOR_CODY, tenantId]);
+  await db.query(`INSERT INTO actors (id, tenant_id, actor_type, display_name, email) VALUES ($1, $2, 'human', 'Sarah Reeves', 'sarah@crmy.ai') ON CONFLICT (id) DO NOTHING`, [IDS.ACTOR_SARAH_R, tenantId]);
+  await db.query(`INSERT INTO actors (id, tenant_id, actor_type, display_name, email, agent_identifier, agent_model) VALUES ($1, $2, 'agent', 'Outreach Agent', NULL, 'outreach-v1', 'claude-sonnet-4-20250514') ON CONFLICT (id) DO NOTHING`, [IDS.ACTOR_OUTREACH, tenantId]);
+  await db.query(`INSERT INTO actors (id, tenant_id, actor_type, display_name, email, agent_identifier, agent_model) VALUES ($1, $2, 'agent', 'Research Agent', NULL, 'research-v1', 'claude-sonnet-4-20250514') ON CONFLICT (id) DO NOTHING`, [IDS.ACTOR_RESEARCH, tenantId]);
+
+  // Accounts
+  await db.query(`INSERT INTO accounts (id, tenant_id, name, industry, health_score, annual_revenue, domain, website) VALUES ($1, $2, 'Acme Corp', 'SaaS', 72, 180000, 'acme.com', 'https://acme.com') ON CONFLICT (id) DO NOTHING`, [IDS.ACCT_ACME, tenantId]);
+  await db.query(`INSERT INTO accounts (id, tenant_id, name, industry, health_score, annual_revenue, domain, website) VALUES ($1, $2, 'Brightside Health', 'Healthcare', 45, 96000, 'brightsidehealth.com', 'https://brightsidehealth.com') ON CONFLICT (id) DO NOTHING`, [IDS.ACCT_BRIGHTSIDE, tenantId]);
+  await db.query(`INSERT INTO accounts (id, tenant_id, name, industry, health_score, annual_revenue, domain, website) VALUES ($1, $2, 'Vertex Logistics', 'Logistics', 88, 240000, 'vertex.io', 'https://vertex.io') ON CONFLICT (id) DO NOTHING`, [IDS.ACCT_VERTEX, tenantId]);
+
+  // Contacts
+  await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Sarah', 'Chen', 'sarah.chen@acme.com', 'VP Engineering', $3, 'prospect') ON CONFLICT (id) DO NOTHING`, [IDS.CT_SARAH_CHEN, tenantId, IDS.ACCT_ACME]);
+  await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Marcus', 'Webb', 'marcus.webb@acme.com', 'CFO', $3, 'prospect') ON CONFLICT (id) DO NOTHING`, [IDS.CT_MARCUS_WEBB, tenantId, IDS.ACCT_ACME]);
+  await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Priya', 'Nair', 'p.nair@brightsidehealth.com', 'CTO', $3, 'active') ON CONFLICT (id) DO NOTHING`, [IDS.CT_PRIYA_NAIR, tenantId, IDS.ACCT_BRIGHTSIDE]);
+  await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Jordan', 'Liu', 'j.liu@brightsidehealth.com', 'RevOps Lead', $3, 'active') ON CONFLICT (id) DO NOTHING`, [IDS.CT_JORDAN_LIU, tenantId, IDS.ACCT_BRIGHTSIDE]);
+  await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Tomás', 'Rivera', 't.rivera@vertex.io', 'Head of Sales Ops', $3, 'champion') ON CONFLICT (id) DO NOTHING`, [IDS.CT_TOMAS_RIVERA, tenantId, IDS.ACCT_VERTEX]);
+  await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Keiko', 'Yamamoto', 'k.yamamoto@vertex.io', 'CEO', $3, 'champion') ON CONFLICT (id) DO NOTHING`, [IDS.CT_KEIKO_YAMAMOTO, tenantId, IDS.ACCT_VERTEX]);
+
+  // Opportunities
+  await db.query(`INSERT INTO opportunities (id, tenant_id, name, account_id, stage, amount, close_date) VALUES ($1, $2, 'Acme Corp Enterprise Deal', $3, 'Discovery', 180000, '2026-06-30') ON CONFLICT (id) DO NOTHING`, [IDS.OPP_ACME, tenantId, IDS.ACCT_ACME]);
+  await db.query(`INSERT INTO opportunities (id, tenant_id, name, account_id, stage, amount, close_date) VALUES ($1, $2, 'Brightside Health Platform Deal', $3, 'PoC', 96000, '2026-05-15') ON CONFLICT (id) DO NOTHING`, [IDS.OPP_BRIGHTSIDE, tenantId, IDS.ACCT_BRIGHTSIDE]);
+  await db.query(`INSERT INTO opportunities (id, tenant_id, name, account_id, stage, amount, close_date) VALUES ($1, $2, 'Vertex Logistics Expansion', $3, 'Negotiation', 240000, '2026-04-30') ON CONFLICT (id) DO NOTHING`, [IDS.OPP_VERTEX, tenantId, IDS.ACCT_VERTEX]);
 }
 
 // Direct startup

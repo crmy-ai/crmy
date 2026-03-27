@@ -14,7 +14,7 @@ export function analyticsTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'crm_search',
-      description: 'Search across all CRM entities (contacts, accounts, opportunities) with a single query',
+      description: 'Search across all CRM entities — contacts, accounts, and opportunities — with a single query string. Returns results grouped by entity type, ranked by relevance. Use this for broad discovery when you do not know which entity type holds the information you need.',
       inputSchema: crmSearch,
       handler: async (input: z.infer<typeof crmSearch>, actor: ActorContext) => {
         return searchRepo.crmSearch(db, actor.tenant_id, input.query, input.limit ?? 10);
@@ -22,7 +22,7 @@ export function analyticsTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'pipeline_forecast',
-      description: 'Get pipeline forecast with win rate, average deal size, and cycle time',
+      description: 'Get a weighted pipeline forecast showing projected ARR by stage across all open opportunities, along with historical win rates, average deal size, and sales cycle time. Use this for weekly pipeline reviews, board reporting, and identifying gaps in pipeline coverage. Returns both raw totals and probability-weighted values.',
       inputSchema: pipelineForecast,
       handler: async (input: z.infer<typeof pipelineForecast>, actor: ActorContext) => {
         return oppRepo.getPipelineForecast(db, actor.tenant_id, {
@@ -33,7 +33,7 @@ export function analyticsTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'account_health_report',
-      description: 'Get a health report for an account including open opportunities, activity metrics, and contact count',
+      description: 'Get a comprehensive health report for an account showing open opportunities, recent activity metrics, contact count, health score trend, and engagement indicators. Use this to surface accounts with declining health scores that need proactive attention or to prepare for account reviews.',
       inputSchema: accountHealthReport,
       handler: async (input: z.infer<typeof accountHealthReport>, actor: ActorContext) => {
         const report = await searchRepo.getAccountHealthReport(db, actor.tenant_id, input.account_id);

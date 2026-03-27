@@ -15,7 +15,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'opportunity_create',
-      description: 'Create a new sales opportunity',
+      description: 'Create a new sales opportunity linked to an account. Set stage, amount (in cents), close_date, probability, and forecast_cat to build the pipeline record. The amount field represents ARR in cents (e.g. 180000 for $1,800). Link to an account_id and optionally a primary contact_id.',
       inputSchema: opportunityCreate,
       handler: async (input: z.infer<typeof opportunityCreate>, actor: ActorContext) => {
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
@@ -39,7 +39,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'opportunity_get',
-      description: 'Get an opportunity by ID, including recent activities',
+      description: 'Retrieve a single opportunity by UUID, including its account details and recent activities. For a comprehensive view with context entries, stale warnings, and assignments, use briefing_get on the opportunity instead.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input: { id: string }, actor: ActorContext) => {
         const opportunity = await oppRepo.getOpportunity(db, actor.tenant_id, input.id);
@@ -51,7 +51,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'opportunity_search',
-      description: 'Search opportunities with filters. Supports query, stage, owner_id, account_id, forecast_cat, and date range.',
+      description: 'Search opportunities with flexible filters. Use stage to find deals at a specific pipeline stage (e.g. "Negotiation"), account_id for a specific company, forecast_cat for pipeline categorization, and date range to find deals closing within a window. Useful for pipeline reviews and identifying at-risk deals approaching their close_date.',
       inputSchema: opportunitySearch,
       handler: async (input: z.infer<typeof opportunitySearch>, actor: ActorContext) => {
         const result = await oppRepo.searchOpportunities(db, actor.tenant_id, {
@@ -63,7 +63,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'opportunity_advance_stage',
-      description: 'Advance an opportunity to a new stage. Requires lost_reason when stage is closed_lost.',
+      description: 'Advance an opportunity to a new pipeline stage. Automatically logs a stage_change activity for the audit trail. When setting stage to "closed_lost", you must provide a lost_reason explaining why the deal was lost — this is required for pipeline analytics.',
       inputSchema: opportunityAdvanceStage,
       handler: async (input: z.infer<typeof opportunityAdvanceStage>, actor: ActorContext) => {
         if (input.stage === 'closed_lost' && !input.lost_reason) {
@@ -105,7 +105,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'opportunity_update',
-      description: 'Update an opportunity. Pass id and a patch object with fields to update.',
+      description: 'Update an opportunity by passing its id and a patch object with fields to change. Supports amount, close_date, probability, forecast_cat, description, and custom_fields. For stage changes, prefer opportunity_advance_stage which auto-logs the transition.',
       inputSchema: opportunityUpdate,
       handler: async (input: z.infer<typeof opportunityUpdate>, actor: ActorContext) => {
         const before = await oppRepo.getOpportunity(db, actor.tenant_id, input.id);
@@ -132,7 +132,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'pipeline_summary',
-      description: 'Get pipeline summary grouped by stage, owner, or forecast category',
+      description: 'Get a pipeline summary showing total deal count, amount, and weighted value grouped by stage, owner, or forecast category. Use this for high-level pipeline snapshots in reports and reviews. For deeper pipeline analytics with win rates and cycle time, use pipeline_forecast instead.',
       inputSchema: pipelineSummary,
       handler: async (input: z.infer<typeof pipelineSummary>, actor: ActorContext) => {
         return oppRepo.getPipelineSummary(db, actor.tenant_id, {
@@ -143,7 +143,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'opportunity_delete',
-      description: 'Permanently delete an opportunity. Requires admin or owner role.',
+      description: 'Permanently delete an opportunity and all associated data. This is a destructive action that requires admin or owner role. For lost deals, prefer closing with opportunity_advance_stage to preserve analytics.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input: { id: string }, actor: ActorContext) => {
         if (actor.role !== 'admin' && actor.role !== 'owner') {

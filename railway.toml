@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CRMy.ai
+#
+# Railway deploy template — one-click deploy for CRMy.
+# https://railway.app/template/crmy
+
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "npm run start:server"
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+
+[[services]]
+name = "crmy"
+
+[[services]]
+name = "postgres"
+image = "postgres:16"

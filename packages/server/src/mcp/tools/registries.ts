@@ -17,7 +17,7 @@ export function registryTools(db: DbPool): ToolDef[] {
     // --- Activity Type Registry ---
     {
       name: 'activity_type_list',
-      description: 'List all registered activity types, optionally filtered by category. Returns types grouped by category.',
+      description: 'List all registered activity types available for use in activity_create. Returns types grouped by category (e.g. communication, meeting, internal, deal). Use this to discover valid type values before logging an activity.',
       inputSchema: activityTypeRegistryList,
       handler: async (input: z.infer<typeof activityTypeRegistryList>, actor: ActorContext) => {
         const types = await activityTypeRepo.listActivityTypes(db, actor.tenant_id, {
@@ -34,7 +34,7 @@ export function registryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'activity_type_add',
-      description: 'Register a new custom activity type. The type_name must be lowercase with underscores.',
+      description: 'Register a new custom activity type to extend the built-in types. The type_name must be lowercase with underscores (e.g. "demo_given", "contract_signed"). Specify a category and optional description. Once registered, the type is available in activity_create.',
       inputSchema: activityTypeRegistryAdd,
       handler: async (input: z.infer<typeof activityTypeRegistryAdd>, actor: ActorContext) => {
         const entry = await activityTypeRepo.addActivityType(db, actor.tenant_id, input);
@@ -43,7 +43,7 @@ export function registryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'activity_type_remove',
-      description: 'Remove a custom activity type. Cannot remove default (built-in) types.',
+      description: 'Remove a custom activity type from the registry. Built-in default types cannot be removed. Existing activities using this type are not affected.',
       inputSchema: activityTypeRegistryRemove,
       handler: async (input: z.infer<typeof activityTypeRegistryRemove>, actor: ActorContext) => {
         const removed = await activityTypeRepo.removeActivityType(db, actor.tenant_id, input.type_name);
@@ -61,7 +61,7 @@ export function registryTools(db: DbPool): ToolDef[] {
     // --- Context Type Registry ---
     {
       name: 'context_type_list',
-      description: 'List all registered context types.',
+      description: 'List all registered context types available for use in context_add. Returns types including the built-in taxonomy (objection, preference, competitive_intel, relationship_map, meeting_notes, research, summary, etc.) and any custom types.',
       inputSchema: contextTypeRegistryList,
       handler: async (_input: z.infer<typeof contextTypeRegistryList>, actor: ActorContext) => {
         const types = await contextTypeRepo.listContextTypes(db, actor.tenant_id);
@@ -70,7 +70,7 @@ export function registryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_type_add',
-      description: 'Register a new custom context type.',
+      description: 'Register a new custom context type to extend the built-in taxonomy. Specify a type name, optional description, and JSON Schema for structured_data validation. Once registered, the type is available in context_add.',
       inputSchema: contextTypeRegistryAdd,
       handler: async (input: z.infer<typeof contextTypeRegistryAdd>, actor: ActorContext) => {
         const entry = await contextTypeRepo.addContextType(db, actor.tenant_id, input);
@@ -79,7 +79,7 @@ export function registryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_type_remove',
-      description: 'Remove a custom context type. Cannot remove default (built-in) types.',
+      description: 'Remove a custom context type from the registry. Built-in default types cannot be removed. Existing context entries using this type are not affected.',
       inputSchema: contextTypeRegistryRemove,
       handler: async (input: z.infer<typeof contextTypeRegistryRemove>, actor: ActorContext) => {
         const removed = await contextTypeRepo.removeContextType(db, actor.tenant_id, input.type_name);

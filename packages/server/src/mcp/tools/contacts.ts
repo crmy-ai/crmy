@@ -16,7 +16,7 @@ export function contactTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'contact_create',
-      description: 'Create a new contact in the CRM',
+      description: 'Create a new contact record with their name, email, title, and company details. Link to an account with account_id to associate the contact with their organization. Set lifecycle_stage to reflect their current position in the sales funnel (lead, prospect, active, customer, churned, champion).',
       inputSchema: contactCreate,
       handler: async (input: z.infer<typeof contactCreate>, actor: ActorContext) => {
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
@@ -40,7 +40,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'contact_get',
-      description: 'Get a contact by ID',
+      description: 'Retrieve a single contact by UUID including their profile, account association, lifecycle stage, and custom fields. For a comprehensive view with context entries, activities, and assignments, use briefing_get on the contact instead.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input: { id: string }, actor: ActorContext) => {
         const contact = await contactRepo.getContact(db, actor.tenant_id, input.id);
@@ -50,7 +50,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'contact_search',
-      description: 'Search contacts with filters. Supports query (searches name, email, company), lifecycle_stage, account_id, owner_id, and tags.',
+      description: 'Search contacts with flexible filters. The query parameter searches across name, email, and company fields simultaneously. Filter by lifecycle_stage to find prospects or champions, account_id to see contacts at a specific company, owner_id for contacts owned by a specific rep, and tags for custom categorization. Returns paginated results.',,
       inputSchema: contactSearch,
       handler: async (input: z.infer<typeof contactSearch>, actor: ActorContext) => {
         const result = await contactRepo.searchContacts(db, actor.tenant_id, {
@@ -62,7 +62,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'contact_update',
-      description: 'Update a contact. Pass id and a patch object with fields to update.',
+      description: 'Update a contact record by passing its id and a patch object with the fields to change. Supports all contact fields including name, email, title, phone, account_id, tags, and custom_fields.',
       inputSchema: contactUpdate,
       handler: async (input: z.infer<typeof contactUpdate>, actor: ActorContext) => {
         const before = await contactRepo.getContact(db, actor.tenant_id, input.id);
@@ -89,7 +89,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'contact_set_lifecycle',
-      description: 'Set the lifecycle stage of a contact (lead, prospect, customer, churned)',
+      description: 'Set the lifecycle stage of a contact to reflect their current position in the sales funnel. Valid stages: lead, prospect, active, customer, churned, champion. Use this when a contact progresses through the pipeline or changes status.',
       inputSchema: contactSetLifecycle,
       handler: async (input: z.infer<typeof contactSetLifecycle>, actor: ActorContext) => {
         const before = await contactRepo.getContact(db, actor.tenant_id, input.id);
@@ -116,7 +116,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'contact_log_activity',
-      description: 'Log an activity (call, email, meeting, note, task) for a contact',
+      description: 'Log an activity directly against a contact record — a convenience wrapper that auto-sets the contact_id. For richer activity logging with polymorphic subjects, detail JSONB, and context engine integration, prefer activity_create instead.',
       inputSchema: contactLogActivity,
       handler: async (input: z.infer<typeof contactLogActivity>, actor: ActorContext) => {
         const contact = await contactRepo.getContact(db, actor.tenant_id, input.contact_id);
@@ -142,7 +142,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'contact_get_timeline',
-      description: 'Get the activity timeline for a contact',
+      description: 'Get a chronological activity timeline for a specific contact. Returns all activities linked to this contact sorted by occurred_at descending. For a more comprehensive view that includes context and assignments, use briefing_get on the contact.',
       inputSchema: contactGetTimeline,
       handler: async (input: z.infer<typeof contactGetTimeline>, actor: ActorContext) => {
         const contact = await contactRepo.getContact(db, actor.tenant_id, input.id);
@@ -156,7 +156,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'contact_delete',
-      description: 'Permanently delete a contact. Requires admin or owner role.',
+      description: 'Permanently delete a contact and all associated data. This is a destructive action that requires admin or owner role. Consider archiving or reassigning activities before deletion.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input: { id: string }, actor: ActorContext) => {
         if (actor.role !== 'admin' && actor.role !== 'owner') {

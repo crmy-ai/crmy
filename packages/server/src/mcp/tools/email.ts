@@ -15,7 +15,7 @@ export function emailTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'email_create',
-      description: 'Draft an outbound email. If require_approval is true (default), it creates a HITL request for review before sending.',
+      description: 'Draft an outbound email linked to a contact. By default require_approval is true, which creates a HITL request for human review before sending — this is the recommended approach for high-stakes communications. Set require_approval to false only for routine, low-risk sends. The email is stored as a draft until approved.',
       inputSchema: emailCreate,
       handler: async (input: z.infer<typeof emailCreate>, actor: ActorContext) => {
         const bodyText = input.body_text ?? input.body_html?.replace(/<[^>]+>/g, '') ?? '';
@@ -68,7 +68,7 @@ export function emailTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'email_get',
-      description: 'Get an email by ID',
+      description: 'Retrieve a single email by UUID including its subject, body, recipients, status (draft, pending_approval, sent), and linked contact. Use this to check the current state of an email draft or review its content.',
       inputSchema: emailGet,
       handler: async (input: z.infer<typeof emailGet>, actor: ActorContext) => {
         const email = await emailRepo.getEmail(db, actor.tenant_id, input.id);
@@ -78,7 +78,7 @@ export function emailTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'email_search',
-      description: 'Search emails with optional contact_id and status filters',
+      description: 'Search emails with optional filters for contact_id and status. Use this to find all emails sent to a specific contact or to list all drafts pending approval. Returns emails sorted by creation time.',
       inputSchema: emailSearch,
       handler: async (input: z.infer<typeof emailSearch>, actor: ActorContext) => {
         const result = await emailRepo.searchEmails(db, actor.tenant_id, {
