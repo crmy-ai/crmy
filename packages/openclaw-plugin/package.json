@@ -1,6 +1,6 @@
 {
   "name": "@crmy/openclaw-plugin",
-  "version": "0.5.12",
+  "version": "0.6.0",
   "description": "CRMy plugin for OpenClaw — expose CRM tools (contacts, accounts, opportunities, pipeline) in any AI assistant running OpenClaw",
   "type": "module",
   "main": "dist/index.js",
