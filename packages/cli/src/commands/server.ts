@@ -18,7 +18,7 @@ function getCLIVersion(): string {
     ) as { version: string };
     return pkg.version;
   } catch {
-    return '0.5.5';
+    return 'unknown';
   }
 }
 
@@ -102,6 +102,11 @@ export function serverCommand(): Command {
         } else if (status === 'error') {
           spinner.fail(`${stepLabels[step] ?? step} failed`);
         }
+      };
+
+      serverConfig.onMigration = (name: string, index: number, total: number) => {
+        spinner.update(`Running migration ${index + 1}/${total}: ${name}…`);
+        logToFile(`[MIGRATION] ${index + 1}/${total}: ${name}`);
       };
 
       let hitlInterval: ReturnType<typeof setInterval> | undefined;

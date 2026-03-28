@@ -1,4 +1,3 @@
-version: '3.9'
 services:
   crmy:
     build:
@@ -8,7 +7,7 @@ services:
       - "3000:3000"
     environment:
       DATABASE_URL: postgres://crmy:crmy@db:5432/crmy
-      JWT_SECRET: change-me-in-production
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET before starting. Generate one with: openssl rand -hex 32}
       # First-run: set these to auto-create the initial admin account.
       # Remove after first boot or use a secrets manager.
       # CRMY_ADMIN_EMAIL: admin@yourcompany.com

@@ -15,7 +15,8 @@
     "dev": "npm run dev --workspace=packages/server",
     "test": "vitest run",
     "lint": "tsc --noEmit",
-    "migrate": "tsx scripts/migrate.ts"
+    "migrate": "tsx scripts/migrate.ts",
+    "start:server": "node packages/server/dist/index.js"
   },
   "engines": {
     "node": ">=20.0.0"

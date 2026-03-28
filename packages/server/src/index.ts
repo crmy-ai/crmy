@@ -32,7 +32,7 @@ const SERVER_VERSION: string = (() => {
     ) as { version: string };
     return pkg.version;
   } catch {
-    return '0.5.5';
+    return 'unknown';
   }
 })();
 
@@ -47,6 +47,8 @@ export interface ServerConfig {
   plugins?: PluginConfig[];
   /** Optional progress callback for CLI startup UI */
   onProgress?: (step: ProgressStep, status: ProgressStatus, detail?: string) => void;
+  /** Optional per-migration progress callback */
+  onMigration?: (name: string, index: number, total: number) => void;
 }
 
 export function loadConfig(): ServerConfig {
@@ -55,6 +57,14 @@ export function loadConfig(): ServerConfig {
 
   if (!databaseUrl) throw new Error('DATABASE_URL is required');
   if (!jwtSecret) throw new Error('JWT_SECRET is required');
+
+  const KNOWN_BAD_SECRETS = ['change-me-in-production', 'dev-secret', 'secret', ''];
+  if (KNOWN_BAD_SECRETS.includes(jwtSecret) && process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'JWT_SECRET is set to a known default — this is not safe for production.\n' +
+      '  Generate a real secret:  openssl rand -hex 32',
+    );
+  }
 
   return {
     databaseUrl,
@@ -80,7 +90,7 @@ export async function createApp(config: ServerConfig) {
   progress('migrations', 'start');
   let ran: string[];
   try {
-    ran = await runMigrations(db);
+    ran = await runMigrations(db, config.onMigration);
     progress('migrations', 'done', ran.length > 0 ? `${ran.length} applied` : 'up to date');
   } catch (err) {
     progress('migrations', 'error', (err as Error).message);

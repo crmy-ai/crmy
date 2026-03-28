@@ -2,6 +2,18 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
+// ── Node.js version gate ─────────────────────────────────────────────────────
+// Must run before any ESM-only imports that would produce cryptic errors on
+// older runtimes. The engines field in package.json is advisory only.
+const [_nodeMajor] = process.versions.node.split('.').map(Number);
+if (_nodeMajor < 20) {
+  console.error(
+    `\n  CRMy requires Node.js >= 20.0.0 (you have ${process.version})` +
+    `\n  Install the latest LTS: https://nodejs.org\n`,
+  );
+  process.exit(1);
+}
+
 import { Command } from 'commander';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +28,7 @@ function getCLIVersion(): string {
     ) as { version: string };
     return pkg.version;
   } catch {
-    return '0.5.5';
+    return 'unknown';
   }
 }
 import { serverCommand } from './commands/server.js';
@@ -45,6 +57,7 @@ import { briefingCommand } from './commands/briefing.js';
 import { authCommand } from './commands/auth.js';
 import { helpCommand } from './commands/help.js';
 import { seedDemoCommand } from './commands/seed-demo.js';
+import { doctorCommand } from './commands/doctor.js';
 
 const program = new Command();
 
@@ -79,6 +92,7 @@ program.addCommand(activityTypesCommand());
 program.addCommand(contextTypesCommand());
 program.addCommand(briefingCommand());
 program.addCommand(seedDemoCommand());
+program.addCommand(doctorCommand());
 program.addCommand(helpCommand());
 
 // Top-level `crmy login` shortcut (delegates to `crmy auth login`)

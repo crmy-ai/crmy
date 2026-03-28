@@ -16,8 +16,8 @@ export function createSpinner(initialMessage: string): Spinner {
     if (initialMessage) console.log(`  ...  ${initialMessage}`);
     return {
       update(message: string) { if (message) console.log(`  ...  ${message}`); },
-      succeed(message: string) { console.log(`  \u2713  ${message}`); },
-      fail(message: string)   { console.log(`  \u2717  ${message}`); },
+      succeed(message: string) { console.log(`  \x1b[32m\u2713\x1b[0m  ${message}`); },
+      fail(message: string)   { console.log(`  \x1b[31m\u2717\x1b[0m  ${message}`); },
       stop()                  {},
     };
   }

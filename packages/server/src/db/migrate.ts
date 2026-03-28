@@ -9,7 +9,10 @@ import type { DbPool } from './pool.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.resolve(__dirname, '../../migrations');
 
-export async function runMigrations(db: DbPool): Promise<string[]> {
+export async function runMigrations(
+  db: DbPool,
+  onMigration?: (name: string, index: number, total: number) => void,
+): Promise<string[]> {
   // Create migrations tracking table
   await db.query(`
     CREATE TABLE IF NOT EXISTS _migrations (
@@ -28,7 +31,9 @@ export async function runMigrations(db: DbPool): Promise<string[]> {
     .sort();
 
   const ran: string[] = [];
+  const pending = files.filter(f => !appliedSet.has(f));
 
+  let idx = 0;
   for (const file of files) {
     if (appliedSet.has(file)) continue;
 
@@ -36,8 +41,12 @@ export async function runMigrations(db: DbPool): Promise<string[]> {
     // Supported on Supabase, Neon, RDS, and local Docker with pgvector/pgvector:pg16.
     if (file === '022_pgvector.sql' && process.env.ENABLE_PGVECTOR !== 'true') {
       console.log(`[migrate] Skipping ${file} (set ENABLE_PGVECTOR=true to enable semantic search)`);
+      idx++;
       continue;
     }
+
+    onMigration?.(file, idx, pending.length);
+    idx++;
 
     const rawSql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8');
     // Substitute ${EMBEDDING_DIMENSIONS} for pgvector migration (default: 1536 for text-embedding-3-small)
