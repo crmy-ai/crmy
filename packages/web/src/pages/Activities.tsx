@@ -3,50 +3,41 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
-import { useActivities } from '@/api/hooks';
+import { useActivities, useActivityTypes } from '@/api/hooks';
 import { ActivityFeed } from '@/components/crm/CrmWidgets';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { DatePicker } from '@/components/ui/date-picker';
 
-const filterConfigs: FilterConfig[] = [
-  {
-    key: 'type', label: 'Type',
-    options: [
-      { value: 'call', label: 'Call' },
-      { value: 'email', label: 'Email' },
-      { value: 'meeting', label: 'Meeting' },
-      { value: 'note', label: 'Note' },
-      { value: 'task', label: 'Task' },
-      { value: 'demo', label: 'Demo' },
-      { value: 'proposal', label: 'Proposal' },
-      { value: 'research', label: 'Research' },
-      { value: 'handoff', label: 'Handoff' },
-      { value: 'status_update', label: 'Status Update' },
-    ],
-  },
-  {
-    key: 'subject_type', label: 'Subject',
-    options: [
-      { value: 'contact', label: 'Contact' },
-      { value: 'account', label: 'Account' },
-      { value: 'opportunity', label: 'Opportunity' },
-      { value: 'use_case', label: 'Use Case' },
-    ],
-  },
-  {
-    key: 'outcome', label: 'Outcome',
-    options: [
-      { value: 'connected', label: 'Connected' },
-      { value: 'voicemail', label: 'Voicemail' },
-      { value: 'positive', label: 'Positive' },
-      { value: 'negative', label: 'Negative' },
-      { value: 'neutral', label: 'Neutral' },
-      { value: 'no_show', label: 'No Show' },
-      { value: 'follow_up_needed', label: 'Follow-up Needed' },
-    ],
-  },
+const BUILT_IN_TYPE_OPTIONS = [
+  { value: 'call', label: 'Call' },
+  { value: 'email', label: 'Email' },
+  { value: 'meeting', label: 'Meeting' },
+  { value: 'note', label: 'Note' },
+  { value: 'task', label: 'Task' },
+  { value: 'demo', label: 'Demo' },
+  { value: 'proposal', label: 'Proposal' },
+  { value: 'research', label: 'Research' },
+  { value: 'handoff', label: 'Handoff' },
+  { value: 'status_update', label: 'Status Update' },
+];
+
+const SUBJECT_TYPE_OPTIONS = [
+  { value: 'contact', label: 'Contact' },
+  { value: 'account', label: 'Account' },
+  { value: 'opportunity', label: 'Opportunity' },
+  { value: 'use_case', label: 'Use Case' },
+];
+
+const OUTCOME_OPTIONS = [
+  { value: 'connected', label: 'Connected' },
+  { value: 'voicemail', label: 'Voicemail' },
+  { value: 'positive', label: 'Positive' },
+  { value: 'negative', label: 'Negative' },
+  { value: 'neutral', label: 'Neutral' },
+  { value: 'no_show', label: 'No Show' },
+  { value: 'follow_up_needed', label: 'Follow-up Needed' },
 ];
 
 const sortOptions: SortOption[] = [
@@ -110,6 +101,22 @@ export default function Activities() {
   const [customTo, setCustomTo] = useState('');
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
+
+  // Dynamic activity types from registry
+  const { data: registryData } = useActivityTypes();
+  const filterConfigs: FilterConfig[] = useMemo(() => {
+    const registryTypes = ((registryData as any)?.data ?? []).map((t: any) => ({
+      value: t.type_name,
+      label: t.label || t.type_name,
+    }));
+    const builtInValues = new Set(BUILT_IN_TYPE_OPTIONS.map(o => o.value));
+    const extraTypes = registryTypes.filter((t: any) => !builtInValues.has(t.value));
+    return [
+      { key: 'type', label: 'Type', options: [...BUILT_IN_TYPE_OPTIONS, ...extraTypes] },
+      { key: 'subject_type', label: 'Subject', options: SUBJECT_TYPE_OPTIONS },
+      { key: 'outcome', label: 'Outcome', options: OUTCOME_OPTIONS },
+    ];
+  }, [registryData]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, isLoading } = useActivities({ limit: 200 }) as any;

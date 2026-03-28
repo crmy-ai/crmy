@@ -19,6 +19,8 @@ import { OpportunityDrawer } from '@/components/crm/OpportunityDrawer';
 import { UseCaseDrawer } from '@/components/crm/UseCaseDrawer';
 import { AccountDrawer } from '@/components/crm/AccountDrawer';
 import { AssignmentDrawer } from '@/components/crm/AssignmentDrawer';
+import { WorkflowDrawer } from '@/components/crm/WorkflowDrawer';
+import { EmailDrawer } from '@/components/crm/EmailDrawer';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useAppStore } from '@/store/appStore';
 import { useTheme } from '@/hooks/useTheme';
@@ -40,6 +42,8 @@ import { HITLPage } from '@/pages/hitl/HITL';
 import AssignmentsPage from '@/pages/Assignments';
 import InboxPage from '@/pages/Inbox';
 import ContextPage from '@/pages/Context';
+import WorkflowsPage from '@/pages/Workflows';
+import EmailsPage from '@/pages/Emails';
 import AgentsPage from '@/pages/Agents';
 
 function ThemeApplier() {
@@ -89,6 +93,8 @@ function AnimatedRoutes() {
           <Route path="/inbox" element={<Navigate to="/assignments" replace />} />
           <Route path="/hitl" element={<HITLPage />} />
           <Route path="/context" element={<ContextPage />} />
+          <Route path="/workflows" element={<WorkflowsPage />} />
+          <Route path="/emails" element={<EmailsPage />} />
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agent" element={<Agent />} />
           <Route path="/agent/activity" element={<AgentActivity />} />
@@ -109,6 +115,8 @@ function AppContent() {
     : drawerType === 'use-case' ? 'Use Case Details'
     : drawerType === 'account' ? 'Account Details'
     : drawerType === 'assignment' ? 'Assignment Details'
+    : drawerType === 'workflow' ? 'Workflow Details'
+    : drawerType === 'email' ? 'Email Details'
     : '';
 
   return (
@@ -127,6 +135,8 @@ function AppContent() {
         {drawerType === 'use-case' && <UseCaseDrawer />}
         {drawerType === 'account' && <AccountDrawer />}
         {drawerType === 'assignment' && <AssignmentDrawer />}
+        {drawerType === 'workflow' && <WorkflowDrawer />}
+        {drawerType === 'email' && <EmailDrawer />}
       </DrawerShell>
 
       {/* Overlays */}

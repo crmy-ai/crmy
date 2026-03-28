@@ -327,6 +327,9 @@ export function useSearch(q: string) {
 export function useEmails(params?: { contact_id?: string; status?: string; limit?: number }) {
   return useList('emails', 'emails', params);
 }
+export function useEmail(id: string) {
+  return useQuery({ queryKey: ['email', id], queryFn: () => api.get(`emails/${id}`), enabled: !!id });
+}
 export function useCreateEmail() {
   const qc = useQueryClient();
   return useMutation({
@@ -649,6 +652,87 @@ export function useDeleteContextType() {
   return useMutation({
     mutationFn: (typeName: string) => api.delete(`context-types/${typeName}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['context-types'] }),
+  });
+}
+
+// Workflows
+export function useWorkflows(params?: { q?: string; enabled?: boolean; limit?: number }) {
+  return useList('workflows', 'workflows', params);
+}
+export function useWorkflow(id: string) {
+  return useQuery({ queryKey: ['workflow', id], queryFn: () => api.get(`workflows/${id}`), enabled: !!id });
+}
+export function useCreateWorkflow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('workflows', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['workflows'] }),
+  });
+}
+export function useUpdateWorkflow(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.patch(`workflows/${id}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['workflow', id] });
+      qc.invalidateQueries({ queryKey: ['workflows'] });
+    },
+  });
+}
+export function useDeleteWorkflow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`workflows/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['workflows'] }),
+  });
+}
+export function useWorkflowRuns(workflowId: string, params?: { limit?: number }) {
+  return useQuery({
+    queryKey: ['workflow-runs', workflowId, params],
+    queryFn: () => {
+      const qs = params?.limit ? `?limit=${params.limit}` : '';
+      return api.get(`workflows/${workflowId}/runs${qs}`);
+    },
+    enabled: !!workflowId,
+  });
+}
+
+// Webhook Deliveries
+export function useWebhookDeliveries(webhookId: string, params?: { limit?: number }) {
+  return useQuery({
+    queryKey: ['webhook-deliveries', webhookId, params],
+    queryFn: () => {
+      const qs = params?.limit ? `?limit=${params.limit}` : '';
+      return api.get(`webhooks/${webhookId}/deliveries${qs}`);
+    },
+    enabled: !!webhookId,
+  });
+}
+
+// Semantic Search
+export function useSemanticSearch(query: string, params?: { subject_type?: string; subject_id?: string; context_type?: string; tag?: string; current_only?: boolean; limit?: number }) {
+  const searchParams = new URLSearchParams();
+  searchParams.set('q', query);
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== '') searchParams.set(k, String(v));
+    });
+  }
+  return useQuery({
+    queryKey: ['context-semantic-search', query, params],
+    queryFn: () => api.get(`context/semantic-search?${searchParams}`),
+    enabled: query.length >= 2,
+    retry: false,
+  });
+}
+
+// Context Ingest
+export function useContextIngest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { text: string; subject_type: string; subject_id: string; source?: string }) =>
+      api.post('context/ingest', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['context-entries'] }),
   });
 }
 

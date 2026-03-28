@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -12,7 +12,7 @@ import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
-import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useDeleteWebhook, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useUsers, useCreateUser, useUpdateUser, useDeleteUser } from '@/api/hooks';
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType } from '@/api/hooks';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import AgentSettings from '@/pages/AgentSettings';
 import ActorsSettings from '@/components/settings/ActorsSettings';
@@ -26,6 +26,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'] },
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
   { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'] },
+  { icon: Tags,       label: 'Registries',    path: '/settings/registries',   roles: ['admin', 'owner'] },
   { icon: Bot,        label: 'Local AI Agent', path: '/settings/agent',        roles: ['admin', 'owner'] },
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
 ];
@@ -798,12 +799,40 @@ function ApiKeysSettings() {
   );
 }
 
+function WebhookDeliveryLog({ webhookId }: { webhookId: string }) {
+  const { data, isLoading } = useWebhookDeliveries(webhookId, { limit: 10 });
+  const deliveries = (data as any)?.data ?? [];
+
+  if (isLoading) return <div className="py-2 pl-4"><div className="h-6 w-32 bg-muted/50 rounded animate-pulse" /></div>;
+  if (deliveries.length === 0) return <p className="text-xs text-muted-foreground py-2 pl-4">No deliveries yet.</p>;
+
+  return (
+    <div className="pl-4 space-y-1 py-2">
+      {deliveries.map((d: any) => {
+        const ok = d.status_code >= 200 && d.status_code < 300;
+        const failed = d.status === 'failed';
+        return (
+          <div key={d.id} className="flex items-center gap-2 text-[10px]">
+            <span className={`inline-flex items-center px-1.5 py-0.5 rounded font-semibold ${ok ? 'bg-emerald-500/15 text-emerald-500' : failed ? 'bg-destructive/15 text-destructive' : 'bg-warning/15 text-warning'}`}>
+              {d.status_code ?? d.status}
+            </span>
+            <span className="text-muted-foreground font-mono">{d.event_type ?? d.event ?? '—'}</span>
+            {d.duration_ms != null && <span className="text-muted-foreground">{d.duration_ms}ms</span>}
+            <span className="text-muted-foreground ml-auto">{d.created_at ? new Date(d.created_at).toLocaleString() : ''}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function WebhooksSettings() {
   const { data, isLoading } = useWebhooks();
   const createWebhook = useCreateWebhook();
   const deleteWebhook = useDeleteWebhook();
   const [showCreate, setShowCreate] = useState(false);
   const [newUrl, setNewUrl] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const webhooks = (data as any)?.data ?? [];
 
@@ -857,20 +886,32 @@ function WebhooksSettings() {
         ) : webhooks.length === 0 ? (
           <p className="text-sm text-muted-foreground py-4">No webhooks configured.</p>
         ) : webhooks.map((wh: any) => (
-          <div key={wh.id} className="flex items-center gap-3 p-3 rounded-xl border border-border bg-card">
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-foreground truncate">{wh.url}</p>
-              {wh.events && (
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {(wh.events as string[]).map((ev) => (
-                    <span key={ev} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-muted text-muted-foreground">{ev}</span>
-                  ))}
-                </div>
-              )}
+          <div key={wh.id} className="rounded-xl border border-border bg-card overflow-hidden">
+            <div
+              className="flex items-center gap-3 p-3 cursor-pointer hover:bg-muted/30 transition-colors"
+              onClick={() => setExpandedId(expandedId === wh.id ? null : wh.id)}
+            >
+              <ChevronRight className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${expandedId === wh.id ? 'rotate-90' : ''}`} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-foreground truncate">{wh.url}</p>
+                {wh.events && (
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {(wh.events as string[]).map((ev) => (
+                      <span key={ev} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-muted text-muted-foreground">{ev}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button onClick={(e) => { e.stopPropagation(); handleDelete(wh.id); }} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <button onClick={() => handleDelete(wh.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
+            {expandedId === wh.id && (
+              <div className="border-t border-border bg-muted/10">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-4 pt-2">Recent deliveries</p>
+                <WebhookDeliveryLog webhookId={wh.id} />
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -1823,6 +1864,135 @@ function DatabaseSettings() {
   );
 }
 
+function RegistriesSettings() {
+  const { data: ctxData, isLoading: ctxLoading } = useContextTypes();
+  const createCtxType = useCreateContextType();
+  const deleteCtxType = useDeleteContextType();
+  const { data: actData, isLoading: actLoading } = useActivityTypes();
+  const createActType = useCreateActivityType();
+  const deleteActType = useDeleteActivityType();
+
+  const [ctxName, setCtxName] = useState('');
+  const [ctxLabel, setCtxLabel] = useState('');
+  const [ctxDesc, setCtxDesc] = useState('');
+  const [actName, setActName] = useState('');
+  const [actLabel, setActLabel] = useState('');
+  const [actCategory, setActCategory] = useState('');
+  const [actDesc, setActDesc] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const contextTypes = (ctxData as any)?.data ?? [];
+  const activityTypes = (actData as any)?.data ?? [];
+
+  const handleCreateCtx = async () => {
+    if (!ctxName.trim() || !ctxLabel.trim()) return;
+    try {
+      await createCtxType.mutateAsync({ type_name: ctxName.trim(), label: ctxLabel.trim(), description: ctxDesc.trim() || undefined });
+      setCtxName(''); setCtxLabel(''); setCtxDesc('');
+      toast({ title: 'Context type added' });
+    } catch { toast({ title: 'Error', variant: 'destructive' }); }
+  };
+
+  const handleCreateAct = async () => {
+    if (!actName.trim() || !actLabel.trim() || !actCategory.trim()) return;
+    try {
+      await createActType.mutateAsync({ type_name: actName.trim(), label: actLabel.trim(), category: actCategory.trim(), description: actDesc.trim() || undefined });
+      setActName(''); setActLabel(''); setActCategory(''); setActDesc('');
+      toast({ title: 'Activity type added' });
+    } catch { toast({ title: 'Error', variant: 'destructive' }); }
+  };
+
+  const inputCls = 'h-8 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
+
+  return (
+    <div className="max-w-2xl">
+      <h2 className="font-display font-bold text-lg text-foreground mb-1">Type Registries</h2>
+      <p className="text-sm text-muted-foreground mb-6">Define custom context and activity types used across the CRM.</p>
+
+      {/* Context Types */}
+      <div className="mb-8">
+        <h3 className="text-sm font-semibold text-foreground mb-3">Context Types</h3>
+        <div className="space-y-1.5 mb-3">
+          {ctxLoading ? (
+            <div className="h-8 bg-muted/50 rounded animate-pulse" />
+          ) : contextTypes.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No custom context types. Built-in types are always available.</p>
+          ) : contextTypes.map((t: any) => (
+            <div key={t.type_name} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card">
+              <span className="text-sm font-medium text-foreground flex-1">{t.label || t.type_name}</span>
+              <span className="text-[10px] font-mono text-muted-foreground">{t.type_name}</span>
+              {t.description && <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[200px]">{t.description}</span>}
+              <button
+                onClick={() => {
+                  if (confirmDelete === t.type_name) {
+                    deleteCtxType.mutate(t.type_name, { onSuccess: () => { toast({ title: 'Removed' }); setConfirmDelete(null); } });
+                  } else {
+                    setConfirmDelete(t.type_name);
+                    setTimeout(() => setConfirmDelete(null), 3000);
+                  }
+                }}
+                className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input value={ctxName} onChange={e => setCtxName(e.target.value)} placeholder="type_name (slug)" className={`${inputCls} w-36`} />
+          <input value={ctxLabel} onChange={e => setCtxLabel(e.target.value)} placeholder="Label" className={`${inputCls} w-32`} />
+          <input value={ctxDesc} onChange={e => setCtxDesc(e.target.value)} placeholder="Description (optional)" className={`${inputCls} flex-1 min-w-[120px]`} />
+          <button onClick={handleCreateCtx} disabled={!ctxName.trim() || !ctxLabel.trim() || createCtxType.isPending}
+            className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+            <Plus className="w-3 h-3 inline mr-1" />Add
+          </button>
+        </div>
+      </div>
+
+      {/* Activity Types */}
+      <div>
+        <h3 className="text-sm font-semibold text-foreground mb-3">Activity Types</h3>
+        <div className="space-y-1.5 mb-3">
+          {actLoading ? (
+            <div className="h-8 bg-muted/50 rounded animate-pulse" />
+          ) : activityTypes.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No custom activity types. Built-in types are always available.</p>
+          ) : activityTypes.map((t: any) => (
+            <div key={t.type_name} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card">
+              <span className="text-sm font-medium text-foreground flex-1">{t.label || t.type_name}</span>
+              <span className="text-[10px] font-mono text-muted-foreground">{t.type_name}</span>
+              {t.category && <span className="px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground">{t.category}</span>}
+              <button
+                onClick={() => {
+                  if (confirmDelete === t.type_name) {
+                    deleteActType.mutate(t.type_name, { onSuccess: () => { toast({ title: 'Removed' }); setConfirmDelete(null); } });
+                  } else {
+                    setConfirmDelete(t.type_name);
+                    setTimeout(() => setConfirmDelete(null), 3000);
+                  }
+                }}
+                className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input value={actName} onChange={e => setActName(e.target.value)} placeholder="type_name (slug)" className={`${inputCls} w-36`} />
+          <input value={actLabel} onChange={e => setActLabel(e.target.value)} placeholder="Label" className={`${inputCls} w-32`} />
+          <input value={actCategory} onChange={e => setActCategory(e.target.value)} placeholder="Category" className={`${inputCls} w-28`} />
+          <input value={actDesc} onChange={e => setActDesc(e.target.value)} placeholder="Description (optional)" className={`${inputCls} flex-1 min-w-[120px]`} />
+          <button onClick={handleCreateAct} disabled={!actName.trim() || !actLabel.trim() || !actCategory.trim() || createActType.isPending}
+            className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+            <Plus className="w-3 h-3 inline mr-1" />Add
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const location = useLocation();
   const user = getUser();
@@ -1873,6 +2043,7 @@ export default function Settings() {
             <Route path="api-keys" element={<ApiKeysSettings />} />
             <Route path="webhooks" element={<RequireRole roles={['admin', 'owner']}><WebhooksSettings /></RequireRole>} />
             <Route path="custom-fields" element={<RequireRole roles={['admin', 'owner']}><CustomFieldsSettings /></RequireRole>} />
+            <Route path="registries" element={<RequireRole roles={['admin', 'owner']}><RegistriesSettings /></RequireRole>} />
             <Route path="actors" element={<RequireRole roles={['admin', 'owner']}><ActorsSettings /></RequireRole>} />
             <Route path="agent" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
             <Route path="database" element={<RequireRole roles={['admin', 'owner']}><DatabaseSettings /></RequireRole>} />

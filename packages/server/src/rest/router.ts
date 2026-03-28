@@ -952,6 +952,37 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.get('/context/semantic-search', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_semantic_search');
+      const result = await handler({
+        query: qs(req.query.q) ?? '',
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        context_type: qs(req.query.context_type),
+        tag: qs(req.query.tag),
+        current_only: req.query.current_only !== 'false',
+        limit: Math.min(qn(req.query.limit, 20), 100),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/ingest', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_ingest');
+      const result = await handler({
+        text: req.body.text,
+        subject_type: req.body.subject_type,
+        subject_id: req.body.subject_id,
+        source: req.body.source,
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   router.post('/context/:id/review', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);

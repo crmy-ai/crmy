@@ -1,11 +1,11 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
-import { useContextEntries, useStaleContextEntries, useReviewContextEntry } from '@/api/hooks';
-import { motion } from 'framer-motion';
+import { useContextEntries, useStaleContextEntries, useReviewContextEntry, useContextTypes, useSemanticSearch, useContextIngest } from '@/api/hooks';
+import { motion, AnimatePresence } from 'framer-motion';
 import { format, formatDistanceToNow, isPast } from 'date-fns';
 import {
   Library,
@@ -16,10 +16,15 @@ import {
   Tag,
   Filter,
   X,
+  Sparkles,
+  Upload,
+  FileText,
+  Loader2,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -27,9 +32,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { toast } from '@/hooks/use-toast';
 
 const SUBJECT_TYPES = ['contact', 'account', 'opportunity', 'use_case'] as const;
-const CONTEXT_TYPES = ['transcript', 'objection', 'summary', 'research', 'note', 'action_plan', 'competitor_intel', 'stakeholder_map'] as const;
 
 function ConfidencePill({ value }: { value: number | null | undefined }) {
   if (value == null) return null;
@@ -39,6 +52,17 @@ function ConfidencePill({ value }: { value: number | null | undefined }) {
     : 'bg-destructive/15 text-destructive';
   return (
     <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${cls}`}>
+      {pct}%
+    </span>
+  );
+}
+
+function SimilarityPill({ value }: { value: number | null | undefined }) {
+  if (value == null) return null;
+  const pct = Math.round(value * 100);
+  return (
+    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-violet-500/15 text-violet-600 dark:text-violet-400">
+      <Sparkles className="w-2.5 h-2.5" />
       {pct}%
     </span>
   );
@@ -66,8 +90,24 @@ export default function ContextPage() {
   const [subjectType, setSubjectType] = useState<string>(searchParams.get('subject_type') ?? '');
   const [contextType, setContextType] = useState('');
   const [staleOnly, setStaleOnly] = useState(searchParams.get('stale') === 'true');
+  const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword');
+  const [ingestOpen, setIngestOpen] = useState(false);
+  const [ingestText, setIngestText] = useState('');
+  const [ingestSubjectType, setIngestSubjectType] = useState('');
+  const [ingestSubjectId, setIngestSubjectId] = useState('');
+  const [ingestSource, setIngestSource] = useState('');
 
   const reviewEntry = useReviewContextEntry();
+  const ingestMutation = useContextIngest();
+
+  // Dynamic context types from registry
+  const { data: contextTypesData } = useContextTypes();
+  const dynamicContextTypes: string[] = useMemo(() => {
+    const types = (contextTypesData as any)?.data ?? [];
+    return types.map((t: any) => t.type_name);
+  }, [contextTypesData]);
+  const FALLBACK_CONTEXT_TYPES = ['transcript', 'objection', 'summary', 'research', 'note', 'action_plan', 'competitor_intel', 'stakeholder_map'];
+  const contextTypeOptions = dynamicContextTypes.length > 0 ? dynamicContextTypes : FALLBACK_CONTEXT_TYPES;
 
   const params = useMemo(() => ({
     subject_type: subjectType || undefined,
@@ -80,8 +120,23 @@ export default function ContextPage() {
   const entries: any[] = data?.data ?? [];
   const total: number = data?.total ?? 0;
 
-  // Local text filter on top of API results
+  // Semantic search query
+  const semanticParams = useMemo(() => ({
+    subject_type: subjectType || undefined,
+    context_type: contextType || undefined,
+    current_only: staleOnly ? false : undefined,
+    limit: 50,
+  }), [subjectType, contextType, staleOnly]);
+  const { data: semanticData, isLoading: semanticLoading, isError: semanticError } = useSemanticSearch(
+    searchMode === 'semantic' ? q : '',
+    semanticParams,
+  );
+  const semanticEntries: any[] = (semanticData as any)?.entries ?? (semanticData as any)?.data ?? [];
+  const semanticUnavailable = semanticError;
+
+  // Local text filter for keyword mode
   const filtered = useMemo(() => {
+    if (searchMode === 'semantic') return semanticEntries;
     if (!q.trim()) return entries;
     const lower = q.toLowerCase();
     return entries.filter((e: any) =>
@@ -89,7 +144,9 @@ export default function ContextPage() {
       (e.body ?? '').toLowerCase().includes(lower) ||
       (e.tags ?? []).some((t: string) => t.toLowerCase().includes(lower))
     );
-  }, [entries, q]);
+  }, [entries, semanticEntries, q, searchMode]);
+
+  const isSearching = searchMode === 'keyword' ? isLoading : semanticLoading;
 
   function clearFilters() {
     setSubjectType('');
@@ -101,6 +158,29 @@ export default function ContextPage() {
 
   const hasFilters = subjectType || contextType || staleOnly || q;
 
+  const handleIngest = useCallback(async () => {
+    if (!ingestText.trim() || !ingestSubjectType || !ingestSubjectId) {
+      toast({ title: 'Missing fields', description: 'Text, subject type, and subject ID are required.', variant: 'destructive' });
+      return;
+    }
+    try {
+      await ingestMutation.mutateAsync({
+        text: ingestText,
+        subject_type: ingestSubjectType,
+        subject_id: ingestSubjectId,
+        source: ingestSource || undefined,
+      });
+      toast({ title: 'Ingestion complete', description: 'Context entries extracted and saved.' });
+      setIngestOpen(false);
+      setIngestText('');
+      setIngestSubjectType('');
+      setIngestSubjectId('');
+      setIngestSource('');
+    } catch (err) {
+      toast({ title: 'Ingestion failed', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' });
+    }
+  }, [ingestText, ingestSubjectType, ingestSubjectId, ingestSource, ingestMutation]);
+
   return (
     <div className="flex flex-col h-full">
       <TopBar title="Context" />
@@ -111,7 +191,7 @@ export default function ContextPage() {
           <div className="flex items-center gap-2 mb-1">
             <Library className="w-5 h-5 text-[#0ea5e9]" />
             <h1 className="text-xl font-display font-bold text-foreground">Context entries</h1>
-            {total > 0 && (
+            {total > 0 && searchMode === 'keyword' && (
               <span className="text-xs text-muted-foreground ml-1">
                 {total.toLocaleString()} total
               </span>
@@ -124,10 +204,28 @@ export default function ContextPage() {
 
         {/* Filters */}
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }} className="flex flex-wrap gap-2 mb-4">
+          {/* Search mode toggle */}
+          <div className="flex rounded-lg border border-border overflow-hidden h-8">
+            <button
+              className={`px-3 text-xs font-medium transition-colors flex items-center gap-1.5 ${searchMode === 'keyword' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground'}`}
+              onClick={() => setSearchMode('keyword')}
+            >
+              <Search className="w-3 h-3" />
+              Keyword
+            </button>
+            <button
+              className={`px-3 text-xs font-medium transition-colors flex items-center gap-1.5 border-l border-border ${searchMode === 'semantic' ? 'bg-violet-600 text-white' : 'bg-background text-muted-foreground hover:text-foreground'}`}
+              onClick={() => setSearchMode('semantic')}
+            >
+              <Sparkles className="w-3 h-3" />
+              Semantic
+            </button>
+          </div>
+
           <div className="relative flex-1 min-w-[200px] max-w-xs">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <Input
-              placeholder="Search title, body, tags…"
+              placeholder={searchMode === 'semantic' ? 'Ask a question about your context…' : 'Search title, body, tags…'}
               value={q}
               onChange={(e) => setQ(e.target.value)}
               className="pl-8 h-8 text-sm"
@@ -152,7 +250,7 @@ export default function ContextPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="">All types</SelectItem>
-              {CONTEXT_TYPES.map((t) => (
+              {contextTypeOptions.map((t) => (
                 <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>
               ))}
             </SelectContent>
@@ -168,6 +266,16 @@ export default function ContextPage() {
             Stale only
           </Button>
 
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs gap-1.5"
+            onClick={() => setIngestOpen(true)}
+          >
+            <Upload className="w-3 h-3" />
+            Import
+          </Button>
+
           {hasFilters && (
             <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={clearFilters}>
               <X className="w-3 h-3" />
@@ -176,9 +284,20 @@ export default function ContextPage() {
           )}
         </motion.div>
 
+        {/* Semantic search unavailable banner */}
+        {searchMode === 'semantic' && semanticUnavailable && (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-4 px-3 py-2 bg-warning/10 border border-warning/30 rounded-lg text-xs text-warning flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            <span>Semantic search requires pgvector. Set <code className="px-1 py-0.5 bg-warning/20 rounded">ENABLE_PGVECTOR=true</code> and configure an embedding provider. Falling back to keyword search.</span>
+          </motion.div>
+        )}
+
         {/* Content */}
-        {isLoading ? (
-          <div className="text-sm text-muted-foreground py-8 text-center">Loading…</div>
+        {isSearching ? (
+          <div className="text-sm text-muted-foreground py-8 text-center flex items-center justify-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            {searchMode === 'semantic' ? 'Searching semantically…' : 'Loading…'}
+          </div>
         ) : filtered.length === 0 ? (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20 text-center">
             <Library className="w-14 h-14 text-muted-foreground/30 mb-4" />
@@ -187,7 +306,9 @@ export default function ContextPage() {
             </p>
             <p className="text-sm text-muted-foreground max-w-sm">
               {hasFilters
-                ? 'Try adjusting your search or filters.'
+                ? searchMode === 'semantic'
+                  ? 'Try rephrasing your question or adjusting filters.'
+                  : 'Try adjusting your search or filters.'
                 : 'Agents write context entries after every interaction. They power the briefings returned by briefing_get.'}
             </p>
             {hasFilters && (
@@ -231,6 +352,7 @@ export default function ContextPage() {
                           </Badge>
                         )}
                         <ConfidencePill value={entry.confidence_score} />
+                        {searchMode === 'semantic' && <SimilarityPill value={entry.similarity} />}
                       </div>
 
                       {/* Body preview */}
@@ -279,6 +401,60 @@ export default function ContextPage() {
           </div>
         )}
       </div>
+
+      {/* Ingest Dialog */}
+      <Dialog open={ingestOpen} onOpenChange={setIngestOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="w-5 h-5 text-[#0ea5e9]" />
+              Import context
+            </DialogTitle>
+            <DialogDescription>
+              Paste a document (meeting transcript, research notes, etc.) and CRMy will auto-extract structured context entries.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Textarea
+              placeholder="Paste document text here…"
+              value={ingestText}
+              onChange={(e) => setIngestText(e.target.value)}
+              className="min-h-[160px] text-sm"
+            />
+            <div className="flex gap-2">
+              <Select value={ingestSubjectType} onValueChange={setIngestSubjectType}>
+                <SelectTrigger className="h-9 flex-1 text-sm">
+                  <SelectValue placeholder="Subject type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SUBJECT_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>{subjectTypeLabel(t)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                placeholder="Subject ID (UUID)"
+                value={ingestSubjectId}
+                onChange={(e) => setIngestSubjectId(e.target.value)}
+                className="h-9 flex-1 text-sm"
+              />
+            </div>
+            <Input
+              placeholder="Source label (optional, e.g. 'Q1 review call')"
+              value={ingestSource}
+              onChange={(e) => setIngestSource(e.target.value)}
+              className="h-9 text-sm"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIngestOpen(false)}>Cancel</Button>
+            <Button onClick={handleIngest} disabled={ingestMutation.isPending} className="gap-1.5">
+              {ingestMutation.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Extract & Import
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

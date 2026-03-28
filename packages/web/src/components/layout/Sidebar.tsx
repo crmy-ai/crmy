@@ -10,11 +10,13 @@ import {
   Bot,
   Library,
   Inbox,
+  Zap,
   Users,
   Building2,
   Briefcase,
   FolderKanban,
   Activity,
+  Mail,
   Settings,
   PanelLeftClose,
   PanelLeft,
@@ -32,6 +34,7 @@ const agentNavItems = [
   { icon: ShieldCheck, label: 'Approvals',   path: '/hitl',        color: ENTITY_COLORS.hitl },
   { icon: Bot,         label: 'Agents',      path: '/agents',      color: ENTITY_COLORS.agents },
   { icon: Library,     label: 'Context',     path: '/context',     color: ENTITY_COLORS.context },
+  { icon: Zap,         label: 'Workflows',   path: '/workflows',   color: ENTITY_COLORS.context },
   { icon: Inbox,       label: 'Handoffs',    path: '/assignments', color: ENTITY_COLORS.assignments },
 ];
 
@@ -42,6 +45,7 @@ const dataNavItems = [
   { icon: Briefcase,   label: 'Opportunities', path: '/opportunities', color: ENTITY_COLORS.opportunities },
   { icon: FolderKanban,label: 'Use Cases',     path: '/use-cases',     color: ENTITY_COLORS.useCases },
   { icon: Activity,    label: 'Activities',    path: '/activities',    color: ENTITY_COLORS.activities },
+  { icon: Mail,        label: 'Emails',        path: '/emails',        color: ENTITY_COLORS.contacts },
 ];
 
 const bottomItems = [
