@@ -5,8 +5,9 @@ import { z } from 'zod';
 import {
   contextEntryCreate, contextEntryGet, contextEntrySearch, contextEntrySupersede,
   contextSearch, contextReview, contextStaleList, briefingGet,
-  contextDiff, contextIngest,
+  contextDiff, contextIngest, contextSemanticSearch, contextEmbedBackfill,
 } from '@crmy/shared';
+import { loadEmbeddingConfig, embedText } from '../../agent/providers/embeddings.js';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext, SubjectType } from '@crmy/shared';
 import * as contextRepo from '../../db/repos/context-entries.js';
@@ -73,6 +74,15 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           ...input,
           authored_by: actor.actor_id,
         });
+
+        // Fire-and-forget embedding — never delays context_add; failures are isolated.
+        const _embCfg = loadEmbeddingConfig();
+        if (_embCfg && entry.body) {
+          embedText(entry.body, _embCfg)
+            .then(vec => contextRepo.updateEmbedding(db, entry.id, actor.tenant_id, vec))
+            .catch((err: unknown) => console.warn(`[embedding] context_add ${entry.id}: ${(err as Error).message}`));
+        }
+
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
           eventType: 'context.added',
@@ -139,6 +149,14 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             authored_by: actor.actor_id,
           },
         );
+
+        // Fire-and-forget embedding for the new entry created by supersession.
+        const _embCfgSup = loadEmbeddingConfig();
+        if (_embCfgSup && result.new.body) {
+          embedText(result.new.body, _embCfgSup)
+            .then(vec => contextRepo.updateEmbedding(db, result.new.id, actor.tenant_id, vec))
+            .catch((err: unknown) => console.warn(`[embedding] context_supersede ${result.new.id}: ${(err as Error).message}`));
+        }
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -309,6 +327,65 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           db, actor.tenant_id, input.limit,
         );
         return { assignments_created };
+      },
+    },
+    {
+      name: 'context_semantic_search',
+      description: 'Semantic (vector) search over context entries using embedding similarity — finds entries that are conceptually related to your query even when no keywords match. Use this when context_search returns poor results for natural language queries like "budget concerns", "team friction", or "implementation challenges". Requires ENABLE_PGVECTOR=true and EMBEDDING_PROVIDER to be configured on the server. Returns entries ranked by similarity score (0.0–1.0). If embeddings are not configured, returns a structured error with fallback_available: true — retry with context_search in that case.',
+      inputSchema: contextSemanticSearch,
+      handler: async (input: z.infer<typeof contextSemanticSearch>, actor: ActorContext) => {
+        const embConfig = loadEmbeddingConfig();
+        if (!embConfig) {
+          return {
+            error: 'Semantic search is not enabled on this server. Set ENABLE_PGVECTOR=true and EMBEDDING_PROVIDER to enable vector search.',
+            fallback_available: true,
+            fallback_tool: 'context_search',
+          };
+        }
+
+        let queryEmbedding: number[];
+        try {
+          queryEmbedding = await embedText(input.query, embConfig);
+        } catch (err) {
+          return {
+            error: `Embedding generation failed: ${(err as Error).message}. Use context_search for full-text search instead.`,
+            fallback_available: true,
+            fallback_tool: 'context_search',
+          };
+        }
+
+        const entries = await contextRepo.semanticSearch(db, actor.tenant_id, queryEmbedding, {
+          subject_type: input.subject_type,
+          subject_id: input.subject_id,
+          context_type: input.context_type,
+          tag: input.tag,
+          current_only: input.current_only,
+          limit: input.limit,
+          structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
+        });
+
+        return { context_entries: entries, total: entries.length, semantic_search: true };
+      },
+    },
+    {
+      name: 'context_embed_backfill',
+      description: 'Admin tool: generate embeddings for context entries that have not yet been embedded. Call with dry_run: true first to see how many entries are pending, then with dry_run: false to process a batch. Loop calls until pending reaches 0. Requires ENABLE_PGVECTOR=true and EMBEDDING_PROVIDER to be configured.',
+      inputSchema: contextEmbedBackfill,
+      handler: async (input: z.infer<typeof contextEmbedBackfill>, actor: ActorContext) => {
+        const embConfig = loadEmbeddingConfig();
+        if (!embConfig) {
+          return { error: 'EMBEDDING_PROVIDER is not configured. Set ENABLE_PGVECTOR=true and EMBEDDING_PROVIDER to enable semantic search.' };
+        }
+
+        const stats = await contextRepo.backfillEmbeddings(
+          db,
+          actor.tenant_id,
+          embConfig,
+          input.batch_size,
+          input.subject_type,
+          input.dry_run,
+        );
+        return { ...stats, dry_run: input.dry_run };
       },
     },
   ];

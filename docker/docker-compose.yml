@@ -16,12 +16,17 @@ services:
       # CRMY_ADMIN_NAME: Admin
       # Seed demo data on container start (set to "true" to enable)
       # CRMY_SEED_DEMO: "true"
+      # pgvector semantic search (requires pgvector/pgvector:pg16 image — already set above)
+      # ENABLE_PGVECTOR: "true"
+      # EMBEDDING_PROVIDER: openai
+      # EMBEDDING_API_KEY: sk-...
+      # EMBEDDING_MODEL: text-embedding-3-small
     depends_on:
       db:
         condition: service_healthy
 
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: crmy
       POSTGRES_PASSWORD: crmy

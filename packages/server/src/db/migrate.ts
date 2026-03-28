@@ -32,7 +32,17 @@ export async function runMigrations(db: DbPool): Promise<string[]> {
   for (const file of files) {
     if (appliedSet.has(file)) continue;
 
-    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8');
+    // Migration 022 requires pgvector extension — skip unless explicitly opted in.
+    // Supported on Supabase, Neon, RDS, and local Docker with pgvector/pgvector:pg16.
+    if (file === '022_pgvector.sql' && process.env.ENABLE_PGVECTOR !== 'true') {
+      console.log(`[migrate] Skipping ${file} (set ENABLE_PGVECTOR=true to enable semantic search)`);
+      continue;
+    }
+
+    const rawSql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8');
+    // Substitute ${EMBEDDING_DIMENSIONS} for pgvector migration (default: 1536 for text-embedding-3-small)
+    const embDims = process.env.EMBEDDING_DIMENSIONS ?? '1536';
+    const sql = rawSql.replace(/\$\{EMBEDDING_DIMENSIONS\}/g, embDims);
     // Extract only the "Up" portion (before "-- Down:")
     const upSql = sql.split('-- Down:')[0];
 

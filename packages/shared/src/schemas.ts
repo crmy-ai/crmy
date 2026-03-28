@@ -715,6 +715,31 @@ export const contextSearch = z.object({
   structured_data_filter: z.record(z.unknown()).optional(),
 });
 
+// -- Context semantic search schema --
+
+export const contextSemanticSearch = z.object({
+  query: z.string().min(1)
+    .describe('Natural language query — embedded and compared by cosine similarity. Use paraphrases, concepts, or descriptions rather than exact keywords.'),
+  subject_type: subjectType.optional(),
+  subject_id: uuid.optional(),
+  context_type: z.string().optional(),
+  tag: z.string().optional(),
+  current_only: z.boolean().default(true),
+  limit: z.number().int().min(1).max(100).default(20),
+  structured_data_filter: z.record(z.unknown()).optional(),
+});
+
+// -- Context embed backfill schema (admin) --
+
+export const contextEmbedBackfill = z.object({
+  batch_size: z.number().int().min(1).max(100).default(50)
+    .describe('Number of entries to embed per call. Loop calls until pending reaches 0.'),
+  subject_type: subjectType.optional()
+    .describe('Optional: limit backfill to entries for a specific entity type.'),
+  dry_run: z.boolean().default(false)
+    .describe('If true, count pending entries without embedding them.'),
+});
+
 // -- Context review schema --
 
 export const contextReview = z.object({

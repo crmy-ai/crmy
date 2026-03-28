@@ -3,6 +3,8 @@
 
 import type { DbPool } from '../pool.js';
 import type { ContextEntry, UUID, PaginatedResponse } from '@crmy/shared';
+import type { EmbeddingConfig } from '../../agent/providers/embeddings.js';
+import { embedText } from '../../agent/providers/embeddings.js';
 
 export async function createContextEntry(
   db: DbPool,
@@ -494,4 +496,147 @@ export async function searchContextEntries(
     total: countResult.rows[0].total,
     next_cursor: hasMore ? data[data.length - 1].created_at : undefined,
   };
+}
+
+// ─── pgvector semantic search ─────────────────────────────────────────────────
+
+/**
+ * Store a precomputed embedding vector for a context entry.
+ * Called fire-and-forget from context_add and context_supersede handlers.
+ */
+export async function updateEmbedding(
+  db: DbPool,
+  id: UUID,
+  tenantId: UUID,
+  embedding: number[],
+): Promise<void> {
+  // pg accepts vector literal as '[v1,v2,...]' text with ::vector cast in the SQL.
+  await db.query(
+    `UPDATE context_entries SET embedding = $1::vector WHERE id = $2 AND tenant_id = $3`,
+    [`[${embedding.join(',')}]`, id, tenantId],
+  );
+}
+
+/**
+ * Semantic similarity search using pgvector cosine distance.
+ * Requires ENABLE_PGVECTOR=true and an embedded query vector.
+ * All typed filters (subject_type, subject_id, context_type, tag, structured_data_filter)
+ * are applied as WHERE conditions so the entity graph and type structure are preserved.
+ */
+export async function semanticSearch(
+  db: DbPool,
+  tenantId: UUID,
+  queryEmbedding: number[],
+  filters?: {
+    subject_type?: string;
+    subject_id?: UUID;
+    context_type?: string;
+    tag?: string;
+    current_only?: boolean;
+    limit?: number;
+    structured_data_filter?: Record<string, unknown>;
+  },
+): Promise<Array<ContextEntry & { similarity: number }>> {
+  const conditions: string[] = [
+    'c.tenant_id = $1',
+    'c.embedding IS NOT NULL',
+  ];
+  const params: unknown[] = [tenantId, `[${queryEmbedding.join(',')}]`];
+  let idx = 3;
+
+  if (filters?.current_only !== false) {
+    conditions.push('c.is_current = true');
+  }
+  if (filters?.subject_type) {
+    conditions.push(`c.subject_type = $${idx++}`);
+    params.push(filters.subject_type);
+  }
+  if (filters?.subject_id) {
+    conditions.push(`c.subject_id = $${idx++}`);
+    params.push(filters.subject_id);
+  }
+  if (filters?.context_type) {
+    conditions.push(`c.context_type = $${idx++}`);
+    params.push(filters.context_type);
+  }
+  if (filters?.tag) {
+    conditions.push(`c.tags @> $${idx++}::jsonb`);
+    params.push(JSON.stringify([filters.tag]));
+  }
+  if (filters?.structured_data_filter) {
+    conditions.push(`c.structured_data @> $${idx++}::jsonb`);
+    params.push(JSON.stringify(filters.structured_data_filter));
+  }
+
+  const lim = filters?.limit ?? 20;
+  params.push(lim);
+
+  const result = await db.query(
+    `SELECT c.*, 1 - (c.embedding <=> $2::vector) AS similarity
+     FROM context_entries c
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY c.embedding <=> $2::vector
+     LIMIT $${idx}`,
+    params,
+  );
+
+  return result.rows as Array<ContextEntry & { similarity: number }>;
+}
+
+/**
+ * Embed all context entries that are missing embeddings.
+ * Called by the context_embed_backfill MCP tool.
+ * Processes up to batchSize entries per call — loop until pending reaches 0.
+ */
+export async function backfillEmbeddings(
+  db: DbPool,
+  tenantId: UUID,
+  embConfig: EmbeddingConfig,
+  batchSize: number,
+  subjectType?: string,
+  dryRun?: boolean,
+): Promise<{ processed: number; skipped: number; failed: number; pending: number }> {
+  const countParams: unknown[] = [tenantId];
+  const subjectFilter = subjectType ? ` AND subject_type = $2` : '';
+  if (subjectType) countParams.push(subjectType);
+
+  const countResult = await db.query(
+    `SELECT count(*)::int AS n FROM context_entries
+     WHERE tenant_id = $1 AND embedding IS NULL${subjectFilter}`,
+    countParams,
+  );
+  const pending: number = countResult.rows[0].n;
+
+  if (dryRun) return { processed: 0, skipped: 0, failed: 0, pending };
+
+  const rowParams: unknown[] = [tenantId];
+  if (subjectType) rowParams.push(subjectType);
+  rowParams.push(batchSize);
+
+  const limitIdx = rowParams.length;
+  const rows = await db.query(
+    `SELECT id, body FROM context_entries
+     WHERE tenant_id = $1 AND embedding IS NULL${subjectFilter}
+     ORDER BY created_at DESC
+     LIMIT $${limitIdx}`,
+    rowParams,
+  );
+
+  let processed = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const row of rows.rows) {
+    const body = row.body as string | null;
+    if (!body?.trim()) { skipped++; continue; }
+    try {
+      const vec = await embedText(body, embConfig);
+      await updateEmbedding(db, row.id as UUID, tenantId, vec);
+      processed++;
+    } catch {
+      failed++;
+    }
+  }
+
+  return { processed, skipped, failed, pending: pending - processed };
 }
