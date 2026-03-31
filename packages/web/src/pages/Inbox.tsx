@@ -499,7 +499,12 @@ export default function InboxPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <TopBar title="Assignments">
+      <TopBar
+        title="Handoffs"
+        icon={InboxIcon}
+        iconClassName="text-destructive"
+        description="Review and respond to agent requests and assignments."
+      >
         <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           {([{ mode: 'card', icon: LayoutGrid }, { mode: 'table', icon: List }] as const).map(({ mode, icon: Icon }) => (
             <button key={mode} onClick={() => setView(mode)}

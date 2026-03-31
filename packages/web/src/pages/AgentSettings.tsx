@@ -3,8 +3,18 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Sparkles, KeyRound, Users, TriangleAlert, Eye, EyeOff, X, ActivitySquare, ArrowRight } from 'lucide-react';
+import {
+  Sparkles, KeyRound, Users, TriangleAlert, Eye, EyeOff, X,
+  ActivitySquare, ArrowRight, CheckCircle2, XCircle,
+} from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import {
   useAgentConfig,
@@ -12,98 +22,99 @@ import {
   useTestAgentConnection,
   useClearAllAgentSessions,
 } from '@/api/hooks';
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-type Provider = 'anthropic' | 'openai' | 'openrouter' | 'ollama' | 'custom';
+import {
+  PROVIDERS,
+  CUSTOM_MODEL_SENTINEL,
+  getProvider,
+  type ProviderId,
+} from '@/lib/agentProviders';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const providerModels: Record<Provider, string[]> = {
-  anthropic: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-5-20251001'],
-  openai: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'],
-  openrouter: ['openrouter/auto', 'anthropic/claude-sonnet-4', 'openai/gpt-4o', 'google/gemini-2.0-flash'],
-  ollama: ['llama3.2', 'mistral', 'deepseek-r1'],
-  custom: [],
-};
-
-const providerUrls: Record<Provider, string> = {
-  anthropic: 'https://api.anthropic.com/v1',
-  openai: 'https://api.openai.com/v1',
-  openrouter: 'https://openrouter.ai/api/v1',
-  ollama: 'http://localhost:11434/v1',
-  custom: 'https://your-gateway.example.com/v1',
-};
-
-const providerColors: Record<Provider, { dot: string; active: string }> = {
-  anthropic: { dot: 'bg-amber-500', active: 'border-amber-500/50 bg-amber-500/10 text-amber-600 dark:text-amber-400' },
-  openai: { dot: 'bg-green-500', active: 'border-green-500/50 bg-green-500/10 text-green-600 dark:text-green-400' },
-  openrouter: { dot: 'bg-purple-500', active: 'border-purple-500/50 bg-purple-500/10 text-purple-600 dark:text-purple-400' },
-  ollama: { dot: 'bg-blue-500', active: 'border-blue-500/50 bg-blue-500/10 text-blue-600 dark:text-blue-400' },
-  custom: { dot: 'bg-gray-400', active: 'border-gray-400/50 bg-gray-400/10 text-gray-600 dark:text-gray-400' },
-};
-
 const tokenCosts: Record<number, string> = {
-  1000: '~$0.002 / turn at current model pricing',
-  4000: '~$0.006 / turn at current model pricing',
-  8000: '~$0.012 / turn at current model pricing',
+  1000:  '~$0.002 / turn at current model pricing',
+  4000:  '~$0.006 / turn at current model pricing',
+  8000:  '~$0.012 / turn at current model pricing',
   16000: '~$0.024 / turn at current model pricing',
 };
 
-const defaultSystemPrompt = `You are a CRMy AI agent helping manage a CRM pipeline. You have access to contacts, accounts, opportunities, use cases, and activity history via tools. Be concise, accurate, and always confirm before making changes to CRM objects.`;
+const defaultSystemPrompt = `You are a CRMy workspace agent helping manage a CRM pipeline. You have access to contacts, accounts, opportunities, use cases, and activity history via tools. Be concise, accurate, and always confirm before making changes to CRM objects.`;
 
 // ─── Shared style constants ───────────────────────────────────────────────────
 
 const inputCls = 'w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
-const selectCls = `${inputCls} cursor-pointer`;
-const primaryBtn = 'px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40';
-const ghostBtn = 'px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors';
-const dangerBtn = 'px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 transition-colors';
+const primaryBtn = 'px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
+const ghostBtn = 'px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
+const dangerBtn = 'px-3 py-1.5 rounded-lg bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 transition-colors disabled:opacity-40';
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AgentSettings() {
   const { data: configData, isLoading } = useAgentConfig();
-  const saveConfig = useSaveAgentConfig();
-  const testConnection = useTestAgentConnection();
-  const clearSessions = useClearAllAgentSessions();
+  const saveConfig       = useSaveAgentConfig();
+  const testConnection   = useTestAgentConnection();
+  const clearSessions    = useClearAllAgentSessions();
 
   const config = configData?.data;
 
-  // Section 1 — Enable
+  // ── Section 1 — Enable ───────────────────────────────────────────────────
   const [enabled, setEnabled] = useState(false);
 
-  // Section 2 — Provider & Model
-  const [provider, setProvider] = useState<Provider>('anthropic');
-  const [baseUrl, setBaseUrl] = useState(providerUrls.anthropic);
-  const [apiKey, setApiKey] = useState('');
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [model, setModel] = useState('claude-sonnet-4-20250514');
+  // ── Section 2 — Provider & Model ────────────────────────────────────────
+  const [provider,    setProvider]    = useState<ProviderId>('anthropic');
+  const [baseUrl,     setBaseUrl]     = useState(getProvider('anthropic').baseUrl);
+  /** New key the user typed this session. Empty = no change to stored key. */
+  const [newApiKey,   setNewApiKey]   = useState('');
+  const [showApiKey,  setShowApiKey]  = useState(false);
+  /** Last 4 chars of stored key returned from the server — for identification. */
+  const [keyHint,     setKeyHint]     = useState<string | null>(null);
+  const [keyConfigured, setKeyConfigured] = useState(false);
+  /**
+   * Selected model ID.  Value is CUSTOM_MODEL_SENTINEL when user chose "Custom…".
+   */
+  const [modelId,     setModelId]     = useState('');
+  /** Free-text model name when modelId === CUSTOM_MODEL_SENTINEL or provider === 'custom'. */
   const [customModel, setCustomModel] = useState('');
 
-  // Section 3 — Per-User Behaviour
-  const [historyRetention, setHistoryRetention] = useState(90);
-  const [systemPrompt, setSystemPrompt] = useState(defaultSystemPrompt);
-  const [editingPrompt, setEditingPrompt] = useState(false);
-  const [promptDraft, setPromptDraft] = useState(defaultSystemPrompt);
-  const [maxTokens, setMaxTokens] = useState(4000);
+  // ── Test status ──────────────────────────────────────────────────────────
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [testError,  setTestError]  = useState('');
+
+  // ── Section 3 — Per-User Behaviour ──────────────────────────────────────
+  const [historyRetention,    setHistoryRetention]    = useState(90);
+  const [systemPrompt,        setSystemPrompt]        = useState(defaultSystemPrompt);
+  const [editingPrompt,       setEditingPrompt]       = useState(false);
+  const [promptDraft,         setPromptDraft]         = useState(defaultSystemPrompt);
+  const [maxTokens,           setMaxTokens]           = useState(4000);
   const [canCreateAssignments, setCanCreateAssignments] = useState(true);
-  const [canLogActivities, setCanLogActivities] = useState(true);
-  const [canWriteObjects, setCanWriteObjects] = useState(false);
+  const [canLogActivities,    setCanLogActivities]    = useState(true);
+  const [canWriteObjects,     setCanWriteObjects]     = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Section 4 — Danger Zone
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [clearConfirmText, setClearConfirmText] = useState('');
+  // ── Danger Zone ──────────────────────────────────────────────────────────
+  const [showClearConfirm,  setShowClearConfirm]  = useState(false);
+  const [clearConfirmText,  setClearConfirmText]  = useState('');
 
-  // Hydrate state from API config
+  // ── Hydrate from API ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!config) return;
     setEnabled(config.enabled);
-    setProvider(config.provider);
+    setProvider(config.provider as ProviderId);
     setBaseUrl(config.base_url);
-    setModel(config.model);
-    setApiKey(config.api_key_enc ?? '');
+    setKeyConfigured(config.api_key_configured ?? false);
+    setKeyHint(config.api_key_hint ?? null);
+
+    // Resolve model: check if it's in the known list for this provider
+    const providerDef = getProvider(config.provider);
+    const known = providerDef.models.find(m => m.id === config.model);
+    if (known) {
+      setModelId(config.model);
+      setCustomModel('');
+    } else {
+      setModelId(CUSTOM_MODEL_SENTINEL);
+      setCustomModel(config.model ?? '');
+    }
+
     setHistoryRetention(config.history_retention_days);
     setSystemPrompt(config.system_prompt ?? defaultSystemPrompt);
     setPromptDraft(config.system_prompt ?? defaultSystemPrompt);
@@ -111,10 +122,6 @@ export default function AgentSettings() {
     setCanCreateAssignments(config.can_create_assignments);
     setCanLogActivities(config.can_log_activities);
     setCanWriteObjects(config.can_write_objects);
-    // If model is not in known list, assume custom
-    if (!providerModels[config.provider as keyof typeof providerModels]?.includes(config.model)) {
-      setCustomModel(config.model);
-    }
   }, [config]);
 
   // Focus textarea when prompt editor opens
@@ -122,75 +129,111 @@ export default function AgentSettings() {
     if (editingPrompt && textareaRef.current) textareaRef.current.focus();
   }, [editingPrompt]);
 
-  // Provider change — update URL and model
-  const handleProviderChange = (p: Provider) => {
+  // ── Derived values ────────────────────────────────────────────────────────
+  const providerDef = getProvider(provider);
+  const isCustomModel = modelId === CUSTOM_MODEL_SENTINEL || provider === 'custom';
+  /** The actual model string to send to the API. */
+  const resolvedModel = isCustomModel ? customModel : modelId;
+
+  /**
+   * Whether the enable toggle is interactive.
+   * Requires a stored key (or Ollama which needs no key) + a model + base URL.
+   */
+  const canEnable = !providerDef.requiresKey
+    ? Boolean(resolvedModel && baseUrl)
+    : Boolean(keyConfigured && resolvedModel && baseUrl);
+
+  /** Reset test status whenever any config-sensitive field changes. */
+  const resetTest = () => { setTestStatus('idle'); setTestError(''); };
+
+  // ── Handlers ──────────────────────────────────────────────────────────────
+
+  const handleProviderChange = (p: ProviderId) => {
     setProvider(p);
-    setBaseUrl(providerUrls[p]);
-    const models = providerModels[p];
-    setModel(models[0] ?? '');
+    const def = getProvider(p);
+    setBaseUrl(def.baseUrl);
+    const firstModel = def.models[0]?.id ?? '';
+    setModelId(firstModel || CUSTOM_MODEL_SENTINEL);
     setCustomModel('');
+    setNewApiKey('');
+    resetTest();
   };
 
-  // Handle enable toggle — immediately persist
   const handleToggleEnabled = async (val: boolean) => {
+    if (val && !canEnable) return; // guard
     setEnabled(val);
     try {
       await saveConfig.mutateAsync({ enabled: val });
       toast({ title: val ? 'Agent enabled' : 'Agent disabled' });
-    } catch (err) {
+    } catch {
       setEnabled(!val);
       toast({ title: 'Failed to update', variant: 'destructive' });
     }
   };
 
-  // Test connection
   const handleTestConnection = async () => {
-    // Save current provider config first, then test
-    const result = await testConnection.mutateAsync();
-    if (result.ok) {
-      toast({ title: 'Connection successful', description: `Connected to ${provider} at ${baseUrl}` });
-    } else {
-      toast({ title: 'Connection failed', description: result.error ?? 'Check your API key and base URL.', variant: 'destructive' });
+    setTestStatus('testing');
+    setTestError('');
+    try {
+      const payload: Record<string, string> = {
+        provider,
+        base_url: baseUrl,
+        model:    resolvedModel,
+      };
+      // Only send the key if the user typed a new one this session
+      if (newApiKey.trim()) payload.api_key = newApiKey.trim();
+
+      const result = await testConnection.mutateAsync(payload);
+      if (result.ok) {
+        setTestStatus('ok');
+      } else {
+        setTestStatus('fail');
+        setTestError(result.error ?? 'Check your settings and try again.');
+      }
+    } catch (err) {
+      setTestStatus('fail');
+      setTestError(err instanceof Error ? err.message : 'Connection failed');
     }
   };
 
-  // Save provider settings
   const handleSaveProvider = async () => {
     const payload: Record<string, unknown> = {
       provider,
-      base_url: baseUrl,
-      model: provider === 'custom' ? customModel : model,
-      system_prompt: systemPrompt,
-      max_tokens_per_turn: maxTokens,
+      base_url:               baseUrl,
+      model:                  resolvedModel,
+      system_prompt:          systemPrompt,
+      max_tokens_per_turn:    maxTokens,
       history_retention_days: historyRetention,
-      can_write_objects: canWriteObjects,
-      can_log_activities: canLogActivities,
+      can_write_objects:      canWriteObjects,
+      can_log_activities:     canLogActivities,
       can_create_assignments: canCreateAssignments,
     };
-    // Only send API key if user entered a new one (not masked)
-    if (apiKey && !apiKey.startsWith('sk-')) {
-      payload.api_key = apiKey;
+    // Only send api_key if the user entered a new one
+    if (newApiKey.trim()) {
+      payload.api_key = newApiKey.trim();
     }
     try {
       await saveConfig.mutateAsync(payload);
+      // After save, the key is now stored — update hint state from response
+      setNewApiKey('');  // clear the new-key input
       toast({ title: 'Settings saved', description: 'Agent configuration updated.' });
     } catch {
       toast({ title: 'Save failed', variant: 'destructive' });
     }
   };
 
-  // Clear all histories
   const handleClearAll = async () => {
     setShowClearConfirm(false);
     setClearConfirmText('');
     try {
-      await clearSessions.mutateAsync();
+      await clearSessions.mutateAsync({} as never);
       toast({ title: 'Chat histories cleared', description: 'All agent chat histories have been deleted.' });
     } catch {
       toast({ title: 'Failed to clear histories', variant: 'destructive' });
     }
   };
 
+  // ── Loading skeleton ──────────────────────────────────────────────────────
   if (isLoading) {
     return (
       <div className="space-y-5 max-w-2xl">
@@ -201,41 +244,51 @@ export default function AgentSettings() {
   }
 
   const dimCls = !enabled ? 'opacity-40 pointer-events-none' : '';
+  // Key placeholder shown when no new key typed but one is stored
+  const keyPlaceholder = keyConfigured
+    ? `••••••••${keyHint ?? '••••'}`
+    : 'Paste your API key…';
 
   return (
     <div className="space-y-5 max-w-2xl">
       <div>
-        <h2 className="font-display font-bold text-lg text-foreground mb-1">Local AI Agent</h2>
-        <p className="text-sm text-muted-foreground">Configure the AI agent for your workspace.</p>
+        <h2 className="font-display font-bold text-lg text-foreground mb-1">Local Agent</h2>
+        <p className="text-sm text-muted-foreground">Configure the workspace agent for your team.</p>
       </div>
 
-      {/* ── SECTION 1: Enable AI Agent ─────────────────────────────────────── */}
+      {/* ── SECTION 1: Enable ────────────────────────────────────────────── */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center">
               <Sparkles className="w-4 h-4 text-amber-500" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-foreground">Enable In-App AI agent</h3>
+              <h3 className="text-sm font-semibold text-foreground">Enable Local Agent</h3>
               <p className="text-xs text-muted-foreground">Toggle AI features on or off for this workspace</p>
             </div>
           </div>
-          <Switch
-            checked={enabled}
-            onCheckedChange={handleToggleEnabled}
-            aria-label="Enable In-App AI agent"
-          />
+          <div className="flex flex-col items-end gap-1">
+            <Switch
+              checked={enabled}
+              onCheckedChange={handleToggleEnabled}
+              disabled={!canEnable && !enabled}
+              aria-label="Enable Local Agent"
+            />
+            {!canEnable && !enabled && (
+              <p className="text-[10px] text-muted-foreground text-right max-w-[160px]">
+                Configure and test your provider first
+              </p>
+            )}
+          </div>
         </div>
 
-        {/* Feature tags */}
         {enabled && (
           <div className="px-5 py-3 flex flex-wrap gap-2">
             {[
               { icon: '✦', label: 'Sparkle column (tables)' },
               { icon: '💬', label: 'Chat button (object detail)' },
-              { icon: '◎', label: 'Floating AI icon' },
+              { icon: '◎', label: 'Floating agent icon' },
               { icon: '✎', label: 'AI-assist on edit' },
             ].map((tag) => (
               <span key={tag.label} className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg bg-muted text-muted-foreground border border-border">
@@ -246,9 +299,8 @@ export default function AgentSettings() {
         )}
       </div>
 
-      {/* ── SECTION 2: Provider & Model ────────────────────────────────────── */}
+      {/* ── SECTION 2: Provider & Model ─────────────────────────────────── */}
       <div className={`rounded-xl border border-border bg-card overflow-hidden transition-opacity ${dimCls}`} aria-disabled={!enabled}>
-        {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center">
@@ -259,33 +311,38 @@ export default function AgentSettings() {
               <p className="text-xs text-muted-foreground">Connect to an LLM gateway or direct provider</p>
             </div>
           </div>
-          {config?.api_key_enc && (
+          {keyConfigured && (
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-green-500" />
-              <span className="text-xs text-muted-foreground">Key configured</span>
+              <span className="text-xs text-muted-foreground">
+                Key configured{keyHint ? ` (…${keyHint})` : ''}
+              </span>
             </div>
           )}
         </div>
 
         <div className="divide-y divide-border px-5">
-          {/* Provider pills */}
-          <div className="py-4 space-y-2">
+          {/* Provider dropdown */}
+          <div className="py-4 space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Provider</label>
-            <div className="flex flex-wrap gap-2">
-              {(['anthropic', 'openai', 'openrouter', 'ollama', 'custom'] as Provider[]).map((p) => {
-                const isActive = provider === p;
-                return (
-                  <button
-                    key={p}
-                    onClick={() => handleProviderChange(p)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors ${isActive ? providerColors[p].active + ' border' : 'border-border text-muted-foreground hover:text-foreground bg-muted/40'}`}
-                  >
-                    <span className={`w-1.5 h-1.5 rounded-full ${providerColors[p].dot}`} />
-                    {p.charAt(0).toUpperCase() + p.slice(1)}
-                  </button>
-                );
-              })}
-            </div>
+            <Select
+              value={provider}
+              onValueChange={(v) => handleProviderChange(v as ProviderId)}
+            >
+              <SelectTrigger className="w-full h-9 text-sm">
+                <SelectValue placeholder="Select provider…" />
+              </SelectTrigger>
+              <SelectContent>
+                {PROVIDERS.map(p => (
+                  <SelectItem key={p.id} value={p.id}>
+                    <span className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${p.dotColor}`} />
+                      {p.label}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Base URL */}
@@ -293,28 +350,37 @@ export default function AgentSettings() {
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Base URL</label>
             <input
               value={baseUrl}
-              onChange={e => setBaseUrl(e.target.value)}
-              placeholder={providerUrls[provider]}
+              onChange={e => { setBaseUrl(e.target.value); resetTest(); }}
+              placeholder={providerDef.baseUrl || 'https://…'}
               className={inputCls}
             />
           </div>
 
-          {/* API Key */}
-          {provider !== 'ollama' ? (
+          {/* API Key (hidden for Ollama) */}
+          {providerDef.requiresKey ? (
             <div className="py-4 space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">API Key</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">API Key</label>
+                {keyConfigured && !newApiKey && (
+                  <span className="text-[10px] text-muted-foreground">
+                    Enter a new key to replace the stored one
+                  </span>
+                )}
+              </div>
               <div className="relative">
                 <input
                   type={showApiKey ? 'text' : 'password'}
-                  value={apiKey}
-                  onChange={e => setApiKey(e.target.value)}
-                  placeholder="sk-..."
+                  value={newApiKey}
+                  onChange={e => { setNewApiKey(e.target.value); resetTest(); }}
+                  placeholder={keyPlaceholder}
                   className={inputCls + ' pr-10'}
+                  autoComplete="new-password"
                 />
                 <button
                   type="button"
                   onClick={() => setShowApiKey(v => !v)}
                   className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
                 >
                   {showApiKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                 </button>
@@ -322,7 +388,11 @@ export default function AgentSettings() {
             </div>
           ) : (
             <div className="py-4">
-              <p className="text-xs text-muted-foreground italic">Ollama runs locally — no API key required.</p>
+              <p className="text-xs text-muted-foreground italic">
+                {provider === 'ollama'
+                  ? 'Ollama runs locally — no API key required.'
+                  : 'No API key required for this provider.'}
+              </p>
             </div>
           )}
 
@@ -332,46 +402,87 @@ export default function AgentSettings() {
             {provider === 'custom' ? (
               <input
                 value={customModel}
-                onChange={e => setCustomModel(e.target.value)}
+                onChange={e => { setCustomModel(e.target.value); resetTest(); }}
                 placeholder="e.g. my-custom-model"
                 className={inputCls}
               />
             ) : (
-              <select
-                value={model}
-                onChange={e => setModel(e.target.value)}
-                className={selectCls}
-              >
-                {providerModels[provider].map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
+              <div className="space-y-2">
+                <Select
+                  value={modelId}
+                  onValueChange={v => { setModelId(v); if (v !== CUSTOM_MODEL_SENTINEL) setCustomModel(''); resetTest(); }}
+                >
+                  <SelectTrigger className="w-full h-9 text-sm">
+                    <SelectValue placeholder="Select model…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {providerDef.models.map(m => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={CUSTOM_MODEL_SENTINEL}>
+                      <span className="text-muted-foreground italic">Custom model ID…</span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {isCustomModel && (
+                  <input
+                    value={customModel}
+                    onChange={e => { setCustomModel(e.target.value); resetTest(); }}
+                    placeholder="Enter model ID exactly as required by the API"
+                    className={inputCls}
+                    autoFocus
+                  />
+                )}
+              </div>
             )}
           </div>
 
-          {/* Actions */}
-          <div className="py-4 flex items-center gap-2 flex-wrap">
-            <button
-              onClick={handleTestConnection}
-              disabled={testConnection.isPending}
-              className={ghostBtn + ' disabled:opacity-40'}
-            >
-              {testConnection.isPending ? 'Testing...' : 'Test connection'}
-            </button>
-            <button
-              onClick={handleSaveProvider}
-              disabled={saveConfig.isPending}
-              className={primaryBtn}
-            >
-              {saveConfig.isPending ? 'Saving...' : 'Save changes'}
-            </button>
+          {/* Actions + inline test status */}
+          <div className="py-4 space-y-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={handleTestConnection}
+                disabled={testStatus === 'testing' || (!resolvedModel) || (!baseUrl)}
+                className={ghostBtn}
+              >
+                {testStatus === 'testing' ? 'Testing…' : 'Test connection'}
+              </button>
+              <button
+                onClick={handleSaveProvider}
+                disabled={testStatus !== 'ok' || saveConfig.isPending}
+                className={primaryBtn}
+                title={testStatus !== 'ok' ? 'Run a successful test first' : undefined}
+              >
+                {saveConfig.isPending ? 'Saving…' : 'Save changes'}
+              </button>
+            </div>
+
+            {/* Inline test feedback */}
+            {testStatus === 'ok' && (
+              <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Connected successfully — you can now save.</span>
+              </div>
+            )}
+            {testStatus === 'fail' && (
+              <div className="flex items-start gap-1.5 text-xs text-destructive">
+                <XCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>{testError || 'Connection failed. Check your key, URL, and model.'}</span>
+              </div>
+            )}
+            {testStatus === 'idle' && testStatus !== 'ok' && (
+              <p className="text-[10px] text-muted-foreground">
+                Test your connection before saving to confirm the key works.
+              </p>
+            )}
           </div>
         </div>
       </div>
 
-      {/* ── SECTION 3: Per-User Agent Behaviour ────────────────────────────── */}
+      {/* ── SECTION 3: Per-User Agent Behaviour ─────────────────────────── */}
       <div className={`rounded-xl border border-border bg-card overflow-hidden transition-opacity ${dimCls}`} aria-disabled={!enabled}>
-        {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
           <div className="w-9 h-9 rounded-xl bg-purple-500/10 flex items-center justify-center">
             <Users className="w-4 h-4 text-purple-500" />
@@ -423,9 +534,7 @@ export default function AgentSettings() {
           {/* Max tokens */}
           <div className="py-3 space-y-1.5">
             <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium text-foreground">Max tokens per turn</p>
-              </div>
+              <p className="text-sm font-medium text-foreground">Max tokens per turn</p>
               <select
                 value={maxTokens}
                 onChange={e => setMaxTokens(Number(e.target.value))}
@@ -446,7 +555,11 @@ export default function AgentSettings() {
               <p className="text-sm font-medium text-foreground">Allow agent to create assignments</p>
               <p className="text-xs text-muted-foreground">Agent can assign tasks to users and actors</p>
             </div>
-            <Switch checked={canCreateAssignments} onCheckedChange={setCanCreateAssignments} aria-label="Allow agent to create assignments" />
+            <Switch
+              checked={canCreateAssignments}
+              onCheckedChange={setCanCreateAssignments}
+              aria-label="Allow agent to create assignments"
+            />
           </div>
 
           {/* Can log activities */}
@@ -455,7 +568,11 @@ export default function AgentSettings() {
               <p className="text-sm font-medium text-foreground">Allow agent to log activities</p>
               <p className="text-xs text-muted-foreground">Agent can record calls, notes, and emails</p>
             </div>
-            <Switch checked={canLogActivities} onCheckedChange={setCanLogActivities} aria-label="Allow agent to log activities" />
+            <Switch
+              checked={canLogActivities}
+              onCheckedChange={setCanLogActivities}
+              aria-label="Allow agent to log activities"
+            />
           </div>
 
           {/* Can write objects */}
@@ -465,7 +582,11 @@ export default function AgentSettings() {
                 <p className="text-sm font-medium text-foreground">Allow agent to write CRM objects</p>
                 <p className="text-xs text-muted-foreground">Agent can create and edit contacts, accounts, and opportunities</p>
               </div>
-              <Switch checked={canWriteObjects} onCheckedChange={setCanWriteObjects} aria-label="Allow agent to write CRM objects" />
+              <Switch
+                checked={canWriteObjects}
+                onCheckedChange={setCanWriteObjects}
+                aria-label="Allow agent to write CRM objects"
+              />
             </div>
             {canWriteObjects && (
               <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
@@ -479,7 +600,7 @@ export default function AgentSettings() {
         </div>
       </div>
 
-      {/* ── SECTION 4: Observability ───────────────────────────────────────── */}
+      {/* ── SECTION 4: Observability ─────────────────────────────────────── */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
           <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -491,10 +612,7 @@ export default function AgentSettings() {
           </div>
         </div>
         <div className="px-5 py-3">
-          <Link
-            to="/agent/activity"
-            className="flex items-center justify-between py-1 group"
-          >
+          <Link to="/agent/activity" className="flex items-center justify-between py-1 group">
             <div>
               <p className="text-sm font-medium text-foreground">Agent activity log</p>
               <p className="text-xs text-muted-foreground">Browse every tool call the agent has made — with arguments, results, session, and timing</p>
@@ -504,9 +622,8 @@ export default function AgentSettings() {
         </div>
       </div>
 
-      {/* ── SECTION 5: Danger Zone ─────────────────────────────────────────── */}
+      {/* ── SECTION 5: Danger Zone ───────────────────────────────────────── */}
       <div className="rounded-xl border border-red-200 dark:border-red-900/50 bg-card overflow-hidden">
-        {/* Header */}
         <div className="flex items-center gap-3 px-5 py-4 border-b border-red-200 dark:border-red-900/50">
           <div className="w-9 h-9 rounded-xl bg-red-500/10 flex items-center justify-center">
             <TriangleAlert className="w-4 h-4 text-red-500" />
@@ -516,9 +633,7 @@ export default function AgentSettings() {
             <p className="text-xs text-muted-foreground">Irreversible actions — proceed with care</p>
           </div>
         </div>
-
         <div className="divide-y divide-red-100 dark:divide-red-900/30 px-5">
-          {/* Clear histories */}
           <div className="flex items-center justify-between py-3 gap-4">
             <div>
               <p className="text-sm font-medium text-foreground">Clear all chat histories</p>
@@ -531,7 +646,7 @@ export default function AgentSettings() {
         </div>
       </div>
 
-      {/* ── System Prompt Editor Overlay ───────────────────────────────────── */}
+      {/* ── System Prompt Editor Overlay ─────────────────────────────────── */}
       {editingPrompt && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center bg-foreground/20 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-xl p-6 max-w-2xl w-full mx-4 shadow-xl space-y-4">
@@ -551,7 +666,11 @@ export default function AgentSettings() {
             <div className="flex gap-2 justify-end">
               <button onClick={() => setEditingPrompt(false)} className={ghostBtn}>Cancel</button>
               <button
-                onClick={() => { setSystemPrompt(promptDraft); setEditingPrompt(false); toast({ title: 'System prompt updated' }); }}
+                onClick={() => {
+                  setSystemPrompt(promptDraft);
+                  setEditingPrompt(false);
+                  toast({ title: 'System prompt updated' });
+                }}
                 className={primaryBtn}
               >
                 Save prompt
@@ -561,7 +680,7 @@ export default function AgentSettings() {
         </div>
       )}
 
-      {/* ── Clear Confirm Modal ─────────────────────────────────────────────── */}
+      {/* ── Clear Confirm Modal ──────────────────────────────────────────── */}
       {showClearConfirm && (
         <div className="fixed inset-0 z-[300] flex items-center justify-center bg-foreground/20 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-xl p-6 max-w-sm w-full mx-4 shadow-xl space-y-4">
@@ -576,7 +695,12 @@ export default function AgentSettings() {
               className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm font-mono outline-none focus:ring-1 focus:ring-ring"
             />
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowClearConfirm(false); setClearConfirmText(''); }} className={ghostBtn}>Cancel</button>
+              <button
+                onClick={() => { setShowClearConfirm(false); setClearConfirmText(''); }}
+                className={ghostBtn}
+              >
+                Cancel
+              </button>
               <button
                 disabled={clearConfirmText !== 'CLEAR'}
                 onClick={handleClearAll}

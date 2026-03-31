@@ -384,7 +384,12 @@ export default function AssignmentsPage() {
 
   return (
     <>
-      <TopBar title="Assignments" />
+      <TopBar
+        title="Assignments"
+        icon={ClipboardList}
+        iconClassName="text-destructive"
+        description="Task queue and handoffs between agents and humans."
+      />
 
       {/* Tabs */}
       <div className="flex items-center gap-3 px-4 md:px-6 pt-4 pb-1">

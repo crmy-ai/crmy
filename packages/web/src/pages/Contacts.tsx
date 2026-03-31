@@ -11,7 +11,7 @@ import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { motion } from 'framer-motion';
-import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
+import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown, Users } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { stageConfig } from '@/lib/stageConfig';
@@ -91,7 +91,12 @@ export default function Contacts() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Contacts">
+      <TopBar
+        title="Contacts"
+        icon={Users}
+        iconClassName="text-primary"
+        description="People and leads across your CRM."
+      >
         <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           <button onClick={() => setView('table')} className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
             <List className="w-4 h-4" />

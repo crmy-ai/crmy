@@ -29,7 +29,12 @@ export function HITLPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Approvals" />
+      <TopBar
+        title="Approvals"
+        icon={ShieldCheck}
+        iconClassName="text-destructive"
+        description="Human-in-the-loop approvals for agent actions."
+      />
       <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6 space-y-4">
         {isLoading ? (
           <p className="text-muted-foreground text-sm">Loading…</p>

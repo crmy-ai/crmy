@@ -183,24 +183,16 @@ export default function ContextPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Context" />
+      <TopBar
+        title="Context"
+        icon={Library}
+        iconClassName="text-[#0ea5e9]"
+        description="Structured memory written by agents after every interaction. Used to power briefings."
+        badge={total > 0 && searchMode === 'keyword' ? (
+          <span className="text-xs text-muted-foreground">{total.toLocaleString()} total</span>
+        ) : undefined}
+      />
       <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
-
-        {/* Header */}
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Library className="w-5 h-5 text-[#0ea5e9]" />
-            <h1 className="text-xl font-display font-bold text-foreground">Context entries</h1>
-            {total > 0 && searchMode === 'keyword' && (
-              <span className="text-xs text-muted-foreground ml-1">
-                {total.toLocaleString()} total
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Structured memory written by agents after every interaction. Used to power briefings.
-          </p>
-        </motion.div>
 
         {/* Filters */}
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }} className="flex flex-wrap gap-2 mb-4">
@@ -232,24 +224,24 @@ export default function ContextPage() {
             />
           </div>
 
-          <Select value={subjectType} onValueChange={setSubjectType}>
+          <Select value={subjectType || '__all__'} onValueChange={(v) => setSubjectType(v === '__all__' ? '' : v)}>
             <SelectTrigger className="h-8 w-[140px] text-sm">
               <SelectValue placeholder="Subject type" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All subjects</SelectItem>
+              <SelectItem value="__all__">All subjects</SelectItem>
               {SUBJECT_TYPES.map((t) => (
                 <SelectItem key={t} value={t}>{subjectTypeLabel(t)}</SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          <Select value={contextType} onValueChange={setContextType}>
+          <Select value={contextType || '__all__'} onValueChange={(v) => setContextType(v === '__all__' ? '' : v)}>
             <SelectTrigger className="h-8 w-[150px] text-sm">
               <SelectValue placeholder="Context type" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All types</SelectItem>
+              <SelectItem value="__all__">All types</SelectItem>
               {contextTypeOptions.map((t) => (
                 <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>
               ))}

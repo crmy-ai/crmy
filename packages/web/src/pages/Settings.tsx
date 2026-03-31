@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -27,7 +27,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
   { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'] },
   { icon: Tags,       label: 'Registries',    path: '/settings/registries',   roles: ['admin', 'owner'] },
-  { icon: Bot,        label: 'Local AI Agent', path: '/settings/agent',        roles: ['admin', 'owner'] },
+  { icon: Bot,        label: 'Local Agent',           path: '/settings/agent',        roles: ['admin', 'owner'] },
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
 ];
 
@@ -2002,7 +2002,12 @@ export default function Settings() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Settings" />
+      <TopBar
+        title="Settings"
+        icon={SettingsIcon}
+        iconClassName="text-muted-foreground"
+        description="Manage your account, team, and integrations."
+      />
 
       <div className="md:hidden flex gap-1 overflow-x-auto no-scrollbar px-4 pt-3 pb-1 border-b border-border">
         {visibleNav.map((item) => {

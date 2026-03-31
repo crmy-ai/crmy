@@ -1,4 +1,4 @@
-import { Search, Command, Sun, Moon, LogOut } from 'lucide-react';
+import { Search, Command, Sun, Moon, LogOut, type LucideIcon } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { useTheme } from '@/hooks/useTheme';
 import { useNavigate } from 'react-router-dom';
@@ -6,10 +6,15 @@ import { clearToken } from '@/api/client';
 
 interface TopBarProps {
   title: string;
+  icon?: LucideIcon;
+  iconClassName?: string;
+  description?: string;
+  /** Extra inline content rendered after the title (e.g. counts) */
+  badge?: React.ReactNode;
   children?: React.ReactNode;
 }
 
-export function TopBar({ title, children }: TopBarProps) {
+export function TopBar({ title, icon: Icon, iconClassName, description, badge, children }: TopBarProps) {
   const { setCommandPaletteOpen } = useAppStore();
   const { theme, toggle } = useTheme();
   const navigate = useNavigate();
@@ -20,8 +25,17 @@ export function TopBar({ title, children }: TopBarProps) {
   };
 
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between h-14 px-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-md gap-2">
-      <h1 className="font-display font-bold text-lg text-foreground truncate hidden md:block">{title}</h1>
+    <header className="sticky top-0 z-30 flex items-center justify-between min-h-14 px-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-md gap-2 py-2">
+      <div className="hidden md:flex flex-col justify-center min-w-0 shrink">
+        <div className="flex items-center gap-2">
+          {Icon && <Icon className={`w-4.5 h-4.5 flex-shrink-0 ${iconClassName ?? 'text-foreground'}`} />}
+          <h1 className="font-display font-bold text-lg text-foreground truncate">{title}</h1>
+          {badge}
+        </div>
+        {description && (
+          <p className="text-xs text-muted-foreground truncate mt-0.5">{description}</p>
+        )}
+      </div>
       <div className="flex items-center gap-1.5 md:ml-auto w-full md:w-auto">
         {children}
         <button

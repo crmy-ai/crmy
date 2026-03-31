@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useMemo, useEffect } from 'react';
+import { Activity as ActivityIcon } from 'lucide-react';
 import { TopBar } from '@/components/layout/TopBar';
 import { useActivities, useActivityTypes } from '@/api/hooks';
 import { ActivityFeed } from '@/components/crm/CrmWidgets';
@@ -192,7 +193,12 @@ export default function Activities() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Activities" />
+      <TopBar
+        title="Activities"
+        icon={ActivityIcon}
+        iconClassName="text-warning"
+        description="Calls, emails, meetings, and tasks."
+      />
 
       {/* Time range selector */}
       <div className="px-4 md:px-6 pt-3 pb-1 flex flex-wrap items-center gap-2">

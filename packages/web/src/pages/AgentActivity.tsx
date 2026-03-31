@@ -138,7 +138,12 @@ export default function AgentActivity() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Agent Activity" />
+      <TopBar
+        title="Agent Activity"
+        icon={Wrench}
+        iconClassName="text-[#6366f1]"
+        description="Real-time agent tool usage and performance."
+      />
 
       <div className="flex-1 overflow-y-auto p-6 max-w-4xl mx-auto w-full">
         {/* Filters */}

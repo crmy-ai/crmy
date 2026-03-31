@@ -98,19 +98,13 @@ export default function Dashboard() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Memory Hub" />
+      <TopBar
+        title="Memory Hub"
+        icon={Brain}
+        iconClassName="text-primary"
+        description="Your agent memory layer — context, approvals, and active agents at a glance."
+      />
       <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
-
-        {/* Hero */}
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="mb-6">
-          <div className="flex items-center gap-2 mb-1">
-            <Brain className="w-5 h-5 text-[#14b8a6]" />
-            <h1 className="text-2xl md:text-3xl font-display font-extrabold">
-              <span className="gradient-text">Memory Hub</span>
-            </h1>
-          </div>
-          <p className="text-sm text-muted-foreground">Your agent memory layer — context, approvals, and active agents at a glance.</p>
-        </motion.div>
 
         {/* Stat row */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
@@ -138,7 +132,7 @@ export default function Dashboard() {
             value={activeAgents.length}
             sub={agents.length > 0 ? `of ${agents.length} registered` : 'none registered'}
             color="bg-[#6366f1]/15 text-[#6366f1]"
-            href="/agents"
+            href="/actors"
             delay={0.1}
           />
           <StatCard
@@ -268,7 +262,7 @@ export default function Dashboard() {
                     <Bot className="w-4 h-4 text-[#6366f1]" />
                     Agents
                   </h3>
-                  <Link to="/agents" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  <Link to="/actors" className="text-xs text-primary hover:underline flex items-center gap-1">
                     Manage <ArrowRight className="w-3 h-3" />
                   </Link>
                 </div>
@@ -276,7 +270,7 @@ export default function Dashboard() {
                   <div className="text-center py-6">
                     <Bot className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
                     <p className="text-xs text-muted-foreground">No agents registered yet.</p>
-                    <Link to="/agents" className="text-xs text-primary hover:underline mt-1 inline-block">
+                    <Link to="/actors" className="text-xs text-primary hover:underline mt-1 inline-block">
                       Register your first agent
                     </Link>
                   </div>
@@ -297,7 +291,7 @@ export default function Dashboard() {
                       </div>
                     ))}
                     {agents.length > 5 && (
-                      <Link to="/agents" className="text-xs text-muted-foreground hover:text-primary block text-center pt-1">
+                      <Link to="/actors" className="text-xs text-muted-foreground hover:text-primary block text-center pt-1">
                         +{agents.length - 5} more
                       </Link>
                     )}

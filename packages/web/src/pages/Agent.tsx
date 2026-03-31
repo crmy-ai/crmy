@@ -248,13 +248,13 @@ export default function Agent() {
   if (!enabled) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="AI Agent" />
+        <TopBar title="Local Agent" />
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center max-w-md space-y-3">
             <Bot className="w-12 h-12 mx-auto text-muted-foreground/40" />
-            <h2 className="text-lg font-display font-bold text-foreground">AI Agent is not enabled</h2>
+            <h2 className="text-lg font-display font-bold text-foreground">Local Agent is not enabled</h2>
             <p className="text-sm text-muted-foreground">
-              An administrator needs to enable the AI agent and configure an LLM provider in Settings &rarr; AI Agent.
+              An administrator needs to enable the agent and configure an LLM provider in Settings &rarr; Local Agent.
             </p>
           </div>
         </div>
@@ -264,7 +264,7 @@ export default function Agent() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="AI Agent" />
+      <TopBar title="Local Agent" />
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         {/* Chat */}
         <div className="flex-1 flex flex-col min-w-0">
@@ -272,7 +272,7 @@ export default function Agent() {
           <div className="px-4 py-3 border-b border-border bg-gradient-to-r from-primary/5 to-accent/5">
             <div className="flex items-center gap-2">
               <AgentStatusDot />
-              <span className="text-sm font-display font-bold text-foreground">AI Agent active</span>
+              <span className="text-sm font-display font-bold text-foreground">Local Agent active</span>
               {streaming && (
                 <span className="flex items-center gap-1 text-[10px] text-primary ml-2">
                   <Loader2 className="w-3 h-3 animate-spin" /> Thinking...
@@ -348,7 +348,7 @@ export default function Agent() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), sendMessage())}
-                placeholder="Ask your AI agent..."
+                placeholder="Ask your local agent…"
                 rows={1}
                 disabled={streaming}
                 className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none outline-none px-2 py-1.5 disabled:opacity-50"

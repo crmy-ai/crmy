@@ -18,4 +18,5 @@ export const ENTITY_COLORS = {
   hitl:          { text: 'text-destructive',  bg: 'bg-destructive/15', bar: 'bg-destructive' },
   agents:        { text: 'text-[#6366f1]',   bg: 'bg-[#6366f1]/15',  bar: 'bg-[#6366f1]' },
   context:       { text: 'text-[#0ea5e9]',   bg: 'bg-[#0ea5e9]/15',  bar: 'bg-[#0ea5e9]' },
+  workflows:     { text: 'text-amber-500',   bg: 'bg-amber-500/15',  bar: 'bg-amber-500' },
 } as const;

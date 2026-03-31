@@ -140,7 +140,7 @@ export async function extractContextFromActivity(
   // Build and call the LLM
   let entries: ExtractedEntry[];
   try {
-    const apiKey = decrypt(config.api_key_enc);
+    const apiKey = decrypt(config.api_key_enc).trim();
     entries = await callExtractionLLM(activity, content, extractableTypes, config.provider, config.base_url, config.model, apiKey, config.max_tokens_per_turn);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'LLM call failed';

@@ -12,7 +12,9 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces",
-    "dev": "npm run dev --workspace=packages/server",
+    "dev": "npm run dev:server & npm run dev:web & wait",
+    "dev:server": "npm run dev --workspace=packages/server",
+    "dev:web": "npm run dev --workspace=packages/web",
     "test": "vitest run",
     "lint": "tsc --noEmit",
     "migrate": "tsx scripts/migrate.ts",

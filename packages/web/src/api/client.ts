@@ -45,7 +45,10 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
 
   if (res.status === 401) {
     clearToken();
-    window.location.href = '/app/login';
+    // Only hard-redirect if not already on the login page to avoid refresh loops
+    if (!window.location.pathname.endsWith('/login')) {
+      window.location.href = '/app/login';
+    }
     throw new Error('Unauthorized');
   }
 

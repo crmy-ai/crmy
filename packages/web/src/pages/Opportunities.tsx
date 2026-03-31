@@ -11,7 +11,7 @@ import { StageBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { DatePicker } from '@/components/ui/date-picker';
 import { motion } from 'framer-motion';
-import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
+import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown, Briefcase } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { stageConfig } from '@/lib/stageConfig';
@@ -144,7 +144,12 @@ export default function Opportunities() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Opportunities">
+      <TopBar
+        title="Opportunities"
+        icon={Briefcase}
+        iconClassName="text-accent"
+        description="Deals and revenue pipeline."
+      >
         <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           {[
             { mode: 'kanban', icon: Columns3 },

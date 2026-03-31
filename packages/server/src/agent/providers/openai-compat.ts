@@ -38,6 +38,12 @@ export async function callOpenAICompat(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
+  // OpenRouter requires HTTP-Referer to identify the calling app
+  if (baseUrl.includes('openrouter.ai')) {
+    headers['HTTP-Referer'] = 'https://github.com/crmy-dev/crmy';
+    headers['X-Title'] = 'CRMy';
+  }
+
   const res = await fetch(url, {
     method: 'POST',
     headers,

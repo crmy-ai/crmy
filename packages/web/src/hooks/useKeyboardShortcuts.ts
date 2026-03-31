@@ -18,7 +18,7 @@ export function useKeyboardShortcuts() {
       return;
     }
 
-    // Cmd+J — AI agent
+    // Cmd+J — Local Agent
     if ((e.metaKey || e.ctrlKey) && e.key === 'j') {
       e.preventDefault();
       navigate('/agent');

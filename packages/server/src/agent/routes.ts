@@ -7,7 +7,7 @@ import type { ActorContext } from '@crmy/shared';
 import { CrmyError, permissionDenied } from '@crmy/shared';
 import * as agentRepo from '../db/repos/agent.js';
 import * as activityRepo from '../db/repos/agent-activity.js';
-import { encrypt } from './crypto.js';
+import { encrypt, decrypt } from './crypto.js';
 import { runAgentTurn } from './engine.js';
 import type { AgentEvent, ConversationMessage } from './types.js';
 
@@ -30,10 +30,20 @@ function requireAdmin(actor: ActorContext): void {
   }
 }
 
-/** Mask an API key for safe client display. */
-function maskApiKey(key: string | null): string | null {
-  if (!key) return null;
-  return 'sk-••••••••';
+/**
+ * Build safe key metadata for the client response.
+ * Decrypts the stored key only to extract the last 4 chars as a hint.
+ * Never sends the full plaintext or the ciphertext to the client.
+ */
+function buildKeyMeta(apiKeyEnc: string | null): { api_key_configured: boolean; api_key_hint: string | null } {
+  if (!apiKeyEnc) return { api_key_configured: false, api_key_hint: null };
+  try {
+    const plain = decrypt(apiKeyEnc);
+    return { api_key_configured: true, api_key_hint: plain.slice(-4) };
+  } catch {
+    // Key exists but cannot be decrypted (wrong env key, corrupted data)
+    return { api_key_configured: true, api_key_hint: null };
+  }
 }
 
 export function agentRouter(db: DbPool): Router {
@@ -50,8 +60,9 @@ export function agentRouter(db: DbPool): Router {
         res.json({ data: null });
         return;
       }
-      // Never return the real API key
-      res.json({ data: { ...config, api_key_enc: maskApiKey(config.api_key_enc) } });
+      // Never return the ciphertext — send only a hint (last 4 chars)
+      const { api_key_enc: _enc, ...rest } = config;
+      res.json({ data: { ...rest, ...buildKeyMeta(_enc) } });
     } catch (err) { handleError(res, err); }
   });
 
@@ -79,36 +90,53 @@ export function agentRouter(db: DbPool): Router {
         if (typeof body[f] === 'number') update[f] = body[f];
       }
 
-      // Encrypt API key if provided (non-masked value)
-      if (typeof body.api_key === 'string' && body.api_key && !body.api_key.startsWith('sk-••')) {
-        update.api_key_enc = encrypt(body.api_key);
+      // Encrypt API key if a new one was provided (non-empty string)
+      if (typeof body.api_key === 'string' && body.api_key.trim()) {
+        update.api_key_enc = encrypt(body.api_key.trim());
       }
 
       const config = await agentRepo.upsertConfig(db, actor.tenant_id, update);
-      res.json({ data: { ...config, api_key_enc: maskApiKey(config.api_key_enc) } });
+      const { api_key_enc: _enc2, ...rest2 } = config;
+      res.json({ data: { ...rest2, ...buildKeyMeta(_enc2) } });
     } catch (err) { handleError(res, err); }
   });
 
-  /** POST /agent/config/test — test LLM connection. */
+  /** POST /agent/config/test — test LLM connection.
+   *
+   * Accepts optional body overrides so the UI can test *current form values*
+   * before the user has saved. Falls back to the stored config for any field
+   * not supplied. Works regardless of whether the agent is enabled.
+   */
   router.post('/config/test', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
       requireAdmin(actor);
 
       const config = await agentRepo.getConfig(db, actor.tenant_id);
-      if (!config || !config.enabled) {
-        res.json({ ok: false, error: 'Agent is not configured or not enabled' });
+
+      // Merge form values (not-yet-saved) over stored config
+      const body = req.body as { provider?: string; base_url?: string; api_key?: string; model?: string };
+
+      const provider = body.provider ?? config?.provider;
+      const rawUrl   = body.base_url  ?? config?.base_url ?? '';
+      const model    = body.model     ?? config?.model    ?? '';
+      const baseUrl  = rawUrl.replace(/\/+$/, '');
+
+      // If caller sent an api_key, use it directly (trimmed). Otherwise decrypt the stored one.
+      let apiKey = '';
+      if (typeof body.api_key === 'string' && body.api_key.trim()) {
+        apiKey = body.api_key.trim();
+      } else if (config?.api_key_enc) {
+        apiKey = decrypt(config.api_key_enc).trim();
+      }
+
+      if (!provider || !baseUrl || !model) {
+        res.json({ ok: false, error: 'Provider, base URL, and model are required' });
         return;
       }
 
       // Attempt a minimal LLM call
-      const { decrypt } = await import('./crypto.js');
-      const apiKey = config.api_key_enc ? decrypt(config.api_key_enc) : '';
-
-      const isAnthropic = config.provider === 'anthropic';
-      const baseUrl = config.base_url.replace(/\/+$/, '');
-
-      if (isAnthropic) {
+      if (provider === 'anthropic') {
         const testRes = await fetch(`${baseUrl}/messages`, {
           method: 'POST',
           headers: {
@@ -117,7 +145,7 @@ export function agentRouter(db: DbPool): Router {
             'anthropic-version': '2023-06-01',
           },
           body: JSON.stringify({
-            model: config.model,
+            model,
             max_tokens: 10,
             messages: [{ role: 'user', content: 'Hi' }],
           }),
@@ -130,12 +158,16 @@ export function agentRouter(db: DbPool): Router {
       } else {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+        if (baseUrl.includes('openrouter.ai')) {
+          headers['HTTP-Referer'] = 'https://github.com/crmy-dev/crmy';
+          headers['X-Title'] = 'CRMy';
+        }
 
         const testRes = await fetch(`${baseUrl}/chat/completions`, {
           method: 'POST',
           headers,
           body: JSON.stringify({
-            model: config.model,
+            model,
             max_tokens: 10,
             messages: [{ role: 'user', content: 'Hi' }],
           }),

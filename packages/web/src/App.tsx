@@ -44,7 +44,7 @@ import InboxPage from '@/pages/Inbox';
 import ContextPage from '@/pages/Context';
 import WorkflowsPage from '@/pages/Workflows';
 import EmailsPage from '@/pages/Emails';
-import AgentsPage from '@/pages/Agents';
+import ActorsPage from '@/pages/Agents';
 
 function ThemeApplier() {
   const { darkVariant } = useAppStore();
@@ -95,7 +95,8 @@ function AnimatedRoutes() {
           <Route path="/context" element={<ContextPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/emails" element={<EmailsPage />} />
-          <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/actors" element={<ActorsPage />} />
+          <Route path="/agents" element={<Navigate to="/actors" replace />} />
           <Route path="/agent" element={<Agent />} />
           <Route path="/agent/activity" element={<AgentActivity />} />
           <Route path="/settings/*" element={<Settings />} />

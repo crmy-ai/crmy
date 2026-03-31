@@ -683,13 +683,9 @@ export default function ActorsSettings() {
 
   return (
     <div className="-mx-6 -my-6 flex flex-col">
-      {/* Header */}
-      <div className="flex items-start justify-between px-6 pt-6 pb-3">
-        <div>
-          <h2 className="font-display font-bold text-lg text-foreground">Actors</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">Manage humans and AI agents with access to your CRMy workspace.</p>
-        </div>
-        <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5 mt-0.5">
+      {/* View toggle */}
+      <div className="flex items-center justify-end px-6 pt-4 pb-2">
+        <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           <button
             onClick={() => setView('table')}
             className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}

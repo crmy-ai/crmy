@@ -7,7 +7,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
   ShieldCheck,
-  Bot,
   Library,
   Inbox,
   Zap,
@@ -30,11 +29,11 @@ export { ENTITY_COLORS };
 
 // Agent-facing tier — top of nav
 const agentNavItems = [
-  { icon: Brain,       label: 'Memory Hub',  path: '/',            color: ENTITY_COLORS.dashboard },
+  { icon: Brain,       label: 'Memory Hub',  path: '/',            color: ENTITY_COLORS.contacts },
   { icon: ShieldCheck, label: 'Approvals',   path: '/hitl',        color: ENTITY_COLORS.hitl },
-  { icon: Bot,         label: 'Agents',      path: '/agents',      color: ENTITY_COLORS.agents },
+  { icon: Users,       label: 'Actors',      path: '/actors',      color: ENTITY_COLORS.agents },
   { icon: Library,     label: 'Context',     path: '/context',     color: ENTITY_COLORS.context },
-  { icon: Zap,         label: 'Workflows',   path: '/workflows',   color: ENTITY_COLORS.context },
+  { icon: Zap,         label: 'Workflows',   path: '/workflows',   color: ENTITY_COLORS.workflows },
   { icon: Inbox,       label: 'Handoffs',    path: '/assignments', color: ENTITY_COLORS.assignments },
 ];
 

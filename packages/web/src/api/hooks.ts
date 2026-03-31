@@ -820,8 +820,8 @@ export function useSaveAgentConfig() {
 }
 
 export function useTestAgentConnection() {
-  return useMutation<{ ok: boolean; error?: string }>({
-    mutationFn: () => api.post('agent/config/test'),
+  return useMutation<{ ok: boolean; error?: string }, Error, Record<string, string>>({
+    mutationFn: (payload) => api.post('agent/config/test', payload),
   });
 }
 

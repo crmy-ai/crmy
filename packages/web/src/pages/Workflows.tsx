@@ -88,22 +88,16 @@ export default function WorkflowsPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Workflows" />
+      <TopBar
+        title="Workflows"
+        icon={Zap}
+        iconClassName="text-amber-500"
+        description="Event-driven automations. Workflows trigger on CRM events and execute a chain of actions."
+        badge={workflows.length > 0 ? (
+          <span className="text-xs text-muted-foreground">{workflows.length} total</span>
+        ) : undefined}
+      />
       <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
-
-        {/* Header */}
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Zap className="w-5 h-5 text-amber-500" />
-            <h1 className="text-xl font-display font-bold text-foreground">Workflows</h1>
-            {workflows.length > 0 && (
-              <span className="text-xs text-muted-foreground ml-1">{workflows.length} total</span>
-            )}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Event-driven automations. Workflows trigger on CRM events and execute a chain of actions.
-          </p>
-        </motion.div>
 
         {/* Toolbar */}
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }} className="flex flex-wrap gap-2 mb-4">

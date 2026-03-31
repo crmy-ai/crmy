@@ -93,22 +93,16 @@ export default function EmailsPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Emails" />
+      <TopBar
+        title="Emails"
+        icon={Mail}
+        iconClassName="text-blue-500"
+        description="Drafted, pending, and sent emails across the CRM."
+        badge={emails.length > 0 ? (
+          <span className="text-xs text-muted-foreground">{emails.length} total</span>
+        ) : undefined}
+      />
       <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
-
-        {/* Header */}
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
-          <div className="flex items-center gap-2 mb-1">
-            <Mail className="w-5 h-5 text-blue-500" />
-            <h1 className="text-xl font-display font-bold text-foreground">Emails</h1>
-            {emails.length > 0 && (
-              <span className="text-xs text-muted-foreground ml-1">{emails.length} total</span>
-            )}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Drafted, pending, and sent emails across the CRM.
-          </p>
-        </motion.div>
 
         {/* Toolbar */}
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }} className="flex flex-wrap gap-2 mb-4">
@@ -122,12 +116,12 @@ export default function EmailsPage() {
             />
           </div>
 
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter || '__all__'} onValueChange={(v) => setStatusFilter(v === '__all__' ? '' : v)}>
             <SelectTrigger className="h-8 w-[130px] text-sm">
               <SelectValue placeholder="All statuses" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All statuses</SelectItem>
+              <SelectItem value="__all__">All statuses</SelectItem>
               <SelectItem value="draft">Draft</SelectItem>
               <SelectItem value="pending_approval">Pending</SelectItem>
               <SelectItem value="sent">Sent</SelectItem>

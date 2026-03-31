@@ -10,7 +10,7 @@ import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { DatePicker } from '@/components/ui/date-picker';
 import { motion } from 'framer-motion';
-import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
+import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown, FolderKanban } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useCaseStageConfig } from '@/lib/stageConfig';
 
@@ -142,7 +142,12 @@ export default function UseCases() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Use Cases">
+      <TopBar
+        title="Use Cases"
+        icon={FolderKanban}
+        iconClassName="text-success"
+        description="Customer use cases and deployment tracking."
+      >
         <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           {[
             { mode: 'kanban', icon: Columns3 },

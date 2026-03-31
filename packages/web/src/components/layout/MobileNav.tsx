@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Link, useLocation } from 'react-router-dom';
-import { Brain, ShieldCheck, Bot, Library, Inbox } from 'lucide-react';
+import { Brain, ShieldCheck, Users, Library, Inbox } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const tabs = [
   { icon: Brain,       label: 'Hub',       path: '/' },
   { icon: ShieldCheck, label: 'Approvals', path: '/hitl' },
-  { icon: Bot,         label: 'Agents',    path: '/agents' },
+  { icon: Users,       label: 'Actors',    path: '/actors' },
   { icon: Library,     label: 'Context',   path: '/context' },
   { icon: Inbox,       label: 'Handoffs',  path: '/assignments' },
 ];

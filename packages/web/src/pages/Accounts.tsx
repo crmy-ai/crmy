@@ -10,7 +10,7 @@ import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { motion } from 'framer-motion';
-import { LayoutGrid, List, ChevronUp, ChevronDown, Sparkles, Globe, DollarSign, Heart } from 'lucide-react';
+import { LayoutGrid, List, ChevronUp, ChevronDown, Sparkles, Globe, DollarSign, Heart, Building2 } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -96,7 +96,12 @@ export default function Accounts() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Accounts">
+      <TopBar
+        title="Accounts"
+        icon={Building2}
+        iconClassName="text-[#8b5cf6]"
+        description="Companies and organizations."
+      >
         <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           <button onClick={() => setView('table')} className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
             <List className="w-4 h-4" />

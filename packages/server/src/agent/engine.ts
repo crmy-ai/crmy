@@ -155,7 +155,7 @@ export async function runAgentTurn(
   onEvent: (event: AgentEvent) => void,
   opts?: { sessionId?: string },
 ): Promise<ConversationMessage[]> {
-  const apiKey = config.api_key_enc ? decrypt(config.api_key_enc) : '';
+  const apiKey = config.api_key_enc ? decrypt(config.api_key_enc).trim() : '';
   const agentScopes = buildAgentScopes(config);
   const { defs: toolDefs, handlers } = getAvailableTools(db, agentScopes);
 
