@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { Phone, Mail, StickyNote, CheckSquare, MessageSquare, ChevronDown, ChevronUp, Presentation, FileText, Search, ArrowRightLeft, RefreshCw, Activity, Heart, Bot, User } from 'lucide-react';
+import { Phone, Mail, StickyNote, CheckSquare, MessageSquare, ChevronDown, ChevronUp, Presentation, FileText, Search, ArrowRightLeft, RefreshCw, Activity, Heart, Bot, User, WifiOff, Wifi } from 'lucide-react';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { ContactAvatar } from './ContactAvatar';
 import { useOpportunities, useUseCases, useAccounts, useActivities, useCustomFields } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
@@ -33,7 +34,24 @@ export function LeadScoreBadge({ score }: { score: number }) {
 }
 
 export function AgentStatusDot() {
-  return <div className="w-2.5 h-2.5 rounded-full bg-success animate-pulse-dot" />;
+  const { connectivity } = useAgentSettings();
+
+  if (connectivity === 'offline') {
+    return (
+      <span title="Agent offline — check provider settings">
+        <WifiOff className="w-3.5 h-3.5 text-destructive" />
+      </span>
+    );
+  }
+  if (connectivity === 'unknown') {
+    return (
+      <span title="Agent status unknown">
+        <Wifi className="w-3.5 h-3.5 text-muted-foreground/50" />
+      </span>
+    );
+  }
+  // online
+  return <div className="w-2.5 h-2.5 rounded-full bg-success animate-pulse-dot" title="Agent online" />;
 }
 
 export function activityIcon(type: string) {

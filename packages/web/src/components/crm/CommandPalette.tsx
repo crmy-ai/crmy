@@ -80,7 +80,7 @@ export function CommandPalette() {
               { label: 'Opportunities', icon: Briefcase,       path: '/opportunities',   color: ENTITY_COLORS.opportunities },
               { label: 'Use Cases',     icon: FolderKanban,    path: '/use-cases',       color: ENTITY_COLORS.useCases },
               { label: 'Activities',    icon: Activity,        path: '/activities',      color: ENTITY_COLORS.activities },
-              { label: 'Assignments',   icon: ClipboardList,   path: '/assignments',     color: ENTITY_COLORS.assignments },
+              { label: 'Handoffs',      icon: ClipboardList,   path: '/handoffs',        color: ENTITY_COLORS.assignments },
               { label: 'Settings',      icon: Settings,        path: '/settings',        color: null },
             ].map((page) => (
               <Command.Item
@@ -189,7 +189,7 @@ export function CommandPalette() {
               <Command.Item
                 key={a.id as string}
                 value={`${a.title ?? ''}`}
-                onSelect={() => runAction(() => navigate('/assignments'))}
+                onSelect={() => runAction(() => navigate('/handoffs'))}
                 className={itemClass}
               >
                 <ClipboardList className={cn('w-4 h-4', ENTITY_COLORS.assignments.text)} />

@@ -25,7 +25,7 @@ export function TopBar({ title, icon: Icon, iconClassName, description, badge, c
   };
 
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between min-h-14 px-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-md gap-2 py-2">
+    <header className="sticky top-0 z-30 flex items-center justify-between h-16 px-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-md gap-2">
       <div className="hidden md:flex flex-col justify-center min-w-0 shrink">
         <div className="flex items-center gap-2">
           {Icon && <Icon className={`w-4.5 h-4.5 flex-shrink-0 ${iconClassName ?? 'text-foreground'}`} />}

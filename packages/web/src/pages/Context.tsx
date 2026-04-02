@@ -4,9 +4,20 @@
 import { useState, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
-import { useContextEntries, useStaleContextEntries, useReviewContextEntry, useContextTypes, useSemanticSearch, useContextIngest } from '@/api/hooks';
-import { motion, AnimatePresence } from 'framer-motion';
-import { format, formatDistanceToNow, isPast } from 'date-fns';
+import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import {
+  useContextEntriesInfinite,
+  useReviewContextEntry,
+  useContextTypes,
+  useSemanticSearch,
+  useContextIngest,
+  useContacts,
+  useAccounts,
+  useOpportunities,
+  useUseCases,
+} from '@/api/hooks';
+import { motion } from 'framer-motion';
+import { formatDistanceToNow, isPast } from 'date-fns';
 import {
   Library,
   Search,
@@ -14,16 +25,15 @@ import {
   CheckCircle2,
   Clock,
   Tag,
-  Filter,
-  X,
   Sparkles,
-  Upload,
   FileText,
   Loader2,
+  X,
+  Plus,
 } from 'lucide-react';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -42,13 +52,17 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
 
+// ── Helper components ────────────────────────────────────────────────────────
+
 const SUBJECT_TYPES = ['contact', 'account', 'opportunity', 'use_case'] as const;
 
 function ConfidencePill({ value }: { value: number | null | undefined }) {
   if (value == null) return null;
   const pct = Math.round(value * 100);
-  const cls = pct >= 80 ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
-    : pct >= 50 ? 'bg-warning/15 text-warning'
+  const cls = pct >= 80
+    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+    : pct >= 50
+    ? 'bg-warning/15 text-warning'
     : 'bg-destructive/15 text-destructive';
   return (
     <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${cls}`}>
@@ -84,20 +98,126 @@ function subjectTypeLabel(t: string) {
   return t === 'use_case' ? 'Use Case' : t.charAt(0).toUpperCase() + t.slice(1);
 }
 
+// ── Entity picker (replaces raw UUID input in the ingest dialog) ─────────────
+
+function EntityPicker({
+  subjectType,
+  selectedId,
+  selectedLabel,
+  onSelect,
+}: {
+  subjectType: string;
+  selectedId: string;
+  selectedLabel: string;
+  onSelect: (id: string, name: string) => void;
+}) {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+
+  const { data: contactsData }  = useContacts({ q: q || undefined, limit: 8 });
+  const { data: accountsData }  = useAccounts({ q: q || undefined, limit: 8 });
+  const { data: oppsData }      = useOpportunities({ q: q || undefined, limit: 8 });
+  const { data: ucData }        = useUseCases({ q: q || undefined, limit: 8 });
+
+  const results = useMemo(() => {
+    if (subjectType === 'contact') {
+      return (contactsData?.data ?? []).map((c: any) => ({
+        id: c.id,
+        name: [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || '(unknown)',
+        sub: c.email,
+      }));
+    }
+    if (subjectType === 'account') {
+      return (accountsData?.data ?? []).map((a: any) => ({ id: a.id, name: a.name, sub: a.website }));
+    }
+    if (subjectType === 'opportunity') {
+      return (oppsData?.data ?? []).map((o: any) => ({ id: o.id, name: o.name, sub: o.stage }));
+    }
+    if (subjectType === 'use_case') {
+      return (ucData?.data ?? []).map((u: any) => ({ id: u.id, name: u.name || u.title, sub: u.stage }));
+    }
+    return [];
+  }, [subjectType, contactsData, accountsData, oppsData, ucData]);
+
+  const inputCls = 'w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
+
+  if (selectedId) {
+    return (
+      <div className="flex items-center gap-2 h-9 px-3 rounded-lg border border-border bg-background text-sm flex-1">
+        <span className="flex-1 text-foreground truncate">{selectedLabel}</span>
+        <button
+          type="button"
+          onClick={() => { onSelect('', ''); setQ(''); }}
+          className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
+          aria-label="Clear selection"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative flex-1">
+      <input
+        value={q}
+        onChange={e => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={`Search ${subjectTypeLabel(subjectType)}…`}
+        className={inputCls}
+      />
+      {open && results.length > 0 && (
+        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto">
+          {results.map((r: any) => (
+            <button
+              key={r.id}
+              type="button"
+              onMouseDown={() => { onSelect(r.id, r.name); setOpen(false); }}
+              className="w-full text-left px-3 py-2 hover:bg-muted transition-colors"
+            >
+              <p className="text-sm font-medium text-foreground truncate">{r.name}</p>
+              {r.sub && <p className="text-xs text-muted-foreground truncate">{r.sub}</p>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const SORT_OPTIONS: SortOption[] = [
+  { key: 'created_at',       label: 'Date Created' },
+  { key: 'confidence_score', label: 'Confidence' },
+  { key: 'valid_until',      label: 'Valid Until' },
+];
+
+// ── Page ─────────────────────────────────────────────────────────────────────
+
 export default function ContextPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [q, setQ] = useState('');
-  const [subjectType, setSubjectType] = useState<string>(searchParams.get('subject_type') ?? '');
-  const [contextType, setContextType] = useState('');
-  const [staleOnly, setStaleOnly] = useState(searchParams.get('stale') === 'true');
-  const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword');
-  const [ingestOpen, setIngestOpen] = useState(false);
-  const [ingestText, setIngestText] = useState('');
-  const [ingestSubjectType, setIngestSubjectType] = useState('');
-  const [ingestSubjectId, setIngestSubjectId] = useState('');
-  const [ingestSource, setIngestSource] = useState('');
 
-  const reviewEntry = useReviewContextEntry();
+  // Initialise filters from URL params
+  const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>(() => {
+    const init: Record<string, string[]> = {};
+    const st = searchParams.get('subject_type');
+    if (st) init.subject_type = [st];
+    if (searchParams.get('stale') === 'true') init.validity = ['stale'];
+    return init;
+  });
+  const [q,          setQ]          = useState('');
+  const [sort,       setSort]       = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword');
+
+  // Ingest dialog state
+  type IngestSubject = { type: string; id: string; label: string };
+  const [ingestOpen,     setIngestOpen]     = useState(false);
+  const [ingestText,     setIngestText]     = useState('');
+  const [ingestSubjects, setIngestSubjects] = useState<IngestSubject[]>([{ type: '', id: '', label: '' }]);
+  const [ingestSource,   setIngestSource]   = useState('');
+  const [ingesting,      setIngesting]      = useState(false);
+
+  const reviewEntry    = useReviewContextEntry();
   const ingestMutation = useContextIngest();
 
   // Dynamic context types from registry
@@ -106,80 +226,177 @@ export default function ContextPage() {
     const types = (contextTypesData as any)?.data ?? [];
     return types.map((t: any) => t.type_name);
   }, [contextTypesData]);
-  const FALLBACK_CONTEXT_TYPES = ['transcript', 'objection', 'summary', 'research', 'note', 'action_plan', 'competitor_intel', 'stakeholder_map'];
+  const FALLBACK_CONTEXT_TYPES = [
+    'transcript', 'objection', 'summary', 'research',
+    'note', 'action_plan', 'competitor_intel', 'stakeholder_map',
+  ];
   const contextTypeOptions = dynamicContextTypes.length > 0 ? dynamicContextTypes : FALLBACK_CONTEXT_TYPES;
 
+  // Derive scalar filter values from activeFilters map
+  const subjectType = activeFilters.subject_type?.[0] ?? '';
+  const contextType = activeFilters.context_type?.[0] ?? '';
+  const staleOnly   = activeFilters.validity?.includes('stale') ?? false;
+
+  // Filter configs — context_type options are dynamic
+  const filterConfigs: FilterConfig[] = useMemo(() => [
+    {
+      key: 'subject_type',
+      label: 'Subject',
+      options: [
+        { value: 'contact',     label: 'Contact' },
+        { value: 'account',     label: 'Account' },
+        { value: 'opportunity', label: 'Opportunity' },
+        { value: 'use_case',    label: 'Use Case' },
+      ],
+    },
+    {
+      key: 'context_type',
+      label: 'Context type',
+      options: contextTypeOptions.map(t => ({ value: t, label: t.replace(/_/g, ' ') })),
+    },
+    {
+      key: 'validity',
+      label: 'Validity',
+      options: [{ value: 'stale', label: 'Stale / Expired' }],
+    },
+  ], [contextTypeOptions]);
+
+  const handleFilterChange = (key: string, values: string[]) => {
+    setActiveFilters(prev => {
+      const next = { ...prev };
+      if (values.length === 0) delete next[key];
+      else next[key] = values;
+      return next;
+    });
+    setSearchParams({});
+  };
+
+  const handleSortChange = (key: string) => {
+    setSort(prev =>
+      prev?.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: 'asc' },
+    );
+  };
+
+  const clearFilters = () => {
+    setActiveFilters({});
+    setQ('');
+    setSearchParams({});
+  };
+
+  // API params for keyword mode
   const params = useMemo(() => ({
     subject_type: subjectType || undefined,
     context_type: contextType || undefined,
-    is_current: staleOnly ? false : undefined,
-    limit: 50,
+    is_current:   staleOnly ? false : undefined,
+    limit:        20,
   }), [subjectType, contextType, staleOnly]);
 
-  const { data, isLoading, refetch } = useContextEntries(params) as any;
-  const entries: any[] = data?.data ?? [];
-  const total: number = data?.total ?? 0;
-
-  // Semantic search query
-  const semanticParams = useMemo(() => ({
-    subject_type: subjectType || undefined,
-    context_type: contextType || undefined,
-    current_only: staleOnly ? false : undefined,
-    limit: 50,
-  }), [subjectType, contextType, staleOnly]);
-  const { data: semanticData, isLoading: semanticLoading, isError: semanticError } = useSemanticSearch(
-    searchMode === 'semantic' ? q : '',
-    semanticParams,
+  const {
+    data: infiniteData,
+    isLoading,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+  } = useContextEntriesInfinite(params);
+  const entries: any[] = useMemo(
+    () => infiniteData?.pages.flatMap((p: any) => p.data ?? []) ?? [],
+    [infiniteData],
   );
-  const semanticEntries: any[] = (semanticData as any)?.entries ?? (semanticData as any)?.data ?? [];
-  const semanticUnavailable = semanticError;
+  const total: number = infiniteData?.pages[0]?.total ?? 0;
 
-  // Local text filter for keyword mode
+  // Semantic search
+  const semanticParams = useMemo(() => ({
+    subject_type:  subjectType || undefined,
+    context_type:  contextType || undefined,
+    current_only:  staleOnly ? false : undefined,
+    limit:         50,
+  }), [subjectType, contextType, staleOnly]);
+
+  const {
+    data: semanticData,
+    isLoading: semanticLoading,
+    isError: semanticError,
+  } = useSemanticSearch(searchMode === 'semantic' ? q : '', semanticParams);
+  const semanticEntries: any[] = (semanticData as any)?.entries ?? (semanticData as any)?.data ?? [];
+
+  // Local filter + sort
   const filtered = useMemo(() => {
-    if (searchMode === 'semantic') return semanticEntries;
-    if (!q.trim()) return entries;
-    const lower = q.toLowerCase();
-    return entries.filter((e: any) =>
-      (e.title ?? '').toLowerCase().includes(lower) ||
-      (e.body ?? '').toLowerCase().includes(lower) ||
-      (e.tags ?? []).some((t: string) => t.toLowerCase().includes(lower))
-    );
-  }, [entries, semanticEntries, q, searchMode]);
+    let items = searchMode === 'semantic' ? semanticEntries : entries;
+
+    if (searchMode === 'keyword' && q.trim()) {
+      const lower = q.toLowerCase();
+      items = items.filter((e: any) =>
+        (e.title ?? '').toLowerCase().includes(lower) ||
+        (e.body ?? '').toLowerCase().includes(lower) ||
+        (e.tags ?? []).some((t: string) => t.toLowerCase().includes(lower)),
+      );
+    }
+
+    if (sort) {
+      items = [...items].sort((a: any, b: any) => {
+        const av = String(a[sort.key] ?? '');
+        const bv = String(b[sort.key] ?? '');
+        return sort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
+    }
+
+    return items;
+  }, [entries, semanticEntries, q, searchMode, sort]);
 
   const isSearching = searchMode === 'keyword' ? isLoading : semanticLoading;
-
-  function clearFilters() {
-    setSubjectType('');
-    setContextType('');
-    setStaleOnly(false);
-    setQ('');
-    setSearchParams({});
-  }
-
-  const hasFilters = subjectType || contextType || staleOnly || q;
+  const hasFilters  = Object.keys(activeFilters).length > 0 || q;
 
   const handleIngest = useCallback(async () => {
-    if (!ingestText.trim() || !ingestSubjectType || !ingestSubjectId) {
-      toast({ title: 'Missing fields', description: 'Text, subject type, and subject ID are required.', variant: 'destructive' });
+    const validSubjects = ingestSubjects.filter(s => s.type && s.id);
+    if (!ingestText.trim() || validSubjects.length === 0) {
+      toast({
+        title: 'Missing fields',
+        description: 'Paste a document and select at least one subject.',
+        variant: 'destructive',
+      });
       return;
     }
+    setIngesting(true);
     try {
-      await ingestMutation.mutateAsync({
-        text: ingestText,
-        subject_type: ingestSubjectType,
-        subject_id: ingestSubjectId,
-        source: ingestSource || undefined,
-      });
-      toast({ title: 'Ingestion complete', description: 'Context entries extracted and saved.' });
+      const results = await Promise.all(validSubjects.map(s =>
+        ingestMutation.mutateAsync({
+          text:         ingestText,
+          subject_type: s.type,
+          subject_id:   s.id,
+          source:       ingestSource || undefined,
+        }),
+      ));
+      const totalExtracted: number = results.reduce((sum: number, r: any) => sum + (r?.extracted_count ?? 0), 0);
+      if (totalExtracted > 0) {
+        toast({
+          title: 'Ingestion complete',
+          description: `${totalExtracted} context ${totalExtracted === 1 ? 'entry' : 'entries'} extracted across ${validSubjects.length === 1 ? '1 subject' : `${validSubjects.length} subjects`}.`,
+        });
+      } else {
+        toast({
+          title: 'Document saved',
+          description: 'No entries were extracted — the Workspace Agent may not be configured, or no extractable context types are defined.',
+          variant: 'destructive',
+        });
+      }
       setIngestOpen(false);
       setIngestText('');
-      setIngestSubjectType('');
-      setIngestSubjectId('');
+      setIngestSubjects([{ type: '', id: '', label: '' }]);
       setIngestSource('');
     } catch (err) {
-      toast({ title: 'Ingestion failed', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' });
+      toast({
+        title: 'Ingestion failed',
+        description: err instanceof Error ? err.message : 'Try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIngesting(false);
     }
-  }, [ingestText, ingestSubjectType, ingestSubjectId, ingestSource, ingestMutation]);
+  }, [ingestText, ingestSubjects, ingestSource, ingestMutation]);
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col h-full">
@@ -191,96 +408,69 @@ export default function ContextPage() {
         badge={total > 0 && searchMode === 'keyword' ? (
           <span className="text-xs text-muted-foreground">{total.toLocaleString()} total</span>
         ) : undefined}
+      >
+        {/* Search-mode toggle — same placement as the list/card toggle in Contacts */}
+        <div className="hidden md:flex items-center gap-0.5 bg-muted rounded-xl p-0.5">
+          <button
+            onClick={() => setSearchMode('keyword')}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              searchMode === 'keyword'
+                ? 'bg-card text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Search className="w-3 h-3" />
+            Keyword
+          </button>
+          <button
+            onClick={() => setSearchMode('semantic')}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              searchMode === 'semantic'
+                ? 'bg-violet-600 text-white shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Sparkles className="w-3 h-3" />
+            Semantic
+          </button>
+        </div>
+      </TopBar>
+
+      <ListToolbar
+        searchValue={q}
+        onSearchChange={setQ}
+        searchPlaceholder={
+          searchMode === 'semantic'
+            ? 'Ask a question about your context…'
+            : 'Search title, body, tags…'
+        }
+        filters={filterConfigs}
+        activeFilters={activeFilters}
+        onFilterChange={handleFilterChange}
+        onClearFilters={clearFilters}
+        sortOptions={SORT_OPTIONS}
+        currentSort={sort}
+        onSortChange={handleSortChange}
+        onAdd={() => setIngestOpen(true)}
+        addLabel="Import"
+        entityType="context"
       />
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
 
-        {/* Filters */}
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }} className="flex flex-wrap gap-2 mb-4">
-          {/* Search mode toggle */}
-          <div className="flex rounded-lg border border-border overflow-hidden h-8">
-            <button
-              className={`px-3 text-xs font-medium transition-colors flex items-center gap-1.5 ${searchMode === 'keyword' ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground hover:text-foreground'}`}
-              onClick={() => setSearchMode('keyword')}
-            >
-              <Search className="w-3 h-3" />
-              Keyword
-            </button>
-            <button
-              className={`px-3 text-xs font-medium transition-colors flex items-center gap-1.5 border-l border-border ${searchMode === 'semantic' ? 'bg-violet-600 text-white' : 'bg-background text-muted-foreground hover:text-foreground'}`}
-              onClick={() => setSearchMode('semantic')}
-            >
-              <Sparkles className="w-3 h-3" />
-              Semantic
-            </button>
-          </div>
+      <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">
 
-          <div className="relative flex-1 min-w-[200px] max-w-xs">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-            <Input
-              placeholder={searchMode === 'semantic' ? 'Ask a question about your context…' : 'Search title, body, tags…'}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              className="pl-8 h-8 text-sm"
-            />
-          </div>
-
-          <Select value={subjectType || '__all__'} onValueChange={(v) => setSubjectType(v === '__all__' ? '' : v)}>
-            <SelectTrigger className="h-8 w-[140px] text-sm">
-              <SelectValue placeholder="Subject type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All subjects</SelectItem>
-              {SUBJECT_TYPES.map((t) => (
-                <SelectItem key={t} value={t}>{subjectTypeLabel(t)}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={contextType || '__all__'} onValueChange={(v) => setContextType(v === '__all__' ? '' : v)}>
-            <SelectTrigger className="h-8 w-[150px] text-sm">
-              <SelectValue placeholder="Context type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All types</SelectItem>
-              {contextTypeOptions.map((t) => (
-                <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Button
-            variant={staleOnly ? 'destructive' : 'outline'}
-            size="sm"
-            className="h-8 text-xs gap-1.5"
-            onClick={() => setStaleOnly(!staleOnly)}
+        {/* Semantic unavailable banner */}
+        {searchMode === 'semantic' && semanticError && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="mb-4 px-3 py-2 bg-warning/10 border border-warning/30 rounded-lg text-xs text-warning flex items-center gap-2"
           >
-            <AlertTriangle className="w-3 h-3" />
-            Stale only
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 text-xs gap-1.5"
-            onClick={() => setIngestOpen(true)}
-          >
-            <Upload className="w-3 h-3" />
-            Import
-          </Button>
-
-          {hasFilters && (
-            <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={clearFilters}>
-              <X className="w-3 h-3" />
-              Clear
-            </Button>
-          )}
-        </motion.div>
-
-        {/* Semantic search unavailable banner */}
-        {searchMode === 'semantic' && semanticUnavailable && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mb-4 px-3 py-2 bg-warning/10 border border-warning/30 rounded-lg text-xs text-warning flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-            <span>Semantic search requires pgvector. Set <code className="px-1 py-0.5 bg-warning/20 rounded">ENABLE_PGVECTOR=true</code> and configure an embedding provider. Falling back to keyword search.</span>
+            <span>
+              Semantic search requires pgvector. Set{' '}
+              <code className="px-1 py-0.5 bg-warning/20 rounded">ENABLE_PGVECTOR=true</code>{' '}
+              and configure an embedding provider. Falling back to keyword search.
+            </span>
           </motion.div>
         )}
 
@@ -291,7 +481,11 @@ export default function ContextPage() {
             {searchMode === 'semantic' ? 'Searching semantically…' : 'Loading…'}
           </div>
         ) : filtered.length === 0 ? (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20 text-center">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex flex-col items-center justify-center py-20 text-center"
+          >
             <Library className="w-14 h-14 text-muted-foreground/30 mb-4" />
             <p className="text-base font-display font-semibold text-foreground mb-1">
               {hasFilters ? 'No entries match your filters' : 'No context entries yet'}
@@ -310,7 +504,7 @@ export default function ContextPage() {
             )}
           </motion.div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 pt-2">
             {filtered.map((entry: any, i: number) => {
               const expired = entry.valid_until ? isPast(new Date(entry.valid_until)) : false;
               return (
@@ -326,7 +520,9 @@ export default function ContextPage() {
                       {/* Title row */}
                       <div className="flex items-center gap-2 flex-wrap mb-1">
                         {entry.title && (
-                          <span className="text-sm font-semibold text-foreground truncate max-w-xs">{entry.title}</span>
+                          <span className="text-sm font-semibold text-foreground truncate max-w-xs">
+                            {entry.title}
+                          </span>
                         )}
                         {entry.context_type && (
                           <Badge variant="outline" className="text-[10px] capitalize">
@@ -390,11 +586,26 @@ export default function ContextPage() {
                 </motion.div>
               );
             })}
+            {/* Load more */}
+            {searchMode === 'keyword' && hasNextPage && (
+              <div className="flex justify-center pt-4 pb-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fetchNextPage()}
+                  disabled={isFetchingNextPage}
+                  className="gap-2"
+                >
+                  {isFetchingNextPage && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {isFetchingNextPage ? 'Loading…' : `Load more (${total - entries.length} remaining)`}
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Ingest Dialog */}
+      {/* ── Import Dialog ──────────────────────────────────────────────────── */}
       <Dialog open={ingestOpen} onOpenChange={setIngestOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -403,7 +614,8 @@ export default function ContextPage() {
               Import context
             </DialogTitle>
             <DialogDescription>
-              Paste a document (meeting transcript, research notes, etc.) and CRMy will auto-extract structured context entries.
+              Paste a document (meeting transcript, research notes, etc.) and CRMy will
+              auto-extract structured context entries.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -413,24 +625,67 @@ export default function ContextPage() {
               onChange={(e) => setIngestText(e.target.value)}
               className="min-h-[160px] text-sm"
             />
-            <div className="flex gap-2">
-              <Select value={ingestSubjectType} onValueChange={setIngestSubjectType}>
-                <SelectTrigger className="h-9 flex-1 text-sm">
-                  <SelectValue placeholder="Subject type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {SUBJECT_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>{subjectTypeLabel(t)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                placeholder="Subject ID (UUID)"
-                value={ingestSubjectId}
-                onChange={(e) => setIngestSubjectId(e.target.value)}
-                className="h-9 flex-1 text-sm"
-              />
+
+            {/* Subject rows */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                Subjects <span className="font-normal">(context will be extracted once per subject)</span>
+              </p>
+              {ingestSubjects.map((subject, idx) => (
+                <div key={idx} className="flex gap-2 items-center">
+                  <Select
+                    value={subject.type}
+                    onValueChange={(v) => setIngestSubjects(prev => prev.map((s, i) =>
+                      i === idx ? { type: v, id: '', label: '' } : s
+                    ))}
+                  >
+                    <SelectTrigger className="h-9 w-36 flex-shrink-0 text-sm">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SUBJECT_TYPES.map((t) => (
+                        <SelectItem key={t} value={t}>{subjectTypeLabel(t)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {subject.type ? (
+                    <EntityPicker
+                      subjectType={subject.type}
+                      selectedId={subject.id}
+                      selectedLabel={subject.label}
+                      onSelect={(id, name) => setIngestSubjects(prev => prev.map((s, i) =>
+                        i === idx ? { ...s, id, label: name } : s
+                      ))}
+                    />
+                  ) : (
+                    <div className="flex-1 h-9 px-3 rounded-lg border border-border bg-muted/40 text-sm text-muted-foreground flex items-center">
+                      Select a type first
+                    </div>
+                  )}
+                  {ingestSubjects.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setIngestSubjects(prev => prev.filter((_, i) => i !== idx))}
+                      className="flex-shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+                      aria-label="Remove subject"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              ))}
+              {ingestSubjects.length < 5 && (
+                <button
+                  type="button"
+                  onClick={() => setIngestSubjects(prev => [...prev, { type: '', id: '', label: '' }])}
+                  className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add subject
+                </button>
+              )}
             </div>
+
             <Input
               placeholder="Source label (optional, e.g. 'Q1 review call')"
               value={ingestSource}
@@ -440,9 +695,13 @@ export default function ContextPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIngestOpen(false)}>Cancel</Button>
-            <Button onClick={handleIngest} disabled={ingestMutation.isPending} className="gap-1.5">
-              {ingestMutation.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Extract & Import
+            <Button
+              onClick={handleIngest}
+              disabled={ingesting}
+              className="gap-1.5"
+            >
+              {ingesting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Extract &amp; Import
             </Button>
           </DialogFooter>
         </DialogContent>

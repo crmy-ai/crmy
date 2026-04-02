@@ -27,7 +27,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
   { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'] },
   { icon: Tags,       label: 'Registries',    path: '/settings/registries',   roles: ['admin', 'owner'] },
-  { icon: Bot,        label: 'Local Agent',           path: '/settings/agent',        roles: ['admin', 'owner'] },
+  { icon: Bot,        label: 'Local Workspace Agent', path: '/settings/agent',        roles: ['admin', 'owner'] },
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
 ];
 

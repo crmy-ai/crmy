@@ -53,6 +53,8 @@ export interface AgentSession {
 /** SSE events emitted during a chat turn. */
 export type AgentEvent =
   | { type: 'delta'; content: string }
+  /** Human-readable status line emitted immediately before tool execution. */
+  | { type: 'tool_status'; id: string; name: string; status: string }
   | { type: 'tool_call'; id: string; name: string; arguments: Record<string, unknown> }
   | { type: 'tool_result'; id: string; name: string; result: unknown; is_error: boolean }
   | { type: 'done'; session_id: string; label: string | null }

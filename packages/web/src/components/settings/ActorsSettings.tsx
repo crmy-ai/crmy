@@ -454,10 +454,19 @@ const initAgentForm = (): AgentFormState => ({
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function ActorsSettings() {
+interface ActorsSettingsProps {
+  /** When provided the parent controls the view toggle (e.g. via TopBar). */
+  view?: 'table' | 'cards';
+  onViewChange?: (v: 'table' | 'cards') => void;
+}
+
+export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsSettingsProps = {}) {
   const currentUser = getUser();
   const isMobile = useIsMobile();
-  const [view, setView] = useState<'table' | 'cards'>('table');
+  const [viewInternal, setViewInternal] = useState<'table' | 'cards'>('table');
+  // Use controlled value when parent provides it, otherwise own state
+  const view = viewProp ?? viewInternal;
+  const setView = (v: 'table' | 'cards') => { setViewInternal(v); onViewChange?.(v); };
   const effectiveView = isMobile ? 'cards' : view;
 
   // Data
@@ -683,26 +692,28 @@ export default function ActorsSettings() {
 
   return (
     <div className="-mx-6 -my-6 flex flex-col">
-      {/* View toggle */}
-      <div className="flex items-center justify-end px-6 pt-4 pb-2">
-        <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
-          <button
-            onClick={() => setView('table')}
-            className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            <List className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setView('cards')}
-            className={`p-1.5 rounded-lg text-sm transition-all ${view === 'cards' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-          >
-            <LayoutGrid className="w-4 h-4" />
-          </button>
+      {/* View toggle — only shown when parent isn't controlling it (e.g. Settings embed) */}
+      {!viewProp && (
+        <div className="flex items-center justify-end px-6 pt-4 pb-2">
+          <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
+            <button
+              onClick={() => setView('table')}
+              className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <List className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setView('cards')}
+              className={`p-1.5 rounded-lg text-sm transition-all ${view === 'cards' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Type tabs */}
-      <div className="flex items-center gap-1 px-6 pb-2">
+      <div className="flex items-center gap-1 px-6 pt-4 pb-2">
         {([
           { key: 'all', label: 'All', count: allActors.length },
           { key: 'human', label: 'Humans', count: humanCount, icon: Users },

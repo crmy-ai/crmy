@@ -11,6 +11,7 @@ import {
   Inbox,
   Zap,
   Users,
+  UsersRound,
   Building2,
   Briefcase,
   FolderKanban,
@@ -30,11 +31,11 @@ export { ENTITY_COLORS };
 // Agent-facing tier — top of nav
 const agentNavItems = [
   { icon: Brain,       label: 'Memory Hub',  path: '/',            color: ENTITY_COLORS.contacts },
-  { icon: ShieldCheck, label: 'Approvals',   path: '/hitl',        color: ENTITY_COLORS.hitl },
-  { icon: Users,       label: 'Actors',      path: '/actors',      color: ENTITY_COLORS.agents },
+  { icon: ShieldCheck, label: 'Approvals',   path: '/approvals',   color: ENTITY_COLORS.hitl },
+  { icon: UsersRound,  label: 'Actors',      path: '/actors',      color: ENTITY_COLORS.agents },
   { icon: Library,     label: 'Context',     path: '/context',     color: ENTITY_COLORS.context },
   { icon: Zap,         label: 'Workflows',   path: '/workflows',   color: ENTITY_COLORS.workflows },
-  { icon: Inbox,       label: 'Handoffs',    path: '/assignments', color: ENTITY_COLORS.assignments },
+  { icon: Inbox,       label: 'Handoffs',    path: '/handoffs',    color: ENTITY_COLORS.assignments },
 ];
 
 // Data tier — knowledge base objects
@@ -120,19 +121,19 @@ export function Sidebar() {
   }
 
   function badge(path: string) {
-    if (path === '/hitl') return hitlCount > 0 ? hitlCount : undefined;
-    if (path === '/assignments') return assignCount > 0 ? assignCount : undefined;
+    if (path === '/approvals') return hitlCount > 0 ? hitlCount : undefined;
+    if (path === '/handoffs') return assignCount > 0 ? assignCount : undefined;
     return undefined;
   }
 
   return (
     <motion.aside
-      className="hidden md:flex flex-col h-screen bg-sidebar border-r border-sidebar-border flex-shrink-0"
+      className="hidden md:flex flex-col h-screen bg-sidebar border-r border-sidebar-border flex-shrink-0 overflow-hidden"
       animate={{ width: sidebarExpanded ? 220 : 56 }}
       transition={{ duration: 0.2, ease: 'easeInOut' }}
     >
       {/* Logo */}
-      <div className="flex items-center h-14 px-3 gap-2 border-b border-sidebar-border">
+      <div className="flex items-center h-16 px-3 gap-2 border-b border-sidebar-border">
         <img src={crmyLogo} alt="CRMy" className="w-8 h-8 flex-shrink-0 rounded-lg" />
         <AnimatePresence>
           {sidebarExpanded && (

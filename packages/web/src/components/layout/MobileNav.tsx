@@ -2,15 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Link, useLocation } from 'react-router-dom';
-import { Brain, ShieldCheck, Users, Library, Inbox } from 'lucide-react';
+import { Brain, ShieldCheck, UsersRound, Library, Inbox, Bot } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const tabs = [
   { icon: Brain,       label: 'Hub',       path: '/' },
-  { icon: ShieldCheck, label: 'Approvals', path: '/hitl' },
-  { icon: Users,       label: 'Actors',    path: '/actors' },
+  { icon: ShieldCheck, label: 'Approvals', path: '/approvals' },
+  { icon: Bot,         label: 'Agent',     path: '/agent' },
+  { icon: UsersRound,  label: 'Actors',    path: '/actors' },
   { icon: Library,     label: 'Context',   path: '/context' },
-  { icon: Inbox,       label: 'Handoffs',  path: '/assignments' },
+  { icon: Inbox,       label: 'Handoffs',  path: '/handoffs' },
 ];
 
 export function MobileNav() {
@@ -24,16 +25,16 @@ export function MobileNav() {
           <Link
             key={tab.path}
             to={tab.path}
-            className="relative flex flex-col items-center justify-center py-1 min-w-[56px] min-h-[44px]"
+            className="relative flex flex-col items-center justify-center py-1 min-w-[44px] min-h-[44px]"
           >
             {active && (
               <motion.div
                 layoutId="mobile-nav-pill"
-                className="absolute inset-x-1 -top-0.5 bottom-1 rounded-2xl bg-primary/10"
+                className="absolute inset-x-0.5 -top-0.5 bottom-1 rounded-2xl bg-primary/10"
                 transition={{ type: 'spring', damping: 25, stiffness: 300 }}
               />
             )}
-            <tab.icon className={`w-6 h-6 relative z-10 transition-colors ${active ? 'text-primary' : 'text-muted-foreground'}`} />
+            <tab.icon className={`w-5 h-5 relative z-10 transition-colors ${active ? 'text-primary' : 'text-muted-foreground'}`} />
             {active && (
               <motion.span
                 initial={{ opacity: 0, y: 4 }}

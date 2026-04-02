@@ -220,6 +220,21 @@ export function agentRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  /** PATCH /agent/sessions/:id — rename a session (update label). */
+  router.patch('/sessions/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const session = await agentRepo.getSession(db, actor.tenant_id, String(req.params.id));
+      if (!session || session.user_id !== actor.actor_id) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      const { label } = req.body as { label?: string };
+      const updated = await agentRepo.updateSession(db, actor.tenant_id, session.id, { label: label ?? undefined });
+      res.json({ data: updated });
+    } catch (err) { handleError(res, err); }
+  });
+
   /** DELETE /agent/sessions/:id — delete a session. */
   router.delete('/sessions/:id', async (req: Request, res: Response) => {
     try {
@@ -270,9 +285,17 @@ export function agentRouter(db: DbPool): Router {
       'Connection': 'keep-alive',
       'X-Accel-Buffering': 'no', // disable nginx buffering
     });
+    // Disable Nagle's algorithm so small SSE packets aren't delayed
+    res.socket?.setNoDelay(true);
+    // Flush headers immediately so the browser knows the stream has started
+    res.flushHeaders();
 
     const sendEvent = (event: AgentEvent) => {
       res.write(`data: ${JSON.stringify(event)}\n\n`);
+      // If compression middleware is present it wraps the socket with flush()
+      if (typeof (res as unknown as { flush?: () => void }).flush === 'function') {
+        (res as unknown as { flush: () => void }).flush();
+      }
     };
 
     try {
@@ -282,8 +305,16 @@ export function agentRouter(db: DbPool): Router {
       // Add user message
       history.push({ role: 'user', content: message });
 
-      // Run the agent turn
-      const updatedHistory = await runAgentTurn(history, config, actor, db, sendEvent, { sessionId: session.id });
+      // Run the agent turn, injecting context metadata from the session so the
+      // system prompt knows which record the conversation is about.
+      const contextMeta = session.context_type
+        ? { type: session.context_type, id: session.context_id ?? '', name: session.context_name ?? '', detail: undefined }
+        : undefined;
+
+      const updatedHistory = await runAgentTurn(history, config, actor, db, sendEvent, {
+        sessionId: session.id,
+        contextMeta,
+      });
 
       // Auto-label: use first user message as label if not set
       let label = session.label;
@@ -302,7 +333,10 @@ export function agentRouter(db: DbPool): Router {
       const errMsg = err instanceof Error ? err.message : 'Agent error';
       sendEvent({ type: 'error', message: errMsg });
     } finally {
-      res.end();
+      // setImmediate ensures the last SSE frames are flushed to the TCP buffer
+      // before we close the connection, avoiding a race where res.end() races
+      // ahead of the final write on some Node.js / proxy configurations.
+      setImmediate(() => res.end());
     }
   });
 

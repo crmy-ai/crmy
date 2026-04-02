@@ -4,7 +4,7 @@ import { useAppStore } from '@/store/appStore';
 const shortcuts = [
   { group: 'Global', items: [
     { keys: ['⌘', 'K'], label: 'Command palette' },
-    { keys: ['⌘', '⇧', 'A'], label: 'Local Agent panel' },
+    { keys: ['⌘', '⇧', 'A'], label: 'Workspace Agent panel' },
     { keys: ['⌘', '⇧', 'Z'], label: 'Zen mode' },
     { keys: ['?'], label: 'Keyboard shortcuts' },
     { keys: ['Esc'], label: 'Close drawer / modal' },

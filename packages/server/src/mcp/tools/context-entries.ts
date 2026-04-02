@@ -299,7 +299,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           body: input.document,
           subject_type: input.subject_type,
           subject_id: input.subject_id,
-          performed_by: actor.actor_id,
+          performed_by: actor.actor_type === 'agent' ? actor.actor_id : null,
           occurred_at: new Date().toISOString(),
         });
 

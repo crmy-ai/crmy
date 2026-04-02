@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { TopBar } from '@/components/layout/TopBar';
@@ -16,12 +16,22 @@ import { useIsMobile } from '@/hooks/use-mobile';
 
 type ViewMode = 'table' | 'cards';
 
-const filterConfigs: FilterConfig[] = [];
+const HEALTH_FILTERS = [
+  { value: 'healthy',  label: 'Healthy (≥ 80)'   },
+  { value: 'at-risk',  label: 'At risk (50 – 79)' },
+  { value: 'poor',     label: 'Poor (< 50)'        },
+];
+
+const EMP_SIZE_FILTERS = [
+  { value: 'small',      label: 'Small (< 50)'       },
+  { value: 'mid',        label: 'Mid-market (50–500)' },
+  { value: 'enterprise', label: 'Enterprise (500+)'   },
+];
 
 const sortOptions: SortOption[] = [
-  { key: 'name', label: 'Name' },
-  { key: 'annual_revenue', label: 'Revenue' },
-  { key: 'health_score', label: 'Health' },
+  { key: 'name',           label: 'Name'      },
+  { key: 'annual_revenue', label: 'Revenue'   },
+  { key: 'health_score',   label: 'Health'    },
   { key: 'employee_count', label: 'Employees' },
 ];
 
@@ -60,6 +70,19 @@ export default function Accounts() {
   const { data, isLoading } = useAccounts({ q: search || undefined, limit: 200 }) as any;
   const allAccounts: Account[] = data?.data ?? [];
 
+  // Derive industry options from loaded data (stable reference via ref)
+  const seenIndustriesRef = useRef<Set<string>>(new Set());
+  const industryOptions = useMemo(() => {
+    allAccounts.forEach(a => { if (a.industry) seenIndustriesRef.current.add(a.industry as string); });
+    return Array.from(seenIndustriesRef.current).sort().map(i => ({ value: i, label: i }));
+  }, [allAccounts]);
+
+  const filterConfigs: FilterConfig[] = [
+    { key: 'industry', label: 'Industry',      options: industryOptions  },
+    { key: 'health',   label: 'Health',         options: HEALTH_FILTERS   },
+    { key: 'emp_size', label: 'Employee size',  options: EMP_SIZE_FILTERS },
+  ];
+
   const handleFilterChange = (key: string, values: string[]) => {
     setActiveFilters(prev => { const next = { ...prev }; if (values.length === 0) delete next[key]; else next[key] = values; return next; });
   };
@@ -69,7 +92,34 @@ export default function Accounts() {
 
   const filtered = useMemo(() => {
     let result = [...allAccounts];
-    if (activeFilters.industry?.length) result = result.filter(a => activeFilters.industry.includes(a.industry as string));
+
+    if (activeFilters.industry?.length)
+      result = result.filter(a => activeFilters.industry.includes(a.industry as string));
+
+    if (activeFilters.health?.length) {
+      result = result.filter(a => {
+        const s = a.health_score as number | null;
+        if (s == null) return false;
+        return activeFilters.health.some(tier =>
+          tier === 'healthy' ? s >= 80 :
+          tier === 'at-risk' ? s >= 50 && s < 80 :
+          /* poor */           s < 50,
+        );
+      });
+    }
+
+    if (activeFilters.emp_size?.length) {
+      result = result.filter(a => {
+        const n = a.employee_count as number | null;
+        if (n == null) return false;
+        return activeFilters.emp_size.some(bucket =>
+          bucket === 'small'      ? n < 50 :
+          bucket === 'mid'        ? n >= 50 && n < 500 :
+          /* enterprise */          n >= 500,
+        );
+      });
+    }
+
     if (sort) {
       result.sort((a, b) => {
         const aVal = (a[sort.key] ?? '') as string | number;

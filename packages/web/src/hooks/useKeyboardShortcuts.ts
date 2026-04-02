@@ -18,7 +18,7 @@ export function useKeyboardShortcuts() {
       return;
     }
 
-    // Cmd+J — Local Agent
+    // Cmd+J — Workspace Agent
     if ((e.metaKey || e.ctrlKey) && e.key === 'j') {
       e.preventDefault();
       navigate('/agent');

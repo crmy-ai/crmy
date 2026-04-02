@@ -26,19 +26,35 @@ import {
   PROVIDERS,
   CUSTOM_MODEL_SENTINEL,
   getProvider,
+  getModelPricing,
   type ProviderId,
 } from '@/lib/agentProviders';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const tokenCosts: Record<number, string> = {
-  1000:  '~$0.002 / turn at current model pricing',
-  4000:  '~$0.006 / turn at current model pricing',
-  8000:  '~$0.012 / turn at current model pricing',
-  16000: '~$0.024 / turn at current model pricing',
-};
+/**
+ * Estimate cost per turn given token budget and per-million prices.
+ * Input assumption: ~1.5× maxTokens (system prompt + history + user message).
+ * Output assumption: ~0.6× maxTokens (LLM rarely hits the hard limit).
+ */
+function estimateCostPerTurn(maxTokens: number, inputPricePerM: number, outputPricePerM: number): string {
+  if (inputPricePerM === 0 && outputPricePerM === 0) return 'Free (running locally)';
+  const inputTokens  = maxTokens * 1.5;
+  const outputTokens = maxTokens * 0.6;
+  const cost = (inputTokens * inputPricePerM + outputTokens * outputPricePerM) / 1_000_000;
+  if (cost < 0.0001) return `< $0.0001 / turn`;
+  if (cost < 0.01)   return `~$${cost.toFixed(4)} / turn`;
+  return `~$${cost.toFixed(3)} / turn`;
+}
 
-const defaultSystemPrompt = `You are a CRMy workspace agent helping manage a CRM pipeline. You have access to contacts, accounts, opportunities, use cases, and activity history via tools. Be concise, accurate, and always confirm before making changes to CRM objects.`;
+const defaultSystemPrompt = `You are a CRMy workspace assistant with direct API access to the CRM.
+
+CORE RULES:
+1. Use your tools to complete every task directly — never tell the user to use the UI instead.
+2. Search for a record first (e.g. contact_search) to obtain its UUID before updating it.
+3. After making a change, confirm what was updated and show the new value.
+4. For potentially destructive changes (deletes, bulk edits) state what you are about to do before calling the tool.
+5. If a tool call fails, explain the error and suggest a correction.`;
 
 // ─── Shared style constants ───────────────────────────────────────────────────
 
@@ -75,6 +91,14 @@ export default function AgentSettings() {
   const [modelId,     setModelId]     = useState('');
   /** Free-text model name when modelId === CUSTOM_MODEL_SENTINEL or provider === 'custom'. */
   const [customModel, setCustomModel] = useState('');
+
+  // ── Token pricing ────────────────────────────────────────────────────────
+  /** USD per million INPUT tokens — editable, auto-populated from model defs or OpenRouter API */
+  const [inputPricePerM,  setInputPricePerM]  = useState<string>('');
+  /** USD per million OUTPUT tokens — editable, auto-populated */
+  const [outputPricePerM, setOutputPricePerM] = useState<string>('');
+  /** Source of current prices: 'default' = static table, 'openrouter' = live fetch, 'user' = manually edited */
+  const [priceSource, setPriceSource] = useState<'default' | 'openrouter' | 'user' | 'free' | 'unknown'>('unknown');
 
   // ── Test status ──────────────────────────────────────────────────────────
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
@@ -128,6 +152,55 @@ export default function AgentSettings() {
   useEffect(() => {
     if (editingPrompt && textareaRef.current) textareaRef.current.focus();
   }, [editingPrompt]);
+
+  // Auto-populate token prices when the selected model changes.
+  // For OpenRouter: attempts a live fetch from their public models API.
+  // For all others: uses static pricing from agentProviders.ts.
+  useEffect(() => {
+    const _isCustomModel = modelId === CUSTOM_MODEL_SENTINEL || provider === 'custom';
+    const modelKey = _isCustomModel ? customModel : modelId;
+    if (!modelKey) { setPriceSource('unknown'); return; }
+
+    // Ollama / free models
+    if (provider === 'ollama') {
+      setInputPricePerM('0');
+      setOutputPricePerM('0');
+      setPriceSource('free');
+      return;
+    }
+
+    // Try static defaults first (instant, no network)
+    const staticPricing = getModelPricing(provider, modelKey);
+    if (staticPricing) {
+      setInputPricePerM(String(staticPricing.inputPricePerM));
+      setOutputPricePerM(String(staticPricing.outputPricePerM));
+      setPriceSource(provider === 'openrouter' ? 'openrouter' : 'default');
+    } else {
+      setPriceSource('unknown');
+    }
+
+    // For OpenRouter: supplement with live pricing regardless of static match
+    if (provider === 'openrouter' && modelKey !== 'openrouter/auto') {
+      let cancelled = false;
+      fetch('https://openrouter.ai/api/v1/models')
+        .then(r => r.ok ? r.json() : null)
+        .then((json: { data?: { id: string; pricing?: { prompt?: string; completion?: string } }[] } | null) => {
+          if (cancelled || !json?.data) return;
+          const found = json.data.find(m => m.id === modelKey);
+          if (!found?.pricing) return;
+          // OpenRouter pricing is USD per token — multiply by 1e6 for per-million
+          const inp = parseFloat(found.pricing.prompt ?? '0') * 1_000_000;
+          const out = parseFloat(found.pricing.completion ?? '0') * 1_000_000;
+          if (isFinite(inp) && isFinite(out)) {
+            setInputPricePerM(inp.toFixed(inp < 1 ? 4 : 2));
+            setOutputPricePerM(out.toFixed(out < 1 ? 4 : 2));
+            setPriceSource('openrouter');
+          }
+        })
+        .catch(() => { /* keep static prices on network failure */ });
+      return () => { cancelled = true; };
+    }
+  }, [provider, modelId, customModel]);
 
   // ── Derived values ────────────────────────────────────────────────────────
   const providerDef = getProvider(provider);
@@ -252,7 +325,7 @@ export default function AgentSettings() {
   return (
     <div className="space-y-5 max-w-2xl">
       <div>
-        <h2 className="font-display font-bold text-lg text-foreground mb-1">Local Agent</h2>
+        <h2 className="font-display font-bold text-lg text-foreground mb-1">Local Workspace Agent</h2>
         <p className="text-sm text-muted-foreground">Configure the workspace agent for your team.</p>
       </div>
 
@@ -264,7 +337,7 @@ export default function AgentSettings() {
               <Sparkles className="w-4 h-4 text-amber-500" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-foreground">Enable Local Agent</h3>
+              <h3 className="text-sm font-semibold text-foreground">Enable Local Workspace Agent</h3>
               <p className="text-xs text-muted-foreground">Toggle AI features on or off for this workspace</p>
             </div>
           </div>
@@ -273,7 +346,7 @@ export default function AgentSettings() {
               checked={enabled}
               onCheckedChange={handleToggleEnabled}
               disabled={!canEnable && !enabled}
-              aria-label="Enable Local Agent"
+              aria-label="Enable Local Workspace Agent"
             />
             {!canEnable && !enabled && (
               <p className="text-[10px] text-muted-foreground text-right max-w-[160px]">
@@ -283,20 +356,9 @@ export default function AgentSettings() {
           </div>
         </div>
 
-        {enabled && (
-          <div className="px-5 py-3 flex flex-wrap gap-2">
-            {[
-              { icon: '✦', label: 'Sparkle column (tables)' },
-              { icon: '💬', label: 'Chat button (object detail)' },
-              { icon: '◎', label: 'Floating agent icon' },
-              { icon: '✎', label: 'AI-assist on edit' },
-            ].map((tag) => (
-              <span key={tag.label} className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg bg-muted text-muted-foreground border border-border">
-                <span>{tag.icon}</span> {tag.label}
-              </span>
-            ))}
-          </div>
-        )}
+        <div className="px-5 py-4 text-sm text-muted-foreground leading-relaxed">
+          The Local Workspace Agent connects your CRM to an LLM of your choice — running on your own infrastructure or a provider you control. Once enabled, team members can chat with the agent to search records, log activities, update opportunities, and run bulk actions without leaving the workspace. The agent only has access to data within your tenant and operates under the permission scopes you configure below.
+        </div>
       </div>
 
       {/* ── SECTION 2: Provider & Model ─────────────────────────────────── */}
@@ -472,7 +534,7 @@ export default function AgentSettings() {
                 <span>{testError || 'Connection failed. Check your key, URL, and model.'}</span>
               </div>
             )}
-            {testStatus === 'idle' && testStatus !== 'ok' && (
+            {testStatus === 'idle' && (
               <p className="text-[10px] text-muted-foreground">
                 Test your connection before saving to confirm the key works.
               </p>
@@ -531,10 +593,13 @@ export default function AgentSettings() {
             </div>
           </div>
 
-          {/* Max tokens */}
-          <div className="py-3 space-y-1.5">
+          {/* Max tokens + pricing */}
+          <div className="py-3 space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-foreground">Max tokens per turn</p>
+              <div>
+                <p className="text-sm font-medium text-foreground">Max tokens per turn</p>
+                <p className="text-xs text-muted-foreground">Maximum tokens the model can generate per response</p>
+              </div>
               <select
                 value={maxTokens}
                 onChange={e => setMaxTokens(Number(e.target.value))}
@@ -546,7 +611,69 @@ export default function AgentSettings() {
                 <option value={16000}>16,000</option>
               </select>
             </div>
-            <p className="text-xs text-muted-foreground">{tokenCosts[maxTokens]}</p>
+
+            {/* Token pricing fields */}
+            <div className="p-3 rounded-lg bg-muted/30 border border-border space-y-2.5">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-foreground">Token pricing <span className="font-normal text-muted-foreground">(USD per million tokens)</span></p>
+                {priceSource === 'openrouter' && (
+                  <span className="text-[10px] text-violet-500 font-medium">Live from OpenRouter</span>
+                )}
+                {priceSource === 'default' && (
+                  <span className="text-[10px] text-muted-foreground">Default for model</span>
+                )}
+                {priceSource === 'user' && (
+                  <span className="text-[10px] text-primary font-medium">Custom</span>
+                )}
+                {priceSource === 'free' && (
+                  <span className="text-[10px] text-green-600 font-medium">Free (local)</span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Input ($/M)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={inputPricePerM}
+                    onChange={e => { setInputPricePerM(e.target.value); setPriceSource('user'); }}
+                    placeholder="e.g. 3.00"
+                    className="w-full h-8 px-2.5 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Output ($/M)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={outputPricePerM}
+                    onChange={e => { setOutputPricePerM(e.target.value); setPriceSource('user'); }}
+                    placeholder="e.g. 15.00"
+                    className="w-full h-8 px-2.5 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              </div>
+              {/* Estimated cost */}
+              {(inputPricePerM !== '' || outputPricePerM !== '') && (
+                <p className="text-xs text-muted-foreground">
+                  {estimateCostPerTurn(
+                    maxTokens,
+                    parseFloat(inputPricePerM || '0'),
+                    parseFloat(outputPricePerM || '0'),
+                  )}
+                  {priceSource !== 'free' && (
+                    <span className="ml-1 text-[10px]">· estimated (1.5× input, 0.6× output of max tokens)</span>
+                  )}
+                </p>
+              )}
+              {priceSource === 'unknown' && inputPricePerM === '' && (
+                <p className="text-[10px] text-muted-foreground">
+                  Select a known model above to auto-fill prices, or enter them manually.
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Can create assignments */}
@@ -557,7 +684,15 @@ export default function AgentSettings() {
             </div>
             <Switch
               checked={canCreateAssignments}
-              onCheckedChange={setCanCreateAssignments}
+              onCheckedChange={async (v) => {
+                setCanCreateAssignments(v);
+                try {
+                  await saveConfig.mutateAsync({ can_create_assignments: v });
+                } catch {
+                  setCanCreateAssignments(!v);
+                  toast({ title: 'Failed to save', variant: 'destructive' });
+                }
+              }}
               aria-label="Allow agent to create assignments"
             />
           </div>
@@ -570,7 +705,15 @@ export default function AgentSettings() {
             </div>
             <Switch
               checked={canLogActivities}
-              onCheckedChange={setCanLogActivities}
+              onCheckedChange={async (v) => {
+                setCanLogActivities(v);
+                try {
+                  await saveConfig.mutateAsync({ can_log_activities: v });
+                } catch {
+                  setCanLogActivities(!v);
+                  toast({ title: 'Failed to save', variant: 'destructive' });
+                }
+              }}
               aria-label="Allow agent to log activities"
             />
           </div>
@@ -584,7 +727,15 @@ export default function AgentSettings() {
               </div>
               <Switch
                 checked={canWriteObjects}
-                onCheckedChange={setCanWriteObjects}
+                onCheckedChange={async (v) => {
+                  setCanWriteObjects(v);
+                  try {
+                    await saveConfig.mutateAsync({ can_write_objects: v });
+                  } catch {
+                    setCanWriteObjects(!v);
+                    toast({ title: 'Failed to save', variant: 'destructive' });
+                  }
+                }}
                 aria-label="Allow agent to write CRM objects"
               />
             </div>

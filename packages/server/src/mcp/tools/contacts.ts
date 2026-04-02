@@ -16,7 +16,7 @@ export function contactTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'contact_create',
-      description: 'Create a new contact record with their name, email, title, and company details. Link to an account with account_id to associate the contact with their organization. Set lifecycle_stage to reflect their current position in the sales funnel (lead, prospect, active, customer, churned, champion).',
+      description: 'Create a new contact record. Contact names are stored as first_name (required) and last_name (optional) separately — never as a single name field. Also accepts email, phone, title, company_name, account_id, lifecycle_stage (lead/prospect/active/customer/churned/champion), tags, and custom_fields.',
       inputSchema: contactCreate,
       handler: async (input: z.infer<typeof contactCreate>, actor: ActorContext) => {
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
@@ -62,7 +62,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'contact_update',
-      description: 'Update a contact record by passing its id and a patch object with the fields to change. Supports all contact fields including name, email, title, phone, account_id, tags, and custom_fields.',
+      description: 'Update a contact record. Pass the contact UUID as id and a patch object containing only the fields to change. Contact names are stored as first_name and last_name separately — to rename a contact pass { first_name: "Thomas" } or { last_name: "Rivera" } or both. Other patchable fields: email, phone, title, company_name, account_id, lifecycle_stage, tags, custom_fields. Example: { id: "<uuid>", patch: { first_name: "Thomas", last_name: "Rivera" } }',
       inputSchema: contactUpdate,
       handler: async (input: z.infer<typeof contactUpdate>, actor: ActorContext) => {
         const before = await contactRepo.getContact(db, actor.tenant_id, input.id);

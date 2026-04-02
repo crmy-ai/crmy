@@ -37,6 +37,8 @@ const ENTITY_GRADIENTS: Record<string, string> = {
   'use cases':   'from-success to-success/80',
   activities:    'from-warning to-warning/80',
   assignments:   'from-destructive to-destructive/80',
+  workflows:     'from-amber-500 to-amber-500/80',
+  context:       'from-[#0ea5e9] to-[#0ea5e9]/80',
 };
 
 export function ListToolbar({

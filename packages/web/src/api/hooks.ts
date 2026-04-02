@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from './client';
 
 // Generic list hook with pagination
@@ -464,7 +464,7 @@ export function useUpdateActor() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...patch }: { id: string; [key: string]: unknown }) =>
-      api.patch(`actors/${id}`, { patch }),
+      api.patch(`actors/${id}`, patch),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['actors'] });
       qc.invalidateQueries({ queryKey: ['actor'] });
@@ -544,6 +544,28 @@ export function useContextEntries(params?: {
 }) {
   return useList('context-entries', 'context', params);
 }
+export function useContextEntriesInfinite(params?: {
+  subject_type?: string;
+  context_type?: string;
+  is_current?: boolean;
+  limit?: number;
+}) {
+  const limit = params?.limit ?? 20;
+  return useInfiniteQuery<{ data: any[]; next_cursor?: string; total: number }>({
+    queryKey: ['context-entries-infinite', params],
+    queryFn: ({ pageParam }) => {
+      const query = new URLSearchParams();
+      if (params?.subject_type) query.set('subject_type', params.subject_type);
+      if (params?.context_type) query.set('context_type', params.context_type);
+      if (params?.is_current !== undefined) query.set('is_current', String(params.is_current));
+      query.set('limit', String(limit));
+      if (pageParam) query.set('cursor', pageParam as string);
+      return api.get(`context?${query}`);
+    },
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+  });
+}
 export function useContextEntry(id: string) {
   return useQuery({ queryKey: ['context-entry', id], queryFn: () => api.get(`context/${id}`), enabled: !!id });
 }
@@ -582,6 +604,7 @@ export function useReviewContextEntry() {
     mutationFn: (id: string) => api.post(`context/${id}/review`, {}),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
       qc.invalidateQueries({ queryKey: ['context-stale'] });
     },
   });
@@ -732,7 +755,10 @@ export function useContextIngest() {
   return useMutation({
     mutationFn: (data: { text: string; subject_type: string; subject_id: string; source?: string }) =>
       api.post('context/ingest', data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['context-entries'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+    },
   });
 }
 
@@ -779,7 +805,8 @@ export interface AgentConfigData {
   enabled: boolean;
   provider: 'anthropic' | 'openai' | 'openrouter' | 'ollama' | 'custom';
   base_url: string;
-  api_key_enc: string | null;
+  api_key_configured: boolean;
+  api_key_hint: string | null;
   model: string;
   system_prompt: string | null;
   max_tokens_per_turn: number;
@@ -844,6 +871,15 @@ export function useCreateAgentSession() {
   const qc = useQueryClient();
   return useMutation<{ data: AgentSessionFull }, Error, { context_type?: string; context_id?: string; context_name?: string }>({
     mutationFn: (data) => api.post('agent/sessions', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-sessions'] }),
+  });
+}
+
+export function useRenameAgentSession() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, label }: { id: string; label: string }) =>
+      api.patch(`agent/sessions/${id}`, { label }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-sessions'] }),
   });
 }

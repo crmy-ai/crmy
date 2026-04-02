@@ -709,7 +709,10 @@ export function apiRouter(db: DbPool): Router {
         limit: Math.min(qn(req.query.limit, 20), 100),
         cursor: qs(req.query.cursor),
       }, actor);
-      res.json(result);
+      // Normalize: the MCP tool returns { workflows: [...] } but REST clients
+      // expect the standard { data: [...], next_cursor, total } envelope.
+      const r = result as { workflows: unknown[]; next_cursor?: string; total: number };
+      res.json({ data: r.workflows, next_cursor: r.next_cursor, total: r.total });
     } catch (err) { handleError(res, err); }
   });
 
@@ -903,7 +906,7 @@ export function apiRouter(db: DbPool): Router {
         limit: Math.min(qn(req.query.limit, 20), 100),
         cursor: qs(req.query.cursor),
       }, actor);
-      res.json(result);
+      res.json({ data: result.context_entries, next_cursor: result.next_cursor, total: result.total });
     } catch (err) { handleError(res, err); }
   });
 
@@ -974,10 +977,10 @@ export function apiRouter(db: DbPool): Router {
       const actor = getActor(req);
       const handler = toolHandler(db, 'context_ingest');
       const result = await handler({
-        text: req.body.text,
+        document:     req.body.text ?? req.body.document,
         subject_type: req.body.subject_type,
-        subject_id: req.body.subject_id,
-        source: req.body.source,
+        subject_id:   req.body.subject_id,
+        source_label: req.body.source ?? req.body.source_label,
       }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }

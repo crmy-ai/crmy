@@ -10,6 +10,7 @@ import { motion } from 'framer-motion';
 import {
   ShieldCheck,
   Bot,
+  UsersRound,
   Library,
   Inbox,
   ArrowRight,
@@ -87,14 +88,15 @@ export default function Dashboard() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: staleData } = useContextEntries({ is_current: false, limit: 200 }) as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: agentsData } = useActors({ actor_type: 'agent', limit: 10 }) as any;
+  const { data: actorsData } = useActors({ limit: 200 }) as any;
 
   const hitlRequests: any[] = hitlData?.data ?? [];
   const pendingHITL = hitlRequests.filter((r: any) => r.status === 'pending');
   const contextTotal: number = contextData?.total ?? 0;
   const staleCount: number = staleData?.data?.length ?? 0;
-  const agents: any[] = agentsData?.data ?? [];
-  const activeAgents = agents.filter((a: any) => a.is_active);
+  const actors: any[] = actorsData?.data ?? [];
+  const activeActors = actors.filter((a: any) => a.is_active);
+  const agents = actors.filter((a: any) => a.actor_type === 'agent');
 
   return (
     <div className="flex flex-col h-full">
@@ -102,19 +104,19 @@ export default function Dashboard() {
         title="Memory Hub"
         icon={Brain}
         iconClassName="text-primary"
-        description="Your agent memory layer — context, approvals, and active agents at a glance."
+        description="Your agent memory layer — context, approvals, and active actors at a glance."
       />
       <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
 
         {/* Stat row */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-4 md:mb-6">
           <StatCard
-            icon={ShieldCheck}
-            label="Pending approvals"
-            value={pendingHITL.length}
-            sub={pendingHITL.length === 1 ? 'needs review' : pendingHITL.length > 0 ? 'need review' : 'all clear'}
-            color="bg-destructive/15 text-destructive"
-            href="/hitl"
+            icon={Inbox}
+            label="Open handoffs"
+            value="—"
+            sub="view assignments"
+            color="bg-amber-500/15 text-amber-500"
+            href="/handoffs"
             delay={0.04}
           />
           <StatCard
@@ -127,22 +129,13 @@ export default function Dashboard() {
             delay={0.07}
           />
           <StatCard
-            icon={Bot}
-            label="Active agents"
-            value={activeAgents.length}
-            sub={agents.length > 0 ? `of ${agents.length} registered` : 'none registered'}
+            icon={UsersRound}
+            label="Active actors"
+            value={activeActors.length}
+            sub={actors.length > 0 ? `of ${actors.length} registered` : 'none registered'}
             color="bg-[#6366f1]/15 text-[#6366f1]"
             href="/actors"
             delay={0.1}
-          />
-          <StatCard
-            icon={Inbox}
-            label="Open handoffs"
-            value="—"
-            sub="view assignments"
-            color="bg-destructive/10 text-destructive/70"
-            href="/assignments"
-            delay={0.13}
           />
         </div>
 
@@ -159,7 +152,7 @@ export default function Dashboard() {
                     Pending approvals
                   </h2>
                   {pendingHITL.length > 0 && (
-                    <Link to="/hitl" className="text-xs text-primary hover:underline flex items-center gap-1">
+                    <Link to="/approvals" className="text-xs text-primary hover:underline flex items-center gap-1">
                       View all <ArrowRight className="w-3 h-3" />
                     </Link>
                   )}
@@ -215,7 +208,7 @@ export default function Dashboard() {
                     ))}
                     {pendingHITL.length > 3 && (
                       <button
-                        onClick={() => navigate('/hitl')}
+                        onClick={() => navigate('/approvals')}
                         className="w-full text-xs text-primary hover:underline py-1"
                       >
                         +{pendingHITL.length - 3} more — view all approvals

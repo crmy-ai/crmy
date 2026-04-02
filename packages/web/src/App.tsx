@@ -89,9 +89,11 @@ function AnimatedRoutes() {
           <Route path="/opportunities" element={<Opportunities />} />
           <Route path="/use-cases" element={<UseCasesPage />} />
           <Route path="/activities" element={<Activities />} />
-          <Route path="/assignments" element={<InboxPage />} />
-          <Route path="/inbox" element={<Navigate to="/assignments" replace />} />
-          <Route path="/hitl" element={<HITLPage />} />
+          <Route path="/handoffs" element={<InboxPage />} />
+          <Route path="/assignments" element={<Navigate to="/handoffs" replace />} />
+          <Route path="/inbox" element={<Navigate to="/handoffs" replace />} />
+          <Route path="/approvals" element={<HITLPage />} />
+          <Route path="/hitl" element={<Navigate to="/approvals" replace />} />
           <Route path="/context" element={<ContextPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/emails" element={<EmailsPage />} />
