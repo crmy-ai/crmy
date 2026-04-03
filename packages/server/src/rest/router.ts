@@ -906,7 +906,8 @@ export function apiRouter(db: DbPool): Router {
         limit: Math.min(qn(req.query.limit, 20), 100),
         cursor: qs(req.query.cursor),
       }, actor);
-      res.json({ data: result.context_entries, next_cursor: result.next_cursor, total: result.total });
+      const r = result as { context_entries: unknown[]; next_cursor?: string; total: number };
+      res.json({ data: r.context_entries, next_cursor: r.next_cursor, total: r.total });
     } catch (err) { handleError(res, err); }
   });
 
