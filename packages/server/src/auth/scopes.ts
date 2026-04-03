@@ -98,6 +98,8 @@ const TOOL_SCOPES: Record<string, string[]> = {
   email_get: ['activities:read'],
   email_search: ['activities:read'],
   email_create: ['activities:write'],
+  email_provider_set: ['write'],
+  email_provider_get: ['read'],
 
   // ── Webhooks ──
   webhook_get: ['read'],

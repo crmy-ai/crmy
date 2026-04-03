@@ -480,6 +480,15 @@ export const emailSearch = z.object({
   cursor,
 });
 
+export const emailProviderSet = z.object({
+  provider: z.string().min(1),
+  config: z.record(z.unknown()),
+  from_name: z.string().min(1),
+  from_email: z.string().email(),
+});
+
+export const emailProviderGet = z.object({});
+
 export const emailSequenceCreate = z.object({
   name: z.string().min(1),
   description: z.string().optional(),

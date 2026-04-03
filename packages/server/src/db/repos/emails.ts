@@ -118,6 +118,38 @@ export async function updateEmailStatus(
   return (result.rows[0] as EmailRow) ?? null;
 }
 
+export async function getEmailByHitlRequestId(
+  db: DbPool, tenantId: UUID, hitlRequestId: UUID,
+): Promise<EmailRow | null> {
+  const result = await db.query(
+    'SELECT * FROM emails WHERE hitl_request_id = $1 AND tenant_id = $2',
+    [hitlRequestId, tenantId],
+  );
+  return (result.rows[0] as EmailRow) ?? null;
+}
+
+export async function updateEmailDelivery(
+  db: DbPool, tenantId: UUID, id: UUID,
+  data: { status: string; provider_msg_id?: string; error?: string },
+): Promise<EmailRow | null> {
+  const sets = ['status = $3', 'updated_at = now()'];
+  const params: unknown[] = [id, tenantId, data.status];
+  let idx = 4;
+
+  if (data.status === 'sent') sets.push('sent_at = now()');
+  if (data.provider_msg_id) {
+    sets.push(`provider_msg_id = $${idx}`);
+    params.push(data.provider_msg_id);
+    idx++;
+  }
+
+  const result = await db.query(
+    `UPDATE emails SET ${sets.join(', ')} WHERE id = $1 AND tenant_id = $2 RETURNING *`,
+    params,
+  );
+  return (result.rows[0] as EmailRow) ?? null;
+}
+
 export async function searchEmails(
   db: DbPool, tenantId: UUID,
   filters: { contact_id?: UUID; status?: string; limit: number; cursor?: string },

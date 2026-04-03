@@ -241,6 +241,10 @@ export async function createApp(config: ServerConfig) {
     await loadPlugins(config.plugins, { db, config: {} });
   }
 
+  // Register email HITL approval/rejection handler
+  const { registerEmailHitlHandler } = await import('./email/hitl-handler.js');
+  registerEmailHitlHandler(db);
+
   return { app, db, hitlInterval };
 }
 

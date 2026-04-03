@@ -154,6 +154,8 @@ const TOOL_STATUS_MAP: Record<string, string> = {
   email_create:         'Sending email…',
   email_get:            'Reading email…',
   email_search:         'Searching emails…',
+  email_provider_set:   'Configuring email provider…',
+  email_provider_get:   'Checking email provider…',
 
   // Webhooks / workflows
   webhook_create:       'Creating webhook…',
@@ -427,6 +429,7 @@ function buildSystemPrompt(
   if (canWrite)      capLines.push('- Create, update, and delete contacts, accounts, and opportunities');
   if (canActivities) capLines.push('- Log and complete activities');
   if (canAssignments) capLines.push('- Create and manage assignments');
+  if (canWrite)      capLines.push('- Configure email delivery and send emails');
   capLines.push('');
   capLines.push('**You CANNOT:**');
   if (!canWrite)      capLines.push('- Create, update, or delete CRM records (write access not enabled)');

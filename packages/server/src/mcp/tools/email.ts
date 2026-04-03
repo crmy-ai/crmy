@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from 'zod';
-import { emailCreate, emailGet, emailSearch } from '@crmy/shared';
+import { emailCreate, emailGet, emailSearch, emailProviderSet, emailProviderGet } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as emailRepo from '../../db/repos/emails.js';
 import * as hitlRepo from '../../db/repos/hitl.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
+import { deliverEmail } from '../../email/delivery.js';
+import { getEmailProvider, listEmailProviderTypes } from '../../email/providers/index.js';
 import type { ToolDef } from '../server.js';
 
 export function emailTools(db: DbPool): ToolDef[] {
@@ -63,6 +65,13 @@ export function emailTools(db: DbPool): ToolDef[] {
           afterData: { id: email.id, to: email.to_email, subject: email.subject, status: email.status },
         });
 
+        // When no approval required, send immediately
+        if (input.require_approval === false) {
+          await deliverEmail(db, actor.tenant_id, email.id);
+          const sent = await emailRepo.getEmail(db, actor.tenant_id, email.id);
+          return { email: sent ?? email, event_id };
+        }
+
         return { email, hitl_request_id: hitlRequestId, event_id };
       },
     },
@@ -88,6 +97,64 @@ export function emailTools(db: DbPool): ToolDef[] {
           cursor: input.cursor,
         });
         return { emails: result.data, next_cursor: result.next_cursor, total: result.total };
+      },
+    },
+
+    // ── Provider configuration ─────────────────────────────────────────────
+
+    {
+      name: 'email_provider_set',
+      description:
+        'Configure the tenant\'s email provider for outbound email delivery. ' +
+        'Required: provider type, config object, from_name, from_email. ' +
+        'SMTP config requires: host, port, auth.user, auth.pass (optional: secure). ' +
+        'This overwrites any existing provider config for the tenant.',
+      inputSchema: emailProviderSet,
+      handler: async (input: z.infer<typeof emailProviderSet>, actor: ActorContext) => {
+        const provider = getEmailProvider(input.provider);
+        if (!provider) {
+          return {
+            error: `Unknown provider: "${input.provider}". Available: ${listEmailProviderTypes().join(', ')}`,
+          };
+        }
+
+        const validation = provider.validateConfig(input.config);
+        if (!validation.valid) {
+          return { error: `Invalid config for "${input.provider}": ${validation.error}` };
+        }
+
+        const result = await emailRepo.upsertProvider(db, actor.tenant_id, {
+          provider: input.provider,
+          config: input.config,
+          from_name: input.from_name,
+          from_email: input.from_email,
+        });
+
+        // Redact sensitive fields in response
+        const safeConfig = { ...result.config };
+        if (safeConfig.auth && typeof safeConfig.auth === 'object') {
+          safeConfig.auth = { ...(safeConfig.auth as Record<string, unknown>), pass: '***' };
+        }
+        return { ...result, config: safeConfig };
+      },
+    },
+    {
+      name: 'email_provider_get',
+      description:
+        'Get the current email provider configuration for this tenant. ' +
+        'Returns provider type, from_name, from_email, and config. ' +
+        'Returns { configured: false } if no provider is set up.',
+      inputSchema: emailProviderGet,
+      handler: async (_input: z.infer<typeof emailProviderGet>, actor: ActorContext) => {
+        const result = await emailRepo.getProvider(db, actor.tenant_id);
+        if (!result) return { configured: false };
+
+        // Redact sensitive fields
+        const safeConfig = { ...result.config };
+        if (safeConfig.auth && typeof safeConfig.auth === 'object') {
+          safeConfig.auth = { ...(safeConfig.auth as Record<string, unknown>), pass: '***' };
+        }
+        return { ...result, config: safeConfig };
       },
     },
   ];

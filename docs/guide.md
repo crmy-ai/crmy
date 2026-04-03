@@ -1800,9 +1800,38 @@ GET    /api/v1/webhooks/:id/deliveries
 
 ## Email
 
-Draft and send outbound emails with built-in HITL approval.
+Draft and send outbound emails with built-in HITL approval and configurable delivery providers.
 
-When `require_approval` is true (default), creating an email automatically submits a HITL request. The email is sent only after approval.
+### How it works
+
+1. **Configure a provider** — set up SMTP (or another provider) via `email_provider_set` with host, credentials, and sender identity
+2. **Draft emails** — use `email_create` to draft an email linked to a contact
+3. **Approval flow** — when `require_approval` is true (default), a HITL request is created for human review
+4. **Delivery** — after approval (or immediately if `require_approval: false`), the email is sent through the configured provider
+
+### Provider configuration
+
+Configure your tenant's email provider using `email_provider_set`. SMTP is built-in; additional providers (SendGrid, SES) can be added via plugins.
+
+```json
+{
+  "provider": "smtp",
+  "config": {
+    "host": "smtp.gmail.com",
+    "port": 587,
+    "secure": false,
+    "auth": { "user": "you@example.com", "pass": "app-password" }
+  },
+  "from_name": "CRMy",
+  "from_email": "crm@example.com"
+}
+```
+
+| Provider | Config fields | Status |
+|----------|--------------|--------|
+| `smtp` | `host`, `port`, `auth.user`, `auth.pass`, optional `secure` | Built-in |
+| `sendgrid` | Provider-specific | Via plugin |
+| `ses` | Provider-specific | Via plugin |
 
 ### MCP tools
 
@@ -1811,12 +1840,24 @@ When `require_approval` is true (default), creating an email automatically submi
 | `email_create` | Draft an email. Required: `to_address`, `subject`. Optional: `body_html`, `body_text`, `contact_id`, `account_id`, `opportunity_id`, `use_case_id`, `require_approval` |
 | `email_get` | Get email by ID |
 | `email_search` | Search by `contact_id`, `status` |
+| `email_provider_set` | Configure the tenant's email provider (SMTP, etc.) |
+| `email_provider_get` | Get current email provider config (passwords redacted) |
 
 ### Email statuses
 
-`draft` → `pending_approval` → `approved` → `sending` → `sent`
+```
+draft → pending_approval → approved → sending → sent
+                                             ↘ failed
+         (if rejected)  → rejected
+```
 
-Also: `failed`, `rejected`
+- **draft**: created with `require_approval: false`, sent immediately if provider configured
+- **pending_approval**: awaiting HITL review
+- **approved**: HITL approved, delivery in progress
+- **sending**: provider send in flight
+- **sent**: successfully delivered
+- **failed**: provider error or no provider configured
+- **rejected**: HITL reviewer rejected the email
 
 ### CLI
 
@@ -2207,7 +2248,7 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 | Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
 | Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
-| Emails | `email_create`, `email_get`, `email_search` |
+| Emails | `email_create`, `email_get`, `email_search`, `email_provider_set`, `email_provider_get` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
 | Identity | `entity_resolve` |
 | Analytics | `crm_search`, `pipeline_summary`, `pipeline_forecast`, `account_health_report`, `tenant_get_stats` |
