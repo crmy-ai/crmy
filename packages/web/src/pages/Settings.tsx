@@ -27,7 +27,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
   { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'] },
   { icon: Tags,       label: 'Registries',    path: '/settings/registries',   roles: ['admin', 'owner'] },
-  { icon: Bot,        label: 'Local Workspace Agent', path: '/settings/agent',        roles: ['admin', 'owner'] },
+  { icon: Bot,        label: 'Local Agent', path: '/settings/agent',        roles: ['admin', 'owner'] },
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
 ];
 
@@ -1864,6 +1864,50 @@ function DatabaseSettings() {
   );
 }
 
+// System-default types that are always available (seeded on tenant creation).
+// These cannot be removed — they are the foundation of the context engine and activity tracking.
+const SYSTEM_CONTEXT_TYPES = [
+  { type_name: 'note', label: 'Note' },
+  { type_name: 'transcript', label: 'Transcript' },
+  { type_name: 'summary', label: 'Summary' },
+  { type_name: 'research', label: 'Research' },
+  { type_name: 'preference', label: 'Preference' },
+  { type_name: 'decision', label: 'Decision' },
+  { type_name: 'relationship_map', label: 'Relationship Map' },
+  { type_name: 'agent_reasoning', label: 'Agent Reasoning' },
+  { type_name: 'sentiment_analysis', label: 'Sentiment Analysis' },
+  { type_name: 'commitment', label: 'Commitment' },
+  { type_name: 'next_step', label: 'Next Step' },
+  { type_name: 'stakeholder', label: 'Stakeholder' },
+  { type_name: 'deal_risk', label: 'Deal Risk' },
+  { type_name: 'competitive_intel', label: 'Competitive Intel' },
+  { type_name: 'objection', label: 'Objection' },
+  { type_name: 'meeting_notes', label: 'Meeting Notes' },
+  { type_name: 'key_fact', label: 'Key Fact' },
+];
+
+const SYSTEM_ACTIVITY_TYPES = [
+  { type_name: 'outreach_email', label: 'Email Sent', category: 'outreach' },
+  { type_name: 'outreach_call', label: 'Call Made', category: 'outreach' },
+  { type_name: 'outreach_sms', label: 'SMS Sent', category: 'outreach' },
+  { type_name: 'outreach_social', label: 'Social Touch', category: 'outreach' },
+  { type_name: 'meeting_scheduled', label: 'Meeting Scheduled', category: 'meeting' },
+  { type_name: 'meeting_held', label: 'Meeting Held', category: 'meeting' },
+  { type_name: 'meeting_cancelled', label: 'Meeting Cancelled', category: 'meeting' },
+  { type_name: 'proposal_drafted', label: 'Proposal Drafted', category: 'proposal' },
+  { type_name: 'proposal_sent', label: 'Proposal Sent', category: 'proposal' },
+  { type_name: 'proposal_viewed', label: 'Proposal Viewed', category: 'proposal' },
+  { type_name: 'contract_sent', label: 'Contract Sent', category: 'contract' },
+  { type_name: 'contract_signed', label: 'Contract Signed', category: 'contract' },
+  { type_name: 'note_added', label: 'Note Added', category: 'internal' },
+  { type_name: 'research_completed', label: 'Research Completed', category: 'internal' },
+  { type_name: 'stage_change', label: 'Stage Changed', category: 'lifecycle' },
+  { type_name: 'field_update', label: 'Field Updated', category: 'lifecycle' },
+  { type_name: 'task_completed', label: 'Task Completed', category: 'internal' },
+  { type_name: 'handoff_initiated', label: 'Handoff Initiated', category: 'handoff' },
+  { type_name: 'handoff_accepted', label: 'Handoff Accepted', category: 'handoff' },
+];
+
 function RegistriesSettings() {
   const { data: ctxData, isLoading: ctxLoading } = useContextTypes();
   const createCtxType = useCreateContextType();
@@ -1907,16 +1951,39 @@ function RegistriesSettings() {
   return (
     <div className="max-w-2xl">
       <h2 className="font-display font-bold text-lg text-foreground mb-1">Type Registries</h2>
-      <p className="text-sm text-muted-foreground mb-6">Define custom context and activity types used across the CRM.</p>
+      <p className="text-sm text-muted-foreground mb-6">
+        Context types classify the knowledge your agents store — objections, next steps, competitive intel, and more.
+        Activity types categorize what happened — calls, emails, meetings, handoffs. Both registries come with system
+        defaults and can be extended with custom types to match your workflow.
+      </p>
 
       {/* Context Types */}
       <div className="mb-8">
-        <h3 className="text-sm font-semibold text-foreground mb-3">Context Types</h3>
-        <div className="space-y-1.5 mb-3">
+        <h3 className="text-sm font-semibold text-foreground mb-2">Context Types</h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          Each context entry is tagged with a type. Types control how context is prioritized in briefings,
+          how confidence decays over time, and which entries the extraction pipeline produces automatically.
+        </p>
+
+        {/* System types */}
+        <div className="mb-3">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">System</span>
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {SYSTEM_CONTEXT_TYPES.map(t => (
+              <span key={t.type_name} className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-muted text-muted-foreground">
+                {t.label}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Custom types */}
+        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Custom</span>
+        <div className="space-y-1.5 mb-3 mt-1.5">
           {ctxLoading ? (
             <div className="h-8 bg-muted/50 rounded animate-pulse" />
           ) : contextTypes.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No custom context types. Built-in types are always available.</p>
+            <p className="text-xs text-muted-foreground italic">No custom context types added yet.</p>
           ) : contextTypes.map((t: any) => (
             <div key={t.type_name} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card">
               <span className="text-sm font-medium text-foreground flex-1">{t.label || t.type_name}</span>
@@ -1951,12 +2018,33 @@ function RegistriesSettings() {
 
       {/* Activity Types */}
       <div>
-        <h3 className="text-sm font-semibold text-foreground mb-3">Activity Types</h3>
-        <div className="space-y-1.5 mb-3">
+        <h3 className="text-sm font-semibold text-foreground mb-2">Activity Types</h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          Activities represent things that happened — calls made, emails sent, meetings held.
+          Each type belongs to a category (outreach, meeting, proposal, contract, internal, lifecycle, handoff)
+          which drives filtering, timeline grouping, and reporting.
+        </p>
+
+        {/* System types grouped by category */}
+        <div className="mb-3">
+          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">System</span>
+          <div className="flex flex-wrap gap-1.5 mt-1.5">
+            {SYSTEM_ACTIVITY_TYPES.map(t => (
+              <span key={t.type_name} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-muted text-muted-foreground">
+                {t.label}
+                <span className="text-[9px] opacity-60">{t.category}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        {/* Custom types */}
+        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Custom</span>
+        <div className="space-y-1.5 mb-3 mt-1.5">
           {actLoading ? (
             <div className="h-8 bg-muted/50 rounded animate-pulse" />
           ) : activityTypes.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No custom activity types. Built-in types are always available.</p>
+            <p className="text-xs text-muted-foreground italic">No custom activity types added yet.</p>
           ) : activityTypes.map((t: any) => (
             <div key={t.type_name} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card">
               <span className="text-sm font-medium text-foreground flex-1">{t.label || t.type_name}</span>

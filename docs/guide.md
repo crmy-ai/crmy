@@ -28,13 +28,14 @@ Complete documentation for CRMy — the agent-first open source CRM.
 20. [Workflows & Automation](#workflows--automation)
 21. [Webhooks](#webhooks)
 22. [Email](#email)
-23. [Custom Fields](#custom-fields)
-24. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
-25. [Analytics & Reporting](#analytics--reporting)
-26. [Plugins](#plugins)
-27. [MCP Tools Reference](#mcp-tools-reference)
-28. [REST API Reference](#rest-api-reference)
-29. [Database & Migrations](#database--migrations)
+23. [Messaging & Channels](#messaging--channels)
+24. [Custom Fields](#custom-fields)
+25. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
+26. [Analytics & Reporting](#analytics--reporting)
+27. [Plugins](#plugins)
+28. [MCP Tools Reference](#mcp-tools-reference)
+29. [REST API Reference](#rest-api-reference)
+30. [Database & Migrations](#database--migrations)
 
 ---
 
@@ -1659,7 +1660,8 @@ Optional JSON conditions on the event payload. Only events matching all filter c
 
 | Action | Description |
 |---|---|
-| `send_notification` | Emit a notification event (picked up by plugins like Slack) |
+| `send_notification` | Send a message through a configured messaging channel (with delivery tracking) or emit a notification event. Falls back to the tenant's default channel when no `channel_id` is specified. |
+| `send_email` | Draft and optionally send an outbound email with HITL approval. Set `require_approval: false` to skip human review. |
 | `create_activity` | Create a follow-up task or activity |
 | `create_note` | Add a note to the triggering object |
 | `add_tag` | Add a tag to the object |
@@ -1670,6 +1672,8 @@ Optional JSON conditions on the event payload. Only events matching all filter c
 
 ### Example: notify on closed-won deals
 
+When `channel_id` is provided, the message is delivered through that channel with tracking and retries. When omitted, the tenant's **default channel** is used if one is configured (see [Default channel](#default-channel)). If no default exists, a `workflow.notification` event is emitted for plugin-based handling (legacy behavior).
+
 ```json
 {
   "name": "Celebrate closed deals",
@@ -1678,11 +1682,37 @@ Optional JSON conditions on the event payload. Only events matching all filter c
   "actions": [
     {
       "type": "send_notification",
-      "config": { "channel": "slack", "message": "Deal closed!" }
+      "config": {
+        "message": "Deal closed!",
+        "recipient": "#wins"
+      }
     },
     {
       "type": "create_activity",
       "config": { "type": "task", "subject": "Schedule kickoff call" }
+    }
+  ]
+}
+```
+
+### Example: send email on new contact
+
+The `send_email` action drafts an outbound email. By default, a HITL approval request is created so a human can review before sending. Set `require_approval` to `false` for automated sends.
+
+```json
+{
+  "name": "Welcome email for new contacts",
+  "trigger_event": "contact.created",
+  "trigger_filter": {},
+  "actions": [
+    {
+      "type": "send_email",
+      "config": {
+        "to_address": "{{contact.email}}",
+        "subject": "Welcome aboard!",
+        "body_text": "Thanks for signing up. We're excited to have you.",
+        "require_approval": true
+      }
     }
   ]
 }
@@ -1802,6 +1832,123 @@ crmy emails get <id>
 GET    /api/v1/emails?contact_id=...&status=sent
 POST   /api/v1/emails
 GET    /api/v1/emails/:id
+```
+
+---
+
+## Messaging & Channels
+
+Send messages through configured channels (Slack, email, and more) with delivery tracking, automatic retries, and status monitoring.
+
+### How it works
+
+1. **Configure a channel** — register a messaging endpoint (e.g. a Slack webhook) via `message_channel_create`
+2. **Set a default** — mark one channel as `is_default: true` so workflow actions can omit `channel_id`
+3. **Send messages** — use `message_send` or workflow `send_notification` actions with an optional `channel_id`
+4. **Track delivery** — every message creates a delivery record with status tracking and automatic retry on failure
+
+### Providers
+
+CRMy ships with a built-in Slack provider. Additional providers (Teams, Discord, SMS) can be added via plugins.
+
+| Provider | Config fields | Status |
+|----------|--------------|--------|
+| `slack` | `webhook_url` (required), `channel` (optional default) | Built-in |
+| `email` | Provider-specific | Planned |
+| `teams` | Provider-specific | Via plugin |
+| `discord` | Provider-specific | Via plugin |
+
+### Channel configuration
+
+```json
+{
+  "name": "Eng Slack",
+  "provider": "slack",
+  "config": {
+    "webhook_url": "https://hooks.slack.com/services/T00/B00/xxxx",
+    "channel": "#crm-alerts"
+  },
+  "is_default": true
+}
+```
+
+### Default channel
+
+Each tenant can designate one channel as the **default** by setting `is_default: true` when creating or updating a channel. Only one channel per tenant can be the default — setting a new default automatically clears the previous one.
+
+The default channel is used as a fallback by the `send_notification` workflow action when no `channel_id` is specified. This means workflows can simply specify a message without needing to know the channel UUID:
+
+```json
+{ "type": "send_notification", "config": { "message": "New lead!" } }
+```
+
+### Delivery tracking
+
+Every `message_send` call creates a `message_delivery` record:
+
+| Status | Meaning |
+|--------|---------|
+| `pending` | Created, not yet attempted |
+| `delivered` | Provider confirmed receipt |
+| `retrying` | Failed, will retry (exponential backoff: 30s, 60s, 2m, ... up to 1hr) |
+| `failed` | Exhausted all retry attempts (default: 5) |
+
+### Retry logic
+
+Failed deliveries are automatically retried with exponential backoff. The retry loop runs every 30 seconds and processes pending retries in batches.
+
+### Adding custom providers via plugins
+
+Plugins can register new channel providers in their `onInit` hook:
+
+```typescript
+import type { CrmyPlugin, PluginContext } from '@crmy/server';
+import { registerProvider } from '@crmy/server/messaging/providers';
+
+export default function teamsNotifier(options: TeamsOptions): CrmyPlugin {
+  return {
+    name: 'teams-notifier',
+    async onInit(_ctx: PluginContext) {
+      registerProvider({
+        type: 'teams',
+        validateConfig(config) {
+          if (!config.webhook_url) return { valid: false, error: 'webhook_url required' };
+          return { valid: true };
+        },
+        async send(config, message) {
+          // POST to Teams webhook
+          // Return { success: true/false, ... }
+        },
+      });
+    },
+  };
+}
+```
+
+### MCP tools
+
+| Tool | Description |
+|------|-------------|
+| `message_channel_create` | Configure a new messaging channel. Required: `name`, `provider`, `config` |
+| `message_channel_update` | Update channel name, config, or active status |
+| `message_channel_get` | Get channel details by ID |
+| `message_channel_delete` | Delete a channel (delivery records are preserved) |
+| `message_channel_list` | List channels. Filter by `provider`, `is_active` |
+| `message_send` | Send a message through a channel. Required: `channel_id`, `body`. Optional: `recipient`, `subject`, `metadata` |
+| `message_delivery_get` | Check delivery status by ID |
+| `message_delivery_search` | Search deliveries. Filter by `channel_id`, `status` |
+
+### REST API
+
+```
+GET    /api/v1/messaging/channels
+POST   /api/v1/messaging/channels
+GET    /api/v1/messaging/channels/:id
+PATCH  /api/v1/messaging/channels/:id
+DELETE /api/v1/messaging/channels/:id
+POST   /api/v1/messaging/send
+GET    /api/v1/messaging/deliveries?channel_id=...&status=delivered
+GET    /api/v1/messaging/deliveries/:id
 ```
 
 ---
@@ -1970,9 +2117,11 @@ const config: ServerConfig = {
 };
 ```
 
-### Sample plugin: Slack notifier
+### Sample plugin: Slack notifier (deprecated)
 
-A built-in sample plugin at `packages/server/src/plugins/slack-notifier.ts` posts notifications to Slack on configurable events.
+> **Deprecated:** The `slack-notifier` plugin is superseded by the built-in [Messaging & Channels](#messaging--channels) system, which provides delivery tracking, automatic retries, and per-tenant configuration. To migrate, create a Slack messaging channel via `message_channel_create` and update your workflow actions to include `channel_id`.
+
+A legacy sample plugin at `packages/server/src/plugins/slack-notifier.ts` posts notifications to Slack on configurable events. It still works but lacks delivery tracking and retry logic.
 
 ```typescript
 import slackNotifier from './plugins/slack-notifier.js';
@@ -2039,19 +2188,20 @@ Content-Type: application/json
 
 Uses the MCP Streamable HTTP transport. Each request creates a new session.
 
-### Full tool list (80+)
+### Full tool list (120+)
 
 | Category | Tools |
 |---|---|
 | Briefing | `briefing_get` |
-| Context | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_review`, `context_stale` |
-| Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami` |
+| Context | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_stale`, `context_diff`, `context_ingest`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
+| Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise` |
 | Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
 | Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
 | Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
-| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_delete` |
-| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete`, `pipeline_summary` |
+| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_health_report`, `account_delete` |
+| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete` |
+| Messaging | `message_channel_create`, `message_channel_update`, `message_channel_get`, `message_channel_delete`, `message_channel_list`, `message_send`, `message_delivery_get`, `message_delivery_search` |
 | Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
 | Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
 | Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
@@ -2060,8 +2210,8 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 | Emails | `email_create`, `email_get`, `email_search` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
 | Identity | `entity_resolve` |
-| Analytics | `crm_search`, `pipeline_forecast`, `account_health_report` |
-| Meta | `schema_get`, `tenant_get_stats` |
+| Analytics | `crm_search`, `pipeline_summary`, `pipeline_forecast`, `account_health_report`, `tenant_get_stats` |
+| Meta | `schema_get`, `guide_search` |
 
 ---
 
@@ -2221,6 +2371,19 @@ Base URL: `/api/v1`
 | POST | `/emails` | Create/draft email |
 | GET | `/emails/:id` | Get email |
 
+### Messaging Channels
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/messaging/channels` | List channels |
+| POST | `/messaging/channels` | Create channel |
+| GET | `/messaging/channels/:id` | Get channel |
+| PATCH | `/messaging/channels/:id` | Update channel |
+| DELETE | `/messaging/channels/:id` | Delete channel |
+| POST | `/messaging/send` | Send a message |
+| GET | `/messaging/deliveries` | List deliveries |
+| GET | `/messaging/deliveries/:id` | Get delivery status |
+
 ### Custom Fields
 
 | Method | Path | Description |
@@ -2295,3 +2458,11 @@ Located in `packages/server/migrations/`:
 | 014_context.sql | context_entries, context type registry, FTS indexes |
 | 015_activity_types.sql | activity type registry, default types seed |
 | 016_governor.sql | governor_limits, plan defaults |
+| 017_agent.sql | agent_configs, agent sessions |
+| 018_extraction.sql | context extraction pipeline |
+| 018_identity_resolution.sql | identity resolution tables |
+| 020_agent_activity.sql | agent tool call activity log |
+| 021_context_priorities.sql | context entry priority weights |
+| 022_pgvector.sql | pgvector embedding column (conditional) |
+| 023_messaging_channels.sql | messaging_channels, message_deliveries |
+| 024_messaging_default.sql | is_default column + unique partial index |

@@ -150,6 +150,17 @@ const TOOL_SCOPES: Record<string, string[]> = {
   tenant_get_stats: ['read'],
   entity_resolve: [],  // always allowed
   schema_get: [],      // always allowed
+  guide_search: [],    // always allowed
+
+  // ── Messaging ──
+  message_channel_create: ['write'],
+  message_channel_update: ['write'],
+  message_channel_get: ['read'],
+  message_channel_delete: ['write'],
+  message_channel_list: ['read'],
+  message_send: ['write'],
+  message_delivery_get: ['read'],
+  message_delivery_search: ['read'],
 };
 
 /**

@@ -294,6 +294,11 @@ export const schemaGet = z.object({
 
 export const tenantGetStats = z.object({});
 
+export const guideSearch = z.object({
+  query: z.string().min(1).describe('Search query — a topic, feature name, or question about CRMy (e.g. "context engine", "how do assignments work", "webhooks")'),
+  section: z.string().optional().describe('Optional exact section name to retrieve (e.g. "Contacts", "Briefings", "HITL (Human-in-the-Loop)")'),
+});
+
 // -- Auth schemas --
 
 export const authRegister = z.object({
@@ -581,7 +586,7 @@ export const noteList = z.object({
 // -- Workflow schemas --
 
 const workflowActionType = z.enum([
-  'send_notification', 'update_field', 'create_activity',
+  'send_notification', 'send_email', 'update_field', 'create_activity',
   'add_tag', 'remove_tag', 'assign_owner', 'create_note', 'webhook',
 ]);
 
@@ -624,6 +629,53 @@ export const workflowList = z.object({
 export const workflowRunList = z.object({
   workflow_id: uuid,
   status: z.enum(['running', 'completed', 'failed']).optional(),
+  limit,
+  cursor,
+});
+
+// -- Messaging channel schemas --
+
+export const messagingChannelCreate = z.object({
+  name: z.string().min(1),
+  provider: z.string().min(1),
+  config: z.record(z.unknown()),
+  is_active: z.boolean().default(true),
+  is_default: z.boolean().default(false),
+});
+
+export const messagingChannelUpdate = z.object({
+  id: uuid,
+  patch: z.object({
+    name: z.string().min(1).optional(),
+    config: z.record(z.unknown()).optional(),
+    is_active: z.boolean().optional(),
+    is_default: z.boolean().optional(),
+  }),
+});
+
+export const messagingChannelGet = z.object({ id: uuid });
+export const messagingChannelDelete = z.object({ id: uuid });
+
+export const messagingChannelList = z.object({
+  provider: z.string().optional(),
+  is_active: z.boolean().optional(),
+  limit,
+  cursor,
+});
+
+export const messageSend = z.object({
+  channel_id: uuid,
+  recipient: z.string().optional(),
+  subject: z.string().optional(),
+  body: z.string().min(1),
+  metadata: z.record(z.unknown()).default({}),
+});
+
+export const messageDeliveryGet = z.object({ id: uuid });
+
+export const messageDeliverySearch = z.object({
+  channel_id: uuid.optional(),
+  status: z.enum(['pending', 'delivered', 'retrying', 'failed']).optional(),
   limit,
   cursor,
 });

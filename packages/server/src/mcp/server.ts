@@ -41,6 +41,8 @@ import { assignmentTools } from './tools/assignments.js';
 import { contextEntryTools } from './tools/context-entries.js';
 import { registryTools } from './tools/registries.js';
 import { entityResolveTools } from './tools/entity-resolve.js';
+import { guideTools } from './tools/guide.js';
+import { messagingTools } from './tools/messaging.js';
 
 export interface ToolDef {
   name: string;
@@ -80,6 +82,10 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...workflowTools(db),
     ...customFieldTools(db),
     ...metaTools(db),
+    // 9. Messaging channels
+    ...messagingTools(db),
+    // 10. User guide — always available, no DB needed
+    ...guideTools(),
   ];
 }
 

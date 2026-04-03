@@ -272,10 +272,20 @@ export default function UseCases() {
         ) : view === 'table' ? (
           <div className="px-4 md:px-6">
             {filtered.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <p className="text-sm">No use cases found.</p>
-                <button onClick={() => { setSearch(''); setActiveFilters({}); setProdDate('all'); }} className="mt-2 text-xs text-primary font-semibold hover:underline">Clear all filters</button>
-              </div>
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20 text-center">
+                <FolderKanban className="w-14 h-14 text-muted-foreground/30 mb-4" />
+                <p className="text-base font-display font-semibold text-foreground mb-1">
+                  {allUseCases.length === 0 ? 'No use cases yet' : 'No matches'}
+                </p>
+                <p className="text-sm text-muted-foreground max-w-sm">
+                  {allUseCases.length === 0
+                    ? 'Create a use case to track customer deployments and adoption.'
+                    : 'Try adjusting your search, filters, or date range.'}
+                </p>
+                {(search || Object.keys(activeFilters).length > 0 || prodDate !== 'all') && (
+                  <button onClick={() => { setSearch(''); setActiveFilters({}); setProdDate('all'); }} className="mt-3 text-xs text-primary font-semibold hover:underline">Clear all filters</button>
+                )}
+              </motion.div>
             ) : (
               <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">

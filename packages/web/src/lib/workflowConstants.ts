@@ -51,7 +51,19 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     value: 'send_notification',
     label: 'Send notification',
     configFields: [
-      { key: 'message', label: 'Message', placeholder: 'e.g. A new lead arrived', required: true },
+      { key: 'message',    label: 'Message',    placeholder: 'e.g. A new lead arrived',      required: true  },
+      { key: 'channel_id', label: 'Channel ID', placeholder: 'UUID (uses default if empty)', required: false },
+      { key: 'recipient',  label: 'Recipient',  placeholder: 'e.g. #channel or @user',       required: false },
+    ],
+  },
+  {
+    value: 'send_email',
+    label: 'Send email',
+    configFields: [
+      { key: 'to_address',        label: 'To',               placeholder: 'recipient@example.com', required: true  },
+      { key: 'subject',           label: 'Subject',          placeholder: 'e.g. Welcome aboard!',  required: true  },
+      { key: 'body_text',         label: 'Body',             placeholder: 'Email body text...',     required: true  },
+      { key: 'require_approval',  label: 'Require approval', placeholder: 'true or false',          required: false },
     ],
   },
   {

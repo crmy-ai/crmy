@@ -640,3 +640,38 @@ export interface Briefing {
   /** True if context entries were truncated to fit within token_budget. */
   truncated?: boolean;
 }
+
+export interface MessagingChannel {
+  id: UUID;
+  tenant_id: UUID;
+  name: string;
+  provider: string;
+  config: Record<string, unknown>;
+  is_active: boolean;
+  is_default: boolean;
+  created_by?: UUID;
+  created_at: string;
+  updated_at: string;
+}
+
+export type MessageDeliveryStatus = 'pending' | 'delivered' | 'retrying' | 'failed';
+
+export interface MessageDelivery {
+  id: UUID;
+  tenant_id: UUID;
+  channel_id: UUID;
+  recipient?: string;
+  subject?: string;
+  body: string;
+  status: MessageDeliveryStatus;
+  provider_msg_id?: string;
+  response_status?: number;
+  response_body?: string;
+  attempt_count: number;
+  max_attempts: number;
+  next_retry_at?: string;
+  delivered_at?: string;
+  error?: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}

@@ -25,6 +25,10 @@ export default function slackNotifier(options: SlackConfig): CrmyPlugin {
       if (!options.webhookUrl) {
         throw new Error('slack-notifier requires webhookUrl');
       }
+      console.warn(
+        '[slack-notifier] This plugin is deprecated. Configure a Slack messaging channel instead ' +
+        '(message_channel_create with provider "slack") for delivery tracking and retries.',
+      );
       console.log(`  Slack notifier → ${options.channel ?? '#crm-alerts'}`);
     },
 

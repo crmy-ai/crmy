@@ -119,7 +119,7 @@ Add to `.cursor/mcp.json` or equivalent:
 }
 ```
 
-Once connected, your agent has access to 111 MCP tools. No API calls, no auth wiring — just tool calls.
+Once connected, your agent has access to 120+ MCP tools. No API calls, no auth wiring — just tool calls.
 
 ---
 
@@ -220,7 +220,7 @@ context_semantic_search query="deals at risk due to competitor pressure"
 
 ---
 
-## MCP Tools (111)
+## MCP Tools (120+)
 
 | Category | Tools |
 |---|---|
@@ -233,7 +233,8 @@ context_semantic_search query="deals at risk due to competitor pressure"
 | Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
 | Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_health_report`, `account_delete` |
 | Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete` |
-| Analytics | `pipeline_summary`, `pipeline_forecast`, `crm_search`, `account_health_report` |
+| Messaging | `message_channel_create`, `message_channel_update`, `message_channel_get`, `message_channel_delete`, `message_channel_list`, `message_send`, `message_delivery_get`, `message_delivery_search` |
+| Analytics | `pipeline_summary`, `pipeline_forecast`, `crm_search`, `account_health_report`, `tenant_get_stats` |
 | Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
 | Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
 | Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
@@ -241,7 +242,7 @@ context_semantic_search query="deals at risk due to competitor pressure"
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
 | Emails | `email_create`, `email_get`, `email_search` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
-| Meta | `schema_get`, `entity_resolve`, `tenant_get_stats` |
+| Meta | `schema_get`, `entity_resolve`, `guide_search` |
 
 ---
 
@@ -596,9 +597,11 @@ Step-by-step guides for building agents on CRMy, each with MCP tool calls, CLI e
 - **Node.js version gate** — clear error on Node < 20 instead of cryptic ESM failures
 
 ### MCP tools
-- **111 tools** with rewritten descriptions optimized for LLM tool selection
+- **120+ tools** with rewritten descriptions optimized for LLM tool selection
 - **Tool ordering** — briefing and context tools first in manifest, signaling priority to agents
 - **Semantic search** — `context_semantic_search` and `context_embed_backfill` (pgvector)
+- **Multi-channel messaging** — `message_channel_create`, `message_send`, `message_delivery_get` with Slack built-in, extensible via plugins
+- **User guide search** — `guide_search` tool lets the agent look up CRMy documentation to answer user questions
 
 ### Web UI
 - **18 pages** — Dashboard, Contacts, Accounts, Opportunities, Use Cases, Activities, Context, Assignments, Agents, HITL, Workflows, Emails, Settings, and more

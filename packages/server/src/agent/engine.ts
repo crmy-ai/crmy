@@ -173,6 +173,19 @@ const TOOL_STATUS_MAP: Record<string, string> = {
   custom_field_create:  'Creating custom field…',
   custom_field_update:  'Updating custom field…',
   custom_field_delete:  'Deleting custom field…',
+
+  // Messaging
+  message_channel_create: 'Creating messaging channel…',
+  message_channel_update: 'Updating messaging channel…',
+  message_channel_get:    'Looking up messaging channel…',
+  message_channel_delete: 'Deleting messaging channel…',
+  message_channel_list:   'Loading messaging channels…',
+  message_send:           'Sending message…',
+  message_delivery_get:   'Checking message delivery…',
+  message_delivery_search:'Searching message deliveries…',
+
+  // Guide
+  guide_search:         'Searching user guide…',
 };
 
 function toolStatusText(name: string): string {
@@ -445,7 +458,17 @@ function buildSystemPrompt(
 
   parts.push(toolLines.join('\n'));
 
-  // ── 5. Communication ──────────────────────────────────────────────────────
+  // ── 5. User guide ──────────────────────────────────────────────────────────
+  if (toolDefs.some(t => t.name === 'guide_search')) {
+    parts.push([
+      '# User guide',
+      'You have access to the complete CRMy user guide via the `guide_search` tool.',
+      'When the user asks "how does X work?", "what is X?", or needs help understanding any CRMy feature, use `guide_search` to look up the relevant documentation and provide an accurate answer.',
+      'Do not guess or fabricate information about CRMy features — always consult the guide first.',
+    ].join('\n'));
+  }
+
+  // ── 6. Communication ──────────────────────────────────────────────────────
   parts.push([
     '# Communication',
     '- Be concise. After completing a task, confirm what changed and show the key new values.',
