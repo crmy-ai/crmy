@@ -1664,10 +1664,10 @@ Optional JSON conditions on the event payload. Only events matching all filter c
 | `send_email` | Draft and optionally send an outbound email with HITL approval. Set `require_approval: false` to skip human review. |
 | `create_activity` | Create a follow-up task or activity |
 | `create_note` | Add a note to the triggering object |
-| `add_tag` | Add a tag to the object |
-| `remove_tag` | Remove a tag |
-| `assign_owner` | Change the owner |
-| `update_field` | Update a field on the object |
+| `add_tag` | Add a tag to the triggering object (contact, account, or opportunity). Config: `tag`, optional `object_type`, `object_id`. |
+| `remove_tag` | Remove a tag from the triggering object. Config: `tag`, optional `object_type`, `object_id`. |
+| `assign_owner` | Change the owner of the triggering object. Config: `owner_id`, optional `object_type`, `object_id`. |
+| `update_field` | Update a field on the triggering object. Config: `field`, `value`, optional `object_type`, `object_id`. |
 | `webhook` | Fire an outbound HTTP request |
 
 ### Example: notify on closed-won deals
@@ -1873,6 +1873,69 @@ crmy emails get <id>
 GET    /api/v1/emails?contact_id=...&status=sent
 POST   /api/v1/emails
 GET    /api/v1/emails/:id
+GET    /api/v1/email-provider
+PUT    /api/v1/email-provider
+```
+
+---
+
+## Email Sequences
+
+Create automated drip campaigns that send a series of emails to enrolled contacts on a schedule.
+
+### How it works
+
+1. **Create a sequence** — define steps with `delay_days`, `subject`, and email body
+2. **Enroll contacts** — use `email_sequence_enroll` to start a contact on the sequence
+3. **Automatic sending** — the background worker sends each step's email when the delay elapses, then advances to the next step
+4. **Completion** — once all steps are sent, the enrollment is marked `completed`
+
+### MCP tools
+
+| Tool | Description |
+|---|---|
+| `email_sequence_create` | Create a new sequence with steps |
+| `email_sequence_get` | Get sequence by ID |
+| `email_sequence_update` | Update name, description, steps, or active status |
+| `email_sequence_delete` | Delete a sequence (cascades to enrollments) |
+| `email_sequence_list` | List sequences with optional active filter |
+| `email_sequence_enroll` | Enroll a contact (one enrollment per contact per sequence) |
+| `email_sequence_unenroll` | Cancel an active enrollment |
+| `email_sequence_enrollment_list` | List enrollments by sequence, contact, or status |
+
+### Example sequence
+
+```json
+{
+  "name": "Onboarding drip",
+  "steps": [
+    { "delay_days": 0, "subject": "Welcome!", "body_text": "Thanks for signing up." },
+    { "delay_days": 3, "subject": "Getting started", "body_text": "Here are some tips..." },
+    { "delay_days": 7, "subject": "How's it going?", "body_text": "We'd love your feedback." }
+  ]
+}
+```
+
+### Enrollment statuses
+
+| Status | Meaning |
+|--------|---------|
+| `active` | Currently progressing through steps |
+| `completed` | All steps sent |
+| `paused` | Temporarily paused |
+| `cancelled` | Manually unenrolled |
+
+### REST API
+
+```
+GET    /api/v1/email-sequences
+POST   /api/v1/email-sequences
+GET    /api/v1/email-sequences/:id
+PATCH  /api/v1/email-sequences/:id
+DELETE /api/v1/email-sequences/:id
+POST   /api/v1/email-sequences/enroll
+POST   /api/v1/email-sequences/unenroll
+GET    /api/v1/email-sequences/enrollments
 ```
 
 ---
@@ -2229,7 +2292,7 @@ Content-Type: application/json
 
 Uses the MCP Streamable HTTP transport. Each request creates a new session.
 
-### Full tool list (120+)
+### Full tool list (175+)
 
 | Category | Tools |
 |---|---|
@@ -2249,6 +2312,7 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 | Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
 | Emails | `email_create`, `email_get`, `email_search`, `email_provider_set`, `email_provider_get` |
+| Email Sequences | `email_sequence_create`, `email_sequence_get`, `email_sequence_update`, `email_sequence_delete`, `email_sequence_list`, `email_sequence_enroll`, `email_sequence_unenroll`, `email_sequence_enrollment_list` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
 | Identity | `entity_resolve` |
 | Analytics | `crm_search`, `pipeline_summary`, `pipeline_forecast`, `account_health_report`, `tenant_get_stats` |

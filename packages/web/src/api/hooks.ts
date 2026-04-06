@@ -149,8 +149,8 @@ export function useDeleteUseCase(id: string) {
 export function useAdvanceUseCaseStage(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { stage: string; note?: string; attributed_arr?: number }) =>
-      api.post(`use-cases/${id}/stage`, data),
+    mutationFn: (data: { stage: string; note?: string }) =>
+      api.patch(`use-cases/${id}`, { stage: data.stage, note: data.note }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['use-case', id] });
       qc.invalidateQueries({ queryKey: ['use-cases'] });
@@ -167,7 +167,7 @@ export function useSetConsumption(id: string) {
 export function useSetHealth(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { health_score: number; health_note: string }) => api.post(`use-cases/${id}/health`, data),
+    mutationFn: (data: { score: number; rationale?: string }) => api.post(`use-cases/${id}/health`, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['use-case', id] }),
   });
 }

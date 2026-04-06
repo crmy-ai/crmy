@@ -43,6 +43,7 @@ import { registryTools } from './tools/registries.js';
 import { entityResolveTools } from './tools/entity-resolve.js';
 import { guideTools } from './tools/guide.js';
 import { messagingTools } from './tools/messaging.js';
+import { emailSequenceTools } from './tools/email-sequences.js';
 
 export interface ToolDef {
   name: string;
@@ -75,6 +76,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
     // 8. Remaining tools
     ...useCaseTools(db),
     ...emailTools(db),
+    ...emailSequenceTools(db),
     ...noteTools(db),
     ...entityResolveTools(db),
     ...registryTools(db),

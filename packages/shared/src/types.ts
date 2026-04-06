@@ -90,7 +90,7 @@ export interface Opportunity {
 export interface Activity {
   id: UUID;
   tenant_id: UUID;
-  type: 'call' | 'email' | 'meeting' | 'note' | 'task';
+  type: 'call' | 'email' | 'meeting' | 'note' | 'task' | 'demo' | 'proposal' | 'research' | 'handoff' | 'status_update';
   subject: string;
   body?: string;
   status: string;
@@ -368,6 +368,7 @@ export interface Note {
 
 export type WorkflowActionType =
   | 'send_notification'
+  | 'send_email'
   | 'update_field'
   | 'create_activity'
   | 'add_tag'

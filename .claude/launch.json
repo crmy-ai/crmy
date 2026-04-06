@@ -3,14 +3,14 @@
   "configurations": [
     {
       "name": "web",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--workspace=packages/web"],
+      "runtimeExecutable": "/bin/zsh",
+      "runtimeArgs": ["-l", "-c", "npm run dev --workspace=packages/web"],
       "port": 5173
     },
     {
       "name": "server",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--workspace=packages/server"],
+      "runtimeExecutable": "/bin/zsh",
+      "runtimeArgs": ["-l", "-c", "npm run dev --workspace=packages/server"],
       "port": 3001,
       "autoPort": false
     }

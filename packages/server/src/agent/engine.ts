@@ -156,6 +156,14 @@ const TOOL_STATUS_MAP: Record<string, string> = {
   email_search:         'Searching emails…',
   email_provider_set:   'Configuring email provider…',
   email_provider_get:   'Checking email provider…',
+  email_sequence_create:'Creating email sequence…',
+  email_sequence_get:   'Loading email sequence…',
+  email_sequence_update:'Updating email sequence…',
+  email_sequence_delete:'Deleting email sequence…',
+  email_sequence_list:  'Listing email sequences…',
+  email_sequence_enroll:'Enrolling contact in sequence…',
+  email_sequence_unenroll:'Unenrolling contact…',
+  email_sequence_enrollment_list:'Listing sequence enrollments…',
 
   // Webhooks / workflows
   webhook_create:       'Creating webhook…',
@@ -210,7 +218,7 @@ function buildAgentScopes(config: AgentConfig): string[] {
     scopes.push('activities:write');
   }
   if (config.can_create_assignments) {
-    scopes.push('assignments:create', 'assignments:update');
+    scopes.push('assignments:read', 'assignments:write');
   }
   // Context writing is always allowed — the agent should be able to add context
   scopes.push('context:write');
@@ -419,7 +427,7 @@ function buildSystemPrompt(
   // ── 3. Capabilities ───────────────────────────────────────────────────────
   const canWrite = scopes.includes('write') || scopes.includes('contacts:write');
   const canActivities = scopes.includes('activities:write');
-  const canAssignments = scopes.includes('assignments:create');
+  const canAssignments = scopes.includes('assignments:write');
 
   const capLines = ['# Capabilities'];
   capLines.push('**You CAN:**');

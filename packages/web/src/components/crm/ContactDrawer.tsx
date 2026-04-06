@@ -18,7 +18,7 @@ import { DatePicker } from '@/components/ui/date-picker';
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
 
-const LIFECYCLE_STAGES = ['lead', 'qualified', 'opportunity', 'customer', 'churned'];
+const LIFECYCLE_STAGES = ['lead', 'prospect', 'customer', 'churned'];
 
 function ContactEditForm({
   contact,

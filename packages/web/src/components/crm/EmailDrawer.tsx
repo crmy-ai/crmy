@@ -11,14 +11,19 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
+  XCircle,
+  Send,
   User,
 } from 'lucide-react';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof Mail }> = {
   draft: { label: 'Draft', color: 'bg-muted text-muted-foreground', icon: FileEdit },
   pending_approval: { label: 'Pending Approval', color: 'bg-warning/15 text-warning', icon: Clock },
+  approved: { label: 'Approved', color: 'bg-emerald-500/15 text-emerald-500', icon: CheckCircle2 },
+  sending: { label: 'Sending', color: 'bg-blue-500/15 text-blue-500', icon: Send },
   sent: { label: 'Sent', color: 'bg-emerald-500/15 text-emerald-500', icon: CheckCircle2 },
   failed: { label: 'Failed', color: 'bg-destructive/15 text-destructive', icon: AlertCircle },
+  rejected: { label: 'Rejected', color: 'bg-destructive/15 text-destructive', icon: XCircle },
 };
 
 export function EmailDrawer() {

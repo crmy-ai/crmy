@@ -11,7 +11,7 @@ export const limit = z.number().int().min(1).max(100).default(20);
 export const lifecycleStage = z.enum(['lead', 'prospect', 'customer', 'churned']);
 export const oppStage = z.enum(['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost']);
 export const forecastCat = z.enum(['pipeline', 'best_case', 'commit', 'closed']);
-export const activityType = z.enum(['call', 'email', 'meeting', 'note', 'task']);
+export const activityType = z.enum(['call', 'email', 'meeting', 'note', 'task', 'demo', 'proposal', 'research', 'handoff', 'status_update']);
 export const direction = z.enum(['inbound', 'outbound']);
 export const userRole = z.enum(['owner', 'admin', 'member']);
 export const subjectType = z.enum(['contact', 'account', 'opportunity', 'use_case']);
@@ -500,9 +500,43 @@ export const emailSequenceCreate = z.object({
   })).min(1),
 });
 
+export const emailSequenceGet = z.object({ id: uuid });
+export const emailSequenceDelete = z.object({ id: uuid });
+
+export const emailSequenceUpdate = z.object({
+  id: uuid,
+  patch: z.object({
+    name: z.string().min(1).optional(),
+    description: z.string().optional(),
+    steps: z.array(z.object({
+      delay_days: z.number().int().min(0),
+      subject: z.string().min(1),
+      body_html: z.string().optional(),
+      body_text: z.string().optional(),
+    })).min(1).optional(),
+    is_active: z.boolean().optional(),
+  }),
+});
+
+export const emailSequenceList = z.object({
+  is_active: z.boolean().optional(),
+  limit,
+  cursor,
+});
+
 export const emailSequenceEnroll = z.object({
   sequence_id: uuid,
   contact_id: uuid,
+});
+
+export const emailSequenceUnenroll = z.object({ id: uuid });
+
+export const emailSequenceEnrollmentList = z.object({
+  sequence_id: uuid.optional(),
+  contact_id: uuid.optional(),
+  status: z.enum(['active', 'completed', 'paused', 'cancelled']).optional(),
+  limit,
+  cursor,
 });
 
 // -- Custom field schemas --

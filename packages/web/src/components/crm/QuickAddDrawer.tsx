@@ -328,7 +328,7 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
     { key: 'description', label: 'Description', placeholder: 'Any additional details', fieldType: 'textarea' },
   ],
   activity: [
-    { key: 'type', label: 'Type', fieldType: 'select', options: ['call', 'email', 'meeting', 'note', 'task', 'demo', 'proposal', 'research', 'handoff'], required: true },
+    { key: 'type', label: 'Type', fieldType: 'select', options: ['call', 'email', 'meeting', 'note', 'task', 'demo', 'proposal', 'research', 'handoff', 'status_update'], required: true},
     { key: 'subject', label: 'Subject', placeholder: 'What was this activity about?', required: true },
     { key: 'subject_type', label: 'Linked To', fieldType: 'subject-type-select', placeholder: 'Link to a CRM record (optional)' },
     { key: 'subject_id', label: 'Record', fieldType: 'entity-select', dependsOn: { key: 'subject_type' } },

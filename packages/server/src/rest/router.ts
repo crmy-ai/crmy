@@ -587,6 +587,108 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  // --- Email Provider ---
+  router.get('/email-provider', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_provider_get');
+      const result = await handler({}, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.put('/email-provider', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_provider_set');
+      const result = await handler(req.body, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Email Sequences ---
+  router.get('/email-sequences', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_sequence_list');
+      const result = await handler({
+        is_active: req.query.is_active !== undefined ? req.query.is_active === 'true' : undefined,
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/email-sequences', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_sequence_create');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/email-sequences/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_sequence_get');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/email-sequences/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_sequence_update');
+      const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/email-sequences/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_sequence_delete');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/email-sequences/enroll', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_sequence_enroll');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/email-sequences/unenroll', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_sequence_unenroll');
+      const result = await handler(req.body, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/email-sequences/enrollments', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'email_sequence_enrollment_list');
+      const result = await handler({
+        sequence_id: qs(req.query.sequence_id),
+        contact_id: qs(req.query.contact_id),
+        status: qs(req.query.status),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Custom Fields ---
   router.get('/custom-fields', async (req: Request, res: Response) => {
     try {

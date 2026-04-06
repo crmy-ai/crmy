@@ -21,6 +21,7 @@ import { cleanExpiredSessions } from './db/repos/agent.js';
 import { processPendingExtractions } from './agent/extraction.js';
 import { processStaleEntries } from './services/staleness.js';
 import { loadPlugins, shutdownPlugins, type PluginConfig } from './plugins/index.js';
+import { eventBus } from './events/bus.js';
 import type { ActorContext } from '@crmy/shared';
 
 // Read package version at runtime — avoids hardcoding across builds
@@ -220,6 +221,7 @@ export async function createApp(config: ServerConfig) {
   });
 
   // Background workers (every 60 seconds)
+  const { processWebhookRetries } = await import('./webhooks/dispatcher.js');
   const hitlInterval = setInterval(async () => {
     try {
       await autoApproveExpired(db);
@@ -227,6 +229,7 @@ export async function createApp(config: ServerConfig) {
       await cleanExpiredSessions(db);
       await processPendingExtractions(db);
       await processStaleEntries(db);
+      await processWebhookRetries(db);
       // Evict idle MCP sessions (30-minute TTL)
       evictStaleMcpSessions();
     } catch (err) {
@@ -245,7 +248,44 @@ export async function createApp(config: ServerConfig) {
   const { registerEmailHitlHandler } = await import('./email/hitl-handler.js');
   registerEmailHitlHandler(db);
 
-  return { app, db, hitlInterval };
+  // Wire workflow engine to event bus — workflows trigger on emitted events
+  const { createWorkflowEngine } = await import('./workflows/engine.js');
+  const workflowEngine = createWorkflowEngine(db);
+  eventBus.on('crmy:event', (event) => {
+    // Skip workflow-generated events to prevent infinite loops
+    if (event.eventType.startsWith('workflow.')) return;
+    workflowEngine
+      .processEvent(event.tenantId, event.eventType, event.event_id, event.afterData)
+      .catch((err) => console.error('[workflow] processEvent error:', err));
+  });
+
+  // Wire plugin event dispatch to event bus
+  const { dispatchEvent } = await import('./plugins/index.js');
+  eventBus.on('crmy:event', (event) => {
+    dispatchEvent({
+      id: event.event_id,
+      tenant_id: event.tenantId,
+      event_type: event.eventType,
+      actor_id: event.actorId,
+      actor_type: event.actorType,
+      object_type: event.objectType,
+      object_id: event.objectId,
+      before_data: event.beforeData,
+      after_data: event.afterData,
+      metadata: event.metadata ?? {},
+      created_at: new Date().toISOString(),
+    }).catch((err) => console.error('[plugins] dispatchEvent error:', err));
+  });
+
+  // Wire webhook dispatcher to event bus — delivers to registered webhook endpoints
+  const { registerWebhookDispatcher } = await import('./webhooks/dispatcher.js');
+  registerWebhookDispatcher(db);
+
+  // Start messaging retry loop (30s interval for exponential backoff retries)
+  const { startRetryLoop, stopRetryLoop } = await import('./messaging/delivery.js');
+  startRetryLoop(db);
+
+  return { app, db, hitlInterval, stopRetryLoop };
 }
 
 /**
@@ -391,7 +431,7 @@ async function seedDemoData(db: DbPool): Promise<void> {
 // Direct startup
 async function main() {
   const config = loadConfig();
-  const { app, hitlInterval } = await createApp(config);
+  const { app, hitlInterval, stopRetryLoop } = await createApp(config);
 
   const server = app.listen(config.port, () => {
     console.log(`crmy server ready on :${config.port}`);
@@ -400,6 +440,7 @@ async function main() {
   // Graceful shutdown
   const shutdown = async () => {
     clearInterval(hitlInterval);
+    stopRetryLoop();
     await shutdownPlugins();
     server.close();
     await closePool();

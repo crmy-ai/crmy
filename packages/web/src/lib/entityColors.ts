@@ -19,4 +19,5 @@ export const ENTITY_COLORS = {
   agents:        { text: 'text-[#6366f1]',   bg: 'bg-[#6366f1]/15',  bar: 'bg-[#6366f1]' },
   context:       { text: 'text-[#0ea5e9]',   bg: 'bg-[#0ea5e9]/15',  bar: 'bg-[#0ea5e9]' },
   workflows:     { text: 'text-amber-500',   bg: 'bg-amber-500/15',  bar: 'bg-amber-500' },
+  emails:        { text: 'text-[#3b82f6]',   bg: 'bg-[#3b82f6]/15',  bar: 'bg-[#3b82f6]' },
 } as const;

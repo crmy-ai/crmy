@@ -58,7 +58,7 @@ function matchesFilter(filter: Record<string, unknown>, payload: unknown): boole
 async function executeAction(
   db: DbPool, tenantId: UUID,
   action: { type: string; config: Record<string, unknown> },
-  _payload: unknown,
+  payload: unknown,
 ): Promise<void> {
   switch (action.type) {
     case 'create_note': {
@@ -184,22 +184,129 @@ async function executeAction(
         objectId: email.id,
         afterData: { id: email.id, to: email.to_email, subject: email.subject, status: email.status },
       });
+
+      // When no approval required, deliver immediately
+      if (!requireApproval) {
+        const { deliverEmail } = await import('../email/delivery.js');
+        await deliverEmail(db, tenantId, email.id);
+      }
       break;
     }
-    case 'update_field':
+    case 'update_field': {
+      const objectType = action.config.object_type as string || (payload as Record<string, unknown>)?.object_type as string;
+      const objectId = action.config.object_id as string || (payload as Record<string, unknown>)?.id as string;
+      const field = action.config.field as string;
+      const value = action.config.value;
+
+      if (objectType && objectId && field) {
+        const repoMap: Record<string, string> = {
+          contact: '../db/repos/contacts.js',
+          account: '../db/repos/accounts.js',
+          opportunity: '../db/repos/opportunities.js',
+        };
+        const repoPath = repoMap[objectType];
+        if (repoPath) {
+          const repo = await import(repoPath);
+          const updateFn = repo[`update${objectType.charAt(0).toUpperCase() + objectType.slice(1)}`];
+          if (updateFn) await updateFn(db, tenantId, objectId, { [field]: value });
+        }
+      }
+
+      await emitEvent(db, {
+        tenantId,
+        eventType: 'workflow.action.update_field',
+        actorType: 'system',
+        objectType: objectType || 'workflow',
+        objectId,
+        afterData: action.config,
+      });
+      break;
+    }
     case 'add_tag':
-    case 'remove_tag':
-    case 'assign_owner':
-    case 'webhook':
-      // Emit event for plugin/external handling
+    case 'remove_tag': {
+      const tagPayload = payload as Record<string, unknown> | undefined;
+      const objType = action.config.object_type as string || tagPayload?.object_type as string;
+      const objId = action.config.object_id as string || tagPayload?.id as string;
+      const tag = action.config.tag as string;
+
+      if (objType && objId && tag) {
+        const repoMap: Record<string, string> = {
+          contact: '../db/repos/contacts.js',
+          account: '../db/repos/accounts.js',
+          opportunity: '../db/repos/opportunities.js',
+        };
+        const repoPath = repoMap[objType];
+        if (repoPath) {
+          const repo = await import(repoPath);
+          const getFn = repo[`get${objType.charAt(0).toUpperCase() + objType.slice(1)}`];
+          const updateFn = repo[`update${objType.charAt(0).toUpperCase() + objType.slice(1)}`];
+          if (getFn && updateFn) {
+            const record = await getFn(db, tenantId, objId);
+            if (record) {
+              const tags: string[] = Array.isArray(record.tags) ? [...record.tags] : [];
+              if (action.type === 'add_tag' && !tags.includes(tag)) {
+                tags.push(tag);
+              } else if (action.type === 'remove_tag') {
+                const idx = tags.indexOf(tag);
+                if (idx >= 0) tags.splice(idx, 1);
+              }
+              await updateFn(db, tenantId, objId, { tags });
+            }
+          }
+        }
+      }
+
       await emitEvent(db, {
         tenantId,
         eventType: `workflow.action.${action.type}`,
+        actorType: 'system',
+        objectType: objType || 'workflow',
+        objectId: objId,
+        afterData: action.config,
+      });
+      break;
+    }
+    case 'assign_owner': {
+      const ownerPayload = payload as Record<string, unknown> | undefined;
+      const ownerObjType = action.config.object_type as string || ownerPayload?.object_type as string;
+      const ownerObjId = action.config.object_id as string || ownerPayload?.id as string;
+      const ownerId = action.config.owner_id as string;
+
+      if (ownerObjType && ownerObjId && ownerId) {
+        const repoMap: Record<string, string> = {
+          contact: '../db/repos/contacts.js',
+          account: '../db/repos/accounts.js',
+          opportunity: '../db/repos/opportunities.js',
+        };
+        const repoPath = repoMap[ownerObjType];
+        if (repoPath) {
+          const repo = await import(repoPath);
+          const updateFn = repo[`update${ownerObjType.charAt(0).toUpperCase() + ownerObjType.slice(1)}`];
+          if (updateFn) await updateFn(db, tenantId, ownerObjId, { owner_id: ownerId });
+        }
+      }
+
+      await emitEvent(db, {
+        tenantId,
+        eventType: 'workflow.action.assign_owner',
+        actorType: 'system',
+        objectType: ownerObjType || 'workflow',
+        objectId: ownerObjId,
+        afterData: action.config,
+      });
+      break;
+    }
+    case 'webhook': {
+      // Emit event — the webhook dispatcher on the event bus will deliver to matching endpoints
+      await emitEvent(db, {
+        tenantId,
+        eventType: 'workflow.action.webhook',
         actorType: 'system',
         objectType: 'workflow',
         afterData: action.config,
       });
       break;
+    }
     default:
       throw new Error(`Unknown action type: ${action.type}`);
   }

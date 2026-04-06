@@ -45,7 +45,7 @@ const dataNavItems = [
   { icon: Briefcase,   label: 'Opportunities', path: '/opportunities', color: ENTITY_COLORS.opportunities },
   { icon: FolderKanban,label: 'Use Cases',     path: '/use-cases',     color: ENTITY_COLORS.useCases },
   { icon: Activity,    label: 'Activities',    path: '/activities',    color: ENTITY_COLORS.activities },
-  { icon: Mail,        label: 'Emails',        path: '/emails',        color: ENTITY_COLORS.contacts },
+  { icon: Mail,        label: 'Emails',        path: '/emails',        color: ENTITY_COLORS.emails },
 ];
 
 const bottomItems = [

@@ -119,7 +119,7 @@ Add to `.cursor/mcp.json` or equivalent:
 }
 ```
 
-Once connected, your agent has access to 120+ MCP tools. No API calls, no auth wiring — just tool calls.
+Once connected, your agent has access to 175+ MCP tools. No API calls, no auth wiring — just tool calls.
 
 ---
 
@@ -220,7 +220,7 @@ context_semantic_search query="deals at risk due to competitor pressure"
 
 ---
 
-## MCP Tools (120+)
+## MCP Tools (175+)
 
 | Category | Tools |
 |---|---|
@@ -240,7 +240,8 @@ context_semantic_search query="deals at risk due to competitor pressure"
 | Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
 | Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
-| Emails | `email_create`, `email_get`, `email_search` |
+| Emails | `email_create`, `email_get`, `email_search`, `email_provider_set`, `email_provider_get` |
+| Email Sequences | `email_sequence_create`, `email_sequence_get`, `email_sequence_update`, `email_sequence_delete`, `email_sequence_list`, `email_sequence_enroll`, `email_sequence_unenroll`, `email_sequence_enrollment_list` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
 | Meta | `schema_get`, `entity_resolve`, `guide_search` |
 
@@ -597,7 +598,7 @@ Step-by-step guides for building agents on CRMy, each with MCP tool calls, CLI e
 - **Node.js version gate** — clear error on Node < 20 instead of cryptic ESM failures
 
 ### MCP tools
-- **120+ tools** with rewritten descriptions optimized for LLM tool selection
+- **175+ tools** with rewritten descriptions optimized for LLM tool selection
 - **Tool ordering** — briefing and context tools first in manifest, signaling priority to agents
 - **Semantic search** — `context_semantic_search` and `context_embed_backfill` (pgvector)
 - **Multi-channel messaging** — `message_channel_create`, `message_send`, `message_delivery_get` with Slack built-in, extensible via plugins

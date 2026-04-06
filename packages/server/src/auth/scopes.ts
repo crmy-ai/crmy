@@ -47,14 +47,14 @@ const TOOL_SCOPES: Record<string, string[]> = {
   activity_complete: ['activities:write'],
 
   // ── Assignments ──
-  assignment_get: ['assignments:create'],
-  assignment_list: ['assignments:create'],
-  assignment_create: ['assignments:create'],
-  assignment_update: ['assignments:update'],
-  assignment_accept: ['assignments:update'],
-  assignment_complete: ['assignments:update'],
-  assignment_decline: ['assignments:update'],
-  assignment_start: ['assignments:update'],
+  assignment_get: ['assignments:read'],
+  assignment_list: ['assignments:read'],
+  assignment_create: ['assignments:write'],
+  assignment_update: ['assignments:write'],
+  assignment_accept: ['assignments:write'],
+  assignment_complete: ['assignments:write'],
+  assignment_decline: ['assignments:write'],
+  assignment_start: ['assignments:write'],
   assignment_block: ['assignments:update'],
   assignment_cancel: ['assignments:update'],
 
@@ -100,6 +100,14 @@ const TOOL_SCOPES: Record<string, string[]> = {
   email_create: ['activities:write'],
   email_provider_set: ['write'],
   email_provider_get: ['read'],
+  email_sequence_create: ['activities:write'],
+  email_sequence_get: ['activities:read'],
+  email_sequence_update: ['activities:write'],
+  email_sequence_delete: ['activities:write'],
+  email_sequence_list: ['activities:read'],
+  email_sequence_enroll: ['activities:write'],
+  email_sequence_unenroll: ['activities:write'],
+  email_sequence_enrollment_list: ['activities:read'],
 
   // ── Webhooks ──
   webhook_get: ['read'],

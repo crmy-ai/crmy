@@ -9,11 +9,10 @@ export const stageConfig: Record<string, { label: string; color: string }> = {
   closed_won: { label: 'Won', color: '#4ade80' },
   closed_lost: { label: 'Lost', color: '#f87171' },
   // Contact stages
-  new: { label: 'New', color: '#94a3b8' },
-  contacted: { label: 'Contacted', color: '#60a5fa' },
-  qualified: { label: 'Qualified', color: '#a78bfa' },
-  active: { label: 'Active', color: '#fb923c' },
-  inactive: { label: 'Inactive', color: '#f87171' },
+  lead: { label: 'Lead', color: '#94a3b8' },
+  prospect: { label: 'Prospect', color: '#60a5fa' },
+  customer: { label: 'Customer', color: '#4ade80' },
+  churned: { label: 'Churned', color: '#f87171' },
 };
 
 export const useCaseStageConfig: Record<string, { label: string; color: string }> = {
