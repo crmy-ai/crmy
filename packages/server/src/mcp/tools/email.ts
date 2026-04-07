@@ -13,6 +13,25 @@ import { deliverEmail } from '../../email/delivery.js';
 import { getEmailProvider, listEmailProviderTypes } from '../../email/providers/index.js';
 import type { ToolDef } from '../server.js';
 
+/** Redact provider-specific sensitive fields before returning config to callers. */
+function redactProviderConfig(provider: string, config: Record<string, unknown>): Record<string, unknown> {
+  const safe = { ...config };
+  if (provider === 'smtp') {
+    if (safe.auth && typeof safe.auth === 'object') {
+      safe.auth = { ...(safe.auth as Record<string, unknown>), pass: '***' };
+    }
+  } else if (provider === 'resend' || provider === 'sendgrid') {
+    if (safe.api_key) safe.api_key = '***';
+  } else if (provider === 'postmark') {
+    if (safe.server_token) safe.server_token = '***';
+  } else if (provider === 'ses') {
+    if (safe.secret_access_key) safe.secret_access_key = '***';
+  } else if (provider === 'mailgun') {
+    if (safe.api_key) safe.api_key = '***';
+  }
+  return safe;
+}
+
 export function emailTools(db: DbPool): ToolDef[] {
   return [
     {
@@ -108,6 +127,8 @@ export function emailTools(db: DbPool): ToolDef[] {
         'Configure the tenant\'s email provider for outbound email delivery. ' +
         'Required: provider type, config object, from_name, from_email. ' +
         'SMTP config requires: host, port, auth.user, auth.pass (optional: secure). ' +
+        'Resend config requires: api_key. ' +
+        'Postmark config requires: server_token (optional: message_stream, defaults to "outbound"). ' +
         'This overwrites any existing provider config for the tenant.',
       inputSchema: emailProviderSet,
       handler: async (input: z.infer<typeof emailProviderSet>, actor: ActorContext) => {
@@ -130,12 +151,7 @@ export function emailTools(db: DbPool): ToolDef[] {
           from_email: input.from_email,
         });
 
-        // Redact sensitive fields in response
-        const safeConfig = { ...result.config };
-        if (safeConfig.auth && typeof safeConfig.auth === 'object') {
-          safeConfig.auth = { ...(safeConfig.auth as Record<string, unknown>), pass: '***' };
-        }
-        return { ...result, config: safeConfig };
+        return { ...result, config: redactProviderConfig(input.provider, result.config) };
       },
     },
     {
@@ -149,12 +165,7 @@ export function emailTools(db: DbPool): ToolDef[] {
         const result = await emailRepo.getProvider(db, actor.tenant_id);
         if (!result) return { configured: false };
 
-        // Redact sensitive fields
-        const safeConfig = { ...result.config };
-        if (safeConfig.auth && typeof safeConfig.auth === 'object') {
-          safeConfig.auth = { ...(safeConfig.auth as Record<string, unknown>), pass: '***' };
-        }
-        return { ...result, config: safeConfig };
+        return { ...result, config: redactProviderConfig(result.provider, result.config) };
       },
     },
   ];

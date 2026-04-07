@@ -1,7 +1,7 @@
 {
   "name": "@crmy/server",
   "version": "0.6.0",
-  "description": "CRMy server \u2014 Express + PostgreSQL + MCP endpoint",
+  "description": "CRMy server — Express + PostgreSQL + MCP endpoint",
   "type": "module",
   "files": [
     "dist",
@@ -19,13 +19,19 @@
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.0.0",
+    "@aws-sdk/client-ses": "^3.1025.0",
     "@crmy/shared": "*",
     "@modelcontextprotocol/sdk": "^1.27.0",
+    "@sendgrid/mail": "^8.1.6",
     "express": "^4.21.0",
+    "form-data": "^4.0.5",
     "jose": "^5.9.0",
-    "nodemailer": "^6.9.0",
+    "mailgun.js": "^12.7.1",
     "node-pg-migrate": "^7.9.0",
+    "nodemailer": "^6.9.0",
     "pg": "^8.13.0",
+    "postmark": "^4.0.7",
+    "resend": "^6.10.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {

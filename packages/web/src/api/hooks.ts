@@ -954,3 +954,47 @@ export function useSessionActivity(sessionId: string | null) {
   });
 }
 
+// ── Email Provider ───────────────────────────────────────────────────────────
+
+export function useEmailProvider() {
+  return useQuery({ queryKey: ['email-provider'], queryFn: () => api.get('email-provider') });
+}
+
+export function useUpdateEmailProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.put('email-provider', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['email-provider'] }),
+  });
+}
+
+// ── Messaging Channels ──────────────────────────────────────────────────────
+
+export function useMessagingChannels(params?: { provider?: string; is_active?: boolean; limit?: number }) {
+  return useList('messaging-channels', 'messaging-channels', params as Record<string, string | number | boolean | undefined>);
+}
+
+export function useCreateMessagingChannel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('messaging-channels', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['messaging-channels'] }),
+  });
+}
+
+export function useUpdateMessagingChannel(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.patch(`messaging-channels/${id}`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['messaging-channels'] }),
+  });
+}
+
+export function useDeleteMessagingChannel(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete(`messaging-channels/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['messaging-channels'] }),
+  });
+}
+

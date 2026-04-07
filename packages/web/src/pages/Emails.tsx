@@ -3,33 +3,25 @@
 
 import { useState, useMemo } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
+import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { useEmails, useCreateEmail } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { motion } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
 import {
   Mail,
-  Search,
-  Plus,
   Loader2,
   Send,
   FileEdit,
   AlertCircle,
   CheckCircle2,
   Clock,
-  X,
+  XCircle,
 } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -40,34 +32,71 @@ import {
 import { toast } from '@/hooks/use-toast';
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof Mail }> = {
-  draft: { label: 'Draft', color: 'bg-muted text-muted-foreground', icon: FileEdit },
-  pending_approval: { label: 'Pending', color: 'bg-warning/15 text-warning', icon: Clock },
-  sent: { label: 'Sent', color: 'bg-emerald-500/15 text-emerald-500', icon: CheckCircle2 },
-  failed: { label: 'Failed', color: 'bg-destructive/15 text-destructive', icon: AlertCircle },
+  draft:            { label: 'Draft',            color: 'bg-muted text-muted-foreground',        icon: FileEdit },
+  pending_approval: { label: 'Pending Approval', color: 'bg-warning/15 text-warning',            icon: Clock },
+  approved:         { label: 'Approved',         color: 'bg-emerald-500/15 text-emerald-500',    icon: CheckCircle2 },
+  sending:          { label: 'Sending',          color: 'bg-blue-500/15 text-blue-500',          icon: Send },
+  sent:             { label: 'Sent',             color: 'bg-emerald-500/15 text-emerald-500',    icon: CheckCircle2 },
+  failed:           { label: 'Failed',           color: 'bg-destructive/15 text-destructive',    icon: AlertCircle },
+  rejected:         { label: 'Rejected',         color: 'bg-destructive/15 text-destructive',    icon: XCircle },
 };
+
+const FILTER_CONFIGS: FilterConfig[] = [
+  {
+    key: 'status',
+    label: 'Status',
+    options: [
+      { value: 'draft',            label: 'Draft' },
+      { value: 'pending_approval', label: 'Pending Approval' },
+      { value: 'approved',         label: 'Approved' },
+      { value: 'sending',          label: 'Sending' },
+      { value: 'sent',             label: 'Sent' },
+      { value: 'failed',           label: 'Failed' },
+      { value: 'rejected',         label: 'Rejected' },
+    ],
+  },
+];
+
+const SORT_OPTIONS: SortOption[] = [
+  { key: 'created_at', label: 'Date Created' },
+  { key: 'subject',    label: 'Subject' },
+  { key: 'to_email',   label: 'Recipient' },
+];
 
 export default function EmailsPage() {
   const { openDrawer } = useAppStore();
   const [q, setQ] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeTo, setComposeTo] = useState('');
   const [composeSubject, setComposeSubject] = useState('');
   const [composeBody, setComposeBody] = useState('');
 
+  const statusFilter = activeFilters.status?.[0] ?? '';
   const { data, isLoading } = useEmails({ status: statusFilter || undefined }) as any;
   const createEmail = useCreateEmail();
 
   const emails: any[] = (data as any)?.data ?? [];
 
   const filtered = useMemo(() => {
-    if (!q.trim()) return emails;
-    const lower = q.toLowerCase();
-    return emails.filter((e: any) =>
-      (e.subject ?? '').toLowerCase().includes(lower) ||
-      (e.to ?? '').toLowerCase().includes(lower)
-    );
-  }, [emails, q]);
+    let items = emails;
+    if (q.trim()) {
+      const lower = q.toLowerCase();
+      items = items.filter((e: any) =>
+        (e.subject ?? '').toLowerCase().includes(lower) ||
+        (e.to_email ?? '').toLowerCase().includes(lower)
+      );
+    }
+    if (sort) {
+      items = [...items].sort((a: any, b: any) => {
+        const av = String(a[sort.key] ?? '');
+        const bv = String(b[sort.key] ?? '');
+        return sort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      });
+    }
+    return items;
+  }, [emails, q, sort]);
 
   const handleCompose = async (status: string) => {
     if (!composeTo.trim() || !composeSubject.trim()) {
@@ -76,10 +105,10 @@ export default function EmailsPage() {
     }
     try {
       await createEmail.mutateAsync({
-        to: composeTo.trim(),
+        to_address: composeTo.trim(),
         subject: composeSubject.trim(),
-        body: composeBody.trim(),
-        status,
+        body_text: composeBody.trim(),
+        require_approval: status === 'pending_approval',
       });
       setComposeTo('');
       setComposeSubject('');
@@ -102,38 +131,29 @@ export default function EmailsPage() {
           <span className="text-xs text-muted-foreground">{emails.length} total</span>
         ) : undefined}
       />
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
+      <ListToolbar
+        searchValue={q}
+        onSearchChange={setQ}
+        searchPlaceholder="Search by subject or recipient…"
+        filters={FILTER_CONFIGS}
+        activeFilters={activeFilters}
+        onFilterChange={(key, values) => setActiveFilters(prev => {
+          const next = { ...prev };
+          if (values.length === 0) delete next[key]; else next[key] = values;
+          return next;
+        })}
+        onClearFilters={() => { setActiveFilters({}); setQ(''); }}
+        sortOptions={SORT_OPTIONS}
+        currentSort={sort}
+        onSortChange={(key) => setSort(prev =>
+          prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }
+        )}
+        onAdd={() => setComposeOpen(true)}
+        addLabel="Compose"
+        entityType="emails"
+      />
 
-        {/* Toolbar */}
-        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }} className="flex flex-wrap gap-2 mb-4">
-          <div className="relative flex-1 min-w-[200px] max-w-xs">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
-            <Input
-              placeholder="Search by subject or recipient…"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              className="pl-8 h-8 text-sm"
-            />
-          </div>
-
-          <Select value={statusFilter || '__all__'} onValueChange={(v) => setStatusFilter(v === '__all__' ? '' : v)}>
-            <SelectTrigger className="h-8 w-[130px] text-sm">
-              <SelectValue placeholder="All statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All statuses</SelectItem>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="pending_approval">Pending</SelectItem>
-              <SelectItem value="sent">Sent</SelectItem>
-              <SelectItem value="failed">Failed</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => setComposeOpen(true)}>
-            <Plus className="w-3 h-3" />
-            Compose
-          </Button>
-        </motion.div>
+      <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">
 
         {/* Content */}
         {isLoading ? (
@@ -176,7 +196,7 @@ export default function EmailsPage() {
                       </Badge>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      {email.to && <span className="truncate max-w-[200px]">To: {email.to}</span>}
+                      {email.to_email && <span className="truncate max-w-[200px]">To: {email.to_email}</span>}
                       {email.created_at && (
                         <span>· {formatDistanceToNow(new Date(email.created_at), { addSuffix: true })}</span>
                       )}
