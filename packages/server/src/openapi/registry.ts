@@ -244,11 +244,6 @@ export const Req = {
   CustomFieldCreate: registry.register('CustomFieldCreate', S.customFieldCreate),
   CustomFieldUpdate: registry.register('CustomFieldUpdate', S.customFieldUpdate.shape.patch),
 
-  // Notes
-  NoteCreate: registry.register('NoteCreate', S.noteCreate),
-  NoteUpdate: registry.register('NoteUpdate', S.noteUpdate.shape.patch),
-  NoteList: registry.register('NoteList', S.noteList),
-
   // Workflows
   WorkflowCreate: registry.register('WorkflowCreate', S.workflowCreate),
   WorkflowUpdate: registry.register('WorkflowUpdate', S.workflowUpdate.shape.patch),

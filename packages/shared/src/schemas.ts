@@ -235,16 +235,29 @@ export const activityComplete = z.object({
   note: z.string().optional(),
 });
 
-// -- Contact log activity (convenience) --
+// -- Compound action schemas --
 
-export const contactLogActivity = z.object({
+export const dealAdvance = z.object({
+  opportunity_id: uuid,
+  stage: oppStage,
+  note: z.string().optional(),
+  context: z.object({
+    title: z.string(),
+    body: z.string(),
+    context_type: z.string().default('insight'),
+  }).optional(),
+});
+
+export const contactOutreach = z.object({
   contact_id: uuid,
-  type: activityType,
+  channel: z.enum(['email', 'call', 'linkedin', 'other']),
   subject: z.string().min(1),
   body: z.string().optional(),
-  opportunity_id: uuid.optional(),
-  due_at: z.string().optional(),
-  direction: direction.optional(),
+  outcome: z.string().optional(),
+  context: z.object({
+    title: z.string(),
+    body: z.string(),
+  }).optional(),
 });
 
 // -- Analytics schemas --
@@ -590,47 +603,16 @@ export const bulkJobList = z.object({
   cursor,
 });
 
-// -- Note schemas --
-
-const noteObjectType = z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case']);
-const noteVisibility = z.enum(['internal', 'external']);
-
-export const noteCreate = z.object({
-  object_type: noteObjectType,
-  object_id: uuid,
-  parent_id: uuid.optional(),
-  body: z.string().min(1),
-  visibility: noteVisibility.default('internal'),
-  mentions: z.array(z.string()).default([]),
-  pinned: z.boolean().default(false),
-});
-
-export const noteUpdate = z.object({
-  id: uuid,
-  patch: z.object({
-    body: z.string().min(1).optional(),
-    visibility: noteVisibility.optional(),
-    pinned: z.boolean().optional(),
-  }),
-});
-
-export const noteGet = z.object({ id: uuid });
-export const noteDelete = z.object({ id: uuid });
-
-export const noteList = z.object({
-  object_type: noteObjectType,
-  object_id: uuid,
-  visibility: noteVisibility.optional(),
-  pinned: z.boolean().optional(),
-  limit,
-  cursor,
-});
+// Note: the notes table has been removed. Use context_add with context_type='note' instead.
+// contextEntryCreate supports parent_id, visibility, mentions, and pinned for full note functionality.
 
 // -- Workflow schemas --
 
 const workflowActionType = z.enum([
   'send_notification', 'send_email', 'update_field', 'create_activity',
-  'add_tag', 'remove_tag', 'assign_owner', 'create_note', 'webhook',
+  'add_tag', 'remove_tag', 'assign_owner', 'create_context_entry', 'webhook',
+  // 'create_note' kept for backward compat with stored workflows; engine aliases to create_context_entry
+  'create_note',
 ]);
 
 const workflowActionSchema = z.object({
@@ -970,6 +952,11 @@ export const contextEntryCreate = z.object({
   source_ref: z.string().optional(),
   source_activity_id: uuid.optional(),
   valid_until: z.string().optional(),
+  // Note-style fields (used when context_type = 'note')
+  parent_id: uuid.optional(),
+  visibility: z.enum(['internal', 'external']).default('internal'),
+  mentions: z.array(z.string()).default([]),
+  pinned: z.boolean().default(false),
 });
 
 export const contextEntryGet = z.object({ id: uuid });
@@ -983,6 +970,9 @@ export const contextEntrySearch = z.object({
   query: z.string().optional(),
   /** Partial JSONB match against structured_data. Example: { "severity": "critical" } */
   structured_data_filter: z.record(z.unknown()).optional(),
+  // Note-style filters
+  visibility: z.enum(['internal', 'external']).optional(),
+  pinned: z.boolean().optional(),
   limit,
   cursor,
 });

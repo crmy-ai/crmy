@@ -25,6 +25,7 @@ export function messagingTools(db: DbPool): ToolDef[] {
 
     {
       name: 'message_channel_create',
+      tier: 'extended',
       description:
         'Configure a new messaging channel for the tenant. A channel represents a delivery endpoint ' +
         'like a Slack workspace, email provider, or other messaging platform. ' +
@@ -59,6 +60,7 @@ export function messagingTools(db: DbPool): ToolDef[] {
 
     {
       name: 'message_channel_update',
+      tier: 'extended',
       description: 'Update an existing messaging channel configuration. Can change the name, config, or active status.',
       inputSchema: messagingChannelUpdate,
       handler: async (input: z.infer<typeof messagingChannelUpdate>, actor: ActorContext) => {
@@ -83,6 +85,7 @@ export function messagingTools(db: DbPool): ToolDef[] {
 
     {
       name: 'message_channel_get',
+      tier: 'extended',
       description: 'Get details of a specific messaging channel by ID.',
       inputSchema: messagingChannelGet,
       handler: async (input: z.infer<typeof messagingChannelGet>, actor: ActorContext) => {
@@ -93,6 +96,7 @@ export function messagingTools(db: DbPool): ToolDef[] {
 
     {
       name: 'message_channel_delete',
+      tier: 'extended',
       description: 'Delete a messaging channel. This does not delete past delivery records.',
       inputSchema: messagingChannelDelete,
       handler: async (input: z.infer<typeof messagingChannelDelete>, actor: ActorContext) => {
@@ -103,6 +107,7 @@ export function messagingTools(db: DbPool): ToolDef[] {
 
     {
       name: 'message_channel_list',
+      tier: 'extended',
       description:
         'List configured messaging channels with optional filters by provider type or active status. ' +
         'Shows all channels the tenant has set up for sending messages.',
@@ -121,6 +126,7 @@ export function messagingTools(db: DbPool): ToolDef[] {
 
     {
       name: 'message_send',
+      tier: 'extended',
       description:
         'Send a message through a configured messaging channel with delivery tracking. ' +
         'Returns the delivery record including status (delivered, retrying, or failed). ' +
@@ -142,6 +148,7 @@ export function messagingTools(db: DbPool): ToolDef[] {
 
     {
       name: 'message_delivery_get',
+      tier: 'extended',
       description: 'Check the delivery status of a previously sent message by delivery ID.',
       inputSchema: messageDeliveryGet,
       handler: async (input: z.infer<typeof messageDeliveryGet>, actor: ActorContext) => {
@@ -152,6 +159,7 @@ export function messagingTools(db: DbPool): ToolDef[] {
 
     {
       name: 'message_delivery_search',
+      tier: 'extended',
       description:
         'Search message delivery records filtered by channel or status. ' +
         'Useful for checking if messages were delivered, finding failures, or auditing messaging activity.',

@@ -36,6 +36,7 @@ export function emailTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'email_create',
+      tier: 'extended',
       description: 'Draft an outbound email linked to a contact. By default require_approval is true, which creates a HITL request for human review before sending — this is the recommended approach for high-stakes communications. Set require_approval to false only for routine, low-risk sends. The email is stored as a draft until approved.',
       inputSchema: emailCreate,
       handler: async (input: z.infer<typeof emailCreate>, actor: ActorContext) => {
@@ -96,6 +97,7 @@ export function emailTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'email_get',
+      tier: 'extended',
       description: 'Retrieve a single email by UUID including its subject, body, recipients, status (draft, pending_approval, sent), and linked contact. Use this to check the current state of an email draft or review its content.',
       inputSchema: emailGet,
       handler: async (input: z.infer<typeof emailGet>, actor: ActorContext) => {
@@ -106,6 +108,7 @@ export function emailTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'email_search',
+      tier: 'extended',
       description: 'Search emails with optional filters for contact_id and status. Use this to find all emails sent to a specific contact or to list all drafts pending approval. Returns emails sorted by creation time.',
       inputSchema: emailSearch,
       handler: async (input: z.infer<typeof emailSearch>, actor: ActorContext) => {
@@ -123,6 +126,7 @@ export function emailTools(db: DbPool): ToolDef[] {
 
     {
       name: 'email_provider_set',
+      tier: 'extended',
       description:
         'Configure the tenant\'s email provider for outbound email delivery. ' +
         'Required: provider type, config object, from_name, from_email. ' +
@@ -156,6 +160,7 @@ export function emailTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'email_provider_get',
+      tier: 'extended',
       description:
         'Get the current email provider configuration for this tenant. ' +
         'Returns provider type, from_name, from_email, and config. ' +

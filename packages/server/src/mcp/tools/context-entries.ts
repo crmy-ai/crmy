@@ -56,7 +56,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'context_add',
-      description: 'Store a typed knowledge entry about a contact, account, opportunity, or use case — this is how agents write memory. Call this after every meaningful interaction to capture what you learned. Set context_type to the taxonomy key: objection, preference, competitive_intel, relationship_map, meeting_notes, research, summary, decision, sentiment_analysis, agent_reasoning, or transcript. Set confidence (0.0–1.0) for agent-authored entries: 1.0 for confirmed facts, 0.6–0.8 for inferences, below 0.5 for hypotheses. Set valid_until whenever the information has a shelf life (competitive pricing, org chart details, budget cycles). Use supersedes_id to replace an existing entry rather than creating a duplicate when updating a belief.',
+      tier: 'core',
+      description: 'Store a typed knowledge entry about a contact, account, opportunity, or use case — this is how agents write memory. Call this after every meaningful interaction to capture what you learned. Set context_type to the taxonomy key: objection, preference, competitive_intel, relationship_map, meeting_notes, research, summary, decision, sentiment_analysis, agent_reasoning, or transcript. Set confidence (0.0–1.0) for agent-authored entries: 1.0 for confirmed facts, 0.6–0.8 for inferences, below 0.5 for hypotheses. Set valid_until whenever the information has a shelf life (competitive pricing, org chart details, budget cycles). Use supersedes_id to replace an existing entry rather than creating a duplicate when updating a belief. Use context_type "note" for threaded comments — supports parent_id for replies, visibility ("internal"/"external"), @mentions, and pinned flag.',
       inputSchema: contextEntryCreate,
       handler: async (input: z.infer<typeof contextEntryCreate>, actor: ActorContext) => {
         // Enforce governor limit on context entry count
@@ -112,6 +113,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_get',
+      tier: 'core',
       description: 'Retrieve a single context entry by its UUID. Returns the full entry including body, structured_data, confidence score, authorship, and staleness metadata. Use this when you have a specific entry ID from a briefing, search result, or stale warning and need the complete details.',
       inputSchema: contextEntryGet,
       handler: async (input: z.infer<typeof contextEntryGet>, actor: ActorContext) => {
@@ -122,12 +124,15 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_list',
+      tier: 'core',
       description: 'List context entries attached to a CRM object with flexible filters. Use subject_type and subject_id to scope to a specific record, context_type to filter by knowledge category (e.g. "objection", "preference"), authored_by to see what a specific actor has contributed, and is_current to exclude superseded entries. The structured_data_filter parameter supports typed JSONB queries for domain-specific searches like finding all open objections or critical deal risks. Returns entries sorted by recency.',
       inputSchema: contextEntrySearch,
       handler: async (input: z.infer<typeof contextEntrySearch>, actor: ActorContext) => {
         const result = await contextRepo.searchContextEntries(db, actor.tenant_id, {
           ...input,
           structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
+          visibility: input.visibility,
+          pinned: input.pinned,
           limit: input.limit ?? 20,
         });
         return { context_entries: result.data, next_cursor: result.next_cursor, total: result.total };
@@ -135,6 +140,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_supersede',
+      tier: 'core',
       description: 'Replace an existing context entry with updated information — use this instead of context_add when you have new information that contradicts or updates an existing belief. Marks the old entry as not current (preserving the full audit trail) and creates a new entry that references it. Find the entry to supersede with context_list or context_search first, then pass its ID along with the updated body and confidence. This is the correct way to update beliefs — never create a duplicate entry with context_add when you mean to revise.',
       inputSchema: contextEntrySupersede,
       handler: async (input: z.infer<typeof contextEntrySupersede>, actor: ActorContext) => {
@@ -183,6 +189,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_search',
+      tier: 'core',
       description: 'Full-text search across all context entries using PostgreSQL GIN index — useful for cross-cutting queries like "what do we know about procurement concerns across all accounts" or "find every competitive intel mention of HubSpot." Returns results ranked by relevance with highlighted matches. Supports structured_data_filter for typed JSONB queries. Use this when you need to find information across multiple subjects rather than within a single record.',
       inputSchema: contextSearch,
       handler: async (input: z.infer<typeof contextSearch>, actor: ActorContext) => {
@@ -200,6 +207,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_review',
+      tier: 'admin',
       description: 'Mark a context entry as reviewed and still accurate, resetting its reviewed_at timestamp to now. Use this after verifying that a flagged or aging entry is still correct — it signals to other agents and the staleness system that a human or agent has confirmed the information. Does not modify the entry content.',
       inputSchema: contextReview,
       handler: async (input: z.infer<typeof contextReview>, actor: ActorContext) => {
@@ -210,6 +218,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_stale',
+      tier: 'core',
       description: 'List all stale context entries where valid_until has passed but is_current is still true — these contain potentially outdated information that should be reverified before acting on. Use this as a recurring agent hygiene check to identify competitive intel, org chart details, or research that may have expired. Returns entries grouped by subject with staleness duration. Optionally filter by subject_type to scope the check to a specific entity type.',
       inputSchema: contextStaleList,
       handler: async (input: z.infer<typeof contextStaleList>, actor: ActorContext) => {
@@ -223,6 +232,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_extract',
+      tier: 'admin',
       description: 'Re-run the automatic context extraction pipeline on a specific activity. Useful for backfilling entries on older activities or retrying after an error. Returns the number of context entries created.',
       inputSchema: z.object({ activity_id: z.string().uuid().describe('ID of the activity to extract context from') }),
       handler: async (input: { activity_id: string }, actor: ActorContext) => {
@@ -232,6 +242,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'briefing_get',
+      tier: 'core',
       description: 'Get a unified briefing for any CRM object — the single most important tool in CRMy. Call this before every agent action, not just the first one. It assembles the full record, related entities, recent activity timeline, open assignments, typed context entries, and stale warnings in one response. Set context_radius to "direct" for single-contact outreach, "adjacent" to include related accounts and opportunities, or "account_wide" for deal reviews that need the full picture. Set token_budget (integer, token count) to tell CRMy how much space you have — it packs the highest-priority context to fit. Check stale_warnings in the response before acting — they identify context entries past their valid_until date that should be reverified. Works on contacts, accounts, opportunities, and use_cases.',
       inputSchema: briefingGet,
       handler: async (input: z.infer<typeof briefingGet>, actor: ActorContext) => {
@@ -257,6 +268,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_diff',
+      tier: 'admin',
       description: 'Get a catch-up diff for a CRM subject showing everything that changed since a given timestamp. Returns four lists: new context entries added, entries that were superseded, entries that became stale, and entries that were recently reviewed. Ideal for daily agent check-ins or resuming work after a gap — call this instead of a full briefing when you already have baseline context and just need the delta.',
       inputSchema: contextDiff,
       handler: async (input: z.infer<typeof contextDiff>, actor: ActorContext) => {
@@ -292,6 +304,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_ingest',
+      tier: 'core',
       description: 'Ingest a raw document (transcript, email, meeting notes, etc.) and auto-extract all structured context entries from it. Creates an activity as provenance and runs the full extraction pipeline. Returns all context entries produced.',
       inputSchema: contextIngest,
       handler: async (input: z.infer<typeof contextIngest>, actor: ActorContext) => {
@@ -327,6 +340,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_stale_assign',
+      tier: 'admin',
       description: 'Trigger the stale context review loop for the current tenant: finds all expired context entries and creates review assignments for the most knowledgeable actors. Normally runs automatically in the background every 60 seconds. Use this to trigger it on-demand.',
       inputSchema: z.object({
         limit: z.number().int().min(1).max(100).default(20)
@@ -341,6 +355,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_semantic_search',
+      tier: 'extended',
       description: 'Semantic (vector) search over context entries using embedding similarity — finds entries that are conceptually related to your query even when no keywords match. Use this when context_search returns poor results for natural language queries like "budget concerns", "team friction", or "implementation challenges". Requires ENABLE_PGVECTOR=true and EMBEDDING_PROVIDER to be configured on the server. Returns entries ranked by similarity score (0.0–1.0). If embeddings are not configured, returns a structured error with fallback_available: true — retry with context_search in that case.',
       inputSchema: contextSemanticSearch,
       handler: async (input: z.infer<typeof contextSemanticSearch>, actor: ActorContext) => {
@@ -379,6 +394,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_embed_backfill',
+      tier: 'admin',
       description: 'Admin tool: generate embeddings for context entries that have not yet been embedded. Call with dry_run: true first to see how many entries are pending, then with dry_run: false to process a batch. Loop calls until pending reaches 0. Requires ENABLE_PGVECTOR=true and EMBEDDING_PROVIDER to be configured.',
       inputSchema: contextEmbedBackfill,
       handler: async (input: z.infer<typeof contextEmbedBackfill>, actor: ActorContext) => {

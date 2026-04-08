@@ -94,6 +94,7 @@ export function guideTools(): ToolDef[] {
   return [
     {
       name: 'guide_search',
+      tier: 'core',
       description:
         'Search the CRMy user guide for documentation about a feature, concept, or workflow. ' +
         'Use this tool when the user asks "how does X work?", "what is X?", or needs help understanding any CRMy feature. ' +

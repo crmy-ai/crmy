@@ -748,53 +748,6 @@ registry.registerPath({
   responses: { 200: ok(SuccessResult), 404: err404 },
 });
 
-// -- Notes --
-
-registry.registerPath({
-  method: 'get', path: '/notes',
-  tags: ['Notes'],
-  summary: 'List notes for a CRM object (object_type and object_id required)',
-  security: bearer,
-  request: { query: Req.NoteList },
-  responses: { 200: ok(GenericList), 400: err400 },
-});
-
-registry.registerPath({
-  method: 'post', path: '/notes',
-  tags: ['Notes'],
-  summary: 'Create a note',
-  security: bearer,
-  request: { body: jsonBody(Req.NoteCreate) },
-  responses: { 201: created(GenericObject), 400: err400 },
-});
-
-registry.registerPath({
-  method: 'get', path: '/notes/{id}',
-  tags: ['Notes'],
-  summary: 'Get a note with threaded replies',
-  security: bearer,
-  request: { params: idParam },
-  responses: { 200: ok(GenericObject), 404: err404 },
-});
-
-registry.registerPath({
-  method: 'patch', path: '/notes/{id}',
-  tags: ['Notes'],
-  summary: 'Update a note',
-  security: bearer,
-  request: { params: idParam, body: jsonBody(Req.NoteUpdate) },
-  responses: { 200: ok(GenericObject), 404: err404 },
-});
-
-registry.registerPath({
-  method: 'delete', path: '/notes/{id}',
-  tags: ['Notes'],
-  summary: 'Delete a note and its replies',
-  security: bearer,
-  request: { params: idParam },
-  responses: { 200: ok(SuccessResult), 404: err404 },
-});
-
 // -- Workflows --
 
 registry.registerPath({

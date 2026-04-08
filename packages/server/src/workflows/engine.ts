@@ -61,15 +61,21 @@ async function executeAction(
   payload: unknown,
 ): Promise<void> {
   switch (action.type) {
+    case 'create_context_entry':
     case 'create_note': {
-      const { createNote } = await import('../db/repos/notes.js');
-      await createNote(db, tenantId, {
-        object_type: action.config.object_type as string,
-        object_id: action.config.object_id as string,
+      // 'create_note' is a deprecated alias — stored workflows continue to work.
+      if (action.type === 'create_note') {
+        console.warn('[workflow] Action type "create_note" is deprecated. Update workflow to use "create_context_entry".');
+      }
+      const { createContextEntry } = await import('../db/repos/context-entries.js');
+      await createContextEntry(db, tenantId, {
+        subject_type: action.config.object_type as string,
+        subject_id: action.config.object_id as string,
+        context_type: (action.config.context_type as string) ?? 'note',
         body: action.config.body as string,
+        authored_by: 'system',
         visibility: (action.config.visibility as string) ?? 'internal',
-        author_type: 'system',
-      });
+      } as Parameters<typeof createContextEntry>[2]);
       break;
     }
     case 'create_activity': {

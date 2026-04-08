@@ -17,6 +17,7 @@ export function webhookTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'webhook_create',
+      tier: 'admin',
       description: 'Register a new webhook endpoint to receive real-time event notifications. Specify the URL, events to subscribe to (e.g. "contact.created", "opportunity.stage_changed"), and an optional secret for HMAC signature verification. CRMy sends POST requests with the event payload to your endpoint.',
       inputSchema: webhookCreate,
       handler: async (input: z.infer<typeof webhookCreate>, actor: ActorContext) => {
@@ -38,6 +39,7 @@ export function webhookTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'webhook_get',
+      tier: 'admin',
       description: 'Retrieve a webhook endpoint configuration by UUID, including its URL, subscribed events, active status, and delivery statistics.',
       inputSchema: webhookGet,
       handler: async (input: z.infer<typeof webhookGet>, actor: ActorContext) => {
@@ -48,6 +50,7 @@ export function webhookTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'webhook_update',
+      tier: 'admin',
       description: 'Update a webhook endpoint configuration including its URL, subscribed events, active status, and secret. Use this to change event subscriptions or temporarily disable a webhook.',
       inputSchema: webhookUpdate,
       handler: async (input: z.infer<typeof webhookUpdate>, actor: ActorContext) => {
@@ -59,6 +62,7 @@ export function webhookTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'webhook_delete',
+      tier: 'admin',
       description: 'Delete a webhook endpoint and stop all future deliveries. Past delivery records are retained for debugging.',
       inputSchema: webhookDelete,
       handler: async (input: z.infer<typeof webhookDelete>, actor: ActorContext) => {
@@ -69,6 +73,7 @@ export function webhookTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'webhook_list',
+      tier: 'admin',
       description: 'List all registered webhook endpoints for the current tenant, including their URLs, subscribed events, and active status.',
       inputSchema: webhookList,
       handler: async (input: z.infer<typeof webhookList>, actor: ActorContext) => {
@@ -82,6 +87,7 @@ export function webhookTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'webhook_list_deliveries',
+      tier: 'admin',
       description: 'List webhook delivery attempts with optional filters for a specific webhook. Shows delivery status (success, failed, pending), response codes, and timestamps. Useful for debugging webhook integration issues.',
       inputSchema: webhookListDeliveries,
       handler: async (input: z.infer<typeof webhookListDeliveries>, _actor: ActorContext) => {

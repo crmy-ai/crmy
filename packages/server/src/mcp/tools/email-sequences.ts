@@ -21,6 +21,7 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'email_sequence_create',
+      tier: 'extended',
       description:
         'Create an email sequence (drip campaign). Steps define delay_days between sends, ' +
         'subject, and body. The sequence starts sending when contacts are enrolled.',
@@ -36,6 +37,7 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'email_sequence_get',
+      tier: 'extended',
       description: 'Get an email sequence by ID, including its steps.',
       inputSchema: emailSequenceGet,
       handler: async (input: z.infer<typeof emailSequenceGet>, actor: ActorContext) => {
@@ -45,6 +47,7 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'email_sequence_update',
+      tier: 'extended',
       description: 'Update an email sequence name, description, steps, or active status.',
       inputSchema: emailSequenceUpdate,
       handler: async (input: z.infer<typeof emailSequenceUpdate>, actor: ActorContext) => {
@@ -54,6 +57,7 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'email_sequence_delete',
+      tier: 'extended',
       description: 'Delete an email sequence. Active enrollments will be cancelled.',
       inputSchema: emailSequenceDelete,
       handler: async (input: z.infer<typeof emailSequenceDelete>, actor: ActorContext) => {
@@ -63,6 +67,7 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'email_sequence_list',
+      tier: 'extended',
       description: 'List email sequences with optional active status filter.',
       inputSchema: emailSequenceList,
       handler: async (input: z.infer<typeof emailSequenceList>, actor: ActorContext) => {
@@ -75,6 +80,7 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'email_sequence_enroll',
+      tier: 'extended',
       description:
         'Enroll a contact in an email sequence. The contact will receive sequence emails ' +
         'according to the step delays. A contact can only be enrolled in a sequence once.',
@@ -97,6 +103,7 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'email_sequence_unenroll',
+      tier: 'extended',
       description: 'Cancel an active enrollment by enrollment ID.',
       inputSchema: emailSequenceUnenroll,
       handler: async (input: z.infer<typeof emailSequenceUnenroll>, actor: ActorContext) => {
@@ -106,6 +113,7 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'email_sequence_enrollment_list',
+      tier: 'extended',
       description: 'List sequence enrollments filtered by sequence, contact, or status.',
       inputSchema: emailSequenceEnrollmentList,
       handler: async (input: z.infer<typeof emailSequenceEnrollmentList>, actor: ActorContext) => {

@@ -49,6 +49,7 @@ export function entityResolveTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'entity_resolve',
+      tier: 'core',
       description:
         'Resolve a natural-language entity reference to a canonical CRM record. ' +
         'Handles abbreviations (e.g. "JPMC" → JP Morgan Chase), aliases, typos, ' +

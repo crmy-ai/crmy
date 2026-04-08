@@ -17,6 +17,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'opportunity_create',
+      tier: 'extended',
       description: 'Create a new sales opportunity linked to an account. Set stage, amount (in cents), close_date, probability, and forecast_cat to build the pipeline record. The amount field represents ARR in cents (e.g. 180000 for $1,800). Link to an account_id and optionally a primary contact_id.',
       inputSchema: opportunityCreate,
       handler: async (input: z.infer<typeof opportunityCreate>, actor: ActorContext) => {
@@ -43,6 +44,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'opportunity_get',
+      tier: 'core',
       description: 'Retrieve a single opportunity by UUID, including its account details and recent activities. For a comprehensive view with context entries, stale warnings, and assignments, use briefing_get on the opportunity instead.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input: { id: string }, actor: ActorContext) => {
@@ -55,6 +57,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'opportunity_search',
+      tier: 'core',
       description: 'Search opportunities with flexible filters. Use stage to find deals at a specific pipeline stage (e.g. "Negotiation"), account_id for a specific company, forecast_cat for pipeline categorization, and date range to find deals closing within a window. Useful for pipeline reviews and identifying at-risk deals approaching their close_date.',
       inputSchema: opportunitySearch,
       handler: async (input: z.infer<typeof opportunitySearch>, actor: ActorContext) => {
@@ -67,6 +70,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'opportunity_advance_stage',
+      tier: 'core',
       description: 'Advance an opportunity to a new pipeline stage. Automatically logs a stage_change activity for the audit trail. When setting stage to "closed_lost", you must provide a lost_reason explaining why the deal was lost — this is required for pipeline analytics.',
       inputSchema: opportunityAdvanceStage,
       handler: async (input: z.infer<typeof opportunityAdvanceStage>, actor: ActorContext) => {
@@ -118,6 +122,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'opportunity_update',
+      tier: 'extended',
       description: 'Update an opportunity by passing its id and a patch object with fields to change. Supports amount, close_date, probability, forecast_cat, description, and custom_fields. For stage changes, prefer opportunity_advance_stage which auto-logs the transition.',
       inputSchema: opportunityUpdate,
       handler: async (input: z.infer<typeof opportunityUpdate>, actor: ActorContext) => {
@@ -147,6 +152,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'pipeline_summary',
+      tier: 'analytics',
       description: 'Get a pipeline summary showing total deal count, amount, and weighted value grouped by stage, owner, or forecast category. Use this for high-level pipeline snapshots in reports and reviews. For deeper pipeline analytics with win rates and cycle time, use pipeline_forecast instead.',
       inputSchema: pipelineSummary,
       handler: async (input: z.infer<typeof pipelineSummary>, actor: ActorContext) => {
@@ -158,6 +164,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'opportunity_delete',
+      tier: 'admin',
       description: 'Permanently delete an opportunity and all associated data. This is a destructive action that requires admin or owner role. For lost deals, prefer closing with opportunity_advance_stage to preserve analytics.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input: { id: string }, actor: ActorContext) => {

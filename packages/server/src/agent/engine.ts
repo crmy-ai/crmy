@@ -78,12 +78,9 @@ const TOOL_STATUS_MAP: Record<string, string> = {
   activity_complete:    'Marking activity complete…',
   activity_get_timeline:'Loading activity timeline…',
 
-  // Notes
-  note_list:            'Loading notes…',
-  note_get:             'Reading note…',
-  note_create:          'Creating note…',
-  note_update:          'Updating note…',
-  note_delete:          'Deleting note…',
+  // Compound actions
+  deal_advance:         'Advancing deal stage…',
+  contact_outreach:     'Logging outreach…',
 
   // Assignments
   assignment_list:      'Loading assignments…',

@@ -20,6 +20,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'assignment_create',
+      tier: 'core',
       description: 'Create an assignment to hand off work from one actor to another — this is the agent-to-human (or agent-to-agent) coordination primitive. The context field (plain text) is the handoff brief: write it as if explaining to a colleague what they need to know — what you tried, what you learned, what the assignee needs to do, and what to avoid. Set priority to "urgent" sparingly as it surfaces at the top of the human queue. The human sees assignments in the web UI Assignments view and via "crmy assignments list --mine". The assigner is automatically set to the current actor.',
       inputSchema: assignmentCreate,
       handler: async (input: z.infer<typeof assignmentCreate>, actor: ActorContext) => {
@@ -45,6 +46,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'assignment_get',
+      tier: 'core',
       description: 'Retrieve a single assignment by UUID, including its full context brief, status, priority, and linked subject. Use this to read the handoff details before starting work on an assignment.',
       inputSchema: assignmentGet,
       handler: async (input: z.infer<typeof assignmentGet>, actor: ActorContext) => {
@@ -55,6 +57,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'assignment_list',
+      tier: 'core',
       description: 'List assignments with flexible filters. Use assigned_to to see your own queue, assigned_by to see what you have delegated, status to filter by lifecycle state (pending, accepted, in_progress, blocked, completed, declined, cancelled), and priority to focus on urgent items. Returns paginated results sorted by priority and creation time.',
       inputSchema: assignmentSearch,
       handler: async (input: z.infer<typeof assignmentSearch>, actor: ActorContext) => {
@@ -67,6 +70,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'assignment_update',
+      tier: 'extended',
       description: 'Update an assignment by passing its id and a patch object with fields to change. Use this to modify the context brief, adjust priority, update the due date, or change the assignee. For status transitions, prefer the dedicated accept/start/complete/block/decline/cancel tools instead.',
       inputSchema: assignmentUpdate,
       handler: async (input: z.infer<typeof assignmentUpdate>, actor: ActorContext) => {
@@ -91,6 +95,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'assignment_accept',
+      tier: 'core',
       description: 'Accept a pending assignment, transitioning it from "pending" to "accepted" status. Call this when you are ready to take ownership of the work. The assignment must be in "pending" status.',
       inputSchema: assignmentAccept,
       handler: async (input: z.infer<typeof assignmentAccept>, actor: ActorContext) => {
@@ -118,6 +123,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'assignment_complete',
+      tier: 'core',
       description: 'Mark an assignment as completed. Optionally pass completed_by_activity_id to link the activity that fulfilled the assignment — this creates a clear audit trail showing exactly what action completed the work.',
       inputSchema: assignmentComplete,
       handler: async (input: z.infer<typeof assignmentComplete>, actor: ActorContext) => {
@@ -147,6 +153,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'assignment_decline',
+      tier: 'core',
       description: 'Decline a pending assignment you cannot or should not handle. Optionally provide a reason so the assigner understands why and can reassign. The reason is stored in the assignment metadata for audit.',
       inputSchema: assignmentDecline,
       handler: async (input: z.infer<typeof assignmentDecline>, actor: ActorContext) => {
@@ -182,6 +189,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'assignment_start',
+      tier: 'core',
       description: 'Begin working on an accepted assignment, transitioning it from "accepted" to "in_progress" status. Call this when you actively start the work so the assigner can see progress.',
       inputSchema: assignmentStart,
       handler: async (input: z.infer<typeof assignmentStart>, actor: ActorContext) => {
@@ -209,6 +217,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'assignment_block',
+      tier: 'admin',
       description: 'Mark an in-progress assignment as blocked when you cannot continue without external input or resolution. Provide a reason describing what is blocking progress so the assigner or team can help unblock.',
       inputSchema: assignmentBlock,
       handler: async (input: z.infer<typeof assignmentBlock>, actor: ActorContext) => {
@@ -243,6 +252,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'assignment_cancel',
+      tier: 'admin',
       description: 'Cancel an assignment that is no longer needed. Works from any non-terminal state (pending, accepted, in_progress, blocked). Optionally provide a reason explaining why the work is no longer required.',
       inputSchema: assignmentCancel,
       handler: async (input: z.infer<typeof assignmentCancel>, actor: ActorContext) => {

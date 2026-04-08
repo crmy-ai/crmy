@@ -787,7 +787,8 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
-  // --- Notes ---
+  // --- Notes (deprecated — proxied to context_entries with context_type=note) ---
+  // These routes are preserved for backward compatibility. New clients should use /context-entries.
   router.get('/notes', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
@@ -802,10 +803,11 @@ export function apiRouter(db: DbPool): Router {
         });
         return;
       }
-      const handler = toolHandler(db, 'note_list');
+      const handler = toolHandler(db, 'context_list');
       const result = await handler({
-        object_type: objectType,
-        object_id: objectId,
+        subject_type: objectType,
+        subject_id: objectId,
+        context_type: 'note',
         visibility: qs(req.query.visibility),
         pinned: req.query.pinned !== undefined ? req.query.pinned === 'true' : undefined,
         limit: Math.min(qn(req.query.limit, 20), 100),
@@ -818,8 +820,20 @@ export function apiRouter(db: DbPool): Router {
   router.post('/notes', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      const handler = toolHandler(db, 'note_create');
-      const result = await handler(req.body, actor);
+      const handler = toolHandler(db, 'context_add');
+      const body = req.body as Record<string, unknown>;
+      // Map legacy note fields to context_entry fields
+      const result = await handler({
+        subject_type: body.object_type,
+        subject_id: body.object_id,
+        context_type: 'note',
+        body: body.body,
+        title: typeof body.body === 'string' ? (body.body as string).slice(0, 120) : undefined,
+        parent_id: body.parent_id,
+        visibility: body.visibility ?? 'internal',
+        mentions: body.mentions ?? [],
+        pinned: body.pinned ?? false,
+      }, actor);
       res.status(201).json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -827,7 +841,7 @@ export function apiRouter(db: DbPool): Router {
   router.get('/notes/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      const handler = toolHandler(db, 'note_get');
+      const handler = toolHandler(db, 'context_get');
       const result = await handler({ id: p(req, 'id') }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
@@ -835,19 +849,23 @@ export function apiRouter(db: DbPool): Router {
 
   router.patch('/notes/:id', async (req: Request, res: Response) => {
     try {
-      const actor = getActor(req);
-      const handler = toolHandler(db, 'note_update');
-      const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
-      res.json(result);
+      res.status(410).json({
+        type: 'https://crmy.ai/errors/gone',
+        title: 'Notes API removed',
+        status: 410,
+        detail: 'The /notes PATCH endpoint has been removed. Use /context-entries/:id via context_supersede instead.',
+      });
     } catch (err) { handleError(res, err); }
   });
 
   router.delete('/notes/:id', async (req: Request, res: Response) => {
     try {
-      const actor = getActor(req);
-      const handler = toolHandler(db, 'note_delete');
-      const result = await handler({ id: p(req, 'id') }, actor);
-      res.json(result);
+      res.status(410).json({
+        type: 'https://crmy.ai/errors/gone',
+        title: 'Notes API removed',
+        status: 410,
+        detail: 'The /notes DELETE endpoint has been removed. Context entries are immutable — use context_supersede to replace content.',
+      });
     } catch (err) { handleError(res, err); }
   });
 

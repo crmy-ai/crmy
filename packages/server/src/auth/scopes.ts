@@ -18,7 +18,9 @@ const TOOL_SCOPES: Record<string, string[]> = {
   contact_update: ['contacts:write'],
   contact_delete: ['contacts:write'],
   contact_set_lifecycle: ['contacts:write'],
-  contact_log_activity: ['contacts:write', 'activities:write'],
+  // Compound action tools
+  deal_advance: ['opportunities:write', 'activities:write'],
+  contact_outreach: ['contacts:read', 'activities:write'],
 
   // ── Accounts ──
   account_get: ['accounts:read'],
@@ -86,13 +88,6 @@ const TOOL_SCOPES: Record<string, string[]> = {
   use_case_set_health: ['accounts:write'],
   use_case_link_contact: ['accounts:write', 'contacts:read'],
   use_case_unlink_contact: ['accounts:write'],
-
-  // ── Notes ──
-  note_get: ['activities:read'],
-  note_list: ['activities:read'],
-  note_create: ['activities:write'],
-  note_update: ['activities:write'],
-  note_delete: ['activities:write'],
 
   // ── Emails ──
   email_get: ['activities:read'],

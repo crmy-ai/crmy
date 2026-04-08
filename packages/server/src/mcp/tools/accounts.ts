@@ -16,6 +16,7 @@ export function accountTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'account_create',
+      tier: 'extended',
       description: 'Create a new account representing a company or organization. Set name, industry, domain, website, annual_revenue, and employee_count to build a complete profile. Accounts are the top-level entity that contacts, opportunities, and use cases roll up to.',
       inputSchema: accountCreate,
       handler: async (input: z.infer<typeof accountCreate>, actor: ActorContext) => {
@@ -42,6 +43,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'account_get',
+      tier: 'core',
       description: 'Retrieve a single account by UUID, including its linked contacts and open opportunities. Returns the full account profile with health_score, annual_revenue, industry, and custom fields. For a comprehensive view with context entries and activity timeline, use briefing_get instead.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input: { id: string }, actor: ActorContext) => {
@@ -58,6 +60,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'account_search',
+      tier: 'core',
       description: 'Search accounts with flexible filters. Use query to search by name or domain, industry to filter by sector, owner_id for accounts owned by a specific user, min_revenue for revenue thresholds, and tags for custom categorization. Returns paginated results with cursor-based pagination.',
       inputSchema: accountSearch,
       handler: async (input: z.infer<typeof accountSearch>, actor: ActorContext) => {
@@ -70,6 +73,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'account_update',
+      tier: 'extended',
       description: 'Update an account by passing its id and a patch object with the fields to change. Supports all account fields including name, industry, domain, annual_revenue, tags, and custom_fields.',
       inputSchema: accountUpdate,
       handler: async (input: z.infer<typeof accountUpdate>, actor: ActorContext) => {
@@ -99,6 +103,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'account_set_health_score',
+      tier: 'extended',
       description: 'Set the health score (0–100) for an account to reflect its current relationship health. Use this after evaluating engagement patterns, support tickets, NPS responses, or other health signals. Scores below 50 typically indicate at-risk accounts that need attention.',
       inputSchema: accountSetHealth,
       handler: async (input: z.infer<typeof accountSetHealth>, actor: ActorContext) => {
@@ -128,6 +133,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'account_get_hierarchy',
+      tier: 'extended',
       description: 'Get the parent/child hierarchy for an account, showing its position in a corporate structure. Returns the parent account (if any) and all child accounts. Useful for understanding organizational relationships in enterprise deals.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input: { id: string }, actor: ActorContext) => {
@@ -138,6 +144,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'account_delete',
+      tier: 'admin',
       description: 'Permanently delete an account and all associated data. This is a destructive action that requires admin or owner role. Consider archiving or reassigning contacts and opportunities before deletion.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input: { id: string }, actor: ActorContext) => {

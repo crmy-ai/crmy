@@ -14,8 +14,9 @@ export async function createContextEntry(
   const result = await db.query(
     `INSERT INTO context_entries (tenant_id, subject_type, subject_id,
        context_type, authored_by, title, body, structured_data,
-       confidence, tags, source, source_ref, source_activity_id, valid_until)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+       confidence, tags, source, source_ref, source_activity_id, valid_until,
+       parent_id, visibility, mentions, pinned)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      RETURNING *`,
     [
       tenantId,
@@ -32,6 +33,10 @@ export async function createContextEntry(
       data.source_ref ?? null,
       data.source_activity_id ?? null,
       data.valid_until ?? null,
+      (data as Record<string, unknown>).parent_id ?? null,
+      (data as Record<string, unknown>).visibility ?? 'internal',
+      JSON.stringify((data as Record<string, unknown>).mentions ?? []),
+      (data as Record<string, unknown>).pinned ?? false,
     ],
   );
   return result.rows[0] as ContextEntry;
@@ -420,6 +425,8 @@ export async function searchContextEntries(
     tag?: string;
     query?: string;
     structured_data_filter?: Record<string, unknown>;
+    visibility?: 'internal' | 'external';
+    pinned?: boolean;
     limit: number;
     cursor?: string;
   },
@@ -466,6 +473,16 @@ export async function searchContextEntries(
   if (filters.structured_data_filter) {
     conditions.push(`c.structured_data @> $${idx}::jsonb`);
     params.push(JSON.stringify(filters.structured_data_filter));
+    idx++;
+  }
+  if (filters.visibility) {
+    conditions.push(`c.visibility = $${idx}`);
+    params.push(filters.visibility);
+    idx++;
+  }
+  if (filters.pinned !== undefined) {
+    conditions.push(`c.pinned = $${idx}`);
+    params.push(filters.pinned);
     idx++;
   }
   if (filters.cursor) {

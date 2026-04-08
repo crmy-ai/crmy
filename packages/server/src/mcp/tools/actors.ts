@@ -15,6 +15,7 @@ export function actorTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'actor_register',
+      tier: 'admin',
       description: 'Register a new actor (human or agent) in the CRMy system. Agents should call this at the start of each session — it is idempotent, so calling it when already registered is safe and returns the existing actor. Provide actor_type ("human" or "agent"), display_name, and for agents: agent_identifier and agent_model. The returned actor ID is used in all subsequent tool calls as performed_by and authored_by.',
       inputSchema: actorCreate,
       handler: async (input: z.infer<typeof actorCreate>, actor: ActorContext) => {
@@ -37,6 +38,7 @@ export function actorTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'actor_get',
+      tier: 'admin',
       description: 'Retrieve an actor profile by UUID. Returns the actor type, display name, email, agent model, and activity status. Use this to look up details about who performed an activity or authored a context entry.',
       inputSchema: actorGet,
       handler: async (input: z.infer<typeof actorGet>, actor: ActorContext) => {
@@ -47,6 +49,7 @@ export function actorTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'actor_list',
+      tier: 'admin',
       description: 'List all registered actors (humans and agents) with optional filters. Filter by actor_type to see only humans or only agents, is_active to find active participants, or query to search by name. Returns paginated results with cursor-based pagination.',
       inputSchema: actorSearch,
       handler: async (input: z.infer<typeof actorSearch>, actor: ActorContext) => {
@@ -59,6 +62,7 @@ export function actorTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'actor_update',
+      tier: 'admin',
       description: 'Update an actor profile. Pass the actor id and a patch object with the fields to change (display_name, email, agent_model, metadata, is_active). Use this to update agent configuration or deactivate an actor.',
       inputSchema: actorUpdate,
       handler: async (input: z.infer<typeof actorUpdate>, actor: ActorContext) => {
@@ -83,6 +87,7 @@ export function actorTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'actor_whoami',
+      tier: 'core',
       description: 'Return your current actor identity — call this at the start of any agent session to get your actor_id, which is required as performed_by in activity_create and authored_by in context_add. If you are not registered, call actor_register first (it is idempotent and safe to call every session). Returns tenant_id, actor_id, actor_type, and role.',
       inputSchema: z.object({}),
       handler: async (_input: unknown, actor: ActorContext) => {
@@ -96,6 +101,7 @@ export function actorTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'actor_expertise',
+      tier: 'core',
       description: 'Find the actor (human or agent) with the most knowledge about a CRM entity, or see what a specific actor knows. Two modes: pass actor_id alone to get the subjects this actor has contributed context to (useful for routing review requests to the right person), or pass subject_type + subject_id to get actors ranked by contribution count for that entity (useful for finding who to ask about an account or opportunity). At least one of actor_id or (subject_type + subject_id) must be provided. Returns contribution counts, context types, and recency.',
       inputSchema: actorExpertise,
       handler: async (input: z.infer<typeof actorExpertise>, actor: ActorContext) => {

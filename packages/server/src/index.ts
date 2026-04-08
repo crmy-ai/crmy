@@ -173,7 +173,7 @@ export async function createApp(config: ServerConfig) {
 
       // New session — authenticate and create
       const actor = await extractMcpActor(req);
-      const server = createMcpServer(db, () => actor);
+      const server = createMcpServer(db, actor, () => actor);
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (sid) => {

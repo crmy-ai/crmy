@@ -22,6 +22,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'use_case_create',
+      tier: 'extended',
       description: 'Create a new use case for an account to track a consumption-based workload or deployment. Use cases complement opportunities by tracking ongoing product usage after a deal closes. Set product_line, target consumption metrics, and stage (discovery, poc, production, scaling, sunset).',
       inputSchema: useCaseCreate,
       handler: async (input: z.infer<typeof useCaseCreate>, actor: ActorContext) => {
@@ -48,6 +49,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_get',
+      tier: 'core',
       description: 'Retrieve a single use case by UUID including its linked contacts, consumption metrics, and current stage. For a comprehensive view with context entries and activity timeline, use briefing_get on the use case.',
       inputSchema: useCaseGet,
       handler: async (input: z.infer<typeof useCaseGet>, actor: ActorContext) => {
@@ -59,6 +61,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_search',
+      tier: 'core',
       description: 'Search use cases with flexible filters. Use account_id for a specific company, stage for lifecycle filtering, product_line for product segmentation, and query for text search. Returns paginated results sorted by recency.',
       inputSchema: useCaseSearch,
       handler: async (input: z.infer<typeof useCaseSearch>, actor: ActorContext) => {
@@ -71,6 +74,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_update',
+      tier: 'extended',
       description: 'Update a use case by passing its id and a patch object with fields to change. Supports all use case fields including product_line, consumption metrics, tags, and custom_fields.',
       inputSchema: useCaseUpdate,
       handler: async (input: z.infer<typeof useCaseUpdate>, actor: ActorContext) => {
@@ -100,6 +104,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_delete',
+      tier: 'admin',
       description: 'Delete a use case by UUID. This permanently removes the use case and unlinks all associated contacts. Consider advancing to "sunset" stage instead to preserve the historical record.',
       inputSchema: useCaseDelete,
       handler: async (input: z.infer<typeof useCaseDelete>, actor: ActorContext) => {
@@ -124,6 +129,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_advance_stage',
+      tier: 'extended',
       description: 'Advance a use case to its next lifecycle stage: discovery, poc, production, scaling, or sunset. Logs the stage transition as an activity for the audit trail. Use this to track product adoption progress.',
       inputSchema: useCaseAdvanceStage,
       handler: async (input: z.infer<typeof useCaseAdvanceStage>, actor: ActorContext) => {
@@ -160,6 +166,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_update_consumption',
+      tier: 'extended',
       description: 'Update the current consumption metrics for a use case. Set actual usage values against targets to track product adoption. The consumption ratio (actual/target) feeds into health score calculations.',
       inputSchema: useCaseUpdateConsumption,
       handler: async (input: z.infer<typeof useCaseUpdateConsumption>, actor: ActorContext) => {
@@ -189,6 +196,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_set_health',
+      tier: 'extended',
       description: 'Set the health score (0–100) for a use case to reflect current adoption health. Consider consumption ratio, user engagement, support ticket volume, and stakeholder sentiment when setting this score.',
       inputSchema: useCaseSetHealth,
       handler: async (input: z.infer<typeof useCaseSetHealth>, actor: ActorContext) => {
@@ -216,6 +224,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_link_contact',
+      tier: 'extended',
       description: 'Link a contact to a use case with an optional role description (e.g. "champion", "end user", "executive sponsor"). Creates a many-to-many relationship between the contact and the use case.',
       inputSchema: useCaseLinkContact,
       handler: async (input: z.infer<typeof useCaseLinkContact>, actor: ActorContext) => {
@@ -238,6 +247,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_unlink_contact',
+      tier: 'extended',
       description: 'Remove a contact from a use case, breaking the many-to-many link. The contact record itself is not affected.',
       inputSchema: useCaseUnlinkContact,
       handler: async (input: z.infer<typeof useCaseUnlinkContact>, actor: ActorContext) => {
@@ -258,6 +268,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_list_contacts',
+      tier: 'extended',
       description: 'List all contacts linked to a use case, including their roles. Returns contact profiles with their relationship to the use case.',
       inputSchema: useCaseListContacts,
       handler: async (input: z.infer<typeof useCaseListContacts>, actor: ActorContext) => {
@@ -267,6 +278,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_get_timeline',
+      tier: 'extended',
       description: 'Get a chronological activity timeline for a use case. Returns all activities linked to this use case sorted by occurred_at descending.',
       inputSchema: useCaseGetTimeline,
       handler: async (input: z.infer<typeof useCaseGetTimeline>, actor: ActorContext) => {
@@ -279,6 +291,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'use_case_summary',
+      tier: 'analytics',
       description: 'Get an aggregate summary of use cases grouped by stage, product_line, or owner. Returns counts and consumption totals per group. Useful for portfolio reviews and product adoption dashboards.',
       inputSchema: useCaseSummary,
       handler: async (input: z.infer<typeof useCaseSummary>, actor: ActorContext) => {

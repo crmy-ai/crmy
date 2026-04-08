@@ -34,7 +34,6 @@ import { useCaseTools } from './tools/use-cases.js';
 import { webhookTools } from './tools/webhooks.js';
 import { emailTools } from './tools/email.js';
 import { customFieldTools } from './tools/custom-fields.js';
-import { noteTools } from './tools/notes.js';
 import { workflowTools } from './tools/workflows.js';
 import { actorTools } from './tools/actors.js';
 import { assignmentTools } from './tools/assignments.js';
@@ -44,9 +43,17 @@ import { entityResolveTools } from './tools/entity-resolve.js';
 import { guideTools } from './tools/guide.js';
 import { messagingTools } from './tools/messaging.js';
 import { emailSequenceTools } from './tools/email-sequences.js';
+import { compoundTools } from './tools/compound.js';
 
 export interface ToolDef {
   name: string;
+  /** Determines which actors see this tool at connection time.
+   *  core     — all actors (agents, users, system)
+   *  extended — users + agents with 'extended' or 'write' scope
+   *  analytics — users + agents with 'analytics' or 'read' scope
+   *  admin    — actors with role 'admin' or 'owner' only
+   */
+  tier: 'core' | 'extended' | 'analytics' | 'admin';
   description: string;
   inputSchema: ZodObject<ZodRawShape>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -57,6 +64,8 @@ export function getAllTools(db: DbPool): ToolDef[] {
   // Order signals importance to the LLM scanning the tool list.
   // High-frequency agent tools first, infrastructure tools last.
   return [
+    // 0. Compound actions — highest priority, replace multi-step sequences
+    ...compoundTools(db),        // deal_advance, contact_outreach
     // 1. Briefing + context (most important agent tools)
     ...contextEntryTools(db),    // briefing_get, context_add/get/list/search/supersede, context_stale
     // 2. Actor identity
@@ -77,7 +86,6 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...useCaseTools(db),
     ...emailTools(db),
     ...emailSequenceTools(db),
-    ...noteTools(db),
     ...entityResolveTools(db),
     ...registryTools(db),
     ...webhookTools(db),
@@ -91,13 +99,40 @@ export function getAllTools(db: DbPool): ToolDef[] {
   ];
 }
 
-export function createMcpServer(db: DbPool, getActor: () => ActorContext): McpServer {
+/**
+ * Filter the full tool list to only those visible for a given actor.
+ * Called at server construction time so each MCP session only registers
+ * the tools the actor is allowed to use.
+ */
+export function getToolsForActor(db: DbPool, actor: ActorContext): ToolDef[] {
+  const all = getAllTools(db);
+  const isAdmin = actor.role === 'admin' || actor.role === 'owner';
+  // No scopes = JWT user (full access); scopes array present = agent API key
+  const hasExtended = !actor.scopes
+    || actor.scopes.includes('extended')
+    || actor.scopes.includes('write');
+  const hasAnalytics = !actor.scopes
+    || actor.scopes.includes('analytics')
+    || actor.scopes.includes('read');
+
+  return all.filter(t => {
+    if (t.tier === 'core') return true;
+    if (t.tier === 'extended') return hasExtended || isAdmin;
+    if (t.tier === 'analytics') return hasAnalytics || isAdmin;
+    if (t.tier === 'admin') return isAdmin;
+    return false;
+  });
+}
+
+export function createMcpServer(db: DbPool, actor: ActorContext, getActor: () => ActorContext): McpServer {
   const server = new McpServer({
     name: 'CRMy',
     version: getServerVersion(),
   });
 
-  const tools = getAllTools(db);
+  // Filter tools at connection time based on actor tier — agents see ~20 core tools;
+  // extended/analytics/admin tools are added only for actors that need them.
+  const tools = getToolsForActor(db, actor);
 
   registerResources(server, db, getActor);
 
