@@ -222,6 +222,7 @@ export async function createApp(config: ServerConfig) {
 
   // Background workers (every 60 seconds)
   const { processWebhookRetries } = await import('./webhooks/dispatcher.js');
+  const { processNextBatch: processContextOutbox } = await import('./workers/context_ingestion_worker.service.js');
   const hitlInterval = setInterval(async () => {
     try {
       await autoApproveExpired(db);
@@ -230,6 +231,7 @@ export async function createApp(config: ServerConfig) {
       await processPendingExtractions(db);
       await processStaleEntries(db);
       await processWebhookRetries(db);
+      await processContextOutbox(db);
       // Evict idle MCP sessions (30-minute TTL)
       evictStaleMcpSessions();
     } catch (err) {

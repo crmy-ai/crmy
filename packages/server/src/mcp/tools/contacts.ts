@@ -9,6 +9,7 @@ import * as contactRepo from '../../db/repos/contacts.js';
 import * as activityRepo from '../../db/repos/activities.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, permissionDenied } from '@crmy/shared';
+import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import type { ToolDef } from '../server.js';
 
@@ -35,6 +36,8 @@ export function contactTools(db: DbPool): ToolDef[] {
           objectId: contact.id,
           afterData: contact,
         });
+        indexDocument(db, 'contact', contact as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] contact index ${contact.id}: ${(err as Error).message}`));
         return { contact, event_id };
       },
     },
@@ -84,6 +87,8 @@ export function contactTools(db: DbPool): ToolDef[] {
           beforeData: before,
           afterData: contact,
         });
+        indexDocument(db, 'contact', contact as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] contact index ${contact.id}: ${(err as Error).message}`));
         return { contact, event_id };
       },
     },
@@ -111,6 +116,8 @@ export function contactTools(db: DbPool): ToolDef[] {
           afterData: { lifecycle_stage: contact.lifecycle_stage },
           metadata: input.reason ? { reason: input.reason } : {},
         });
+        indexDocument(db, 'contact', contact as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] contact index ${contact.id}: ${(err as Error).message}`));
         return { contact, event_id };
       },
     },
@@ -166,6 +173,8 @@ export function contactTools(db: DbPool): ToolDef[] {
         if (!before) throw notFound('Contact', input.id);
 
         await contactRepo.deleteContact(db, actor.tenant_id, input.id);
+        removeDocument(db, actor.tenant_id, 'contact', input.id)
+          .catch((err: unknown) => console.warn(`[search] contact remove ${input.id}: ${(err as Error).message}`));
         await emitEvent(db, {
           tenantId: actor.tenant_id,
           eventType: 'contact.deleted',

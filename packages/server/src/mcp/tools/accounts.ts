@@ -8,6 +8,7 @@ import type { ActorContext } from '@crmy/shared';
 import * as accountRepo from '../../db/repos/accounts.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, permissionDenied } from '@crmy/shared';
+import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import type { ToolDef } from '../server.js';
 
@@ -34,6 +35,8 @@ export function accountTools(db: DbPool): ToolDef[] {
           objectId: account.id,
           afterData: account,
         });
+        indexDocument(db, 'account', account as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] account index ${account.id}: ${(err as Error).message}`));
         return { account, event_id };
       },
     },
@@ -89,6 +92,8 @@ export function accountTools(db: DbPool): ToolDef[] {
           beforeData: before,
           afterData: account,
         });
+        indexDocument(db, 'account', account as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] account index ${account.id}: ${(err as Error).message}`));
         return { account, event_id };
       },
     },
@@ -116,6 +121,8 @@ export function accountTools(db: DbPool): ToolDef[] {
           afterData: { health_score: account.health_score },
           metadata: input.rationale ? { rationale: input.rationale } : {},
         });
+        indexDocument(db, 'account', account as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] account index ${account.id}: ${(err as Error).message}`));
         return { account, event_id };
       },
     },
@@ -141,6 +148,8 @@ export function accountTools(db: DbPool): ToolDef[] {
         if (!before) throw notFound('Account', input.id);
 
         await accountRepo.deleteAccount(db, actor.tenant_id, input.id);
+        removeDocument(db, actor.tenant_id, 'account', input.id)
+          .catch((err: unknown) => console.warn(`[search] account remove ${input.id}: ${(err as Error).message}`));
         await emitEvent(db, {
           tenantId: actor.tenant_id,
           eventType: 'account.deleted',

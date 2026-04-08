@@ -12,7 +12,9 @@ import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as ucRepo from '../../db/repos/use-cases.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound } from '@crmy/shared';
+import { notFound, validationError } from '@crmy/shared';
+import { validateUseCaseTransition } from '../../services/state-machine.js';
+import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import type { ToolDef } from '../server.js';
 
@@ -39,6 +41,8 @@ export function useCaseTools(db: DbPool): ToolDef[] {
           objectId: uc.id,
           afterData: uc,
         });
+        indexDocument(db, 'use_case', uc as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] use_case index ${uc.id}: ${(err as Error).message}`));
         return { use_case: uc, event_id };
       },
     },
@@ -89,6 +93,8 @@ export function useCaseTools(db: DbPool): ToolDef[] {
           beforeData: before,
           afterData: uc,
         });
+        indexDocument(db, 'use_case', uc as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] use_case index ${uc.id}: ${(err as Error).message}`));
         return { use_case: uc, event_id };
       },
     },
@@ -101,6 +107,8 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         if (!uc) throw notFound('UseCase', input.id);
 
         await ucRepo.deleteUseCase(db, actor.tenant_id, input.id);
+        removeDocument(db, actor.tenant_id, 'use_case', input.id)
+          .catch((err: unknown) => console.warn(`[search] use_case remove ${input.id}: ${(err as Error).message}`));
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -122,6 +130,13 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         const before = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!before) throw notFound('UseCase', input.id);
 
+        const transition = await validateUseCaseTransition(
+          db, actor.tenant_id, input.id, before.stage, input.stage,
+        );
+        if (!transition.allowed) {
+          throw validationError(transition.blockers.join('; '));
+        }
+
         const uc = await ucRepo.updateUseCase(db, actor.tenant_id, input.id, {
           stage: input.stage,
         });
@@ -138,6 +153,8 @@ export function useCaseTools(db: DbPool): ToolDef[] {
           afterData: { stage: uc.stage },
           metadata: input.note ? { note: input.note } : {},
         });
+        indexDocument(db, 'use_case', uc as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] use_case index ${uc.id}: ${(err as Error).message}`));
         return { use_case: uc, event_id };
       },
     },
@@ -165,6 +182,8 @@ export function useCaseTools(db: DbPool): ToolDef[] {
           afterData: { consumption_current: uc.consumption_current },
           metadata: input.note ? { note: input.note } : {},
         });
+        indexDocument(db, 'use_case', uc as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] use_case index ${uc.id}: ${(err as Error).message}`));
         return { use_case: uc, event_id };
       },
     },

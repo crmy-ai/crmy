@@ -8,6 +8,8 @@ import type { ActorContext } from '@crmy/shared';
 import * as oppRepo from '../../db/repos/opportunities.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, validationError, permissionDenied } from '@crmy/shared';
+import { validateOpportunityTransition } from '../../services/state-machine.js';
+import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import type { ToolDef } from '../server.js';
 
@@ -34,6 +36,8 @@ export function opportunityTools(db: DbPool): ToolDef[] {
           objectId: opportunity.id,
           afterData: opportunity,
         });
+        indexDocument(db, 'opportunity', opportunity as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] opportunity index ${opportunity.id}: ${(err as Error).message}`));
         return { opportunity, event_id };
       },
     },
@@ -73,6 +77,13 @@ export function opportunityTools(db: DbPool): ToolDef[] {
         const before = await oppRepo.getOpportunity(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Opportunity', input.id);
 
+        const transition = await validateOpportunityTransition(
+          db, actor.tenant_id, input.id, before.stage, input.stage,
+        );
+        if (!transition.allowed) {
+          throw validationError(transition.blockers.join('; '));
+        }
+
         const patch: Record<string, unknown> = { stage: input.stage };
         if (input.lost_reason) patch.lost_reason = input.lost_reason;
         if (input.stage === 'closed_won' || input.stage === 'closed_lost') {
@@ -100,6 +111,8 @@ export function opportunityTools(db: DbPool): ToolDef[] {
             ...(input.lost_reason ? { lost_reason: input.lost_reason } : {}),
           },
         });
+        indexDocument(db, 'opportunity', opportunity as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] opportunity index ${opportunity.id}: ${(err as Error).message}`));
         return { opportunity, event_id };
       },
     },
@@ -127,6 +140,8 @@ export function opportunityTools(db: DbPool): ToolDef[] {
           beforeData: before,
           afterData: opportunity,
         });
+        indexDocument(db, 'opportunity', opportunity as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] opportunity index ${opportunity.id}: ${(err as Error).message}`));
         return { opportunity, event_id };
       },
     },
@@ -153,6 +168,8 @@ export function opportunityTools(db: DbPool): ToolDef[] {
         if (!before) throw notFound('Opportunity', input.id);
 
         await oppRepo.deleteOpportunity(db, actor.tenant_id, input.id);
+        removeDocument(db, actor.tenant_id, 'opportunity', input.id)
+          .catch((err: unknown) => console.warn(`[search] opportunity remove ${input.id}: ${(err as Error).message}`));
         await emitEvent(db, {
           tenantId: actor.tenant_id,
           eventType: 'opportunity.deleted',

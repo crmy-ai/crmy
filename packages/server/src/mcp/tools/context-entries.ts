@@ -13,6 +13,7 @@ import type { ActorContext, SubjectType } from '@crmy/shared';
 import * as contextRepo from '../../db/repos/context-entries.js';
 import * as activityRepo from '../../db/repos/activities.js';
 import * as contextTypeRepo from '../../db/repos/context-type-registry.js';
+import * as outboxRepo from '../../db/repos/context-outbox.js';
 import * as governorLimits from '../../db/repos/governor-limits.js';
 import { assembleBriefing, formatBriefingText } from '../../services/briefing.js';
 import { processStaleEntriesForTenant } from '../../services/staleness.js';
@@ -93,6 +94,10 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           afterData: entry,
         });
 
+        // Enqueue for search indexing — fire-and-forget, never blocks the write.
+        outboxRepo.insertJob(db, actor.tenant_id, 'context_entry', entry.id, entry as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[outbox] context_add enqueue ${entry.id}: ${(err as Error).message}`));
+
         // Soft-validate structured_data against the context type's JSON Schema
         const schema = await contextTypeRepo.getContextTypeSchema(db, input.context_type);
         const validation_warnings = schema && input.structured_data
@@ -168,6 +173,11 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           beforeData: { superseded_id: input.id },
           afterData: result.new,
         });
+
+        // Enqueue replacement entry for search re-indexing — fire-and-forget.
+        outboxRepo.insertJob(db, actor.tenant_id, 'context_entry', result.new.id, result.new as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[outbox] context_supersede enqueue ${result.new.id}: ${(err as Error).message}`));
+
         return { context_entry: result.new, superseded: result.old, event_id };
       },
     },

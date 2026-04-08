@@ -9,6 +9,7 @@ import * as activityRepo from '../../db/repos/activities.js';
 import * as governorLimits from '../../db/repos/governor-limits.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
+import { indexDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import { triggerExtraction } from '../../agent/extraction.js';
 import type { ToolDef } from '../server.js';
@@ -46,6 +47,9 @@ export function activityTools(db: DbPool): ToolDef[] {
         triggerExtraction(db, actor.tenant_id, activity.id).catch(err =>
           console.error('[extraction] trigger failed:', err),
         );
+
+        indexDocument(db, 'activity', activity as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] activity index ${activity.id}: ${(err as Error).message}`));
 
         return { activity, event_id };
       },
@@ -109,6 +113,8 @@ export function activityTools(db: DbPool): ToolDef[] {
           beforeData: { status: before.status },
           afterData: { status: 'completed' },
         });
+        indexDocument(db, 'activity', activity as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] activity index ${activity.id}: ${(err as Error).message}`));
         return { activity, event_id };
       },
     },
@@ -143,6 +149,8 @@ export function activityTools(db: DbPool): ToolDef[] {
           beforeData: before,
           afterData: activity,
         });
+        indexDocument(db, 'activity', activity as unknown as Record<string, unknown>)
+          .catch((err: unknown) => console.warn(`[search] activity index ${activity.id}: ${(err as Error).message}`));
         return { activity, event_id };
       },
     },

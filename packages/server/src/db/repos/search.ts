@@ -17,6 +17,58 @@ export async function crmSearch(
   useCases: Record<string, unknown>[];
   assignments: Record<string, unknown>[];
 }> {
+  // ── Unified index path ────────────────────────────────────────────────────
+  // Query the search_index table using PostgreSQL full-text search.
+  // Falls back to the legacy ILIKE multi-table scan when:
+  //   a) the table doesn't exist yet (migration not yet applied), or
+  //   b) the index is empty (no documents indexed yet for this tenant).
+  try {
+    const indexResult = await db.query(
+      `SELECT entity_type, entity_id, metadata,
+              ts_rank(search_vector, plainto_tsquery('english', $2)) AS rank
+       FROM search_index
+       WHERE tenant_id = $1
+         AND search_vector @@ plainto_tsquery('english', $2)
+       ORDER BY rank DESC
+       LIMIT $3`,
+      [tenantId, query, limit * 6],  // fetch up to 6× limit so each bucket can fill
+    );
+
+    if (indexResult.rows.length > 0) {
+      const contacts: Contact[] = [];
+      const accounts: Account[] = [];
+      const opportunities: Opportunity[] = [];
+      const activities: Record<string, unknown>[] = [];
+      const useCases: Record<string, unknown>[] = [];
+      const assignments: Record<string, unknown>[] = [];
+
+      for (const row of indexResult.rows as { entity_type: string; entity_id: string; metadata: Record<string, unknown> }[]) {
+        const entity = { ...row.metadata, id: row.entity_id };
+        switch (row.entity_type) {
+          case 'contact':     contacts.push(entity as unknown as Contact);     break;
+          case 'account':     accounts.push(entity as unknown as Account);     break;
+          case 'opportunity': opportunities.push(entity as unknown as Opportunity); break;
+          case 'activity':    activities.push(entity);                         break;
+          case 'use_case':    useCases.push(entity);                           break;
+        }
+      }
+
+      return {
+        contacts:      contacts.slice(0, limit),
+        accounts:      accounts.slice(0, limit),
+        opportunities: opportunities.slice(0, limit),
+        activities:    activities.slice(0, limit),
+        useCases:      useCases.slice(0, limit),
+        assignments:   assignments.slice(0, limit),
+      };
+    }
+  } catch {
+    // Table not yet created (migration pending) — fall through to ILIKE.
+  }
+
+  // ── Legacy fallback: parallel ILIKE scans ────────────────────────────────
+  // Used during the migration window before search_index is populated, or when
+  // a query returns zero results from the index (e.g. new tenant, no docs yet).
   const pattern = `%${query}%`;
 
   const [contacts, accounts, opportunities, activities, useCases, assignments] = await Promise.all([
@@ -67,12 +119,12 @@ export async function crmSearch(
   ]);
 
   return {
-    contacts: contacts.rows as Contact[],
-    accounts: accounts.rows as Account[],
+    contacts:      contacts.rows as Contact[],
+    accounts:      accounts.rows as Account[],
     opportunities: opportunities.rows as Opportunity[],
-    activities: activities.rows,
-    useCases: useCases.rows,
-    assignments: assignments.rows,
+    activities:    activities.rows,
+    useCases:      useCases.rows,
+    assignments:   assignments.rows,
   };
 }
 

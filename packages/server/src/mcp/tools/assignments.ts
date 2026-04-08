@@ -12,7 +12,8 @@ import type { ActorContext } from '@crmy/shared';
 import * as assignmentRepo from '../../db/repos/assignments.js';
 import * as governorLimits from '../../db/repos/governor-limits.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound } from '@crmy/shared';
+import { notFound, validationError } from '@crmy/shared';
+import { validateAssignmentAction } from '../../services/state-machine.js';
 import type { ToolDef } from '../server.js';
 
 export function assignmentTools(db: DbPool): ToolDef[] {
@@ -96,6 +97,9 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
 
+        const acceptBlocker = validateAssignmentAction('accept', before.status);
+        if (acceptBlocker) throw validationError(acceptBlocker);
+
         const assignment = await assignmentRepo.acceptAssignment(db, actor.tenant_id, input.id);
         if (!assignment) throw notFound('Assignment', input.id);
 
@@ -119,6 +123,9 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       handler: async (input: z.infer<typeof assignmentComplete>, actor: ActorContext) => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
+
+        const completeBlocker = validateAssignmentAction('complete', before.status);
+        if (completeBlocker) throw validationError(completeBlocker);
 
         const assignment = await assignmentRepo.completeAssignment(
           db, actor.tenant_id, input.id, input.completed_by_activity_id,
@@ -145,6 +152,9 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       handler: async (input: z.infer<typeof assignmentDecline>, actor: ActorContext) => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
+
+        const declineBlocker = validateAssignmentAction('decline', before.status);
+        if (declineBlocker) throw validationError(declineBlocker);
 
         const assignment = await assignmentRepo.declineAssignment(db, actor.tenant_id, input.id);
         if (!assignment) throw notFound('Assignment', input.id);
@@ -178,6 +188,9 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
 
+        const startBlocker = validateAssignmentAction('start', before.status);
+        if (startBlocker) throw validationError(startBlocker);
+
         const assignment = await assignmentRepo.startAssignment(db, actor.tenant_id, input.id);
         if (!assignment) throw notFound('Assignment', input.id);
 
@@ -201,6 +214,9 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       handler: async (input: z.infer<typeof assignmentBlock>, actor: ActorContext) => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
+
+        const blockBlocker = validateAssignmentAction('block', before.status);
+        if (blockBlocker) throw validationError(blockBlocker);
 
         const assignment = await assignmentRepo.blockAssignment(db, actor.tenant_id, input.id);
         if (!assignment) throw notFound('Assignment', input.id);
@@ -232,6 +248,9 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       handler: async (input: z.infer<typeof assignmentCancel>, actor: ActorContext) => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
+
+        const cancelBlocker = validateAssignmentAction('cancel', before.status);
+        if (cancelBlocker) throw validationError(cancelBlocker);
 
         const assignment = await assignmentRepo.cancelAssignment(db, actor.tenant_id, input.id);
         if (!assignment) throw notFound('Assignment', input.id);

@@ -20,6 +20,7 @@ import * as agentRepo from '../db/repos/agent.js';
 import * as contextRepo from '../db/repos/context-entries.js';
 import * as contextTypeRepo from '../db/repos/context-type-registry.js';
 import * as actorRepo from '../db/repos/actors.js';
+import * as outboxRepo from '../db/repos/context-outbox.js';
 import { decrypt } from './crypto.js';
 
 // Activity types worth extracting from (those with text content)
@@ -162,7 +163,7 @@ export async function extractContextFromActivity(
     if (!typeExists) continue;
 
     try {
-      await contextRepo.createContextEntry(db, tenantId, {
+      const created = await contextRepo.createContextEntry(db, tenantId, {
         subject_type: (activity.subject_type ?? 'contact') as 'contact' | 'account' | 'opportunity' | 'use_case',
         subject_id: activity.subject_id ?? activity.id, // fallback to activity id if no subject
         context_type: entry.context_type,
@@ -178,6 +179,11 @@ export async function extractContextFromActivity(
         valid_until: entry.valid_until ?? undefined,
         is_current: true,
       });
+
+      // Enqueue for search indexing — fire-and-forget.
+      outboxRepo.insertJob(db, tenantId, 'context_entry', created.id, created as unknown as Record<string, unknown>)
+        .catch((err: unknown) => console.warn(`[outbox] extraction enqueue ${created.id}: ${(err as Error).message}`));
+
       written++;
     } catch (err) {
       console.error(`[extraction] Failed to write context entry for activity ${activityId}:`, err);
