@@ -10,7 +10,7 @@ import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { motion } from 'framer-motion';
-import { LayoutGrid, List, ChevronUp, ChevronDown, Sparkles, Globe, DollarSign, Heart, Building2 } from 'lucide-react';
+import { LayoutGrid, List, ChevronUp, ChevronDown, Sparkles, Globe, DollarSign, Heart, Building2, FileText } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -57,7 +57,7 @@ export default function Accounts() {
   const isMobile = useIsMobile();
   const [view, setView] = useState<ViewMode>('table');
   const effectiveView = isMobile ? 'cards' : view;
-  const { openDrawer, openQuickAdd, openAIWithContext } = useAppStore();
+  const { openDrawer, openQuickAdd, openAIWithContext, openDrawerBriefing } = useAppStore();
   const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
@@ -190,7 +190,7 @@ export default function Accounts() {
                     <SortHeader label="Revenue" sortKey="annual_revenue" />
                     <SortHeader label="Employees" sortKey="employee_count" />
                     <SortHeader label="Health" sortKey="health_score" />
-                    {agentEnabled && <th className="px-2 py-3 w-8"></th>}
+                    <th className="px-2 py-3 w-16"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -210,14 +210,20 @@ export default function Accounts() {
                       <td className="px-4 py-3 text-foreground font-medium">{a.annual_revenue ? formatRevenue(a.annual_revenue as number) : '—'}</td>
                       <td className="px-4 py-3 text-muted-foreground">{(a.employee_count as number) || '—'}</td>
                       <td className="px-4 py-3">{a.health_score ? <HealthBadge score={a.health_score as number} /> : '—'}</td>
-                      {agentEnabled && (
-                        <td className="px-2 py-3">
-                          <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'account', id: a.id as string, name: a.name as string, detail: a.industry as string }); navigate('/agent'); }}
-                            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
-                            <Sparkles className="w-3.5 h-3.5 text-accent" />
+                      <td className="px-2 py-3">
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                          <button onClick={(e) => { e.stopPropagation(); openDrawerBriefing('account', a.id as string); }}
+                            className="p-1.5 rounded-lg hover:bg-primary/10 transition-colors" title="View briefing">
+                            <FileText className="w-3.5 h-3.5 text-primary" />
                           </button>
-                        </td>
-                      )}
+                          {agentEnabled && (
+                            <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'account', id: a.id as string, name: a.name as string, detail: a.industry as string }); navigate('/agent'); }}
+                              className="p-1.5 rounded-lg hover:bg-accent/10 transition-colors">
+                              <Sparkles className="w-3.5 h-3.5 text-accent" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -234,6 +240,18 @@ export default function Accounts() {
               <motion.div key={a.id as string} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
                 onClick={() => openDrawer('account', a.id as string)}
                 className="bg-card border border-border rounded-2xl p-4 cursor-pointer hover:shadow-lg hover:border-primary/20 transition-all press-scale group relative">
+                <div className="absolute top-3 right-3 flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-all">
+                  <button onClick={(e) => { e.stopPropagation(); openDrawerBriefing('account', a.id as string); }}
+                    className="p-1.5 rounded-lg hover:bg-primary/10 transition-colors" title="View briefing">
+                    <FileText className="w-3.5 h-3.5 text-primary" />
+                  </button>
+                  {agentEnabled && (
+                    <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'account', id: a.id as string, name: a.name as string, detail: a.industry as string }); navigate('/agent'); }}
+                      className="p-1.5 rounded-lg hover:bg-accent/10 transition-colors">
+                      <Sparkles className="w-3.5 h-3.5 text-accent" />
+                    </button>
+                  )}
+                </div>
                 <div className="flex items-center gap-3 mb-3">
                   <ContactAvatar name={a.name as string} className="w-11 h-11 rounded-2xl text-sm" />
                   <div className="min-w-0">

@@ -11,7 +11,7 @@ import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { motion } from 'framer-motion';
-import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown, Users } from 'lucide-react';
+import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown, Users, FileText } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { stageConfig } from '@/lib/stageConfig';
@@ -43,7 +43,7 @@ export default function Contacts() {
   const isMobile = useIsMobile();
   const [view, setView] = useState<ViewMode>('table');
   const effectiveView = isMobile ? 'cards' : view;
-  const { openDrawer, openQuickAdd, openAIWithContext } = useAppStore();
+  const { openDrawer, openQuickAdd, openAIWithContext, openDrawerBriefing } = useAppStore();
   const { enabled: agentEnabled } = useAgentSettings();
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
@@ -136,7 +136,7 @@ export default function Contacts() {
                     <SortHeader label="Company" sortKey="company" />
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Phone</th>
                     <SortHeader label="Stage" sortKey="lifecycle_stage" />
-                    {agentEnabled && <th className="px-2 py-3 w-8"></th>}
+                    <th className="px-2 py-3 w-16"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -152,14 +152,20 @@ export default function Contacts() {
                       <td className="px-4 py-3 text-muted-foreground">{(c.company_name as string) || '—'}</td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{(c.phone as string) || '—'}</td>
                       <td className="px-4 py-3">{c.lifecycle_stage ? <StageBadge stage={c.lifecycle_stage as string} /> : '—'}</td>
-                      {agentEnabled && (
-                        <td className="px-2 py-3">
-                          <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: c.company_name as string }); navigate('/agent'); }}
-                            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
-                            <Sparkles className="w-3.5 h-3.5 text-accent" />
+                      <td className="px-2 py-3">
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                          <button onClick={(e) => { e.stopPropagation(); openDrawerBriefing('contact', c.id as string); }}
+                            className="p-1.5 rounded-lg hover:bg-primary/10 transition-colors" title="View briefing">
+                            <FileText className="w-3.5 h-3.5 text-primary" />
                           </button>
-                        </td>
-                      )}
+                          {agentEnabled && (
+                            <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: c.company_name as string }); navigate('/agent'); }}
+                              className="p-1.5 rounded-lg hover:bg-accent/10 transition-colors">
+                              <Sparkles className="w-3.5 h-3.5 text-accent" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -176,12 +182,18 @@ export default function Contacts() {
               <motion.div key={c.id as string} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
                 onClick={() => openDrawer('contact', c.id as string)}
                 className="bg-card border border-border rounded-2xl p-4 cursor-pointer hover:shadow-lg hover:border-primary/20 transition-all press-scale group relative">
-                {agentEnabled && (
-                  <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: c.company_name as string }); navigate('/agent'); }}
-                    className="absolute top-3 right-3 p-1.5 rounded-lg hover:bg-accent/10 transition-all md:opacity-0 md:group-hover:opacity-100">
-                    <Sparkles className="w-3.5 h-3.5 text-accent" />
+                <div className="absolute top-3 right-3 flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-all">
+                  <button onClick={(e) => { e.stopPropagation(); openDrawerBriefing('contact', c.id as string); }}
+                    className="p-1.5 rounded-lg hover:bg-primary/10 transition-colors" title="View briefing">
+                    <FileText className="w-3.5 h-3.5 text-primary" />
                   </button>
-                )}
+                  {agentEnabled && (
+                    <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: c.company_name as string }); navigate('/agent'); }}
+                      className="p-1.5 rounded-lg hover:bg-accent/10 transition-colors">
+                      <Sparkles className="w-3.5 h-3.5 text-accent" />
+                    </button>
+                  )}
+                </div>
                 <div className="flex items-center gap-3 mb-3">
                   <ContactAvatar name={displayName(c)} className="w-11 h-11 rounded-2xl text-sm" />
                   <div>

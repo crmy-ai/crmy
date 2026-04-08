@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { ContextBrowser } from '@/components/crm/ContextBrowser';
 import { TopBar } from '@/components/layout/TopBar';
 import { ActivityFeed } from '@/components/crm/CrmWidgets';
 import { useHITLRequests, useResolveHITL, useContextEntries, useActors } from '@/api/hooks';
@@ -77,6 +78,8 @@ function StatCard({
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') ?? 'overview';
   const [activityWindow, setActivityWindow] = useState<'today' | 'week'>('today');
   const [notes, setNotes] = useState<Record<string, string>>({});
 
@@ -101,11 +104,56 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-full">
       <TopBar
-        title="Memory Hub"
+        title="Workspace"
         icon={Brain}
         iconClassName="text-primary"
-        description="Your agent memory layer — context, approvals, and active actors at a glance."
-      />
+        description="Agent memory — context entries, handoffs, and active agents at a glance."
+      >
+        <div className="hidden md:flex items-center gap-0.5 bg-muted rounded-xl p-0.5">
+          <button
+            onClick={() => setSearchParams({})}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeTab === 'overview' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Brain className="w-3 h-3" /> Overview
+          </button>
+          <button
+            onClick={() => setSearchParams({ tab: 'knowledge' })}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeTab === 'knowledge' ? 'bg-[#0ea5e9]/15 text-[#0ea5e9] shadow-sm' : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Library className="w-3 h-3" /> Knowledge
+          </button>
+        </div>
+      </TopBar>
+
+      {/* Mobile tab bar */}
+      {activeTab !== 'overview' || true ? (
+        <div className="md:hidden flex items-center gap-0.5 bg-muted rounded-xl p-0.5 mx-4 mt-3 mb-1">
+          <button
+            onClick={() => setSearchParams({})}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeTab === 'overview' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
+            }`}
+          >
+            <Brain className="w-3 h-3" /> Overview
+          </button>
+          <button
+            onClick={() => setSearchParams({ tab: 'knowledge' })}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              activeTab === 'knowledge' ? 'bg-[#0ea5e9]/15 text-[#0ea5e9] shadow-sm' : 'text-muted-foreground'
+            }`}
+          >
+            <Library className="w-3 h-3" /> Knowledge
+          </button>
+        </div>
+      ) : null}
+
+      {activeTab === 'knowledge' ? (
+        <ContextBrowser />
+      ) : (
       <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
 
         {/* Stat row */}
@@ -125,7 +173,7 @@ export default function Dashboard() {
             value={contextTotal}
             sub={staleCount > 0 ? `${staleCount} stale` : 'all current'}
             color="bg-[#0ea5e9]/15 text-[#0ea5e9]"
-            href="/context"
+            href="/?tab=knowledge"
             delay={0.07}
           />
           <StatCard
@@ -149,10 +197,10 @@ export default function Dashboard() {
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="font-display font-bold text-foreground flex items-center gap-2">
                     <ShieldCheck className="w-4 h-4 text-destructive" />
-                    Pending approvals
+                    Pending handoffs
                   </h2>
                   {pendingHITL.length > 0 && (
-                    <Link to="/approvals" className="text-xs text-primary hover:underline flex items-center gap-1">
+                    <Link to="/handoffs" className="text-xs text-primary hover:underline flex items-center gap-1">
                       View all <ArrowRight className="w-3 h-3" />
                     </Link>
                   )}
@@ -208,10 +256,10 @@ export default function Dashboard() {
                     ))}
                     {pendingHITL.length > 3 && (
                       <button
-                        onClick={() => navigate('/approvals')}
+                        onClick={() => navigate('/handoffs')}
                         className="w-full text-xs text-primary hover:underline py-1"
                       >
-                        +{pendingHITL.length - 3} more — view all approvals
+                        +{pendingHITL.length - 3} more — view all handoffs
                       </button>
                     )}
                   </div>
@@ -301,7 +349,7 @@ export default function Dashboard() {
                     <Library className="w-4 h-4 text-[#0ea5e9]" />
                     Context health
                   </h3>
-                  <Link to="/context" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  <Link to="/?tab=knowledge" className="text-xs text-primary hover:underline flex items-center gap-1">
                     Browse <ArrowRight className="w-3 h-3" />
                   </Link>
                 </div>
@@ -321,7 +369,7 @@ export default function Dashboard() {
                   </div>
                   {staleCount > 0 && (
                     <Link
-                      to="/context?stale=true"
+                      to="/?tab=knowledge&stale=true"
                       className="flex items-center gap-1 text-xs text-destructive hover:underline"
                     >
                       <AlertCircle className="w-3 h-3" />
@@ -339,6 +387,7 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

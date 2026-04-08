@@ -26,7 +26,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Lock,       label: 'API Keys',      path: '/settings/api-keys',     roles: ['member', 'admin', 'owner'] },
   { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'] },
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
-  { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'] },
+  { icon: Users,      label: 'Agents',        path: '/settings/actors',       roles: ['admin', 'owner'] },
   { icon: Tags,       label: 'Registries',    path: '/settings/registries',   roles: ['admin', 'owner'] },
   { icon: MessageSquare, label: 'Messaging', path: '/settings/messaging',   roles: ['admin', 'owner'] },
   { icon: Bot,        label: 'Local Agent', path: '/settings/agent',        roles: ['admin', 'owner'] },

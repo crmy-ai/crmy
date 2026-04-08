@@ -7,7 +7,9 @@ import { ContactAvatar } from './ContactAvatar';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { Sparkles, Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2, FileText } from 'lucide-react';
+import { Sparkles, Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
+import { DrawerTabBar, type DrawerView } from './DrawerTabBar';
+import { MemoryGraph } from './MemoryGraph';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
 import { CustomFieldsSection } from './CrmWidgets';
@@ -202,11 +204,11 @@ function AccountEditForm({
 }
 
 export function AccountDrawer() {
-  const { drawerEntityId, openAIWithContext, closeDrawer } = useAppStore();
+  const { drawerEntityId, openAIWithContext, closeDrawer, drawerBriefing } = useAppStore();
   const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
-  const [briefing, setBriefing] = useState(false);
+  const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: accountData, isLoading } = useAccount(drawerEntityId ?? '') as any;
   const updateAccount = useUpdateAccount(drawerEntityId ?? '');
@@ -238,8 +240,22 @@ export function AccountDrawer() {
   const employeeCount: number = account.employee_count ?? 0;
   const healthScore: number = account.health_score ?? 0;
 
-  if (briefing) {
-    return <BriefingPanel subjectType="account" subjectId={drawerEntityId!} onClose={() => setBriefing(false)} />;
+  if (view === 'brief') {
+    return (
+      <>
+        <DrawerTabBar view={view} onChange={setView} />
+        <BriefingPanel subjectType="account" subjectId={drawerEntityId!} onClose={() => setView('detail')} />
+      </>
+    );
+  }
+
+  if (view === 'graph') {
+    return (
+      <>
+        <DrawerTabBar view={view} onChange={setView} />
+        <MemoryGraph subjectType="account" subjectId={drawerEntityId!} subjectName={name} />
+      </>
+    );
   }
 
   if (editing) {
@@ -301,12 +317,6 @@ export function AccountDrawer() {
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
           </button>
-          <button
-            onClick={() => setBriefing(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
-          >
-            <FileText className="w-3.5 h-3.5" /> Brief
-          </button>
           {agentEnabled && (
             <button
               onClick={() => {
@@ -321,6 +331,8 @@ export function AccountDrawer() {
           )}
         </div>
       </div>
+
+      <DrawerTabBar view={view} onChange={setView} />
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 p-4 mx-4 mt-4">

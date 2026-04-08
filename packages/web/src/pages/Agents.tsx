@@ -12,7 +12,7 @@ export default function ActorsPage() {
   return (
     <div className="flex flex-col h-full">
       <TopBar
-        title="Actors"
+        title="Agents"
         icon={UsersRound}
         iconClassName="text-[#6366f1]"
         description="Manage humans and AI agents with access to your CRMy workspace."

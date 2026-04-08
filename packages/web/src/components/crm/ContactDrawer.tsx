@@ -2,14 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useRef } from 'react';
-import { useContact, useActivities, useUpdateContact, useDeleteContact, useUsers, useCustomFields, useNotes, useCreateNote } from '@/api/hooks';
+import { useContact, useActivities, useUpdateContact, useDeleteContact, useUsers, useCustomFields, useContextEntries, useCreateContextEntry } from '@/api/hooks';
 import { ContactAvatar } from './ContactAvatar';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge, LeadScoreBadge, CustomFieldsSection } from './CrmWidgets';
 import { ActivityTimeline } from './ActivityTimeline';
-import { Phone, Mail, StickyNote, Sparkles, Pencil, ChevronLeft, Send, Pin, Trash2, FileText } from 'lucide-react';
+import { Phone, Mail, StickyNote, Sparkles, Pencil, ChevronLeft, Send, Pin, Trash2 } from 'lucide-react';
+import { DrawerTabBar, type DrawerView } from './DrawerTabBar';
+import { MemoryGraph } from './MemoryGraph';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
 import { toast } from '@/components/ui/use-toast';
@@ -203,11 +205,11 @@ function ContactEditForm({
 }
 
 export function ContactDrawer() {
-  const { drawerEntityId, openAIWithContext, closeDrawer } = useAppStore();
+  const { drawerEntityId, openAIWithContext, closeDrawer, drawerBriefing } = useAppStore();
   const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
-  const [briefing, setBriefing] = useState(false);
+  const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
   const [noting, setNoting] = useState(false);
   const [noteBody, setNoteBody] = useState('');
   const noteRef = useRef<HTMLTextAreaElement>(null);
@@ -217,9 +219,9 @@ export function ContactDrawer() {
   const { data: activitiesData } = useActivities({ contact_id: drawerEntityId ?? undefined, limit: 20 }) as any;
   const activities: any[] = activitiesData?.data ?? [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: notesData } = useNotes({ object_type: 'contact', object_id: drawerEntityId ?? '' }) as any;
+  const { data: notesData } = useContextEntries({ subject_type: 'contact', subject_id: drawerEntityId ?? '', context_type: 'note', limit: 20 }) as any;
   const notes: any[] = notesData?.data ?? [];
-  const createNote = useCreateNote();
+  const createNote = useCreateContextEntry();
   const updateContact = useUpdateContact(drawerEntityId ?? '');
   const deleteContact = useDeleteContact(drawerEntityId ?? '');
 
@@ -247,8 +249,22 @@ export function ContactDrawer() {
   const stage: string = contact.lifecycle_stage ?? '';
   const leadScore: number = contact.lead_score ?? 0;
 
-  if (briefing) {
-    return <BriefingPanel subjectType="contact" subjectId={drawerEntityId!} onClose={() => setBriefing(false)} />;
+  if (view === 'brief') {
+    return (
+      <>
+        <DrawerTabBar view={view} onChange={setView} />
+        <BriefingPanel subjectType="contact" subjectId={drawerEntityId!} onClose={() => setView('detail')} />
+      </>
+    );
+  }
+
+  if (view === 'graph') {
+    return (
+      <>
+        <DrawerTabBar view={view} onChange={setView} />
+        <MemoryGraph subjectType="contact" subjectId={drawerEntityId!} subjectName={name} />
+      </>
+    );
   }
 
   if (editing) {
@@ -323,12 +339,6 @@ export function ContactDrawer() {
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
           </button>
-          <button
-            onClick={() => setBriefing(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
-          >
-            <FileText className="w-3.5 h-3.5" /> Brief
-          </button>
           {agentEnabled && (
             <button
               onClick={() => {
@@ -343,6 +353,8 @@ export function ContactDrawer() {
           )}
         </div>
       </div>
+
+      <DrawerTabBar view={view} onChange={setView} />
 
       {/* Note compose panel */}
       {noting && (
@@ -360,7 +372,7 @@ export function ContactDrawer() {
             <button
               disabled={!noteBody.trim() || createNote.isPending}
               onClick={async () => {
-                await createNote.mutateAsync({ object_type: 'contact', object_id: drawerEntityId, body: noteBody.trim() });
+                await createNote.mutateAsync({ subject_type: 'contact', subject_id: drawerEntityId, context_type: 'note', body: noteBody.trim() });
                 setNoteBody('');
                 setNoting(false);
                 toast({ title: 'Note saved' });
@@ -386,9 +398,10 @@ export function ContactDrawer() {
                   {new Date(note.created_at).toLocaleDateString()}
                 </span>
               </div>
+              {note.title && <p className="text-xs font-medium text-foreground">{note.title}</p>}
               <p className="text-sm text-foreground whitespace-pre-wrap">{note.body}</p>
-              {note.author_type && (
-                <p className="text-[10px] text-muted-foreground capitalize">{note.author_type === 'agent' ? 'AI Agent' : note.author_type}</p>
+              {note.metadata?.author_type && (
+                <p className="text-[10px] text-muted-foreground capitalize">{note.metadata.author_type === 'agent' ? 'AI Agent' : note.metadata.author_type}</p>
               )}
             </div>
           ))}

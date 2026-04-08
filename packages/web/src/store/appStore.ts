@@ -21,7 +21,9 @@ interface AppState {
   drawerOpen: boolean;
   drawerType: DrawerType;
   drawerEntityId: string | null;
+  drawerBriefing: boolean;
   openDrawer: (type: DrawerType, entityId?: string) => void;
+  openDrawerBriefing: (type: DrawerType, entityId: string) => void;
   closeDrawer: () => void;
 
   commandPaletteOpen: boolean;
@@ -55,8 +57,10 @@ export const useAppStore = create<AppState>()(
       drawerOpen: false,
       drawerType: null,
       drawerEntityId: null,
-      openDrawer: (type, entityId) => set({ drawerOpen: true, drawerType: type, drawerEntityId: entityId ?? null }),
-      closeDrawer: () => set({ drawerOpen: false, drawerType: null, drawerEntityId: null }),
+      drawerBriefing: false,
+      openDrawer: (type, entityId) => set({ drawerOpen: true, drawerType: type, drawerEntityId: entityId ?? null, drawerBriefing: false }),
+      openDrawerBriefing: (type, entityId) => set({ drawerOpen: true, drawerType: type, drawerEntityId: entityId, drawerBriefing: true }),
+      closeDrawer: () => set({ drawerOpen: false, drawerType: null, drawerEntityId: null, drawerBriefing: false }),
 
       commandPaletteOpen: false,
       setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),

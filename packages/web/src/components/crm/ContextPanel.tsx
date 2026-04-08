@@ -25,7 +25,7 @@ interface ContextEntry {
   created_at: string;
 }
 
-const TYPE_COLORS: Record<string, string> = {
+export const TYPE_COLORS: Record<string, string> = {
   note: '#6366f1',
   research: '#8b5cf6',
   preference: '#ec4899',
@@ -36,6 +36,19 @@ const TYPE_COLORS: Record<string, string> = {
   summary: '#06b6d4',
   transcript: '#64748b',
   agent_reasoning: '#a855f7',
+};
+
+const TYPE_DESCRIPTIONS: Record<string, string> = {
+  note: 'Manual note added by a user or agent',
+  research: 'Background research about this contact or account',
+  preference: 'Known preferences — communication style, product focus, etc.',
+  objection: 'Stated blockers or objections during the sales process',
+  competitive_intel: 'Insights about competing vendors or alternatives under evaluation',
+  relationship_map: 'Org chart details, key stakeholders, and internal dynamics',
+  meeting_notes: 'Notes captured during a call or meeting',
+  summary: 'AI-generated or manual summary of interactions',
+  transcript: 'Verbatim or edited call/meeting transcript',
+  agent_reasoning: 'Reasoning trace captured by an AI agent during a task',
 };
 
 export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
@@ -159,14 +172,24 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
               >
                 <div className="flex items-center gap-2">
                   <span
-                    className="px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize"
+                    className="px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize cursor-help"
                     style={{ backgroundColor: color + '18', color }}
+                    title={TYPE_DESCRIPTIONS[entry.context_type] ?? entry.context_type.replace(/_/g, ' ')}
                   >
                     {entry.context_type.replace(/_/g, ' ')}
                   </span>
                   {entry.confidence != null && (
-                    <span className="text-[10px] text-muted-foreground font-mono">
-                      {Math.round(entry.confidence * 100)}%
+                    <span
+                      title={`${Math.round(entry.confidence * 100)}% confidence`}
+                      className={`text-[10px] font-semibold px-1 py-0.5 rounded cursor-help ${
+                        entry.confidence >= 0.8
+                          ? 'text-green-500 bg-green-500/10'
+                          : entry.confidence >= 0.5
+                            ? 'text-amber-500 bg-amber-500/10'
+                            : 'text-muted-foreground bg-muted'
+                      }`}
+                    >
+                      {entry.confidence >= 0.8 ? 'Verified' : entry.confidence >= 0.5 ? 'Likely' : 'Uncertain'}
                     </span>
                   )}
                   <span className="text-[10px] text-muted-foreground ml-auto">

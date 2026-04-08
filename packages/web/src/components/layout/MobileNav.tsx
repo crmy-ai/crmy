@@ -2,16 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Link, useLocation } from 'react-router-dom';
-import { Brain, ShieldCheck, UsersRound, Library, Inbox, Bot } from 'lucide-react';
+import { Brain, UsersRound, Inbox, Bot } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const tabs = [
-  { icon: Brain,       label: 'Hub',       path: '/' },
-  { icon: ShieldCheck, label: 'Approvals', path: '/approvals' },
-  { icon: Bot,         label: 'Agent',     path: '/agent' },
-  { icon: UsersRound,  label: 'Actors',    path: '/actors' },
-  { icon: Library,     label: 'Context',   path: '/context' },
-  { icon: Inbox,       label: 'Handoffs',  path: '/handoffs' },
+  { icon: Brain,      label: 'Workspace', path: '/' },
+  { icon: Bot,        label: 'Agent',     path: '/agent' },
+  { icon: UsersRound, label: 'Agents',    path: '/actors' },
+  { icon: Inbox,      label: 'Handoffs',  path: '/handoffs' },
 ];
 
 export function MobileNav() {

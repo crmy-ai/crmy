@@ -6,8 +6,6 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
-  ShieldCheck,
-  Library,
   Inbox,
   Zap,
   Users,
@@ -30,10 +28,8 @@ export { ENTITY_COLORS };
 
 // Agent-facing tier — top of nav
 const agentNavItems = [
-  { icon: Brain,       label: 'Memory Hub',  path: '/',            color: ENTITY_COLORS.contacts },
-  { icon: ShieldCheck, label: 'Approvals',   path: '/approvals',   color: ENTITY_COLORS.hitl },
-  { icon: UsersRound,  label: 'Actors',      path: '/actors',      color: ENTITY_COLORS.agents },
-  { icon: Library,     label: 'Context',     path: '/context',     color: ENTITY_COLORS.context },
+  { icon: Brain,       label: 'Workspace',   path: '/',            color: ENTITY_COLORS.contacts },
+  { icon: UsersRound,  label: 'Agents',      path: '/actors',      color: ENTITY_COLORS.agents },
   { icon: Zap,         label: 'Workflows',   path: '/workflows',   color: ENTITY_COLORS.workflows },
   { icon: Inbox,       label: 'Handoffs',    path: '/handoffs',    color: ENTITY_COLORS.assignments },
 ];
@@ -121,8 +117,10 @@ export function Sidebar() {
   }
 
   function badge(path: string) {
-    if (path === '/approvals') return hitlCount > 0 ? hitlCount : undefined;
-    if (path === '/handoffs') return assignCount > 0 ? assignCount : undefined;
+    if (path === '/handoffs') {
+      const total = (hitlCount ?? 0) + (assignCount ?? 0);
+      return total > 0 ? total : undefined;
+    }
     return undefined;
   }
 

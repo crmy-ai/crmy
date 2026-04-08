@@ -38,7 +38,6 @@ import Agent from '@/pages/Agent';
 import AgentActivity from '@/pages/AgentActivity';
 import Settings from '@/pages/Settings';
 import NotFound from '@/pages/NotFound';
-import { HITLPage } from '@/pages/hitl/HITL';
 import AssignmentsPage from '@/pages/Assignments';
 import InboxPage from '@/pages/Inbox';
 import ContextPage from '@/pages/Context';
@@ -92,8 +91,8 @@ function AnimatedRoutes() {
           <Route path="/handoffs" element={<InboxPage />} />
           <Route path="/assignments" element={<Navigate to="/handoffs" replace />} />
           <Route path="/inbox" element={<Navigate to="/handoffs" replace />} />
-          <Route path="/approvals" element={<HITLPage />} />
-          <Route path="/hitl" element={<Navigate to="/approvals" replace />} />
+          <Route path="/approvals" element={<Navigate to="/handoffs" replace />} />
+          <Route path="/hitl" element={<Navigate to="/handoffs" replace />} />
           <Route path="/context" element={<ContextPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/emails" element={<EmailsPage />} />
