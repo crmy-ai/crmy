@@ -125,13 +125,23 @@ export async function createApp(config: ServerConfig) {
   // MCP tool calls may include context blobs — 1 MB is generous but bounded.
   app.use(express.json({ limit: '1mb' }));
 
+  // Parse DB host/name once for the health endpoint (no credentials exposed)
+  const dbInfo = (() => {
+    try {
+      const u = new URL(config.databaseUrl);
+      return { host: u.hostname, name: u.pathname.replace(/^\//, '') };
+    } catch {
+      return { host: 'unknown', name: 'unknown' };
+    }
+  })();
+
   // Health check (no auth)
   app.get('/health', async (_req, res) => {
     try {
       await db.query('SELECT 1');
-      res.json({ status: 'ok', db: 'ok', version: SERVER_VERSION });
+      res.json({ status: 'ok', db: 'ok', version: SERVER_VERSION, db_host: dbInfo.host, db_name: dbInfo.name });
     } catch {
-      res.status(503).json({ status: 'error', db: 'error', version: SERVER_VERSION });
+      res.status(503).json({ status: 'error', db: 'error', version: SERVER_VERSION, db_host: dbInfo.host, db_name: dbInfo.name });
     }
   });
 

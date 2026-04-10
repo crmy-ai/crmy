@@ -374,25 +374,29 @@ http://localhost:3000/app
 
 #### Memory Hub (`/app`)
 
-The operator's overview of agent activity. Four stat cards link to their respective pages: **Pending Approvals**, **Context Entries**, **Active Agents**, and **Open Handoffs**.
+The operator's overview of agent activity. Two tabs sit in the page body:
 
-Below the stat cards, up to three pending HITL requests are shown inline with approve/reject buttons — no need to navigate to the Approvals page for quick decisions.
+**Overview tab** (default): Four stat cards link to their respective pages: **Pending Approvals**, **Context Entries**, **Active Agents**, and **Open Handoffs**. Below the stat cards, up to three pending HITL requests are shown inline with approve/reject buttons — no need to navigate to the Approvals page for quick decisions. The right column shows active agents with status indicators and a context health widget (total entries + stale count). The left column shows the agent activity feed.
 
-The right column shows active agents with status indicators and a context health widget (total entries + stale count). The left column shows the agent activity feed.
+**Knowledge tab**: The full `ContextBrowser` component embedded in the dashboard. Search, filter, and import context entries without leaving the home page. The inline search toggle (keyword vs. semantic) sits directly in the search bar.
 
 #### Contacts (`/app/contacts`)
 
 - **List**: searchable table with name, email, company, lifecycle stage
 - **Create** (`/app/contacts/new`): form for first name, last name, email, phone, title, company, stage
-- **Detail** (`/app/contacts/:id`): contact info, activity timeline, and linked use cases section
+- **Detail** (`/app/contacts/:id`): three-tab layout:
+  - **Detail**: contact info, activity timeline, linked use cases
+  - **Brief**: AI-generated structured briefing (relationship history, key themes, open items)
+  - **Graph**: full-page Memory Graph — see [Memory Graph](#memory-graph) below
 
 #### Accounts (`/app/accounts`)
 
 - **List**: searchable table with name, industry, revenue, employees, health score
 - **Create** (`/app/accounts/new`): name, domain, industry, website
-- **Detail** (`/app/accounts/:id`): account info with tabs:
-  - **Overview**: details, contacts, opportunities
-  - **Use Cases**: list with consumption bars, health badges, and total attributed ARR
+- **Detail** (`/app/accounts/:id`): three-tab layout:
+  - **Overview**: account info, contacts, opportunities, use cases
+  - **Brief**: AI-generated account briefing surfaced inline
+  - **Graph**: full-page Memory Graph for the account
 
 #### Pipeline (`/app/pipeline`)
 
@@ -455,12 +459,39 @@ Full list of registered actors (humans and AI agents) with their role, model, sc
 
 #### Context (`/app/context`)
 
-Browse and manage all context entries stored in the memory layer. Supports:
-- **Search** by content text
-- **Filter** by subject type (contact, account, opportunity, …) and context type
+The Knowledge tab on the Dashboard and the standalone Context page share the same `ContextBrowser` component. Features:
+
+- **Dual search modes**: keyword (full-text, client-side) and **semantic** (pgvector similarity). The toggle sits inline in the search bar. If semantic search is unavailable (pgvector not configured), it falls back to keyword automatically with a warning banner.
+- **Filter** by subject type (contact, account, opportunity, use case) and context type
 - **Stale-only toggle** to surface entries past their `valid_until` date
 - Confidence score pills, expiry date highlighting, and `is_current` badges
 - Inline **"Mark reviewed"** action for stale entries
+- **Import dialog** (click "Import" button):
+  - **Text / Paste tab**: paste any document text; subjects are auto-detected and shown as colored chips; smart clipboard detection offers to use clipboard content on open
+  - **Upload File tab**: drag-and-drop or browse for PDF, DOCX, TXT, or Markdown; text is extracted server-side and subjects detected automatically; file name, size, and a text preview are shown before confirming
+  - Both tabs allow adding or removing detected subjects and providing a source label
+  - Submit creates one context entry per confirmed subject and runs the full extraction pipeline
+
+#### Memory Graph (`/app/contacts/:id/graph`, `/app/accounts/:id/graph`) {#memory-graph}
+
+An Obsidian-style dark canvas visualization of everything CRMy knows about an entity. Accessible via the **Graph** tab on any Contact or Account detail page.
+
+**Canvas**: powered by `@xyflow/react` (ReactFlow). Nodes are laid out in a concentric radial arrangement around the subject:
+
+| Node type | Color | Description |
+|---|---|---|
+| `subject` | Purple | The focal entity (contact or account) |
+| `context` | Teal | Individual context entries |
+| `account` | Blue | Linked account records |
+| `contact` | Green | Linked contact records |
+| `activity` | Orange | Recent activity log entries |
+| `assignment` | Yellow | Open assignments |
+
+**Sidebar filters**: toggle each node category on/off to reduce visual noise. Hidden node types are fully removed from the graph, not just faded.
+
+**MiniMap**: top-right corner; shows node positions at scale. Supports panning the main canvas from the minimap.
+
+**Node detail drawer**: click any node to open a Radix UI Sheet from the right side. Shows the node's key fields, content preview, and a direct link to the full record. Context nodes show the full body text, type badge, confidence score, and whether the entry is current.
 
 #### Settings (`/app/settings`)
 
@@ -470,6 +501,30 @@ Tabbed interface:
 - **Webhooks**: add endpoint URL + event types, list existing, delete
 - **Custom Fields**: tabbed by object type (contact, account, opportunity, activity, use_case) — create field definitions, list, delete
 - **Actors**: manage registered actors (humans and agents) — see below
+- **Local AI Agent** (`/app/settings/agent`): configure the workspace agent
+
+#### Local AI Agent settings (`/app/settings/agent`)
+
+Controls the agent that performs background intelligence tasks for your tenant.
+
+**Section 1 — Enable**: master on/off switch.
+
+**Section 2 — Provider & Model**: select Anthropic, OpenAI, OpenRouter, Ollama, or a custom OpenAI-compatible endpoint. Enter the API key (stored encrypted, shown only as a hint after saving). Model pricing is estimated per-turn based on `max_tokens_per_turn`.
+
+**Section 3 — Behavior**:
+
+| Flag | Default | Description |
+|---|---|---|
+| Allow agent to create assignments | ✓ | Agent can create `stale_context_review` and task assignments |
+| Allow agent to log activities | ✓ | Agent can create activity records as provenance for extractions |
+| **Auto-extract context from activities** | ✓ | Automatically run the extraction pipeline on every new activity |
+| Allow agent to write CRM objects | ✗ | Agent can create/update contacts, accounts, opportunities (requires confirmation warning) |
+
+The **Auto-extract context from activities** flag (`auto_extract_context`) controls whether newly created activities trigger the extraction pipeline. When disabled, activities are marked `skipped` and no context entries are written. This is useful when you want to control extraction cost or use `context_ingest_auto` explicitly instead.
+
+**Section 4 — Observability**: link to the agent activity log showing every tool call, argument, result, and session attribution.
+
+**System prompt**: editable with full preview; the default instructs the agent to complete tasks directly via tools rather than describing UI steps.
 
 #### Actors Settings Panel
 
@@ -1059,6 +1114,41 @@ context_ingest {
 
 Returns `{ extracted_count, context_entries, activity_id }`.
 
+### Automatic subject detection — `context_ingest_auto`
+
+When you don't know which CRM records a document mentions, use `context_ingest_auto`. It extracts candidate entity names from the text using regex, resolves each name against contacts and accounts using the 6-tier entity resolution service, and runs the extraction pipeline for every resolved subject:
+
+```
+context_ingest_auto {
+  document: "<full meeting transcript>",
+  source_label: "Discovery call 2026-04-09",
+  confidence_threshold: 0.6    // optional, default 0.6 — skip low-confidence matches
+}
+```
+
+Returns:
+
+```json
+{
+  "subjects_resolved": [
+    { "entity_type": "account", "id": "...", "name": "Acme Corp", "confidence": "high", "entries_created": 3, "activity_id": "..." },
+    { "entity_type": "contact", "id": "...", "name": "Jane Smith", "confidence": "medium", "entries_created": 2, "activity_id": "..." }
+  ],
+  "entries_created": 5,
+  "low_confidence_skipped": ["Inc", "Q2", "Monday"]
+}
+```
+
+The resolution tiers used are the same as `entity_resolve` — exact name, alias, email, domain, substring, and fuzzy (`pg_trgm`). Only matches above the `confidence_threshold` are linked. Common English words, days of the week, and month names are filtered before resolution to avoid noise.
+
+This is the recommended tool for agents processing inbound content (emails, transcripts, documents) when subject IDs are not already known.
+
+### Auto-extract from activities
+
+When the **Local AI Agent** is configured and `auto_extract_context` is enabled (Settings → Local AI Agent → "Auto-extract context from activities"), CRMy runs the extraction pipeline automatically on every new activity. Extraction happens fire-and-forget — it does not slow down activity creation. Activities are processed immediately if the agent is configured; otherwise they are queued with `extraction_status = 'pending'` and processed by the background worker (runs every 60 seconds) once the agent becomes available.
+
+Use `context_extract { activity_id }` to manually re-run extraction on any activity.
+
 ### Catch-up diff
 
 `context_diff` shows what changed about a subject since a timestamp — useful for daily agent check-ins:
@@ -1090,9 +1180,12 @@ Returns:
 | `context_review` | Mark an entry as reviewed (confirm still accurate) |
 | `context_stale` | List entries that are past `valid_until` and may need updating |
 | `context_diff` | Catch-up diff since a timestamp: new, superseded, stale, and resolved entries |
-| `context_ingest` | Ingest a raw document and auto-extract all structured context entries |
+| `context_ingest` | Ingest a raw document and auto-extract all structured context entries. Requires explicit `subject_type` + `subject_id`. |
+| `context_ingest_auto` | Ingest a document and automatically resolve mentioned entities — **no subject IDs needed**. Configurable `confidence_threshold`. |
 | `context_extract` | Re-run the extraction pipeline on a specific activity (backfill or retry) |
 | `context_stale_assign` | Trigger the stale review loop on-demand for the current tenant |
+| `context_semantic_search` | Semantic (vector) similarity search using pgvector. Falls back gracefully with `fallback_available: true` if embeddings are not configured. |
+| `context_embed_backfill` | Generate embeddings for context entries that have not yet been embedded. Use `dry_run: true` first to see pending count. |
 
 ### CLI
 
@@ -1116,6 +1209,10 @@ POST   /api/v1/context/:id/supersede
 POST   /api/v1/context/:id/review
 GET    /api/v1/context/stale
 GET    /api/v1/context/search?q=pricing&tags=q2
+GET    /api/v1/context/semantic-search?q=...&subject_type=...
+POST   /api/v1/context/ingest           { text, subject_type, subject_id, source_label }
+POST   /api/v1/context/detect-subjects  { text }          → { subjects: [{ type, id, name, confidence, match_tier }] }
+POST   /api/v1/context/ingest-file      { filename, data (base64), source_label }  → { text_preview, subjects, truncated }
 ```
 
 ---
@@ -2297,7 +2394,7 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 | Category | Tools |
 |---|---|
 | Briefing | `briefing_get` |
-| Context | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_stale`, `context_diff`, `context_ingest`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
+| Context | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_stale`, `context_diff`, `context_ingest`, `context_ingest_auto`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
 | Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise` |
 | Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
@@ -2413,6 +2510,10 @@ Base URL: `/api/v1`
 | POST | `/context/:id/review` | Mark as reviewed |
 | GET | `/context/stale` | List stale entries |
 | GET | `/context/search` | Full-text search |
+| GET | `/context/semantic-search` | pgvector similarity search (`?q=`, `?subject_type=`, `?limit=`) |
+| POST | `/context/detect-subjects` | Detect CRM entities mentioned in text (`{ text }`) |
+| POST | `/context/ingest` | Ingest context for a known subject (structured form) |
+| POST | `/context/ingest-file` | Extract text from file and ingest (`{ filename, data (base64), source_label }`) |
 
 ### Briefings
 

@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -26,32 +26,6 @@ function isValidPassword(password: string) {
   return PASSWORD_RULES.every((r) => r.test(password));
 }
 
-// Light-mode inline overrides: card always appears as a dark panel to contrast against the light page background
-const CHARCOAL_LIGHT_STYLE: React.CSSProperties = {
-  '--background': '220 10% 32%',
-  '--card': '220 14% 18%',
-  '--card-foreground': '36 15% 92%',
-  '--popover': '220 14% 22%',
-  '--popover-foreground': '36 15% 92%',
-  '--muted': '220 10% 24%',
-  '--muted-foreground': '220 8% 62%',
-  '--input': '220 10% 32%',
-  '--border': '220 10% 28%',
-  '--foreground': '36 15% 92%',
-} as React.CSSProperties;
-
-const WARM_LIGHT_STYLE: React.CSSProperties = {
-  '--background': '15 25% 32%',
-  '--card': '15 22% 18%',
-  '--card-foreground': '25 100% 95%',
-  '--popover': '15 22% 22%',
-  '--popover-foreground': '25 100% 95%',
-  '--muted': '15 20% 24%',
-  '--muted-foreground': '20 15% 62%',
-  '--input': '15 20% 32%',
-  '--border': '15 20% 28%',
-  '--foreground': '25 100% 95%',
-} as React.CSSProperties;
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -67,6 +41,19 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
+  const [dbStatus, setDbStatus] = useState<{
+    db: 'ok' | 'error' | 'loading';
+    db_host?: string;
+    db_name?: string;
+    version?: string;
+  }>({ db: 'loading' });
+
+  useEffect(() => {
+    fetch('/health')
+      .then((r) => r.json())
+      .then((d) => setDbStatus({ db: d.db === 'ok' ? 'ok' : 'error', db_host: d.db_host, db_name: d.db_name, version: d.version }))
+      .catch(() => setDbStatus({ db: 'error' }));
+  }, []);
 
   const toggleTheme = () => {
     const next = !isDark;
@@ -125,13 +112,11 @@ export function LoginPage() {
     setError('');
   };
 
-  // Page background: light mode uses a tinted background; dark mode uses CSS variable
-  const pageBg = isDark ? 'bg-background' : isCharcoal ? 'bg-[hsl(220_20%_93%)]' : 'bg-[hsl(30_25%_93%)]';
+  // Page background matches the app's background in both modes
+  const pageBg = 'bg-background';
 
-  // Card wrapper: always rendered as a dark panel, variant-aware
-  const cardClass = isCharcoal ? 'dark charcoal' : 'dark';
-  // In light mode, override CSS vars so the card appears as a medium-dark panel against the light page
-  const cardStyle = !isDark ? (isCharcoal ? CHARCOAL_LIGHT_STYLE : WARM_LIGHT_STYLE) : undefined;
+  // Card wrapper: in dark mode render as dark panel variant; in light mode use default light styles
+  const cardClass = isDark ? (isCharcoal ? 'dark charcoal' : 'dark') : '';
 
   return (
     <div className={`flex min-h-screen items-center justify-center p-4 ${pageBg}`}>
@@ -142,7 +127,7 @@ export function LoginPage() {
       >
         {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
       </button>
-      <div className={`${cardClass} w-full max-w-md`} style={cardStyle}>
+      <div className={`${cardClass} w-full max-w-md`}>
       <Card className="w-full">
         <CardHeader className="text-left">
           <div className="flex items-center gap-3 mb-1">
@@ -251,6 +236,23 @@ export function LoginPage() {
                   Sign in
                 </button>
               </>
+            )}
+          </div>
+          <div className="mt-6 pt-4 border-t border-border flex items-center gap-2 text-xs text-muted-foreground">
+            <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+              dbStatus.db === 'ok' ? 'bg-green-500' : dbStatus.db === 'error' ? 'bg-red-500' : 'bg-gray-400'
+            }`} />
+            {dbStatus.db === 'loading' && <span>Connecting…</span>}
+            {dbStatus.db === 'ok' && (
+              <span className="truncate">
+                {dbStatus.db_name && <span className="font-medium text-foreground/70">{dbStatus.db_name}</span>}
+                {dbStatus.db_name && dbStatus.db_host && <span className="mx-1">@</span>}
+                {dbStatus.db_host}
+              </span>
+            )}
+            {dbStatus.db === 'error' && <span className="text-destructive">Server unreachable</span>}
+            {dbStatus.version && (
+              <span className="ml-auto flex-shrink-0">v{dbStatus.version}</span>
             )}
           </div>
         </CardContent>

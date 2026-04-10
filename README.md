@@ -225,7 +225,7 @@ context_semantic_search query="deals at risk due to competitor pressure"
 | Category | Tools |
 |---|---|
 | **Briefing** | `briefing_get` — with `context_radius` (direct/adjacent/account_wide) and `token_budget` |
-| **Context** | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_stale`, `context_diff`, `context_ingest`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
+| **Context** | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_stale`, `context_diff`, `context_ingest`, `context_ingest_auto`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
 | **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise` |
 | **Assignments** | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | **HITL** | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
@@ -371,14 +371,18 @@ Available at `/app` when the server is running. The web UI provides full CRUD fo
 | **System** | Settings (Profile, Appearance, API Keys, Webhooks, Custom Fields, Actors, Registries, Local AI Agent, Database) |
 
 **Key features:**
-- **Memory Hub** — pipeline stats, recent activity feed, context overview
-- **Context page** — browse, search, and filter all context entries by type, subject, and tags
+- **Memory Hub** — pipeline stats, recent activity feed, context overview with Knowledge tab for cross-entity context browsing
+- **Contact/Account drawers** — Detail, Brief, and Graph tabs; Brief surfaces a full structured briefing inline; Graph opens a full-page Obsidian-style memory graph
+- **Memory Graph** — dark canvas visualization showing entity nodes, context clusters, related records, activities, and assignments in a concentric radial layout; sidebar for category filtering; click any node to open a detail Sheet drawer
+- **Context page** — browse and search context entries; inline keyword/semantic search toggle; semantic fallback to keyword when pgvector is unavailable
+- **Context import** — paste text or upload a file (PDF, DOCX, TXT, MD); subjects are auto-detected from the document using entity resolution — no manual subject selection needed; smart clipboard paste detection
 - **Assignments** — My Queue / Delegated / All tabs with status-based filtering
 - **HITL Approvals** — approve or reject pending agent action requests
 - **Workflows** — create and manage event-driven automations
 - **Emails** — compose, view, and track outbound emails with approval flow
 - **Settings → Registries** — manage custom context types and activity types
 - **Settings → Actors** — view and configure registered agents
+- **Settings → Local AI Agent** — enable auto-extraction of context from activities; configure provider, model, and capability flags
 - **Command palette** — `⌘K` for cross-entity search and quick navigation
 
 **First-run setup (Docker):** There are no default credentials. After `docker compose up`, create your first admin account using one of these methods:
@@ -584,6 +588,49 @@ Step-by-step guides for building agents on CRMy, each with MCP tool calls, CLI e
 - [**Post-Meeting Agent**](docs/recipes/post-meeting-agent.md) — Process call transcripts into structured CRM context
 - [**Outreach Agent**](docs/recipes/outreach-agent.md) — Briefing-driven outreach with HITL approval flow
 - [**Pipeline Review Agent**](docs/recipes/pipeline-review-agent.md) — Weekly pipeline forecast and at-risk deal identification
+
+---
+
+## What's new in v0.7
+
+### Context import — zero-friction ingestion
+
+Context is the core value of CRMy. v0.7 makes adding it effortless:
+
+- **Auto-subject detection** — paste any text and CRMy automatically identifies which contacts and accounts are mentioned, using the 6-tier entity resolution service. No manual subject selection required.
+- **File upload** — drag and drop PDF, DOCX, TXT, or Markdown files. Text is extracted server-side (`pdf-parse` + `mammoth`) and subjects are detected automatically from the content.
+- **Smart clipboard paste** — when you open the import dialog with an empty body, CRMy checks your clipboard. If it contains >100 characters, a banner offers to use it immediately.
+- **New MCP tool: `context_ingest_auto`** — for agents and CLI workflows, this tool ingests a document and resolves subjects automatically. No subject IDs needed. Pass a `confidence_threshold` to control how aggressively it links to CRM records.
+
+```
+context_ingest_auto {
+  document: "<full meeting transcript>",
+  source_label: "Discovery call 2026-04-09",
+  confidence_threshold: 0.6    // default
+}
+→ { subjects_resolved: [...], entries_created: 3 }
+```
+
+- **Auto-extract from activities** — configurable in Settings → Local AI Agent (`auto_extract_context` toggle). When enabled, the extraction pipeline runs automatically on every new activity.
+
+### Memory Graph — full redesign
+
+The entity memory graph (`/contacts/:id/graph`, `/accounts/:id/graph`) is now an Obsidian-style dark canvas visualization:
+
+- **6 node types**: entity center, related objects, context type clusters, individual context entries, activities, and assignments
+- **5-zone concentric radial layout**: related records on the right arc, context clusters on the left, leaf entries orbiting their cluster, activities and assignments in the lower arcs
+- **Sidebar filter panel**: toggle context, related, activities, and assignments on/off without rebuilding the layout
+- **Node detail Sheet**: clicking any node opens a full-width slide-in drawer with complete entry details — readable font sizes, full body text, tags, confidence indicators
+- **MiniMap**: functional top-right minimap showing colored nodes for orientation
+
+### UI simplifications
+
+- **Accounts list**: removed the initials circle avatar — accounts are companies, not people
+- **Context page**: keyword/semantic search toggle moved inline with the search bar
+- **Dashboard**: Overview/Knowledge tab toggle moved from the header into the page body
+- **BriefingPanel**: larger fonts, colored activity-type icons, activity count pill
+- **ContextPanel**: larger fonts and more readable entry cards throughout
+- **Navigation**: fixed horizontal scroll on collapsed left nav
 
 ---
 
