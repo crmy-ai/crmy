@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { UsersRound, List, LayoutGrid } from 'lucide-react';
+import { Bot, List, LayoutGrid } from 'lucide-react';
 import { TopBar } from '@/components/layout/TopBar';
 import ActorsSettings from '@/components/settings/ActorsSettings';
 
@@ -13,7 +13,7 @@ export default function ActorsPage() {
     <div className="flex flex-col h-full">
       <TopBar
         title="Agents"
-        icon={UsersRound}
+        icon={Bot}
         iconClassName="text-[#6366f1]"
         description="Manage humans and AI agents with access to your CRMy workspace."
       >

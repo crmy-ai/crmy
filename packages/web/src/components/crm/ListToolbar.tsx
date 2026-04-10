@@ -27,7 +27,10 @@ interface ListToolbarProps {
   onSortChange: (key: string) => void;
   onAdd: () => void;
   addLabel: string;
+  onSecondaryAdd?: () => void;
+  secondaryAddLabel?: string;
   entityType: string;
+  searchSuffix?: React.ReactNode;
 }
 
 const ENTITY_GRADIENTS: Record<string, string> = {
@@ -55,7 +58,10 @@ export function ListToolbar({
   onSortChange,
   onAdd,
   addLabel,
+  onSecondaryAdd,
+  secondaryAddLabel,
   entityType,
+  searchSuffix,
 }: ListToolbarProps) {
   const gradientClasses = ENTITY_GRADIENTS[entityType] ?? 'from-primary to-primary/80';
   const searchRef = useRef<HTMLInputElement>(null);
@@ -99,6 +105,7 @@ export function ListToolbar({
             </kbd>
           )}
         </div>
+        {searchSuffix}
 
         {/* Filter */}
         <Popover>
@@ -167,6 +174,15 @@ export function ListToolbar({
         </Popover>
 
         {/* Add New */}
+        {onSecondaryAdd && secondaryAddLabel && (
+          <button
+            onClick={onSecondaryAdd}
+            className="h-9 px-4 flex items-center gap-1.5 rounded-xl border border-border bg-card text-sm font-semibold text-foreground hover:border-primary/30 transition-all flex-shrink-0 press-scale"
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">{secondaryAddLabel}</span>
+          </button>
+        )}
         <button
           onClick={onAdd}
           className={`h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r ${gradientClasses} text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale`}

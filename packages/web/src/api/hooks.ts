@@ -762,6 +762,26 @@ export function useContextIngest() {
   });
 }
 
+// Auto-detect subjects mentioned in free text (no LLM, regex + entity-resolve)
+export function useDetectSubjects() {
+  return useMutation({
+    mutationFn: (text: string) => api.post('context/detect-subjects', { text }),
+  });
+}
+
+// Ingest a file: send base64-encoded content, get back detected subjects + text preview
+export function useIngestFile() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { filename: string; data: string; source_label?: string }) =>
+      api.post('context/ingest-file', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+    },
+  });
+}
+
 // Inbox counts (HITL pending + my active assignments) — used by nav badge
 export function useInboxCounts() {
   const { data: whoami } = useWhoAmI() as any;
@@ -814,6 +834,7 @@ export interface AgentConfigData {
   can_write_objects: boolean;
   can_log_activities: boolean;
   can_create_assignments: boolean;
+  auto_extract_context: boolean;
 }
 
 export interface AgentSessionSummary {

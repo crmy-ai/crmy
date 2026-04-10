@@ -14,7 +14,7 @@ ALTER TABLE context_entries
 INSERT INTO context_entries (
   id, tenant_id, subject_type, subject_id, context_type,
   title, body, confidence, is_current,
-  metadata, authored_by, created_at, updated_at,
+  structured_data, authored_by, created_at, updated_at,
   visibility, mentions, pinned
 )
 SELECT
@@ -30,8 +30,8 @@ SELECT
   jsonb_build_object(
     'author_type', n.author_type,
     'migrated_from_notes', TRUE
-  )                                                         AS metadata,
-  COALESCE(n.author_id, 'system'::text)                    AS authored_by,
+  )                                                         AS structured_data,
+  COALESCE(n.author_id, (SELECT id FROM actors ORDER BY created_at LIMIT 1)) AS authored_by,
   n.created_at,
   n.updated_at,
   n.visibility,

@@ -24,6 +24,7 @@ import { getAllTools } from '../mcp/server.js';
 import { enforceToolScopes, requireScopes } from '../auth/scopes.js';
 import * as governorLimits from '../db/repos/governor-limits.js';
 import { getSpec } from '../openapi/spec.js';
+import { extractTextFromBuffer } from '../lib/file-extract.js';
 
 function getActor(req: Request): ActorContext {
   return req.actor!;
@@ -1155,6 +1156,160 @@ export function apiRouter(db: DbPool): Router {
         source_label: req.body.source ?? req.body.source_label,
       }, actor);
       res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // Detect entity subjects mentioned in a block of free text (no LLM required).
+  // Extracts capitalized candidate names via regex, resolves each against the
+  // contacts + accounts tables, and returns resolved matches above medium confidence.
+  router.post('/context/detect-subjects', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const text: string = req.body.text ?? '';
+      if (!text.trim()) return res.json({ subjects: [] });
+
+      // Extract candidate names: capitalized 1–4 word phrases, email addresses, domains
+      const candidates = new Set<string>();
+
+      // Multi-word proper nouns (e.g. "Acme Corp", "John Smith", "Salesforce Inc")
+      const phraseRe = /\b([A-Z][a-zA-Z]{1,}(?:\s+[A-Z][a-zA-Z]{1,}){0,3})\b/g;
+      let m: RegExpExecArray | null;
+      while ((m = phraseRe.exec(text)) !== null) {
+        candidates.add(m[1]);
+      }
+      // Email addresses → resolve as contacts
+      const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+      while ((m = emailRe.exec(text)) !== null) {
+        candidates.add(m[0]);
+      }
+
+      // Common English words to skip
+      const STOP = new Set([
+        'The', 'This', 'That', 'These', 'Those', 'With', 'From', 'They', 'Their',
+        'There', 'Here', 'When', 'Where', 'What', 'Which', 'While', 'After',
+        'Before', 'During', 'About', 'Above', 'Below', 'Between', 'Through',
+        'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+        'January', 'February', 'March', 'April', 'June', 'July', 'August',
+        'September', 'October', 'November', 'December',
+        'Please', 'Thank', 'Thanks', 'Hello', 'Also', 'However', 'Therefore',
+        'Because', 'Since', 'Until', 'Although', 'Unless',
+        'CRM', 'CEO', 'CTO', 'CFO', 'COO', 'VP', 'SVP', 'EVP',
+      ]);
+
+      const filtered = [...candidates].filter(c => {
+        if (c.length < 2) return false;
+        const words = c.split(/\s+/);
+        if (words.every(w => STOP.has(w))) return false;
+        return true;
+      }).slice(0, 15); // cap at 15 candidates to avoid N+1 overload
+
+      // Resolve each candidate
+      const settled = await Promise.allSettled(
+        filtered.map(name =>
+          entityResolve(db, actor.tenant_id, { query: name, entity_type: 'any', limit: 1 }),
+        ),
+      );
+
+      const seen = new Set<string>();
+      const subjects: { type: string; id: string; name: string; confidence: string; match_tier: string }[] = [];
+
+      for (const result of settled) {
+        if (result.status !== 'fulfilled') continue;
+        const r = result.value;
+        if (r.status !== 'resolved' || !r.resolved) continue;
+        if (r.resolved.confidence === 'low') continue;
+        if (seen.has(r.resolved.id)) continue;
+        seen.add(r.resolved.id);
+        subjects.push({
+          type: r.resolved.entity_type,
+          id: r.resolved.id,
+          name: r.resolved.name,
+          confidence: r.resolved.confidence,
+          match_tier: r.resolved.match_reason,
+        });
+      }
+
+      return res.json({ subjects });
+    } catch (err) { handleError(res, err); }
+  });
+
+  // Accept a file upload (base64-encoded) and extract text, then detect subjects.
+  // Body: { filename: string, data: string (base64), source_label?: string }
+  // Returns: { text_preview, truncated, subjects, filename }
+  router.post('/context/ingest-file', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const { filename, data, source_label } = req.body as {
+        filename: string;
+        data: string;
+        source_label?: string;
+      };
+
+      if (!filename || !data) {
+        return res.status(400).json({ error: 'filename and data (base64) are required' });
+      }
+
+      const buffer = Buffer.from(data, 'base64');
+      const { text, truncated, format } = await extractTextFromBuffer(buffer, filename);
+
+      if (!text.trim()) {
+        return res.json({ text_preview: '', truncated: false, subjects: [], filename, format });
+      }
+
+      // Auto-detect subjects from the extracted text
+      const candidates = new Set<string>();
+      const phraseRe = /\b([A-Z][a-zA-Z]{1,}(?:\s+[A-Z][a-zA-Z]{1,}){0,3})\b/g;
+      let m: RegExpExecArray | null;
+      while ((m = phraseRe.exec(text)) !== null) candidates.add(m[1]);
+      const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+      while ((m = emailRe.exec(text)) !== null) candidates.add(m[0]);
+
+      const STOP = new Set([
+        'The', 'This', 'That', 'These', 'Those', 'With', 'From', 'They', 'Their',
+        'There', 'Here', 'When', 'Where', 'What', 'Which', 'While', 'After',
+        'Before', 'During', 'About', 'Above', 'Below', 'Between', 'Through',
+        'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+        'January', 'February', 'March', 'April', 'June', 'July', 'August',
+        'September', 'October', 'November', 'December',
+        'Please', 'Thank', 'Thanks', 'Hello', 'Also', 'However', 'Therefore',
+        'Because', 'Since', 'Until', 'Although', 'Unless',
+      ]);
+      const filtered = [...candidates].filter(c => {
+        if (c.length < 2) return false;
+        return !c.split(/\s+/).every(w => STOP.has(w));
+      }).slice(0, 15);
+
+      const settled = await Promise.allSettled(
+        filtered.map(name => entityResolve(db, actor.tenant_id, { query: name, entity_type: 'any', limit: 1 })),
+      );
+
+      const seen = new Set<string>();
+      const subjects: { type: string; id: string; name: string; confidence: string; match_tier: string }[] = [];
+      for (const result of settled) {
+        if (result.status !== 'fulfilled') continue;
+        const r = result.value;
+        if (r.status !== 'resolved' || !r.resolved) continue;
+        if (r.resolved.confidence === 'low') continue;
+        if (seen.has(r.resolved.id)) continue;
+        seen.add(r.resolved.id);
+        subjects.push({
+          type: r.resolved.entity_type,
+          id: r.resolved.id,
+          name: r.resolved.name,
+          confidence: r.resolved.confidence,
+          match_tier: r.resolved.match_reason,
+        });
+      }
+
+      return res.json({
+        text_preview: text.slice(0, 600),
+        full_text: text,
+        truncated,
+        subjects,
+        filename,
+        format,
+        source_label: source_label ?? filename,
+      });
     } catch (err) { handleError(res, err); }
   });
 

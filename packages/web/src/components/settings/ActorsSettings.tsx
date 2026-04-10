@@ -741,6 +741,8 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
         onSortChange={handleSortChange}
         onAdd={() => setShowCreate(tab === 'agent' ? 'agent' : 'human')}
         addLabel={tab === 'agent' ? 'Register Agent' : 'Add Human'}
+        onSecondaryAdd={tab === 'all' ? () => setShowCreate('agent') : undefined}
+        secondaryAddLabel={tab === 'all' ? 'Register Agent' : undefined}
         entityType="actors"
       />
 

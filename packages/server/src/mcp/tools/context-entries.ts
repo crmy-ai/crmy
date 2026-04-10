@@ -7,6 +7,7 @@ import {
   contextSearch, contextReview, contextStaleList, briefingGet,
   contextDiff, contextIngest, contextSemanticSearch, contextEmbedBackfill,
 } from '@crmy/shared';
+import { entityResolve } from '../../services/entity-resolve.js';
 import { loadEmbeddingConfig, embedText } from '../../agent/providers/embeddings.js';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext, SubjectType } from '@crmy/shared';
@@ -336,6 +337,116 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         );
 
         return { extracted_count, context_entries: entries, activity_id: activity.id };
+      },
+    },
+    {
+      name: 'context_ingest_auto',
+      tier: 'core',
+      description: 'Ingest a document (transcript, email, meeting notes, etc.) and automatically resolve which contacts and accounts are mentioned — no subject IDs required. Extracts candidate entity names from the text using regex patterns, resolves each against the CRM via the entity resolution service (6-tier: exact name, alias, email, domain, substring, fuzzy), and runs the full context extraction pipeline for every resolved subject above the confidence threshold. Returns resolved subjects, entries created, and any names that could not be resolved. Ideal for agents processing inbound content when they do not know which CRM records are involved.',
+      inputSchema: z.object({
+        document: z.string().min(1).describe('The full text to ingest — transcript, email body, meeting notes, research, etc.'),
+        source_label: z.string().optional().describe('Human-readable label for the source (e.g. "Discovery call 2026-04-09")'),
+        context_type: z.string().optional().describe('Override the context type for all extracted entries (e.g. "meeting_notes")'),
+        confidence_threshold: z.number().min(0).max(1).default(0.6)
+          .describe('Minimum entity resolution confidence to link an entry. 0.6 = medium+high (default). Set lower to include more speculative matches.'),
+      }),
+      handler: async (
+        input: { document: string; source_label?: string; context_type?: string; confidence_threshold: number },
+        actor: ActorContext,
+      ) => {
+        // Step 1: extract candidate entity names from the document text
+        const candidates = new Set<string>();
+        const phraseRe = /\b([A-Z][a-zA-Z]{1,}(?:\s+[A-Z][a-zA-Z]{1,}){0,3})\b/g;
+        let m: RegExpExecArray | null;
+        while ((m = phraseRe.exec(input.document)) !== null) candidates.add(m[1]);
+        const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+        while ((m = emailRe.exec(input.document)) !== null) candidates.add(m[0]);
+
+        const STOP = new Set([
+          'The', 'This', 'That', 'These', 'Those', 'With', 'From', 'They', 'Their',
+          'There', 'Here', 'When', 'Where', 'What', 'Which', 'While', 'After',
+          'Before', 'During', 'About', 'Above', 'Below', 'Between', 'Through',
+          'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+          'January', 'February', 'March', 'April', 'June', 'July', 'August',
+          'September', 'October', 'November', 'December',
+          'Please', 'Thank', 'Thanks', 'Hello', 'Also', 'However', 'Therefore',
+          'Because', 'Since', 'Until', 'Although', 'Unless',
+          'CRM', 'CEO', 'CTO', 'CFO', 'COO', 'VP', 'SVP', 'EVP',
+        ]);
+        const filtered = [...candidates].filter(c => {
+          if (c.length < 2) return false;
+          return !c.split(/\s+/).every(w => STOP.has(w));
+        }).slice(0, 20);
+
+        // Step 2: resolve each candidate
+        const confThreshold = input.confidence_threshold;
+        const CONF_RANK: Record<string, number> = { high: 3, medium: 2, low: 1 };
+        const settled = await Promise.allSettled(
+          filtered.map(name => entityResolve(db, actor.tenant_id, { query: name, entity_type: 'any', limit: 1 })),
+        );
+
+        const resolvedSubjects: { entity_type: string; id: string; name: string; confidence: string }[] = [];
+        const skipped: string[] = [];
+        const seen = new Set<string>();
+
+        for (let i = 0; i < settled.length; i++) {
+          const result = settled[i];
+          const candidateName = filtered[i];
+          if (result.status !== 'fulfilled') { skipped.push(candidateName); continue; }
+          const r = result.value;
+          if (r.status !== 'resolved' || !r.resolved) { skipped.push(candidateName); continue; }
+          const confScore = (CONF_RANK[r.resolved.confidence] ?? 0) / 3;
+          if (confScore < confThreshold && r.resolved.confidence !== 'high' && r.resolved.confidence !== 'medium') {
+            skipped.push(candidateName); continue;
+          }
+          if (r.resolved.confidence === 'low' && confThreshold > 0.4) { skipped.push(candidateName); continue; }
+          if (seen.has(r.resolved.id)) continue;
+          seen.add(r.resolved.id);
+          resolvedSubjects.push({
+            entity_type: r.resolved.entity_type,
+            id: r.resolved.id,
+            name: r.resolved.name,
+            confidence: r.resolved.confidence,
+          });
+        }
+
+        if (resolvedSubjects.length === 0) {
+          return {
+            subjects_resolved: [],
+            entries_created: 0,
+            low_confidence_skipped: skipped,
+            message: 'No CRM entities could be confidently identified in the document. Try adding contacts/accounts with matching names or aliases, or lower confidence_threshold.',
+          };
+        }
+
+        // Step 3: ingest for each resolved subject
+        let totalCreated = 0;
+        const subjectResults: { entity_type: string; id: string; name: string; entries_created: number; activity_id: string }[] = [];
+
+        for (const subject of resolvedSubjects) {
+          try {
+            const activity = await activityRepo.createActivity(db, actor.tenant_id, {
+              type: 'note',
+              subject: input.source_label ?? 'Auto-ingested document',
+              body: input.document,
+              subject_type: subject.entity_type as 'contact' | 'account',
+              subject_id: subject.id,
+              performed_by: actor.actor_type === 'agent' ? actor.actor_id : undefined,
+              occurred_at: new Date().toISOString(),
+            });
+            const extracted = await extractContextFromActivity(db, actor.tenant_id, activity.id);
+            totalCreated += extracted;
+            subjectResults.push({ ...subject, entries_created: extracted, activity_id: activity.id });
+          } catch (err) {
+            console.error(`[context_ingest_auto] Failed for subject ${subject.id}:`, err);
+          }
+        }
+
+        return {
+          subjects_resolved: subjectResults,
+          entries_created: totalCreated,
+          low_confidence_skipped: skipped.length > 0 ? skipped : undefined,
+        };
       },
     },
     {

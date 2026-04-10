@@ -9,7 +9,6 @@ import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { Sparkles, Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
 import { DrawerTabBar, type DrawerView } from './DrawerTabBar';
-import { MemoryGraph } from './MemoryGraph';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
 import { CustomFieldsSection } from './CrmWidgets';
@@ -209,6 +208,7 @@ export function AccountDrawer() {
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
+  const graphHref = drawerEntityId ? `/accounts/${drawerEntityId}/graph` : undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: accountData, isLoading } = useAccount(drawerEntityId ?? '') as any;
   const updateAccount = useUpdateAccount(drawerEntityId ?? '');
@@ -243,17 +243,8 @@ export function AccountDrawer() {
   if (view === 'brief') {
     return (
       <>
-        <DrawerTabBar view={view} onChange={setView} />
+        <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} />
         <BriefingPanel subjectType="account" subjectId={drawerEntityId!} onClose={() => setView('detail')} />
-      </>
-    );
-  }
-
-  if (view === 'graph') {
-    return (
-      <>
-        <DrawerTabBar view={view} onChange={setView} />
-        <MemoryGraph subjectType="account" subjectId={drawerEntityId!} subjectName={name} />
       </>
     );
   }
@@ -332,7 +323,7 @@ export function AccountDrawer() {
         </div>
       </div>
 
-      <DrawerTabBar view={view} onChange={setView} />
+      <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} />
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 p-4 mx-4 mt-4">

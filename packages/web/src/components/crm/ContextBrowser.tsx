@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import {
@@ -10,6 +10,8 @@ import {
   useContextTypes,
   useSemanticSearch,
   useContextIngest,
+  useDetectSubjects,
+  useIngestFile,
   useContacts,
   useAccounts,
   useOpportunities,
@@ -29,6 +31,11 @@ import {
   Loader2,
   X,
   Plus,
+  Upload,
+  Wand2,
+  Building2,
+  User,
+  Clipboard,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -192,6 +199,155 @@ function EntityPicker({
   );
 }
 
+// ── Subject section for import dialog ────────────────────────────────────────
+
+type IngestSubjectLocal = { type: string; id: string; label: string; auto?: boolean; confidence?: string };
+
+function SubjectSection({
+  subjects,
+  onChange,
+  detecting,
+}: {
+  subjects: IngestSubjectLocal[];
+  onChange: (subjects: IngestSubjectLocal[]) => void;
+  detecting: boolean;
+}) {
+  const [showManual, setShowManual] = useState(false);
+
+  const removeSubject = (id: string) => onChange(subjects.filter(s => s.id !== id));
+  const addManual = () => setShowManual(true);
+
+  const autoSubjects = subjects.filter(s => s.auto);
+  const manualSubjects = subjects.filter(s => !s.auto);
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <p className="text-xs font-medium text-muted-foreground flex-1">
+          Subjects
+          <span className="font-normal ml-1">(context extracted once per subject)</span>
+        </p>
+        {detecting && (
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <Wand2 className="w-3 h-3 animate-pulse text-primary" />
+            Detecting…
+          </span>
+        )}
+      </div>
+
+      {/* Auto-detected chips */}
+      {autoSubjects.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {autoSubjects.map((s) => (
+            <span
+              key={s.id}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border ${
+                s.confidence === 'high'
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400'
+                  : 'bg-primary/8 border-primary/20 text-primary'
+              }`}
+            >
+              {s.type === 'contact' ? <User className="w-3 h-3" /> : <Building2 className="w-3 h-3" />}
+              {s.label}
+              <span className="opacity-60">{s.type}</span>
+              <button
+                type="button"
+                onClick={() => removeSubject(s.id)}
+                className="ml-0.5 opacity-60 hover:opacity-100 transition-opacity"
+                aria-label={`Remove ${s.label}`}
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Manual subjects */}
+      {manualSubjects.map((subject, idx) => (
+        <div key={`manual-${idx}`} className="flex gap-2 items-center">
+          <Select
+            value={subject.type}
+            onValueChange={(v) => {
+              const updated = manualSubjects.map((s, i) => i === idx ? { type: v, id: '', label: '' } : s);
+              onChange([...autoSubjects, ...updated]);
+            }}
+          >
+            <SelectTrigger className="h-9 w-36 flex-shrink-0 text-sm">
+              <SelectValue placeholder="Type" />
+            </SelectTrigger>
+            <SelectContent>
+              {SUBJECT_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>{subjectTypeLabel(t)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {subject.type ? (
+            <EntityPicker
+              subjectType={subject.type}
+              selectedId={subject.id}
+              selectedLabel={subject.label}
+              onSelect={(id, name) => {
+                const updated = manualSubjects.map((s, i) => i === idx ? { ...s, id, label: name } : s);
+                onChange([...autoSubjects, ...updated]);
+              }}
+            />
+          ) : (
+            <div className="flex-1 h-9 px-3 rounded-lg border border-border bg-muted/40 text-sm text-muted-foreground flex items-center">
+              Select a type first
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              const updated = manualSubjects.filter((_, i) => i !== idx);
+              onChange([...autoSubjects, ...updated]);
+              if (updated.length === 0) setShowManual(false);
+            }}
+            className="flex-shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+            aria-label="Remove subject"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      ))}
+
+      {/* Show manual entry if requested, or if no auto-detected */}
+      {(showManual || autoSubjects.length === 0) && !manualSubjects.length && (
+        <div className="flex gap-2 items-center">
+          <Select
+            onValueChange={(v) => onChange([...subjects, { type: v, id: '', label: '' }])}
+          >
+            <SelectTrigger className="h-9 w-36 flex-shrink-0 text-sm">
+              <SelectValue placeholder="Type" />
+            </SelectTrigger>
+            <SelectContent>
+              {SUBJECT_TYPES.map((t) => (
+                <SelectItem key={t} value={t}>{subjectTypeLabel(t)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="flex-1 h-9 px-3 rounded-lg border border-border bg-muted/40 text-sm text-muted-foreground flex items-center">
+            Select a type first
+          </div>
+        </div>
+      )}
+
+      {/* Add subject link */}
+      {subjects.length < 5 && (
+        <button
+          type="button"
+          onClick={addManual}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary transition-colors"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          Add subject manually
+        </button>
+      )}
+    </div>
+  );
+}
+
 const SORT_OPTIONS: SortOption[] = [
   { key: 'created_at',       label: 'Date Created' },
   { key: 'confidence_score', label: 'Confidence' },
@@ -216,15 +372,122 @@ export function ContextBrowser() {
   const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword');
 
   // Ingest dialog state
-  type IngestSubject = { type: string; id: string; label: string };
-  const [ingestOpen,     setIngestOpen]     = useState(false);
-  const [ingestText,     setIngestText]     = useState('');
-  const [ingestSubjects, setIngestSubjects] = useState<IngestSubject[]>([{ type: '', id: '', label: '' }]);
-  const [ingestSource,   setIngestSource]   = useState('');
-  const [ingesting,      setIngesting]      = useState(false);
+  type IngestSubject = { type: string; id: string; label: string; auto?: boolean; confidence?: string };
+  const [ingestOpen,        setIngestOpen]        = useState(false);
+  const [ingestTab,         setIngestTab]          = useState<'text' | 'file'>('text');
+  const [ingestText,        setIngestText]         = useState('');
+  const [ingestSubjects,    setIngestSubjects]     = useState<IngestSubject[]>([]);
+  const [ingestSource,      setIngestSource]       = useState('');
+  const [ingesting,         setIngesting]          = useState(false);
+  const [detecting,         setDetecting]          = useState(false);
+  const [clipboardBanner,   setClipboardBanner]    = useState<string | null>(null);
+  // File upload state
+  const [uploadFile,        setUploadFile]         = useState<File | null>(null);
+  const [uploadText,        setUploadText]         = useState('');
+  const [uploadPreview,     setUploadPreview]      = useState('');
+  const [uploadTruncated,   setUploadTruncated]    = useState(false);
+  const [uploadSubjects,    setUploadSubjects]     = useState<IngestSubject[]>([]);
+  const [uploadSource,      setUploadSource]       = useState('');
+  const [uploadParsing,     setUploadParsing]      = useState(false);
+  const [uploadDragging,    setUploadDragging]     = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const detectDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  const reviewEntry    = useReviewContextEntry();
-  const ingestMutation = useContextIngest();
+  const reviewEntry      = useReviewContextEntry();
+  const ingestMutation   = useContextIngest();
+  const detectSubjects   = useDetectSubjects();
+  const ingestFileMut    = useIngestFile();
+
+  // Smart paste: read clipboard when dialog opens
+  useEffect(() => {
+    if (!ingestOpen) {
+      setClipboardBanner(null);
+      return;
+    }
+    if (ingestText.trim()) return; // already has content
+    navigator.clipboard.readText().then(text => {
+      if (text.trim().length > 100) setClipboardBanner(text.trim());
+    }).catch(() => {}); // permission denied — silently skip
+  }, [ingestOpen]);
+
+  // Auto-detect subjects from pasted text (debounced 600ms)
+  const runDetect = useCallback((text: string, targetTab: 'text' | 'file') => {
+    clearTimeout(detectDebounceRef.current);
+    if (text.trim().length < 40) return;
+    detectDebounceRef.current = setTimeout(async () => {
+      setDetecting(true);
+      try {
+        const result = await detectSubjects.mutateAsync(text) as any;
+        const detected: IngestSubject[] = (result?.subjects ?? []).map((s: any) => ({
+          type: s.type,
+          id: s.id,
+          label: s.name,
+          auto: true,
+          confidence: s.confidence,
+        }));
+        if (targetTab === 'text') {
+          setIngestSubjects(prev => {
+            // Merge auto-detected with any existing manual entries
+            const manual = prev.filter(s => !s.auto);
+            const newIds = new Set(detected.map(d => d.id));
+            const keptManual = manual.filter(s => !newIds.has(s.id));
+            return [...detected, ...keptManual];
+          });
+        } else {
+          setUploadSubjects(detected);
+        }
+      } catch { /* silently fail */ } finally {
+        setDetecting(false);
+      }
+    }, 600);
+  }, [detectSubjects]);
+
+  // File upload handler
+  const handleFileUpload = useCallback(async (file: File) => {
+    setUploadFile(file);
+    setUploadSource(file.name);
+    setUploadParsing(true);
+    try {
+      const reader = new FileReader();
+      const base64 = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+          const result = reader.result as string;
+          resolve(result.split(',')[1] ?? '');
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const result = await ingestFileMut.mutateAsync({ filename: file.name, data: base64 }) as any;
+      setUploadText(result.full_text ?? '');
+      setUploadPreview(result.text_preview ?? '');
+      setUploadTruncated(result.truncated ?? false);
+      const detected: IngestSubject[] = (result.subjects ?? []).map((s: any) => ({
+        type: s.type, id: s.id, label: s.name, auto: true, confidence: s.confidence,
+      }));
+      setUploadSubjects(detected);
+    } catch (err) {
+      toast({ title: 'File parsing failed', description: err instanceof Error ? err.message : 'Try a different file.', variant: 'destructive' });
+      setUploadFile(null);
+    } finally {
+      setUploadParsing(false);
+    }
+  }, [ingestFileMut]);
+
+  // Reset dialog state on close
+  const closeIngestDialog = useCallback(() => {
+    setIngestOpen(false);
+    setIngestText('');
+    setIngestSubjects([]);
+    setIngestSource('');
+    setIngestTab('text');
+    setUploadFile(null);
+    setUploadText('');
+    setUploadPreview('');
+    setUploadSubjects([]);
+    setUploadSource('');
+    setClipboardBanner(null);
+    clearTimeout(detectDebounceRef.current);
+  }, []);
 
   // Dynamic context types from registry
   const { data: contextTypesData } = useContextTypes();
@@ -330,10 +593,13 @@ export function ContextBrowser() {
   } = useSemanticSearch(searchMode === 'semantic' ? q : '', semanticParams);
   const semanticEntries: any[] = (semanticData as any)?.entries ?? (semanticData as any)?.data ?? [];
 
-  const filtered = useMemo(() => {
-    let items = searchMode === 'semantic' ? semanticEntries : entries;
+  // When semantic search errors, fall back to keyword results
+  const effectiveMode = searchMode === 'semantic' && semanticError ? 'keyword' : searchMode;
 
-    if (searchMode === 'keyword' && q.trim()) {
+  const filtered = useMemo(() => {
+    let items = effectiveMode === 'semantic' ? semanticEntries : entries;
+
+    if (effectiveMode === 'keyword' && q.trim()) {
       const lower = q.toLowerCase();
       items = items.filter((e: any) =>
         (e.title ?? '').toLowerCase().includes(lower) ||
@@ -351,17 +617,23 @@ export function ContextBrowser() {
     }
 
     return items;
-  }, [entries, semanticEntries, q, searchMode, sort]);
+  }, [entries, semanticEntries, q, effectiveMode, sort]);
 
-  const isSearching = searchMode === 'keyword' ? isLoading : semanticLoading;
+  const isSearching = searchMode === 'keyword' ? isLoading : (semanticError ? isLoading : semanticLoading);
   const hasFilters  = Object.keys(activeFilters).length > 0 || q;
 
   const handleIngest = useCallback(async () => {
-    const validSubjects = ingestSubjects.filter(s => s.type && s.id);
-    if (!ingestText.trim() || validSubjects.length === 0) {
+    const activeText = ingestTab === 'file' ? uploadText : ingestText;
+    const activeSubjects = ingestTab === 'file' ? uploadSubjects : ingestSubjects;
+    const activeSource = ingestTab === 'file' ? uploadSource : ingestSource;
+
+    const validSubjects = activeSubjects.filter(s => s.type && s.id);
+    if (!activeText.trim() || validSubjects.length === 0) {
       toast({
         title: 'Missing fields',
-        description: 'Paste a document and select at least one subject.',
+        description: validSubjects.length === 0
+          ? 'No subjects found or selected. Add one manually or paste text that mentions a contact or account.'
+          : 'No document text provided.',
         variant: 'destructive',
       });
       return;
@@ -370,10 +642,10 @@ export function ContextBrowser() {
     try {
       const results = await Promise.all(validSubjects.map(s =>
         ingestMutation.mutateAsync({
-          text:         ingestText,
+          text:         activeText,
           subject_type: s.type,
           subject_id:   s.id,
-          source:       ingestSource || undefined,
+          source:       activeSource || undefined,
         }),
       ));
       const totalExtracted: number = results.reduce((sum: number, r: any) => sum + (r?.extracted_count ?? 0), 0);
@@ -389,10 +661,7 @@ export function ContextBrowser() {
           variant: 'destructive',
         });
       }
-      setIngestOpen(false);
-      setIngestText('');
-      setIngestSubjects([{ type: '', id: '', label: '' }]);
-      setIngestSource('');
+      closeIngestDialog();
     } catch (err) {
       toast({
         title: 'Ingestion failed',
@@ -402,43 +671,39 @@ export function ContextBrowser() {
     } finally {
       setIngesting(false);
     }
-  }, [ingestText, ingestSubjects, ingestSource, ingestMutation]);
+  }, [ingestTab, ingestText, ingestSubjects, ingestSource, uploadText, uploadSubjects, uploadSource, ingestMutation, closeIngestDialog]);
+
+  const searchModeToggle = (
+    <div className="flex items-center gap-0.5 bg-muted rounded-xl p-0.5 flex-shrink-0">
+      <button
+        onClick={() => setSearchMode('keyword')}
+        className={`flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm font-medium transition-all ${
+          searchMode === 'keyword'
+            ? 'bg-card text-foreground shadow-sm'
+            : 'text-muted-foreground hover:text-foreground'
+        }`}
+      >
+        <Search className="w-3.5 h-3.5" />
+        Keyword
+      </button>
+      <button
+        onClick={() => setSearchMode('semantic')}
+        className={`flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm font-medium transition-all ${
+          searchMode === 'semantic'
+            ? 'bg-violet-600 text-white shadow-sm'
+            : 'text-muted-foreground hover:text-foreground'
+        }`}
+      >
+        <Sparkles className="w-3.5 h-3.5" />
+        Semantic
+      </button>
+    </div>
+  );
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <>
-      {/* Search-mode toggle */}
-      <div className="px-4 md:px-6 pt-3 pb-0 flex items-center gap-2">
-        <div className="flex items-center gap-0.5 bg-muted rounded-xl p-0.5">
-          <button
-            onClick={() => setSearchMode('keyword')}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              searchMode === 'keyword'
-                ? 'bg-card text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Search className="w-3 h-3" />
-            Keyword
-          </button>
-          <button
-            onClick={() => setSearchMode('semantic')}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              searchMode === 'semantic'
-                ? 'bg-violet-600 text-white shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Sparkles className="w-3 h-3" />
-            Semantic
-          </button>
-        </div>
-        {total > 0 && searchMode === 'keyword' && (
-          <span className="text-xs text-muted-foreground">{total.toLocaleString()} total</span>
-        )}
-      </div>
-
       <ListToolbar
         searchValue={q}
         onSearchChange={setQ}
@@ -454,27 +719,11 @@ export function ContextBrowser() {
         sortOptions={SORT_OPTIONS}
         currentSort={sort}
         onSortChange={handleSortChange}
-        onAdd={() => setIngestOpen(true)}
+        onAdd={() => { setIngestOpen(true); setIngestTab('text'); }}
         addLabel="Import"
         entityType="context"
+        searchSuffix={searchModeToggle}
       />
-
-      {/* Search-mode banner */}
-      <motion.div
-        key={searchMode}
-        initial={{ opacity: 0, y: -4 }}
-        animate={{ opacity: 1, y: 0 }}
-        className={`mx-4 md:mx-6 mt-2 mb-1 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 border ${
-          searchMode === 'semantic'
-            ? 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20'
-            : 'bg-muted text-muted-foreground border-border'
-        }`}
-      >
-        {searchMode === 'semantic'
-          ? <><Sparkles className="w-3.5 h-3.5 flex-shrink-0" /> Semantic search — AI-ranked by meaning, not keywords</>
-          : <><Search className="w-3.5 h-3.5 flex-shrink-0" /> Keyword search — matching titles, bodies, and tags</>
-        }
-      </motion.div>
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">
 
@@ -624,93 +873,153 @@ export function ContextBrowser() {
       </div>
 
       {/* ── Import Dialog ──────────────────────────────────────────────────── */}
-      <Dialog open={ingestOpen} onOpenChange={setIngestOpen}>
-        <DialogContent className="sm:max-w-lg">
+      <Dialog open={ingestOpen} onOpenChange={(open) => { if (!open) closeIngestDialog(); else setIngestOpen(true); }}>
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-[#0ea5e9]" />
               Import context
             </DialogTitle>
             <DialogDescription>
-              Paste a document (meeting transcript, research notes, etc.) and CRMy will
-              auto-extract structured context entries.
+              Paste text or upload a file — CRMy automatically detects which contacts and accounts are mentioned.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            <Textarea
-              placeholder="Paste document text here…"
-              value={ingestText}
-              onChange={(e) => setIngestText(e.target.value)}
-              className="min-h-[160px] text-sm"
-            />
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-muted-foreground">
-                Subjects <span className="font-normal">(context will be extracted once per subject)</span>
-              </p>
-              {ingestSubjects.map((subject, idx) => (
-                <div key={idx} className="flex gap-2 items-center">
-                  <Select
-                    value={subject.type}
-                    onValueChange={(v) => setIngestSubjects(prev => prev.map((s, i) =>
-                      i === idx ? { type: v, id: '', label: '' } : s
-                    ))}
-                  >
-                    <SelectTrigger className="h-9 w-36 flex-shrink-0 text-sm">
-                      <SelectValue placeholder="Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {SUBJECT_TYPES.map((t) => (
-                        <SelectItem key={t} value={t}>{subjectTypeLabel(t)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {subject.type ? (
-                    <EntityPicker
-                      subjectType={subject.type}
-                      selectedId={subject.id}
-                      selectedLabel={subject.label}
-                      onSelect={(id, name) => setIngestSubjects(prev => prev.map((s, i) =>
-                        i === idx ? { ...s, id, label: name } : s
-                      ))}
-                    />
-                  ) : (
-                    <div className="flex-1 h-9 px-3 rounded-lg border border-border bg-muted/40 text-sm text-muted-foreground flex items-center">
-                      Select a type first
-                    </div>
-                  )}
-                  {ingestSubjects.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setIngestSubjects(prev => prev.filter((_, i) => i !== idx))}
-                      className="flex-shrink-0 text-muted-foreground hover:text-destructive transition-colors"
-                      aria-label="Remove subject"
-                    >
+
+          {/* Tab switcher */}
+          <div className="flex items-center gap-0.5 bg-muted rounded-xl p-0.5 self-start">
+            <button
+              onClick={() => setIngestTab('text')}
+              className={`flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm font-medium transition-all ${ingestTab === 'text' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              Text / Paste
+            </button>
+            <button
+              onClick={() => setIngestTab('file')}
+              className={`flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm font-medium transition-all ${ingestTab === 'file' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              <Upload className="w-3.5 h-3.5" />
+              Upload File
+            </button>
+          </div>
+
+          {ingestTab === 'text' ? (
+            <div className="space-y-3">
+              {/* Smart paste banner */}
+              {clipboardBanner && (
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/8 border border-primary/20 text-sm">
+                  <Clipboard className="w-3.5 h-3.5 text-primary flex-shrink-0" />
+                  <span className="flex-1 text-foreground">Clipboard content detected — import it?</span>
+                  <button
+                    onClick={() => {
+                      setIngestText(clipboardBanner);
+                      setClipboardBanner(null);
+                      runDetect(clipboardBanner, 'text');
+                    }}
+                    className="text-xs font-semibold text-primary hover:underline"
+                  >Use</button>
+                  <button onClick={() => setClipboardBanner(null)} className="text-muted-foreground hover:text-foreground">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
+              <Textarea
+                placeholder="Paste a meeting transcript, research notes, email thread…"
+                value={ingestText}
+                onChange={(e) => {
+                  setIngestText(e.target.value);
+                  runDetect(e.target.value, 'text');
+                }}
+                className="min-h-[150px] text-sm"
+              />
+
+              <SubjectSection
+                subjects={ingestSubjects}
+                onChange={setIngestSubjects}
+                detecting={detecting}
+              />
+
+              <Input
+                placeholder="Source label (optional, e.g. 'Q1 review call')"
+                value={ingestSource}
+                onChange={(e) => setIngestSource(e.target.value)}
+                className="h-9 text-sm"
+              />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {/* Dropzone */}
+              {!uploadFile ? (
+                <div
+                  className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${uploadDragging ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40 hover:bg-muted/30'}`}
+                  onDragOver={(e) => { e.preventDefault(); setUploadDragging(true); }}
+                  onDragLeave={() => setUploadDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setUploadDragging(false);
+                    const f = e.dataTransfer.files[0];
+                    if (f) handleFileUpload(f);
+                  }}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".txt,.md,.pdf,.docx,.csv"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileUpload(f); }}
+                  />
+                  <Upload className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
+                  <p className="text-sm font-medium text-foreground">Drop a file or click to browse</p>
+                  <p className="text-xs text-muted-foreground mt-1">PDF, DOCX, TXT, MD · up to ~120,000 chars</p>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border bg-muted/30 p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-primary flex-shrink-0" />
+                    <span className="text-sm font-medium text-foreground flex-1 truncate">{uploadFile.name}</span>
+                    <span className="text-xs text-muted-foreground">{(uploadFile.size / 1024).toFixed(0)} KB</span>
+                    <button onClick={() => { setUploadFile(null); setUploadText(''); setUploadPreview(''); setUploadSubjects([]); }} className="text-muted-foreground hover:text-foreground">
                       <X className="w-4 h-4" />
                     </button>
-                  )}
+                  </div>
+                  {uploadParsing ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground py-1">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      Extracting text and detecting subjects…
+                    </div>
+                  ) : uploadPreview ? (
+                    <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 italic">
+                      {uploadPreview}
+                      {uploadTruncated && <span className="not-italic text-warning ml-1">[truncated]</span>}
+                    </p>
+                  ) : null}
                 </div>
-              ))}
-              {ingestSubjects.length < 5 && (
-                <button
-                  type="button"
-                  onClick={() => setIngestSubjects(prev => [...prev, { type: '', id: '', label: '' }])}
-                  className="flex items-center gap-1.5 text-xs text-primary hover:underline"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Add subject
-                </button>
               )}
+
+              <SubjectSection
+                subjects={uploadSubjects}
+                onChange={setUploadSubjects}
+                detecting={uploadParsing}
+              />
+
+              <Input
+                placeholder="Source label (e.g. 'Q1 review transcript')"
+                value={uploadSource}
+                onChange={(e) => setUploadSource(e.target.value)}
+                className="h-9 text-sm"
+              />
             </div>
-            <Input
-              placeholder="Source label (optional, e.g. 'Q1 review call')"
-              value={ingestSource}
-              onChange={(e) => setIngestSource(e.target.value)}
-              className="h-9 text-sm"
-            />
-          </div>
+          )}
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIngestOpen(false)}>Cancel</Button>
-            <Button onClick={handleIngest} disabled={ingesting} className="gap-1.5">
+            <Button variant="outline" onClick={closeIngestDialog}>Cancel</Button>
+            <Button
+              onClick={handleIngest}
+              disabled={ingesting || uploadParsing}
+              className="gap-1.5"
+            >
               {ingesting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Extract &amp; Import
             </Button>

@@ -16,6 +16,7 @@ export interface AgentConfig {
   can_write_objects: boolean;
   can_log_activities: boolean;
   can_create_assignments: boolean;
+  auto_extract_context: boolean;
 }
 
 /** A single message in a conversation. */

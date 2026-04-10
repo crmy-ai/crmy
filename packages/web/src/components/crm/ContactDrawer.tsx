@@ -11,7 +11,6 @@ import { StageBadge, LeadScoreBadge, CustomFieldsSection } from './CrmWidgets';
 import { ActivityTimeline } from './ActivityTimeline';
 import { Phone, Mail, StickyNote, Sparkles, Pencil, ChevronLeft, Send, Pin, Trash2 } from 'lucide-react';
 import { DrawerTabBar, type DrawerView } from './DrawerTabBar';
-import { MemoryGraph } from './MemoryGraph';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
 import { toast } from '@/components/ui/use-toast';
@@ -210,6 +209,7 @@ export function ContactDrawer() {
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
+  const graphHref = drawerEntityId ? `/contacts/${drawerEntityId}/graph` : undefined;
   const [noting, setNoting] = useState(false);
   const [noteBody, setNoteBody] = useState('');
   const noteRef = useRef<HTMLTextAreaElement>(null);
@@ -252,17 +252,8 @@ export function ContactDrawer() {
   if (view === 'brief') {
     return (
       <>
-        <DrawerTabBar view={view} onChange={setView} />
+        <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} />
         <BriefingPanel subjectType="contact" subjectId={drawerEntityId!} onClose={() => setView('detail')} />
-      </>
-    );
-  }
-
-  if (view === 'graph') {
-    return (
-      <>
-        <DrawerTabBar view={view} onChange={setView} />
-        <MemoryGraph subjectType="contact" subjectId={drawerEntityId!} subjectName={name} />
       </>
     );
   }
@@ -354,7 +345,7 @@ export function ContactDrawer() {
         </div>
       </div>
 
-      <DrawerTabBar view={view} onChange={setView} />
+      <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} />
 
       {/* Note compose panel */}
       {noting && (

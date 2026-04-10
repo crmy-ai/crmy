@@ -3,7 +3,6 @@
 
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { TopBar } from '@/components/layout/TopBar';
 import { useAccounts } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
@@ -198,12 +197,9 @@ export default function Accounts() {
                     <tr key={a.id as string} onClick={() => openDrawer('account', a.id as string)}
                       className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer group transition-colors ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <ContactAvatar name={a.name as string} className="w-8 h-8 text-xs" />
-                          <div>
-                            <span className="font-semibold text-foreground">{a.name as string}</span>
-                            {a.website && <p className="text-xs text-muted-foreground">{a.website as string}</p>}
-                          </div>
+                        <div>
+                          <span className="font-semibold text-foreground">{a.name as string}</span>
+                          {a.website && <p className="text-xs text-muted-foreground">{a.website as string}</p>}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground">{(a.industry as string) || '—'}</td>
@@ -252,12 +248,9 @@ export default function Accounts() {
                     </button>
                   )}
                 </div>
-                <div className="flex items-center gap-3 mb-3">
-                  <ContactAvatar name={a.name as string} className="w-11 h-11 rounded-2xl text-sm" />
-                  <div className="min-w-0">
-                    <p className="font-display font-bold text-foreground truncate">{a.name as string}</p>
-                    <p className="text-xs text-muted-foreground">{(a.industry as string) || '—'}</p>
-                  </div>
+                <div className="mb-3">
+                  <p className="font-display font-bold text-foreground truncate">{a.name as string}</p>
+                  <p className="text-xs text-muted-foreground">{(a.industry as string) || '—'}</p>
                 </div>
                 <div className="flex items-center gap-2 mb-3">
                   {a.health_score && <HealthBadge score={a.health_score as number} />}

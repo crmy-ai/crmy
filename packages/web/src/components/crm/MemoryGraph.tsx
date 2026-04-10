@@ -5,254 +5,501 @@ import '@xyflow/react/dist/style.css';
 import {
   ReactFlow,
   Background,
+  BackgroundVariant,
   Controls,
-  useNodesState,
-  useEdgesState,
+  MiniMap,
+  useReactFlow,
   type Node,
   type Edge,
-  type NodeMouseHandler,
 } from '@xyflow/react';
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useEffect, useRef, useCallback } from 'react';
 import { useBriefing } from '@/api/hooks';
 import { TYPE_COLORS } from './ContextPanel';
-import { Loader2, X } from 'lucide-react';
+import {
+  Loader2,
+  Users, Building2, Briefcase, FolderKanban,
+  Phone, Mail, Calendar, FileText, ClipboardList,
+  Activity, Monitor, CheckSquare,
+  type LucideIcon,
+} from 'lucide-react';
+import {
+  ENTITY_HEX,
+  ACTIVITY_COLORS,
+  PRIORITY_COLORS,
+  type GraphNodeData,
+  type FilterCounts,
+} from './GraphSidebar';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 interface MemoryGraphProps {
-  subjectType: string;
-  subjectId: string;
-  subjectName: string;
+  subjectType:    string;
+  subjectId:      string;
+  subjectName:    string;
+  selectedNodeId: string | null;
+  onNodeSelect:   (id: string | null, data: GraphNodeData | null) => void;
+  activeFilters:  Set<string>;
+  fitViewRef:     React.MutableRefObject<(() => void) | null>;
+  onFilterCounts: (counts: FilterCounts) => void;
 }
 
-// Derive a hex fill color from Tailwind entity type strings
-const ENTITY_HEX: Record<string, string> = {
-  contact:     '#6366f1',
-  account:     '#8b5cf6',
-  opportunity: '#f59e0b',
-  use_case:    '#22c55e',
-};
+// ── Layout helper ─────────────────────────────────────────────────────────────
 
-function radialPos(cx: number, cy: number, r: number, i: number, total: number) {
-  const angle = (2 * Math.PI * i) / total - Math.PI / 2;
+function radialPos(
+  cx: number, cy: number, r: number,
+  i: number, total: number,
+  startAngle = -Math.PI / 2,
+  arcSpan = 2 * Math.PI,
+) {
+  const step = total <= 1 ? 0 : arcSpan / total;
+  const angle = startAngle + i * step;
   return { x: cx + r * Math.cos(angle), y: cy + r * Math.sin(angle) };
 }
 
-interface NodeData {
-  label: string;
-  body?: string;
-  color: string;
-  size: number;
-  [key: string]: unknown;
+function flattenRelated(related: Record<string, unknown[]>) {
+  const typeMap: Record<string, string> = {
+    accounts: 'account', contacts: 'contact',
+    opportunities: 'opportunity', use_cases: 'use_case',
+  };
+  const result: Array<{ type: string; id: string; name: string }> = [];
+  for (const [key, items] of Object.entries(related)) {
+    const type = typeMap[key] ?? key;
+    for (const item of (items ?? []) as Record<string, unknown>[]) {
+      const name = (item.name
+        ?? item.display_name
+        ?? [item.first_name, item.last_name].filter(Boolean).join(' ')
+        ?? item.email
+        ?? 'Unknown') as string;
+      result.push({ type, id: item.id as string, name });
+    }
+  }
+  return result;
 }
 
-function buildGraph(briefing: any, subjectType: string, subjectName: string) {
-  const nodes: Node[] = [];
-  const edges: Edge[] = [];
+function getCategoryForNodeType(type: string | undefined): string {
+  if (type === 'relatedNode')                       return 'related';
+  if (type === 'clusterNode' || type === 'leafNode') return 'context';
+  if (type === 'activityNode')                      return 'activities';
+  if (type === 'assignmentNode')                    return 'assignments';
+  return 'entity';
+}
 
-  // Center entity node
+// ── Graph builder ─────────────────────────────────────────────────────────────
+
+function buildGraph(briefing: Record<string, unknown> | null, subjectType: string, subjectName: string) {
+  const nodes: Node<GraphNodeData>[] = [];
+  const edges: Edge[] = [];
+  const CX = 0, CY = 0;
+
+  const contextEntries = (briefing?.context_entries ?? {}) as Record<string, Record<string, unknown>[]>;
+  const typeKeys = Object.keys(contextEntries).slice(0, 10);
+  const activities = ((briefing?.activities ?? []) as Record<string, unknown>[]).slice(0, 5);
+  const assignments = ((briefing?.open_assignments ?? []) as Record<string, unknown>[]).slice(0, 3);
+  const relatedObjects = flattenRelated((briefing?.related_objects ?? {}) as Record<string, unknown[]>);
+
+  // ── Center entity ──
   nodes.push({
     id: 'entity',
-    position: { x: 300, y: 260 },
-    data: { label: subjectName, color: ENTITY_HEX[subjectType] ?? '#6366f1', size: 56 } as NodeData,
+    position: { x: CX, y: CY },
     type: 'entityNode',
+    width: 60, height: 80,
+    data: {
+      nodeType: 'entityNode',
+      label: subjectName || subjectType,
+      color: ENTITY_HEX[subjectType] ?? '#6366f1',
+      subjectType,
+    },
   });
 
-  const contextEntries: Record<string, any[]> = briefing?.context_entries ?? {};
-  const typeKeys = Object.keys(contextEntries).slice(0, 8);
-  const activities: any[] = (briefing?.activities ?? []).slice(0, 5);
+  // ── Zone 1: Related objects — right arc (r=200) ──
+  relatedObjects.slice(0, 5).forEach((obj, i) => {
+    const pos = radialPos(CX, CY, 200, i, Math.max(relatedObjects.length, 1), -Math.PI / 2, Math.PI);
+    const color = ENTITY_HEX[obj.type] ?? '#94a3b8';
+    const nodeId = `related-${obj.id}`;
+    nodes.push({
+      id: nodeId,
+      position: pos,
+      type: 'relatedNode',
+      width: 40, height: 56,
+      data: { nodeType: 'relatedNode', label: obj.name, color, entityType: obj.type, entityId: obj.id },
+    });
+    edges.push({
+      id: `e-entity-${nodeId}`,
+      source: 'entity', target: nodeId,
+      style: { stroke: color, strokeWidth: 2, opacity: 0.5 },
+    });
+  });
 
-  // Type cluster nodes
+  // ── Zone 2: Context type clusters — left arc (r=280) ──
   typeKeys.forEach((type, i) => {
-    const pos = radialPos(300, 260, 165, i, Math.max(typeKeys.length, 1));
+    const pos = radialPos(CX, CY, 280, i, Math.max(typeKeys.length, 1), Math.PI / 2, Math.PI);
     const color = TYPE_COLORS[type] ?? '#94a3b8';
     const clusterId = `type-${type}`;
+    const entries = contextEntries[type] ?? [];
 
     nodes.push({
       id: clusterId,
       position: pos,
-      data: { label: type.replace(/_/g, ' '), color, size: 36 } as NodeData,
       type: 'clusterNode',
+      width: 80, height: 28,
+      data: {
+        nodeType: 'clusterNode',
+        label: type.replace(/_/g, ' '),
+        color,
+        contextType: type,
+        count: entries.length,
+        entries: entries.slice(0, 6).map(e => ({
+          id: e.id as string,
+          title: e.title as string | undefined,
+          body: (e.body ?? '') as string,
+        })),
+      },
     });
-
     edges.push({
       id: `e-entity-${clusterId}`,
-      source: 'entity',
-      target: clusterId,
-      style: { stroke: color, strokeWidth: 2, opacity: 0.6 },
+      source: 'entity', target: clusterId,
+      style: { stroke: color, strokeWidth: 1.5, opacity: 0.4 },
     });
 
-    // Leaf entry nodes
-    const typeEntries = contextEntries[type].slice(0, 5);
-    typeEntries.forEach((entry: any, j: number) => {
-      const leafPos = radialPos(pos.x, pos.y, 80, j, Math.max(typeEntries.length, 1));
-      const leafId = `entry-${entry.id}`;
+    // Zone 3a: Leaf entries orbiting their cluster
+    const leaves = entries.slice(0, 4);
+    const parentAngle = Math.atan2(pos.y - CY, pos.x - CX);
+    leaves.forEach((entry, j) => {
+      const leafPos = radialPos(pos.x, pos.y, 90, j, Math.max(leaves.length, 1), parentAngle - Math.PI / 6, Math.PI / 3);
+      const leafId = `entry-${entry.id as string}`;
+      const now = new Date();
+      const isStale = entry.valid_until ? new Date(entry.valid_until as string) < now : false;
 
       nodes.push({
         id: leafId,
         position: leafPos,
-        data: {
-          label: (entry.title ?? entry.body ?? '').slice(0, 22) || type,
-          body: entry.body,
-          color,
-          size: 24,
-        } as NodeData,
         type: 'leafNode',
+        width: 12, height: 12,
+        data: {
+          nodeType: 'leafNode',
+          label: ((entry.title ?? entry.body ?? '') as string).slice(0, 40) || type,
+          color,
+          contextType: type,
+          body: entry.body as string,
+          confidence: entry.confidence as number | undefined,
+          tags: entry.tags as string[] | undefined,
+          source: entry.source as string | undefined,
+          createdAt: entry.created_at as string | undefined,
+          isStale,
+        },
       });
-
       edges.push({
         id: `e-${clusterId}-${leafId}`,
-        source: clusterId,
-        target: leafId,
-        style: { stroke: color, strokeWidth: 1, opacity: 0.4 },
+        source: clusterId, target: leafId,
+        style: { stroke: color, strokeWidth: 1, opacity: 0.25 },
       });
     });
   });
 
-  // Activity nodes — fan at bottom-left
-  activities.forEach((act: any, i: number) => {
-    const pos = radialPos(300, 260, 200, i + typeKeys.length + 1, typeKeys.length + activities.length + 1);
+  // ── Zone 3b: Activities — lower-left arc (r=170) ──
+  activities.forEach((act, i) => {
+    const pos = radialPos(CX, CY, 170, i, Math.max(activities.length, 1), Math.PI * 0.6, Math.PI * 0.5);
+    const actType = ((act.type ?? act.activity_type ?? 'activity') as string);
+    const color = ACTIVITY_COLORS[actType] ?? '#64748b';
     const actId = `activity-${act.id ?? i}`;
 
     nodes.push({
       id: actId,
       position: pos,
-      data: {
-        label: (act.type ?? act.activity_type ?? 'activity').replace(/_/g, ' ').slice(0, 18),
-        body: act.body ?? act.description,
-        color: '#64748b',
-        size: 22,
-      } as NodeData,
       type: 'activityNode',
+      width: 32, height: 32,
+      data: {
+        nodeType: 'activityNode',
+        label: actType.replace(/_/g, ' '),
+        color,
+        activityType: actType,
+        subject: act.subject as string | undefined,
+        body: (act.body ?? act.description) as string | undefined,
+        outcome: act.outcome as string | undefined,
+        occurredAt: (act.occurred_at ?? act.created_at) as string | undefined,
+      },
     });
-
     edges.push({
       id: `e-act-${actId}`,
-      source: actId,
-      target: 'entity',
-      style: { stroke: '#64748b', strokeWidth: 1, strokeDasharray: '4 3', opacity: 0.35 },
+      source: actId, target: 'entity',
+      style: { stroke: '#64748b', strokeWidth: 1, strokeDasharray: '3 4', opacity: 0.3 },
     });
   });
 
-  return { nodes, edges };
+  // ── Zone 3c: Assignments — lower-right arc (r=170) ──
+  assignments.forEach((asgn, i) => {
+    const pos = radialPos(CX, CY, 170, i, Math.max(assignments.length, 1), Math.PI * 0.08, Math.PI * 0.4);
+    const priority = (asgn.priority ?? 'normal') as string;
+    const color = PRIORITY_COLORS[priority] ?? '#3b82f6';
+    const asgnId = `assignment-${asgn.id ?? i}`;
+
+    nodes.push({
+      id: asgnId,
+      position: pos,
+      type: 'assignmentNode',
+      width: 32, height: 32,
+      data: {
+        nodeType: 'assignmentNode',
+        label: (asgn.title ?? 'Task') as string,
+        color,
+        status: asgn.status as string | undefined,
+        priority,
+        dueAt: asgn.due_at as string | undefined,
+        description: asgn.description as string | undefined,
+      },
+    });
+    edges.push({
+      id: `e-entity-${asgnId}`,
+      source: 'entity', target: asgnId,
+      style: { stroke: color, strokeWidth: 1, strokeDasharray: '2 3', opacity: 0.35 },
+    });
+  });
+
+  const filterCounts: FilterCounts = {
+    context:     Object.values(contextEntries).reduce((s, a) => s + a.length, 0),
+    related:     relatedObjects.length,
+    activities:  activities.length,
+    assignments: assignments.length,
+  };
+
+  return { nodes, edges, filterCounts };
 }
 
-// ── Custom node renderers ─────────────────────────────────────────────────────
+// ── Icon maps ─────────────────────────────────────────────────────────────────
 
-function EntityNodeComponent({ data }: { data: NodeData }) {
+const ENTITY_ICONS: Record<string, LucideIcon> = {
+  contact:     Users,
+  account:     Building2,
+  opportunity: Briefcase,
+  use_case:    FolderKanban,
+};
+
+const ACTIVITY_ICONS: Record<string, LucideIcon> = {
+  call:          Phone,
+  email:         Mail,
+  meeting:       Calendar,
+  note:          FileText,
+  task:          CheckSquare,
+  demo:          Monitor,
+  proposal:      FileText,
+  research:      FileText,
+  status_update: Activity,
+};
+
+// ── Custom node components (module-scope — stable references) ─────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function EntityNodeComponent({ data }: { data: any }) {
+  const color: string = data.color;
+  const Icon = ENTITY_ICONS[data.subjectType as string] ?? Users;
   return (
-    <div
-      className="flex items-center justify-center rounded-2xl text-white text-xs font-bold shadow-lg select-none border-2 border-white/20"
-      style={{
-        width: data.size,
-        height: data.size,
-        backgroundColor: data.color as string,
-        fontSize: 10,
-        padding: 4,
-        textAlign: 'center',
-        lineHeight: 1.2,
-      }}
-    >
-      {(data.label as string).slice(0, 12)}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+      <div style={{
+        width: 60, height: 60, borderRadius: '50%',
+        backgroundColor: color + '18',
+        border: data.isSelected ? `2px solid ${color}` : `1.5px solid ${color}50`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'border-color 0.15s',
+      }}>
+        <Icon size={22} color={color} strokeWidth={1.75} />
+      </div>
+      <span style={{
+        fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+        maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis',
+        color: 'hsl(var(--foreground))',
+      }}>
+        {(data.label as string).slice(0, 20)}
+      </span>
     </div>
   );
 }
 
-function ClusterNodeComponent({ data }: { data: NodeData }) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function RelatedNodeComponent({ data }: { data: any }) {
+  const color: string = data.color;
+  const Icon = ENTITY_ICONS[data.entityType as string] ?? Users;
   return (
-    <div
-      className="flex items-center justify-center rounded-xl text-white text-[9px] font-semibold shadow-md select-none capitalize"
-      style={{
-        width: data.size,
-        height: data.size,
-        backgroundColor: (data.color as string) + 'cc',
-        fontSize: 9,
-        padding: 3,
-        textAlign: 'center',
-        lineHeight: 1.2,
-      }}
-    >
-      {(data.label as string).slice(0, 10)}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+      <div style={{
+        width: 40, height: 40, borderRadius: '50%',
+        backgroundColor: color + '15',
+        border: data.isSelected ? `1.5px solid ${color}` : `1px solid ${color}45`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'border-color 0.15s',
+      }}>
+        <Icon size={15} color={color} strokeWidth={1.75} />
+      </div>
+      <span style={{
+        fontSize: 9, fontWeight: 500, whiteSpace: 'nowrap',
+        maxWidth: 64, overflow: 'hidden', textOverflow: 'ellipsis',
+        color: 'hsl(var(--muted-foreground))',
+      }}>
+        {(data.label as string).slice(0, 16)}
+      </span>
     </div>
   );
 }
 
-function LeafNodeComponent({ data }: { data: NodeData }) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ClusterNodeComponent({ data }: { data: any }) {
+  const color: string = data.color;
   return (
-    <div
-      className="flex items-center justify-center rounded-lg text-white text-[8px] font-medium shadow select-none"
-      style={{
-        width: data.size,
-        height: data.size,
-        backgroundColor: (data.color as string) + '99',
-        fontSize: 8,
-        padding: 2,
-        textAlign: 'center',
-        lineHeight: 1.2,
-      }}
-    >
-      {(data.label as string).slice(0, 8)}
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer' }}>
+      <div style={{
+        padding: '4px 10px', borderRadius: 8,
+        backgroundColor: 'hsl(var(--card))',
+        border: data.isSelected ? `1.5px solid ${color}` : `1px solid ${color}45`,
+        display: 'flex', alignItems: 'center', gap: 6,
+        transition: 'border-color 0.15s',
+      }}>
+        <span style={{ fontSize: 10, color, fontWeight: 600, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>
+          {(data.label as string).slice(0, 14)}
+        </span>
+        {data.count > 0 && (
+          <span style={{
+            fontSize: 9, fontWeight: 700, color: 'white',
+            backgroundColor: color, borderRadius: '50%',
+            width: 14, height: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}>
+            {(data.count as number) > 9 ? '9+' : data.count}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
-function ActivityNodeComponent({ data }: { data: NodeData }) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function LeafNodeComponent({ data }: { data: any }) {
+  const color: string = data.color;
   return (
-    <div
-      className="flex items-center justify-center rounded-lg text-white text-[8px] font-medium shadow select-none"
-      style={{
-        width: data.size,
-        height: data.size,
-        backgroundColor: '#64748b99',
-        fontSize: 8,
-        padding: 2,
-        textAlign: 'center',
-        lineHeight: 1.2,
-      }}
-    >
-      {(data.label as string).slice(0, 8)}
+    <div style={{
+      width: 12, height: 12, borderRadius: '50%',
+      backgroundColor: color + '70',
+      border: data.isSelected ? `1.5px solid ${color}` : `1px solid ${color}50`,
+      cursor: 'pointer',
+      transition: 'border-color 0.15s',
+      opacity: data.isStale ? 0.4 : 1,
+    }} />
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ActivityNodeComponent({ data }: { data: any }) {
+  const color: string = data.color;
+  const Icon = ACTIVITY_ICONS[data.activityType as string] ?? Activity;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+      <div style={{
+        width: 32, height: 32, borderRadius: 8,
+        backgroundColor: 'hsl(var(--card))',
+        border: data.isSelected ? `1.5px solid ${color}` : `1px solid ${color}50`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'border-color 0.15s',
+      }}>
+        <Icon size={14} color={color} strokeWidth={1.75} />
+      </div>
+    </div>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function AssignmentNodeComponent({ data }: { data: any }) {
+  const color: string = data.color;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+      <div style={{
+        width: 32, height: 32, borderRadius: 8,
+        backgroundColor: 'hsl(var(--card))',
+        border: data.isSelected ? `1.5px solid ${color}` : `1.5px dashed ${color}60`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'border-color 0.15s',
+      }}>
+        <ClipboardList size={14} color={color} strokeWidth={1.75} />
+      </div>
     </div>
   );
 }
 
 const nodeTypes = {
-  entityNode:   EntityNodeComponent,
-  clusterNode:  ClusterNodeComponent,
-  leafNode:     LeafNodeComponent,
-  activityNode: ActivityNodeComponent,
+  entityNode:     EntityNodeComponent,
+  relatedNode:    RelatedNodeComponent,
+  clusterNode:    ClusterNodeComponent,
+  leafNode:       LeafNodeComponent,
+  activityNode:   ActivityNodeComponent,
+  assignmentNode: AssignmentNodeComponent,
 };
+
+// ── FitViewBridge — exposes useReactFlow().fitView via ref ────────────────────
+
+function FitViewBridge({ fitViewRef }: { fitViewRef: React.MutableRefObject<(() => void) | null> }) {
+  const { fitView } = useReactFlow();
+  useEffect(() => {
+    fitViewRef.current = () => fitView({ padding: 0.18, duration: 500 });
+    return () => { fitViewRef.current = null; };
+  }, [fitView, fitViewRef]);
+  return null;
+}
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function MemoryGraph({ subjectType, subjectId, subjectName }: MemoryGraphProps) {
+export function MemoryGraph({
+  subjectType, subjectId, subjectName,
+  selectedNodeId, onNodeSelect, activeFilters, fitViewRef, onFilterCounts,
+}: MemoryGraphProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: briefingData, isLoading } = useBriefing(subjectType, subjectId) as any;
-  const briefing = briefingData?.briefing ?? briefingData;
+  const briefing = briefingData?.briefing ?? briefingData ?? null;
 
-  const { nodes: initialNodes, edges: initialEdges } = useMemo(
+  const prevCountsRef = useRef<FilterCounts | null>(null);
+
+  const { nodes: baseNodes, edges: baseEdges, filterCounts } = useMemo(
     () => buildGraph(briefing, subjectType, subjectName),
     [briefing, subjectType, subjectName],
   );
 
-  const [nodes, , onNodesChange] = useNodesState(initialNodes);
-  const [edges, , onEdgesChange] = useEdgesState(initialEdges);
-  const [selectedNode, setSelectedNode] = useState<{ label: string; body?: string } | null>(null);
-
-  // Re-sync when briefing loads
+  // Propagate counts to page (stable if unchanged)
   useEffect(() => {
-    // useNodesState doesn't expose a reset — React remounts via key instead (see wrapper)
-  }, [briefing]);
+    const prev = prevCountsRef.current;
+    if (!prev ||
+        prev.context !== filterCounts.context ||
+        prev.related !== filterCounts.related ||
+        prev.activities !== filterCounts.activities ||
+        prev.assignments !== filterCounts.assignments) {
+      prevCountsRef.current = filterCounts;
+      onFilterCounts(filterCounts);
+    }
+  });
 
-  const handleNodeClick: NodeMouseHandler = (_, node) => {
-    const d = node.data as NodeData;
-    setSelectedNode({ label: d.label as string, body: d.body as string | undefined });
-  };
+  // Apply filter visibility + selection state
+  const displayNodes = useMemo(() =>
+    baseNodes.map(n => ({
+      ...n,
+      hidden: n.type !== 'entityNode' && !activeFilters.has(getCategoryForNodeType(n.type ?? '')),
+      data: { ...n.data, isSelected: n.id === selectedNodeId },
+    })),
+    [baseNodes, activeFilters, selectedNodeId],
+  );
+
+  // Hide edges whose source/target is hidden
+  const displayEdges = useMemo(() => {
+    const visibleIds = new Set(displayNodes.filter(n => !n.hidden).map(n => n.id));
+    return baseEdges.filter(e => visibleIds.has(e.source) && visibleIds.has(e.target));
+  }, [baseEdges, displayNodes]);
+
+  const handleNodeClick = useCallback((_: React.MouseEvent, node: Node<GraphNodeData>) => {
+    onNodeSelect(node.id, node.data as GraphNodeData);
+  }, [onNodeSelect]);
 
   const isEmpty = !briefing ||
     (Object.keys(briefing?.context_entries ?? {}).length === 0 &&
-     (briefing?.activities ?? []).length === 0);
+     (briefing?.activities ?? []).length === 0 &&
+     (briefing?.open_assignments ?? []).length === 0 &&
+     Object.keys(briefing?.related_objects ?? {}).every(k => (briefing.related_objects[k] ?? []).length === 0));
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-[450px] text-muted-foreground gap-2 text-sm">
+      <div className="flex-1 min-h-0 h-full w-full flex items-center justify-center gap-2 text-sm text-muted-foreground bg-background">
         <Loader2 className="w-4 h-4 animate-spin" /> Loading graph…
       </div>
     );
@@ -260,10 +507,12 @@ export function MemoryGraph({ subjectType, subjectId, subjectName }: MemoryGraph
 
   if (isEmpty) {
     return (
-      <div className="flex flex-col items-center justify-center h-[450px] text-center text-muted-foreground px-8">
-        <div className="text-5xl mb-4 opacity-20">⬡</div>
-        <p className="font-medium text-sm text-foreground">No context data yet</p>
-        <p className="text-xs mt-1 max-w-xs">
+      <div className="flex-1 min-h-0 h-full w-full flex flex-col items-center justify-center text-center px-8 bg-background">
+        <div className="w-10 h-10 rounded-xl border border-border flex items-center justify-center mb-4 opacity-30">
+          <Activity className="w-5 h-5 text-muted-foreground" />
+        </div>
+        <p className="text-sm font-medium text-muted-foreground">No context data yet</p>
+        <p className="text-xs mt-1 max-w-xs text-muted-foreground/50 leading-relaxed">
           Agents populate this graph as they interact with this {subjectType.replace('_', ' ')}.
           Context entries, activities, and briefings will appear here.
         </p>
@@ -272,44 +521,50 @@ export function MemoryGraph({ subjectType, subjectId, subjectName }: MemoryGraph
   }
 
   return (
-    <div className="relative" style={{ height: 450 }}>
+    <div className="flex-1 min-h-0 h-full w-full bg-background">
       <ReactFlow
         key={subjectId}
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
+        nodes={displayNodes}
+        edges={displayEdges}
         onNodeClick={handleNodeClick}
+        onPaneClick={() => onNodeSelect(null, null)}
         nodeTypes={nodeTypes}
+        nodeOrigin={[0.5, 0.5]}
+        nodesDraggable={false}
+        nodesConnectable={false}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
-        minZoom={0.4}
-        maxZoom={2}
+        fitViewOptions={{ padding: 0.18 }}
+        minZoom={0.3}
+        maxZoom={2.5}
+        defaultEdgeOptions={{ type: 'straight' }}
         proOptions={{ hideAttribution: true }}
+        style={{ backgroundColor: 'hsl(var(--background))' }}
       >
-        <Background color="#94a3b8" gap={20} size={1} style={{ opacity: 0.06 }} />
-        <Controls showInteractive={false} className="!bottom-3 !left-3" />
+        <FitViewBridge fitViewRef={fitViewRef} />
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={24}
+          size={1}
+          color="hsl(var(--border))"
+        />
+        <Controls
+          showInteractive={false}
+          className="!bg-card !border-border !shadow-none [&>button]:!bg-transparent [&>button]:!text-muted-foreground [&>button:hover]:!text-foreground [&>button]:!border-border"
+        />
+        <MiniMap
+          position="top-right"
+          nodeColor={n => {
+            const d = n.data as GraphNodeData;
+            return n.hidden ? 'transparent' : (d.color ?? '#94a3b8');
+          }}
+          nodeStrokeWidth={0}
+          nodeStrokeColor="transparent"
+          maskColor="rgba(0,0,0,0.55)"
+          zoomable
+          pannable
+          style={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8 }}
+        />
       </ReactFlow>
-
-      {/* Node detail tooltip */}
-      {selectedNode && (
-        <div className="absolute bottom-3 right-3 w-64 bg-card border border-border rounded-xl shadow-lg p-3 z-10">
-          <div className="flex items-start justify-between gap-2 mb-1">
-            <p className="text-xs font-semibold text-foreground capitalize leading-tight">{selectedNode.label}</p>
-            <button
-              onClick={() => setSelectedNode(null)}
-              className="text-muted-foreground hover:text-foreground flex-shrink-0"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-          {selectedNode.body && (
-            <p className="text-[11px] text-muted-foreground line-clamp-4 whitespace-pre-wrap">
-              {selectedNode.body}
-            </p>
-          )}
-        </div>
-      )}
     </div>
   );
 }

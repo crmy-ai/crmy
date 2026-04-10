@@ -6,10 +6,10 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
+  Bot,
   Inbox,
   Zap,
   Users,
-  UsersRound,
   Building2,
   Briefcase,
   FolderKanban,
@@ -29,7 +29,7 @@ export { ENTITY_COLORS };
 // Agent-facing tier — top of nav
 const agentNavItems = [
   { icon: Brain,       label: 'Workspace',   path: '/',            color: ENTITY_COLORS.contacts },
-  { icon: UsersRound,  label: 'Agents',      path: '/actors',      color: ENTITY_COLORS.agents },
+  { icon: Bot,         label: 'Agents',      path: '/agents',      color: ENTITY_COLORS.agents },
   { icon: Zap,         label: 'Workflows',   path: '/workflows',   color: ENTITY_COLORS.workflows },
   { icon: Inbox,       label: 'Handoffs',    path: '/handoffs',    color: ENTITY_COLORS.assignments },
 ];
@@ -148,7 +148,7 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 flex flex-col py-3 gap-1 px-2 overflow-y-auto">
+      <nav className="flex-1 flex flex-col py-3 gap-1 px-2 overflow-y-auto overflow-x-hidden">
         {/* Agent-facing tier */}
         {agentNavItems.map((item) => (
           <NavItem key={item.path} item={item} active={isActive(item.path)} badge={badge(item.path)} />

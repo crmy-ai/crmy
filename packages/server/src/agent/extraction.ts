@@ -69,6 +69,13 @@ export async function triggerExtraction(
 ): Promise<void> {
   const config = await agentRepo.getConfig(db, tenantId);
 
+  // auto_extract_context defaults to true when the column is absent (pre-migration)
+  const autoExtract = config?.auto_extract_context !== false;
+  if (!autoExtract) {
+    await markExtractionStatus(db, activityId, 'skipped', 'auto_extract_context disabled');
+    return;
+  }
+
   if (!config?.enabled || !config.api_key_enc) {
     // Mark pending — background worker will pick it up once agent is configured
     await markExtractionStatus(db, activityId, 'pending');

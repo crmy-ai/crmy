@@ -113,6 +113,7 @@ export default function AgentSettings() {
   const [canCreateAssignments, setCanCreateAssignments] = useState(true);
   const [canLogActivities,    setCanLogActivities]    = useState(true);
   const [canWriteObjects,     setCanWriteObjects]     = useState(false);
+  const [autoExtractContext,  setAutoExtractContext]  = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // ── Danger Zone ──────────────────────────────────────────────────────────
@@ -146,6 +147,7 @@ export default function AgentSettings() {
     setCanCreateAssignments(config.can_create_assignments);
     setCanLogActivities(config.can_log_activities);
     setCanWriteObjects(config.can_write_objects);
+    setAutoExtractContext(config.auto_extract_context !== false); // default true
   }, [config]);
 
   // Focus textarea when prompt editor opens
@@ -280,6 +282,7 @@ export default function AgentSettings() {
       can_write_objects:      canWriteObjects,
       can_log_activities:     canLogActivities,
       can_create_assignments: canCreateAssignments,
+      auto_extract_context:   autoExtractContext,
     };
     // Only send api_key if the user entered a new one
     if (newApiKey.trim()) {
@@ -715,6 +718,27 @@ export default function AgentSettings() {
                 }
               }}
               aria-label="Allow agent to log activities"
+            />
+          </div>
+
+          {/* Auto-extract context from activities */}
+          <div className="flex items-center justify-between py-3 border-t border-border">
+            <div>
+              <p className="text-sm font-medium text-foreground">Auto-extract context from activities</p>
+              <p className="text-xs text-muted-foreground">Automatically analyzes new activities and writes structured context entries</p>
+            </div>
+            <Switch
+              checked={autoExtractContext}
+              onCheckedChange={async (v) => {
+                setAutoExtractContext(v);
+                try {
+                  await saveConfig.mutateAsync({ auto_extract_context: v });
+                } catch {
+                  setAutoExtractContext(!v);
+                  toast({ title: 'Failed to save', variant: 'destructive' });
+                }
+              }}
+              aria-label="Auto-extract context from activities"
             />
           </div>
 

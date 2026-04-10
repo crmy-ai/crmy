@@ -1,21 +1,25 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
+import { Link } from 'react-router-dom';
 import { User, FileText, GitFork } from 'lucide-react';
+import { useAppStore } from '@/store/appStore';
 
-export type DrawerView = 'detail' | 'brief' | 'graph';
+export type DrawerView = 'detail' | 'brief';
 
 export function DrawerTabBar({
   view,
   onChange,
+  graphHref,
 }: {
   view: DrawerView;
   onChange: (v: DrawerView) => void;
+  graphHref?: string;
 }) {
+  const closeDrawer = useAppStore(s => s.closeDrawer);
   const tabs: { key: DrawerView; label: string; icon: React.ElementType }[] = [
     { key: 'detail', label: 'Detail', icon: User },
     { key: 'brief',  label: 'Brief',  icon: FileText },
-    { key: 'graph',  label: 'Graph',  icon: GitFork },
   ];
 
   return (
@@ -34,6 +38,16 @@ export function DrawerTabBar({
           {t.label}
         </button>
       ))}
+      {graphHref && (
+        <Link
+          to={graphHref}
+          onClick={closeDrawer}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-muted-foreground hover:text-foreground transition-all"
+        >
+          <GitFork className="w-3 h-3" />
+          Graph
+        </Link>
+      )}
     </div>
   );
 }

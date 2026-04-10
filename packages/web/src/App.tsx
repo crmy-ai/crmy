@@ -44,6 +44,7 @@ import ContextPage from '@/pages/Context';
 import WorkflowsPage from '@/pages/Workflows';
 import EmailsPage from '@/pages/Emails';
 import ActorsPage from '@/pages/Agents';
+import MemoryGraphPage from '@/pages/MemoryGraphPage';
 
 function ThemeApplier() {
   const { darkVariant } = useAppStore();
@@ -96,8 +97,10 @@ function AnimatedRoutes() {
           <Route path="/context" element={<ContextPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/emails" element={<EmailsPage />} />
-          <Route path="/actors" element={<ActorsPage />} />
-          <Route path="/agents" element={<Navigate to="/actors" replace />} />
+          <Route path="/agents" element={<ActorsPage />} />
+          <Route path="/actors" element={<Navigate to="/agents" replace />} />
+          <Route path="/contacts/:id/graph" element={<MemoryGraphPage />} />
+          <Route path="/accounts/:id/graph" element={<MemoryGraphPage />} />
           <Route path="/agent" element={<Agent />} />
           <Route path="/agent/activity" element={<AgentActivity />} />
           <Route path="/settings/*" element={<Settings />} />

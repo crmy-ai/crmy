@@ -108,48 +108,27 @@ export default function Dashboard() {
         icon={Brain}
         iconClassName="text-primary"
         description="Agent memory — context entries, handoffs, and active agents at a glance."
-      >
-        <div className="hidden md:flex items-center gap-0.5 bg-muted rounded-xl p-0.5">
-          <button
-            onClick={() => setSearchParams({})}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'overview' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Brain className="w-3 h-3" /> Overview
-          </button>
-          <button
-            onClick={() => setSearchParams({ tab: 'knowledge' })}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'knowledge' ? 'bg-[#0ea5e9]/15 text-[#0ea5e9] shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <Library className="w-3 h-3" /> Knowledge
-          </button>
-        </div>
-      </TopBar>
+      />
 
-      {/* Mobile tab bar */}
-      {activeTab !== 'overview' || true ? (
-        <div className="md:hidden flex items-center gap-0.5 bg-muted rounded-xl p-0.5 mx-4 mt-3 mb-1">
-          <button
-            onClick={() => setSearchParams({})}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'overview' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
-            }`}
-          >
-            <Brain className="w-3 h-3" /> Overview
-          </button>
-          <button
-            onClick={() => setSearchParams({ tab: 'knowledge' })}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-              activeTab === 'knowledge' ? 'bg-[#0ea5e9]/15 text-[#0ea5e9] shadow-sm' : 'text-muted-foreground'
-            }`}
-          >
-            <Library className="w-3 h-3" /> Knowledge
-          </button>
-        </div>
-      ) : null}
+      {/* Tab toggle */}
+      <div className="flex items-center gap-0.5 bg-muted rounded-xl p-0.5 mx-4 md:mx-6 mt-3 mb-1 self-start">
+        <button
+          onClick={() => setSearchParams({})}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+            activeTab === 'overview' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Brain className="w-3.5 h-3.5" /> Overview
+        </button>
+        <button
+          onClick={() => setSearchParams({ tab: 'knowledge' })}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+            activeTab === 'knowledge' ? 'bg-[#0ea5e9]/15 text-[#0ea5e9] shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Library className="w-3.5 h-3.5" /> Knowledge
+        </button>
+      </div>
 
       {activeTab === 'knowledge' ? (
         <ContextBrowser />
@@ -182,7 +161,7 @@ export default function Dashboard() {
             value={activeActors.length}
             sub={actors.length > 0 ? `of ${actors.length} registered` : 'none registered'}
             color="bg-[#6366f1]/15 text-[#6366f1]"
-            href="/actors"
+            href="/agents"
             delay={0.1}
           />
         </div>
@@ -303,7 +282,7 @@ export default function Dashboard() {
                     <Bot className="w-4 h-4 text-[#6366f1]" />
                     Agents
                   </h3>
-                  <Link to="/actors" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  <Link to="/agents" className="text-xs text-primary hover:underline flex items-center gap-1">
                     Manage <ArrowRight className="w-3 h-3" />
                   </Link>
                 </div>
@@ -311,7 +290,7 @@ export default function Dashboard() {
                   <div className="text-center py-6">
                     <Bot className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
                     <p className="text-xs text-muted-foreground">No agents registered yet.</p>
-                    <Link to="/actors" className="text-xs text-primary hover:underline mt-1 inline-block">
+                    <Link to="/agents" className="text-xs text-primary hover:underline mt-1 inline-block">
                       Register your first agent
                     </Link>
                   </div>
@@ -332,7 +311,7 @@ export default function Dashboard() {
                       </div>
                     ))}
                     {agents.length > 5 && (
-                      <Link to="/actors" className="text-xs text-muted-foreground hover:text-primary block text-center pt-1">
+                      <Link to="/agents" className="text-xs text-muted-foreground hover:text-primary block text-center pt-1">
                         +{agents.length - 5} more
                       </Link>
                     )}

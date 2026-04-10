@@ -38,7 +38,7 @@ export const TYPE_COLORS: Record<string, string> = {
   agent_reasoning: '#a855f7',
 };
 
-const TYPE_DESCRIPTIONS: Record<string, string> = {
+export const TYPE_DESCRIPTIONS: Record<string, string> = {
   note: 'Manual note added by a user or agent',
   research: 'Background research about this contact or account',
   preference: 'Known preferences — communication style, product focus, etc.',
@@ -84,8 +84,8 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
     return (
       <div className="space-y-2 animate-pulse">
         <div className="h-4 bg-muted rounded w-1/3" />
-        <div className="h-16 bg-muted rounded" />
-        <div className="h-16 bg-muted rounded" />
+        <div className="h-20 bg-muted rounded" />
+        <div className="h-20 bg-muted rounded" />
       </div>
     );
   }
@@ -106,7 +106,7 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
           <span className="ml-1.5 font-mono font-normal text-muted-foreground/50">({entries.length})</span>
         </h3>
         {staleEntries.length > 0 && (
-          <span className="flex items-center gap-1 text-[10px] text-warning font-medium">
+          <span className="flex items-center gap-1 text-xs text-warning font-medium">
             <AlertTriangle className="w-3 h-3" /> {staleEntries.length} stale
           </span>
         )}
@@ -120,7 +120,7 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
             <div className="flex gap-1 flex-wrap">
               <button
                 onClick={() => setActiveType(null)}
-                className={`px-2 py-0.5 rounded-md text-[10px] font-semibold transition-all ${!activeType ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                className={`px-2 py-0.5 rounded-md text-xs font-semibold transition-all ${!activeType ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
               >
                 All
               </button>
@@ -128,7 +128,7 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
                 <button
                   key={type}
                   onClick={() => setActiveType(activeType === type ? null : type)}
-                  className={`px-2 py-0.5 rounded-md text-[10px] font-semibold transition-all ${activeType === type ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
+                  className={`px-2 py-0.5 rounded-md text-xs font-semibold transition-all ${activeType === type ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'}`}
                 >
                   {type.replace(/_/g, ' ')}
                   <span className="ml-1 opacity-50">{grouped[type].length}</span>
@@ -140,19 +140,19 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
           {/* Stale warnings */}
           {staleEntries.length > 0 && !activeType && (
             <div className="rounded-xl border border-warning/30 bg-warning/5 p-3 space-y-2">
-              <p className="text-[10px] font-semibold text-warning uppercase tracking-wide">Needs Review</p>
+              <p className="text-xs font-semibold text-warning uppercase tracking-wide">Needs Review</p>
               {staleEntries.map(entry => (
                 <div key={entry.id} className="flex items-start gap-2">
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs text-foreground truncate">{entry.title ?? entry.context_type}</p>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-sm text-foreground truncate">{entry.title ?? entry.context_type}</p>
+                    <p className="text-xs text-muted-foreground">
                       Expired {entry.valid_until ? new Date(entry.valid_until).toLocaleDateString() : ''}
                     </p>
                   </div>
                   <button
                     onClick={() => handleReview(entry.id)}
                     disabled={reviewMutation.isPending}
-                    className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                    className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
                   >
                     <CheckCircle2 className="w-3 h-3" /> Review
                   </button>
@@ -168,11 +168,11 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
             return (
               <div
                 key={entry.id}
-                className={`rounded-xl border p-3 space-y-1.5 ${isStale ? 'border-warning/30 bg-warning/5' : 'border-border bg-card'}`}
+                className={`rounded-xl border p-3.5 space-y-2 ${isStale ? 'border-warning/30 bg-warning/5' : 'border-border bg-card'}`}
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span
-                    className="px-1.5 py-0.5 rounded text-[10px] font-semibold capitalize cursor-help"
+                    className="px-2 py-0.5 rounded text-xs font-semibold capitalize cursor-help"
                     style={{ backgroundColor: color + '18', color }}
                     title={TYPE_DESCRIPTIONS[entry.context_type] ?? entry.context_type.replace(/_/g, ' ')}
                   >
@@ -181,7 +181,7 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
                   {entry.confidence != null && (
                     <span
                       title={`${Math.round(entry.confidence * 100)}% confidence`}
-                      className={`text-[10px] font-semibold px-1 py-0.5 rounded cursor-help ${
+                      className={`text-xs font-semibold px-1.5 py-0.5 rounded cursor-help ${
                         entry.confidence >= 0.8
                           ? 'text-green-500 bg-green-500/10'
                           : entry.confidence >= 0.5
@@ -192,26 +192,26 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
                       {entry.confidence >= 0.8 ? 'Verified' : entry.confidence >= 0.5 ? 'Likely' : 'Uncertain'}
                     </span>
                   )}
-                  <span className="text-[10px] text-muted-foreground ml-auto">
+                  <span className="text-xs text-muted-foreground ml-auto">
                     {new Date(entry.created_at).toLocaleDateString()}
                   </span>
                 </div>
                 {entry.title && (
                   <p className="text-sm font-medium text-foreground">{entry.title}</p>
                 )}
-                <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-wrap">
+                <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-wrap">
                   {entry.body}
                 </p>
                 {entry.tags && entry.tags.length > 0 && (
-                  <div className="flex items-center gap-1 flex-wrap">
-                    <Tag className="w-2.5 h-2.5 text-muted-foreground" />
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <Tag className="w-3 h-3 text-muted-foreground" />
                     {entry.tags.map(tag => (
-                      <span key={tag} className="px-1.5 py-0.5 rounded bg-muted text-[10px] text-muted-foreground">{tag}</span>
+                      <span key={tag} className="px-2 py-0.5 rounded-full bg-muted text-xs text-muted-foreground">#{tag}</span>
                     ))}
                   </div>
                 )}
                 {entry.source && (
-                  <p className="text-[10px] text-muted-foreground/60">Source: {entry.source}</p>
+                  <p className="text-xs text-muted-foreground/70">Source: {entry.source}</p>
                 )}
               </div>
             );

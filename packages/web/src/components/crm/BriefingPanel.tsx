@@ -3,13 +3,27 @@
 
 import { useState } from 'react';
 import { useBriefing } from '@/api/hooks';
-import { FileText, ChevronDown, ChevronUp, AlertTriangle, Activity, ClipboardList, Brain, X } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, AlertTriangle, ClipboardList, Brain, X, Phone, Mail, Calendar, Monitor, CheckSquare, Activity } from 'lucide-react';
+import { ACTIVITY_COLORS } from './GraphSidebar';
+import { TYPE_COLORS } from './ContextPanel';
 
 interface BriefingPanelProps {
   subjectType: string;
   subjectId: string;
   onClose: () => void;
 }
+
+const ACTIVITY_ICONS: Record<string, React.ElementType> = {
+  call:          Phone,
+  email:         Mail,
+  meeting:       Calendar,
+  note:          FileText,
+  task:          CheckSquare,
+  demo:          Monitor,
+  proposal:      FileText,
+  research:      FileText,
+  status_update: Activity,
+};
 
 export function BriefingPanel({ subjectType, subjectId, onClose }: BriefingPanelProps) {
   const [includeStale, setIncludeStale] = useState(true);
@@ -22,9 +36,9 @@ export function BriefingPanel({ subjectType, subjectId, onClose }: BriefingPanel
         <BriefingHeader onClose={onClose} />
         <div className="flex-1 p-5 space-y-4 animate-pulse">
           <div className="h-6 bg-muted rounded w-1/2" />
-          <div className="h-20 bg-muted rounded" />
-          <div className="h-20 bg-muted rounded" />
-          <div className="h-20 bg-muted rounded" />
+          <div className="h-24 bg-muted rounded" />
+          <div className="h-24 bg-muted rounded" />
+          <div className="h-24 bg-muted rounded" />
         </div>
       </div>
     );
@@ -40,23 +54,25 @@ export function BriefingPanel({ subjectType, subjectId, onClose }: BriefingPanel
   }
 
   const briefing = data?.briefing ?? data;
+  const activityCount: number = briefing?.activities?.length ?? 0;
+  const contextTypes = briefing?.context_entries ? Object.keys(briefing.context_entries) : [];
 
   return (
     <div className="flex flex-col h-full">
       <BriefingHeader onClose={onClose} />
-      <div className="flex-1 overflow-y-auto p-5 space-y-4">
+      <div className="flex-1 overflow-y-auto p-5 space-y-3">
         {/* Staleness warnings */}
         {briefing?.staleness_warnings?.length > 0 && (
           <BriefingSection
-            icon={<AlertTriangle className="w-3.5 h-3.5 text-warning" />}
+            icon={<AlertTriangle className="w-4 h-4 text-warning" />}
             title="Stale Context"
             defaultOpen
           >
             <div className="space-y-2">
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {briefing.staleness_warnings.map((w: any) => (
-                <div key={w.id} className="flex items-start gap-2 text-xs">
-                  <AlertTriangle className="w-3 h-3 text-warning flex-shrink-0 mt-0.5" />
+                <div key={w.id} className="flex items-start gap-2 text-sm">
+                  <AlertTriangle className="w-3.5 h-3.5 text-warning flex-shrink-0 mt-0.5" />
                   <div>
                     <span className="font-medium text-foreground">{w.title ?? w.context_type}</span>
                     <span className="text-muted-foreground ml-1.5">
@@ -70,25 +86,41 @@ export function BriefingPanel({ subjectType, subjectId, onClose }: BriefingPanel
         )}
 
         {/* Activities */}
-        {briefing?.activities?.length > 0 && (
+        {activityCount > 0 && (
           <BriefingSection
-            icon={<Activity className="w-3.5 h-3.5 text-primary" />}
-            title={`Recent Activities (${briefing.activities.length})`}
+            icon={<Activity className="w-4 h-4" style={{ color: '#f97316' }} />}
+            title="Recent Activities"
+            pill={activityCount}
+            pillColor="#f97316"
             defaultOpen
           >
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              {briefing.activities.slice(0, 10).map((a: any) => (
-                <div key={a.id} className="flex items-start gap-2 text-xs">
-                  <span className="w-16 flex-shrink-0 text-muted-foreground">
-                    {new Date(a.occurred_at ?? a.created_at).toLocaleDateString()}
-                  </span>
-                  <span className="px-1.5 py-0.5 rounded bg-muted text-[10px] font-medium capitalize flex-shrink-0">
-                    {(a.type ?? a.activity_type ?? '').replace(/_/g, ' ')}
-                  </span>
-                  <span className="text-foreground truncate">{a.description ?? a.body ?? ''}</span>
-                </div>
-              ))}
+              {briefing.activities.slice(0, 10).map((a: any) => {
+                const actType = (a.type ?? a.activity_type ?? '') as string;
+                const actColor = ACTIVITY_COLORS[actType] ?? '#94a3b8';
+                const Icon = ACTIVITY_ICONS[actType] ?? Activity;
+                return (
+                  <div key={a.id} className="flex items-start gap-3">
+                    <div className="flex-shrink-0 mt-0.5 w-6 h-6 rounded-lg flex items-center justify-center" style={{ backgroundColor: actColor + '18' }}>
+                      <Icon className="w-3.5 h-3.5" style={{ color: actColor }} strokeWidth={1.75} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-xs font-semibold capitalize" style={{ color: actColor }}>
+                          {actType.replace(/_/g, ' ')}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(a.occurred_at ?? a.created_at).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {(a.description ?? a.body) && (
+                        <p className="text-sm text-foreground leading-snug">{a.description ?? a.body}</p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </BriefingSection>
         )}
@@ -96,16 +128,17 @@ export function BriefingPanel({ subjectType, subjectId, onClose }: BriefingPanel
         {/* Open Assignments */}
         {briefing?.open_assignments?.length > 0 && (
           <BriefingSection
-            icon={<ClipboardList className="w-3.5 h-3.5 text-primary" />}
-            title={`Open Assignments (${briefing.open_assignments.length})`}
+            icon={<ClipboardList className="w-4 h-4 text-primary" />}
+            title="Open Assignments"
+            pill={briefing.open_assignments.length}
             defaultOpen
           >
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {briefing.open_assignments.map((a: any) => (
-                <div key={a.id} className="flex items-center gap-2 text-xs">
+                <div key={a.id} className="flex items-center gap-2">
                   <StatusBadge status={a.status} />
-                  <span className="text-foreground flex-1 truncate">{a.title}</span>
+                  <span className="text-sm text-foreground flex-1 truncate">{a.title}</span>
                   <PriorityDot priority={a.priority} />
                 </div>
               ))}
@@ -114,29 +147,35 @@ export function BriefingPanel({ subjectType, subjectId, onClose }: BriefingPanel
         )}
 
         {/* Context Entries (grouped by type) */}
-        {briefing?.context_entries && Object.keys(briefing.context_entries).length > 0 && (
+        {contextTypes.length > 0 && (
           <BriefingSection
-            icon={<Brain className="w-3.5 h-3.5 text-primary" />}
+            icon={<Brain className="w-4 h-4 text-primary" />}
             title="Context"
             defaultOpen
           >
-            <div className="space-y-3">
-              {Object.entries(briefing.context_entries).map(([type, entries]) => (
-                <div key={type}>
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                    {type.replace(/_/g, ' ')}
-                  </p>
-                  <div className="space-y-1.5">
-                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                    {(entries as any[]).map((c: any) => (
-                      <div key={c.id} className="rounded-lg bg-muted/50 p-2">
-                        {c.title && <p className="text-xs font-medium text-foreground">{c.title}</p>}
-                        <p className="text-[11px] text-muted-foreground line-clamp-2">{c.body}</p>
-                      </div>
-                    ))}
+            <div className="space-y-4">
+              {Object.entries(briefing.context_entries).map(([type, entries]) => {
+                const typeColor = TYPE_COLORS[type] ?? '#94a3b8';
+                return (
+                  <div key={type}>
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: typeColor }} />
+                      <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: typeColor }}>
+                        {type.replace(/_/g, ' ')}
+                      </p>
+                    </div>
+                    <div className="space-y-2 pl-3.5">
+                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                      {(entries as any[]).map((c: any) => (
+                        <div key={c.id} className="rounded-xl border border-border bg-card p-3">
+                          {c.title && <p className="text-sm font-medium text-foreground mb-1">{c.title}</p>}
+                          <p className="text-sm text-muted-foreground leading-relaxed">{c.body}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </BriefingSection>
         )}
@@ -149,7 +188,7 @@ export function BriefingPanel({ subjectType, subjectId, onClose }: BriefingPanel
             onChange={e => setIncludeStale(e.target.checked)}
             className="w-3.5 h-3.5 rounded border-border accent-primary"
           />
-          <span className="text-xs text-muted-foreground">Include stale context</span>
+          <span className="text-sm text-muted-foreground">Include stale context</span>
         </div>
       </div>
     </div>
@@ -168,24 +207,37 @@ function BriefingHeader({ onClose }: { onClose: () => void }) {
   );
 }
 
-function BriefingSection({ icon, title, children, defaultOpen = false }: {
+function BriefingSection({ icon, title, children, defaultOpen = false, pill, pillColor }: {
   icon: React.ReactNode;
   title: string;
   children: React.ReactNode;
   defaultOpen?: boolean;
+  pill?: number;
+  pillColor?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="rounded-xl border border-border">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full p-3 text-left"
+        className="flex items-center gap-2 w-full px-4 py-3 text-left"
       >
         {icon}
-        <span className="text-xs font-display font-bold text-foreground flex-1">{title}</span>
+        <span className="text-sm font-display font-bold text-foreground flex-1">{title}</span>
+        {pill !== undefined && (
+          <span
+            className="text-xs font-bold px-2 py-0.5 rounded-full mr-1"
+            style={{
+              backgroundColor: (pillColor ?? '#6366f1') + '20',
+              color: pillColor ?? '#6366f1',
+            }}
+          >
+            {pill}
+          </span>
+        )}
         {open ? <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />}
       </button>
-      {open && <div className="px-3 pb-3">{children}</div>}
+      {open && <div className="px-4 pb-4">{children}</div>}
     </div>
   );
 }
@@ -203,7 +255,7 @@ function StatusBadge({ status }: { status: string }) {
   const color = colors[status] ?? '#94a3b8';
   return (
     <span
-      className="px-1.5 py-0.5 rounded text-[10px] font-medium capitalize flex-shrink-0"
+      className="px-2 py-0.5 rounded-lg text-xs font-medium capitalize flex-shrink-0"
       style={{ backgroundColor: color + '18', color }}
     >
       {status.replace(/_/g, ' ')}
