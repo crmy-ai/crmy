@@ -8,7 +8,7 @@ import { TopBar } from '@/components/layout/TopBar';
 import { useContacts } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { StageBadge } from '@/components/crm/CrmWidgets';
+import { StageBadge, LeadScoreBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { motion } from 'framer-motion';
 import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown, Users, FileText } from 'lucide-react';
@@ -27,6 +27,7 @@ const sortOptions: SortOption[] = [
   { key: 'company', label: 'Company' },
   { key: 'created_at', label: 'Created' },
   { key: 'lifecycle_stage', label: 'Stage' },
+  { key: 'lead_score', label: 'Score' },
 ];
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -136,6 +137,7 @@ export default function Contacts() {
                     <SortHeader label="Company" sortKey="company" />
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Phone</th>
                     <SortHeader label="Stage" sortKey="lifecycle_stage" />
+                    <SortHeader label="Score" sortKey="lead_score" />
                     <th className="px-2 py-3 w-16"></th>
                   </tr>
                 </thead>
@@ -152,6 +154,9 @@ export default function Contacts() {
                       <td className="px-4 py-3 text-muted-foreground">{(c.company_name as string) || '—'}</td>
                       <td className="px-4 py-3 text-muted-foreground text-xs">{(c.phone as string) || '—'}</td>
                       <td className="px-4 py-3">{c.lifecycle_stage ? <StageBadge stage={c.lifecycle_stage as string} /> : '—'}</td>
+                      <td className="px-4 py-3">
+                        {c.lead_score != null ? <LeadScoreBadge score={c.lead_score as number} /> : <span className="text-muted-foreground text-xs">—</span>}
+                      </td>
                       <td className="px-2 py-3">
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
                           <button onClick={(e) => { e.stopPropagation(); openDrawerBriefing('contact', c.id as string); }}
@@ -201,8 +206,9 @@ export default function Contacts() {
                     <p className="text-xs text-muted-foreground">{(c.company_name as string) || 'Individual'}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
                   {c.lifecycle_stage && <StageBadge stage={c.lifecycle_stage as string} />}
+                  {c.lead_score != null && <LeadScoreBadge score={c.lead_score as number} />}
                 </div>
                 {c.email && <p className="text-xs text-muted-foreground">{c.email as string}</p>}
               </motion.div>

@@ -144,6 +144,15 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.post('/contacts/:id/score', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'contact_score');
+      const result = await handler({ contact_id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Accounts ---
   router.get('/accounts', async (req: Request, res: Response) => {
     try {
@@ -258,6 +267,15 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.post('/opportunities/:id/health-score', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'opportunity_health_score');
+      const result = await handler({ opportunity_id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Activities ---
   router.get('/activities', async (req: Request, res: Response) => {
     try {
@@ -268,6 +286,7 @@ export function apiRouter(db: DbPool): Router {
         account_id: qs(req.query.account_id),
         opportunity_id: qs(req.query.opportunity_id),
         type: qs(req.query.type),
+        direction: qs(req.query.direction),
         subject_type: qs(req.query.subject_type),
         subject_id: qs(req.query.subject_id),
         performed_by: qs(req.query.performed_by),
@@ -355,6 +374,41 @@ export function apiRouter(db: DbPool): Router {
       const handler = toolHandler(db, 'hitl_resolve');
       const result = await handler({ request_id: p(req, 'id'), ...req.body }, actor);
       res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- HITL Approval Rules ---
+  router.get('/hitl/rules', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const rules = await hitlRepo.listApprovalRules(db, actor.tenant_id);
+      res.json({ data: rules });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/hitl/rules', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const rule = await hitlRepo.createApprovalRule(db, actor.tenant_id, req.body);
+      res.status(201).json(rule);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/hitl/rules/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const rule = await hitlRepo.updateApprovalRule(db, actor.tenant_id, p(req, 'id'), req.body);
+      if (!rule) { res.status(404).json({ error: 'Rule not found' }); return; }
+      res.json(rule);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/hitl/rules/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const deleted = await hitlRepo.deleteApprovalRule(db, actor.tenant_id, p(req, 'id'));
+      if (!deleted) { res.status(404).json({ error: 'Rule not found' }); return; }
+      res.status(204).end();
     } catch (err) { handleError(res, err); }
   });
 
@@ -604,6 +658,42 @@ export function apiRouter(db: DbPool): Router {
       const handler = toolHandler(db, 'email_provider_set');
       const result = await handler(req.body, actor);
       res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Handoff snapshots (read-only, for UI) ---
+  router.get('/handoff-snapshots/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const { getSnapshot } = await import('../db/repos/handoff-snapshots.js');
+      const snapshot = await getSnapshot(db, actor.tenant_id, p(req, 'id'));
+      if (!snapshot) { res.status(404).json({ error: 'Snapshot not found' }); return; }
+      res.json(snapshot);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // Inbound email webhook config: get status and regenerate secret
+  router.get('/email-provider/inbound', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const row = await db.query(
+        'SELECT inbound_enabled, CASE WHEN inbound_webhook_secret IS NOT NULL THEN true ELSE false END as has_secret FROM email_providers WHERE tenant_id = $1',
+        [actor.tenant_id],
+      );
+      if (row.rows.length === 0) { res.json({ configured: false }); return; }
+      res.json({ configured: true, inbound_enabled: row.rows[0].inbound_enabled, has_secret: row.rows[0].has_secret });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/email-provider/inbound/secret', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const secret = crypto.randomBytes(32).toString('hex');
+      await db.query(
+        'UPDATE email_providers SET inbound_webhook_secret = $1, inbound_enabled = true WHERE tenant_id = $2',
+        [secret, actor.tenant_id],
+      );
+      res.json({ secret, inbound_enabled: true });
     } catch (err) { handleError(res, err); }
   });
 
@@ -990,6 +1080,49 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.get('/actors/:id/specializations', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const specs = await actorRepo.findSpecialists
+        ? await actorRepo.findSpecialists(db, actor.tenant_id, '', p(req, 'id'))
+        : [];
+      // Actually list specializations for a specific actor
+      const result = await db.query(
+        `SELECT * FROM agent_specializations WHERE tenant_id = $1 AND actor_id = $2 AND is_active = true ORDER BY created_at`,
+        [actor.tenant_id, p(req, 'id')],
+      );
+      res.json({ data: result.rows });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/actors/:id/specializations', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const { skill_tag, proficiency, description } = req.body as {
+        skill_tag: string;
+        proficiency?: string;
+        description?: string;
+      };
+      const spec = await actorRepo.upsertSpecialization(db, actor.tenant_id, p(req, 'id'), {
+        skill_tag,
+        proficiency: (proficiency as 'basic' | 'intermediate' | 'expert') ?? 'basic',
+        description,
+      });
+      res.status(201).json(spec);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/actors/:id/specializations/:skill_tag', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      await db.query(
+        `UPDATE agent_specializations SET is_active = false WHERE tenant_id = $1 AND actor_id = $2 AND skill_tag = $3`,
+        [actor.tenant_id, p(req, 'id'), decodeURIComponent(p(req, 'skill_tag'))],
+      );
+      res.status(204).end();
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Assignments ---
   router.get('/assignments', async (req: Request, res: Response) => {
     try {
@@ -1318,6 +1451,15 @@ export function apiRouter(db: DbPool): Router {
       const actor = getActor(req);
       const handler = toolHandler(db, 'context_review');
       const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/consolidate', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_consolidate');
+      const result = await handler(req.body, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -1776,6 +1918,107 @@ export function apiRouter(db: DbPool): Router {
       }
       const result = await searchRepo.crmSearch(db, actor.tenant_id, q, qn(req.query.limit, 10));
       res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  return router;
+}
+
+/**
+ * Router for inbound webhook routes that must NOT require JWT authentication.
+ * Mount this BEFORE the auth middleware in the Express app.
+ */
+export function inboundRouter(db: DbPool): Router {
+  const router = Router();
+
+  // ── Inbound email webhook (no auth — HMAC-signed by provider) ─────────────
+  router.post('/email/inbound', async (req: Request, res: Response) => {
+    try {
+      const { parseInboundEmail } = await import('../email/inbound-parser.js');
+      const { extractContextFromActivity } = await import('../agent/extraction.js');
+      const { emitEvent: emit } = await import('../events/emitter.js');
+
+      // Determine tenant: single-tenant installs use the first tenant
+      const tenantResult = await db.query('SELECT id FROM tenants LIMIT 1');
+      if (tenantResult.rows.length === 0) {
+        res.status(503).json({ error: 'No tenant configured' });
+        return;
+      }
+      const tenantId: string = tenantResult.rows[0].id;
+
+      // Optional HMAC verification using inbound_webhook_secret
+      const providerRow = await db.query(
+        'SELECT inbound_webhook_secret FROM email_providers WHERE tenant_id = $1',
+        [tenantId],
+      );
+      const secret: string | null = providerRow.rows[0]?.inbound_webhook_secret ?? null;
+      if (secret) {
+        const sig = req.headers['x-webhook-signature'] as string | undefined;
+        if (sig) {
+          const expected = crypto
+            .createHmac('sha256', secret)
+            .update(JSON.stringify(req.body))
+            .digest('hex');
+          if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+            res.status(401).json({ error: 'Invalid webhook signature' });
+            return;
+          }
+        }
+      }
+
+      const parsed = parseInboundEmail(req.body as Record<string, unknown>);
+      if (!parsed) {
+        res.status(400).json({ error: 'Unrecognised inbound email payload format' });
+        return;
+      }
+
+      // Resolve sender to a contact (best-effort)
+      let contactId: string | undefined;
+      try {
+        const resolved = await entityResolve(db, tenantId, {
+          query: parsed.from_email,
+          entity_type: 'contact',
+          context_hints: { email: parsed.from_email },
+        });
+        if (resolved.resolved) {
+          contactId = resolved.resolved.id;
+        } else if (resolved.candidates?.length) {
+          contactId = resolved.candidates[0].id;
+        }
+      } catch { /* entity resolve is best-effort */ }
+
+      const activity = await activityRepo.createActivity(db, tenantId, {
+        type: 'email',
+        direction: 'inbound',
+        subject: parsed.subject,
+        body: parsed.text_body,
+        contact_id: contactId,
+        source_agent: 'inbound_webhook',
+        occurred_at: parsed.received_at,
+        detail: {
+          from_email: parsed.from_email,
+          from_name: parsed.from_name,
+          to_email: parsed.to_email,
+          html_body: parsed.html_body,
+          in_reply_to: parsed.in_reply_to,
+        },
+      });
+
+      // Trigger context extraction (async — fire and forget)
+      extractContextFromActivity(db, tenantId, activity.id).catch((err) => {
+        console.error('[inbound-email] extraction error:', err);
+      });
+
+      emit(db, {
+        tenantId,
+        eventType: 'activity.created',
+        actorType: 'agent',
+        objectType: 'activity',
+        objectId: activity.id,
+        afterData: activity,
+      }).catch(() => {});
+
+      res.status(200).json({ ok: true, activity_id: activity.id });
     } catch (err) { handleError(res, err); }
   });
 

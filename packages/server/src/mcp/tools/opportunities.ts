@@ -11,6 +11,7 @@ import { notFound, validationError, permissionDenied } from '@crmy/shared';
 import { validateOpportunityTransition } from '../../services/state-machine.js';
 import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
+import { computeDealHealthScore } from '../../services/scoring.js';
 import type { ToolDef } from '../server.js';
 
 export function opportunityTools(db: DbPool): ToolDef[] {
@@ -187,6 +188,23 @@ export function opportunityTools(db: DbPool): ToolDef[] {
           beforeData: before,
         });
         return { deleted: true };
+      },
+    },
+    {
+      name: 'opportunity_health_score',
+      tier: 'core',
+      description: 'Compute the deal health score (0–100) for an opportunity. Factors in stage progression, activity recency, context completeness (has commitment/stakeholder/next_step entries), close date urgency, and deal risk entries. Risk entries reduce the score. Returns the score with breakdown and a list of risk factors. Use this before preparing for any important deal conversation.',
+      inputSchema: z.object({
+        opportunity_id: z.string().uuid().describe('ID of the opportunity to score'),
+      }),
+      handler: async (input: { opportunity_id: string }, actor: ActorContext) => {
+        const { score, breakdown, risk_factors } = await computeDealHealthScore(db, actor.tenant_id, input.opportunity_id);
+        // Persist score
+        await db.query(
+          'UPDATE opportunities SET deal_health_score = $1, deal_health_score_updated_at = now() WHERE id = $2 AND tenant_id = $3',
+          [score, input.opportunity_id, actor.tenant_id],
+        );
+        return { opportunity_id: input.opportunity_id, health_score: score, score_breakdown: breakdown, risk_factors, last_updated: new Date().toISOString() };
       },
     },
   ];

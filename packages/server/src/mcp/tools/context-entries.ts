@@ -10,7 +10,7 @@ import {
 import { entityResolve } from '../../services/entity-resolve.js';
 import { loadEmbeddingConfig, embedText } from '../../agent/providers/embeddings.js';
 import type { DbPool } from '../../db/pool.js';
-import type { ActorContext, SubjectType } from '@crmy/shared';
+import type { ActorContext, SubjectType, UUID } from '@crmy/shared';
 import * as contextRepo from '../../db/repos/context-entries.js';
 import * as activityRepo from '../../db/repos/activities.js';
 import * as contextTypeRepo from '../../db/repos/context-type-registry.js';
@@ -21,6 +21,8 @@ import { processStaleEntriesForTenant } from '../../services/staleness.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, validationError } from '@crmy/shared';
 import { extractContextFromActivity } from '../../agent/extraction.js';
+import { detectContradictions } from '../../services/contradictions.js';
+import { consolidateContextEntries } from '../../services/consolidation.js';
 import type { ToolDef } from '../server.js';
 
 /**
@@ -209,10 +211,19 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_review',
       tier: 'admin',
-      description: 'Mark a context entry as reviewed and still accurate, resetting its reviewed_at timestamp to now. Use this after verifying that a flagged or aging entry is still correct — it signals to other agents and the staleness system that a human or agent has confirmed the information. Does not modify the entry content.',
+      description: 'Mark a context entry as reviewed and still accurate. Resets reviewed_at to now and optionally extends valid_until by extend_days days (default: type half-life or 30 days). Use this after verifying an entry is still correct — prevents the staleness system from re-queuing it immediately.',
       inputSchema: contextReview,
       handler: async (input: z.infer<typeof contextReview>, actor: ActorContext) => {
-        const entry = await contextRepo.reviewContextEntry(db, actor.tenant_id, input.id);
+        // Determine extend_days: use provided value, fall back to type half_life, then 30
+        let extendDays = input.extend_days;
+        if (!extendDays) {
+          const typeRow = await db.query(
+            'SELECT confidence_half_life_days FROM context_type_registry WHERE tenant_id = $1 AND type_name = (SELECT context_type FROM context_entries WHERE id = $2)',
+            [actor.tenant_id, input.id],
+          );
+          extendDays = typeRow.rows[0]?.confidence_half_life_days ?? 30;
+        }
+        const entry = await contextRepo.reviewContextEntry(db, actor.tenant_id, input.id, extendDays);
         if (!entry) throw notFound('ContextEntry', input.id);
         return { context_entry: entry };
       },
@@ -501,6 +512,115 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         });
 
         return { context_entries: entries, total: entries.length, semantic_search: true };
+      },
+    },
+    {
+      name: 'context_detect_contradictions',
+      tier: 'extended',
+      description: 'Scan a subject\'s current context entries for conflicting facts — e.g. two entries that claim different budget amounts, different champions, or contradictory next steps. Returns contradiction warnings with the two conflicting entries, a description of the conflict, and a suggested resolution action. Call before important decisions to ensure you\'re not acting on contradictory beliefs. Use context_resolve_contradiction to fix them.',
+      inputSchema: z.object({
+        subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case'])
+          .describe('Type of the CRM subject to check'),
+        subject_id: z.string().uuid()
+          .describe('ID of the subject to check'),
+        context_type: z.string().optional()
+          .describe('If provided, only check entries of this context type. Omit to check all eligible types.'),
+      }),
+      handler: async (
+        input: { subject_type: SubjectType; subject_id: string; context_type?: string },
+        actor: ActorContext,
+      ) => {
+        const warnings = await detectContradictions(
+          db, actor.tenant_id, input.subject_type, input.subject_id, input.context_type,
+        );
+        return {
+          contradiction_warnings: warnings,
+          total: warnings.length,
+          subject_type: input.subject_type,
+          subject_id: input.subject_id,
+        };
+      },
+    },
+    {
+      name: 'context_resolve_contradiction',
+      tier: 'extended',
+      description: 'Resolve a contradiction between two context entries by superseding the incorrect one with the correct one. The kept entry is preserved as-is; the superseded entry is marked not current (full audit trail maintained). Provide a resolution_note explaining why you chose to keep one over the other. Find the entry IDs from context_detect_contradictions or briefing_get contradiction_warnings.',
+      inputSchema: z.object({
+        keep_entry_id: z.string().uuid()
+          .describe('ID of the entry to keep as the authoritative fact'),
+        supersede_entry_id: z.string().uuid()
+          .describe('ID of the entry to supersede (mark as no longer current)'),
+        resolution_note: z.string().min(1).max(500)
+          .describe('Brief explanation of why the kept entry is correct'),
+      }),
+      handler: async (
+        input: { keep_entry_id: string; supersede_entry_id: string; resolution_note: string },
+        actor: ActorContext,
+      ) => {
+        // Fetch the entry to keep so we can supersede with its content
+        const keepEntry = await contextRepo.getContextEntry(db, actor.tenant_id, input.keep_entry_id);
+        if (!keepEntry) return notFound('context_entry', input.keep_entry_id);
+
+        // Supersede the incorrect entry with the kept entry's content + resolution note
+        const result = await contextRepo.supersedeContextEntry(
+          db, actor.tenant_id, input.supersede_entry_id,
+          {
+            body: keepEntry.body,
+            title: keepEntry.title,
+            structured_data: {
+              ...keepEntry.structured_data,
+              resolved_by_entry_id: input.keep_entry_id,
+              resolution_note: input.resolution_note,
+            },
+            confidence: keepEntry.confidence,
+            tags: keepEntry.tags,
+            authored_by: actor.actor_id,
+          },
+        );
+
+        return {
+          resolved: true,
+          kept_entry: keepEntry,
+          superseded_entry: result.old,
+          resolution_entry: result.new,
+          resolution_note: input.resolution_note,
+        };
+      },
+    },
+    {
+      name: 'context_consolidate',
+      tier: 'extended',
+      description: 'Synthesise multiple current context entries of the same type for a subject into a single authoritative entry. Uses the tenant\'s configured LLM to merge bodies, resolve conflicts (preferring recent + high-confidence), and deduplicate. All source entries are superseded (is_current=false, audit trail preserved). Call when a subject has accumulated many redundant entries of the same type — e.g. 5 "next_step" entries that have piled up. If entry_ids is omitted, consolidates all current entries of context_type for the subject (up to max_entries).',
+      inputSchema: z.object({
+        subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case'])
+          .describe('Type of the CRM subject'),
+        subject_id: z.string().uuid()
+          .describe('ID of the CRM subject'),
+        context_type: z.string().min(1)
+          .describe('Context type to consolidate (e.g. "next_step", "objection")'),
+        entry_ids: z.array(z.string().uuid()).min(2).optional()
+          .describe('Specific entry IDs to consolidate. If omitted, uses all current entries of context_type.'),
+        max_entries: z.number().int().min(2).max(20).default(10)
+          .describe('Maximum number of entries to consolidate when entry_ids is omitted.'),
+      }),
+      handler: async (input: {
+        subject_type: 'contact' | 'account' | 'opportunity' | 'use_case';
+        subject_id: string;
+        context_type: string;
+        entry_ids?: string[];
+        max_entries?: number;
+      }, actor: ActorContext) => {
+        const result = await consolidateContextEntries(
+          db,
+          actor.tenant_id,
+          actor.actor_id,
+          input.subject_type,
+          input.subject_id,
+          input.context_type,
+          input.entry_ids as UUID[] | undefined,
+          input.max_entries ?? 10,
+        );
+        return result;
       },
     },
     {

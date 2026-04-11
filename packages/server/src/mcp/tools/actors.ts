@@ -169,5 +169,64 @@ export function actorTools(db: DbPool): ToolDef[] {
         }
       },
     },
+    // ── Specialist registry ──────────────────────────────────────────────────
+    {
+      name: 'agent_register_specialization',
+      tier: 'core',
+      description: 'Register or update a skill specialization for yourself. Call this at startup to declare what you are good at so other agents can discover and route work to you. skill_tag should be a short kebab-case identifier like "pricing", "legal", "discovery", "renewal", "technical". proficiency is "novice", "intermediate", or "expert".',
+      inputSchema: z.object({
+        skill_tag: z.string().min(1).max(50).describe('Short skill identifier, e.g. "pricing", "legal"'),
+        proficiency: z.enum(['novice', 'intermediate', 'expert']).default('intermediate'),
+        description: z.string().max(300).optional().describe('What you can do with this skill'),
+      }),
+      handler: async (input: { skill_tag: string; proficiency?: string; description?: string }, actor: ActorContext) => {
+        const spec = await actorRepo.upsertSpecialization(db, actor.tenant_id, actor.actor_id, {
+          skill_tag: input.skill_tag,
+          proficiency: input.proficiency,
+          description: input.description,
+        });
+        return { specialization: spec };
+      },
+    },
+    {
+      name: 'agent_find_specialist',
+      tier: 'core',
+      description: 'Find agents with a specific skill tag, sorted by proficiency (expert first) then recency. Use this before creating an assignment to find the best agent to route work to. Returns actors with their specialization metadata and availability status.',
+      inputSchema: z.object({
+        skill_tag: z.string().min(1).describe('The skill to search for, e.g. "pricing"'),
+        exclude_actor_id: z.string().uuid().optional().describe('Exclude this actor from results (typically yourself)'),
+      }),
+      handler: async (input: { skill_tag: string; exclude_actor_id?: string }, actor: ActorContext) => {
+        const specialists = await actorRepo.findSpecialists(
+          db,
+          actor.tenant_id,
+          input.skill_tag,
+          input.exclude_actor_id as string | undefined,
+        );
+        return {
+          skill_tag: input.skill_tag,
+          specialists: specialists.map(s => ({
+            actor_id: s.actor_id,
+            display_name: s.actor.display_name,
+            proficiency: s.proficiency,
+            description: s.description,
+            availability_status: s.actor.availability_status ?? 'available',
+          })),
+          total: specialists.length,
+        };
+      },
+    },
+    {
+      name: 'agent_set_availability',
+      tier: 'core',
+      description: 'Update your availability status so other agents know whether you can take work. Set to "busy" when you are actively working on a task, "available" when idle, and "offline" when shutting down.',
+      inputSchema: z.object({
+        status: z.enum(['available', 'busy', 'offline']).describe('Your availability status'),
+      }),
+      handler: async (input: { status: 'available' | 'busy' | 'offline' }, actor: ActorContext) => {
+        await actorRepo.setAvailabilityStatus(db, actor.tenant_id, actor.actor_id, input.status);
+        return { actor_id: actor.actor_id, availability_status: input.status };
+      },
+    },
   ];
 }

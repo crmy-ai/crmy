@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { useOpportunity, useUpdateOpportunity, useDeleteOpportunity, useUsers, useCustomFields } from '@/api/hooks';
+import { useOpportunity, useUpdateOpportunity, useDeleteOpportunity, useUsers, useCustomFields, useRescoreOpportunity } from '@/api/hooks';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { StageBadge, CustomFieldsSection } from './CrmWidgets';
+import { StageBadge, CustomFieldsSection, DealHealthBadge } from './CrmWidgets';
 import { Sparkles, TrendingUp, Calendar, User, Pencil, ChevronLeft, Trash2, FileText } from 'lucide-react';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
@@ -226,6 +226,7 @@ export function OpportunityDrawer() {
   const { data: oppData, isLoading } = useOpportunity(drawerEntityId ?? '') as any;
   const updateOpportunity = useUpdateOpportunity(drawerEntityId ?? '');
   const deleteOpportunity = useDeleteOpportunity(drawerEntityId ?? '');
+  const rescore = useRescoreOpportunity(drawerEntityId ?? '');
 
   if (isLoading) {
     return (
@@ -247,6 +248,7 @@ export function OpportunityDrawer() {
   const probability: number = opportunity.probability ?? 0;
   const forecastCat: string = opportunity.forecast_cat ?? '';
   const closeDate: string = opportunity.close_date ? new Date(opportunity.close_date as string).toLocaleDateString() : '—';
+  const dealHealthScore: number | null = opportunity.deal_health_score ?? null;
 
   if (briefing) {
     return <BriefingPanel subjectType="opportunity" subjectId={drawerEntityId!} onClose={() => setBriefing(false)} />;
@@ -288,12 +290,27 @@ export function OpportunityDrawer() {
         <p className="text-3xl font-display font-extrabold text-foreground mt-2">
           ${amount >= 1000 ? `${(amount / 1000).toFixed(0)}K` : amount}
         </p>
-        <div className="flex items-center gap-2 mt-3">
+        <div className="flex items-center gap-2 mt-3 flex-wrap">
           {stage && <StageBadge stage={stage} />}
           {probability > 0 && (
             <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-accent/10 text-accent">
               {probability}% probability
             </span>
+          )}
+          {dealHealthScore != null ? (
+            <DealHealthBadge
+              score={dealHealthScore}
+              onRescore={() => rescore.mutate()}
+              rescoring={rescore.isPending}
+            />
+          ) : (
+            <button
+              onClick={() => rescore.mutate()}
+              disabled={rescore.isPending}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-2 py-0.5 transition-colors disabled:opacity-50"
+            >
+              {rescore.isPending ? 'Scoring…' : 'Score deal health'}
+            </button>
           )}
         </div>
         <div className="flex gap-2 mt-4">

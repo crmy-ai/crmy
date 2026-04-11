@@ -44,6 +44,7 @@ import { guideTools } from './tools/guide.js';
 import { messagingTools } from './tools/messaging.js';
 import { emailSequenceTools } from './tools/email-sequences.js';
 import { compoundTools } from './tools/compound.js';
+import { agentHandoffTools } from './tools/agent-handoff.js';
 
 export interface ToolDef {
   name: string;
@@ -74,8 +75,9 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...activityTools(db),        // activity_create, activity_get_timeline
     // 4. Assignments
     ...assignmentTools(db),      // assignment_create, assignment_list, assignment_update
-    // 5. HITL
+    // 5. HITL + handoff
     ...hitlTools(db),            // hitl_submit_request, hitl_check_status
+    ...agentHandoffTools(db),    // agent_capture_handoff, agent_resume_handoff
     // 6. Core CRM entities
     ...contactTools(db),
     ...accountTools(db),

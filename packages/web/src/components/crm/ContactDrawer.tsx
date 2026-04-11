@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useRef } from 'react';
-import { useContact, useActivities, useUpdateContact, useDeleteContact, useUsers, useCustomFields, useContextEntries, useCreateContextEntry } from '@/api/hooks';
+import { useContact, useActivities, useUpdateContact, useDeleteContact, useUsers, useCustomFields, useContextEntries, useCreateContextEntry, useRescoreContact } from '@/api/hooks';
 import { ContactAvatar } from './ContactAvatar';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
@@ -224,6 +224,7 @@ export function ContactDrawer() {
   const createNote = useCreateContextEntry();
   const updateContact = useUpdateContact(drawerEntityId ?? '');
   const deleteContact = useDeleteContact(drawerEntityId ?? '');
+  const rescore = useRescoreContact(drawerEntityId ?? '');
 
   if (isLoading) {
     return (
@@ -297,7 +298,13 @@ export function ContactDrawer() {
             {company && <p className="text-sm text-muted-foreground">{company}</p>}
             <div className="flex items-center gap-2 mt-2">
               {stage && <StageBadge stage={stage} />}
-              {leadScore > 0 && <LeadScoreBadge score={leadScore} />}
+              {leadScore > 0 && (
+                <LeadScoreBadge
+                  score={leadScore}
+                  onRescore={() => rescore.mutate(undefined, { onSuccess: () => { /* query invalidated in hook */ } })}
+                  rescoring={rescore.isPending}
+                />
+              )}
             </div>
           </div>
         </div>

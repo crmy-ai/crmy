@@ -6,15 +6,77 @@ import {
   useAssignment, useUpdateAssignment,
   useAcceptAssignment, useStartAssignment, useCompleteAssignment,
   useDeclineAssignment, useBlockAssignment, useCancelAssignment,
-  useActor,
+  useActor, useHandoffSnapshot,
 } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import {
   Pencil, ChevronLeft, ClipboardList,
   Play, CheckCircle2, XCircle, Ban, AlertOctagon,
+  Bot, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { DatePicker } from '@/components/ui/date-picker';
 import { toast } from '@/components/ui/use-toast';
+
+// ─── Agent Context Section (reused from HITL page) ────────────────────────────
+
+function AgentContextSection({ snapshotId }: { snapshotId: string }) {
+  const [open, setOpen] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, isLoading } = useHandoffSnapshot(open ? snapshotId : null) as any;
+  const snapshot = data;
+
+  return (
+    <div className="border border-border rounded-xl overflow-hidden">
+      <button
+        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted/50 transition-colors"
+        onClick={() => setOpen(!open)}
+      >
+        <Bot className="w-3.5 h-3.5 text-violet-500" />
+        Agent reasoning
+        {open ? <ChevronUp className="w-3.5 h-3.5 ml-auto" /> : <ChevronDown className="w-3.5 h-3.5 ml-auto" />}
+      </button>
+      {open && (
+        <div className="px-3 pb-3 space-y-3 border-t border-border bg-muted/20">
+          {isLoading ? (
+            <p className="text-xs text-muted-foreground pt-2">Loading…</p>
+          ) : snapshot ? (
+            <>
+              {snapshot.reasoning && (
+                <div className="pt-2">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Reasoning</p>
+                  <p className="text-xs text-foreground whitespace-pre-wrap">{snapshot.reasoning}</p>
+                </div>
+              )}
+              {snapshot.key_findings?.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Key Findings</p>
+                  <ul className="space-y-1">
+                    {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                    {snapshot.key_findings.map((f: any, i: number) => (
+                      <li key={i} className="flex items-start gap-2 text-xs text-foreground">
+                        <span className="text-muted-foreground shrink-0">
+                          {f.confidence != null ? `${Math.round(f.confidence * 100)}%` : '•'}
+                        </span>
+                        <span>{f.finding}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {snapshot.confidence != null && (
+                <p className="text-xs text-muted-foreground">
+                  Overall confidence: <span className="text-foreground font-medium">{Math.round(snapshot.confidence * 100)}%</span>
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground pt-2">Snapshot not found.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -381,6 +443,13 @@ export function AssignmentDrawer() {
         <div className="p-4 mx-4 mt-2">
           <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide mb-2">Context</h3>
           <p className="text-sm text-foreground leading-relaxed italic">{assignment.context}</p>
+        </div>
+      )}
+
+      {/* Agent reasoning snapshot */}
+      {assignment.handoff_snapshot_id && (
+        <div className="px-4 mx-4 mt-2">
+          <AgentContextSection snapshotId={assignment.handoff_snapshot_id} />
         </div>
       )}
 

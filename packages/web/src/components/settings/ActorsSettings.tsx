@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { useActors, useCreateActor, useUpdateActor, useCreateUser, useUsers, useApiKeys, useCreateApiKey, useRevokeApiKey } from '@/api/hooks';
+import { useActors, useCreateActor, useUpdateActor, useCreateUser, useUsers, useApiKeys, useCreateApiKey, useRevokeApiKey, useAgentSpecializations, useUpsertSpecialization, useDeleteSpecialization, useSetActorAvailability } from '@/api/hooks';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -13,7 +13,7 @@ import {
   Users, Bot, LayoutGrid, List, ChevronUp, ChevronDown,
   Pencil, Trash2, Shield, Phone, Mail, MessageSquare,
   Plus, X, CheckCircle2, CircleDot, Power, PowerOff,
-  Key, Copy, ChevronRight, Lock,
+  Key, Copy, ChevronRight, Lock, Star, Wifi, WifiOff, Coffee,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -317,6 +317,11 @@ function ActorDetailPanel({
           </div>
         </div>
 
+        {/* ── Specializations (agents only) ── */}
+        {actor.actor_type === 'agent' && (
+          <SpecializationsPanel actor={actor} />
+        )}
+
         <div className="flex justify-end">
           <button onClick={onClose}
             className="px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">
@@ -325,6 +330,163 @@ function ActorDetailPanel({
         </div>
       </div>
     </motion.div>
+  );
+}
+
+// ─── Specializations Panel ────────────────────────────────────────────────────
+
+const PROFICIENCY_LEVELS = [
+  { value: 'basic',        label: 'Basic' },
+  { value: 'intermediate', label: 'Intermediate' },
+  { value: 'expert',       label: 'Expert' },
+] as const;
+
+const AVAILABILITY_OPTIONS = [
+  { value: 'available', label: 'Available', icon: Wifi,    cls: 'text-emerald-500' },
+  { value: 'busy',      label: 'Busy',      icon: Coffee,  cls: 'text-amber-500' },
+  { value: 'offline',   label: 'Offline',   icon: WifiOff, cls: 'text-muted-foreground' },
+] as const;
+
+interface Specialization {
+  actor_id: string;
+  skill_tag: string;
+  proficiency: 'basic' | 'intermediate' | 'expert';
+  description?: string;
+  is_active: boolean;
+}
+
+function SpecializationsPanel({ actor }: { actor: ActorRow }) {
+  const { data, isLoading } = useAgentSpecializations(actor.id) as { data: { data: Specialization[] } | undefined; isLoading: boolean };
+  const upsert = useUpsertSpecialization(actor.id);
+  const del = useDeleteSpecialization(actor.id);
+  const setAvailability = useSetActorAvailability(actor.id);
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [newSkill, setNewSkill] = useState('');
+  const [newProficiency, setNewProficiency] = useState<'basic' | 'intermediate' | 'expert'>('basic');
+  const [newDescription, setNewDescription] = useState('');
+
+  const specs = data?.data ?? [];
+  const availability = (actor as ActorRow & { availability_status?: string }).availability_status ?? 'available';
+
+  const inputCls = 'w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
+
+  const handleAdd = async () => {
+    if (!newSkill.trim()) return;
+    try {
+      await upsert.mutateAsync({ skill_tag: newSkill.trim(), proficiency: newProficiency, description: newDescription.trim() || undefined });
+      setNewSkill(''); setNewProficiency('basic'); setNewDescription(''); setShowAdd(false);
+      toast({ title: 'Specialization added' });
+    } catch {
+      toast({ title: 'Failed to add specialization', variant: 'destructive' });
+    }
+  };
+
+  const handleDelete = async (skillTag: string) => {
+    try {
+      await del.mutateAsync(skillTag);
+      toast({ title: 'Specialization removed' });
+    } catch {
+      toast({ title: 'Failed to remove specialization', variant: 'destructive' });
+    }
+  };
+
+  const handleAvailability = async (status: string) => {
+    try {
+      await setAvailability.mutateAsync(status);
+      toast({ title: `Availability set to ${status}` });
+    } catch {
+      toast({ title: 'Failed to update availability', variant: 'destructive' });
+    }
+  };
+
+  const proficiencyColor = { basic: 'text-sky-500 border-sky-500/30 bg-sky-500/10', intermediate: 'text-amber-500 border-amber-500/30 bg-amber-500/10', expert: 'text-emerald-500 border-emerald-500/30 bg-emerald-500/10' };
+
+  return (
+    <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="flex items-center gap-2">
+          <Star className="w-4 h-4 text-muted-foreground" />
+          <span className="text-sm font-semibold text-foreground">Skills & Availability</span>
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">{specs.length}</span>
+        </div>
+        <button onClick={() => setShowAdd(!showAdd)}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90">
+          {showAdd ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+          {showAdd ? 'Cancel' : 'Add Skill'}
+        </button>
+      </div>
+
+      <div className="px-4 py-3 space-y-3">
+        {/* Availability toggle */}
+        <div>
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Availability</p>
+          <div className="flex gap-1.5">
+            {AVAILABILITY_OPTIONS.map((opt) => {
+              const Icon = opt.icon;
+              const active = availability === opt.value;
+              return (
+                <button key={opt.value} onClick={() => handleAvailability(opt.value)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                    active ? `${opt.cls} border-current bg-current/10` : 'border-border text-muted-foreground hover:text-foreground'
+                  }`}>
+                  <Icon className="w-3 h-3" />
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Add skill form */}
+        {showAdd && (
+          <div className="rounded-lg border border-primary/30 bg-muted/20 p-3 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Skill Tag</label>
+                <input type="text" value={newSkill} onChange={(e) => setNewSkill(e.target.value)} placeholder="e.g. email_outreach" className={inputCls} />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Proficiency</label>
+                <select value={newProficiency} onChange={(e) => setNewProficiency(e.target.value as typeof newProficiency)} className={inputCls}>
+                  {PROFICIENCY_LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                </select>
+              </div>
+            </div>
+            <input type="text" value={newDescription} onChange={(e) => setNewDescription(e.target.value)} placeholder="Description (optional)" className={inputCls} />
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowAdd(false)} className="px-2.5 py-1 rounded-lg border border-border text-xs font-semibold text-muted-foreground">Cancel</button>
+              <button onClick={handleAdd} disabled={!newSkill.trim() || upsert.isPending}
+                className="px-2.5 py-1 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40">
+                {upsert.isPending ? 'Adding…' : 'Add'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Skills list */}
+        {isLoading ? (
+          <div className="h-8 bg-muted/50 rounded animate-pulse" />
+        ) : specs.length === 0 && !showAdd ? (
+          <p className="text-xs text-muted-foreground py-1">No skills registered for this agent.</p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {specs.map((s) => (
+              <div key={s.skill_tag} className="flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md border border-border bg-background group">
+                <span className="text-xs text-foreground font-medium">{s.skill_tag}</span>
+                <span className={`text-[10px] px-1 rounded border font-semibold ml-1 ${proficiencyColor[s.proficiency] ?? 'text-muted-foreground'}`}>
+                  {s.proficiency}
+                </span>
+                <button onClick={() => handleDelete(s.skill_tag)}
+                  className="ml-1 p-0.5 rounded text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all">
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

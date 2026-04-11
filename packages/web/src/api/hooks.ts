@@ -250,12 +250,118 @@ export function useHITLRequests() {
     refetchInterval: 10_000,
   });
 }
+export function useHandoffSnapshot(snapshotId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['handoff-snapshot', snapshotId],
+    queryFn: () => api.get(`handoff-snapshots/${snapshotId}`),
+    enabled: !!snapshotId,
+  });
+}
+
 export function useResolveHITL() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...data }: { id: string; status: string; note?: string }) =>
       api.post(`hitl/${id}/resolve`, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['hitl'] }),
+  });
+}
+
+// HITL Approval Rules
+export function useHITLApprovalRules() {
+  return useQuery({ queryKey: ['hitl-rules'], queryFn: () => api.get('hitl/rules') });
+}
+export function useCreateHITLRule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('hitl/rules', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hitl-rules'] }),
+  });
+}
+export function useUpdateHITLRule(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.patch(`hitl/rules/${id}`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hitl-rules'] }),
+  });
+}
+export function useDeleteHITLRule(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete(`hitl/rules/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hitl-rules'] }),
+  });
+}
+
+// Scoring
+export function useRescoreContact(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post(`contacts/${id}/score`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['contact', id] });
+      qc.invalidateQueries({ queryKey: ['contacts'] });
+    },
+  });
+}
+export function useRescoreOpportunity(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post(`opportunities/${id}/health-score`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['opportunity', id] });
+      qc.invalidateQueries({ queryKey: ['opportunities'] });
+    },
+  });
+}
+
+// Specialist registry
+export function useAgentSpecializations(actorId: string) {
+  return useQuery({
+    queryKey: ['specializations', actorId],
+    queryFn: () => api.get(`actors/${actorId}/specializations`),
+    enabled: !!actorId,
+  });
+}
+export function useUpsertSpecialization(actorId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post(`actors/${actorId}/specializations`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['specializations', actorId] }),
+  });
+}
+export function useDeleteSpecialization(actorId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (skillTag: string) => api.delete(`actors/${actorId}/specializations/${encodeURIComponent(skillTag)}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['specializations', actorId] }),
+  });
+}
+export function useSetActorAvailability(actorId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (status: string) => api.patch(`actors/${actorId}`, { availability_status: status }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['actor', actorId] });
+      qc.invalidateQueries({ queryKey: ['actors'] });
+    },
+  });
+}
+
+// Memory consolidation
+export function useConsolidateContext() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      subject_type: string;
+      subject_id: string;
+      context_type: string;
+      entry_ids?: string[];
+    }) => api.post('context/consolidate', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+    },
   });
 }
 
@@ -309,11 +415,6 @@ export function useDeleteCustomField() {
   });
 }
 
-// Events
-export function useEvents(params?: { object_id?: string; limit?: number }) {
-  return useList('events', 'events', params);
-}
-
 // Search
 export function useSearch(q: string) {
   return useQuery({
@@ -336,6 +437,69 @@ export function useCreateEmail() {
     mutationFn: (data: Record<string, unknown>) => api.post('emails', data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['emails'] }),
   });
+}
+
+// Email Sequences
+export function useEmailSequences(params?: { is_active?: boolean; limit?: number }) {
+  return useList('email-sequences', 'email-sequences', params as Record<string, string | number | boolean | undefined>);
+}
+export function useEmailSequence(id: string) {
+  return useQuery({ queryKey: ['email-sequence', id], queryFn: () => api.get(`email-sequences/${id}`), enabled: !!id });
+}
+export function useCreateEmailSequence() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('email-sequences', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['email-sequences'] }),
+  });
+}
+export function useUpdateEmailSequence(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ patch }: { patch: Record<string, unknown> }) => api.patch(`email-sequences/${id}`, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['email-sequences'] });
+      qc.invalidateQueries({ queryKey: ['email-sequence', id] });
+    },
+  });
+}
+export function useDeleteEmailSequence(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete(`email-sequences/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['email-sequences'] }),
+  });
+}
+export function useEnrollInSequence() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { sequence_id: string; contact_id: string }) => api.post('email-sequences/enroll', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sequence-enrollments'] }),
+  });
+}
+export function useUnenrollFromSequence() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post('email-sequences/unenroll', { id }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sequence-enrollments'] }),
+  });
+}
+export function useSequenceEnrollments(params?: { sequence_id?: string; contact_id?: string; status?: string; limit?: number }) {
+  return useList('sequence-enrollments', 'email-sequences/enrollments', params as Record<string, string | number | boolean | undefined>);
+}
+
+// Inbound emails (activities with direction=inbound)
+export function useInboundEmails(params?: { limit?: number; cursor?: string }) {
+  return useList('inbound-emails', 'activities', {
+    ...(params as Record<string, string | number | boolean | undefined>),
+    type: 'email',
+    direction: 'inbound',
+  });
+}
+
+// Events / Audit log
+export function useEvents(params?: { object_type?: string; event_type?: string; actor_id?: string; limit?: number; cursor?: string }) {
+  return useList('events', 'events', params as Record<string, string | number | boolean | undefined>);
 }
 
 // Admin: User Management
@@ -986,6 +1150,18 @@ export function useUpdateEmailProvider() {
   return useMutation({
     mutationFn: (data: Record<string, unknown>) => api.put('email-provider', data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['email-provider'] }),
+  });
+}
+
+export function useInboundEmailConfig() {
+  return useQuery({ queryKey: ['email-provider-inbound'], queryFn: () => api.get('email-provider/inbound') });
+}
+
+export function useGenerateInboundSecret() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post('email-provider/inbound/secret', {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['email-provider-inbound'] }),
   });
 }
 

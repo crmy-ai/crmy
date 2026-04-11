@@ -63,6 +63,7 @@ export async function searchActivities(
     account_id?: UUID;
     opportunity_id?: UUID;
     type?: string;
+    direction?: string;
     subject_type?: string;
     subject_id?: UUID;
     performed_by?: UUID;
@@ -113,6 +114,11 @@ export async function searchActivities(
   if (filters.outcome) {
     conditions.push(`a.outcome = $${idx}`);
     params.push(filters.outcome);
+    idx++;
+  }
+  if (filters.direction) {
+    conditions.push(`a.direction = $${idx}`);
+    params.push(filters.direction);
     idx++;
   }
   if (filters.cursor) {

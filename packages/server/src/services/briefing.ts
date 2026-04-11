@@ -10,6 +10,7 @@ import * as activityRepo from '../db/repos/activities.js';
 import * as assignmentRepo from '../db/repos/assignments.js';
 import * as contextRepo from '../db/repos/context-entries.js';
 import * as contextTypeRepo from '../db/repos/context-type-registry.js';
+import { detectContradictions } from './contradictions.js';
 
 /** Parse a duration string like "7d", "24h", "30m" into an ISO timestamp. */
 function parseSince(since?: string): string | undefined {
@@ -287,6 +288,16 @@ export async function assembleBriefing(
     limit: 50,
   });
 
+  // 10. Contradiction warnings (direct radius only — skip on adjacent to avoid N+1)
+  let contradiction_warnings: import('@crmy/shared').ContradictionWarning[] | undefined;
+  if (!options?.context_radius || options.context_radius === 'direct') {
+    try {
+      contradiction_warnings = await detectContradictions(db, tenantId, subjectType, subjectId);
+    } catch {
+      // Detection is best-effort — never fail a briefing because of it
+    }
+  }
+
   return {
     subject: subject as Record<string, unknown>,
     subject_type: subjectType,
@@ -295,6 +306,7 @@ export async function assembleBriefing(
     open_assignments,
     context_entries,
     staleness_warnings,
+    ...(contradiction_warnings?.length ? { contradiction_warnings } : {}),
     ...(adjacent_context ? { adjacent_context } : {}),
     ...(tokenEstimate !== undefined ? { token_estimate: tokenEstimate } : {}),
     ...(truncated !== undefined ? { truncated } : {}),

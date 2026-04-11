@@ -7,7 +7,7 @@ import { TopBar } from '@/components/layout/TopBar';
 import { useOpportunities } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { StageBadge } from '@/components/crm/CrmWidgets';
+import { StageBadge, DealHealthBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { DatePicker } from '@/components/ui/date-picker';
 import { motion } from 'framer-motion';
@@ -66,6 +66,7 @@ const filterConfigs: FilterConfig[] = [
 const sortOptions: SortOption[] = [
   { key: 'name', label: 'Opportunity Name' }, { key: 'amount', label: 'Amount' },
   { key: 'stage', label: 'Stage' }, { key: 'probability', label: 'Probability' },
+  { key: 'deal_health_score', label: 'Health Score' },
   { key: 'created_at', label: 'Created' },
 ];
 
@@ -255,13 +256,18 @@ export default function Opportunities() {
                             <span className="text-sm font-display font-extrabold text-foreground">
                               ${amount >= 1000 ? `${(amount / 1000).toFixed(0)}K` : amount}
                             </span>
-                            {daysInStage > 0 && (
-                              daysInStage > 14 ? (
-                                <span className="px-2 py-0.5 rounded-lg text-xs bg-destructive/15 text-destructive font-semibold">{daysInStage}d</span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">{daysInStage}d</span>
-                              )
-                            )}
+                            <div className="flex items-center gap-1.5">
+                              {opp.deal_health_score != null && (
+                                <DealHealthBadge score={opp.deal_health_score as number} />
+                              )}
+                              {daysInStage > 0 && (
+                                daysInStage > 14 ? (
+                                  <span className="px-2 py-0.5 rounded-lg text-xs bg-destructive/15 text-destructive font-semibold">{daysInStage}d</span>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground">{daysInStage}d</span>
+                                )
+                              )}
+                            </div>
                           </div>
                         </motion.div>
                       );
@@ -294,6 +300,7 @@ export default function Opportunities() {
                         <SortHeader label="Amount" sortKey="amount" />
                         <SortHeader label="Stage" sortKey="stage" />
                         <SortHeader label="Probability" sortKey="probability" />
+                        <SortHeader label="Health" sortKey="deal_health_score" />
                         <SortHeader label="Created" sortKey="created_at" />
                         {agentEnabled && <th className="px-2 py-3 w-8"></th>}
                       </tr>
@@ -319,6 +326,11 @@ export default function Opportunities() {
                             </td>
                             <td className="px-4 py-3">{d.stage && <StageBadge stage={d.stage as string} />}</td>
                             <td className="px-4 py-3 text-muted-foreground">{d.probability ? `${d.probability}%` : '—'}</td>
+                            <td className="px-4 py-3">
+                              {d.deal_health_score != null
+                                ? <DealHealthBadge score={d.deal_health_score as number} />
+                                : <span className="text-muted-foreground text-xs">—</span>}
+                            </td>
                             <td className="px-4 py-3 text-muted-foreground text-xs">
                               {d.created_at ? new Date(d.created_at as string).toLocaleDateString() : '—'}
                             </td>

@@ -283,6 +283,12 @@ export const hitlSubmit = z.object({
   action_summary: z.string().min(1),
   action_payload: z.unknown(),
   auto_approve_after_seconds: z.number().int().min(0).optional(),
+  priority: z.enum(['low', 'normal', 'high', 'urgent']).optional()
+    .describe('Request urgency — affects notification format and SLA. Default: normal'),
+  sla_minutes: z.number().int().min(1).optional()
+    .describe('Minutes before SLA breach triggers escalation. Default: 1440 (24h)'),
+  escalate_to_id: z.string().uuid().optional()
+    .describe('Actor ID to escalate to if SLA breaches. Defaults to most senior active human.'),
 });
 
 export const hitlCheckStatus = z.object({
@@ -821,6 +827,8 @@ export const contextEmbedBackfill = z.object({
 
 export const contextReview = z.object({
   id: uuid,
+  extend_days: z.number().int().min(1).max(3650).optional()
+    .describe('Extend valid_until by this many days from now. If omitted, uses the type\'s half_life_days or defaults to 30.'),
 });
 
 // -- Context stale list schema --

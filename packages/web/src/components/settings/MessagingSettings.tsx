@@ -8,10 +8,11 @@ import {
   useEmailProvider, useUpdateEmailProvider,
   useMessagingChannels, useCreateMessagingChannel,
   useUpdateMessagingChannel, useDeleteMessagingChannel,
+  useInboundEmailConfig, useGenerateInboundSecret,
 } from '@/api/hooks';
 import {
   Mail, MessageSquare, Plus, Trash2, Pencil,
-  Power, PowerOff, Star, Eye, EyeOff, X, Send, CheckCircle2,
+  Power, PowerOff, Star, Eye, EyeOff, X, Send, CheckCircle2, Download, RefreshCw, Copy,
 } from 'lucide-react';
 
 // ─── Provider Config Registry ────────────────────────────────────────────────
@@ -633,6 +634,123 @@ function MessagingChannelsSection() {
   );
 }
 
+// ─── Inbound Email Section ───────────────────────────────────────────────────
+
+function InboundEmailSection() {
+  const { data, isLoading } = useInboundEmailConfig();
+  const generate = useGenerateInboundSecret();
+  const [newSecret, setNewSecret] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const inboundData = data as { configured?: boolean; inbound_enabled?: boolean; has_secret?: boolean } | undefined;
+  const webhookUrl = `${window.location.origin}/api/v1/email/inbound`;
+
+  const handleGenerate = async () => {
+    try {
+      const result = await generate.mutateAsync() as { secret: string };
+      setNewSecret(result.secret);
+    } catch (err: unknown) {
+      toast({ title: 'Error', description: (err as Error).message ?? 'Failed to generate secret.', variant: 'destructive' });
+    }
+  };
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-lg bg-violet-500/15 flex items-center justify-center">
+          <Download className="w-5 h-5 text-violet-500" />
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Inbound Email Webhook</h3>
+          <p className="text-xs text-muted-foreground">Receive prospect replies automatically via your email provider's inbound parse webhook.</p>
+        </div>
+        <div className="ml-auto">
+          {inboundData?.inbound_enabled ? (
+            <span className="flex items-center gap-1.5 text-xs text-emerald-500 font-medium">
+              <CheckCircle2 className="w-3.5 h-3.5" /> Active
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground">Not configured</span>
+          )}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="text-sm text-muted-foreground py-4">Loading...</div>
+      ) : (
+        <div className="rounded-lg border border-border bg-card p-4 space-y-4">
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Webhook Endpoint</label>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-xs bg-muted/50 border border-border rounded px-3 py-2 font-mono text-foreground truncate">
+                {webhookUrl}
+              </code>
+              <button
+                onClick={() => handleCopy(webhookUrl)}
+                className="flex-shrink-0 flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border bg-background hover:bg-muted text-foreground transition-colors"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">Configure this URL as the inbound parse webhook in SendGrid, Postmark, or Mailgun.</p>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">HMAC Signing Secret</label>
+            {newSecret ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs bg-yellow-500/10 border border-yellow-500/30 rounded px-3 py-2 font-mono text-foreground truncate">
+                    {newSecret}
+                  </code>
+                  <button
+                    onClick={() => handleCopy(newSecret)}
+                    className="flex-shrink-0 flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-border bg-background hover:bg-muted text-foreground transition-colors"
+                  >
+                    <Copy className="w-3.5 h-3.5" />
+                    Copy
+                  </button>
+                </div>
+                <p className="text-xs text-yellow-600 dark:text-yellow-400 font-medium">Copy this secret now — it won't be shown again.</p>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-muted-foreground">
+                  {inboundData?.has_secret ? '••••••••••••••••' : 'No secret configured'}
+                </span>
+                <button
+                  onClick={handleGenerate}
+                  disabled={generate.isPending}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border bg-background hover:bg-muted text-foreground transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${generate.isPending ? 'animate-spin' : ''}`} />
+                  {inboundData?.has_secret ? 'Rotate Secret' : 'Generate Secret'}
+                </button>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">Optional but recommended. Set as the HMAC signature secret in your email provider.</p>
+          </div>
+
+          <div className="border-t border-border pt-3">
+            <p className="text-xs text-muted-foreground">
+              <strong className="text-foreground">Supported providers:</strong> SendGrid Inbound Parse, Postmark Inbound, Mailgun Routes.
+              Inbound emails are automatically parsed, linked to matching contacts, and queued for context extraction.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function MessagingSettings() {
@@ -644,6 +762,10 @@ export default function MessagingSettings() {
       </div>
 
       <EmailProviderSection />
+
+      <div className="border-t border-border" />
+
+      <InboundEmailSection />
 
       <div className="border-t border-border" />
 

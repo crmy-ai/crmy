@@ -21,14 +21,52 @@ export function StageBadge({ stage }: { stage: string }) {
   );
 }
 
-export function LeadScoreBadge({ score }: { score: number }) {
+export function LeadScoreBadge({ score, onRescore, rescoring }: { score: number; onRescore?: () => void; rescoring?: boolean }) {
   const color = score >= 80 ? 'hsl(152, 55%, 42%)' : score >= 50 ? 'hsl(38, 92%, 50%)' : 'hsl(var(--muted-foreground))';
+  const label = score >= 80 ? 'Hot lead' : score >= 50 ? 'Warm lead' : 'Cold lead';
   return (
     <span
-      className="inline-flex items-center justify-center w-8 h-6 rounded-lg text-xs font-mono font-bold"
+      className="inline-flex items-center gap-1 rounded-lg text-xs font-mono font-bold"
+      title={`Lead score: ${score}/100 — ${label}`}
       style={{ backgroundColor: color + '18', color }}
     >
-      {score}
+      <span className="px-2 py-0.5">{score}</span>
+      {onRescore && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onRescore(); }}
+          disabled={rescoring}
+          title="Rescore"
+          className="px-1 py-0.5 hover:bg-black/10 rounded-r-lg transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={`w-2.5 h-2.5 ${rescoring ? 'animate-spin' : ''}`} />
+        </button>
+      )}
+    </span>
+  );
+}
+
+export function DealHealthBadge({ score, onRescore, rescoring }: { score: number; onRescore?: () => void; rescoring?: boolean }) {
+  const color = score >= 70 ? 'hsl(152, 55%, 42%)' : score >= 40 ? 'hsl(38, 92%, 50%)' : 'hsl(var(--destructive))';
+  const label = score >= 70 ? 'Healthy' : score >= 40 ? 'At risk' : 'Critical';
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-lg text-xs font-semibold"
+      title={`Deal health: ${score}/100 — ${label}`}
+      style={{ backgroundColor: color + '18', color }}
+    >
+      <Heart className="w-3 h-3 ml-1.5" />
+      <span className="py-0.5">{score}</span>
+      <span className="py-0.5 opacity-70 font-normal text-[10px] pr-1">{label}</span>
+      {onRescore && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onRescore(); }}
+          disabled={rescoring}
+          title="Rescore"
+          className="px-1 py-0.5 hover:bg-black/10 rounded-r-lg transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={`w-2.5 h-2.5 ${rescoring ? 'animate-spin' : ''}`} />
+        </button>
+      )}
     </span>
   );
 }

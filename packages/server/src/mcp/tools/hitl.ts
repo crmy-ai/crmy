@@ -4,7 +4,7 @@
 import { z } from 'zod';
 import { hitlSubmit, hitlCheckStatus, hitlListPending, hitlResolve } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
-import type { ActorContext } from '@crmy/shared';
+import type { ActorContext, UUID } from '@crmy/shared';
 import * as hitlRepo from '../../db/repos/hitl.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
@@ -15,7 +15,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
     {
       name: 'hitl_submit_request',
       tier: 'core',
-      description: 'Submit a human-in-the-loop approval request before executing any high-stakes action that should not be taken autonomously: sending proposals, making commitments, escalating pricing, or contacting executives for the first time. Set auto_approve_after_seconds to enable time-boxed autonomy (e.g. 3600 for "proceed in 1 hour if no human response"). Always poll hitl_check_status before proceeding — never assume approval. The human sees the request in the HITL Queue in the web UI and can approve, reject, or add a note.',
+      description: 'Submit a human-in-the-loop approval request before executing any high-stakes action that should not be taken autonomously: sending proposals, making commitments, escalating pricing, or contacting executives for the first time. Set auto_approve_after_seconds to enable time-boxed autonomy (e.g. 3600 for "proceed in 1 hour if no human response"). Set priority ("low"|"normal"|"high"|"urgent") and sla_minutes to control notification urgency and escalation timing. Always poll hitl_check_status before proceeding — never assume approval. The human sees the request in the HITL Queue in the web UI and can approve, reject, or add a note.',
       inputSchema: hitlSubmit,
       handler: async (input: z.infer<typeof hitlSubmit>, actor: ActorContext) => {
         const request = await hitlRepo.createHITLRequest(db, actor.tenant_id, {
@@ -24,6 +24,9 @@ export function hitlTools(db: DbPool): ToolDef[] {
           action_summary: input.action_summary,
           action_payload: input.action_payload,
           auto_approve_after_seconds: input.auto_approve_after_seconds,
+          priority: input.priority,
+          sla_minutes: input.sla_minutes,
+          escalate_to_id: input.escalate_to_id,
         });
 
         await emitEvent(db, {
@@ -87,6 +90,81 @@ export function hitlTools(db: DbPool): ToolDef[] {
         });
 
         return { request };
+      },
+    },
+    // ── Auto-approval rule management ────────────────────────────────────────
+    {
+      name: 'hitl_rule_create',
+      tier: 'admin',
+      description: 'Create an auto-approval rule that automatically approves or rejects HITL requests matching the specified criteria without human review. Rules are evaluated in descending priority order; first match wins. condition is a JSON object {field, op, value} or array of conditions (all must match). Operators: <, >, =, !=, contains, not_contains. field is a dot-path into action_payload. Use this to automate routine low-risk actions like small email drafts or research tasks.',
+      inputSchema: z.object({
+        name: z.string().min(1).max(100).describe('Human-readable name for the rule'),
+        action_type: z.string().optional().describe('action_type to match. Omit to match all types.'),
+        condition: z.union([
+          z.object({
+            field: z.string(),
+            op: z.enum(['<', '>', '=', '!=', 'contains', 'not_contains']),
+            value: z.unknown(),
+          }),
+          z.array(z.object({
+            field: z.string(),
+            op: z.enum(['<', '>', '=', '!=', 'contains', 'not_contains']),
+            value: z.unknown(),
+          })),
+          z.record(z.never()),
+        ]).default({}).describe('Condition expression (empty = always match)'),
+        decision: z.enum(['approved', 'rejected']).describe('Decision to apply when rule matches'),
+        priority: z.number().int().default(0).describe('Higher priority rules are evaluated first'),
+      }),
+      handler: async (input: {
+        name: string;
+        action_type?: string;
+        condition: unknown;
+        decision: 'approved' | 'rejected';
+        priority?: number;
+      }, actor: ActorContext) => {
+        const result = await db.query(
+          `INSERT INTO hitl_approval_rules (tenant_id, name, action_type, condition, decision, priority)
+           VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+          [
+            actor.tenant_id,
+            input.name,
+            input.action_type ?? null,
+            JSON.stringify(input.condition ?? {}),
+            input.decision,
+            input.priority ?? 0,
+          ],
+        );
+        return { rule: result.rows[0] };
+      },
+    },
+    {
+      name: 'hitl_rule_list',
+      tier: 'admin',
+      description: 'List all auto-approval rules for this tenant, sorted by priority. Use this to audit what rules are active and may be automatically approving or rejecting agent requests.',
+      inputSchema: z.object({}),
+      handler: async (_input: Record<never, never>, actor: ActorContext) => {
+        const result = await db.query(
+          'SELECT * FROM hitl_approval_rules WHERE tenant_id = $1 ORDER BY priority DESC, created_at ASC',
+          [actor.tenant_id],
+        );
+        return { rules: result.rows, total: result.rows.length };
+      },
+    },
+    {
+      name: 'hitl_rule_delete',
+      tier: 'admin',
+      description: 'Delete an auto-approval rule by ID. The rule is permanently removed. Use hitl_rule_list to find rule IDs.',
+      inputSchema: z.object({
+        id: z.string().uuid().describe('ID of the rule to delete'),
+      }),
+      handler: async (input: { id: string }, actor: ActorContext) => {
+        const result = await db.query(
+          'DELETE FROM hitl_approval_rules WHERE id = $1 AND tenant_id = $2 RETURNING id',
+          [input.id, actor.tenant_id],
+        );
+        if (result.rows.length === 0) throw notFound('HITL approval rule', input.id as UUID);
+        return { deleted: true, id: input.id };
       },
     },
   ];

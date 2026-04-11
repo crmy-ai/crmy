@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { useBriefing } from '@/api/hooks';
-import { FileText, ChevronDown, ChevronUp, AlertTriangle, ClipboardList, Brain, X, Phone, Mail, Calendar, Monitor, CheckSquare, Activity } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, AlertTriangle, ClipboardList, Brain, X, Phone, Mail, Calendar, Monitor, CheckSquare, Activity, Swords } from 'lucide-react';
 import { ACTIVITY_COLORS } from './GraphSidebar';
 import { TYPE_COLORS } from './ContextPanel';
 
@@ -61,6 +61,40 @@ export function BriefingPanel({ subjectType, subjectId, onClose }: BriefingPanel
     <div className="flex flex-col h-full">
       <BriefingHeader onClose={onClose} />
       <div className="flex-1 overflow-y-auto p-5 space-y-3">
+        {/* Contradiction warnings */}
+        {briefing?.contradiction_warnings?.length > 0 && (
+          <BriefingSection
+            icon={<Swords className="w-4 h-4 text-destructive" />}
+            title="Contradictions Detected"
+            pill={briefing.contradiction_warnings.length}
+            pillColor="#ef4444"
+            defaultOpen
+          >
+            <div className="space-y-2">
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              {briefing.contradiction_warnings.map((w: any, idx: number) => (
+                <div key={idx} className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 space-y-1.5">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-semibold text-destructive">{w.conflict_field ?? 'Conflict'}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${
+                      w.suggested_action === 'manual_review'
+                        ? 'bg-amber-500/10 border-amber-500/20 text-amber-600'
+                        : 'bg-muted border-border text-muted-foreground'
+                    }`}>
+                      {(w.suggested_action ?? 'manual_review').replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <p className="text-xs text-foreground leading-relaxed">{w.conflict_evidence}</p>
+                  <div className="flex gap-4 text-[10px] text-muted-foreground">
+                    <span>Entry A: <span className="font-mono text-foreground">{w.entry_a?.id?.slice(0, 8)}</span></span>
+                    <span>Entry B: <span className="font-mono text-foreground">{w.entry_b?.id?.slice(0, 8)}</span></span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </BriefingSection>
+        )}
+
         {/* Staleness warnings */}
         {briefing?.staleness_warnings?.length > 0 && (
           <BriefingSection

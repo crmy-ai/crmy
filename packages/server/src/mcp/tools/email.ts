@@ -7,10 +7,14 @@ import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as emailRepo from '../../db/repos/emails.js';
 import * as hitlRepo from '../../db/repos/hitl.js';
+import * as activityRepo from '../../db/repos/activities.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
 import { deliverEmail } from '../../email/delivery.js';
 import { getEmailProvider, listEmailProviderTypes } from '../../email/providers/index.js';
+import { parseInboundEmail } from '../../email/inbound-parser.js';
+import { extractContextFromActivity } from '../../agent/extraction.js';
+import { entityResolve } from '../../services/entity-resolve.js';
 import type { ToolDef } from '../server.js';
 
 /** Redact provider-specific sensitive fields before returning config to callers. */
@@ -156,6 +160,94 @@ export function emailTools(db: DbPool): ToolDef[] {
         });
 
         return { ...result, config: redactProviderConfig(input.provider, result.config) };
+      },
+    },
+    {
+      name: 'email_ingest',
+      tier: 'extended',
+      description: 'Manually ingest an inbound email without a webhook — useful when forwarding emails to the CRM or when the webhook is not available. Creates an inbound activity, attempts to resolve the sender to a contact, and triggers context extraction. If you pass a raw_payload from a supported provider (SendGrid, Postmark, Mailgun), it will be auto-parsed.',
+      inputSchema: z.object({
+        from_email: z.string().email()
+          .describe('Sender email address'),
+        from_name: z.string().optional()
+          .describe('Sender display name'),
+        subject: z.string().min(1)
+          .describe('Email subject line'),
+        body: z.string().min(1)
+          .describe('Plain-text email body'),
+        received_at: z.string().datetime().optional()
+          .describe('ISO timestamp when the email was received. Defaults to now.'),
+        contact_id: z.string().uuid().optional()
+          .describe('Skip entity resolution and link directly to this contact.'),
+        raw_payload: z.record(z.unknown()).optional()
+          .describe('Raw provider webhook payload — if provided, parsed fields above are ignored and the payload is auto-detected (SendGrid, Postmark, Mailgun).'),
+      }),
+      handler: async (input: {
+        from_email: string;
+        from_name?: string;
+        subject: string;
+        body: string;
+        received_at?: string;
+        contact_id?: string;
+        raw_payload?: Record<string, unknown>;
+      }, actor: ActorContext) => {
+        let fromEmail = input.from_email;
+        let fromName = input.from_name;
+        let subject = input.subject;
+        let body = input.body;
+        let receivedAt = input.received_at ?? new Date().toISOString();
+
+        if (input.raw_payload) {
+          const parsed = parseInboundEmail(input.raw_payload);
+          if (!parsed) throw new Error('Unrecognised inbound email payload format');
+          fromEmail = parsed.from_email;
+          fromName = parsed.from_name;
+          subject = parsed.subject;
+          body = parsed.text_body;
+          receivedAt = parsed.received_at;
+        }
+
+        // Resolve contact
+        let contactId: string | undefined = input.contact_id;
+        if (!contactId) {
+          try {
+            const resolved = await entityResolve(db, actor.tenant_id, {
+              query: fromEmail,
+              entity_type: 'contact',
+              context_hints: { email: fromEmail },
+            });
+            if (resolved.resolved) contactId = resolved.resolved.id;
+            else if (resolved.candidates?.length) contactId = resolved.candidates[0].id;
+          } catch { /* best-effort */ }
+        }
+
+        const activity = await activityRepo.createActivity(db, actor.tenant_id, {
+          type: 'email',
+          direction: 'inbound',
+          subject,
+          body,
+          contact_id: contactId,
+          source_agent: 'email_ingest',
+          occurred_at: receivedAt,
+          detail: { from_email: fromEmail, from_name: fromName },
+          created_by: actor.actor_id,
+        });
+
+        extractContextFromActivity(db, actor.tenant_id, activity.id).catch((err) => {
+          console.error('[email_ingest] extraction error:', err);
+        });
+
+        await emitEvent(db, {
+          tenantId: actor.tenant_id,
+          eventType: 'activity.created',
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          objectType: 'activity',
+          objectId: activity.id,
+          afterData: activity,
+        });
+
+        return { activity_id: activity.id, contact_id: contactId ?? null };
       },
     },
     {

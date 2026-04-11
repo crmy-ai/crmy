@@ -11,6 +11,7 @@ import { emitEvent } from '../../events/emitter.js';
 import { notFound, permissionDenied } from '@crmy/shared';
 import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
+import { computeLeadScore } from '../../services/scoring.js';
 import type { ToolDef } from '../server.js';
 
 export function contactTools(db: DbPool): ToolDef[] {
@@ -166,6 +167,23 @@ export function contactTools(db: DbPool): ToolDef[] {
           beforeData: before,
         });
         return { deleted: true };
+      },
+    },
+    {
+      name: 'contact_score',
+      tier: 'core',
+      description: 'Compute or retrieve the lead score (0–100) for a contact. The score reflects recency and volume of activities, quality of context entries, lifecycle stage, and engagement quality (calls/meetings weighted higher than emails). Returns the score with a breakdown by component so you can understand what\'s driving it. Use this before prioritising which contacts to follow up on.',
+      inputSchema: z.object({
+        contact_id: z.string().uuid().describe('ID of the contact to score'),
+      }),
+      handler: async (input: { contact_id: string }, actor: ActorContext) => {
+        const { score, breakdown } = await computeLeadScore(db, actor.tenant_id, input.contact_id);
+        // Persist score
+        await db.query(
+          'UPDATE contacts SET lead_score = $1, lead_score_updated_at = now() WHERE id = $2 AND tenant_id = $3',
+          [score, input.contact_id, actor.tenant_id],
+        );
+        return { contact_id: input.contact_id, lead_score: score, score_breakdown: breakdown, last_updated: new Date().toISOString() };
       },
     },
   ];

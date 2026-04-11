@@ -12,7 +12,7 @@ import { initPool, getPool, closePool, type DbPool } from './db/pool.js';
 import { runMigrations } from './db/migrate.js';
 import { authRouter } from './auth/routes.js';
 import { authMiddleware } from './auth/middleware.js';
-import { apiRouter } from './rest/router.js';
+import { apiRouter, inboundRouter } from './rest/router.js';
 import { agentRouter } from './agent/routes.js';
 import { createMcpServer } from './mcp/server.js';
 import { mcpSessions, registerMcpSession, removeMcpSession, touchMcpSession, evictStaleMcpSessions } from './mcp/session-registry.js';
@@ -148,6 +148,9 @@ export async function createApp(config: ServerConfig) {
   // Auth routes (no /api/v1 prefix)
   app.use('/auth', authRouter(db, config.jwtSecret));
 
+  // Inbound webhook routes (no auth — provider HMAC-signed)
+  app.use('/api/v1', inboundRouter(db));
+
   // Helper: authenticate and return actor from Authorization header
   async function extractMcpActor(req: express.Request): Promise<ActorContext> {
     let actor: ActorContext = {
@@ -233,15 +236,19 @@ export async function createApp(config: ServerConfig) {
   // Background workers (every 60 seconds)
   const { processWebhookRetries } = await import('./webhooks/dispatcher.js');
   const { processNextBatch: processContextOutbox } = await import('./workers/context_ingestion_worker.service.js');
+  const { checkHitlSlaExpiry } = await import('./hitl/sla-checker.js');
+  const { refreshStaleScores } = await import('./services/scoring.js');
   const hitlInterval = setInterval(async () => {
     try {
       await autoApproveExpired(db);
       await expireOldRequests(db);
+      await checkHitlSlaExpiry(db);
       await cleanExpiredSessions(db);
       await processPendingExtractions(db);
       await processStaleEntries(db);
       await processWebhookRetries(db);
       await processContextOutbox(db);
+      await refreshStaleScores(db);
       // Evict idle MCP sessions (30-minute TTL)
       evictStaleMcpSessions();
     } catch (err) {
@@ -259,6 +266,10 @@ export async function createApp(config: ServerConfig) {
   // Register email HITL approval/rejection handler
   const { registerEmailHitlHandler } = await import('./email/hitl-handler.js');
   registerEmailHitlHandler(db);
+
+  // Register HITL submission notification handler (channel notify + fallback assignment)
+  const { registerHitlNotificationHandler } = await import('./hitl/notification-handler.js');
+  registerHitlNotificationHandler(db);
 
   // Wire workflow engine to event bus — workflows trigger on emitted events
   const { createWorkflowEngine } = await import('./workflows/engine.js');

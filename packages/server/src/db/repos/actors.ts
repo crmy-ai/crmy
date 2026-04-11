@@ -117,6 +117,73 @@ export async function updateActor(
   return (result.rows[0] as Actor) ?? null;
 }
 
+// ── Specializations ──────────────────────────────────────────────────────────
+
+export interface AgentSpecialization {
+  id: UUID;
+  tenant_id: UUID;
+  actor_id: UUID;
+  skill_tag: string;
+  proficiency: 'novice' | 'intermediate' | 'expert';
+  description?: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function upsertSpecialization(
+  db: DbPool,
+  tenantId: UUID,
+  actorId: UUID,
+  data: { skill_tag: string; proficiency?: string; description?: string },
+): Promise<AgentSpecialization> {
+  const result = await db.query(
+    `INSERT INTO agent_specializations (tenant_id, actor_id, skill_tag, proficiency, description)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (tenant_id, actor_id, skill_tag) DO UPDATE SET
+       proficiency = $4, description = $5, is_active = true, updated_at = now()
+     RETURNING *`,
+    [tenantId, actorId, data.skill_tag, data.proficiency ?? 'intermediate', data.description ?? null],
+  );
+  return result.rows[0] as AgentSpecialization;
+}
+
+export async function findSpecialists(
+  db: DbPool,
+  tenantId: UUID,
+  skillTag: string,
+  excludeActorId?: UUID,
+): Promise<Array<AgentSpecialization & { actor: Actor }>> {
+  const result = await db.query(
+    `SELECT s.*, row_to_json(a.*) as actor
+     FROM agent_specializations s
+     JOIN actors a ON a.id = s.actor_id
+     WHERE s.tenant_id = $1 AND s.skill_tag = $2 AND s.is_active = true
+       AND a.is_active = true
+       AND ($3::uuid IS NULL OR s.actor_id != $3)
+     ORDER BY
+       CASE s.proficiency WHEN 'expert' THEN 0 WHEN 'intermediate' THEN 1 ELSE 2 END,
+       a.updated_at DESC`,
+    [tenantId, skillTag, excludeActorId ?? null],
+  );
+  return result.rows.map((row) => ({
+    ...(row as AgentSpecialization),
+    actor: row.actor as Actor,
+  }));
+}
+
+export async function setAvailabilityStatus(
+  db: DbPool,
+  tenantId: UUID,
+  actorId: UUID,
+  status: 'available' | 'busy' | 'offline',
+): Promise<void> {
+  await db.query(
+    'UPDATE actors SET availability_status = $1, updated_at = now() WHERE id = $2 AND tenant_id = $3',
+    [status, actorId, tenantId],
+  );
+}
+
 export async function searchActors(
   db: DbPool,
   tenantId: UUID,

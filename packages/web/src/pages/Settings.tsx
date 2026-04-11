@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -17,6 +17,7 @@ import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import AgentSettings from '@/pages/AgentSettings';
 import ActorsSettings from '@/components/settings/ActorsSettings';
 import MessagingSettings from '@/components/settings/MessagingSettings';
+import HITLRulesSettings from '@/components/settings/HITLRulesSettings';
 
 type NavRole = 'member' | 'admin' | 'owner';
 
@@ -29,6 +30,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Users,      label: 'Agents',        path: '/settings/agents',       roles: ['admin', 'owner'] },
   { icon: Tags,       label: 'Registries',    path: '/settings/registries',   roles: ['admin', 'owner'] },
   { icon: MessageSquare, label: 'Messaging', path: '/settings/messaging',   roles: ['admin', 'owner'] },
+  { icon: ShieldCheck, label: 'HITL Rules', path: '/settings/hitl-rules',  roles: ['admin', 'owner'] },
   { icon: Bot,        label: 'Local Agent', path: '/settings/agent',        roles: ['admin', 'owner'] },
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
 ];
@@ -2141,6 +2143,7 @@ export default function Settings() {
             <Route path="registries" element={<RequireRole roles={['admin', 'owner']}><RegistriesSettings /></RequireRole>} />
             <Route path="actors" element={<RequireRole roles={['admin', 'owner']}><ActorsSettings /></RequireRole>} />
             <Route path="messaging" element={<RequireRole roles={['admin', 'owner']}><MessagingSettings /></RequireRole>} />
+            <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
             <Route path="agent" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
             <Route path="database" element={<RequireRole roles={['admin', 'owner']}><DatabaseSettings /></RequireRole>} />
           </Routes>

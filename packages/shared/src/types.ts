@@ -133,6 +133,18 @@ export interface HITLRequest {
   expires_at: string;
   created_at: string;
   resolved_at?: string;
+  /** Priority level — affects notification urgency and SLA. */
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  /** Minutes before SLA breach triggers escalation. Default 1440 (24h). */
+  sla_minutes: number;
+  /** Actor to escalate to if SLA breaches. If null, escalates to most senior human. */
+  escalate_to_id?: UUID;
+  /** When the submission notification was sent to the channel. */
+  notified_at?: string;
+  /** When SLA escalation assignment was created. */
+  escalated_at?: string;
+  /** Agent handoff snapshot captured before this request was created. */
+  handoff_snapshot_id?: UUID;
 }
 
 export interface CrmyEvent {
@@ -428,6 +440,7 @@ export interface Actor {
   scopes: string[];
   metadata: Record<string, unknown>;
   is_active: boolean;
+  availability_status?: 'available' | 'busy' | 'offline';
   created_at: string;
   updated_at: string;
 }
@@ -487,6 +500,8 @@ export interface Assignment {
   completed_by_activity_id?: UUID;
   context?: string;
   metadata: Record<string, unknown>;
+  /** Agent handoff snapshot captured before this assignment was created. */
+  handoff_snapshot_id?: UUID;
   created_at: string;
   updated_at: string;
 }
@@ -536,7 +551,25 @@ export interface ContextTypeRegistryEntry {
   priority_weight: number;
   /** Half-life in days for confidence decay. null = no decay. */
   confidence_half_life_days: number | null;
+  /** Whether this type is checked for contradictions with other entries of the same type. */
+  is_contradiction_eligible?: boolean;
   created_at: string;
+}
+
+/**
+ * A pair of context entries that appear to claim conflicting facts about
+ * the same subject. Surfaced in briefings and via context_detect_contradictions.
+ */
+export interface ContradictionWarning {
+  entry_a: ContextEntry;
+  entry_b: ContextEntry;
+  /** Which field or topic is in conflict (e.g. "budget", "champion", "next_step"). */
+  conflict_field: string;
+  /** Human-readable explanation of the contradiction. */
+  conflict_evidence: string;
+  /** Recommended resolution action. */
+  suggested_action: 'supersede_older' | 'supersede_lower_confidence' | 'manual_review';
+  detected_at: string;
 }
 
 // -- Governor limits --
@@ -634,6 +667,8 @@ export interface Briefing {
   open_assignments: Assignment[];
   context_entries: Record<string, ContextEntry[]>;
   staleness_warnings: ContextEntry[];
+  /** Pairs of current entries that appear to state conflicting facts. */
+  contradiction_warnings?: ContradictionWarning[];
   /** Context from related entities (populated when context_radius !== 'direct'). */
   adjacent_context?: AdjacentContext[];
   /** Estimated token count for this briefing (populated when token_budget is set). */

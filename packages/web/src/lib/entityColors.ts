@@ -20,4 +20,6 @@ export const ENTITY_COLORS = {
   context:       { text: 'text-[#0ea5e9]',   bg: 'bg-[#0ea5e9]/15',  bar: 'bg-[#0ea5e9]' },
   workflows:     { text: 'text-amber-500',   bg: 'bg-amber-500/15',  bar: 'bg-amber-500' },
   emails:        { text: 'text-[#3b82f6]',   bg: 'bg-[#3b82f6]/15',  bar: 'bg-[#3b82f6]' },
+  sequences:     { text: 'text-[#06b6d4]',   bg: 'bg-[#06b6d4]/15',  bar: 'bg-[#06b6d4]' },
+  auditLog:      { text: 'text-[#a78bfa]',   bg: 'bg-[#a78bfa]/15',  bar: 'bg-[#a78bfa]' },
 } as const;

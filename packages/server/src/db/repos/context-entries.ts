@@ -363,9 +363,13 @@ export async function reviewContextEntry(
   db: DbPool,
   tenantId: UUID,
   id: UUID,
+  extendDays?: number,
 ): Promise<ContextEntry | null> {
+  const validUntilExpr = extendDays
+    ? `valid_until = now() + interval '${extendDays} days',`
+    : '';
   const result = await db.query(
-    `UPDATE context_entries SET reviewed_at = now(), updated_at = now()
+    `UPDATE context_entries SET reviewed_at = now(), ${validUntilExpr} updated_at = now()
      WHERE id = $1 AND tenant_id = $2
      RETURNING *`,
     [id, tenantId],

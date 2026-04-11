@@ -52,13 +52,24 @@ async function findBestReviewActor(
 }
 
 /**
- * Check whether an open stale-review assignment already exists for this context entry.
+ * Check whether an open stale-review assignment already exists for this context entry,
+ * OR if the entry was reviewed within the last 24 hours (avoids infinite re-trigger loop).
  */
 async function staleAssignmentExists(
   db: DbPool,
   tenantId: UUID,
   entryId: UUID,
 ): Promise<boolean> {
+  // Skip if already reviewed within 24 hours
+  const reviewedResult = await db.query(
+    `SELECT id FROM context_entries
+     WHERE id = $1 AND tenant_id = $2
+       AND reviewed_at > now() - interval '24 hours'
+     LIMIT 1`,
+    [entryId, tenantId],
+  );
+  if (reviewedResult.rows.length > 0) return true;
+
   const result = await db.query(
     `SELECT id FROM assignments
      WHERE tenant_id = $1
