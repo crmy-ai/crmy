@@ -328,8 +328,8 @@ export default function AgentSettings() {
   return (
     <div className="space-y-5 max-w-2xl">
       <div>
-        <h2 className="font-display font-bold text-lg text-foreground mb-1">Local Workspace Agent</h2>
-        <p className="text-sm text-muted-foreground">Configure the workspace agent for your team.</p>
+        <h2 className="font-display font-bold text-lg text-foreground mb-1">Model Settings</h2>
+        <p className="text-sm text-muted-foreground">Configure the AI model and workspace agent for your team.</p>
       </div>
 
       {/* ── SECTION 1: Enable ────────────────────────────────────────────── */}

@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -27,11 +27,11 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Lock,       label: 'API Keys',      path: '/settings/api-keys',     roles: ['member', 'admin', 'owner'] },
   { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'] },
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
-  { icon: Users,      label: 'Agents',        path: '/settings/agents',       roles: ['admin', 'owner'] },
+  { icon: Bot,        label: 'Agents',        path: '/settings/agents',       roles: ['admin', 'owner'] },
   { icon: Tags,       label: 'Registries',    path: '/settings/registries',   roles: ['admin', 'owner'] },
   { icon: MessageSquare, label: 'Messaging', path: '/settings/messaging',   roles: ['admin', 'owner'] },
   { icon: ShieldCheck, label: 'HITL Rules', path: '/settings/hitl-rules',  roles: ['admin', 'owner'] },
-  { icon: Bot,        label: 'Local Agent', path: '/settings/agent',        roles: ['admin', 'owner'] },
+  { icon: Sparkles,   label: 'Model Settings', path: '/settings/model',     roles: ['admin', 'owner'] },
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
 ];
 
@@ -2109,7 +2109,7 @@ export default function Settings() {
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'}`}>
               <item.icon className="w-3.5 h-3.5" />
               {item.label}
-              {item.path === '/settings/agent' && (
+              {item.path === '/settings/model' && (
                 <span className={`w-2 h-2 rounded-full ${agentEnabled ? 'bg-amber-500' : 'bg-muted-foreground/40'}`} />
               )}
             </Link>
@@ -2126,7 +2126,7 @@ export default function Settings() {
                 className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${active ? 'bg-primary/15 text-primary' : 'text-foreground/60 hover:bg-muted hover:text-foreground'}`}>
                 <item.icon className="w-4 h-4" />
                 {item.label}
-                {item.path === '/settings/agent' && (
+                {item.path === '/settings/model' && (
                   <span className={`ml-auto w-2 h-2 rounded-full ${agentEnabled ? 'bg-amber-500' : 'bg-muted-foreground/40'}`} />
                 )}
               </Link>
@@ -2141,10 +2141,10 @@ export default function Settings() {
             <Route path="webhooks" element={<RequireRole roles={['admin', 'owner']}><WebhooksSettings /></RequireRole>} />
             <Route path="custom-fields" element={<RequireRole roles={['admin', 'owner']}><CustomFieldsSettings /></RequireRole>} />
             <Route path="registries" element={<RequireRole roles={['admin', 'owner']}><RegistriesSettings /></RequireRole>} />
-            <Route path="actors" element={<RequireRole roles={['admin', 'owner']}><ActorsSettings /></RequireRole>} />
+            <Route path="agents" element={<RequireRole roles={['admin', 'owner']}><ActorsSettings /></RequireRole>} />
             <Route path="messaging" element={<RequireRole roles={['admin', 'owner']}><MessagingSettings /></RequireRole>} />
             <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
-            <Route path="agent" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
+            <Route path="model" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
             <Route path="database" element={<RequireRole roles={['admin', 'owner']}><DatabaseSettings /></RequireRole>} />
           </Routes>
         </div>

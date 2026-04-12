@@ -100,11 +100,11 @@ function AnimatedRoutes() {
           <Route path="/context" element={<ContextPage />} />
           <Route path="/workflows" element={<WorkflowsPage />} />
           <Route path="/emails" element={<EmailsPage />} />
-          <Route path="/agents" element={<ActorsPage />} />
-          <Route path="/actors" element={<Navigate to="/agents" replace />} />
+          <Route path="/agents" element={<Navigate to="/settings/agents" replace />} />
+          <Route path="/actors" element={<Navigate to="/settings/agents" replace />} />
           <Route path="/contacts/:id/graph" element={<MemoryGraphPage />} />
           <Route path="/sequences" element={<EmailSequencesPage />} />
-          <Route path="/inbound" element={<InboundInboxPage />} />
+          <Route path="/inbound" element={<Navigate to="/emails" replace />} />
           <Route path="/audit-log" element={<AuditLogPage />} />
           <Route path="/accounts/:id/graph" element={<MemoryGraphPage />} />
           <Route path="/agent" element={<Agent />} />

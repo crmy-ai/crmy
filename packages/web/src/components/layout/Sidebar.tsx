@@ -31,10 +31,8 @@ export { ENTITY_COLORS };
 // Agent-facing tier — top of nav
 const agentNavItems = [
   { icon: Brain,       label: 'Workspace',   path: '/',            color: ENTITY_COLORS.contacts },
-  { icon: Bot,         label: 'Agents',      path: '/agents',      color: ENTITY_COLORS.agents },
   { icon: Zap,         label: 'Workflows',   path: '/workflows',   color: ENTITY_COLORS.workflows },
   { icon: Inbox,       label: 'Handoffs',    path: '/handoffs',    color: ENTITY_COLORS.assignments },
-  { icon: Mail,        label: 'Inbound',     path: '/inbound',     color: ENTITY_COLORS.emails },
 ];
 
 // Data tier — knowledge base objects
