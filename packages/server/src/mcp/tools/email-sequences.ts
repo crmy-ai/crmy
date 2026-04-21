@@ -13,6 +13,7 @@ import {
   emailSequenceEnrollmentList,
 } from '@crmy/shared';
 import type { ActorContext } from '@crmy/shared';
+import { validationError } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
 import type { ToolDef } from '../server.js';
 import * as seqRepo from '../../db/repos/email-sequences.js';
@@ -95,9 +96,9 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Enrollment failed';
           if (msg.includes('unique') || msg.includes('duplicate')) {
-            return { error: 'Contact is already enrolled in this sequence' };
+            throw validationError('Contact is already enrolled in this sequence');
           }
-          return { error: msg };
+          throw err;
         }
       },
     },

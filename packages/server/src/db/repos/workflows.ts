@@ -15,6 +15,9 @@ export interface WorkflowRow {
   is_active: boolean;
   run_count: number;
   last_run_at?: string;
+  max_runs_per_hour?: number;
+  error_count: number;
+  last_error_at?: string;
   created_by?: UUID;
   created_at: string;
   updated_at: string;
@@ -28,6 +31,8 @@ export interface WorkflowRunRow {
   actions_run: number;
   actions_total: number;
   error?: string;
+  duration_ms?: number;
+  action_logs: unknown[];
   started_at: string;
   completed_at?: string;
 }
@@ -37,17 +42,17 @@ export async function createWorkflow(
   data: {
     name: string; description?: string; trigger_event: string;
     trigger_filter?: Record<string, unknown>; actions: unknown[];
-    is_active?: boolean; created_by?: UUID;
+    is_active?: boolean; created_by?: UUID; max_runs_per_hour?: number;
   },
 ): Promise<WorkflowRow> {
   const result = await db.query(
     `INSERT INTO workflows (tenant_id, name, description, trigger_event,
-       trigger_filter, actions, is_active, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+       trigger_filter, actions, is_active, created_by, max_runs_per_hour)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
     [
       tenantId, data.name, data.description ?? null, data.trigger_event,
       JSON.stringify(data.trigger_filter ?? {}), JSON.stringify(data.actions),
-      data.is_active ?? true, data.created_by ?? null,
+      data.is_active ?? true, data.created_by ?? null, data.max_runs_per_hour ?? null,
     ],
   );
   return result.rows[0] as WorkflowRow;
@@ -67,7 +72,7 @@ export async function updateWorkflow(
 ): Promise<WorkflowRow | null> {
   const fieldMap: Record<string, string> = {
     name: 'name', description: 'description', trigger_event: 'trigger_event',
-    is_active: 'is_active',
+    is_active: 'is_active', max_runs_per_hour: 'max_runs_per_hour',
   };
   const jsonFields: Record<string, string> = {
     trigger_filter: 'trigger_filter', actions: 'actions',
@@ -189,6 +194,8 @@ export async function updateRun(
     idx++;
     if (data.status === 'completed' || data.status === 'failed') {
       sets.push('completed_at = now()');
+      // Compute duration_ms from started_at
+      sets.push(`duration_ms = EXTRACT(EPOCH FROM (now() - started_at))::int * 1000`);
     }
   }
   if (data.actions_run !== undefined) {
@@ -211,6 +218,37 @@ export async function incrementRunCount(db: DbPool, workflowId: UUID): Promise<v
     'UPDATE workflows SET run_count = run_count + 1, last_run_at = now() WHERE id = $1',
     [workflowId],
   );
+}
+
+export async function incrementErrorCount(db: DbPool, workflowId: UUID): Promise<void> {
+  await db.query(
+    'UPDATE workflows SET error_count = error_count + 1, last_error_at = now() WHERE id = $1',
+    [workflowId],
+  );
+}
+
+export async function appendActionLog(
+  db: DbPool, runId: UUID, log: {
+    index: number; type: string; status: string;
+    error?: string; duration_ms: number; started_at: string;
+    resolved_config?: Record<string, unknown>;
+  },
+): Promise<void> {
+  await db.query(
+    'UPDATE workflow_runs SET action_logs = action_logs || $2::jsonb WHERE id = $1',
+    [runId, JSON.stringify(log)],
+  );
+}
+
+export async function countRecentRuns(
+  db: DbPool, workflowId: UUID, withinHours: number,
+): Promise<number> {
+  const result = await db.query(
+    `SELECT count(*)::int AS cnt FROM workflow_runs
+     WHERE workflow_id = $1 AND started_at > now() - interval '1 hour' * $2`,
+    [workflowId, withinHours],
+  );
+  return result.rows[0].cnt as number;
 }
 
 export async function listRuns(

@@ -6,6 +6,7 @@ import { accountCreate, accountUpdate, accountSearch, accountSetHealth } from '@
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as accountRepo from '../../db/repos/accounts.js';
+import * as contextRepo from '../../db/repos/context-entries.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, permissionDenied } from '@crmy/shared';
 import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
@@ -44,9 +45,12 @@ export function accountTools(db: DbPool): ToolDef[] {
     {
       name: 'account_get',
       tier: 'core',
-      description: 'Retrieve a single account by UUID, including its linked contacts and open opportunities. Returns the full account profile with health_score, annual_revenue, industry, and custom fields. For a comprehensive view with context entries and activity timeline, use briefing_get instead.',
-      inputSchema: z.object({ id: z.string().uuid() }),
-      handler: async (input: { id: string }, actor: ActorContext) => {
+      description: 'Retrieve a single account by UUID, including its linked contacts and open opportunities. Returns the full account profile with health_score, annual_revenue, industry, and custom fields. Pass include_context_entries: true to also get current context entries without a full briefing. For a comprehensive view with activity timeline and staleness warnings, use briefing_get instead.',
+      inputSchema: z.object({
+        id: z.string().uuid(),
+        include_context_entries: z.boolean().optional().default(false).describe('If true, also return current context entries for this account'),
+      }),
+      handler: async (input: { id: string; include_context_entries?: boolean }, actor: ActorContext) => {
         const account = await accountRepo.getAccount(db, actor.tenant_id, input.id);
         if (!account) throw notFound('Account', input.id);
 
@@ -55,6 +59,10 @@ export function accountTools(db: DbPool): ToolDef[] {
           accountRepo.getAccountOpenOpps(db, actor.tenant_id, input.id),
         ]);
 
+        if (input.include_context_entries) {
+          const context_entries = await contextRepo.getContextForSubject(db, actor.tenant_id, 'account', input.id);
+          return { account, contacts, open_opportunities, context_entries };
+        }
         return { account, contacts, open_opportunities };
       },
     },

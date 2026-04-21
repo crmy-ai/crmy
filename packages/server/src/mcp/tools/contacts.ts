@@ -7,6 +7,8 @@ import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as contactRepo from '../../db/repos/contacts.js';
 import * as activityRepo from '../../db/repos/activities.js';
+import * as contextRepo from '../../db/repos/context-entries.js';
+import * as oppRepo from '../../db/repos/opportunities.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, permissionDenied } from '@crmy/shared';
 import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
@@ -46,12 +48,39 @@ export function contactTools(db: DbPool): ToolDef[] {
     {
       name: 'contact_get',
       tier: 'core',
-      description: 'Retrieve a single contact by UUID including their profile, account association, lifecycle stage, and custom fields. For a comprehensive view with context entries, activities, and assignments, use briefing_get on the contact instead.',
-      inputSchema: z.object({ id: z.string().uuid() }),
-      handler: async (input: { id: string }, actor: ActorContext) => {
+      description: 'Retrieve a single contact by UUID including their profile, account association, lifecycle stage, and custom fields. Pass include_context_entries: true to also get current context entries without a full briefing. For a comprehensive view with activities, assignments, and staleness warnings, use briefing_get on the contact instead.',
+      inputSchema: z.object({
+        id: z.string().uuid(),
+        include_context_entries: z.boolean().optional().default(false).describe('If true, also return current context entries for this contact'),
+      }),
+      handler: async (input: { id: string; include_context_entries?: boolean }, actor: ActorContext) => {
         const contact = await contactRepo.getContact(db, actor.tenant_id, input.id);
         if (!contact) throw notFound('Contact', input.id);
+        if (input.include_context_entries) {
+          const context_entries = await contextRepo.getContextForSubject(db, actor.tenant_id, 'contact', input.id);
+          return { contact, context_entries };
+        }
         return { contact };
+      },
+    },
+    {
+      name: 'contact_get_opportunities',
+      tier: 'core',
+      description: 'Get all opportunities linked to a contact. Returns active and closed deals for this contact sorted by created_at descending. Useful for quickly understanding deal history without navigating account-level pipeline.',
+      inputSchema: z.object({
+        contact_id: z.string().uuid().describe('UUID of the contact'),
+        stage: z.string().optional().describe('Filter to a specific stage (e.g. "prospecting", "closed_won")'),
+        limit: z.number().int().min(1).max(100).default(20),
+      }),
+      handler: async (input: { contact_id: string; stage?: string; limit?: number }, actor: ActorContext) => {
+        const contact = await contactRepo.getContact(db, actor.tenant_id, input.contact_id);
+        if (!contact) throw notFound('Contact', input.contact_id);
+        const result = await oppRepo.searchOpportunities(db, actor.tenant_id, {
+          contact_id: input.contact_id as never,
+          stage: input.stage,
+          limit: input.limit ?? 20,
+        });
+        return { contact_id: input.contact_id, opportunities: result.data, total: result.total };
       },
     },
     {
@@ -99,7 +128,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'contact_set_lifecycle',
-      tier: 'extended',
+      tier: 'core',
       description: 'Set the lifecycle stage of a contact to reflect their current position in the sales funnel. Valid stages: lead, prospect, active, customer, churned, champion. Use this when a contact progresses through the pipeline or changes status.',
       inputSchema: contactSetLifecycle,
       handler: async (input: z.infer<typeof contactSetLifecycle>, actor: ActorContext) => {

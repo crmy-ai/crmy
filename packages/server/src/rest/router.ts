@@ -1028,6 +1028,30 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.post('/workflows/:id/test', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'workflow_test');
+      const result = await handler({
+        id: p(req, 'id'),
+        sample_payload: req.body?.sample_payload ?? {},
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/workflows/:id/clone', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'workflow_clone');
+      const result = await handler({
+        id: p(req, 'id'),
+        name: req.body?.name,
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Actors ---
   router.get('/actors', async (req: Request, res: Response) => {
     try {

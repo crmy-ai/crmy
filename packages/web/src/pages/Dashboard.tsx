@@ -110,20 +110,20 @@ export default function Dashboard() {
         description="Agent memory — context entries, handoffs, and active agents at a glance."
       />
 
-      {/* Tab toggle */}
-      <div className="flex items-center gap-0.5 bg-muted rounded-xl p-0.5 mx-4 md:mx-6 mt-3 mb-1 self-start">
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 px-4 md:px-6 pt-4 border-b border-border pb-0">
         <button
           onClick={() => setSearchParams({})}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-            activeTab === 'overview' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            activeTab === 'overview' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
           <Brain className="w-3.5 h-3.5" /> Overview
         </button>
         <button
           onClick={() => setSearchParams({ tab: 'knowledge' })}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-            activeTab === 'knowledge' ? 'bg-[#0ea5e9]/15 text-[#0ea5e9] shadow-sm' : 'text-muted-foreground hover:text-foreground'
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            activeTab === 'knowledge' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
           <Library className="w-3.5 h-3.5" /> Knowledge

@@ -72,7 +72,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
     // 2. Actor identity
     ...actorTools(db),           // actor_whoami, actor_register, actor_expertise
     // 3. Activities
-    ...activityTools(db),        // activity_create, activity_get_timeline
+    ...activityTools(db),        // activity_create, activity_get, activity_search, activity_get_timeline, activity_complete, activity_update
     // 4. Assignments
     ...assignmentTools(db),      // assignment_create, assignment_list, assignment_update
     // 5. HITL + handoff

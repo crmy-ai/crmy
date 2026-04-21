@@ -614,25 +614,136 @@ export const bulkJobList = z.object({
 
 // -- Workflow schemas --
 
-const workflowActionType = z.enum([
-  'send_notification', 'send_email', 'update_field', 'create_activity',
-  'add_tag', 'remove_tag', 'assign_owner', 'create_context_entry', 'webhook',
-  // 'create_note' kept for backward compat with stored workflows; engine aliases to create_context_entry
-  'create_note',
-]);
-
-const workflowActionSchema = z.object({
-  type: workflowActionType,
-  config: z.record(z.unknown()),
+// Typed per-action-type schemas via discriminated union
+const wfActionSendNotification = z.object({
+  type: z.literal('send_notification'),
+  config: z.object({
+    message: z.string().min(1).describe('Notification message body'),
+    channel_id: z.string().uuid().optional().describe('Messaging channel UUID (uses tenant default if omitted)'),
+    recipient: z.string().optional().describe('Recipient identifier (e.g. @user or #channel)'),
+    subject: z.string().optional().describe('Optional subject/title'),
+  }),
 });
+
+const wfActionSendEmail = z.object({
+  type: z.literal('send_email'),
+  config: z.object({
+    to_address: z.string().min(1).describe('Recipient email address. Supports {{variables}}.'),
+    subject: z.string().min(1).describe('Email subject line. Supports {{variables}}.'),
+    body_text: z.string().min(1).describe('Plain-text email body. Supports {{variables}}.'),
+    body_html: z.string().optional().describe('Optional HTML email body. Supports {{variables}}.'),
+    require_approval: z.boolean().default(true).describe('If true, creates a HITL request before sending'),
+    contact_id: z.string().uuid().optional(),
+    account_id: z.string().uuid().optional(),
+    opportunity_id: z.string().uuid().optional(),
+  }),
+});
+
+const wfActionUpdateField = z.object({
+  type: z.literal('update_field'),
+  config: z.object({
+    object_type: z.enum(['contact', 'account', 'opportunity']).optional().describe('Entity type to update (defaults to triggered entity type)'),
+    object_id: z.string().uuid().optional().describe('Entity UUID (defaults to triggered entity ID)'),
+    field: z.string().min(1).describe('Field name to update, e.g. lifecycle_stage'),
+    value: z.unknown().describe('New field value'),
+  }),
+});
+
+const wfActionCreateActivity = z.object({
+  type: z.literal('create_activity'),
+  config: z.object({
+    type: z.string().min(1).describe('Activity type, e.g. task, call, note'),
+    subject: z.string().min(1).describe('Activity subject. Supports {{variables}}.'),
+    body: z.string().optional().describe('Activity body/notes. Supports {{variables}}.'),
+    contact_id: z.string().uuid().optional(),
+    account_id: z.string().uuid().optional(),
+  }),
+});
+
+const wfActionAddTag = z.object({
+  type: z.literal('add_tag'),
+  config: z.object({
+    tag: z.string().min(1).describe('Tag to add, e.g. hot-lead'),
+    object_type: z.enum(['contact', 'account', 'opportunity']).optional(),
+    object_id: z.string().uuid().optional(),
+  }),
+});
+
+const wfActionRemoveTag = z.object({
+  type: z.literal('remove_tag'),
+  config: z.object({
+    tag: z.string().min(1).describe('Tag to remove'),
+    object_type: z.enum(['contact', 'account', 'opportunity']).optional(),
+    object_id: z.string().uuid().optional(),
+  }),
+});
+
+const wfActionAssignOwner = z.object({
+  type: z.literal('assign_owner'),
+  config: z.object({
+    owner_id: z.string().uuid().describe('UUID of the actor to assign as owner'),
+    object_type: z.enum(['contact', 'account', 'opportunity']).optional(),
+    object_id: z.string().uuid().optional(),
+  }),
+});
+
+const wfActionCreateContextEntry = z.object({
+  type: z.union([z.literal('create_context_entry'), z.literal('create_note')]),
+  config: z.object({
+    body: z.string().min(1).describe('Context entry body. Supports {{variables}}.'),
+    context_type: z.string().default('note').describe('Context type, e.g. note, insight'),
+    object_type: z.string().optional(),
+    object_id: z.string().uuid().optional(),
+    visibility: z.enum(['internal', 'shared']).default('internal').optional(),
+  }),
+});
+
+const wfActionWebhook = z.object({
+  type: z.literal('webhook'),
+  config: z.object({
+    url: z.string().url().describe('HTTPS endpoint to POST to when this action fires'),
+    secret: z.string().optional().describe('Optional shared secret for HMAC verification'),
+  }),
+});
+
+const wfActionWait = z.object({
+  type: z.literal('wait'),
+  config: z.object({
+    seconds: z.number().int().min(1).max(300).describe('Delay in seconds (max 300)'),
+  }),
+});
+
+// Discriminated union covering all action types
+export const workflowAction = z.discriminatedUnion('type', [
+  wfActionSendNotification,
+  wfActionSendEmail,
+  wfActionUpdateField,
+  wfActionCreateActivity,
+  wfActionAddTag,
+  wfActionRemoveTag,
+  wfActionAssignOwner,
+  wfActionWebhook,
+  wfActionWait,
+  // create_context_entry uses z.union so needs separate handling
+]).or(wfActionCreateContextEntry);
+
+// Filter condition shape (structured or legacy plain-value)
+const workflowFilterCondition = z.union([
+  z.object({
+    op: z.enum(['eq', 'neq', 'contains', 'starts_with', 'gt', 'lt', 'exists', 'not_exists']),
+    value: z.unknown().optional(),
+  }),
+  z.unknown(), // legacy: { field: value } plain equality
+]);
 
 export const workflowCreate = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   trigger_event: z.string().min(1),
-  trigger_filter: z.record(z.unknown()).default({}),
-  actions: z.array(workflowActionSchema).min(1),
+  trigger_filter: z.record(workflowFilterCondition).default({}),
+  actions: z.array(workflowAction).min(1).max(20),
   is_active: z.boolean().default(true),
+  max_runs_per_hour: z.number().int().min(1).max(1000).optional().describe('Rate limit: maximum workflow runs allowed per hour'),
 });
 
 export const workflowUpdate = z.object({
@@ -641,9 +752,10 @@ export const workflowUpdate = z.object({
     name: z.string().min(1).optional(),
     description: z.string().nullable().optional(),
     trigger_event: z.string().min(1).optional(),
-    trigger_filter: z.record(z.unknown()).optional(),
-    actions: z.array(workflowActionSchema).optional(),
+    trigger_filter: z.record(workflowFilterCondition).optional(),
+    actions: z.array(workflowAction).min(1).max(20).optional(),
     is_active: z.boolean().optional(),
+    max_runs_per_hour: z.number().int().min(1).max(1000).nullable().optional(),
   }),
 });
 

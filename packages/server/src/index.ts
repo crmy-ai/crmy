@@ -21,6 +21,14 @@ import { cleanExpiredSessions } from './db/repos/agent.js';
 import { processPendingExtractions } from './agent/extraction.js';
 import { processStaleEntries } from './services/staleness.js';
 import { loadPlugins, shutdownPlugins, type PluginConfig } from './plugins/index.js';
+
+async function purgeOldWorkflowRuns(db: DbPool): Promise<void> {
+  await db.query(
+    `DELETE FROM workflow_runs
+     WHERE completed_at < now() - interval '90 days'
+       AND status IN ('completed', 'failed')`,
+  );
+}
 import { eventBus } from './events/bus.js';
 import type { ActorContext } from '@crmy/shared';
 
@@ -249,6 +257,8 @@ export async function createApp(config: ServerConfig) {
       await processWebhookRetries(db);
       await processContextOutbox(db);
       await refreshStaleScores(db);
+      // Purge workflow run history older than 90 days
+      await purgeOldWorkflowRuns(db);
       // Evict idle MCP sessions (30-minute TTL)
       evictStaleMcpSessions();
     } catch (err) {

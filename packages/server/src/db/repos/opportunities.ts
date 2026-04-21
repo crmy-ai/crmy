@@ -59,6 +59,7 @@ export async function searchOpportunities(
     stage?: string;
     owner_id?: UUID;
     account_id?: UUID;
+    contact_id?: UUID;
     forecast_cat?: string;
     close_date_before?: string;
     close_date_after?: string;
@@ -88,6 +89,11 @@ export async function searchOpportunities(
   if (filters.account_id) {
     conditions.push(`o.account_id = $${idx}`);
     params.push(filters.account_id);
+    idx++;
+  }
+  if (filters.contact_id) {
+    conditions.push(`o.contact_id = $${idx}`);
+    params.push(filters.contact_id);
     idx++;
   }
   if (filters.forecast_cat) {

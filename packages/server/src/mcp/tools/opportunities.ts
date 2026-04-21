@@ -6,6 +6,7 @@ import { opportunityCreate, opportunityUpdate, opportunitySearch, opportunityAdv
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as oppRepo from '../../db/repos/opportunities.js';
+import * as contextRepo from '../../db/repos/context-entries.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, validationError, permissionDenied } from '@crmy/shared';
 import { validateOpportunityTransition } from '../../services/state-machine.js';
@@ -46,13 +47,20 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     {
       name: 'opportunity_get',
       tier: 'core',
-      description: 'Retrieve a single opportunity by UUID, including its account details and recent activities. For a comprehensive view with context entries, stale warnings, and assignments, use briefing_get on the opportunity instead.',
-      inputSchema: z.object({ id: z.string().uuid() }),
-      handler: async (input: { id: string }, actor: ActorContext) => {
+      description: 'Retrieve a single opportunity by UUID, including its account details and recent activities. Pass include_context_entries: true to also get current context entries without a full briefing. For a comprehensive view with stale warnings and assignments, use briefing_get on the opportunity instead.',
+      inputSchema: z.object({
+        id: z.string().uuid(),
+        include_context_entries: z.boolean().optional().default(false).describe('If true, also return current context entries for this opportunity'),
+      }),
+      handler: async (input: { id: string; include_context_entries?: boolean }, actor: ActorContext) => {
         const opportunity = await oppRepo.getOpportunity(db, actor.tenant_id, input.id);
         if (!opportunity) throw notFound('Opportunity', input.id);
 
         const activities = await oppRepo.getOpportunityActivities(db, actor.tenant_id, input.id);
+        if (input.include_context_entries) {
+          const context_entries = await contextRepo.getContextForSubject(db, actor.tenant_id, 'opportunity', input.id);
+          return { opportunity, activities, context_entries };
+        }
         return { opportunity, activities };
       },
     },

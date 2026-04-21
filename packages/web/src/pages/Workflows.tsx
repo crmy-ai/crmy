@@ -4,7 +4,7 @@
 import { useState, useMemo, useRef } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
-import { useWorkflows, useCreateWorkflow, useDeleteWorkflow } from '@/api/hooks';
+import { useWorkflows, useCreateWorkflow, useDeleteWorkflow, useUpdateWorkflowById } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { motion } from 'framer-motion';
 import { Zap, Trash2, Loader2, Play, Pause, Plus, X } from 'lucide-react';
@@ -25,9 +25,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
-import { TRIGGER_EVENTS, ACTION_TYPES, isActionValid, type ActionTypeDef } from '@/lib/workflowConstants';
+import { TRIGGER_EVENTS, ACTION_TYPES, VISIBLE_ACTION_TYPES, isActionValid, type ActionTypeDef } from '@/lib/workflowConstants';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
+
+const MAX_ACTIONS = 20;
 
 const FILTER_CONFIGS: FilterConfig[] = [
   {
@@ -109,7 +111,7 @@ function ActionRow({
   onRemove: () => void;
   canRemove: boolean;
 }) {
-  const def: ActionTypeDef = ACTION_TYPES.find(a => a.value === action.type) ?? ACTION_TYPES[0];
+  const def: ActionTypeDef = VISIBLE_ACTION_TYPES.find(a => a.value === action.type) ?? ACTION_TYPES.find(a => a.value === action.type) ?? VISIBLE_ACTION_TYPES[0];
 
   return (
     <div className="p-3 rounded-lg border border-border bg-muted/20 space-y-2">
@@ -122,7 +124,7 @@ function ActionRow({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {ACTION_TYPES.map(a => (
+            {VISIBLE_ACTION_TYPES.map(a => (
               <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
             ))}
           </SelectContent>
@@ -175,9 +177,25 @@ export default function WorkflowsPage() {
   const [actions,    setActions]    = useState<ActionDraft[]>([{ ...DEFAULT_ACTION }]);
   const [errors,     setErrors]     = useState<Record<string, string>>({});
 
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
   const { data, isLoading } = useWorkflows() as any;
   const createWorkflow = useCreateWorkflow();
   const deleteWorkflow = useDeleteWorkflow();
+  const updateWorkflowById = useUpdateWorkflowById();
+
+  const handleToggleActive = async (e: React.MouseEvent, wf: any) => {
+    e.stopPropagation();
+    setTogglingId(wf.id);
+    try {
+      await updateWorkflowById.mutateAsync({ id: wf.id, is_active: !wf.is_active });
+      toast({ title: wf.is_active ? 'Workflow paused' : 'Workflow activated' });
+    } catch {
+      toast({ title: 'Error', variant: 'destructive' });
+    } finally {
+      setTogglingId(null);
+    }
+  };
 
   const workflows: any[] = (data as any)?.data ?? [];
 
@@ -360,12 +378,20 @@ export default function WorkflowsPage() {
                 className="flex items-center gap-3 p-4 bg-card border border-border rounded-xl cursor-pointer hover:border-primary/30 transition-colors"
                 onClick={() => openDrawer('workflow', wf.id)}
               >
-                <div className="flex-shrink-0">
-                  {wf.is_active !== false
-                    ? <Play className="w-4 h-4 text-emerald-500" />
-                    : <Pause className="w-4 h-4 text-muted-foreground" />
+                {/* Inline active toggle */}
+                <button
+                  onClick={(e) => handleToggleActive(e, wf)}
+                  disabled={togglingId === wf.id}
+                  title={wf.is_active !== false ? 'Pause workflow' : 'Activate workflow'}
+                  className="flex-shrink-0 p-1 rounded transition-colors hover:bg-muted"
+                >
+                  {togglingId === wf.id
+                    ? <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                    : wf.is_active !== false
+                      ? <Pause className="w-4 h-4 text-emerald-500" />
+                      : <Play className="w-4 h-4 text-muted-foreground" />
                   }
-                </div>
+                </button>
 
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
@@ -376,14 +402,20 @@ export default function WorkflowsPage() {
                     >
                       {wf.is_active !== false ? 'Active' : 'Paused'}
                     </Badge>
+                    {wf.error_count > 0 && (
+                      <span className="text-[10px] text-amber-500">⚠ {wf.error_count} errors</span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
                     <span className="font-mono">{wf.trigger_event}</span>
                     {Array.isArray(wf.actions) && wf.actions.length > 0 && (
                       <span>{wf.actions.length} action{wf.actions.length !== 1 ? 's' : ''}</span>
                     )}
-                    {wf.updated_at && (
-                      <span>· {new Date(wf.updated_at).toLocaleDateString()}</span>
+                    {wf.run_count != null && (
+                      <span>{wf.run_count} run{wf.run_count !== 1 ? 's' : ''}</span>
+                    )}
+                    {wf.last_run_at && (
+                      <span>last run {new Date(wf.last_run_at).toLocaleDateString()}</span>
                     )}
                   </div>
                 </div>
@@ -458,9 +490,12 @@ export default function WorkflowsPage() {
 
             {/* Actions */}
             <div className="space-y-2">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Actions <span className="text-destructive">*</span>
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Actions <span className="text-destructive">*</span>
+                </label>
+                <span className="text-[10px] text-muted-foreground">{actions.length}/{MAX_ACTIONS}</span>
+              </div>
               {actions.map((action, i) => (
                 <div key={i}>
                   <ActionRow
@@ -474,7 +509,7 @@ export default function WorkflowsPage() {
                   )}
                 </div>
               ))}
-              {actions.length < 5 && (
+              {actions.length < MAX_ACTIONS && (
                 <button
                   type="button"
                   onClick={() => setActions(prev => [...prev, { ...DEFAULT_ACTION }])}

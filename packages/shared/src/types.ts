@@ -386,12 +386,29 @@ export type WorkflowActionType =
   | 'add_tag'
   | 'remove_tag'
   | 'assign_owner'
-  | 'create_note'
-  | 'webhook';
+  | 'create_context_entry'
+  | 'create_note'  // deprecated alias for create_context_entry
+  | 'webhook'
+  | 'wait';
 
 export interface WorkflowAction {
   type: WorkflowActionType;
   config: Record<string, unknown>;
+}
+
+export interface WorkflowFilterCondition {
+  op: 'eq' | 'neq' | 'contains' | 'starts_with' | 'gt' | 'lt' | 'exists' | 'not_exists';
+  value?: unknown;
+}
+
+export interface ActionLog {
+  index: number;
+  type: string;
+  status: 'completed' | 'failed' | 'skipped';
+  error?: string;
+  duration_ms: number;
+  started_at: string;
+  resolved_config?: Record<string, unknown>;
 }
 
 export interface Workflow {
@@ -405,6 +422,9 @@ export interface Workflow {
   is_active: boolean;
   run_count: number;
   last_run_at?: string;
+  max_runs_per_hour?: number;
+  error_count: number;
+  last_error_at?: string;
   created_by?: UUID;
   created_at: string;
   updated_at: string;
@@ -418,6 +438,8 @@ export interface WorkflowRun {
   actions_run: number;
   actions_total: number;
   error?: string;
+  duration_ms?: number;
+  action_logs: ActionLog[];
   started_at: string;
   completed_at?: string;
 }

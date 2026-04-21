@@ -866,6 +866,17 @@ export function useUpdateWorkflow(id: string) {
     },
   });
 }
+export function useUpdateWorkflowById() {
+  const qc = useQueryClient();
+  return useMutation<unknown, Error, { id: string; [key: string]: unknown }>({
+    mutationFn: ({ id, ...data }) =>
+      api.patch(`workflows/${id}`, data),
+    onSuccess: (_result, variables) => {
+      qc.invalidateQueries({ queryKey: ['workflow', variables.id] });
+      qc.invalidateQueries({ queryKey: ['workflows'] });
+    },
+  });
+}
 export function useDeleteWorkflow() {
   const qc = useQueryClient();
   return useMutation({
@@ -881,6 +892,20 @@ export function useWorkflowRuns(workflowId: string, params?: { limit?: number })
       return api.get(`workflows/${workflowId}/runs${qs}`);
     },
     enabled: !!workflowId,
+  });
+}
+export function useTestWorkflow() {
+  return useMutation({
+    mutationFn: ({ id, sample_payload }: { id: string; sample_payload: Record<string, unknown> }) =>
+      api.post(`workflows/${id}/test`, { sample_payload }),
+  });
+}
+export function useCloneWorkflow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name?: string }) =>
+      api.post(`workflows/${id}/clone`, name ? { name } : {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['workflows'] }),
   });
 }
 

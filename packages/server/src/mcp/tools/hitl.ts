@@ -7,7 +7,7 @@ import type { DbPool } from '../../db/pool.js';
 import type { ActorContext, UUID } from '@crmy/shared';
 import * as hitlRepo from '../../db/repos/hitl.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound } from '@crmy/shared';
+import { notFound, validationError } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
 
 export function hitlTools(db: DbPool): ToolDef[] {
@@ -123,19 +123,27 @@ export function hitlTools(db: DbPool): ToolDef[] {
         decision: 'approved' | 'rejected';
         priority?: number;
       }, actor: ActorContext) => {
-        const result = await db.query(
-          `INSERT INTO hitl_approval_rules (tenant_id, name, action_type, condition, decision, priority)
-           VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-          [
-            actor.tenant_id,
-            input.name,
-            input.action_type ?? null,
-            JSON.stringify(input.condition ?? {}),
-            input.decision,
-            input.priority ?? 0,
-          ],
-        );
-        return { rule: result.rows[0] };
+        try {
+          const result = await db.query(
+            `INSERT INTO hitl_approval_rules (tenant_id, name, action_type, condition, decision, priority)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+            [
+              actor.tenant_id,
+              input.name,
+              input.action_type ?? null,
+              JSON.stringify(input.condition ?? {}),
+              input.decision,
+              input.priority ?? 0,
+            ],
+          );
+          return { rule: result.rows[0] };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to create approval rule';
+          if (msg.includes('unique') || msg.includes('duplicate')) {
+            throw validationError(`An approval rule named "${input.name}" already exists`);
+          }
+          throw err;
+        }
       },
     },
     {
