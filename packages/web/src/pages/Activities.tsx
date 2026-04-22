@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useMemo, useEffect } from 'react';
-import { Activity as ActivityIcon } from 'lucide-react';
+import { Activity as ActivityIcon, Plus } from 'lucide-react';
 import { TopBar } from '@/components/layout/TopBar';
 import { useActivities, useActivityTypes } from '@/api/hooks';
 import { ActivityFeed } from '@/components/crm/CrmWidgets';
@@ -244,7 +244,8 @@ export default function Activities() {
         searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search activities..."
         filters={filterConfigs} activeFilters={activeFilters} onFilterChange={handleFilterChange}
         onClearFilters={() => setActiveFilters({})} sortOptions={sortOptions} currentSort={sort}
-        onSortChange={handleSortChange} onAdd={() => openQuickAdd('activity')} addLabel="Log Activity" entityType="activities"
+        onSortChange={handleSortChange} entityType="activities"
+        onAdd={() => openQuickAdd('activity')} addLabel="Log Activity"
       />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">

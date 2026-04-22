@@ -339,9 +339,8 @@ export default function WorkflowsPage() {
         sortOptions={SORT_OPTIONS}
         currentSort={sort}
         onSortChange={handleSortChange}
-        onAdd={openCreate}
-        addLabel="New Workflow"
         entityType="workflows"
+        onAdd={openCreate} addLabel="New Workflow"
       />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">

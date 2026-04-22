@@ -439,53 +439,115 @@ export function useCreateEmail() {
   });
 }
 
-// Email Sequences
+// Email Sequences (legacy hooks — kept for backward compat)
 export function useEmailSequences(params?: { is_active?: boolean; limit?: number }) {
-  return useList('email-sequences', 'email-sequences', params as Record<string, string | number | boolean | undefined>);
+  return useList('sequences', 'sequences', params as Record<string, string | number | boolean | undefined>);
 }
 export function useEmailSequence(id: string) {
-  return useQuery({ queryKey: ['email-sequence', id], queryFn: () => api.get(`email-sequences/${id}`), enabled: !!id });
+  return useQuery({ queryKey: ['sequence', id], queryFn: () => api.get(`sequences/${id}`), enabled: !!id });
 }
 export function useCreateEmailSequence() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: Record<string, unknown>) => api.post('email-sequences', data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['email-sequences'] }),
+    mutationFn: (data: Record<string, unknown>) => api.post('sequences', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sequences'] }),
   });
 }
 export function useUpdateEmailSequence(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ patch }: { patch: Record<string, unknown> }) => api.patch(`email-sequences/${id}`, patch),
+    mutationFn: ({ patch }: { patch: Record<string, unknown> }) => api.patch(`sequences/${id}`, patch),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['email-sequences'] });
-      qc.invalidateQueries({ queryKey: ['email-sequence', id] });
+      qc.invalidateQueries({ queryKey: ['sequences'] });
+      qc.invalidateQueries({ queryKey: ['sequence', id] });
     },
   });
 }
 export function useDeleteEmailSequence(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => api.delete(`email-sequences/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['email-sequences'] }),
+    mutationFn: () => api.delete(`sequences/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sequences'] }),
   });
 }
 export function useEnrollInSequence() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { sequence_id: string; contact_id: string }) => api.post('email-sequences/enroll', data),
+    mutationFn: (data: { sequence_id: string; contact_id: string; variables?: Record<string, unknown>; start_at_step?: number }) =>
+      api.post(`sequences/${data.sequence_id}/enroll`, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sequence-enrollments'] }),
   });
 }
 export function useUnenrollFromSequence() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.post('email-sequences/unenroll', { id }),
+    mutationFn: (id: string) => api.post(`sequences/unenroll`, { id }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sequence-enrollments'] }),
   });
 }
 export function useSequenceEnrollments(params?: { sequence_id?: string; contact_id?: string; status?: string; limit?: number }) {
-  return useList('sequence-enrollments', 'email-sequences/enrollments', params as Record<string, string | number | boolean | undefined>);
+  return useList('sequence-enrollments', 'sequences/enrollments', params as Record<string, string | number | boolean | undefined>);
+}
+
+// Sequences (new canonical hooks)
+export function useSequences(params?: { is_active?: boolean; tags?: string[]; limit?: number }) {
+  return useList('sequences', 'sequences', params as Record<string, string | number | boolean | undefined>);
+}
+export function useSequence(id: string) {
+  return useQuery({ queryKey: ['sequence', id], queryFn: () => api.get(`sequences/${id}`), enabled: !!id });
+}
+export function useCreateSequence() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('sequences', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sequences'] }),
+  });
+}
+export function useUpdateSequence(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: Record<string, unknown>) => api.patch(`sequences/${id}`, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sequences'] });
+      qc.invalidateQueries({ queryKey: ['sequence', id] });
+    },
+  });
+}
+export function useDeleteSequence(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete(`sequences/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sequences'] }),
+  });
+}
+export function useSequenceAnalytics(id: string, periodType: 'day' | 'week' | 'month' = 'day') {
+  return useQuery({
+    queryKey: ['sequence-analytics', id, periodType],
+    queryFn: () => api.get(`sequences/${id}/analytics?period_type=${periodType}`),
+    enabled: !!id,
+  });
+}
+export function useEnrollmentActivities(enrollmentId: string) {
+  return useQuery({
+    queryKey: ['enrollment-activities', enrollmentId],
+    queryFn: () => api.get(`sequences/enrollments/${enrollmentId}/activities`),
+    enabled: !!enrollmentId,
+  });
+}
+export function useEnrollmentContext(enrollmentId: string) {
+  return useQuery({
+    queryKey: ['enrollment-context', enrollmentId],
+    queryFn: () => api.get(`sequences/enrollments/${enrollmentId}/context`),
+    enabled: !!enrollmentId,
+  });
+}
+export function useEnrollInSequenceWithObjective() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { sequence_id: string; contact_id: string; objective?: string; variables?: Record<string, unknown> }) =>
+      api.post(`sequences/enroll`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sequence-enrollments'] }),
+  });
 }
 
 // Inbound emails (activities with direction=inbound)

@@ -25,8 +25,8 @@ interface ListToolbarProps {
   sortOptions: SortOption[];
   currentSort: { key: string; dir: 'asc' | 'desc' } | null;
   onSortChange: (key: string) => void;
-  onAdd: () => void;
-  addLabel: string;
+  onAdd?: () => void;
+  addLabel?: string;
   onSecondaryAdd?: () => void;
   secondaryAddLabel?: string;
   entityType: string;
@@ -41,6 +41,7 @@ const ENTITY_GRADIENTS: Record<string, string> = {
   activities:    'from-warning to-warning/80',
   assignments:   'from-destructive to-destructive/80',
   workflows:     'from-amber-500 to-amber-500/80',
+  sequences:     'from-orange-500 to-orange-500/80',
   context:       'from-[#0ea5e9] to-[#0ea5e9]/80',
   emails:        'from-[#3b82f6] to-[#3b82f6]/80',
 };
@@ -183,13 +184,15 @@ export function ListToolbar({
             <span className="hidden sm:inline">{secondaryAddLabel}</span>
           </button>
         )}
-        <button
-          onClick={onAdd}
-          className={`h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r ${gradientClasses} text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale`}
-        >
-          <Plus className="w-4 h-4" />
-          <span className="hidden sm:inline">{addLabel}</span>
-        </button>
+        {onAdd && (
+          <button
+            onClick={onAdd}
+            className={`h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r ${gradientClasses} text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale`}
+          >
+            <Plus className="w-4 h-4" />
+            <span className="hidden sm:inline">{addLabel}</span>
+          </button>
+        )}
       </div>
 
       {/* Active filter pills */}

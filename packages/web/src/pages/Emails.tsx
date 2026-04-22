@@ -230,25 +230,16 @@ export default function EmailsPage() {
             {v.charAt(0).toUpperCase() + v.slice(1)}
           </button>
         ))}
-        <div className="ml-auto pb-1">
-          {view === 'outbound' ? (
-            <button
-              onClick={() => setComposeOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-            >
-              <Send className="w-3.5 h-3.5" /> Compose
-            </button>
-          ) : (
-            <button
-              onClick={() => refetchInbound()}
-              disabled={inboundFetching}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-40"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${inboundFetching ? 'animate-spin' : ''}`} />
-              Refresh
-            </button>
-          )}
-        </div>
+        {view === 'inbound' && (
+          <button
+            onClick={() => refetchInbound()}
+            disabled={inboundFetching}
+            className="ml-auto mb-1 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${inboundFetching ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        )}
       </div>
 
       {view === 'outbound' && (
@@ -269,9 +260,8 @@ export default function EmailsPage() {
           onSortChange={(key) => setSort(prev =>
             prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }
           )}
-          onAdd={() => setComposeOpen(true)}
-          addLabel="Compose"
           entityType="emails"
+          onAdd={() => setComposeOpen(true)} addLabel="Compose"
         />
       )}
 

@@ -22,8 +22,7 @@
 
 import type { DbPool } from '../db/pool.js';
 import type { UUID, ContextEntry } from '@crmy/shared';
-import * as agentRepo from '../db/repos/agent.js';
-import { decrypt } from '../agent/crypto.js';
+import { callLLM } from '../agent/providers/llm.js';
 
 export interface ContradictionWarning {
   entry_a: ContextEntry;
@@ -113,9 +112,7 @@ export async function detectContradictions(
   // Rebuild full ContextEntry objects from flat columns
   const warnings: ContradictionWarning[] = [];
 
-  // Load agent config once (for LLM slow path)
-  const agentConfig = await agentRepo.getConfig(db, tenantId);
-  const canUseLLM = !!(agentConfig?.enabled && agentConfig.api_key_enc);
+  const canUseLLM = true; // callLLM handles missing config gracefully
 
   for (const row of pairsResult.rows) {
     const entryA: ContextEntry = {
@@ -179,11 +176,7 @@ export async function detectContradictions(
     if (!canUseLLM) continue;
 
     try {
-      const apiKey = decrypt(agentConfig!.api_key_enc!).trim();
-      const result = await callContradictionLLM(
-        entryA, entryB,
-        agentConfig!.provider, agentConfig!.base_url, agentConfig!.model, apiKey,
-      );
+      const result = await callContradictionLLM(db, tenantId, entryA, entryB);
       if (result.contradicts) {
         warnings.push({
           entry_a: entryA,
@@ -290,12 +283,10 @@ function suggestAction(a: ContextEntry, b: ContextEntry): ContradictionWarning['
 // ── LLM contradiction check ──────────────────────────────────────────────────
 
 async function callContradictionLLM(
+  db: DbPool,
+  tenantId: string,
   entryA: ContextEntry,
   entryB: ContextEntry,
-  provider: string,
-  baseUrl: string,
-  model: string,
-  apiKey: string,
 ): Promise<{ contradicts: boolean; field: string; evidence: string }> {
   const systemPrompt = `You are a CRM knowledge consistency checker. Given two context entries about the same CRM record, determine if they state contradictory facts.
 
@@ -317,12 +308,11 @@ Body: ${entryB.body.slice(0, 800)}
 
 Do these entries state contradictory facts about the same topic?`;
 
-  let responseText: string;
-  if (provider === 'anthropic') {
-    responseText = await callAnthropicSync(systemPrompt, userPrompt, model, baseUrl, apiKey);
-  } else {
-    responseText = await callOpenAICompatSync(systemPrompt, userPrompt, model, baseUrl, apiKey);
-  }
+  const responseText = await callLLM(db, tenantId, {
+    system: systemPrompt,
+    user: userPrompt,
+    maxTokens: 256,
+  });
 
   try {
     const parsed = JSON.parse(responseText.trim()) as { contradicts: boolean; field: string; evidence: string };
@@ -336,57 +326,3 @@ Do these entries state contradictory facts about the same topic?`;
   }
 }
 
-async function callAnthropicSync(
-  systemPrompt: string,
-  userPrompt: string,
-  model: string,
-  baseUrl: string,
-  apiKey: string,
-): Promise<string> {
-  const url = `${baseUrl.replace(/\/+$/, '')}/messages`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 256,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-    }),
-  });
-  if (!res.ok) throw new Error(`Anthropic API ${res.status}`);
-  const data = await res.json() as { content: Array<{ type: string; text: string }> };
-  return data.content.find(b => b.type === 'text')?.text ?? '';
-}
-
-async function callOpenAICompatSync(
-  systemPrompt: string,
-  userPrompt: string,
-  model: string,
-  baseUrl: string,
-  apiKey: string,
-): Promise<string> {
-  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 256,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-    }),
-  });
-  if (!res.ok) throw new Error(`OpenAI-compat API ${res.status}`);
-  const data = await res.json() as { choices: Array<{ message: { content: string } }> };
-  return data.choices[0]?.message?.content ?? '';
-}

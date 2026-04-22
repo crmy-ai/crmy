@@ -831,6 +831,155 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  // --- Sequences (new canonical routes) ---
+  router.get('/sequences', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_list');
+      const result = await handler({
+        is_active: req.query.is_active !== undefined ? req.query.is_active === 'true' : undefined,
+        tags: req.query.tags ? String(req.query.tags).split(',') : undefined,
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/sequences', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_create');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/sequences/enrollments', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_enrollment_list');
+      const result = await handler({
+        sequence_id: qs(req.query.sequence_id),
+        contact_id: qs(req.query.contact_id),
+        status: qs(req.query.status),
+        limit: Math.min(qn(req.query.limit, 50), 200),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/sequences/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_get');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/sequences/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_update');
+      const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/sequences/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_delete');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/sequences/:id/enroll', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_enroll');
+      const result = await handler({ sequence_id: p(req, 'id'), ...req.body }, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/sequences/:id/unenroll', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_unenroll');
+      const result = await handler(req.body, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/sequences/:id/analytics', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_analytics');
+      const result = await handler({
+        sequence_id: p(req, 'id'),
+        period_type: (qs(req.query.period_type) as 'day' | 'week' | 'month') ?? 'day',
+        limit: Math.min(qn(req.query.limit, 30), 90),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // Enrollment collaboration sub-resources
+  router.get('/sequences/enrollments/:enrollmentId/activities', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const enrollmentId = req.params.enrollmentId;
+      // Validate enrollment belongs to tenant
+      const enrollment = await import('../db/repos/email-sequences.js').then(m =>
+        m.getEnrollment(db, actor.tenant_id, enrollmentId as import('@crmy/shared').UUID),
+      );
+      if (!enrollment) { res.status(404).json({ error: 'Enrollment not found' }); return; }
+
+      const activityResult = await db.query(
+        `SELECT * FROM activities
+         WHERE tenant_id = $1 AND detail->>'enrollment_id' = $2
+         ORDER BY occurred_at DESC, created_at DESC
+         LIMIT 50`,
+        [actor.tenant_id, enrollmentId],
+      );
+      res.json({ data: activityResult.rows });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/sequences/enrollments/:enrollmentId/context', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const enrollmentId = req.params.enrollmentId;
+      const enrollment = await import('../db/repos/email-sequences.js').then(m =>
+        m.getEnrollment(db, actor.tenant_id, enrollmentId as import('@crmy/shared').UUID),
+      );
+      if (!enrollment) { res.status(404).json({ error: 'Enrollment not found' }); return; }
+
+      const contextResult = await db.query(
+        `SELECT * FROM context_entries
+         WHERE tenant_id = $1 AND source_ref = $2
+         ORDER BY created_at DESC
+         LIMIT 50`,
+        [actor.tenant_id, enrollmentId],
+      );
+      res.json({ data: contextResult.rows });
+    } catch (err) { handleError(res, err); }
+  });
+
+  // Also support POST /sequences/enroll (flat form without sequence id in path)
+  router.post('/sequences/enroll', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_enroll');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Custom Fields ---
   router.get('/custom-fields', async (req: Request, res: Response) => {
     try {

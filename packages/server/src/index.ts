@@ -246,6 +246,8 @@ export async function createApp(config: ServerConfig) {
   const { processNextBatch: processContextOutbox } = await import('./workers/context_ingestion_worker.service.js');
   const { checkHitlSlaExpiry } = await import('./hitl/sla-checker.js');
   const { refreshStaleScores } = await import('./services/scoring.js');
+  const { processSequenceDue, handleSequenceGoalEvent } = await import('./services/sequence-executor.js');
+  const { refreshSequenceAnalytics } = await import('./services/sequence-analytics.js');
   const hitlInterval = setInterval(async () => {
     try {
       await autoApproveExpired(db);
@@ -259,6 +261,10 @@ export async function createApp(config: ServerConfig) {
       await refreshStaleScores(db);
       // Purge workflow run history older than 90 days
       await purgeOldWorkflowRuns(db);
+      // Process due sequence enrollments
+      await processSequenceDue(db);
+      // Refresh sequence analytics rollup
+      await refreshSequenceAnalytics(db);
       // Evict idle MCP sessions (30-minute TTL)
       evictStaleMcpSessions();
     } catch (err) {
@@ -308,6 +314,15 @@ export async function createApp(config: ServerConfig) {
       metadata: event.metadata ?? {},
       created_at: new Date().toISOString(),
     }).catch((err) => console.error('[plugins] dispatchEvent error:', err));
+  });
+
+  // Wire sequence goal-event detection to event bus
+  eventBus.on('crmy:event', (event) => {
+    const contactId = (event.afterData as any)?.contact_id ?? (event.afterData as any)?.id;
+    if (contactId) {
+      handleSequenceGoalEvent(db, event.tenantId, event.eventType, contactId)
+        .catch((err) => console.error('[sequences] goal-event error:', err));
+    }
   });
 
   // Wire webhook dispatcher to event bus — delivers to registered webhook endpoints

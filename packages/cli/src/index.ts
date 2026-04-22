@@ -57,6 +57,7 @@ import { briefingCommand } from './commands/briefing.js';
 import { authCommand } from './commands/auth.js';
 import { helpCommand } from './commands/help.js';
 import { seedDemoCommand } from './commands/seed-demo.js';
+import { resetPasswordCommand } from './commands/reset-password.js';
 import { doctorCommand } from './commands/doctor.js';
 
 const program = new Command();
@@ -92,6 +93,7 @@ program.addCommand(activityTypesCommand());
 program.addCommand(contextTypesCommand());
 program.addCommand(briefingCommand());
 program.addCommand(seedDemoCommand());
+program.addCommand(resetPasswordCommand());
 program.addCommand(doctorCommand());
 program.addCommand(helpCommand());
 

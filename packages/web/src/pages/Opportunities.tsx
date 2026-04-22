@@ -202,7 +202,8 @@ export default function Opportunities() {
       <ListToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search opportunities..."
         filters={filterConfigs} activeFilters={activeFilters} onFilterChange={handleFilterChange}
         onClearFilters={() => setActiveFilters({})} sortOptions={sortOptions} currentSort={sort}
-        onSortChange={handleSortChange} onAdd={() => openQuickAdd('opportunity')} addLabel="New Opportunity" entityType="opportunities" />
+        onSortChange={handleSortChange} entityType="opportunities"
+        onAdd={() => openQuickAdd('opportunity')} addLabel="New Opportunity" />
 
       <div className="flex-1 overflow-y-auto pb-24 md:pb-6">
         {isLoading ? (

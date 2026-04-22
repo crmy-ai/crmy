@@ -22,6 +22,7 @@ import * as contextTypeRepo from '../db/repos/context-type-registry.js';
 import * as actorRepo from '../db/repos/actors.js';
 import * as outboxRepo from '../db/repos/context-outbox.js';
 import { decrypt } from './crypto.js';
+import { callLLM } from './providers/llm.js';
 
 // Activity types worth extracting from (those with text content)
 const EXTRACTABLE_ACTIVITY_TYPES = new Set([
@@ -148,8 +149,7 @@ export async function extractContextFromActivity(
   // Build and call the LLM
   let entries: ExtractedEntry[];
   try {
-    const apiKey = decrypt(config.api_key_enc).trim();
-    entries = await callExtractionLLM(activity, content, extractableTypes, config.provider, config.base_url, config.model, apiKey, config.max_tokens_per_turn);
+    entries = await callExtractionLLM(db, tenantId, activity, content, extractableTypes, config.max_tokens_per_turn);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'LLM call failed';
     await markExtractionStatus(db, activityId, 'error', msg);
@@ -227,28 +227,21 @@ export async function processPendingExtractions(db: DbPool, limit = 20): Promise
 // ── LLM caller ────────────────────────────────────────────────────────────────
 
 async function callExtractionLLM(
+  db: DbPool,
+  tenantId: string,
   activity: ActivityRow,
   content: string,
   extractableTypes: { type_name: string; label: string; description?: string | null; extraction_prompt: string | null; json_schema: Record<string, unknown> | null }[],
-  provider: string,
-  baseUrl: string,
-  model: string,
-  apiKey: string,
   maxTokens: number,
 ): Promise<ExtractedEntry[]> {
   const systemPrompt = buildSystemPrompt(extractableTypes);
   const userPrompt = buildUserPrompt(activity, content);
 
-  // Cap extraction at a reasonable token budget (don't burn the full max_tokens_per_turn)
-  const extractionMaxTokens = Math.min(maxTokens, 2000);
-
-  let responseText: string;
-
-  if (provider === 'anthropic') {
-    responseText = await callAnthropicSync(systemPrompt, userPrompt, model, baseUrl, apiKey, extractionMaxTokens);
-  } else {
-    responseText = await callOpenAICompatSync(systemPrompt, userPrompt, model, baseUrl, apiKey, extractionMaxTokens);
-  }
+  const responseText = await callLLM(db, tenantId, {
+    system: systemPrompt,
+    user: userPrompt,
+    maxTokens: Math.min(maxTokens, 2000),
+  });
 
   return parseExtractionResponse(responseText);
 }
@@ -324,71 +317,6 @@ function buildActivityContent(activity: ActivityRow): string {
   return parts.join('\n\n');
 }
 
-// ── Sync (non-streaming) LLM calls ───────────────────────────────────────────
-
-async function callAnthropicSync(
-  systemPrompt: string,
-  userPrompt: string,
-  model: string,
-  baseUrl: string,
-  apiKey: string,
-  maxTokens: number,
-): Promise<string> {
-  const url = `${baseUrl.replace(/\/+$/, '')}/messages`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Anthropic API error ${res.status}: ${err.slice(0, 300)}`);
-  }
-  const data = await res.json() as { content: { type: string; text: string }[] };
-  return data.content?.find(c => c.type === 'text')?.text ?? '';
-}
-
-async function callOpenAICompatSync(
-  systemPrompt: string,
-  userPrompt: string,
-  model: string,
-  baseUrl: string,
-  apiKey: string,
-  maxTokens: number,
-): Promise<string> {
-  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-      response_format: { type: 'json_object' }, // supported by OpenAI/OpenRouter
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`LLM API error ${res.status}: ${err.slice(0, 300)}`);
-  }
-  const data = await res.json() as { choices: { message: { content: string } }[] };
-  return data.choices?.[0]?.message?.content ?? '';
-}
 
 // ── Response parser ───────────────────────────────────────────────────────────
 

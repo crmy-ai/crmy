@@ -11,7 +11,7 @@ import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge, LeadScoreBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { motion } from 'framer-motion';
-import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown, Users, FileText } from 'lucide-react';
+import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown, Users, FileText, Plus } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { stageConfig } from '@/lib/stageConfig';
@@ -112,7 +112,8 @@ export default function Contacts() {
         searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search contacts..."
         filters={filterConfigs} activeFilters={activeFilters} onFilterChange={handleFilterChange}
         onClearFilters={() => setActiveFilters({})} sortOptions={sortOptions} currentSort={sort}
-        onSortChange={handleSortChange} onAdd={() => openQuickAdd('contact')} addLabel="New Contact" entityType="contacts"
+        onSortChange={handleSortChange} entityType="contacts"
+        onAdd={() => openQuickAdd('contact')} addLabel="New Contact"
       />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">

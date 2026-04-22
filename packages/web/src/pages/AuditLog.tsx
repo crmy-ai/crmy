@@ -22,6 +22,9 @@ interface CrmyEvent {
   after_data?: unknown;
   metadata: Record<string, unknown>;
   created_at: string;
+  actor_display_name?: string;
+  actor_agent_model?: string;
+  actor_agent_identifier?: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -120,6 +123,13 @@ function DiffViewer({ before, after }: { before?: unknown; after?: unknown }) {
 
 // ─── Event Row ────────────────────────────────────────────────────────────────
 
+/** Shorten a model name for display: "claude-sonnet-4-20250514" → "claude-sonnet-4" */
+function shortModel(model?: string): string {
+  if (!model) return '';
+  // Strip trailing date-like suffix (e.g. -20250514)
+  return model.replace(/-\d{8}$/, '');
+}
+
 function EventRow({ event }: { event: CrmyEvent }) {
   const [expanded, setExpanded] = useState(false);
   const actorCfg = ACTOR_TYPE_CONFIG[event.actor_type] ?? ACTOR_TYPE_CONFIG.system;
@@ -128,17 +138,38 @@ function EventRow({ event }: { event: CrmyEvent }) {
   const hasDiff = event.before_data !== undefined || event.after_data !== undefined;
   const hasMetadata = Boolean(event.metadata && Object.keys(event.metadata).length > 0);
 
+  // Resolved actor display — prefer name, fall back to truncated ID
+  const actorName = event.actor_display_name
+    ?? (event.actor_id ? event.actor_id.slice(0, 8) : null);
+
+  const modelLabel = shortModel(event.actor_agent_model);
+
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
       <button
         className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/20 transition-colors"
         onClick={() => (hasDiff || hasMetadata) && setExpanded(!expanded)}
       >
-        {/* Actor type badge */}
-        <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border font-semibold shrink-0 ${actorCfg.cls}`}>
-          <ActorIcon className="w-2.5 h-2.5" />
-          {actorCfg.label}
-        </span>
+        {/* Actor block */}
+        <div className="flex flex-col items-start gap-0.5 shrink-0 min-w-[100px] max-w-[160px]">
+          <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border font-semibold ${actorCfg.cls}`}>
+            <ActorIcon className="w-2.5 h-2.5" />
+            {actorName ?? actorCfg.label}
+          </span>
+          {/* Model badge for agents */}
+          {event.actor_type === 'agent' && modelLabel && (
+            <span className="inline-flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded bg-violet-500/10 border border-violet-500/20 text-violet-400 font-mono leading-none">
+              <Cpu className="w-2 h-2" />
+              {modelLabel}
+            </span>
+          )}
+          {/* Agent identifier if present and different from display name */}
+          {event.actor_agent_identifier && event.actor_agent_identifier !== event.actor_display_name && (
+            <span className="text-[9px] text-muted-foreground/60 font-mono truncate max-w-full leading-none">
+              {event.actor_agent_identifier}
+            </span>
+          )}
+        </div>
 
         {/* Event type */}
         <span className={`inline-flex text-[10px] px-1.5 py-0.5 rounded border font-mono font-semibold shrink-0 ${eventTypeColor(event.event_type)}`}>
@@ -153,7 +184,6 @@ function EventRow({ event }: { event: CrmyEvent }) {
           <p className="text-xs text-muted-foreground truncate">
             {event.object_type}
             {event.object_id ? ` · ${event.object_id.slice(0, 8)}` : ''}
-            {event.actor_id ? ` · actor ${event.actor_id.slice(0, 8)}` : ''}
           </p>
         </div>
 
@@ -171,9 +201,33 @@ function EventRow({ event }: { event: CrmyEvent }) {
         )}
       </button>
 
-      {/* Expanded diff */}
+      {/* Expanded detail */}
       {expanded && (
         <div className="px-4 pb-4 border-t border-border/50 pt-3 space-y-3">
+          {/* Actor detail panel */}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            {actorName && (
+              <span className="text-muted-foreground">
+                Actor: <span className="text-foreground font-medium">{actorName}</span>
+              </span>
+            )}
+            {event.actor_id && (
+              <span className="text-muted-foreground font-mono">
+                ID: <span className="text-foreground">{event.actor_id}</span>
+              </span>
+            )}
+            {event.actor_agent_model && (
+              <span className="text-muted-foreground">
+                Model: <span className="text-violet-400 font-mono">{event.actor_agent_model}</span>
+              </span>
+            )}
+            {event.actor_agent_identifier && (
+              <span className="text-muted-foreground">
+                Identifier: <span className="text-foreground font-mono">{event.actor_agent_identifier}</span>
+              </span>
+            )}
+          </div>
+
           {hasDiff && (
             <div>
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Data Changes</p>

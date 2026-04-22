@@ -508,55 +508,177 @@ export const emailProviderSet = z.object({
 
 export const emailProviderGet = z.object({});
 
-export const emailSequenceCreate = z.object({
-  name: z.string().min(1),
+// ── Sequence step discriminated union ─────────────────────────────────────────
+
+const seqStepEmail = z.object({
+  type: z.literal('email').optional(),
+  delay_days: z.number().int().min(0).default(0),
+  delay_hours: z.number().int().min(0).default(0).optional(),
+  subject: z.string().min(1),
+  body_text: z.string().optional(),
+  body_html: z.string().optional(),
+  require_approval: z.boolean().optional(),
+  ai_generate: z.boolean().optional(),
+  ai_prompt: z.string().optional(),
+});
+
+const seqStepNotification = z.object({
+  type: z.literal('notification'),
+  delay_days: z.number().int().min(0).default(0),
+  channel_id: uuid.optional(),
+  message: z.string().min(1),
+});
+
+const seqStepTask = z.object({
+  type: z.literal('task'),
+  delay_days: z.number().int().min(0).default(0),
+  title: z.string().min(1),
   description: z.string().optional(),
-  steps: z.array(z.object({
-    delay_days: z.number().int().min(0),
-    subject: z.string().min(1),
-    body_html: z.string().optional(),
-    body_text: z.string().optional(),
+  assign_to: z.string().optional(),
+  priority: z.enum(['low', 'normal', 'high']).default('normal').optional(),
+});
+
+const seqStepWebhook = z.object({
+  type: z.literal('webhook'),
+  delay_days: z.number().int().min(0).default(0),
+  url: z.string().url(),
+  method: z.enum(['POST', 'GET']).default('POST').optional(),
+  headers: z.record(z.string()).optional(),
+  body_template: z.string().optional(),
+});
+
+const seqStepWait = z.object({
+  type: z.literal('wait'),
+  delay_days: z.number().int().min(0).default(0),
+  condition: z.object({
+    event: z.string(),
+    timeout_days: z.number().int().min(1),
+    timeout_branch: z.number().int().min(0).optional(),
+  }).optional(),
+});
+
+const seqStepBranch = z.object({
+  type: z.literal('branch'),
+  delay_days: z.number().int().min(0).default(0).optional(),
+  conditions: z.array(z.object({
+    trigger: z.enum(['replied', 'opened', 'clicked', 'goal_met', 'custom_event']),
+    event: z.string().optional(),
+    jump_to_step: z.number().int().min(0).optional(),
+    exit: z.boolean().optional(),
   })).min(1),
 });
 
-export const emailSequenceGet = z.object({ id: uuid });
-export const emailSequenceDelete = z.object({ id: uuid });
+const seqStepAiAction = z.object({
+  type: z.literal('ai_action'),
+  delay_days: z.number().int().min(0).default(0),
+  prompt: z.string().min(1),
+  tool_names: z.array(z.string()).optional(),
+  require_approval: z.boolean().optional(),
+});
 
-export const emailSequenceUpdate = z.object({
+export const sequenceStep = z.union([
+  seqStepEmail,
+  seqStepNotification,
+  seqStepTask,
+  seqStepWebhook,
+  seqStepWait,
+  seqStepBranch,
+  seqStepAiAction,
+]);
+
+// ── Sequence CRUD schemas ──────────────────────────────────────────────────────
+
+export const sequenceCreate = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  steps: z.array(sequenceStep).min(1),
+  channel_types: z.array(z.string()).optional(),
+  goal_event: z.string().optional(),
+  exit_on_reply: z.boolean().optional(),
+  ai_persona: z.string().optional(),
+  tags: z.array(z.string()).optional(),
+});
+
+export const sequenceGet = z.object({ id: uuid });
+export const sequenceDelete = z.object({ id: uuid });
+
+export const sequenceUpdate = z.object({
   id: uuid,
   patch: z.object({
     name: z.string().min(1).optional(),
     description: z.string().optional(),
-    steps: z.array(z.object({
-      delay_days: z.number().int().min(0),
-      subject: z.string().min(1),
-      body_html: z.string().optional(),
-      body_text: z.string().optional(),
-    })).min(1).optional(),
+    steps: z.array(sequenceStep).min(1).optional(),
     is_active: z.boolean().optional(),
+    channel_types: z.array(z.string()).optional(),
+    goal_event: z.string().optional(),
+    exit_on_reply: z.boolean().optional(),
+    ai_persona: z.string().optional(),
+    tags: z.array(z.string()).optional(),
   }),
 });
 
-export const emailSequenceList = z.object({
+export const sequenceList = z.object({
   is_active: z.boolean().optional(),
+  tags: z.array(z.string()).optional(),
   limit,
   cursor,
 });
 
-export const emailSequenceEnroll = z.object({
+export const sequenceEnroll = z.object({
   sequence_id: uuid,
   contact_id: uuid,
+  variables: z.record(z.unknown()).optional(),
+  start_at_step: z.number().int().min(0).optional(),
+  /** What the enrolling actor is trying to achieve — visible in briefings and the sandbox view. */
+  objective: z.string().max(500).optional(),
 });
 
-export const emailSequenceUnenroll = z.object({ id: uuid });
+export const sequenceEnrollmentContext = z.object({
+  enrollment_id: uuid,
+});
 
-export const emailSequenceEnrollmentList = z.object({
+export const sequenceUnenroll = z.object({ id: uuid });
+export const sequencePause = z.object({ id: uuid });
+export const sequenceResume = z.object({ id: uuid });
+
+export const sequenceAdvance = z.object({
+  id: uuid,
+  skip_to_step: z.number().int().min(0).optional(),
+  reason: z.string().optional(),
+});
+
+export const sequenceEnrollmentGet = z.object({ id: uuid });
+
+export const sequenceEnrollmentList = z.object({
   sequence_id: uuid.optional(),
   contact_id: uuid.optional(),
   status: z.enum(['active', 'completed', 'paused', 'cancelled']).optional(),
   limit,
   cursor,
 });
+
+export const sequenceDraftStep = z.object({
+  enrollment_id: uuid,
+  step_index: z.number().int().min(0),
+  instructions: z.string().optional(),
+});
+
+export const sequenceAnalytics = z.object({
+  sequence_id: uuid,
+  period_type: z.enum(['day', 'week', 'month']).optional(),
+  limit: z.number().int().min(1).max(90).default(30).optional(),
+});
+
+// ── Backward-compat aliases ────────────────────────────────────────────────────
+
+export const emailSequenceCreate = sequenceCreate;
+export const emailSequenceGet    = sequenceGet;
+export const emailSequenceDelete = sequenceDelete;
+export const emailSequenceUpdate = sequenceUpdate;
+export const emailSequenceList   = sequenceList;
+export const emailSequenceEnroll = sequenceEnroll;
+export const emailSequenceUnenroll = sequenceUnenroll;
+export const emailSequenceEnrollmentList = sequenceEnrollmentList;
 
 // -- Custom field schemas --
 

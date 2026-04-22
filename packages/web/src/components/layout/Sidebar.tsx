@@ -44,11 +44,11 @@ const dataNavItems = [
   { icon: Activity,    label: 'Activities',    path: '/activities',    color: ENTITY_COLORS.activities },
   { icon: Mail,        label: 'Emails',        path: '/emails',        color: ENTITY_COLORS.emails },
   { icon: ListOrdered, label: 'Sequences',     path: '/sequences',     color: ENTITY_COLORS.sequences },
-  { icon: ScrollText,  label: 'Audit Log',     path: '/audit-log',     color: ENTITY_COLORS.auditLog },
 ];
 
 const bottomItems = [
-  { icon: Settings, label: 'Settings', path: '/settings' },
+  { icon: Settings,    label: 'Settings',  path: '/settings'   },
+  { icon: ScrollText,  label: 'Audit Log', path: '/audit-log'  },
 ];
 
 interface NavItemDef {

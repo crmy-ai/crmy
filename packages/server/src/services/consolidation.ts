@@ -16,66 +16,7 @@
 import type { DbPool } from '../db/pool.js';
 import type { UUID, ContextEntry } from '@crmy/shared';
 import * as contextRepo from '../db/repos/context-entries.js';
-import * as agentRepo from '../db/repos/agent.js';
-import { decrypt } from '../agent/crypto.js';
-// Note: decrypt() is synchronous in this codebase
-
-// ── LLM helpers (reuse pattern from contradictions.ts) ──────────────────────
-
-async function callAnthropicSync(
-  systemPrompt: string,
-  userPrompt: string,
-  model: string,
-  baseUrl: string,
-  apiKey: string,
-): Promise<string> {
-  const url = `${baseUrl.replace(/\/+$/, '')}/messages`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-    }),
-  });
-  if (!res.ok) throw new Error(`Anthropic API ${res.status}`);
-  const data = await res.json() as { content: Array<{ type: string; text: string }> };
-  return data.content.find(b => b.type === 'text')?.text ?? '';
-}
-
-async function callOpenAICompatSync(
-  systemPrompt: string,
-  userPrompt: string,
-  model: string,
-  baseUrl: string,
-  apiKey: string,
-): Promise<string> {
-  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 1024,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ],
-    }),
-  });
-  if (!res.ok) throw new Error(`OpenAI-compat API ${res.status}`);
-  const data = await res.json() as { choices: Array<{ message: { content: string } }> };
-  return data.choices[0]?.message?.content ?? '';
-}
+import { callLLM } from '../agent/providers/llm.js';
 
 // ── Synthesis ────────────────────────────────────────────────────────────────
 
@@ -95,11 +36,9 @@ async function synthesiseFallback(entries: ContextEntry[]): Promise<SynthesisRes
 }
 
 async function synthesiseWithLLM(
+  db: DbPool,
+  tenantId: string,
   entries: ContextEntry[],
-  provider: string,
-  baseUrl: string,
-  model: string,
-  apiKey: string,
 ): Promise<SynthesisResult> {
   const systemPrompt = `You are a CRM knowledge synthesiser. Given multiple context entries of the same type about the same record, produce a single authoritative consolidation.
 
@@ -124,13 +63,8 @@ Body: ${e.body.slice(0, 1200)}`).join('\n\n---\n\n')}
 
 Synthesise these into one authoritative entry. Output JSON only.`;
 
-  let responseText: string;
   try {
-    if (provider === 'anthropic') {
-      responseText = await callAnthropicSync(systemPrompt, userPrompt, model, baseUrl, apiKey);
-    } else {
-      responseText = await callOpenAICompatSync(systemPrompt, userPrompt, model, baseUrl, apiKey);
-    }
+    const responseText = await callLLM(db, tenantId, { system: systemPrompt, user: userPrompt });
     // Extract JSON from potential markdown fences
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No JSON in response');
@@ -193,19 +127,7 @@ export async function consolidateContextEntries(
   // 2. Synthesise — try LLM, fall back to concatenation
   let synthesis: SynthesisResult;
   try {
-    const config = await agentRepo.getConfig(db, tenantId);
-    if (config?.enabled && config.api_key_enc) {
-      const apiKey = decrypt(config.api_key_enc).trim();
-      synthesis = await synthesiseWithLLM(
-        entries,
-        config.provider,
-        config.base_url,
-        config.model,
-        apiKey,
-      );
-    } else {
-      synthesis = await synthesiseFallback(entries);
-    }
+    synthesis = await synthesiseWithLLM(db, tenantId, entries);
   } catch {
     synthesis = await synthesiseFallback(entries);
   }

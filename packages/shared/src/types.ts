@@ -90,7 +90,9 @@ export interface Opportunity {
 export interface Activity {
   id: UUID;
   tenant_id: UUID;
-  type: 'call' | 'email' | 'meeting' | 'note' | 'task' | 'demo' | 'proposal' | 'research' | 'handoff' | 'status_update';
+  type: 'call' | 'email' | 'meeting' | 'note' | 'task' | 'demo' | 'proposal' | 'research' | 'handoff' | 'status_update'
+      | 'outreach_email' | 'outreach_call' | 'meeting_held' | 'meeting_scheduled'
+      | 'note_added' | 'research_completed';
   subject: string;
   body?: string;
   status: string;
@@ -159,6 +161,12 @@ export interface CrmyEvent {
   after_data?: unknown;
   metadata: Record<string, unknown>;
   created_at: string;
+  /** Resolved from actors join — display name of the actor */
+  actor_display_name?: string;
+  /** Resolved from actors join — model string for agent actors (e.g. "claude-sonnet-4-20250514") */
+  actor_agent_model?: string;
+  /** Resolved from actors join — stable agent identifier (e.g. "outreach-v1") */
+  actor_agent_identifier?: string;
 }
 
 export interface ApiKey {
@@ -681,6 +689,19 @@ export interface AdjacentContext {
   context_entries: Record<string, ContextEntry[]>;
 }
 
+export interface ActiveSequenceEnrollment {
+  enrollment_id: UUID;
+  sequence_id: UUID;
+  sequence_name: string;
+  current_step: number;
+  total_steps: number;
+  status: 'active' | 'paused';
+  next_send_at?: string;
+  objective?: string;
+  goal_event?: string;
+  enrolled_by_actor_id?: UUID;
+}
+
 export interface Briefing {
   subject: Record<string, unknown>;
   subject_type: SubjectType;
@@ -689,6 +710,8 @@ export interface Briefing {
   open_assignments: Assignment[];
   context_entries: Record<string, ContextEntry[]>;
   staleness_warnings: ContextEntry[];
+  /** Active sequence enrollments for this contact (shows agents what campaigns are running). */
+  active_sequences?: ActiveSequenceEnrollment[];
   /** Pairs of current entries that appear to state conflicting facts. */
   contradiction_warnings?: ContradictionWarning[];
   /** Context from related entities (populated when context_radius !== 'direct'). */

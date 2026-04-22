@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DbPool } from '../db/pool.js';
-import type { Briefing, UUID, SubjectType, ContextEntry, AdjacentContext } from '@crmy/shared';
+import type { Briefing, UUID, SubjectType, ContextEntry, AdjacentContext, ActiveSequenceEnrollment } from '@crmy/shared';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as accountRepo from '../db/repos/accounts.js';
 import * as oppRepo from '../db/repos/opportunities.js';
@@ -298,6 +298,46 @@ export async function assembleBriefing(
     }
   }
 
+  // 11. Active sequence enrollments (contacts only)
+  let active_sequences: ActiveSequenceEnrollment[] | undefined;
+  if (subjectType === 'contact') {
+    try {
+      const enrollmentRows = await db.query<{
+        id: UUID; sequence_id: UUID; sequence_name: string; current_step: number;
+        total_steps: number; status: string; next_send_at: string | null;
+        objective: string | null; goal_event: string | null; enrolled_by_actor_id: UUID | null;
+      }>(
+        `SELECT se.id, se.sequence_id, s.name AS sequence_name,
+                se.current_step, jsonb_array_length(s.steps) AS total_steps,
+                se.status, se.next_send_at, se.objective, s.goal_event,
+                se.enrolled_by_actor_id
+         FROM sequence_enrollments se
+         JOIN sequences s ON s.id = se.sequence_id
+         WHERE se.contact_id = $1 AND se.tenant_id = $2
+           AND se.status IN ('active','paused')
+         ORDER BY se.created_at DESC
+         LIMIT 10`,
+        [subjectId, tenantId],
+      );
+      if (enrollmentRows.rows.length > 0) {
+        active_sequences = enrollmentRows.rows.map(r => ({
+          enrollment_id: r.id,
+          sequence_id: r.sequence_id,
+          sequence_name: r.sequence_name,
+          current_step: r.current_step,
+          total_steps: r.total_steps,
+          status: r.status as 'active' | 'paused',
+          next_send_at: r.next_send_at ?? undefined,
+          objective: r.objective ?? undefined,
+          goal_event: r.goal_event ?? undefined,
+          enrolled_by_actor_id: r.enrolled_by_actor_id ?? undefined,
+        }));
+      }
+    } catch {
+      // Non-fatal — sequence enrollment data is supplementary
+    }
+  }
+
   return {
     subject: subject as Record<string, unknown>,
     subject_type: subjectType,
@@ -306,6 +346,7 @@ export async function assembleBriefing(
     open_assignments,
     context_entries,
     staleness_warnings,
+    ...(active_sequences?.length ? { active_sequences } : {}),
     ...(contradiction_warnings?.length ? { contradiction_warnings } : {}),
     ...(adjacent_context ? { adjacent_context } : {}),
     ...(tokenEstimate !== undefined ? { token_estimate: tokenEstimate } : {}),
@@ -439,6 +480,18 @@ export function formatBriefingText(briefing: Briefing): string {
         const itemName = item.name ?? `${item.first_name} ${item.last_name}`;
         lines.push(`  ${type}: ${itemName} (${(item.id as string).slice(0, 8)})`);
       }
+    }
+    lines.push('');
+  }
+
+  if (briefing.active_sequences?.length) {
+    lines.push('--- Active Sequences ---');
+    for (const s of briefing.active_sequences) {
+      const stepInfo = `Step ${s.current_step + 1}/${s.total_steps}`;
+      const nextInfo = s.next_send_at ? ` · Next: ${s.next_send_at.slice(0, 10)}` : '';
+      const objectiveInfo = s.objective ? ` · Objective: "${s.objective}"` : '';
+      const statusBadge = s.status === 'paused' ? ' [PAUSED]' : '';
+      lines.push(`  ${s.sequence_name}${statusBadge} — ${stepInfo}${nextInfo}${objectiveInfo}`);
     }
     lines.push('');
   }

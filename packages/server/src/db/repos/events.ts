@@ -55,7 +55,17 @@ export async function searchEvents(
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
-    `SELECT e.* FROM events e WHERE ${where} ORDER BY e.id DESC LIMIT $${idx}`,
+    `SELECT e.*,
+            a.display_name      AS actor_display_name,
+            a.agent_model       AS actor_agent_model,
+            a.agent_identifier  AS actor_agent_identifier
+     FROM events e
+     LEFT JOIN actors a
+       ON a.id::text = e.actor_id
+      AND a.tenant_id = e.tenant_id
+     WHERE ${where}
+     ORDER BY e.id DESC
+     LIMIT $${idx}`,
     params,
   );
 

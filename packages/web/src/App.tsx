@@ -45,7 +45,7 @@ import WorkflowsPage from '@/pages/Workflows';
 import EmailsPage from '@/pages/Emails';
 import ActorsPage from '@/pages/Agents';
 import MemoryGraphPage from '@/pages/MemoryGraphPage';
-import EmailSequencesPage from '@/pages/EmailSequences';
+import SequencesPage from '@/pages/Sequences';
 import InboundInboxPage from '@/pages/InboundInbox';
 import AuditLogPage from '@/pages/AuditLog';
 
@@ -103,7 +103,8 @@ function AnimatedRoutes() {
           <Route path="/agents" element={<Navigate to="/settings/agents" replace />} />
           <Route path="/actors" element={<Navigate to="/settings/agents" replace />} />
           <Route path="/contacts/:id/graph" element={<MemoryGraphPage />} />
-          <Route path="/sequences" element={<EmailSequencesPage />} />
+          <Route path="/sequences" element={<SequencesPage />} />
+          <Route path="/email-sequences" element={<SequencesPage />} />
           <Route path="/inbound" element={<Navigate to="/emails" replace />} />
           <Route path="/audit-log" element={<AuditLogPage />} />
           <Route path="/accounts/:id/graph" element={<MemoryGraphPage />} />

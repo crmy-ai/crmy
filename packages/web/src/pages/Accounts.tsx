@@ -9,7 +9,7 @@ import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { motion } from 'framer-motion';
-import { LayoutGrid, List, ChevronUp, ChevronDown, Sparkles, Globe, DollarSign, Heart, Building2, FileText } from 'lucide-react';
+import { LayoutGrid, List, ChevronUp, ChevronDown, Sparkles, Globe, DollarSign, Heart, Building2, FileText, Plus } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -165,7 +165,8 @@ export default function Accounts() {
         searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search accounts..."
         filters={filterConfigs} activeFilters={activeFilters} onFilterChange={handleFilterChange}
         onClearFilters={() => setActiveFilters({})} sortOptions={sortOptions} currentSort={sort}
-        onSortChange={handleSortChange} onAdd={() => openQuickAdd('account')} addLabel="New Account" entityType="accounts"
+        onSortChange={handleSortChange} entityType="accounts"
+        onAdd={() => openQuickAdd('account')} addLabel="New Account"
       />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">

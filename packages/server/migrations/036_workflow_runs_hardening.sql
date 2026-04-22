@@ -6,9 +6,16 @@ ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS action_logs JSONB NOT NULL DE
 -- Computed total execution duration in milliseconds
 ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS duration_ms INT;
 
--- Enforce valid status values at the DB level
-ALTER TABLE workflow_runs ADD CONSTRAINT IF NOT EXISTS workflow_runs_status_check
-  CHECK (status IN ('running','completed','failed'));
+-- Enforce valid status values at the DB level (skip if constraint already exists)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'workflow_runs_status_check'
+  ) THEN
+    ALTER TABLE workflow_runs ADD CONSTRAINT workflow_runs_status_check
+      CHECK (status IN ('running','completed','failed'));
+  END IF;
+END $$;
 
 -- Index for time-range queries (e.g. "failed runs in last hour")
 CREATE INDEX IF NOT EXISTS workflow_runs_started_at_idx
