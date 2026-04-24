@@ -1201,6 +1201,20 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.post('/workflows/:id/trigger', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const { executeWorkflowDirect } = await import('../workflows/engine.js');
+      const result = await executeWorkflowDirect(
+        db,
+        actor.tenant_id,
+        p(req, 'id'),
+        req.body ?? {},
+      );
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Actors ---
   router.get('/actors', async (req: Request, res: Response) => {
     try {

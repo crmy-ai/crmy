@@ -432,7 +432,7 @@ export default function Agent() {
   if (configLoading) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="Workspace Agent" />
+        <TopBar title="Workspace Agent" icon={Bot} iconClassName="text-primary" description="AI-powered assistant with access to your full CRM context." />
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/40" />
         </div>
@@ -444,7 +444,7 @@ export default function Agent() {
   if (!enabled) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="Workspace Agent" />
+        <TopBar title="Workspace Agent" icon={Bot} iconClassName="text-primary" description="AI-powered assistant with access to your full CRM context." />
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center max-w-md space-y-3">
             <Bot className="w-12 h-12 mx-auto text-muted-foreground/40" />
@@ -461,7 +461,7 @@ export default function Agent() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Workspace Agent" />
+      <TopBar title="Workspace Agent" icon={Bot} iconClassName="text-primary" description="AI-powered assistant with access to your full CRM context." />
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
 
         {/* ── Chat panel ── */}

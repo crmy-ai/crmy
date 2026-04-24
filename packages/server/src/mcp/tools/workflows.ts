@@ -11,7 +11,7 @@ import type { ActorContext } from '@crmy/shared';
 import * as wfRepo from '../../db/repos/workflows.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
-import { invalidateWorkflowCache, dryRunWorkflow } from '../../workflows/engine.js';
+import { invalidateWorkflowCache, dryRunWorkflow, executeWorkflowDirect } from '../../workflows/engine.js';
 import type { ToolDef } from '../server.js';
 
 export function workflowTools(db: DbPool): ToolDef[] {
@@ -177,6 +177,31 @@ export function workflowTools(db: DbPool): ToolDef[] {
 
         invalidateWorkflowCache(actor.tenant_id);
         return { workflow: clone };
+      },
+    },
+    {
+      name: 'workflow_trigger',
+      tier: 'admin',
+      description: 'Manually trigger a workflow by ID, bypassing normal event dispatch. Works for any workflow (manual or event-driven). Use this to run an automation on behalf of a human, test a live workflow against a real subject, or invoke a workflow as part of a multi-agent orchestration. Returns a run summary with status and action count.',
+      inputSchema: z.object({
+        id: z.string().uuid().describe('UUID of the workflow to trigger'),
+        subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case']).optional()
+          .describe('Entity type the workflow is running for (used to resolve {{contact.*}} etc. variables)'),
+        subject_id: z.string().uuid().optional()
+          .describe('UUID of the subject entity'),
+        variables: z.record(z.unknown()).optional()
+          .describe('Additional variables to inject into action templates, merged on top of subject fields'),
+      }),
+      handler: async (
+        input: { id: string; subject_type?: string; subject_id?: string; variables?: Record<string, unknown> },
+        actor: ActorContext,
+      ) => {
+        const payload: Record<string, unknown> = {
+          ...(input.variables ?? {}),
+          ...(input.subject_type ? { _subject_type: input.subject_type } : {}),
+          ...(input.subject_id   ? { _subject_id:   input.subject_id   } : {}),
+        };
+        return executeWorkflowDirect(db, actor.tenant_id, input.id, payload);
       },
     },
   ];

@@ -439,37 +439,6 @@ export function useCreateEmail() {
   });
 }
 
-// Email Sequences (legacy hooks — kept for backward compat)
-export function useEmailSequences(params?: { is_active?: boolean; limit?: number }) {
-  return useList('sequences', 'sequences', params as Record<string, string | number | boolean | undefined>);
-}
-export function useEmailSequence(id: string) {
-  return useQuery({ queryKey: ['sequence', id], queryFn: () => api.get(`sequences/${id}`), enabled: !!id });
-}
-export function useCreateEmailSequence() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: Record<string, unknown>) => api.post('sequences', data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sequences'] }),
-  });
-}
-export function useUpdateEmailSequence(id: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ patch }: { patch: Record<string, unknown> }) => api.patch(`sequences/${id}`, patch),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sequences'] });
-      qc.invalidateQueries({ queryKey: ['sequence', id] });
-    },
-  });
-}
-export function useDeleteEmailSequence(id: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.delete(`sequences/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sequences'] }),
-  });
-}
 export function useEnrollInSequence() {
   const qc = useQueryClient();
   return useMutation({
@@ -805,7 +774,7 @@ export function useCreateContextEntry() {
 export function useSupersedeContextEntry() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; body: string; title?: string }) =>
+    mutationFn: ({ id, ...data }: { id: string; body: string; title?: string; confidence?: number }) =>
       api.post(`context/${id}/supersede`, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['context-entries'] }),
   });
@@ -968,6 +937,18 @@ export function useCloneWorkflow() {
     mutationFn: ({ id, name }: { id: string; name?: string }) =>
       api.post(`workflows/${id}/clone`, name ? { name } : {}),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['workflows'] }),
+  });
+}
+
+export function useManualTriggerWorkflow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: Record<string, unknown> }) =>
+      api.post(`workflows/${id}/trigger`, payload),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: ['workflow-runs', id] });
+      qc.invalidateQueries({ queryKey: ['workflows'] });
+    },
   });
 }
 

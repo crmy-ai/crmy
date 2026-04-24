@@ -7,13 +7,16 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  Handle,
   MiniMap,
+  Position,
   useReactFlow,
   type Node,
   type Edge,
 } from '@xyflow/react';
 import { useMemo, useEffect, useRef, useCallback } from 'react';
 import { useBriefing } from '@/api/hooks';
+import { useAppStore } from '@/store/appStore';
 import { TYPE_COLORS } from './ContextPanel';
 import {
   Loader2,
@@ -33,14 +36,16 @@ import {
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface MemoryGraphProps {
-  subjectType:    string;
-  subjectId:      string;
-  subjectName:    string;
-  selectedNodeId: string | null;
-  onNodeSelect:   (id: string | null, data: GraphNodeData | null) => void;
-  activeFilters:  Set<string>;
-  fitViewRef:     React.MutableRefObject<(() => void) | null>;
-  onFilterCounts: (counts: FilterCounts) => void;
+  subjectType:         string;
+  subjectId:           string;
+  subjectName:         string;
+  selectedNodeId:      string | null;
+  onNodeSelect:        (id: string | null, data: GraphNodeData | null) => void;
+  activeFilters:       Set<string>;
+  fitViewRef:          React.MutableRefObject<(() => void) | null>;
+  onFilterCounts:      (counts: FilterCounts) => void;
+  /** When provided, clicking a relatedNode re-centers the graph on that entity instead of opening the drawer. */
+  onNavigateToEntity?: (type: string, id: string, name: string) => void;
 }
 
 // ── Layout helper ─────────────────────────────────────────────────────────────
@@ -86,7 +91,7 @@ function getCategoryForNodeType(type: string | undefined): string {
 
 // ── Graph builder ─────────────────────────────────────────────────────────────
 
-function buildGraph(briefing: Record<string, unknown> | null, subjectType: string, subjectName: string) {
+function buildGraph(briefing: Record<string, unknown> | null, subjectType: string, subjectName: string, subjectId: string) {
   const nodes: Node<GraphNodeData>[] = [];
   const edges: Edge[] = [];
   const CX = 0, CY = 0;
@@ -108,11 +113,13 @@ function buildGraph(briefing: Record<string, unknown> | null, subjectType: strin
       label: subjectName || subjectType,
       color: ENTITY_HEX[subjectType] ?? '#6366f1',
       subjectType,
+      entityId: subjectId,
+      entityType: subjectType,
     },
   });
 
   // ── Zone 1: Related objects — right arc (r=200) ──
-  relatedObjects.slice(0, 5).forEach((obj, i) => {
+  relatedObjects.slice(0, 8).forEach((obj, i) => {
     const pos = radialPos(CX, CY, 200, i, Math.max(relatedObjects.length, 1), -Math.PI / 2, Math.PI);
     const color = ENTITY_HEX[obj.type] ?? '#94a3b8';
     const nodeId = `related-${obj.id}`;
@@ -286,6 +293,13 @@ const ACTIVITY_ICONS: Record<string, LucideIcon> = {
   status_update: Activity,
 };
 
+// ── Invisible handle helper — edges render behind nodes so lines appear to
+//    terminate at the node boundary even though endpoints are at center ─────────
+
+function nh(top: number, left: number): React.CSSProperties {
+  return { position: 'absolute', top, left, width: 1, height: 1, opacity: 0, border: 'none', background: 'transparent', minWidth: 1, minHeight: 1, pointerEvents: 'none' };
+}
+
 // ── Custom node components (module-scope — stable references) ─────────────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -293,7 +307,10 @@ function EntityNodeComponent({ data }: { data: any }) {
   const color: string = data.color;
   const Icon = ENTITY_ICONS[data.subjectType as string] ?? Users;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, cursor: 'pointer', position: 'relative' }}>
+      {/* Handles at circle center (circle is 60×60, top-left of bounding box) */}
+      <Handle type="source" id="s" position={Position.Top} isConnectable={false} style={nh(30, 30)} />
+      <Handle type="target" id="t" position={Position.Top} isConnectable={false} style={nh(30, 30)} />
       <div style={{
         width: 60, height: 60, borderRadius: '50%',
         backgroundColor: color + '18',
@@ -318,8 +335,18 @@ function EntityNodeComponent({ data }: { data: any }) {
 function RelatedNodeComponent({ data }: { data: any }) {
   const color: string = data.color;
   const Icon = ENTITY_ICONS[data.entityType as string] ?? Users;
+  const navigable: boolean = !!data.navigable;
+  const title = navigable
+    ? `Explore ${(data.entityType as string ?? '').replace(/_/g, ' ')}: ${data.label}`
+    : data.label;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+    <div
+      title={title}
+      style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer', position: 'relative' }}
+    >
+      {/* Handles at circle center (circle is 40×40) */}
+      <Handle type="source" id="s" position={Position.Top} isConnectable={false} style={nh(20, 20)} />
+      <Handle type="target" id="t" position={Position.Top} isConnectable={false} style={nh(20, 20)} />
       <div style={{
         width: 40, height: 40, borderRadius: '50%',
         backgroundColor: color + '15',
@@ -329,6 +356,17 @@ function RelatedNodeComponent({ data }: { data: any }) {
       }}>
         <Icon size={15} color={color} strokeWidth={1.75} />
       </div>
+      {navigable && (
+        <div style={{
+          position: 'absolute', top: -5, right: -5,
+          width: 14, height: 14, borderRadius: '50%',
+          backgroundColor: color,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 8, color: '#fff', fontWeight: 700, lineHeight: 1,
+        }}>
+          ↗
+        </div>
+      )}
       <span style={{
         fontSize: 9, fontWeight: 500, whiteSpace: 'nowrap',
         maxWidth: 64, overflow: 'hidden', textOverflow: 'ellipsis',
@@ -344,7 +382,10 @@ function RelatedNodeComponent({ data }: { data: any }) {
 function ClusterNodeComponent({ data }: { data: any }) {
   const color: string = data.color;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', position: 'relative' }}>
+      {/* Handles at pill center (80×28 bounding box) */}
+      <Handle type="source" id="s" position={Position.Top} isConnectable={false} style={nh(14, 40)} />
+      <Handle type="target" id="t" position={Position.Top} isConnectable={false} style={nh(14, 40)} />
       <div style={{
         padding: '4px 10px', borderRadius: 8,
         backgroundColor: 'hsl(var(--card))',
@@ -374,13 +415,17 @@ function LeafNodeComponent({ data }: { data: any }) {
   const color: string = data.color;
   return (
     <div style={{
-      width: 12, height: 12, borderRadius: '50%',
+      width: 12, height: 12, borderRadius: '50%', position: 'relative',
       backgroundColor: color + '70',
       border: data.isSelected ? `1.5px solid ${color}` : `1px solid ${color}50`,
       cursor: 'pointer',
       transition: 'border-color 0.15s',
       opacity: data.isStale ? 0.4 : 1,
-    }} />
+    }}>
+      {/* Handles at circle center (12×12 bounding box) */}
+      <Handle type="source" id="s" position={Position.Top} isConnectable={false} style={nh(6, 6)} />
+      <Handle type="target" id="t" position={Position.Top} isConnectable={false} style={nh(6, 6)} />
+    </div>
   );
 }
 
@@ -389,7 +434,10 @@ function ActivityNodeComponent({ data }: { data: any }) {
   const color: string = data.color;
   const Icon = ACTIVITY_ICONS[data.activityType as string] ?? Activity;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', position: 'relative' }}>
+      {/* Handles at square center (32×32 bounding box) */}
+      <Handle type="source" id="s" position={Position.Top} isConnectable={false} style={nh(16, 16)} />
+      <Handle type="target" id="t" position={Position.Top} isConnectable={false} style={nh(16, 16)} />
       <div style={{
         width: 32, height: 32, borderRadius: 8,
         backgroundColor: 'hsl(var(--card))',
@@ -407,7 +455,10 @@ function ActivityNodeComponent({ data }: { data: any }) {
 function AssignmentNodeComponent({ data }: { data: any }) {
   const color: string = data.color;
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, cursor: 'pointer', position: 'relative' }}>
+      {/* Handles at square center (32×32 bounding box) */}
+      <Handle type="source" id="s" position={Position.Top} isConnectable={false} style={nh(16, 16)} />
+      <Handle type="target" id="t" position={Position.Top} isConnectable={false} style={nh(16, 16)} />
       <div style={{
         width: 32, height: 32, borderRadius: 8,
         backgroundColor: 'hsl(var(--card))',
@@ -446,6 +497,7 @@ function FitViewBridge({ fitViewRef }: { fitViewRef: React.MutableRefObject<(() 
 export function MemoryGraph({
   subjectType, subjectId, subjectName,
   selectedNodeId, onNodeSelect, activeFilters, fitViewRef, onFilterCounts,
+  onNavigateToEntity,
 }: MemoryGraphProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: briefingData, isLoading } = useBriefing(subjectType, subjectId) as any;
@@ -454,8 +506,8 @@ export function MemoryGraph({
   const prevCountsRef = useRef<FilterCounts | null>(null);
 
   const { nodes: baseNodes, edges: baseEdges, filterCounts } = useMemo(
-    () => buildGraph(briefing, subjectType, subjectName),
-    [briefing, subjectType, subjectName],
+    () => buildGraph(briefing, subjectType, subjectName, subjectId),
+    [briefing, subjectType, subjectName, subjectId],
   );
 
   // Propagate counts to page (stable if unchanged)
@@ -476,9 +528,14 @@ export function MemoryGraph({
     baseNodes.map(n => ({
       ...n,
       hidden: n.type !== 'entityNode' && !activeFilters.has(getCategoryForNodeType(n.type ?? '')),
-      data: { ...n.data, isSelected: n.id === selectedNodeId },
+      data: {
+        ...n.data,
+        isSelected: n.id === selectedNodeId,
+        // Flag related nodes as navigable so the node component can show the ↗ badge
+        navigable: n.type === 'relatedNode' && !!onNavigateToEntity,
+      },
     })),
-    [baseNodes, activeFilters, selectedNodeId],
+    [baseNodes, activeFilters, selectedNodeId, onNavigateToEntity],
   );
 
   // Hide edges whose source/target is hidden
@@ -487,9 +544,48 @@ export function MemoryGraph({
     return baseEdges.filter(e => visibleIds.has(e.source) && visibleIds.has(e.target));
   }, [baseEdges, displayNodes]);
 
+  const openDrawer = useAppStore(s => s.openDrawer);
+
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node<GraphNodeData>) => {
-    onNodeSelect(node.id, node.data as GraphNodeData);
-  }, [onNodeSelect]);
+    const data = node.data as GraphNodeData;
+
+    // Related entities: navigate the graph if a handler is provided, otherwise open drawer
+    if (node.type === 'relatedNode') {
+      const entityType = data.entityType as string | undefined;
+      const entityId   = data.entityId   as string | undefined;
+      if (entityId && entityType) {
+        if (onNavigateToEntity) {
+          onNavigateToEntity(entityType, entityId, data.label);
+        } else {
+          const drawerType =
+            entityType === 'account'     ? 'account'     as const
+            : entityType === 'opportunity' ? 'opportunity' as const
+            : entityType === 'use_case'    ? 'use-case'   as const
+            : 'contact' as const;
+          openDrawer(drawerType, entityId);
+        }
+      }
+      return;
+    }
+
+    // Center entity node: open its drawer (it's the record currently in focus)
+    if (node.type === 'entityNode') {
+      const entityType = (data.entityType ?? data.subjectType) as string | undefined;
+      const entityId   = data.entityId as string | undefined;
+      if (entityId && entityType) {
+        const drawerType =
+          entityType === 'account'     ? 'account'     as const
+          : entityType === 'opportunity' ? 'opportunity' as const
+          : entityType === 'use_case'    ? 'use-case'   as const
+          : 'contact' as const;
+        openDrawer(drawerType, entityId);
+      }
+      return;
+    }
+
+    // Context clusters, leaf entries, activities, assignments → show the detail sheet
+    onNodeSelect(node.id, data);
+  }, [onNodeSelect, openDrawer, onNavigateToEntity]);
 
   const isEmpty = !briefing ||
     (Object.keys(briefing?.context_entries ?? {}).length === 0 &&

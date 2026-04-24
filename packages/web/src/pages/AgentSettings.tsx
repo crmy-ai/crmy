@@ -353,7 +353,7 @@ export default function AgentSettings() {
             />
             {!canEnable && !enabled && (
               <p className="text-[10px] text-muted-foreground text-right max-w-[160px]">
-                Configure and test your provider first
+                Save a provider &amp; model below first
               </p>
             )}
           </div>
@@ -365,7 +365,8 @@ export default function AgentSettings() {
       </div>
 
       {/* ── SECTION 2: Provider & Model ─────────────────────────────────── */}
-      <div className={`rounded-xl border border-border bg-card overflow-hidden transition-opacity ${dimCls}`} aria-disabled={!enabled}>
+      {/* Always interactive — user must configure provider before enabling the agent */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center">

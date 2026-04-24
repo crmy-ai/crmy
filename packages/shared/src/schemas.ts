@@ -835,6 +835,24 @@ const wfActionWait = z.object({
   }),
 });
 
+const wfActionEnrollInSequence = z.object({
+  type: z.literal('enroll_in_sequence'),
+  config: z.object({
+    sequence_id: z.string().uuid().describe('UUID of the sequence to enroll the contact into'),
+    contact_id:  z.string().uuid().optional().describe('Contact UUID override; auto-resolved from event subject if omitted'),
+    objective:   z.string().max(500).optional().describe('Optional goal text for this enrollment'),
+  }),
+});
+
+const wfActionHitlCheckpoint = z.object({
+  type: z.literal('hitl_checkpoint'),
+  config: z.object({
+    title:        z.string().min(1).describe('Review request title shown to the human reviewer. Supports {{variables}}.'),
+    instructions: z.string().optional().describe('Optional instructions for the reviewer — what to check or decide'),
+    priority:     z.enum(['normal', 'high', 'urgent']).default('normal').optional(),
+  }),
+});
+
 // Discriminated union covering all action types
 export const workflowAction = z.discriminatedUnion('type', [
   wfActionSendNotification,
@@ -846,6 +864,8 @@ export const workflowAction = z.discriminatedUnion('type', [
   wfActionAssignOwner,
   wfActionWebhook,
   wfActionWait,
+  wfActionEnrollInSequence,
+  wfActionHitlCheckpoint,
   // create_context_entry uses z.union so needs separate handling
 ]).or(wfActionCreateContextEntry);
 

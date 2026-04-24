@@ -20,12 +20,13 @@ import { UseCaseDrawer } from '@/components/crm/UseCaseDrawer';
 import { AccountDrawer } from '@/components/crm/AccountDrawer';
 import { AssignmentDrawer } from '@/components/crm/AssignmentDrawer';
 import { WorkflowDrawer } from '@/components/crm/WorkflowDrawer';
+import { WorkflowEditor } from '@/components/crm/WorkflowEditor';
+import { SequenceEditor } from '@/components/crm/SequenceEditor';
 import { EmailDrawer } from '@/components/crm/EmailDrawer';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useAppStore } from '@/store/appStore';
 import { useTheme } from '@/hooks/useTheme';
 import { AgentSettingsProvider } from '@/contexts/AgentSettingsContext';
-import { AIFab } from '@/components/crm/AIFab';
 
 import { LoginPage } from '@/pages/auth/Login';
 import Dashboard from '@/pages/Dashboard';
@@ -46,6 +47,7 @@ import EmailsPage from '@/pages/Emails';
 import ActorsPage from '@/pages/Agents';
 import MemoryGraphPage from '@/pages/MemoryGraphPage';
 import SequencesPage from '@/pages/Sequences';
+import AutomationsPage from '@/pages/Automations';
 import InboundInboxPage from '@/pages/InboundInbox';
 import AuditLogPage from '@/pages/AuditLog';
 
@@ -98,13 +100,13 @@ function AnimatedRoutes() {
           <Route path="/approvals" element={<Navigate to="/handoffs" replace />} />
           <Route path="/hitl" element={<Navigate to="/handoffs" replace />} />
           <Route path="/context" element={<ContextPage />} />
-          <Route path="/workflows" element={<WorkflowsPage />} />
+          <Route path="/automations" element={<AutomationsPage />} />
+          <Route path="/workflows"   element={<Navigate to="/automations?tab=triggers"  replace />} />
+          <Route path="/sequences"   element={<Navigate to="/automations?tab=sequences" replace />} />
           <Route path="/emails" element={<EmailsPage />} />
           <Route path="/agents" element={<Navigate to="/settings/agents" replace />} />
           <Route path="/actors" element={<Navigate to="/settings/agents" replace />} />
           <Route path="/contacts/:id/graph" element={<MemoryGraphPage />} />
-          <Route path="/sequences" element={<SequencesPage />} />
-          <Route path="/email-sequences" element={<SequencesPage />} />
           <Route path="/inbound" element={<Navigate to="/emails" replace />} />
           <Route path="/audit-log" element={<AuditLogPage />} />
           <Route path="/accounts/:id/graph" element={<MemoryGraphPage />} />
@@ -120,7 +122,11 @@ function AnimatedRoutes() {
 
 function AppContent() {
   useKeyboardShortcuts();
-  const { drawerType, zenMode } = useAppStore();
+  const {
+    drawerType, zenMode,
+    workflowEditorOpen, workflowEditorId, closeWorkflowEditor,
+    sequenceEditorOpen, sequenceEditorId, closeSequenceEditor,
+  } = useAppStore();
 
   const drawerTitle = drawerType === 'contact' ? 'Contact Details'
     : drawerType === 'opportunity' ? 'Opportunity Details'
@@ -151,11 +157,26 @@ function AppContent() {
         {drawerType === 'email' && <EmailDrawer />}
       </DrawerShell>
 
+      {/* Workflow editor — lives at root so it's never unmounted by other state changes */}
+      <WorkflowEditor
+        open={workflowEditorOpen}
+        workflowId={workflowEditorId}
+        onClose={closeWorkflowEditor}
+        onSaved={closeWorkflowEditor}
+      />
+
+      {/* Sequence editor — same root-level pattern for consistent layering */}
+      <SequenceEditor
+        open={sequenceEditorOpen}
+        sequenceId={sequenceEditorId}
+        onClose={closeSequenceEditor}
+        onSaved={closeSequenceEditor}
+      />
+
       {/* Overlays */}
       <CommandPalette />
       <ShortcutsOverlay />
       <QuickAddDrawer />
-      <AIFab />
     </div>
   );
 }

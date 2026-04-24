@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ContextBrowser } from '@/components/crm/ContextBrowser';
+import { GraphTab } from './GraphExplorerPage';
 import { TopBar } from '@/components/layout/TopBar';
 import { ActivityFeed } from '@/components/crm/CrmWidgets';
 import { useHITLRequests, useResolveHITL, useContextEntries, useActors } from '@/api/hooks';
@@ -20,6 +21,7 @@ import {
   Clock,
   Layers,
   Brain,
+  Network,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -104,7 +106,7 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-full">
       <TopBar
-        title="Workspace"
+        title="Context"
         icon={Brain}
         iconClassName="text-primary"
         description="Agent memory — context entries, handoffs, and active agents at a glance."
@@ -128,10 +130,20 @@ export default function Dashboard() {
         >
           <Library className="w-3.5 h-3.5" /> Knowledge
         </button>
+        <button
+          onClick={() => setSearchParams({ tab: 'graph' })}
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+            activeTab === 'graph' ? 'border-[#0ea5e9] text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Network className="w-3.5 h-3.5" /> Graph
+        </button>
       </div>
 
       {activeTab === 'knowledge' ? (
         <ContextBrowser />
+      ) : activeTab === 'graph' ? (
+        <GraphTab />
       ) : (
       <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
 

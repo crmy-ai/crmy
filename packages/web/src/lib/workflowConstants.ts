@@ -3,6 +3,8 @@
 
 /** All known CRM trigger events for workflow autocomplete. */
 export const TRIGGER_EVENTS = [
+  // Manual
+  { value: 'manual',                     label: 'Manual / On Demand',         group: 'Manual'        },
   // Contacts
   { value: 'contact.created',            label: 'Contact created',            group: 'Contacts'      },
   { value: 'contact.updated',            label: 'Contact updated',            group: 'Contacts'      },
@@ -52,7 +54,7 @@ export interface ActionConfigField {
   label:       string;
   placeholder: string;
   required:    boolean;
-  type?:       'text' | 'boolean' | 'textarea' | 'number';
+  type?:       'text' | 'boolean' | 'textarea' | 'number' | 'sequence_picker';
   hint?:       string;
 }
 
@@ -62,13 +64,48 @@ export interface ActionTypeDef {
   description?: string;
   configFields: ActionConfigField[];
   supportsVariables?: boolean;
+  /** UI grouping category */
+  group?:        string;
+  /** This action type always creates a HITL request (blocks for human review) */
+  isHITL?:       boolean;
+  /** This action CAN require human review via a require_approval config field */
+  hitlCapable?:  boolean;
 }
 
 export const ACTION_TYPES: ActionTypeDef[] = [
+  // ── Human review ──────────────────────────────────────────────────────────
+  {
+    value: 'hitl_checkpoint',
+    label: 'Human Review Checkpoint',
+    description: 'Pause and request human review before continuing. Subsequent actions run after approval.',
+    group: 'Human',
+    isHITL: true,
+    configFields: [
+      { key: 'title',        label: 'Review request title', placeholder: 'e.g. Review outreach email for {{subject.first_name}}', required: true,  type: 'text',     hint: 'Supports {{variables}}' },
+      { key: 'instructions', label: 'Instructions',         placeholder: 'What should the reviewer check or decide?',             required: false, type: 'textarea' },
+      { key: 'priority',     label: 'Priority',             placeholder: 'normal  (or high / urgent)',                            required: false, type: 'text' },
+    ],
+  },
+  // ── Outreach ──────────────────────────────────────────────────────────────
+  {
+    value: 'send_email',
+    label: 'Send email',
+    description: 'Compose and send an email. Enable "Require approval" to route through a human before sending.',
+    group: 'Outreach',
+    supportsVariables: true,
+    hitlCapable: true,
+    configFields: [
+      { key: 'to_address',       label: 'To',               placeholder: 'e.g. {{subject.email}} or person@example.com', required: true,  type: 'text',     hint: 'Supports {{variables}}' },
+      { key: 'subject',          label: 'Subject',          placeholder: 'e.g. Following up on {{subject.name}}',        required: true,  type: 'text',     hint: 'Supports {{variables}}' },
+      { key: 'body_text',        label: 'Body',             placeholder: 'Email body. Supports {{variables}}.',          required: true,  type: 'textarea', hint: 'Supports {{variables}}' },
+      { key: 'require_approval', label: 'Require human approval before sending', placeholder: '', required: false, type: 'boolean', hint: 'A HITL review request is created; email only sends after approval' },
+    ],
+  },
   {
     value: 'send_notification',
     label: 'Send notification',
     description: 'Post a message to a messaging channel (Slack, etc.)',
+    group: 'Outreach',
     supportsVariables: true,
     configFields: [
       { key: 'message',    label: 'Message',    placeholder: 'e.g. New lead arrived: {{subject.first_name}}', required: true,  type: 'textarea', hint: 'Supports {{variables}}' },
@@ -76,53 +113,45 @@ export const ACTION_TYPES: ActionTypeDef[] = [
       { key: 'recipient',  label: 'Recipient',  placeholder: 'e.g. #channel or @user',                        required: false, type: 'text' },
     ],
   },
-  {
-    value: 'send_email',
-    label: 'Send email',
-    description: 'Compose and send an email, optionally requiring human approval',
-    supportsVariables: true,
-    configFields: [
-      { key: 'to_address',       label: 'To',               placeholder: 'e.g. {{subject.email}} or person@example.com', required: true,  type: 'text',     hint: 'Supports {{variables}}' },
-      { key: 'subject',          label: 'Subject',          placeholder: 'e.g. Following up on {{subject.name}}',        required: true,  type: 'text',     hint: 'Supports {{variables}}' },
-      { key: 'body_text',        label: 'Body',             placeholder: 'Email body. Supports {{variables}}.',          required: true,  type: 'textarea', hint: 'Supports {{variables}}' },
-      { key: 'require_approval', label: 'Require approval', placeholder: '',                                             required: false, type: 'boolean',  hint: 'Creates a HITL request before sending' },
-    ],
-  },
+  // ── CRM ───────────────────────────────────────────────────────────────────
   {
     value: 'create_context_entry',
     label: 'Create context entry',
     description: 'Add a note or insight to the triggered entity\'s knowledge base',
+    group: 'CRM',
     supportsVariables: true,
     configFields: [
       { key: 'body',         label: 'Content',      placeholder: 'Note content. Supports {{variables}}.', required: true,  type: 'textarea', hint: 'Supports {{variables}}' },
       { key: 'context_type', label: 'Context type', placeholder: 'e.g. note, insight (default: note)',    required: false, type: 'text' },
     ],
   },
-  // Backward-compat alias — hidden from new workflow UI but kept for stored workflows
-  {
-    value: 'create_note',
-    label: 'Create context entry (legacy)',
-    description: 'Deprecated — use "Create context entry" instead',
-    supportsVariables: true,
-    configFields: [
-      { key: 'body', label: 'Note body', placeholder: 'Note content. Supports {{variables}}.', required: true, type: 'textarea', hint: 'Supports {{variables}}' },
-    ],
-  },
   {
     value: 'create_activity',
     label: 'Create activity',
     description: 'Log a CRM activity on the triggered entity',
+    group: 'CRM',
     supportsVariables: true,
     configFields: [
-      { key: 'type',    label: 'Type',    placeholder: 'e.g. task, call, email, note',   required: true,  type: 'text' },
-      { key: 'subject', label: 'Subject', placeholder: 'Activity subject. {{variables}}', required: true,  type: 'text', hint: 'Supports {{variables}}' },
-      { key: 'body',    label: 'Notes',   placeholder: 'Additional notes (optional)',     required: false, type: 'textarea', hint: 'Supports {{variables}}' },
+      { key: 'type',    label: 'Activity type', placeholder: 'e.g. task, call, email, note',   required: true,  type: 'text' },
+      { key: 'subject', label: 'Subject',        placeholder: 'Activity subject. {{variables}}', required: true,  type: 'text', hint: 'Supports {{variables}}' },
+      { key: 'body',    label: 'Notes',          placeholder: 'Additional notes (optional)',     required: false, type: 'textarea', hint: 'Supports {{variables}}' },
+    ],
+  },
+  {
+    value: 'update_field',
+    label: 'Update field',
+    description: 'Set a field value on the triggered entity',
+    group: 'CRM',
+    configFields: [
+      { key: 'field', label: 'Field name', placeholder: 'e.g. lifecycle_stage', required: true,  type: 'text' },
+      { key: 'value', label: 'New value',  placeholder: 'e.g. customer',        required: true,  type: 'text' },
     ],
   },
   {
     value: 'add_tag',
     label: 'Add tag',
     description: 'Add a tag to the triggered entity',
+    group: 'CRM',
     configFields: [
       { key: 'tag', label: 'Tag', placeholder: 'e.g. hot-lead', required: true, type: 'text' },
     ],
@@ -131,31 +160,39 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     value: 'remove_tag',
     label: 'Remove tag',
     description: 'Remove a tag from the triggered entity',
+    group: 'CRM',
     configFields: [
       { key: 'tag', label: 'Tag', placeholder: 'e.g. unqualified', required: true, type: 'text' },
-    ],
-  },
-  {
-    value: 'update_field',
-    label: 'Update field',
-    description: 'Set a field value on the triggered entity',
-    configFields: [
-      { key: 'field', label: 'Field name', placeholder: 'e.g. lifecycle_stage', required: true,  type: 'text' },
-      { key: 'value', label: 'New value',  placeholder: 'e.g. customer',        required: true,  type: 'text' },
     ],
   },
   {
     value: 'assign_owner',
     label: 'Assign owner',
     description: 'Set the owner of the triggered entity',
+    group: 'CRM',
     configFields: [
       { key: 'owner_id', label: 'Owner ID', placeholder: 'Actor UUID', required: true, type: 'text' },
     ],
   },
+  // ── Sequences ─────────────────────────────────────────────────────────────
+  {
+    value: 'enroll_in_sequence',
+    label: 'Enroll in Sequence',
+    description: 'Enroll the triggered contact into a sequence journey',
+    group: 'Sequences',
+    supportsVariables: true,
+    configFields: [
+      { key: 'sequence_id', label: 'Sequence',  placeholder: 'Select a sequence',                             required: true,  type: 'sequence_picker' },
+      { key: 'objective',   label: 'Objective', placeholder: 'e.g. Book demo call by end of month',           required: false, type: 'text', hint: 'Supports {{variables}}' },
+      { key: 'contact_id',  label: 'Contact ID (override)', placeholder: 'Leave blank to use {{contact.id}}', required: false, type: 'text', hint: 'Auto-resolved from event subject if blank' },
+    ],
+  },
+  // ── Developer ─────────────────────────────────────────────────────────────
   {
     value: 'webhook',
     label: 'Call webhook',
     description: 'POST a JSON payload to an external HTTPS endpoint',
+    group: 'Developer',
     configFields: [
       { key: 'url',    label: 'URL',    placeholder: 'https://hooks.example.com/crmy', required: true,  type: 'text' },
       { key: 'secret', label: 'Secret', placeholder: 'Optional shared secret',         required: false, type: 'text' },
@@ -165,11 +202,27 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     value: 'wait',
     label: 'Wait / delay',
     description: 'Pause execution before running the next action',
+    group: 'Developer',
     configFields: [
       { key: 'seconds', label: 'Delay (seconds)', placeholder: 'e.g. 30 (max 300)', required: true, type: 'number' },
     ],
   },
+  // ── Legacy (hidden from UI, kept for backward compat) ─────────────────────
+  {
+    value: 'create_note',
+    label: 'Create context entry (legacy)',
+    description: 'Deprecated — use "Create context entry" instead',
+    group: 'CRM',
+    supportsVariables: true,
+    configFields: [
+      { key: 'body', label: 'Note body', placeholder: 'Note content. Supports {{variables}}.', required: true, type: 'textarea', hint: 'Supports {{variables}}' },
+    ],
+  },
 ];
+
+/** Unique action groups in display order */
+export const ACTION_GROUPS = ['Human', 'Outreach', 'CRM', 'Sequences', 'Developer'] as const;
+export type ActionGroup = typeof ACTION_GROUPS[number];
 
 /** Action types shown to users when creating a new workflow (hide deprecated aliases) */
 export const VISIBLE_ACTION_TYPES = ACTION_TYPES.filter(a => a.value !== 'create_note');

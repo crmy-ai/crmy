@@ -45,6 +45,16 @@ interface AppState {
 
   aiContext: AIContextEntity | null;
   openAIWithContext: (context: AIContextEntity) => void;
+
+  workflowEditorId: string | null;   // null = create mode, string = edit mode
+  workflowEditorOpen: boolean;
+  openWorkflowEditor: (id: string | null) => void;
+  closeWorkflowEditor: () => void;
+
+  sequenceEditorId: string | null;   // null = create mode, string = edit mode
+  sequenceEditorOpen: boolean;
+  openSequenceEditor: (id: string | null) => void;
+  closeSequenceEditor: () => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -91,6 +101,16 @@ export const useAppStore = create<AppState>()(
 
       aiContext: null,
       openAIWithContext: (context) => set({ aiContext: context }),
+
+      workflowEditorId: null,
+      workflowEditorOpen: false,
+      openWorkflowEditor: (id) => set({ workflowEditorOpen: true, workflowEditorId: id }),
+      closeWorkflowEditor: () => set({ workflowEditorOpen: false, workflowEditorId: null }),
+
+      sequenceEditorId: null,
+      sequenceEditorOpen: false,
+      openSequenceEditor: (id) => set({ sequenceEditorOpen: true, sequenceEditorId: id }),
+      closeSequenceEditor: () => set({ sequenceEditorOpen: false, sequenceEditorId: null }),
 
       darkVariant: 'warm',
       setDarkVariant: (variant) => set({ darkVariant: variant }),

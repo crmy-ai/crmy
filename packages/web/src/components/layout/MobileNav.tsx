@@ -6,7 +6,7 @@ import { Brain, Inbox, Bot } from 'lucide-react';
 import { motion } from 'framer-motion';
 
 const tabs = [
-  { icon: Brain,      label: 'Workspace', path: '/' },
+  { icon: Brain,      label: 'Context',   path: '/' },
   { icon: Bot,        label: 'Agent',     path: '/agent' },
   { icon: Bot,        label: 'Agents',    path: '/agents' },
   { icon: Inbox,      label: 'Handoffs',  path: '/handoffs' },

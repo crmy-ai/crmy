@@ -507,8 +507,143 @@ async function executeAction(
       await new Promise<void>(resolve => setTimeout(resolve, seconds * 1000));
       break;
     }
+    case 'enroll_in_sequence': {
+      const sequenceId = String(cfg.sequence_id ?? '');
+      // Use explicit contact_id override, or resolve from variable context (contact.id / subject.id)
+      const contactId = String(
+        cfg.contact_id ||
+        (variableContext as Record<string, Record<string, unknown>>)?.contact?.id ||
+        (variableContext as Record<string, Record<string, unknown>>)?.subject?.id ||
+        '',
+      );
+      if (!sequenceId || !contactId) {
+        console.warn('[workflow] enroll_in_sequence: missing sequence_id or resolvable contact_id — skipping');
+        break;
+      }
+      const { enrollContact, getSequence } = await import('../db/repos/email-sequences.js');
+      // Skip if contact already has an active or paused enrollment in this sequence (idempotent)
+      const seq = await getSequence(db, tenantId, sequenceId);
+      if (!seq) { console.warn(`[workflow] enroll_in_sequence: sequence ${sequenceId} not found`); break; }
+      const existing = await db.query(
+        `SELECT id FROM sequence_enrollments
+         WHERE tenant_id=$1 AND sequence_id=$2 AND contact_id=$3
+           AND status IN ('active','paused') LIMIT 1`,
+        [tenantId, sequenceId, contactId],
+      );
+      if (existing.rows.length > 0) {
+        console.info(`[workflow] enroll_in_sequence: contact ${contactId} already enrolled — skipping`);
+        break;
+      }
+      await enrollContact(db, tenantId, {
+        sequence_id: sequenceId,
+        contact_id:  contactId,
+        objective:   cfg.objective as string | undefined,
+        enrolled_by: 'workflow',
+      });
+      await emitEvent(db, {
+        tenantId,
+        eventType: 'sequence.enrolled',
+        actorType: 'system',
+        objectType: 'sequence_enrollment',
+        afterData: { sequence_id: sequenceId, contact_id: contactId, via: 'workflow' },
+      });
+      break;
+    }
+    case 'hitl_checkpoint': {
+      const hitlRepo = await import('../db/repos/hitl.js');
+      const title        = interpolate(String(cfg.title ?? 'Human review requested'), variableContext);
+      const instructions = cfg.instructions ? interpolate(String(cfg.instructions), variableContext) : undefined;
+      const priority     = (cfg.priority as string | undefined) ?? 'normal';
+      await hitlRepo.createHITLRequest(db, tenantId, {
+        agent_id:       'workflow',
+        action_type:    'workflow.checkpoint',
+        action_summary: title,
+        action_payload: {
+          instructions,
+          priority,
+          subject_type: (payload as Record<string, unknown>)?.subject_type ?? undefined,
+          subject_id:   (payload as Record<string, unknown>)?.id ?? undefined,
+        },
+        priority: priority as 'normal' | 'high' | 'urgent' | undefined,
+      });
+      break;
+    }
+
     default:
       throw new Error(`Unknown workflow action type: ${action.type}`);
+  }
+}
+
+// ── Direct execution (manual trigger) ────────────────────────────────────────
+
+/**
+ * Run a specific workflow directly without going through event dispatch.
+ * Used by the manual trigger endpoint and the workflow_trigger MCP tool.
+ */
+export async function executeWorkflowDirect(
+  db:         DbPool,
+  tenantId:   UUID,
+  workflowId: string,
+  payload:    Record<string, unknown> = {},
+): Promise<{ run_id: string; actions_run: number; actions_total: number; status: string }> {
+  const workflow = await wfRepo.getWorkflow(db, tenantId, workflowId);
+  if (!workflow) throw new Error(`Workflow ${workflowId} not found`);
+
+  const actions  = workflow.actions as { type: string; config: Record<string, unknown> }[];
+  const run      = await wfRepo.createRun(db, {
+    workflow_id:   workflow.id,
+    event_id:      null as unknown as number,
+    actions_total: actions.length,
+  });
+
+  const variableContext = buildVariableContext(payload);
+  let actionsRun = 0;
+
+  try {
+    for (const action of actions) {
+      const startMs = Date.now();
+      try {
+        await executeWithTimeout(
+          () => executeAction(db, tenantId, action, payload, variableContext),
+          ACTION_TIMEOUT_MS,
+        );
+        actionsRun++;
+        await wfRepo.appendActionLog(db, run.id, {
+          index:    actionsRun - 1,
+          type:     action.type,
+          status:   'completed',
+          duration_ms: Date.now() - startMs,
+          started_at: new Date().toISOString(),
+          resolved_config: resolveConfig(action.config, variableContext) as Record<string, unknown>,
+        });
+        await wfRepo.updateRun(db, run.id, { actions_run: actionsRun });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        await wfRepo.appendActionLog(db, run.id, {
+          index:    actionsRun,
+          type:     action.type,
+          status:   'failed',
+          error:    message,
+          duration_ms: Date.now() - startMs,
+          started_at: new Date().toISOString(),
+        });
+        await wfRepo.updateRun(db, run.id, {
+          status:     'failed',
+          error:      message,
+          actions_run: actionsRun,
+        });
+        return { run_id: run.id, actions_run: actionsRun, actions_total: actions.length, status: 'failed' };
+      }
+    }
+    await wfRepo.updateRun(db, run.id, {
+      status:     'completed',
+      actions_run: actionsRun,
+    });
+    return { run_id: run.id, actions_run: actionsRun, actions_total: actions.length, status: 'completed' };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    await wfRepo.updateRun(db, run.id, { status: 'failed', error: message });
+    return { run_id: run.id, actions_run: actionsRun, actions_total: actions.length, status: 'failed' };
   }
 }
 

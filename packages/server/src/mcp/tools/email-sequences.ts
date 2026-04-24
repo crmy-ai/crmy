@@ -8,12 +8,9 @@ import {
   sequenceAdvance, sequenceEnrollmentGet, sequenceEnrollmentList,
   sequenceEnrollmentContext,
   sequenceDraftStep, sequenceAnalytics,
-  // backward-compat aliases
-  emailSequenceCreate, emailSequenceGet, emailSequenceUpdate, emailSequenceDelete,
-  emailSequenceList, emailSequenceEnroll, emailSequenceUnenroll, emailSequenceEnrollmentList,
 } from '@crmy/shared';
 import type { ActorContext } from '@crmy/shared';
-import { validationError } from '@crmy/shared';
+import { validationError, notFound } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
 import type { ToolDef } from '../server.js';
 import * as seqRepo from '../../db/repos/email-sequences.js';
@@ -338,95 +335,30 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
       },
     },
 
-    // ── Backward-compat aliases (old email_sequence_* names) ─────────────────
+    // ── sequence_clone ────────────────────────────────────────────────────────
 
     {
-      name: 'email_sequence_create',
+      name: 'sequence_clone',
       tier: 'extended',
-      description: 'Alias for sequence_create (backward compat).',
-      inputSchema: emailSequenceCreate,
-      handler: async (input: z.infer<typeof emailSequenceCreate>, actor: ActorContext) => {
-        return seqRepo.createSequence(db, actor.tenant_id, { ...input, created_by: actor.actor_id as any });
-      },
-    },
-    {
-      name: 'email_sequence_get',
-      tier: 'extended',
-      description: 'Alias for sequence_get (backward compat).',
-      inputSchema: emailSequenceGet,
-      handler: async (input: z.infer<typeof emailSequenceGet>, actor: ActorContext) => {
-        return (await seqRepo.getSequence(db, actor.tenant_id, input.id)) ?? { error: 'Sequence not found' };
-      },
-    },
-    {
-      name: 'email_sequence_update',
-      tier: 'extended',
-      description: 'Alias for sequence_update (backward compat).',
-      inputSchema: emailSequenceUpdate,
-      handler: async (input: z.infer<typeof emailSequenceUpdate>, actor: ActorContext) => {
-        return (await seqRepo.updateSequence(db, actor.tenant_id, input.id, input.patch)) ?? { error: 'Not found' };
-      },
-    },
-    {
-      name: 'email_sequence_delete',
-      tier: 'extended',
-      description: 'Alias for sequence_delete (backward compat).',
-      inputSchema: emailSequenceDelete,
-      handler: async (input: z.infer<typeof emailSequenceDelete>, actor: ActorContext) => {
-        return { deleted: await seqRepo.deleteSequence(db, actor.tenant_id, input.id) };
-      },
-    },
-    {
-      name: 'email_sequence_list',
-      tier: 'extended',
-      description: 'Alias for sequence_list (backward compat).',
-      inputSchema: emailSequenceList,
-      handler: async (input: z.infer<typeof emailSequenceList>, actor: ActorContext) => {
-        return seqRepo.listSequences(db, actor.tenant_id, { is_active: input.is_active, limit: input.limit, cursor: input.cursor });
-      },
-    },
-    {
-      name: 'email_sequence_enroll',
-      tier: 'extended',
-      description: 'Alias for sequence_enroll (backward compat).',
-      inputSchema: emailSequenceEnroll,
-      handler: async (input: z.infer<typeof emailSequenceEnroll>, actor: ActorContext) => {
-        try {
-          return await seqRepo.enrollContact(db, actor.tenant_id, {
-            sequence_id: input.sequence_id,
-            contact_id: input.contact_id,
-            enrolled_by: actor.actor_id,
-          });
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : '';
-          if (msg.includes('unique') || msg.includes('duplicate')) {
-            throw validationError('Contact is already actively enrolled in this sequence');
-          }
-          throw err;
-        }
-      },
-    },
-    {
-      name: 'email_sequence_unenroll',
-      tier: 'extended',
-      description: 'Alias for sequence_unenroll (backward compat).',
-      inputSchema: emailSequenceUnenroll,
-      handler: async (input: z.infer<typeof emailSequenceUnenroll>, actor: ActorContext) => {
-        return { cancelled: await seqRepo.unenrollContact(db, actor.tenant_id, input.id) };
-      },
-    },
-    {
-      name: 'email_sequence_enrollment_list',
-      tier: 'extended',
-      description: 'Alias for sequence_enrollment_list (backward compat).',
-      inputSchema: emailSequenceEnrollmentList,
-      handler: async (input: z.infer<typeof emailSequenceEnrollmentList>, actor: ActorContext) => {
-        return seqRepo.listEnrollments(db, actor.tenant_id, {
-          sequence_id: input.sequence_id,
-          contact_id: input.contact_id,
-          status: input.status,
-          limit: input.limit,
-          cursor: input.cursor,
+      description: 'Duplicate a sequence as an inactive copy. Useful for creating variants of an existing journey without starting from scratch. The clone is created with is_active: false.',
+      inputSchema: z.object({
+        id:   z.string().uuid().describe('UUID of the sequence to clone'),
+        name: z.string().min(1).max(200).optional().describe('Name for the new sequence (defaults to "<original name> (copy)")'),
+      }),
+      handler: async (input: { id: string; name?: string }, actor: ActorContext) => {
+        const src = await seqRepo.getSequence(db, actor.tenant_id, input.id);
+        if (!src) throw notFound('Sequence', input.id);
+        return seqRepo.createSequence(db, actor.tenant_id, {
+          name:            input.name ?? `${src.name} (copy)`,
+          description:     src.description,
+          steps:           src.steps,
+          channel_types:   src.channel_types,
+          goal_event:      src.goal_event,
+          exit_on_reply:   src.exit_on_reply,
+          ai_persona:      src.ai_persona,
+          tags:            src.tags,
+          owner_actor_id:  src.owner_actor_id,
+          created_by:      actor.actor_id,
         });
       },
     },

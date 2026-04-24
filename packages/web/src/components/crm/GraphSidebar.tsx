@@ -1,8 +1,9 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Tag } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, Tag, ExternalLink } from 'lucide-react';
+import { useAppStore } from '@/store/appStore';
 import { TYPE_COLORS, TYPE_DESCRIPTIONS } from './ContextPanel';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 
@@ -81,11 +82,15 @@ interface GraphSidebarProps {
   filterCounts:   FilterCounts;
   onFilterChange: (next: Set<string>) => void;
   onFitView:      () => void;
+  /** If provided, replaces the default navigate(-1) behaviour of the Back button */
+  onBack?:        () => void;
+  /** Previous subjects in the traversal stack (up to 2 shown as breadcrumbs) */
+  historyItems?:  Array<{ name: string; type: string }>;
 }
 
 export function GraphSidebar({
   subjectType, subjectName,
-  activeFilters, filterCounts, onFilterChange, onFitView,
+  activeFilters, filterCounts, onFilterChange, onFitView, onBack, historyItems,
 }: GraphSidebarProps) {
   const navigate = useNavigate();
   const entityColor = ENTITY_HEX[subjectType] ?? '#f97316';
@@ -108,12 +113,41 @@ export function GraphSidebar({
 
       {/* Entity header */}
       <div className="flex-shrink-0 px-4 pt-4 pb-3 border-b border-border">
-        <button
-          onClick={() => navigate(-1)}
-          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mb-3 transition-colors"
-        >
-          <ArrowLeft className="w-3 h-3" /> Back
-        </button>
+        {/* Breadcrumb trail */}
+        {historyItems && historyItems.length > 0 ? (
+          <div className="mb-3 space-y-1">
+            <div className="flex items-center gap-1 flex-wrap">
+              {historyItems.length > 2 && (
+                <span className="text-[10px] text-muted-foreground/50">…</span>
+              )}
+              {historyItems.map((item, i) => (
+                <span key={i} className="flex items-center gap-1">
+                  <span
+                    className="text-[10px] text-muted-foreground/60 max-w-[64px] truncate"
+                    title={item.name}
+                  >
+                    {item.name}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground/30">›</span>
+                </span>
+              ))}
+            </div>
+            <button
+              onClick={() => (onBack ? onBack() : navigate(-1))}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeft className="w-3 h-3" />
+              Back to {historyItems[historyItems.length - 1].name}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => (onBack ? onBack() : navigate(-1))}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mb-3 transition-colors"
+          >
+            <ArrowLeft className="w-3 h-3" /> Back
+          </button>
+        )}
         <div className="flex items-center gap-3">
           <div
             className="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center text-sm font-bold"
@@ -188,6 +222,8 @@ export function GraphNodeSheet({ node, onClose, onNodeFocus }: GraphNodeSheetPro
 }
 
 function NodeSheetContent({ node, onNodeFocus }: { node: GraphNodeData; onNodeFocus?: (id: string) => void }) {
+  const openDrawer = useAppStore(s => s.openDrawer);
+
   if (node.nodeType === 'clusterNode') {
     const typeColor = TYPE_COLORS[node.contextType ?? ''] ?? node.color;
     return (
@@ -336,12 +372,17 @@ function NodeSheetContent({ node, onNodeFocus }: { node: GraphNodeData; onNodeFo
   }
 
   if (node.nodeType === 'relatedNode') {
-    const relColor = ENTITY_HEX[node.entityType as string ?? ''] ?? '#94a3b8';
+    const relColor   = ENTITY_HEX[node.entityType as string ?? ''] ?? '#94a3b8';
     const entityType = node.entityType as string | undefined;
     const entityId   = node.entityId   as string | undefined;
-    const path = entityType === 'account'     ? `/accounts/${entityId}`
-               : entityType === 'opportunity' ? `/opportunities/${entityId}`
-               : `/contacts/${entityId}`;
+
+    // Map graph entity type → drawer type
+    const drawerType =
+      entityType === 'account'     ? 'account'     as const
+      : entityType === 'opportunity' ? 'opportunity' as const
+      : entityType === 'use_case'    ? 'use-case'   as const
+      : 'contact' as const;
+
     return (
       <div className="flex flex-col h-full overflow-hidden">
         <div className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-border">
@@ -355,12 +396,13 @@ function NodeSheetContent({ node, onNodeFocus }: { node: GraphNodeData; onNodeFo
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {entityId && (
-            <Link
-              to={path}
+            <button
+              onClick={() => openDrawer(drawerType, entityId)}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border hover:bg-muted/50 text-sm font-medium text-foreground transition-colors"
             >
-              Open {(entityType ?? '').replace(/_/g, ' ')} →
-            </Link>
+              <ExternalLink className="w-3.5 h-3.5" />
+              Open {(entityType ?? '').replace(/_/g, ' ')}
+            </button>
           )}
         </div>
       </div>
@@ -399,13 +441,40 @@ function NodeSheetContent({ node, onNodeFocus }: { node: GraphNodeData; onNodeFo
     );
   }
 
-  // Fallback (entity center node — shouldn't normally be selected)
-  return (
-    <div className="px-6 pt-6">
-      <h2 className="text-xl font-bold text-foreground">{node.label}</h2>
-      <p className="text-sm text-muted-foreground capitalize mt-1">
-        {((node.subjectType as string | undefined) ?? '').replace(/_/g, ' ')}
-      </p>
-    </div>
-  );
+  // Entity center node (the subject itself)
+  {
+    const entityType = (node.entityType ?? node.subjectType) as string | undefined;
+    const entityId   = node.entityId as string | undefined;
+    const color      = ENTITY_HEX[entityType ?? ''] ?? '#6366f1';
+    const drawerType =
+      entityType === 'account'     ? 'account'     as const
+      : entityType === 'opportunity' ? 'opportunity' as const
+      : entityType === 'use_case'    ? 'use-case'   as const
+      : 'contact' as const;
+
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <div className="flex-shrink-0 px-6 pt-6 pb-4 border-b border-border">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide capitalize">
+              {(entityType ?? '').replace(/_/g, ' ')}
+            </span>
+          </div>
+          <h2 className="text-xl font-bold text-foreground">{node.label}</h2>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {entityId && (
+            <button
+              onClick={() => openDrawer(drawerType, entityId)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border hover:bg-muted/50 text-sm font-medium text-foreground transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Open {(entityType ?? '').replace(/_/g, ' ')}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 }

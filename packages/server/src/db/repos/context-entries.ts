@@ -504,7 +504,16 @@ export async function searchContextEntries(
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
-    `SELECT c.* FROM context_entries c WHERE ${where} ORDER BY c.created_at DESC LIMIT $${idx}`,
+    `SELECT c.*,
+       CASE c.subject_type
+         WHEN 'contact'     THEN (SELECT COALESCE(NULLIF(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')), ''), email) FROM contacts     WHERE id = c.subject_id AND tenant_id = c.tenant_id)
+         WHEN 'account'     THEN (SELECT name  FROM accounts      WHERE id = c.subject_id AND tenant_id = c.tenant_id)
+         WHEN 'opportunity' THEN (SELECT name  FROM opportunities  WHERE id = c.subject_id AND tenant_id = c.tenant_id)
+         WHEN 'use_case'    THEN (SELECT COALESCE(name, title) FROM use_cases WHERE id = c.subject_id AND tenant_id = c.tenant_id)
+       END AS subject_name,
+       (SELECT display_name FROM actors WHERE id = c.authored_by) AS authored_by_name,
+       (SELECT actor_type   FROM actors WHERE id = c.authored_by) AS authored_by_type
+     FROM context_entries c WHERE ${where} ORDER BY c.created_at DESC LIMIT $${idx}`,
     params,
   );
 
@@ -593,7 +602,16 @@ export async function semanticSearch(
   params.push(lim);
 
   const result = await db.query(
-    `SELECT c.*, 1 - (c.embedding <=> $2::vector) AS similarity
+    `SELECT c.*,
+       1 - (c.embedding <=> $2::vector) AS similarity,
+       CASE c.subject_type
+         WHEN 'contact'     THEN (SELECT COALESCE(NULLIF(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')), ''), email) FROM contacts     WHERE id = c.subject_id AND tenant_id = c.tenant_id)
+         WHEN 'account'     THEN (SELECT name  FROM accounts      WHERE id = c.subject_id AND tenant_id = c.tenant_id)
+         WHEN 'opportunity' THEN (SELECT name  FROM opportunities  WHERE id = c.subject_id AND tenant_id = c.tenant_id)
+         WHEN 'use_case'    THEN (SELECT COALESCE(name, title) FROM use_cases WHERE id = c.subject_id AND tenant_id = c.tenant_id)
+       END AS subject_name,
+       (SELECT display_name FROM actors WHERE id = c.authored_by) AS authored_by_name,
+       (SELECT actor_type   FROM actors WHERE id = c.authored_by) AS authored_by_type
      FROM context_entries c
      WHERE ${conditions.join(' AND ')}
      ORDER BY c.embedding <=> $2::vector

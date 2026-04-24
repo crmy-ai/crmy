@@ -77,7 +77,7 @@ export async function triggerExtraction(
     return;
   }
 
-  if (!config?.enabled || !config.api_key_enc) {
+  if (!config?.enabled || !config.model || !config.base_url) {
     // Mark pending — background worker will pick it up once agent is configured
     await markExtractionStatus(db, activityId, 'pending');
     return;
@@ -125,8 +125,15 @@ export async function extractContextFromActivity(
 
   // Load agent config
   const config = await agentRepo.getConfig(db, tenantId);
-  if (!config?.enabled || !config.api_key_enc) {
-    await markExtractionStatus(db, activityId, 'pending', 'Agent not configured');
+  // api_key_enc may legitimately be null for providers that don't require a key (Ollama, custom).
+  // callLLM handles keyless providers correctly — only gate on enabled flag.
+  if (!config?.enabled) {
+    await markExtractionStatus(db, activityId, 'pending', 'Agent not enabled');
+    return 0;
+  }
+  // Still need a model and base_url to proceed
+  if (!config.model || !config.base_url) {
+    await markExtractionStatus(db, activityId, 'pending', 'Agent not fully configured (missing model or base_url)');
     return 0;
   }
 

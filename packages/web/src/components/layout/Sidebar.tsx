@@ -15,7 +15,6 @@ import {
   FolderKanban,
   Activity,
   Mail,
-  ListOrdered,
   ScrollText,
   Settings,
   PanelLeftClose,
@@ -30,9 +29,9 @@ export { ENTITY_COLORS };
 
 // Agent-facing tier — top of nav
 const agentNavItems = [
-  { icon: Brain,       label: 'Workspace',   path: '/',            color: ENTITY_COLORS.contacts },
-  { icon: Zap,         label: 'Workflows',   path: '/workflows',   color: ENTITY_COLORS.workflows },
-  { icon: Inbox,       label: 'Handoffs',    path: '/handoffs',    color: ENTITY_COLORS.assignments },
+  { icon: Brain,       label: 'Context',      path: '/',             color: ENTITY_COLORS.contacts },
+  { icon: Zap,         label: 'Automations',  path: '/automations',  color: ENTITY_COLORS.workflows },
+  { icon: Inbox,       label: 'Handoffs',     path: '/handoffs',     color: ENTITY_COLORS.assignments },
 ];
 
 // Data tier — knowledge base objects
@@ -43,7 +42,6 @@ const dataNavItems = [
   { icon: FolderKanban,label: 'Use Cases',     path: '/use-cases',     color: ENTITY_COLORS.useCases },
   { icon: Activity,    label: 'Activities',    path: '/activities',    color: ENTITY_COLORS.activities },
   { icon: Mail,        label: 'Emails',        path: '/emails',        color: ENTITY_COLORS.emails },
-  { icon: ListOrdered, label: 'Sequences',     path: '/sequences',     color: ENTITY_COLORS.sequences },
 ];
 
 const bottomItems = [

@@ -1,8 +1,9 @@
-import { Search, Command, Sun, Moon, LogOut, type LucideIcon } from 'lucide-react';
+import { Search, Command, Sun, Moon, LogOut, Sparkles, type LucideIcon } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { useTheme } from '@/hooks/useTheme';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { clearToken } from '@/api/client';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 
 interface TopBarProps {
   title: string;
@@ -18,6 +19,9 @@ export function TopBar({ title, icon: Icon, iconClassName, description, badge, c
   const { setCommandPaletteOpen } = useAppStore();
   const { theme, toggle } = useTheme();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { enabled: agentEnabled } = useAgentSettings();
+  const onAgentPage = location.pathname === '/agent';
 
   const handleLogout = () => {
     clearToken();
@@ -38,6 +42,18 @@ export function TopBar({ title, icon: Icon, iconClassName, description, badge, c
       </div>
       <div className="flex items-center gap-1.5 md:ml-auto w-full md:w-auto">
         {children}
+        {agentEnabled && !onAgentPage && (
+          <button
+            onClick={() => navigate('/agent')}
+            className="relative p-1.5 rounded-xl bg-gradient-to-br from-primary to-accent text-primary-foreground shadow-sm hover:opacity-90 hover:shadow-md transition-all group"
+            title="Open AI agent (⌘J)"
+          >
+            <Sparkles className="w-4 h-4" />
+            <kbd className="absolute -bottom-1 -right-1 hidden md:inline-flex items-center gap-px text-[8px] font-mono leading-none bg-background/90 text-foreground border border-border px-0.5 py-px rounded shadow-sm">
+              <Command className="w-2 h-2" />J
+            </kbd>
+          </button>
+        )}
         <button
           onClick={toggle}
           className="p-2 rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"

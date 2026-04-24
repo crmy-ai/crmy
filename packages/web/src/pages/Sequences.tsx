@@ -7,23 +7,25 @@ import { TopBar } from '@/components/layout/TopBar';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { VariableAwareField } from '@/components/crm/VariableAwareField';
 import { toast } from '@/hooks/use-toast';
+import { useAppStore } from '@/store/appStore';
 import {
-  useSequences, useCreateSequence, useUpdateSequence,
-  useDeleteSequence, useSequenceEnrollments, useEnrollInSequence,
+  useSequences, useUpdateSequence,
+  useDeleteSequence, useSequenceEnrollments,
   useUnenrollFromSequence, useContacts, useSequenceAnalytics,
   useEnrollmentActivities, useEnrollmentContext, useEnrollInSequenceWithObjective,
 } from '@/api/hooks';
 import {
   ListOrdered, Plus, Trash2, Pencil, Power, PowerOff, ChevronDown, ChevronUp,
-  X, GripVertical, Users, CheckCircle2, Clock, XCircle, AlertCircle,
-  PlayCircle, BarChart3, Settings, Mail, Bell, ClipboardList, Webhook,
+  X, GripVertical, Users, CheckCircle2, Clock, XCircle, Loader2,
+  PlayCircle, BarChart3, Mail, Bell, ClipboardList, Webhook,
   Timer, GitBranch, Bot, Zap, TrendingUp, Activity,
   ChevronRight, MessageSquare, Lightbulb, Variable, Target,
 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type StepType = 'email' | 'notification' | 'task' | 'webhook' | 'wait' | 'branch' | 'ai_action';
+export type StepType = 'email' | 'notification' | 'task' | 'webhook' | 'wait' | 'branch' | 'ai_action';
 
 interface BaseStep {
   type: StepType;
@@ -78,7 +80,7 @@ interface AiActionStep extends BaseStep {
   require_approval?: boolean;
 }
 
-type SequenceStep = EmailStep | NotificationStep | TaskStep | WebhookStep | WaitStep | BranchStep | AiActionStep;
+export type SequenceStep = EmailStep | NotificationStep | TaskStep | WebhookStep | WaitStep | BranchStep | AiActionStep;
 
 interface Sequence {
   id: string;
@@ -109,7 +111,7 @@ interface Enrollment {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STEP_TYPES: { value: StepType; label: string; icon: typeof Mail; color: string; desc: string }[] = [
+export const STEP_TYPES: { value: StepType; label: string; icon: typeof Mail; color: string; desc: string }[] = [
   { value: 'email',        label: 'Email',         icon: Mail,         color: 'text-blue-500',    desc: 'Send a personalized email' },
   { value: 'notification', label: 'Notification',  icon: Bell,         color: 'text-amber-500',   desc: 'Notify a team member' },
   { value: 'task',         label: 'Task',          icon: ClipboardList,color: 'text-emerald-500', desc: 'Create a CRM task' },
@@ -119,7 +121,7 @@ const STEP_TYPES: { value: StepType; label: string; icon: typeof Mail; color: st
   { value: 'ai_action',    label: 'AI Action',     icon: Bot,          color: 'text-violet-500',  desc: 'Run an AI prompt and store output' },
 ];
 
-const TRIGGER_EVENTS = [
+export const SEQUENCE_TRIGGER_EVENTS = [
   'contact.created', 'contact.updated', 'opportunity.created', 'opportunity.updated',
   'opportunity.stage_changed', 'opportunity.closed_won', 'opportunity.closed_lost',
   'activity.created', 'email.sent', 'email.replied',
@@ -138,13 +140,13 @@ const ENROLLMENT_STATUS: Record<string, { label: string; cls: string; icon: type
   cancelled: { label: 'Cancelled', cls: 'text-muted-foreground bg-muted border-border',             icon: XCircle },
 };
 
-function stepIcon(type: StepType) {
+export function stepIcon(type: StepType) {
   return STEP_TYPES.find(s => s.value === type)?.icon ?? Mail;
 }
-function stepColor(type: StepType) {
+export function stepColor(type: StepType) {
   return STEP_TYPES.find(s => s.value === type)?.color ?? 'text-muted-foreground';
 }
-function stepLabel(type: StepType) {
+export function stepLabel(type: StepType) {
   return STEP_TYPES.find(s => s.value === type)?.label ?? type;
 }
 function contactName(e: Enrollment): string {
@@ -152,7 +154,7 @@ function contactName(e: Enrollment): string {
   const name = [e.contact.first_name, e.contact.last_name].filter(Boolean).join(' ');
   return name || e.contact.email || e.contact_id.slice(0, 8);
 }
-function defaultStep(type: StepType): SequenceStep {
+export function defaultStep(type: StepType): SequenceStep {
   const base = { delay_days: 1 };
   switch (type) {
     case 'email':        return { ...base, type, subject: '', body_text: '', ai_generate: false, require_approval: false };
@@ -167,7 +169,7 @@ function defaultStep(type: StepType): SequenceStep {
 
 // ─── Step Type Builder ─────────────────────────────────────────────────────────
 
-function StepFields({
+export function StepFields({
   step, onChange, enrollmentVariables,
 }: {
   step: SequenceStep;
@@ -364,7 +366,7 @@ function StepFields({
 
 // ─── Typed Step Builder ────────────────────────────────────────────────────────
 
-function TypedStepBuilder({
+export function TypedStepBuilder({
   steps, onChange, enrollmentVariables,
 }: {
   steps: SequenceStep[];
@@ -878,107 +880,33 @@ function AnalyticsTab({ sequenceId }: { sequenceId: string }) {
   );
 }
 
-// ─── Settings Tab ─────────────────────────────────────────────────────────────
-
-function SettingsTab({ sequence, onSave }: { sequence: Sequence; onSave: (patch: Record<string, unknown>) => void }) {
-  const [goalEvent, setGoalEvent] = useState(sequence.goal_event ?? '');
-  const [exitOnReply, setExitOnReply] = useState(sequence.exit_on_reply ?? true);
-  const [aiPersona, setAiPersona] = useState(sequence.ai_persona ?? '');
-  const [tagsText, setTagsText] = useState((sequence.tags ?? []).join(', '));
-  const update = useUpdateSequence(sequence.id);
-
-  const handleSave = async () => {
-    const tags = tagsText.split(',').map(t => t.trim()).filter(Boolean);
-    try {
-      await update.mutateAsync({
-        goal_event: goalEvent || undefined,
-        exit_on_reply: exitOnReply,
-        ai_persona: aiPersona || undefined,
-        tags,
-      });
-      onSave({});
-      toast({ title: 'Settings saved' });
-    } catch {
-      toast({ title: 'Failed to save settings', variant: 'destructive' });
-    }
-  };
-
-  return (
-    <div className="space-y-5">
-      {/* Goal event */}
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Goal Event</label>
-        <p className="text-xs text-muted-foreground">When this event fires for the contact, the sequence auto-completes.</p>
-        <select value={goalEvent} onChange={e => setGoalEvent(e.target.value)} className={inputCls}>
-          <option value="">None — sequence runs all steps</option>
-          {TRIGGER_EVENTS.map(e => <option key={e} value={e}>{e}</option>)}
-        </select>
-      </div>
-
-      {/* Exit on reply */}
-      <div className="flex items-start gap-3">
-        <input type="checkbox" id="exit-on-reply" checked={exitOnReply} onChange={e => setExitOnReply(e.target.checked)}
-          className="w-4 h-4 mt-0.5 rounded border-border accent-primary" />
-        <div>
-          <label htmlFor="exit-on-reply" className="text-sm font-medium text-foreground cursor-pointer">Exit on Reply</label>
-          <p className="text-xs text-muted-foreground mt-0.5">Stop sending email steps when the contact replies to any email in this sequence.</p>
-        </div>
-      </div>
-
-      {/* AI Persona */}
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">AI Persona / System Prompt</label>
-        <p className="text-xs text-muted-foreground">Used when AI-generate is enabled on email steps. Describe the voice and context for the AI.</p>
-        <textarea value={aiPersona} onChange={e => setAiPersona(e.target.value)} rows={4} placeholder="You are a sales development rep at Acme Corp. You write concise, personalized emails focused on solving the prospect's pain around..."
-          className={textareaCls} />
-      </div>
-
-      {/* Tags */}
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Tags</label>
-        <input type="text" value={tagsText} onChange={e => setTagsText(e.target.value)}
-          placeholder="cold-outreach, enterprise, saas (comma-separated)" className={inputCls} />
-      </div>
-
-      <div className="flex justify-end">
-        <button onClick={handleSave} disabled={update.isPending} className={btnPrimary}>
-          {update.isPending ? 'Saving…' : 'Save Settings'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ─── Sequence Row ─────────────────────────────────────────────────────────────
 
-type RowTab = 'steps' | 'enrollments' | 'analytics' | 'settings';
+type RowTab = 'steps' | 'enrollments' | 'analytics';
 
 function SequenceRow({ sequence }: { sequence: Sequence }) {
+  const { openSequenceEditor } = useAppStore();
   const update = useUpdateSequence(sequence.id);
   const del = useDeleteSequence(sequence.id);
   const [tab, setTab] = useState<RowTab>('steps');
   const [expanded, setExpanded] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [name, setName] = useState(sequence.name);
-  const [description, setDescription] = useState(sequence.description ?? '');
-  const [steps, setSteps] = useState<SequenceStep[]>((sequence.steps ?? []) as SequenceStep[]);
+  const [toggling, setToggling] = useState(false);
 
   // Channel type icons
   const channels = sequence.channel_types ?? ['email'];
   const hasMultiChannel = channels.length > 1 || !channels.includes('email');
 
   const handleToggleActive = async () => {
-    try { await update.mutateAsync({ is_active: !sequence.is_active }); }
-    catch { toast({ title: 'Failed to update', variant: 'destructive' }); }
-  };
-
-  const handleSave = async () => {
+    setToggling(true);
     try {
-      await update.mutateAsync({ name, description: description || undefined, steps });
-      setEditing(false);
-      toast({ title: 'Sequence saved' });
-    } catch { toast({ title: 'Failed to save', variant: 'destructive' }); }
+      await update.mutateAsync({ is_active: !sequence.is_active });
+      toast({ title: sequence.is_active ? 'Sequence paused' : 'Sequence activated' });
+    } catch {
+      toast({ title: 'Failed to update', variant: 'destructive' });
+    } finally {
+      setToggling(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -989,10 +917,9 @@ function SequenceRow({ sequence }: { sequence: Sequence }) {
   };
 
   const TABS: { key: RowTab; label: string; icon: typeof ListOrdered }[] = [
-    { key: 'steps',       label: 'Steps',       icon: ListOrdered },
-    { key: 'enrollments', label: 'Contacts',    icon: Users },
-    { key: 'analytics',   label: 'Analytics',   icon: BarChart3 },
-    { key: 'settings',    label: 'Settings',    icon: Settings },
+    { key: 'steps',       label: 'Steps',     icon: ListOrdered },
+    { key: 'enrollments', label: 'Contacts',  icon: Users },
+    { key: 'analytics',   label: 'Analytics', icon: BarChart3 },
   ];
 
   return (
@@ -1007,45 +934,72 @@ function SequenceRow({ sequence }: { sequence: Sequence }) {
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap mb-0.5">
             <span className="text-sm font-semibold text-foreground truncate">{sequence.name}</span>
-            {!sequence.is_active && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">Inactive</span>
-            )}
+            <Badge variant={sequence.is_active ? 'default' : 'secondary'} className="text-[10px] shrink-0">
+              {sequence.is_active ? 'Active' : 'Paused'}
+            </Badge>
             {sequence.tags?.map(tag => (
-              <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">{tag}</span>
+              <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">{tag}</span>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground truncate">
-            {sequence.steps.length} step{sequence.steps.length !== 1 ? 's' : ''}
-            {sequence.goal_event ? ` · goal: ${sequence.goal_event}` : ''}
-            {sequence.description ? ` · ${sequence.description}` : ''}
-          </p>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+            <span>{sequence.steps.length} step{sequence.steps.length !== 1 ? 's' : ''}</span>
+            {sequence.goal_event && <span>goal: <span className="font-mono">{sequence.goal_event}</span></span>}
+            {sequence.description && <span className="truncate max-w-[240px]">{sequence.description}</span>}
+          </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <button onClick={handleToggleActive} title={sequence.is_active ? 'Deactivate' : 'Activate'}
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-colors">
-            {sequence.is_active ? <Power className="w-4 h-4 text-emerald-500" /> : <PowerOff className="w-4 h-4" />}
+        <div className="flex items-center gap-0.5 shrink-0">
+          {/* Toggle active */}
+          <button
+            onClick={handleToggleActive}
+            disabled={toggling}
+            title={sequence.is_active ? 'Pause' : 'Activate'}
+            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground transition-colors"
+          >
+            {toggling
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : sequence.is_active
+                ? <Power className="w-4 h-4 text-emerald-500" />
+                : <PowerOff className="w-4 h-4" />}
           </button>
-          <button onClick={() => { setEditing(true); setExpanded(true); setTab('steps'); }}
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
+
+          {/* Edit */}
+          <button
+            onClick={() => openSequenceEditor(sequence.id)}
+            title="Edit sequence"
+            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          >
             <Pencil className="w-4 h-4" />
           </button>
-          <button onClick={() => setExpanded(!expanded)}
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
-            {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
+
+          {/* Delete */}
           {!confirmDelete ? (
-            <button onClick={() => setConfirmDelete(true)}
-              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-destructive transition-colors">
+            <button
+              onClick={() => { setConfirmDelete(true); setTimeout(() => setConfirmDelete(false), 3000); }}
+              title="Delete"
+              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-destructive transition-colors"
+            >
               <Trash2 className="w-4 h-4" />
             </button>
           ) : (
             <div className="flex items-center gap-1">
-              <button onClick={handleDelete} className="text-xs font-semibold text-destructive hover:underline">Delete</button>
-              <button onClick={() => setConfirmDelete(false)} className="p-1 text-muted-foreground"><X className="w-3.5 h-3.5" /></button>
+              <button onClick={handleDelete} className="text-xs font-semibold text-destructive hover:underline px-1">
+                Delete
+              </button>
+              <button onClick={() => setConfirmDelete(false)} className="p-1 text-muted-foreground">
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
           )}
+
+          {/* Expand */}
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
         </div>
       </div>
 
@@ -1068,87 +1022,14 @@ function SequenceRow({ sequence }: { sequence: Sequence }) {
               </div>
 
               <div className="p-4 bg-muted/10 space-y-4">
-                {tab === 'steps' && (
-                  editing ? (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Name</label>
-                          <input type="text" value={name} onChange={e => setName(e.target.value)} className={inputCls} />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</label>
-                          <input type="text" value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional" className={inputCls} />
-                        </div>
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Steps</label>
-                        <TypedStepBuilder steps={steps} onChange={setSteps} />
-                      </div>
-                      <div className="flex justify-end gap-2">
-                        <button onClick={() => setEditing(false)} className={btnOutline}>Cancel</button>
-                        <button onClick={handleSave} disabled={update.isPending || !name.trim()} className={btnPrimary}>
-                          {update.isPending ? 'Saving…' : 'Save'}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <StepReadView steps={sequence.steps as SequenceStep[]} />
-                  )
-                )}
+                {tab === 'steps' && <StepReadView steps={sequence.steps as SequenceStep[]} />}
                 {tab === 'enrollments' && <EnrollmentTab sequence={sequence} />}
                 {tab === 'analytics' && <AnalyticsTab sequenceId={sequence.id} />}
-                {tab === 'settings' && <SettingsTab sequence={sequence} onSave={() => {}} />}
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
-  );
-}
-
-// ─── Create Form ──────────────────────────────────────────────────────────────
-
-function CreateSequenceForm({ onClose }: { onClose: () => void }) {
-  const create = useCreateSequence();
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [steps, setSteps] = useState<SequenceStep[]>([{ type: 'email', delay_days: 0, subject: '', body_text: '', ai_generate: false, require_approval: false }]);
-
-  const handleCreate = async () => {
-    if (!name.trim()) { toast({ title: 'Name is required', variant: 'destructive' }); return; }
-    try {
-      await create.mutateAsync({ name: name.trim(), description: description || undefined, steps });
-      toast({ title: 'Sequence created' });
-      onClose();
-    } catch (err: any) {
-      toast({ title: err?.message ?? 'Failed to create sequence', variant: 'destructive' });
-    }
-  };
-
-  return (
-    <div className="rounded-xl border border-primary/30 bg-card p-4 space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Name</label>
-          <input type="text" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Cold outreach — SaaS" className={inputCls} />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</label>
-          <input type="text" value={description} onChange={e => setDescription(e.target.value)} placeholder="Optional" className={inputCls} />
-        </div>
-      </div>
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Steps</label>
-        <TypedStepBuilder steps={steps} onChange={setSteps} />
-      </div>
-      <div className="flex justify-end gap-2">
-        <button onClick={onClose} className={btnOutline}>Cancel</button>
-        <button onClick={handleCreate} disabled={create.isPending || !name.trim()} className={btnPrimary}>
-          {create.isPending ? 'Creating…' : 'Create Sequence'}
-        </button>
-      </div>
     </div>
   );
 }
@@ -1161,9 +1042,9 @@ const SEQ_SORT_OPTIONS: SortOption[] = [
   { key: 'step_count', label: 'Steps'   },
 ];
 
-export default function SequencesPage() {
+export default function SequencesPage({ embedded }: { embedded?: boolean } = {}) {
+  const { openSequenceEditor } = useAppStore();
   const { data, isLoading } = useSequences({ limit: 50 }) as { data: { data: Sequence[] } | undefined; isLoading: boolean };
-  const [showCreate, setShowCreate] = useState(false);
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
@@ -1235,34 +1116,28 @@ export default function SequencesPage() {
   }, [sequences, search, activeFilters, sort]);
 
   return (
-    <div className="flex flex-col h-full">
-      <TopBar
-        title="Sequences"
-        icon={Zap}
-        iconClassName="text-orange-500"
-        description={`${sequences.length} sequence${sequences.length !== 1 ? 's' : ''} · ${active} active`}
-      />
+    <div className={embedded ? 'flex-1 min-h-0 flex flex-col' : 'flex flex-col h-full'}>
+      {!embedded && (
+        <TopBar
+          title="Sequences"
+          icon={Zap}
+          iconClassName="text-orange-500"
+          description={`${sequences.length} sequence${sequences.length !== 1 ? 's' : ''} · ${active} active`}
+        />
+      )}
 
       <ListToolbar
         searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search sequences..."
         filters={filterConfigs} activeFilters={activeFilters} onFilterChange={handleFilterChange}
         onClearFilters={() => setActiveFilters({})} sortOptions={SEQ_SORT_OPTIONS} currentSort={sort}
         onSortChange={handleSortChange} entityType="sequences"
-        onAdd={() => setShowCreate(true)} addLabel="New Sequence"
+        onAdd={() => openSequenceEditor(null)} addLabel="New Sequence"
       />
 
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6 space-y-4">
-        <AnimatePresence>
-          {showCreate && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-              <CreateSequenceForm onClose={() => setShowCreate(false)} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-
+      <div className="flex-1 overflow-y-auto px-4 md:px-6 pt-2 pb-24 md:pb-6">
         {isLoading ? (
           <div className="space-y-3">{[1, 2, 3].map(i => <div key={i} className="h-16 rounded-xl bg-muted/50 animate-pulse" />)}</div>
-        ) : sequences.length === 0 && !showCreate ? (
+        ) : sequences.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
               <Zap className="w-8 h-8 text-primary" />
@@ -1271,7 +1146,7 @@ export default function SequencesPage() {
             <p className="text-sm text-muted-foreground max-w-sm mb-4">
               Build multi-channel, AI-personalized sequences with email, tasks, webhooks, branches, and AI actions.
             </p>
-            <button onClick={() => setShowCreate(true)} className={btnPrimary}>
+            <button onClick={() => openSequenceEditor(null)} className={btnPrimary}>
               <span className="flex items-center gap-1.5"><Plus className="w-4 h-4" /> Create your first sequence</span>
             </button>
           </div>
@@ -1283,18 +1158,6 @@ export default function SequencesPage() {
         ) : (
           <div className="space-y-3">
             {filtered.map(seq => <SequenceRow key={seq.id} sequence={seq} />)}
-          </div>
-        )}
-
-        {sequences.length > 0 && (
-          <div className="rounded-xl border border-border bg-muted/30 p-4">
-            <p className="text-xs font-semibold text-foreground mb-1">Variables available in steps</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
-              {[
-                '{{contact.first_name}}', '{{contact.last_name}}', '{{contact.email}}', '{{contact.title}}',
-                '{{account.name}}', '{{opportunity.stage}}', '{{event.id}}', '{{subject.company_name}}',
-              ].map(v => <code key={v} className="bg-muted px-1 rounded text-[10px] font-mono">{v}</code>)}
-            </div>
           </div>
         )}
       </div>

@@ -35,8 +35,11 @@ import {
   Wand2,
   Building2,
   User,
+  Briefcase,
+  FolderKanban,
   Clipboard,
 } from 'lucide-react';
+import { useAppStore } from '@/store/appStore';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -57,6 +60,16 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
+import { ContextEntryDrawer } from '@/components/crm/ContextEntryDrawer';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { useSupersedeContextEntry } from '@/api/hooks';
+import { MoreHorizontal, Trash2, Edit3 } from 'lucide-react';
 
 // ── Helper components ────────────────────────────────────────────────────────
 
@@ -109,6 +122,61 @@ function ValidUntilBadge({ date }: { date: string | null | undefined }) {
 
 function subjectTypeLabel(t: string) {
   return t === 'use_case' ? 'Use Case' : t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+const SUBJECT_ICONS: Record<string, React.ElementType> = {
+  contact:     User,
+  account:     Building2,
+  opportunity: Briefcase,
+  use_case:    FolderKanban,
+};
+
+const SUBJECT_COLORS: Record<string, string> = {
+  contact:     '#f97316',
+  account:     '#8b5cf6',
+  opportunity: '#0ea5e9',
+  use_case:    '#22c55e',
+};
+
+const DRAWER_TYPE_MAP: Record<string, 'contact' | 'account' | 'opportunity' | 'use-case'> = {
+  contact:     'contact',
+  account:     'account',
+  opportunity: 'opportunity',
+  use_case:    'use-case',
+};
+
+function SubjectChip({
+  subjectType,
+  subjectId,
+  subjectName,
+}: {
+  subjectType?: string;
+  subjectId?: string;
+  subjectName?: string;
+}) {
+  const openDrawer = useAppStore(s => s.openDrawer);
+  if (!subjectType) return null;
+
+  const Icon       = SUBJECT_ICONS[subjectType] ?? User;
+  const color      = SUBJECT_COLORS[subjectType] ?? '#94a3b8';
+  const drawerType = DRAWER_TYPE_MAP[subjectType] ?? 'contact';
+  const label      = subjectName || subjectTypeLabel(subjectType);
+
+  return (
+    <button
+      onClick={subjectId ? () => openDrawer(drawerType, subjectId) : undefined}
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
+        subjectId
+          ? 'hover:opacity-80 cursor-pointer'
+          : 'cursor-default'
+      }`}
+      style={{ background: color + '18', color }}
+      title={subjectId ? `Open ${subjectTypeLabel(subjectType)}` : undefined}
+    >
+      <Icon className="w-2.5 h-2.5 flex-shrink-0" />
+      {label}
+    </button>
+  );
 }
 
 // ── Entity picker ─────────────────────────────────────────────────────────────
@@ -393,7 +461,17 @@ export function ContextBrowser() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const detectDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
+  // Detail drawer state
+  const [selectedEntry, setSelectedEntry] = useState<any | null>(null);
+  const [drawerOpen,    setDrawerOpen]    = useState(false);
+
+  function openEntryDrawer(entry: any) {
+    setSelectedEntry(entry);
+    setDrawerOpen(true);
+  }
+
   const reviewEntry      = useReviewContextEntry();
+  const supersedeEntry   = useSupersedeContextEntry();
   const ingestMutation   = useContextIngest();
   const detectSubjects   = useDetectSubjects();
   const ingestFileMut    = useIngestFile();
@@ -782,13 +860,14 @@ export function ContextBrowser() {
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.02 }}
-                  className={`bg-card border rounded-xl p-4 transition-colors ${
+                  className={`group bg-card border rounded-xl p-4 transition-colors cursor-pointer hover:bg-muted/30 ${
                     expired
                       ? 'border-destructive/30'
                       : searchMode === 'semantic'
                       ? 'border-border border-l-2 border-l-violet-500/50'
                       : 'border-border'
                   }`}
+                  onClick={() => openEntryDrawer(entry)}
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex-1 min-w-0">
@@ -803,11 +882,11 @@ export function ContextBrowser() {
                             {entry.context_type.replace(/_/g, ' ')}
                           </Badge>
                         )}
-                        {entry.subject_type && (
-                          <Badge variant="secondary" className="text-[10px]">
-                            {subjectTypeLabel(entry.subject_type)}
-                          </Badge>
-                        )}
+                        <SubjectChip
+                          subjectType={entry.subject_type}
+                          subjectId={entry.subject_id}
+                          subjectName={entry.subject_name}
+                        />
                         {entry.is_current === false && (
                           <Badge variant="outline" className="text-[10px] text-muted-foreground border-muted">
                             superseded
@@ -834,21 +913,64 @@ export function ContextBrowser() {
                         <ValidUntilBadge date={entry.valid_until} />
                       </div>
                     </div>
-                    <div className="flex flex-col gap-1.5 flex-shrink-0">
+                    {/* Right-side actions */}
+                    <div
+                      className="flex items-center gap-1.5 flex-shrink-0"
+                      onClick={e => e.stopPropagation()}
+                    >
                       {expired && (
                         <Button
                           variant="outline"
                           size="sm"
                           className="h-6 text-[10px] text-destructive border-destructive/30 hover:bg-destructive/10"
-                          onClick={() => reviewEntry.mutate(entry.id)}
+                          onClick={(e) => { e.stopPropagation(); reviewEntry.mutate(entry.id); }}
                           disabled={reviewEntry.isPending}
                         >
                           Mark reviewed
                         </Button>
                       )}
                       {!expired && entry.is_current && (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5" />
+                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
                       )}
+                      {/* Kebab menu */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 focus:opacity-100"
+                            aria-label="Entry actions"
+                          >
+                            <MoreHorizontal className="w-3.5 h-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuItem onClick={() => openEntryDrawer(entry)}>
+                            <Edit3 className="w-3.5 h-3.5 mr-2" />
+                            View details
+                          </DropdownMenuItem>
+                          {expired && (
+                            <DropdownMenuItem onClick={() => reviewEntry.mutate(entry.id)}>
+                              <CheckCircle2 className="w-3.5 h-3.5 mr-2" />
+                              Mark reviewed
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                            onClick={() => {
+                              const now = new Date().toISOString().slice(0, 10);
+                              supersedeEntry.mutate(
+                                { id: entry.id, body: `[Forgotten by user on ${now}]`, confidence: 0 },
+                                { onSuccess: () => toast({ title: 'Entry forgotten', description: 'Belief invalidated. Audit record preserved.' }) },
+                              );
+                            }}
+                          >
+                            <Trash2 className="w-3.5 h-3.5 mr-2" />
+                            Forget / Invalidate
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </div>
                 </motion.div>
@@ -871,6 +993,13 @@ export function ContextBrowser() {
           </div>
         )}
       </div>
+
+      {/* ── Context Entry Detail Drawer ──────────────────────────────────── */}
+      <ContextEntryDrawer
+        entry={selectedEntry}
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+      />
 
       {/* ── Import Dialog ──────────────────────────────────────────────────── */}
       <Dialog open={ingestOpen} onOpenChange={(open) => { if (!open) closeIngestDialog(); else setIngestOpen(true); }}>

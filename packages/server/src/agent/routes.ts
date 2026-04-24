@@ -76,7 +76,7 @@ export function agentRouter(db: DbPool): Router {
       const update: Record<string, unknown> = {};
 
       // Pick allowed fields
-      const boolFields = ['enabled', 'can_write_objects', 'can_log_activities', 'can_create_assignments'];
+      const boolFields = ['enabled', 'can_write_objects', 'can_log_activities', 'can_create_assignments', 'auto_extract_context'];
       const strFields = ['provider', 'base_url', 'model', 'system_prompt'];
       const intFields = ['max_tokens_per_turn', 'history_retention_days'];
 
