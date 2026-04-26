@@ -76,7 +76,7 @@ export function BriefingPanel({ subjectType, subjectId, onClose }: BriefingPanel
                 <div key={idx} className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 space-y-1.5">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs font-semibold text-destructive">{w.conflict_field ?? 'Conflict'}</span>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${
+                    <span className={`text-xs px-1.5 py-0.5 rounded border font-mono ${
                       w.suggested_action === 'manual_review'
                         ? 'bg-amber-500/10 border-amber-500/20 text-amber-600'
                         : 'bg-muted border-border text-muted-foreground'
@@ -85,7 +85,7 @@ export function BriefingPanel({ subjectType, subjectId, onClose }: BriefingPanel
                     </span>
                   </div>
                   <p className="text-xs text-foreground leading-relaxed">{w.conflict_evidence}</p>
-                  <div className="flex gap-4 text-[10px] text-muted-foreground">
+                  <div className="flex gap-4 text-xs text-muted-foreground">
                     <span>Entry A: <span className="font-mono text-foreground">{w.entry_a?.id?.slice(0, 8)}</span></span>
                     <span>Entry B: <span className="font-mono text-foreground">{w.entry_b?.id?.slice(0, 8)}</span></span>
                   </div>

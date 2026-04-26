@@ -82,7 +82,7 @@ export function WorkflowFilterBuilder({ conditions, onChange, disabled }: Props)
 
       {/* Human-readable preview */}
       {conditions.filter(c => c.field).length > 0 && (
-        <p className="text-[10px] text-muted-foreground italic">
+        <p className="text-xs text-muted-foreground italic">
           Only runs when{' '}
           {conditions
             .filter(c => c.field)

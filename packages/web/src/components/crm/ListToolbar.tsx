@@ -101,7 +101,7 @@ export function ListToolbar({
             </button>
           )}
           {!searchValue && (
-            <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 hidden md:inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-mono text-muted-foreground/50 bg-muted border border-border">
+            <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 hidden md:inline-flex items-center px-1.5 py-0.5 rounded-md text-xs font-mono text-muted-foreground/50 bg-muted border border-border">
               /
             </kbd>
           )}
@@ -115,7 +115,7 @@ export function ListToolbar({
               <Filter className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Filter</span>
               {activeFilterCount > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground text-[10px] font-semibold">
+                <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground text-xs font-semibold">
                   {activeFilterCount}
                 </span>
               )}
@@ -152,7 +152,7 @@ export function ListToolbar({
                 {currentSort ? sortOptions.find(s => s.key === currentSort.key)?.label || 'Sort' : 'Sort'}
               </span>
               {currentSort && (
-                <span className="text-[10px] font-mono">{currentSort.dir === 'asc' ? '↑' : '↓'}</span>
+                <span className="text-xs font-mono">{currentSort.dir === 'asc' ? '↑' : '↓'}</span>
               )}
             </button>
           </PopoverTrigger>
@@ -167,7 +167,7 @@ export function ListToolbar({
               >
                 {opt.label}
                 {currentSort?.key === opt.key && (
-                  <span className="ml-auto float-right text-[10px] font-mono">{currentSort.dir === 'asc' ? '↑' : '↓'}</span>
+                  <span className="ml-auto float-right text-xs font-mono">{currentSort.dir === 'asc' ? '↑' : '↓'}</span>
                 )}
               </button>
             ))}

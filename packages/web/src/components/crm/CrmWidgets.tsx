@@ -56,7 +56,7 @@ export function DealHealthBadge({ score, onRescore, rescoring }: { score: number
     >
       <Heart className="w-3 h-3 ml-1.5" />
       <span className="py-0.5">{score}</span>
-      <span className="py-0.5 opacity-70 font-normal text-[10px] pr-1">{label}</span>
+      <span className="py-0.5 opacity-70 font-normal text-xs pr-1">{label}</span>
       {onRescore && (
         <button
           onClick={(e) => { e.stopPropagation(); onRescore(); }}
@@ -124,7 +124,7 @@ function OutcomeBadge({ outcome }: { outcome: string }) {
   const label = outcome.replace(/_/g, ' ');
   return (
     <span
-      className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium capitalize"
+      className="inline-flex items-center px-1.5 py-0.5 rounded-md text-xs font-medium capitalize"
       style={{ backgroundColor: color + '18', color }}
     >
       {label}
@@ -260,12 +260,12 @@ export function ActivityFeed({ limit, activities: propActivities, filterWindow }
               </div>
               <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                 {hasSubjectLink && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-primary/80 bg-primary/8 px-1.5 py-0.5 rounded">
+                  <span className="inline-flex items-center gap-0.5 text-xs font-medium text-primary/80 bg-primary/8 px-1.5 py-0.5 rounded">
                     {SUBJECT_TYPE_LABELS[a.subject_type!] ?? a.subject_type}
                   </span>
                 )}
                 {a.performer_name && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                  <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
                     {a.performed_by ? <Bot className="w-2.5 h-2.5" /> : <User className="w-2.5 h-2.5" />}
                     {a.performer_name}
                   </span>
@@ -335,13 +335,13 @@ export function PipelineSnapshot() {
         <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
           <button
             onClick={() => setView('opportunities')}
-            className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${view === 'opportunities' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${view === 'opportunities' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
           >
             Opps
           </button>
           <button
             onClick={() => setView('use-cases')}
-            className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${view === 'use-cases' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+            className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${view === 'use-cases' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
           >
             Use Cases
           </button>
@@ -351,9 +351,9 @@ export function PipelineSnapshot() {
         {data.map((s) => (
           <div key={s.key} className="flex-shrink-0 w-28 rounded-xl p-3 border border-border" style={{ backgroundColor: s.color + '08' }}>
             <div className="w-3 h-3 rounded-full mb-2" style={{ backgroundColor: s.color }} />
-            <p className="text-[10px] text-muted-foreground font-medium truncate">{s.label}</p>
+            <p className="text-xs text-muted-foreground font-medium truncate">{s.label}</p>
             <p className="text-lg font-display font-bold text-foreground">{s.count}</p>
-            <p className="text-[10px] text-muted-foreground font-mono truncate">{valueLabel(s.total)}</p>
+            <p className="text-xs text-muted-foreground font-mono truncate">{valueLabel(s.total)}</p>
           </div>
         ))}
       </div>
@@ -398,9 +398,9 @@ export function AccountHealth() {
         {segments.map((s) => (
           <div key={s.label} className="flex-shrink-0 w-28 rounded-xl p-3 border border-border" style={{ backgroundColor: s.color + '08' }}>
             <div className="w-3 h-3 rounded-full mb-2" style={{ backgroundColor: s.color }} />
-            <p className="text-[10px] text-muted-foreground font-medium truncate">{s.label}</p>
+            <p className="text-xs text-muted-foreground font-medium truncate">{s.label}</p>
             <p className="text-lg font-display font-bold text-foreground">{s.count}</p>
-            <p className="text-[10px] text-muted-foreground font-mono">{total > 0 ? Math.round((s.count / total) * 100) : 0}%</p>
+            <p className="text-xs text-muted-foreground font-mono">{total > 0 ? Math.round((s.count / total) * 100) : 0}%</p>
           </div>
         ))}
       </div>

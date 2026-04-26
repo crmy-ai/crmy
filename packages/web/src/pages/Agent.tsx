@@ -18,83 +18,17 @@ import {
   ChevronDown, ChevronRight, Pencil, Trash2, Check, MessageSquare,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-
-// ── Types ───────────────────────────────────────────────────────────────────
-
-type DisplayMessage =
-  | { kind: 'user'; content: string }
-  | { kind: 'assistant'; content: string }
-  | { kind: 'tool_status'; id: string; name: string; status: string }
-  | { kind: 'tool_call'; id: string; name: string; arguments: Record<string, unknown> }
-  | { kind: 'tool_result'; id: string; name: string; is_error: boolean; result?: unknown }
-  | { kind: 'error'; message: string };
-
-type SSEEvent =
-  | { type: 'delta'; content: string }
-  | { type: 'tool_status'; id: string; name: string; status: string }
-  | { type: 'tool_call'; id: string; name: string; arguments: Record<string, unknown> }
-  | { type: 'tool_result'; id: string; name: string; result: unknown; is_error: boolean }
-  | { type: 'done'; session_id: string; label: string | null }
-  | { type: 'error'; message: string };
+import {
+  streamChat, groupToolMessages, getSuggestions, SYSTEM_INIT_PREFIX,
+  type DisplayMessage, type RenderItem, type ToolGroupItem,
+} from '@/lib/agentStream';
 
 const typeIcons: Record<string, typeof User> = {
-  contact: User,
-  opportunity: Briefcase,
-  'use-case': Layers,
-  account: Building,
+  contact: User, opportunity: Briefcase, 'use-case': Layers, account: Building,
 };
 const typeLabels: Record<string, string> = {
-  contact: 'Contact',
-  opportunity: 'Opportunity',
-  'use-case': 'Use Case',
-  account: 'Account',
+  contact: 'Contact', opportunity: 'Opportunity', 'use-case': 'Use Case', account: 'Account',
 };
-
-// ── SSE Chat Helper ─────────────────────────────────────────────────────────
-
-async function streamChat(
-  sessionId: string,
-  message: string,
-  onEvent: (event: SSEEvent) => void,
-  signal?: AbortSignal,
-) {
-  const token = localStorage.getItem('crmy_token');
-  const res = await fetch(`/api/v1/agent/sessions/${sessionId}/chat`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ message }),
-    signal,
-  });
-
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
-  }
-
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop()!;
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      try {
-        const event: SSEEvent = JSON.parse(line.slice(6));
-        onEvent(event);
-      } catch { /* skip malformed */ }
-    }
-  }
-}
 
 // ── Session item with rename/delete ─────────────────────────────────────────
 
@@ -176,7 +110,7 @@ function SessionItem({
           </span>
         )}
         {session.context_name && (
-          <span className="text-[10px] text-muted-foreground/60 truncate block mt-0.5">
+          <span className="text-xs text-muted-foreground/60 truncate block mt-0.5">
             {typeLabels[session.context_type ?? ''] ?? session.context_type} · {session.context_name}
           </span>
         )}
@@ -226,19 +160,82 @@ export default function Agent() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Handle entity context from AIFab
+  // Auto-greet: when entity context is injected, fire a real briefing_get turn
+  // instead of showing a hardcoded greeting.
+  const autoGreet = useCallback(async (ctx: AIContextEntity) => {
+    const abort = new AbortController();
+    abortRef.current = abort;
+    setStreaming(true);
+    setMessages([]);
+
+    try {
+      const session = await createSession.mutateAsync({
+        context_type: ctx.type,
+        context_id: ctx.id,
+        context_name: ctx.name,
+      });
+      const sessionId = session.data.id;
+      setActiveSessionId(sessionId);
+
+      let assistantText = '';
+      await streamChat(
+        sessionId,
+        SYSTEM_INIT_PREFIX,
+        (event) => {
+          switch (event.type) {
+            case 'delta': {
+              assistantText += event.content;
+              const snapshot = assistantText;
+              setMessages(prev => {
+                const last = prev[prev.length - 1];
+                if (last?.kind === 'assistant') return [...prev.slice(0, -1), { kind: 'assistant', content: snapshot }];
+                return [...prev, { kind: 'assistant', content: snapshot }];
+              });
+              break;
+            }
+            case 'tool_status':
+              setMessages(prev => {
+                const existing = prev.findIndex(m => m.kind === 'tool_status' && m.id === event.id);
+                const msg: DisplayMessage = { kind: 'tool_status', id: event.id, name: event.name, status: event.status, turn_id: event.turn_id };
+                if (existing >= 0) { const u = [...prev]; u[existing] = msg; return u; }
+                return [...prev, msg];
+              });
+              break;
+            case 'tool_result':
+              setMessages(prev => prev.map(m =>
+                m.kind === 'tool_status' && m.id === event.id
+                  ? { ...m, status: event.is_error ? `Error from ${m.name.replace(/_/g, ' ')}` : m.status.replace('…', ' ✓') }
+                  : m
+              ));
+              break;
+            case 'done':
+              refetchSessions();
+              break;
+          }
+        },
+        abort.signal,
+        { auto_greet: true },
+      );
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        setMessages([{ kind: 'error', message: (err as Error).message }]);
+      }
+    } finally {
+      setStreaming(false);
+      abortRef.current = null;
+    }
+  }, [createSession, refetchSessions]);
+
+  // Handle entity context from record pages (openAIWithContext)
   useEffect(() => {
     if (aiContext) {
       setEntityContext(aiContext);
       setInput('');
-      setMessages([{
-        kind: 'assistant',
-        content: `I'm ready to help with **${aiContext.name}**${aiContext.detail ? ` (${aiContext.detail})` : ''}. What would you like to do?`,
-      }]);
-      setActiveSessionId(null); // will create a new session on send
+      setActiveSessionId(null);
       useAppStore.setState({ aiContext: null });
+      autoGreet(aiContext);
     }
-  }, [aiContext]);
+  }, [aiContext, autoGreet]);
 
   // Load existing session
   const loadSession = useCallback(async (session: AgentSessionSummary) => {
@@ -259,6 +256,8 @@ export default function Agent() {
         const display: DisplayMessage[] = [];
         for (const msg of data.messages) {
           if (msg.role === 'system') continue;
+          // Filter out internal auto-greet prompts — only show the agent's response
+          if (msg.role === 'user' && msg.content?.startsWith(SYSTEM_INIT_PREFIX)) continue;
           if (msg.role === 'user') display.push({ kind: 'user', content: msg.content });
           if (msg.role === 'assistant' && msg.content) display.push({ kind: 'assistant', content: msg.content });
         }
@@ -349,6 +348,7 @@ export default function Agent() {
                 id: event.id,
                 name: event.name,
                 status: event.status,
+                turn_id: event.turn_id,
               };
               if (existingIdx >= 0) {
                 const updated = [...prev];
@@ -369,7 +369,7 @@ export default function Agent() {
             setMessages(prev =>
               prev.map(m =>
                 m.kind === 'tool_status' && m.id === event.id
-                  ? { ...m, status: event.is_error ? `Error from ${m.name.replace(/_/g, ' ')}` : m.status.replace('…', ' ✓') }
+                  ? { ...m, status: event.is_error ? `Error from ${m.name.replace(/_/g, ' ')}` : m.status.replace('…', ' ✓'), turn_id: event.turn_id }
                   : m
               )
             );
@@ -407,6 +407,7 @@ export default function Agent() {
             const display: DisplayMessage[] = [];
             for (const msg of json.data.messages as { role: string; content: string }[]) {
               if (msg.role === 'system') continue;
+              if (msg.role === 'user' && msg.content?.startsWith(SYSTEM_INIT_PREFIX)) continue;
               if (msg.role === 'user') display.push({ kind: 'user', content: msg.content });
               if (msg.role === 'assistant' && msg.content) display.push({ kind: 'assistant', content: msg.content });
             }
@@ -417,9 +418,7 @@ export default function Agent() {
     }
   }, [input, streaming, activeSessionId, entityContext, createSession, refetchSessions]);
 
-  const suggestions = entityContext
-    ? [`Summarize ${typeLabels[entityContext.type]?.toLowerCase() ?? 'record'}`, 'Recent activities', 'Draft follow-up']
-    : ['Summarize pipeline', 'Deals needing attention', 'List my open activities'];
+  const suggestions = getSuggestions(entityContext?.type ?? null, entityContext?.name ?? null);
 
   const IconComponent = entityContext ? typeIcons[entityContext.type] : null;
 
@@ -475,7 +474,7 @@ export default function Agent() {
                 {connectivityLabel}
               </span>
               {streaming && (
-                <span className="flex items-center gap-1 text-[10px] text-primary ml-2">
+                <span className="flex items-center gap-1 text-xs text-primary ml-2">
                   <Loader2 className="w-3 h-3 animate-spin" /> Thinking…
                 </span>
               )}
@@ -483,14 +482,14 @@ export default function Agent() {
                 {streaming && (
                   <button
                     onClick={() => abortRef.current?.abort()}
-                    className="text-[10px] text-destructive bg-destructive/10 px-2 py-0.5 rounded-full hover:bg-destructive/20 transition-colors"
+                    className="text-xs text-destructive bg-destructive/10 px-2 py-0.5 rounded-full hover:bg-destructive/20 transition-colors"
                   >
                     Stop
                   </button>
                 )}
                 <button
                   onClick={startNewChat}
-                  className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full hover:bg-muted/80 transition-colors"
+                  className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full hover:bg-muted/80 transition-colors"
                 >
                   New chat
                 </button>
@@ -535,10 +534,10 @@ export default function Agent() {
                 <p className="text-sm">Ask your workspace agent anything about your CRM.</p>
               </div>
             )}
-            {messages.map((msg, i) => (
-              <MessageBubble key={i} msg={msg} index={i} />
+            {groupToolMessages(messages).map((item, i) => (
+              <MessageBubble key={i} item={item} index={i} />
             ))}
-            {streaming && messages[messages.length - 1]?.kind !== 'assistant' && messages[messages.length - 1]?.kind !== 'tool_status' && (
+            {streaming && !['assistant', 'tool_status'].includes(messages[messages.length - 1]?.kind ?? '') && (
               <TypingIndicator />
             )}
             <div ref={messagesEndRef} />
@@ -591,7 +590,7 @@ export default function Agent() {
             </h3>
             <button
               onClick={startNewChat}
-              className="text-[10px] text-primary hover:underline"
+              className="text-xs text-primary hover:underline"
             >
               + New
             </button>
@@ -644,48 +643,66 @@ function TypingIndicator() {
   );
 }
 
-// ── Tool Status Row ──────────────────────────────────────────────────────────
+// ── Tool Group (collapsible) ─────────────────────────────────────────────────
 
-function ToolStatusRow({ msg }: { msg: DisplayMessage & { kind: 'tool_status' } }) {
-  const [expanded, setExpanded] = useState(false);
-  const isDone = msg.status.endsWith('✓');
-  const isError = msg.status.startsWith('Error');
+function ToolGroup({ group }: { group: ToolGroupItem }) {
+  const allDone = group.steps.every(s => s.status.endsWith('✓') || s.status.startsWith('Error'));
+  const hasError = group.steps.some(s => s.status.startsWith('Error'));
+  const [expanded, setExpanded] = useState(hasError); // auto-expand on error
+
+  // While running: show current active step name
+  const activeStep = group.steps.find(s => !s.status.endsWith('✓') && !s.status.startsWith('Error'));
+  const currentStatus = activeStep?.status ?? (hasError ? 'Error in tool call' : `${group.steps.length} step${group.steps.length !== 1 ? 's' : ''} complete`);
+
+  const iconClass = hasError ? 'text-destructive' : allDone ? 'text-emerald-500' : 'text-primary animate-pulse';
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="flex items-start gap-2 px-3 py-1.5 text-xs text-muted-foreground group"
-    >
-      <Wrench className={`w-3 h-3 mt-0.5 flex-shrink-0 ${isError ? 'text-destructive' : isDone ? 'text-success' : 'text-primary animate-pulse'}`} />
-      <span className={isError ? 'text-destructive' : isDone ? 'text-muted-foreground' : 'text-foreground/70'}>
-        {msg.status}
-      </span>
+    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="px-3 py-1">
       <button
         onClick={() => setExpanded(v => !v)}
-        className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5 text-[10px] text-muted-foreground/60 hover:text-muted-foreground"
+        className="flex items-center gap-2 w-full text-left text-xs text-muted-foreground hover:text-foreground transition-colors group"
       >
-        <code className="font-mono bg-muted px-1 rounded">{msg.name}</code>
-        {expanded ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
+        <Wrench className={`w-3 h-3 shrink-0 ${iconClass}`} />
+        <span className={hasError ? 'text-destructive' : allDone ? 'text-muted-foreground' : 'text-foreground/70'}>
+          {allDone
+            ? `✓ ${group.steps.length} step${group.steps.length !== 1 ? 's' : ''}`
+            : currentStatus}
+        </span>
+        <span className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+          {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        </span>
       </button>
+      {expanded && (
+        <div className="mt-1 ml-5 space-y-0.5 border-l border-border pl-3">
+          {group.steps.map(step => {
+            const done = step.status.endsWith('✓');
+            const err = step.status.startsWith('Error');
+            return (
+              <div key={step.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <code className="font-mono text-muted-foreground/60 bg-muted px-1 rounded shrink-0">{step.name}</code>
+                <span className={err ? 'text-destructive' : done ? 'text-muted-foreground' : 'text-foreground/60'}>
+                  {step.status}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </motion.div>
   );
 }
 
 // ── Message Bubble ──────────────────────────────────────────────────────────
 
-function MessageBubble({ msg, index }: { msg: DisplayMessage; index: number }) {
-  if (msg.kind === 'tool_status') {
-    return <ToolStatusRow msg={msg} />;
+function MessageBubble({ item, index }: { item: RenderItem; index: number }) {
+  if (item.kind === 'tool_group') {
+    return <ToolGroup group={item} />;
   }
 
-  if (msg.kind === 'tool_call') {
-    // tool_call is now handled via tool_status — skip rendering to avoid duplicates
-    return null;
-  }
+  const msg = item as DisplayMessage;
 
-  if (msg.kind === 'tool_result') {
-    // Results are surfaced through the tool_status update — skip rendering
+  if (msg.kind === 'tool_status' || msg.kind === 'tool_call' || msg.kind === 'tool_result') {
+    // These are handled by ToolGroup — skip
     return null;
   }
 

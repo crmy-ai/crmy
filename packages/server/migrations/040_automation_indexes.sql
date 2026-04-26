@@ -14,9 +14,9 @@ CREATE INDEX IF NOT EXISTS seq_enrollments_due_idx
 CREATE INDEX IF NOT EXISTS seq_enrollments_tenant_status_idx
   ON sequence_enrollments(tenant_id, status, created_at DESC);
 
--- Workflow run history listing by tenant + time
-CREATE INDEX IF NOT EXISTS workflow_runs_tenant_time_idx
-  ON workflow_runs(tenant_id, started_at DESC);
+-- Workflow run history listing by workflow + time (workflow_runs has no tenant_id column)
+CREATE INDEX IF NOT EXISTS workflow_runs_workflow_time_idx
+  ON workflow_runs(workflow_id, started_at DESC);
 
 -- Sequences: listing active sequences per tenant
 CREATE INDEX IF NOT EXISTS sequences_tenant_active_idx

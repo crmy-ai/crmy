@@ -33,7 +33,7 @@ function ContactBadge({ contactId }: { contactId?: string }) {
 
   if (!contactId) {
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground">
+      <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground">
         <User className="w-2.5 h-2.5" />
         Unknown sender
       </span>
@@ -47,7 +47,7 @@ function ContactBadge({ contactId }: { contactId?: string }) {
   return (
     <button
       onClick={() => openDrawer('contact', contactId)}
-      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors font-semibold"
+      className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors font-semibold"
     >
       <User className="w-2.5 h-2.5" />
       {name}
@@ -90,7 +90,7 @@ function InboundEmailCard({ email }: { email: InboundActivity }) {
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <ContactBadge contactId={email.contact_id} />
             {contextExtracted && (
-              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 font-semibold">
+              <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 font-semibold">
                 <Brain className="w-2.5 h-2.5" />
                 Context extracted
               </span>

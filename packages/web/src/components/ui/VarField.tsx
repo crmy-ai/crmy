@@ -158,7 +158,7 @@ function VarDropdown({
             {'{{' + s.path + '}}'}
           </code>
           <span className="text-muted-foreground truncate">{s.label}</span>
-          <Badge variant="outline" className="ml-auto shrink-0 text-[9px] px-1 py-0">
+          <Badge variant="outline" className="ml-auto shrink-0 text-xs px-1 py-0">
             {s.group}
           </Badge>
         </button>

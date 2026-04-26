@@ -87,7 +87,7 @@ function NavItem({ item, active, badge }: {
         )}
       </AnimatePresence>
       {badge !== undefined && badge > 0 && (
-        <span className={`flex-shrink-0 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-destructive text-white text-[10px] font-bold ${sidebarExpanded ? '' : 'absolute -top-1 -right-1'}`}>
+        <span className={`flex-shrink-0 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-destructive text-white text-xs font-bold ${sidebarExpanded ? '' : 'absolute -top-1 -right-1'}`}>
           {badge > 99 ? '99+' : badge}
         </span>
       )}
@@ -164,7 +164,7 @@ export function Sidebar() {
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                className="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-widest px-2.5 pt-2 pb-0.5"
+                className="text-xs font-semibold text-muted-foreground/60 uppercase tracking-widest px-2.5 pt-2 pb-0.5"
               >
                 Knowledge Base
               </motion.p>

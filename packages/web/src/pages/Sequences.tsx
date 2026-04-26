@@ -437,7 +437,7 @@ export function TypedStepBuilder({
                   <Icon className={`w-4 h-4 mt-0.5 shrink-0 ${t.color}`} />
                   <div>
                     <p className="text-xs font-semibold text-foreground">{t.label}</p>
-                    <p className="text-[10px] text-muted-foreground leading-tight">{t.desc}</p>
+                    <p className="text-xs text-muted-foreground leading-tight">{t.desc}</p>
                   </div>
                 </button>
               );
@@ -495,12 +495,12 @@ function StepReadView({ steps }: { steps: SequenceStep[] }) {
             <div className="flex-1 pb-2 min-w-0">
               <div className="flex items-center gap-2 mb-0.5 flex-wrap">
                 <span className="text-xs font-semibold text-foreground">{stepLabel(step.type)}</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">{delayLabel}</span>
+                <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">{delayLabel}</span>
                 {step.type === 'email' && step.ai_generate && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-500 border border-violet-500/20">AI</span>
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-500 border border-violet-500/20">AI</span>
                 )}
                 {(step.type === 'email' || step.type === 'ai_action') && step.require_approval && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">Needs approval</span>
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500 border border-amber-500/20">Needs approval</span>
                 )}
               </div>
               <p className="text-xs text-muted-foreground truncate">{preview}</p>
@@ -544,7 +544,7 @@ function EnrollmentSandbox({ enrollment, totalSteps }: { enrollment: Enrollment 
               <Icon className="w-3 h-3" />
               {t.label}
               {t.count > 0 && (
-                <span className="text-[10px] px-1 rounded-full bg-muted text-muted-foreground">{t.count}</span>
+                <span className="text-xs px-1 rounded-full bg-muted text-muted-foreground">{t.count}</span>
               )}
             </button>
           );
@@ -564,7 +564,7 @@ function EnrollmentSandbox({ enrollment, totalSteps }: { enrollment: Enrollment 
                 <div className="w-1.5 h-1.5 rounded-full bg-orange-500/60 mt-1.5 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-foreground truncate">{a.subject}</p>
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     {a.type.replace(/_/g, ' ')} · {new Date(a.occurred_at ?? a.created_at).toLocaleDateString()}
                   </p>
                 </div>
@@ -583,10 +583,10 @@ function EnrollmentSandbox({ enrollment, totalSteps }: { enrollment: Enrollment 
                 <Lightbulb className="w-3 h-3 text-amber-500 mt-0.5 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-foreground truncate">{c.title ?? c.context_type}</p>
-                  <p className="text-[10px] text-muted-foreground line-clamp-2">{c.body}</p>
+                  <p className="text-xs text-muted-foreground line-clamp-2">{c.body}</p>
                 </div>
                 {c.confidence != null && (
-                  <span className="text-[10px] text-muted-foreground shrink-0">{Math.round(c.confidence * 100)}%</span>
+                  <span className="text-xs text-muted-foreground shrink-0">{Math.round(c.confidence * 100)}%</span>
                 )}
               </div>
             ))
@@ -599,7 +599,7 @@ function EnrollmentSandbox({ enrollment, totalSteps }: { enrollment: Enrollment 
             ) : (
               Object.entries((enrollment as any).variables ?? {}).map(([k, v]) => (
                 <div key={k} className="flex items-center gap-2 px-2 py-1.5 rounded-md bg-muted/40 border border-border">
-                  <span className="font-mono text-[10px] text-muted-foreground shrink-0">{`{{variables.${k}}}`}</span>
+                  <span className="font-mono text-xs text-muted-foreground shrink-0">{`{{variables.${k}}}`}</span>
                   <span className="text-xs text-foreground flex-1 truncate">{String(v)}</span>
                 </div>
               ))
@@ -680,7 +680,7 @@ function EnrollmentTab({ sequence }: { sequence: Sequence }) {
             onChange={e => setObjective(e.target.value)}
             className={`${inputCls} text-xs`}
           />
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             <Target className="w-3 h-3 inline-block mr-0.5 align-middle" />
             Setting an objective gives agents context when working with this contact.
           </p>
@@ -721,7 +721,7 @@ function EnrollmentTab({ sequence }: { sequence: Sequence }) {
               <div key={e.id} className="rounded-lg border border-border bg-card overflow-hidden">
                 {/* Card header */}
                 <div className="flex items-center gap-3 px-3 py-2.5">
-                  <span className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border font-semibold shrink-0 ${cfg.cls}`}>
+                  <span className={`flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border font-semibold shrink-0 ${cfg.cls}`}>
                     <StatusIcon className="w-3 h-3" /> {cfg.label}
                   </span>
                   <div className="flex-1 min-w-0">
@@ -936,11 +936,11 @@ function SequenceRow({ sequence }: { sequence: Sequence }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-0.5">
             <span className="text-sm font-semibold text-foreground truncate">{sequence.name}</span>
-            <Badge variant={sequence.is_active ? 'default' : 'secondary'} className="text-[10px] shrink-0">
+            <Badge variant={sequence.is_active ? 'default' : 'secondary'} className="text-xs shrink-0">
               {sequence.is_active ? 'Active' : 'Paused'}
             </Badge>
             {sequence.tags?.map(tag => (
-              <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">{tag}</span>
+              <span key={tag} className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 shrink-0">{tag}</span>
             ))}
           </div>
           <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">

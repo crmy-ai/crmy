@@ -118,17 +118,17 @@ export function GraphSidebar({
           <div className="mb-3 space-y-1">
             <div className="flex items-center gap-1 flex-wrap">
               {historyItems.length > 2 && (
-                <span className="text-[10px] text-muted-foreground/50">…</span>
+                <span className="text-xs text-muted-foreground/50">…</span>
               )}
               {historyItems.map((item, i) => (
                 <span key={i} className="flex items-center gap-1">
                   <span
-                    className="text-[10px] text-muted-foreground/60 max-w-[64px] truncate"
+                    className="text-xs text-muted-foreground/60 max-w-[64px] truncate"
                     title={item.name}
                   >
                     {item.name}
                   </span>
-                  <span className="text-[10px] text-muted-foreground/30">›</span>
+                  <span className="text-xs text-muted-foreground/30">›</span>
                 </span>
               ))}
             </div>
@@ -157,7 +157,7 @@ export function GraphSidebar({
           </div>
           <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground truncate">{subjectName || 'Loading…'}</p>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground capitalize">
+            <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground capitalize">
               {subjectType.replace(/_/g, ' ')}
             </span>
           </div>
@@ -166,7 +166,7 @@ export function GraphSidebar({
 
       {/* Filters */}
       <div className="flex-1 px-3 py-3">
-        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 mb-1.5">Show</p>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 mb-1.5">Show</p>
         <div className="space-y-0.5">
           {filterRows.map(row => (
             <button
@@ -181,7 +181,7 @@ export function GraphSidebar({
                 style={{ backgroundColor: activeFilters.has(row.key) ? row.color : row.color + '50' }}
               />
               <span className="flex-1 text-left font-medium">{row.label}</span>
-              <span className="text-[10px] text-muted-foreground tabular-nums">{row.count}</span>
+              <span className="text-xs text-muted-foreground tabular-nums">{row.count}</span>
             </button>
           ))}
         </div>

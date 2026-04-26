@@ -208,7 +208,7 @@ export default function Dashboard() {
                     {pendingHITL.slice(0, 3).map((r: any) => (
                       <div key={r.id} className="rounded-xl border border-border bg-surface p-3 space-y-2">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <Badge variant="outline" className="text-[11px]">{r.action_type}</Badge>
+                          <Badge variant="outline" className="text-xs">{r.action_type}</Badge>
                           <span className="text-xs text-muted-foreground">
                             {r.agent_id ?? r.created_by ?? 'agent'}
                           </span>
@@ -266,13 +266,13 @@ export default function Dashboard() {
                   <div className="flex items-center gap-0.5 bg-muted rounded-lg p-0.5">
                     <button
                       onClick={() => setActivityWindow('today')}
-                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${activityWindow === 'today' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${activityWindow === 'today' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                     >
                       Today
                     </button>
                     <button
                       onClick={() => setActivityWindow('week')}
-                      className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-all ${activityWindow === 'week' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all ${activityWindow === 'week' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
                     >
                       This Week
                     </button>
@@ -316,7 +316,7 @@ export default function Dashboard() {
                         <div className="flex-1 min-w-0">
                           <p className="text-xs font-semibold text-foreground truncate">{agent.display_name}</p>
                           {agent.agent_model && (
-                            <p className="text-[10px] text-muted-foreground truncate">{agent.agent_model}</p>
+                            <p className="text-xs text-muted-foreground truncate">{agent.agent_model}</p>
                           )}
                         </div>
                         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${agent.is_active ? 'bg-emerald-500' : 'bg-muted-foreground/30'}`} />

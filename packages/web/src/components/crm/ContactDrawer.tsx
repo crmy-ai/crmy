@@ -450,14 +450,14 @@ export function ContactDrawer() {
             <div key={note.id} className="rounded-xl bg-muted/50 p-3 space-y-1">
               <div className="flex items-center gap-1.5">
                 {note.pinned && <Pin className="w-3 h-3 text-accent" />}
-                <span className="text-[10px] text-muted-foreground ml-auto">
+                <span className="text-xs text-muted-foreground ml-auto">
                   {new Date(note.created_at).toLocaleDateString()}
                 </span>
               </div>
               {note.title && <p className="text-xs font-medium text-foreground">{note.title}</p>}
               <p className="text-sm text-foreground whitespace-pre-wrap">{note.body}</p>
               {note.metadata?.author_type && (
-                <p className="text-[10px] text-muted-foreground capitalize">{note.metadata.author_type === 'agent' ? 'AI Agent' : note.metadata.author_type}</p>
+                <p className="text-xs text-muted-foreground capitalize">{note.metadata.author_type === 'agent' ? 'AI Agent' : note.metadata.author_type}</p>
               )}
             </div>
           ))}

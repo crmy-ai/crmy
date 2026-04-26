@@ -65,7 +65,7 @@ export interface WorkflowEditorProps {
 const fieldCls    = 'w-full h-9 px-3 rounded-lg border border-border bg-background text-sm placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const smFieldCls  = 'w-full h-8 px-2.5 rounded-md border border-border bg-background text-xs placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const areaCls     = 'w-full px-2.5 py-2 rounded-md border border-border bg-background text-xs placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring resize-none font-mono leading-relaxed';
-const labelCls    = 'block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1';
+const labelCls    = 'block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -102,7 +102,7 @@ function TriggerCombobox({ value, onChange }: { value: string; onChange: (v: str
             const groups = [...new Set(matches.map(e => e.group))];
             return groups.map(g => (
               <div key={g}>
-                <p className="px-3 pt-2 pb-0.5 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                <p className="px-3 pt-2 pb-0.5 text-xs font-bold uppercase tracking-widest text-muted-foreground/60">
                   {g}
                 </p>
                 {matches.filter(e => e.group === g).map(e => (
@@ -113,7 +113,7 @@ function TriggerCombobox({ value, onChange }: { value: string; onChange: (v: str
                     className="w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center justify-between gap-3"
                   >
                     <span className="font-mono text-foreground">{e.value}</span>
-                    <span className="text-muted-foreground shrink-0 text-[10px]">{e.label}</span>
+                    <span className="text-muted-foreground shrink-0 text-xs">{e.label}</span>
                   </button>
                 ))}
               </div>
@@ -158,10 +158,10 @@ function TriggerPanel({
         <label className={labelCls}>Event</label>
         <TriggerCombobox value={trigger} onChange={onTriggerChange} />
         {triggerDef && trigger !== 'manual' && (
-          <p className="text-[10px] text-muted-foreground mt-1">{triggerDef.label}</p>
+          <p className="text-xs text-muted-foreground mt-1">{triggerDef.label}</p>
         )}
         {isManual && (
-          <div className="mt-2 p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-[10px] text-blue-600 dark:text-blue-400 space-y-1">
+          <div className="mt-2 p-2.5 rounded-lg bg-blue-500/10 border border-blue-500/20 text-xs text-blue-600 dark:text-blue-400 space-y-1">
             <p className="font-semibold">Manual / On Demand</p>
             <p>This automation has no automatic trigger. Run it on-demand via the <span className="font-mono">▶ Run</span> button or the <span className="font-mono">workflow_trigger</span> MCP tool.</p>
           </div>
@@ -221,7 +221,7 @@ function ActionTypeSelect({
           return (
             <SelectGroup key={group}>
               {gi > 0 && <SelectSeparator />}
-              <SelectLabel className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60 px-2 py-1">
+              <SelectLabel className="text-xs font-bold uppercase tracking-wider text-muted-foreground/60 px-2 py-1">
                 {group}
               </SelectLabel>
               {items.map(a => (
@@ -300,7 +300,7 @@ function ActionCard({
         isHITL ? 'border-amber-500/20 pl-5' : 'border-border'
       }`}>
         {/* Step number */}
-        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+        <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
           isHITL ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400' : 'bg-muted text-muted-foreground'
         }`}>
           {index + 1}
@@ -314,11 +314,11 @@ function ActionCard({
 
         {/* HITL / Auto badge */}
         {isHITL ? (
-          <Badge className="shrink-0 text-[9px] px-1.5 bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20">
+          <Badge className="shrink-0 text-xs px-1.5 bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20">
             <UserCheck className="w-2.5 h-2.5 mr-0.5" />Human
           </Badge>
         ) : (
-          <Badge variant="outline" className="shrink-0 text-[9px] px-1.5 text-muted-foreground">
+          <Badge variant="outline" className="shrink-0 text-xs px-1.5 text-muted-foreground">
             <Bot className="w-2.5 h-2.5 mr-0.5" />Auto
           </Badge>
         )}
@@ -372,7 +372,7 @@ function ActionCard({
                     {field.label}
                   </label>
                   {field.hint && (
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{field.hint}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{field.hint}</p>
                   )}
                 </div>
               </div>
@@ -399,7 +399,7 @@ function ActionCard({
                   ))}
                 </select>
                 {sel && (
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                  <p className="text-xs text-muted-foreground mt-0.5">
                     {sel.steps?.length ?? 0} step{sel.steps?.length !== 1 ? 's' : ''}
                   </p>
                 )}
@@ -421,7 +421,7 @@ function ActionCard({
                   placeholder={field.placeholder}
                   className={smFieldCls + ' font-mono'}
                 />
-                {field.hint && <p className="text-[10px] text-muted-foreground mt-0.5">{field.hint}</p>}
+                {field.hint && <p className="text-xs text-muted-foreground mt-0.5">{field.hint}</p>}
               </div>
             );
           }
@@ -443,7 +443,7 @@ function ActionCard({
                   className={areaCls}
                 />
                 {field.hint && (
-                  <p className="text-[10px] text-muted-foreground mt-0.5">{field.hint}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{field.hint}</p>
                 )}
               </div>
             );
@@ -463,7 +463,7 @@ function ActionCard({
                 className={smFieldCls + ' font-mono'}
               />
               {field.hint && (
-                <p className="text-[10px] text-muted-foreground mt-0.5">{field.hint}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{field.hint}</p>
               )}
             </div>
           );
@@ -471,7 +471,7 @@ function ActionCard({
 
         {/* Human review notice on HITL actions */}
         {isHITL && (
-          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-700 dark:text-amber-400">
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-700 dark:text-amber-400">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             <span>
               {def.isHITL
@@ -506,14 +506,14 @@ function TriggerNode({ triggerEvent, isManual }: { triggerEvent: string; isManua
         {isManual ? <Play className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" /> : <Zap className="w-3.5 h-3.5 text-amber-500" />}
       </div>
       <div className="min-w-0">
-        <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 mb-0.5">
+        <p className="text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 mb-0.5">
           {isManual ? 'Manual Trigger' : 'Trigger'}
         </p>
         <p className="text-sm font-mono text-foreground truncate">
           {triggerEvent || <span className="text-muted-foreground">No trigger selected</span>}
         </p>
         {def && !isManual && (
-          <p className="text-[10px] text-muted-foreground mt-0.5">{def.label}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{def.label}</p>
         )}
       </div>
     </div>
@@ -545,7 +545,7 @@ function AddActionButton({ onAdd }: { onAdd: (type: string) => void }) {
               return (
                 <div key={group}>
                   {gi > 0 && <div className="border-t border-border/60" />}
-                  <p className="px-3 pt-2.5 pb-1 text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                  <p className="px-3 pt-2.5 pb-1 text-xs font-bold uppercase tracking-widest text-muted-foreground/60">
                     {group}
                   </p>
                   {items.map(a => (
@@ -560,7 +560,7 @@ function AddActionButton({ onAdd }: { onAdd: (type: string) => void }) {
                         <span className="text-xs font-medium text-foreground">{a.label}</span>
                       </div>
                       {a.description && (
-                        <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
+                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">
                           {a.description}
                         </p>
                       )}
@@ -604,10 +604,10 @@ function TestPanel({ workflowId, triggerEvent }: { workflowId?: string; triggerE
           value={payload}
           onChange={e => { setPayload(e.target.value); setParseError(''); }}
           rows={9}
-          className={areaCls + ' text-[11px]'}
+          className={areaCls + ' text-xs'}
           spellCheck={false}
         />
-        {parseError && <p className="text-destructive mt-1 text-[10px]">{parseError}</p>}
+        {parseError && <p className="text-destructive mt-1 text-xs">{parseError}</p>}
       </div>
 
       <Button size="sm" onClick={run} disabled={testMutation.isPending} className="w-full gap-1.5 text-xs">
@@ -618,7 +618,7 @@ function TestPanel({ workflowId, triggerEvent }: { workflowId?: string; triggerE
       </Button>
 
       {!workflowId && (
-        <p className="text-[10px] text-muted-foreground text-center">Save first to enable test.</p>
+        <p className="text-xs text-muted-foreground text-center">Save first to enable test.</p>
       )}
 
       {result && (
@@ -638,7 +638,7 @@ function TestPanel({ workflowId, triggerEvent }: { workflowId?: string; triggerE
             <div className="space-y-1">
               <p className={labelCls}>Filter mismatches</p>
               {result.filter_match_details.mismatches.map((m: any, i: number) => (
-                <div key={i} className="flex items-start gap-1.5 text-[10px] text-destructive">
+                <div key={i} className="flex items-start gap-1.5 text-xs text-destructive">
                   <XCircle className="w-3 h-3 shrink-0 mt-0.5" />
                   <span><span className="font-mono">{m.field}</span>: got <span className="font-mono">"{String(m.actual)}"</span></span>
                 </div>
@@ -651,7 +651,7 @@ function TestPanel({ workflowId, triggerEvent }: { workflowId?: string; triggerE
               <p className={labelCls}>Resolved actions</p>
               <div className="rounded-lg border border-border divide-y divide-border overflow-hidden">
                 {result.actions.map((a: any, i: number) => (
-                  <div key={i} className="px-2.5 py-1.5 flex items-start gap-2 text-[10px]">
+                  <div key={i} className="px-2.5 py-1.5 flex items-start gap-2 text-xs">
                     <span className="shrink-0 text-muted-foreground w-4">{i + 1}.</span>
                     <span className="font-mono text-foreground shrink-0">{a.type}</span>
                     <span className="text-muted-foreground font-mono truncate">
@@ -840,7 +840,7 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
         if (v && workflow) resetFromWorkflow(workflow);
       }}
     >
-      <DialogContent className="max-w-none p-0 gap-0 w-[min(95vw,1440px)] h-[min(90vh,920px)] flex flex-col overflow-hidden rounded-2xl">
+      <DialogContent className="max-w-none p-0 gap-0 w-[min(95vw,1440px)] h-[min(90vh,920px)] flex flex-col overflow-hidden rounded-2xl [&>button]:hidden">
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border bg-background/95 backdrop-blur shrink-0">
@@ -860,7 +860,7 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
 
           {/* HITL present indicator */}
           {hasHITL && (
-            <Badge className="shrink-0 text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/15">
+            <Badge className="shrink-0 text-xs bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/15">
               <UserCheck className="w-3 h-3 mr-1" />Requires human review
             </Badge>
           )}
@@ -952,7 +952,7 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
                 </>
               )}
 
-              <p className="text-center text-[10px] text-muted-foreground/40 mt-4">
+              <p className="text-center text-xs text-muted-foreground/40 mt-4">
                 {actions.length}/{MAX_ACTIONS} actions
               </p>
             </div>

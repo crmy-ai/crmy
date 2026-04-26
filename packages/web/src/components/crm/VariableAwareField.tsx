@@ -273,10 +273,10 @@ export function VariableAwareField({
             tabIndex={-1}
             onMouseDown={(e) => { e.preventDefault(); handleButtonInsert(); }}
             title="Insert variable"
-            className="flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] font-mono text-muted-foreground hover:text-foreground hover:bg-muted border border-border/60 transition-colors"
+            className="flex items-center gap-0.5 px-1 py-0.5 rounded text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-muted border border-border/60 transition-colors"
           >
             <Braces className="w-3 h-3" />
-            <span className="text-[9px]">{'{{}}'}</span>
+            <span className="text-xs">{'{{}}'}</span>
           </button>
         </div>
       )}
@@ -313,7 +313,7 @@ export function VariableAwareField({
           style={popoverStyle}
           className="z-[9999] bg-popover border border-border rounded-lg shadow-xl overflow-hidden"
         >
-          <div className="px-2.5 py-1 border-b border-border text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+          <div className="px-2.5 py-1 border-b border-border text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Insert variable
           </div>
           <div className="max-h-52 overflow-y-auto">
@@ -321,7 +321,7 @@ export function VariableAwareField({
               const items = suggestions.filter(s => s.group === group);
               return (
                 <div key={group}>
-                  <div className="px-2.5 py-1 text-[10px] font-semibold text-muted-foreground bg-muted/40 sticky top-0">
+                  <div className="px-2.5 py-1 text-xs font-semibold text-muted-foreground bg-muted/40 sticky top-0">
                     {group}
                   </div>
                   {items.map((s) => {
@@ -340,8 +340,8 @@ export function VariableAwareField({
                           flatIdx === activeIdx ? 'bg-accent text-accent-foreground' : 'hover:bg-muted',
                         )}
                       >
-                        <span className="font-mono text-[11px]">{`{{${s.path}}}`}</span>
-                        <span className="text-muted-foreground shrink-0 text-[10px]">{s.label}</span>
+                        <span className="font-mono text-xs">{`{{${s.path}}}`}</span>
+                        <span className="text-muted-foreground shrink-0 text-xs">{s.label}</span>
                       </button>
                     );
                   })}

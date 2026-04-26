@@ -335,7 +335,7 @@ export function AccountDrawer() {
           <div key={stat.label} className="bg-muted/50 rounded-xl p-3 text-center">
             <stat.icon className="w-4 h-4 text-muted-foreground mx-auto mb-1" />
             <p className="text-sm font-display font-bold text-foreground">{stat.value}</p>
-            <p className="text-[10px] text-muted-foreground">{stat.label}</p>
+            <p className="text-xs text-muted-foreground">{stat.label}</p>
           </div>
         ))}
       </div>

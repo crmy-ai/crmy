@@ -100,7 +100,7 @@ function SequenceStepPreview({ payload }: { payload: Record<string, unknown> }) 
 
       <div className="p-3 space-y-2">
         {/* Envelope fields */}
-        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
+        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
           {contactName && (
             <>
               <span className="text-muted-foreground font-medium">To:</span>
@@ -125,13 +125,13 @@ function SequenceStepPreview({ payload }: { payload: Record<string, unknown> }) 
         {bodyText && (
           <div>
             <button
-              className="text-[11px] text-primary hover:underline"
+              className="text-xs text-primary hover:underline"
               onClick={() => setShowBody(b => !b)}
             >
               {showBody ? 'Hide body' : 'Preview body'}
             </button>
             {showBody && (
-              <pre className="mt-2 whitespace-pre-wrap text-[11px] text-foreground bg-muted/30 rounded-md p-2.5 max-h-48 overflow-auto border border-border">
+              <pre className="mt-2 whitespace-pre-wrap text-xs text-foreground bg-muted/30 rounded-md p-2.5 max-h-48 overflow-auto border border-border">
                 {bodyText}
               </pre>
             )}
@@ -141,7 +141,7 @@ function SequenceStepPreview({ payload }: { payload: Record<string, unknown> }) 
         {/* Enrollment context */}
         {enrollmentId && (
           <p className="text-muted-foreground">
-            Enrollment: <span className="font-mono text-[10px]">{enrollmentId.slice(0, 8)}…</span>
+            Enrollment: <span className="font-mono text-xs">{enrollmentId.slice(0, 8)}…</span>
           </p>
         )}
       </div>
@@ -204,7 +204,7 @@ export function HITLPage() {
               {tab === 'escalated' && <AlertTriangle className="w-3.5 h-3.5 text-destructive" />}
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
               {count > 0 && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-semibold ${
                   tab === 'escalated' ? 'bg-destructive/15 text-destructive' : 'bg-muted text-muted-foreground'
                 }`}>
                   {count}
@@ -251,7 +251,7 @@ export function HITLPage() {
 
                     {/* Priority badge */}
                     {priority !== 'normal' && (
-                      <span className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border font-semibold ${PRIORITY_CONFIG[priority]?.cls}`}>
+                      <span className={`flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border font-semibold ${PRIORITY_CONFIG[priority]?.cls}`}>
                         <PriorityIcon className="w-3 h-3" />
                         {PRIORITY_CONFIG[priority]?.label}
                       </span>
@@ -259,7 +259,7 @@ export function HITLPage() {
 
                     {/* Escalated badge */}
                     {isEscalated && (
-                      <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-destructive/30 bg-destructive/10 text-destructive font-semibold">
+                      <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border border-destructive/30 bg-destructive/10 text-destructive font-semibold">
                         <AlertTriangle className="w-3 h-3" />
                         Escalated {timeAgo(r.escalated_at)}
                       </span>

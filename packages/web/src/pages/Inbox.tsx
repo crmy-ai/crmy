@@ -339,7 +339,7 @@ function AssignmentTableRow({ task, actorMap, index }: { task: Assignment; actor
   return (
     <tr className={`border-b border-border hover:bg-primary/5 transition-colors group ${index % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
       <td className="px-4 py-3">
-        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${PRIORITY_COLORS[task.priority] ?? PRIORITY_COLORS.normal}`}>{task.priority}</span>
+        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${PRIORITY_COLORS[task.priority] ?? PRIORITY_COLORS.normal}`}>{task.priority}</span>
       </td>
       <td className="px-4 py-3 max-w-xs">
         <p className="text-sm font-medium text-foreground truncate">{task.title}</p>
@@ -525,7 +525,7 @@ export default function InboxPage() {
               ].join(' ')}>
               {t.label}
               {t.key === 'needs_attention' && needsAttentionCount > 0 && (
-                <span className={`min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center ${
+                <span className={`min-w-[16px] h-4 px-1 rounded-full text-xs font-bold flex items-center justify-center ${
                   tab === t.key ? 'bg-destructive text-white' : 'bg-muted-foreground/20 text-muted-foreground'
                 }`}>{needsAttentionCount}</span>
               )}
@@ -556,7 +556,7 @@ export default function InboxPage() {
               <div className="px-4 md:px-6 pt-4 pb-2">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide">Approval Requests</span>
-                  <span className="px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px] font-semibold">{pendingHitl.length}</span>
+                  <span className="px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground text-xs font-semibold">{pendingHitl.length}</span>
                   <div className="flex-1 h-px bg-border" />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -575,7 +575,7 @@ export default function InboxPage() {
                 {tab === 'needs_attention' && paginated.length > 0 && (
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide">My Tasks</span>
-                    <span className="px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px] font-semibold">{paginated.length}</span>
+                    <span className="px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground text-xs font-semibold">{paginated.length}</span>
                     <div className="flex-1 h-px bg-border" />
                   </div>
                 )}

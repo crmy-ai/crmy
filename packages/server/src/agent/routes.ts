@@ -257,9 +257,21 @@ export function agentRouter(db: DbPool): Router {
   /** POST /agent/sessions/:id/chat — send a message and stream the response via SSE. */
   router.post('/sessions/:id/chat', async (req: Request, res: Response) => {
     const actor = getActor(req);
-    const { message } = req.body as { message: string };
+    const { message, auto_greet } = req.body as { message?: string; auto_greet?: boolean };
 
-    if (!message?.trim()) {
+    // auto_greet: the frontend sends this when a session is opened with entity context
+    // and no user message yet. We inject an internal prompt to trigger briefing_get
+    // and surface a real AI summary rather than a static greeting.
+    const GREET_PROMPT =
+      '[SYSTEM_INIT] The user has just opened this conversation from a CRM record. ' +
+      'Call briefing_get for this record immediately. Then respond with a concise 2–3 sentence ' +
+      'summary of the most important current facts — be specific (mention lifecycle stage, ' +
+      'last activity, any notable context entries or open assignments). ' +
+      'Do not ask what the user would like to do; just surface the key facts in a natural, helpful tone.';
+
+    const effectiveMessage = auto_greet ? GREET_PROMPT : message;
+
+    if (!effectiveMessage?.trim()) {
       res.status(400).json({ error: 'message is required' });
       return;
     }
@@ -302,8 +314,8 @@ export function agentRouter(db: DbPool): Router {
       // Build conversation history from session
       const history: ConversationMessage[] = [...(session.messages as ConversationMessage[])];
 
-      // Add user message
-      history.push({ role: 'user', content: message });
+      // Add user message (or auto-greet internal prompt)
+      history.push({ role: 'user', content: effectiveMessage });
 
       // Run the agent turn, injecting context metadata from the session so the
       // system prompt knows which record the conversation is about.
@@ -316,10 +328,10 @@ export function agentRouter(db: DbPool): Router {
         contextMeta,
       });
 
-      // Auto-label: use first user message as label if not set
-      let label = session.label;
-      if (!label) {
-        label = message.length > 60 ? message.slice(0, 57) + '...' : message;
+      // Auto-label: use first visible user message as label (skip SYSTEM_INIT prompts)
+      let label: string | undefined = session.label ?? undefined;
+      if (!label && !auto_greet) {
+        label = effectiveMessage.length > 60 ? effectiveMessage.slice(0, 57) + '...' : effectiveMessage;
       }
 
       // Persist updated session
@@ -328,7 +340,7 @@ export function agentRouter(db: DbPool): Router {
         label,
       });
 
-      sendEvent({ type: 'done', session_id: session.id, label });
+      sendEvent({ type: 'done', session_id: session.id, label: label ?? null });
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Agent error';
       sendEvent({ type: 'error', message: errMsg });

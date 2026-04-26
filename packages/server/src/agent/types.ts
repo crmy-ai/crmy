@@ -54,10 +54,12 @@ export interface AgentSession {
 /** SSE events emitted during a chat turn. */
 export type AgentEvent =
   | { type: 'delta'; content: string }
-  /** Human-readable status line emitted immediately before tool execution. */
-  | { type: 'tool_status'; id: string; name: string; status: string }
-  | { type: 'tool_call'; id: string; name: string; arguments: Record<string, unknown> }
-  | { type: 'tool_result'; id: string; name: string; result: unknown; is_error: boolean }
+  /** Human-readable status line emitted immediately before tool execution.
+   *  turn_id groups all tool calls from the same agent loop round so the UI
+   *  can collapse them into a single collapsible "Working…" row. */
+  | { type: 'tool_status'; id: string; name: string; status: string; turn_id: string }
+  | { type: 'tool_call'; id: string; name: string; arguments: Record<string, unknown>; turn_id: string }
+  | { type: 'tool_result'; id: string; name: string; result: unknown; is_error: boolean; turn_id: string }
   | { type: 'done'; session_id: string; label: string | null }
   | { type: 'error'; message: string };
 

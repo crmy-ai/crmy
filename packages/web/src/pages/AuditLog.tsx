@@ -88,7 +88,7 @@ function DiffViewer({ before, after }: { before?: unknown; after?: unknown }) {
     <div className="rounded-lg border border-border bg-muted/20 overflow-hidden">
       {changed.length > 0 && (
         <div className="p-3 space-y-1.5">
-          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Changed</p>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Changed</p>
           {changed.map(key => (
             <div key={key} className="grid grid-cols-[auto_1fr_1fr] gap-2 text-xs items-start">
               <span className="font-mono text-muted-foreground shrink-0 pt-0.5">{key}</span>
@@ -104,14 +104,14 @@ function DiffViewer({ before, after }: { before?: unknown; after?: unknown }) {
       )}
       {unchanged.length > 0 && changed.length > 0 && (
         <div className="px-3 pb-3">
-          <p className="text-[10px] font-semibold text-muted-foreground/50 uppercase tracking-wider">
+          <p className="text-xs font-semibold text-muted-foreground/50 uppercase tracking-wider">
             {unchanged.length} unchanged field{unchanged.length !== 1 ? 's' : ''}
           </p>
         </div>
       )}
       {!before && after != null && (
         <div className="p-3">
-          <p className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wider mb-2">Created with</p>
+          <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wider mb-2">Created with</p>
           <pre className="text-xs text-foreground font-mono whitespace-pre-wrap break-all">
             {JSON.stringify(after, null, 2)}
           </pre>
@@ -152,27 +152,27 @@ function EventRow({ event }: { event: CrmyEvent }) {
       >
         {/* Actor block */}
         <div className="flex flex-col items-start gap-0.5 shrink-0 min-w-[100px] max-w-[160px]">
-          <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border font-semibold ${actorCfg.cls}`}>
+          <span className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border font-semibold ${actorCfg.cls}`}>
             <ActorIcon className="w-2.5 h-2.5" />
             {actorName ?? actorCfg.label}
           </span>
           {/* Model badge for agents */}
           {event.actor_type === 'agent' && modelLabel && (
-            <span className="inline-flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded bg-violet-500/10 border border-violet-500/20 text-violet-400 font-mono leading-none">
+            <span className="inline-flex items-center gap-0.5 text-xs px-1 py-0.5 rounded bg-violet-500/10 border border-violet-500/20 text-violet-400 font-mono leading-none">
               <Cpu className="w-2 h-2" />
               {modelLabel}
             </span>
           )}
           {/* Agent identifier if present and different from display name */}
           {event.actor_agent_identifier && event.actor_agent_identifier !== event.actor_display_name && (
-            <span className="text-[9px] text-muted-foreground/60 font-mono truncate max-w-full leading-none">
+            <span className="text-xs text-muted-foreground/60 font-mono truncate max-w-full leading-none">
               {event.actor_agent_identifier}
             </span>
           )}
         </div>
 
         {/* Event type */}
-        <span className={`inline-flex text-[10px] px-1.5 py-0.5 rounded border font-mono font-semibold shrink-0 ${eventTypeColor(event.event_type)}`}>
+        <span className={`inline-flex text-xs px-1.5 py-0.5 rounded border font-mono font-semibold shrink-0 ${eventTypeColor(event.event_type)}`}>
           {event.event_type}
         </span>
 

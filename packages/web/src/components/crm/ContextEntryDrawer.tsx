@@ -103,7 +103,7 @@ function ConfidenceBar({ value, label }: { value: number; label?: string }) {
   const color = confColor(pct);
   return (
     <div className="space-y-1">
-      {label && <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{label}</p>}
+      {label && <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{label}</p>}
       <div className="flex items-center gap-2">
         <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
           <div
@@ -112,7 +112,7 @@ function ConfidenceBar({ value, label }: { value: number; label?: string }) {
           />
         </div>
         <span className="text-xs font-semibold tabular-nums" style={{ color }}>{pct}%</span>
-        <span className="text-[10px] text-muted-foreground">{confLabel(pct)}</span>
+        <span className="text-xs text-muted-foreground">{confLabel(pct)}</span>
       </div>
     </div>
   );
@@ -139,7 +139,7 @@ function DecayTimeline({
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Decay timeline (half-life: {halfLifeDays}d)</p>
+      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Decay timeline (half-life: {halfLifeDays}d)</p>
       {/* Bar markers */}
       <div className="relative h-8">
         <div className="absolute inset-x-0 top-1/2 h-0.5 bg-muted rounded" />
@@ -150,7 +150,7 @@ function DecayTimeline({
           return (
             <div key={p.label} style={{ left: `${x}%` }} className="absolute top-0 flex flex-col items-center gap-0.5 -translate-x-1/2">
               <div className="w-2 h-2 rounded-full border-2 border-background" style={{ backgroundColor: color }} />
-              <span className="text-[9px] text-muted-foreground mt-3 whitespace-nowrap">{p.label}</span>
+              <span className="text-xs text-muted-foreground mt-3 whitespace-nowrap">{p.label}</span>
             </div>
           );
         })}
@@ -160,7 +160,7 @@ function DecayTimeline({
             className="w-2.5 h-2.5 rounded-full border-2 border-background ring-1"
             style={{ backgroundColor: confColor(todayPct), outlineColor: confColor(todayPct) }}
           />
-          <span className="text-[9px] font-semibold mt-3 whitespace-nowrap" style={{ color: confColor(todayPct) }}>
+          <span className="text-xs font-semibold mt-3 whitespace-nowrap" style={{ color: confColor(todayPct) }}>
             Today ({todayPct}%)
           </span>
         </div>
@@ -177,7 +177,7 @@ function Section({ title, children, defaultOpen = true }: { title: string; child
         onClick={() => setOpen(v => !v)}
         className="flex items-center justify-between w-full mb-3 group"
       >
-        <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider group-hover:text-foreground transition-colors">
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider group-hover:text-foreground transition-colors">
           {title}
         </span>
         {open ? <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" /> : <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />}
@@ -295,7 +295,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
           <div className="flex items-center gap-2 flex-wrap mb-2">
             {/* Type badge */}
             <span
-              className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold capitalize"
+              className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold capitalize"
               style={{ backgroundColor: typeColor + '18', color: typeColor, border: `1px solid ${typeColor}30` }}
             >
               {entry.context_type?.replace(/_/g, ' ')}
@@ -303,7 +303,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
             {/* Subject chip */}
             <button
               onClick={() => entry.subject_id && openDrawer(DRAWER_TYPE_MAP[entry.subject_type] ?? 'contact', entry.subject_id)}
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors hover:opacity-80"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition-colors hover:opacity-80"
               style={{ backgroundColor: subjectColor + '18', color: subjectColor, border: `1px solid ${subjectColor}30` }}
             >
               <SubjectIcon className="w-2.5 h-2.5" />
@@ -312,10 +312,10 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
             </button>
             {/* Status badges */}
             {isSuperseded && (
-              <Badge variant="outline" className="text-[10px] text-muted-foreground border-muted">superseded</Badge>
+              <Badge variant="outline" className="text-xs text-muted-foreground border-muted">superseded</Badge>
             )}
             {expired && !isSuperseded && (
-              <Badge variant="outline" className="text-[10px] text-destructive border-destructive/30">expired</Badge>
+              <Badge variant="outline" className="text-xs text-destructive border-destructive/30">expired</Badge>
             )}
           </div>
           <SheetTitle className="text-base font-semibold text-foreground text-left leading-snug">
@@ -339,7 +339,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
                   </>
                 )}
                 {!halfLife && (
-                  <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
                     No decay — this knowledge type is treated as a permanent record.
                   </p>
@@ -381,7 +381,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
                 <span className="text-muted-foreground">Authored by</span>
                 <span className="font-medium text-foreground">{entry.authored_by_name ?? 'Unknown'}</span>
                 <span
-                  className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase"
+                  className="px-1.5 py-0.5 rounded text-xs font-semibold uppercase"
                   style={entry.authored_by_type === 'agent'
                     ? { background: '#7c3aed18', color: '#7c3aed' }
                     : { background: '#3b82f618', color: '#3b82f6' }
@@ -432,7 +432,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
                 {(entry.tags as string[]).map(tag => (
                   <span
                     key={tag}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-[10px] font-medium text-muted-foreground"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-xs font-medium text-muted-foreground"
                   >
                     <Tag className="w-2.5 h-2.5" />
                     {tag}
@@ -478,9 +478,9 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
           {entry.supersedes_id && (
             <Section title="History" defaultOpen={false}>
               <div className="rounded-lg border border-border p-3 bg-muted/30 space-y-1 opacity-60">
-                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Supersedes</p>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Supersedes</p>
                 <p className="text-xs text-foreground font-medium truncate">Entry {entry.supersedes_id.slice(0, 8)}…</p>
-                <p className="text-[10px] text-muted-foreground">This entry replaced an older belief. The original is preserved in audit history.</p>
+                <p className="text-xs text-muted-foreground">This entry replaced an older belief. The original is preserved in audit history.</p>
               </div>
             </Section>
           )}
@@ -504,7 +504,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
               {/* Confidence slider */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                     New confidence
                   </label>
                   <span className="text-xs font-semibold tabular-nums" style={{ color: confColor(Math.round((supersedeConf ?? storedConf ?? 0.8) * 100)) }}>
@@ -520,7 +520,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
                   onChange={e => setSupersedeConf(Number(e.target.value) / 100)}
                   className="w-full accent-primary h-1.5 rounded cursor-pointer"
                 />
-                <div className="flex justify-between text-[9px] text-muted-foreground">
+                <div className="flex justify-between text-xs text-muted-foreground">
                   <span>Speculative</span><span>Confirmed</span>
                 </div>
               </div>

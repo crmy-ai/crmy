@@ -35,7 +35,7 @@ import { EditorErrorBoundary } from './EditorErrorBoundary';
 
 const fieldCls   = 'w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const areaCls    = 'w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring resize-none';
-const labelCls   = 'block text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1';
+const labelCls   = 'block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ function SettingsPanel({
       {/* Goal event */}
       <div>
         <label className={labelCls}>Goal event</label>
-        <p className="text-[10px] text-muted-foreground mb-1.5">
+        <p className="text-xs text-muted-foreground mb-1.5">
           When this CRM event fires for the contact, the sequence auto-completes.
         </p>
         <select
@@ -110,7 +110,7 @@ function SettingsPanel({
           <label htmlFor="exit-on-reply" className="text-xs font-medium text-foreground cursor-pointer">
             Exit on reply
           </label>
-          <p className="text-[10px] text-muted-foreground mt-0.5">
+          <p className="text-xs text-muted-foreground mt-0.5">
             Stop email steps when the contact replies to any email in this sequence.
           </p>
         </div>
@@ -128,7 +128,7 @@ function SettingsPanel({
           <label htmlFor="exit-on-unsubscribe" className="text-xs font-medium text-foreground cursor-pointer">
             Exit on unsubscribe
           </label>
-          <p className="text-[10px] text-muted-foreground mt-0.5">
+          <p className="text-xs text-muted-foreground mt-0.5">
             Stop sending when a contact opts out. Recommended for CAN-SPAM / GDPR compliance.
           </p>
         </div>
@@ -140,7 +140,7 @@ function SettingsPanel({
           Max active enrollments
           <span className="ml-1 normal-case font-normal text-muted-foreground/60">(optional)</span>
         </label>
-        <p className="text-[10px] text-muted-foreground mb-1.5">
+        <p className="text-xs text-muted-foreground mb-1.5">
           Cap the number of contacts actively progressing through this sequence. Leave blank for unlimited.
         </p>
         <input
@@ -156,7 +156,7 @@ function SettingsPanel({
       {/* AI Persona */}
       <div>
         <label className={labelCls}>AI persona / system prompt</label>
-        <p className="text-[10px] text-muted-foreground mb-1.5">
+        <p className="text-xs text-muted-foreground mb-1.5">
           Used when AI-generate is enabled on email steps.
         </p>
         <textarea
@@ -315,7 +315,7 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
         if (v && sequence) resetFromSequence(sequence);
       }}
     >
-      <DialogContent className="max-w-none p-0 gap-0 w-[min(95vw,1440px)] h-[min(90vh,920px)] flex flex-col overflow-hidden rounded-2xl">
+      <DialogContent className="max-w-none p-0 gap-0 w-[min(95vw,1440px)] h-[min(90vh,920px)] flex flex-col overflow-hidden rounded-2xl [&>button]:hidden">
 
         {/* ── Header ───────────────────────────────────────────────────── */}
         <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border bg-background/95 backdrop-blur shrink-0">
@@ -335,7 +335,7 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
 
           {/* HITL indicator */}
           {hasHITL && (
-            <Badge className="shrink-0 text-[10px] bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/15">
+            <Badge className="shrink-0 text-xs bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/15">
               <UserCheck className="w-3 h-3 mr-1" />Requires human review
             </Badge>
           )}
@@ -390,14 +390,14 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
                   <ListOrdered className="w-3.5 h-3.5 text-primary" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-primary mb-0.5">
+                  <p className="text-xs font-bold uppercase tracking-wider text-primary mb-0.5">
                     Sequence Journey
                   </p>
                   <p className="text-sm font-medium text-foreground truncate">
                     {name || <span className="text-muted-foreground">Unnamed sequence</span>}
                   </p>
                   {goalEvent && (
-                    <p className="text-[10px] text-muted-foreground mt-0.5">Goal: {goalEvent}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Goal: {goalEvent}</p>
                   )}
                 </div>
               </div>
@@ -422,7 +422,7 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
                 </div>
               )}
 
-              <p className="text-center text-[10px] text-muted-foreground/40">
+              <p className="text-center text-xs text-muted-foreground/40">
                 {steps.length} step{steps.length !== 1 ? 's' : ''}
               </p>
             </div>

@@ -49,7 +49,7 @@ export function EmailDrawer() {
           <h3 className="text-lg font-display font-bold text-foreground">
             {email.subject || '(no subject)'}
           </h3>
-          <Badge variant="outline" className={`text-[10px] mt-1 ${cfg.color}`}>
+          <Badge variant="outline" className={`text-xs mt-1 ${cfg.color}`}>
             <Icon className="w-3 h-3 mr-1" />
             {cfg.label}
           </Badge>

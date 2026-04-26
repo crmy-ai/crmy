@@ -59,7 +59,7 @@ function ContactBadge({ contactId }: { contactId?: string }) {
 
   if (!contactId) {
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground">
+      <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-muted border border-border text-muted-foreground">
         <User className="w-2.5 h-2.5" /> Unknown sender
       </span>
     );
@@ -72,7 +72,7 @@ function ContactBadge({ contactId }: { contactId?: string }) {
   return (
     <button
       onClick={e => { e.stopPropagation(); openDrawer('contact', contactId); }}
-      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors font-semibold"
+      className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors font-semibold"
     >
       <User className="w-2.5 h-2.5" /> {name}
     </button>
@@ -100,7 +100,7 @@ function InboundRow({ email }: { email: any }) {
           <div className="flex items-center gap-2 flex-wrap mb-0.5">
             <span className="text-sm font-semibold text-foreground truncate">{email.subject || '(no subject)'}</span>
             {contextExtracted && (
-              <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 font-semibold">
+              <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 font-semibold">
                 <Brain className="w-2.5 h-2.5" /> Context extracted
               </span>
             )}
@@ -321,7 +321,7 @@ export default function EmailsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
                       <span className="text-sm font-semibold text-foreground truncate">{email.subject || '(no subject)'}</span>
-                      <Badge variant="outline" className={`text-[10px] ${cfg.color}`}>{cfg.label}</Badge>
+                      <Badge variant="outline" className={`text-xs ${cfg.color}`}>{cfg.label}</Badge>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       {email.to_email && <span className="truncate max-w-[200px]">To: {email.to_email}</span>}

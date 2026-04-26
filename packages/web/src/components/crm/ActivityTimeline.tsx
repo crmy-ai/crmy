@@ -85,7 +85,7 @@ export function ActivityTimeline({ activities, emptyMessage = 'No activity yet.'
                 </p>
                 {a.outcome && (
                   <span
-                    className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium capitalize flex-shrink-0"
+                    className="inline-flex items-center px-1.5 py-0.5 rounded-md text-xs font-medium capitalize flex-shrink-0"
                     style={{
                       backgroundColor: (OUTCOME_COLORS[a.outcome] ?? 'hsl(var(--muted-foreground))') + '18',
                       color: OUTCOME_COLORS[a.outcome] ?? 'hsl(var(--muted-foreground))',
@@ -97,7 +97,7 @@ export function ActivityTimeline({ activities, emptyMessage = 'No activity yet.'
               </div>
               <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                 {a.performer_name && (
-                  <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                  <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">
                     <Bot className="w-2.5 h-2.5" />
                     {a.performer_name}
                   </span>

@@ -190,11 +190,11 @@ function RuleRow({ rule }: { rule: ApprovalRule }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-foreground truncate">{rule.name}</span>
             {rule.action_type && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
                 {rule.action_type}
               </span>
             )}
-            <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${
+            <span className={`text-xs px-1.5 py-0.5 rounded border font-semibold ${
               rule.decision === 'approved'
                 ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
                 : 'bg-destructive/10 text-destructive border-destructive/20'
@@ -202,7 +202,7 @@ function RuleRow({ rule }: { rule: ApprovalRule }) {
               {rule.decision === 'approved' ? 'Auto-approve' : 'Auto-reject'}
             </span>
             {!rule.is_active && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
                 Inactive
               </span>
             )}

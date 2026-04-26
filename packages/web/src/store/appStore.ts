@@ -46,6 +46,11 @@ interface AppState {
   aiContext: AIContextEntity | null;
   openAIWithContext: (context: AIContextEntity) => void;
 
+  agentPanelOpen: boolean;
+  openAgentPanel: () => void;
+  closeAgentPanel: () => void;
+  toggleAgentPanel: () => void;
+
   workflowEditorId: string | null;   // null = create mode, string = edit mode
   workflowEditorOpen: boolean;
   openWorkflowEditor: (id: string | null) => void;
@@ -100,7 +105,12 @@ export const useAppStore = create<AppState>()(
       closeQuickAdd: () => set({ quickAddOpen: false, quickAddType: null }),
 
       aiContext: null,
-      openAIWithContext: (context) => set({ aiContext: context }),
+      openAIWithContext: (context) => set({ aiContext: context, agentPanelOpen: true }),
+
+      agentPanelOpen: false,
+      openAgentPanel: () => set({ agentPanelOpen: true }),
+      closeAgentPanel: () => set({ agentPanelOpen: false }),
+      toggleAgentPanel: () => set((s) => ({ agentPanelOpen: !s.agentPanelOpen })),
 
       workflowEditorId: null,
       workflowEditorOpen: false,

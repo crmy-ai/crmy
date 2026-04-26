@@ -87,7 +87,7 @@ function ActionReadView({ actions }: { actions: any[] }) {
                   {def?.label ?? action.type}
                 </span>
                 {isHITL && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-semibold">
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-semibold">
                     Human review
                   </span>
                 )}
@@ -116,7 +116,7 @@ function RunActionLogs({ logs }: { logs: any[] }) {
         const resolved = log.resolved_config ?? {};
         const preview = Object.values(resolved).find(v => typeof v === 'string' && (v as string).length > 0) as string | undefined;
         return (
-          <div key={i} className="flex items-start gap-2 text-[10px]">
+          <div key={i} className="flex items-start gap-2 text-xs">
             <span className={`shrink-0 font-mono w-4 text-muted-foreground`}>{i + 1}.</span>
             <span className={`font-semibold shrink-0 ${isFailed ? 'text-destructive' : isCompleted ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
               {def?.label ?? log.type}
@@ -182,7 +182,7 @@ function RunsTab({ workflowId }: { workflowId: string }) {
                   {run.trigger_event ?? 'manual'}
                 </p>
                 {run.objective && (
-                  <p className="text-[10px] text-orange-500 truncate font-medium">"{run.objective}"</p>
+                  <p className="text-xs text-orange-500 truncate font-medium">"{run.objective}"</p>
                 )}
                 {run.error && (
                   <p className="text-destructive truncate">{run.error}</p>
@@ -274,7 +274,7 @@ function TestTab({ workflowId, triggerEvent }: { workflowId: string; triggerEven
             placeholder="e.g. Follow up on Q2 renewal — contact opened email twice"
             className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
           />
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Gives agents context about why this run was triggered. Passed as <code className="font-mono bg-muted px-1 rounded">payload.objective</code>.
           </p>
         </div>
@@ -398,16 +398,16 @@ function TriggerRow({ wf }: { wf: any }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-0.5">
             <span className="text-sm font-semibold text-foreground truncate">{wf.name}</span>
-            <Badge variant={isActive ? 'default' : 'secondary'} className="text-[10px] shrink-0">
+            <Badge variant={isActive ? 'default' : 'secondary'} className="text-xs shrink-0">
               {isActive ? 'Active' : 'Paused'}
             </Badge>
             {hasHITL && (
-              <Badge className="text-[9px] px-1.5 bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/15 shrink-0">
+              <Badge className="text-xs px-1.5 bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/15 shrink-0">
                 <UserCheck className="w-2.5 h-2.5 mr-0.5" />Human
               </Badge>
             )}
             {isManual && (
-              <Badge variant="outline" className="text-[9px] px-1.5 text-blue-600 dark:text-blue-400 border-blue-500/30 shrink-0">
+              <Badge variant="outline" className="text-xs px-1.5 text-blue-600 dark:text-blue-400 border-blue-500/30 shrink-0">
                 On demand
               </Badge>
             )}
@@ -515,7 +515,7 @@ function TriggerRow({ wf }: { wf: any }) {
                   >
                     {label}
                     {key === 'runs' && wf.run_count > 0 && (
-                      <span className="text-[10px] px-1 rounded-full bg-muted text-muted-foreground">{wf.run_count}</span>
+                      <span className="text-xs px-1 rounded-full bg-muted text-muted-foreground">{wf.run_count}</span>
                     )}
                   </button>
                 ))}

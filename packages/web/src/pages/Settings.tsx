@@ -121,7 +121,7 @@ function ProfileSettings() {
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Role</label>
           <div className={readonlyCls}>
-            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border capitalize ${roleBadge[user?.role ?? 'member'] ?? roleBadge.member}`}>
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border capitalize ${roleBadge[user?.role ?? 'member'] ?? roleBadge.member}`}>
               {user?.role ?? '—'}
             </span>
           </div>
@@ -137,7 +137,7 @@ function ProfileSettings() {
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-2">
             Email
-            {!isAdmin && <span className="text-[10px] text-muted-foreground/60 normal-case font-normal">contact an admin to change</span>}
+            {!isAdmin && <span className="text-xs text-muted-foreground/60 normal-case font-normal">contact an admin to change</span>}
           </label>
           {isAdmin ? (
             <input type="email" value={email} onChange={e => setEmail(e.target.value)} className={inputCls} placeholder="you@example.com" />
@@ -409,7 +409,7 @@ function ApiKeysSettings() {
   const ActorBadge = ({ name, type }: { name: string; type: string }) => (
     <div className="flex items-center gap-1.5">
       <span className="text-sm text-foreground truncate">{name}</span>
-      <span className={`text-[10px] px-1.5 py-0.5 rounded border capitalize flex-shrink-0 ${type === 'agent' ? 'bg-blue-500/10 text-blue-500 border-blue-500/30' : 'bg-amber-500/10 text-amber-600 border-amber-500/30'}`}>{type}</span>
+      <span className={`text-xs px-1.5 py-0.5 rounded border capitalize flex-shrink-0 ${type === 'agent' ? 'bg-blue-500/10 text-blue-500 border-blue-500/30' : 'bg-amber-500/10 text-amber-600 border-amber-500/30'}`}>{type}</span>
     </div>
   );
 
@@ -607,7 +607,7 @@ function ApiKeysSettings() {
                             </div>
                             <div>
                               <p className="font-semibold text-foreground">{k.label}</p>
-                              <p className="text-[10px] font-mono text-muted-foreground">{k.id.slice(0, 14)}…</p>
+                              <p className="text-xs font-mono text-muted-foreground">{k.id.slice(0, 14)}…</p>
                             </div>
                           </div>
                         </td>
@@ -616,7 +616,7 @@ function ApiKeysSettings() {
                             onClick={() => { setExpandedKeyId(prev => prev === k.id ? null : k.id); setEditingScopes(null); }}
                             className="flex items-center gap-1.5 hover:text-foreground transition-colors"
                           >
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border font-mono">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border font-mono">
                               {(k.scopes ?? []).length} scope{(k.scopes ?? []).length !== 1 ? 's' : ''}
                             </span>
                             <ChevronRight className={`w-3 h-3 text-muted-foreground transition-transform ${expandedKeyId === k.id ? 'rotate-90' : ''}`} />
@@ -630,7 +630,7 @@ function ApiKeysSettings() {
                         </td>
                         <td className="px-4 py-3 hidden lg:table-cell">
                           <span className="text-xs text-muted-foreground">{fmtDate(k.created_at)}</span>
-                          {k.expires_at && <p className={`text-[10px] mt-0.5 ${new Date(k.expires_at) < new Date() ? 'text-destructive' : 'text-muted-foreground'}`}>Exp: {fmtDate(k.expires_at)}</p>}
+                          {k.expires_at && <p className={`text-xs mt-0.5 ${new Date(k.expires_at) < new Date() ? 'text-destructive' : 'text-muted-foreground'}`}>Exp: {fmtDate(k.expires_at)}</p>}
                         </td>
                         <td className="px-2 py-3" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center gap-1 justify-end">
@@ -674,7 +674,7 @@ function ApiKeysSettings() {
                                     <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                                       <div className="flex items-center gap-2">
                                         <span className="text-sm font-semibold text-foreground">Scopes</span>
-                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+                                        <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
                                           {(k.scopes ?? []).length}
                                         </span>
                                       </div>
@@ -698,7 +698,7 @@ function ApiKeysSettings() {
                                         <div className="space-y-3">
                                           {API_KEY_SCOPE_GROUPS.map(group => (
                                             <div key={group.label}>
-                                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{group.label}</p>
+                                              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{group.label}</p>
                                               <div className="flex flex-wrap gap-1.5">
                                                 {group.scopes.map(s => {
                                                   const active = editScopes.includes(s.value);
@@ -719,7 +719,7 @@ function ApiKeysSettings() {
                                             <p className="text-xs text-muted-foreground">No scopes assigned.</p>
                                           ) : (
                                             (k.scopes ?? []).map((s: string) => (
-                                              <span key={s} className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-primary/10 text-primary border border-primary/20">{s}</span>
+                                              <span key={s} className="px-2 py-0.5 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20">{s}</span>
                                             ))
                                           )}
                                         </div>
@@ -752,13 +752,13 @@ function ApiKeysSettings() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-semibold text-foreground truncate">{k.label}</p>
-                    <p className="text-[10px] font-mono text-muted-foreground">{k.id.slice(0, 14)}…</p>
+                    <p className="text-xs font-mono text-muted-foreground">{k.id.slice(0, 14)}…</p>
                   </div>
                 </div>
                 {revokeId === k.id ? (
                   <div className="flex items-center gap-1 flex-shrink-0">
-                    <button onClick={() => handleRevoke(k.id)} className="px-2 py-0.5 rounded bg-destructive text-destructive-foreground text-[10px] font-semibold">Revoke</button>
-                    <button onClick={() => setRevokeId(null)} className="px-2 py-0.5 rounded bg-muted text-muted-foreground text-[10px]">✕</button>
+                    <button onClick={() => handleRevoke(k.id)} className="px-2 py-0.5 rounded bg-destructive text-destructive-foreground text-xs font-semibold">Revoke</button>
+                    <button onClick={() => setRevokeId(null)} className="px-2 py-0.5 rounded bg-muted text-muted-foreground text-xs">✕</button>
                   </div>
                 ) : (
                   <button onClick={() => setRevokeId(k.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0">
@@ -768,27 +768,27 @@ function ApiKeysSettings() {
               </div>
               <div className="flex flex-wrap gap-1">
                 {(k.scopes ?? []).map((s: string) => (
-                  <span key={s} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-muted text-muted-foreground border border-border">{s}</span>
+                  <span key={s} className="px-1.5 py-0.5 rounded text-xs font-mono bg-muted text-muted-foreground border border-border">{s}</span>
                 ))}
               </div>
               <div className="space-y-1.5 pt-2 border-t border-border">
                 {k.actor_name && (
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] text-muted-foreground w-16 flex-shrink-0">Actor</span>
+                    <span className="text-xs text-muted-foreground w-16 flex-shrink-0">Actor</span>
                     <ActorBadge name={k.actor_name} type={k.actor_type} />
                   </div>
                 )}
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-muted-foreground w-16 flex-shrink-0">Last used</span>
+                  <span className="text-xs text-muted-foreground w-16 flex-shrink-0">Last used</span>
                   <span className={`text-xs ${k.last_used_at ? 'text-foreground' : 'text-muted-foreground'}`}>{fmtLastUsed(k.last_used_at)}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-muted-foreground w-16 flex-shrink-0">Created</span>
+                  <span className="text-xs text-muted-foreground w-16 flex-shrink-0">Created</span>
                   <span className="text-xs text-muted-foreground">{fmtDate(k.created_at)}</span>
                 </div>
                 {k.expires_at && (
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] text-muted-foreground w-16 flex-shrink-0">Expires</span>
+                    <span className="text-xs text-muted-foreground w-16 flex-shrink-0">Expires</span>
                     <span className={`text-xs ${new Date(k.expires_at) < new Date() ? 'text-destructive font-medium' : 'text-foreground'}`}>{fmtDate(k.expires_at)}</span>
                   </div>
                 )}
@@ -816,7 +816,7 @@ function WebhookDeliveryLog({ webhookId }: { webhookId: string }) {
         const ok = d.status_code >= 200 && d.status_code < 300;
         const failed = d.status === 'failed';
         return (
-          <div key={d.id} className="flex items-center gap-2 text-[10px]">
+          <div key={d.id} className="flex items-center gap-2 text-xs">
             <span className={`inline-flex items-center px-1.5 py-0.5 rounded font-semibold ${ok ? 'bg-emerald-500/15 text-emerald-500' : failed ? 'bg-destructive/15 text-destructive' : 'bg-warning/15 text-warning'}`}>
               {d.status_code ?? d.status}
             </span>
@@ -901,7 +901,7 @@ function WebhooksSettings() {
                 {wh.events && (
                   <div className="flex flex-wrap gap-1 mt-1">
                     {(wh.events as string[]).map((ev) => (
-                      <span key={ev} className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-muted text-muted-foreground">{ev}</span>
+                      <span key={ev} className="px-1.5 py-0.5 rounded text-xs font-mono bg-muted text-muted-foreground">{ev}</span>
                     ))}
                   </div>
                 )}
@@ -912,7 +912,7 @@ function WebhooksSettings() {
             </div>
             {expandedId === wh.id && (
               <div className="border-t border-border bg-muted/10">
-                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-4 pt-2">Recent deliveries</p>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 pt-2">Recent deliveries</p>
                 <WebhookDeliveryLog webhookId={wh.id} />
               </div>
             )}
@@ -1069,7 +1069,7 @@ function CustomFieldsSettings() {
             <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="e.g. Preferred Language"
               className={inputCls} onKeyDown={e => e.key === 'Enter' && handleCreate()} />
             {newLabel.trim() && (
-              <p className="text-[11px] text-muted-foreground font-mono">key: {toFieldKey(newLabel)}</p>
+              <p className="text-xs text-muted-foreground font-mono">key: {toFieldKey(newLabel)}</p>
             )}
           </div>
           <div className="space-y-1.5">
@@ -1179,16 +1179,16 @@ function CustomFieldsSettings() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-semibold text-foreground">{f.label}</p>
                     {f.is_required && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded border bg-destructive/10 text-destructive border-destructive/20 font-semibold">Required</span>
+                      <span className="text-xs px-1.5 py-0.5 rounded border bg-destructive/10 text-destructive border-destructive/20 font-semibold">Required</span>
                     )}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono font-medium ${fieldTypeColor(f.field_type)}`}>
+                    <span className={`text-xs px-1.5 py-0.5 rounded border font-mono font-medium ${fieldTypeColor(f.field_type)}`}>
                       {fieldTypeLabel(f.field_type)}
                     </span>
-                    <span className="text-[10px] text-muted-foreground font-mono">{f.field_key}</span>
+                    <span className="text-xs text-muted-foreground font-mono">{f.field_key}</span>
                     {Array.isArray(f.options) && f.options.length > 0 && (
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-xs text-muted-foreground">
                         {f.options.slice(0, 3).join(', ')}{f.options.length > 3 ? ` +${f.options.length - 3}` : ''}
                       </span>
                     )}
@@ -1293,7 +1293,7 @@ function UserForm({
               {PASSWORD_RULES.map(rule => {
                 const ok = rule.test(form.password);
                 return (
-                  <li key={rule.label} className={`flex items-center gap-1 text-[11px] ${ok ? 'text-success' : 'text-muted-foreground'}`}>
+                  <li key={rule.label} className={`flex items-center gap-1 text-xs ${ok ? 'text-success' : 'text-muted-foreground'}`}>
                     <CheckCircle2 className={`w-3 h-3 ${ok ? 'opacity-100' : 'opacity-30'}`} /> {rule.label}
                   </li>
                 );
@@ -1311,7 +1311,7 @@ function UserForm({
               <option key={r} value={r}>{roleLabels[r]}</option>
             ))}
           </select>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             {form.role === 'owner' ? 'Full access including billing and account deletion' : form.role === 'admin' ? 'Can manage users, settings, and all data' : 'Can access CRM data only'}
           </p>
         </div>
@@ -1613,7 +1613,7 @@ function UsersSettings() {
                                 <div className="flex items-center gap-1.5">
                                   <span className="font-semibold text-foreground">{u.name}</span>
                                   {u.id === currentUser?.id && (
-                                    <span className="text-[10px] font-mono bg-muted text-muted-foreground px-1.5 py-0.5 rounded">you</span>
+                                    <span className="text-xs font-mono bg-muted text-muted-foreground px-1.5 py-0.5 rounded">you</span>
                                   )}
                                 </div>
                               </div>
@@ -1621,7 +1621,7 @@ function UsersSettings() {
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">{u.email}</td>
                           <td className="px-4 py-3">
-                            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${rolePillCls[u.role] ?? rolePillCls.member}`}>
+                            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${rolePillCls[u.role] ?? rolePillCls.member}`}>
                               {roleLabels[u.role as Role] ?? u.role}
                             </span>
                           </td>
@@ -1701,7 +1701,7 @@ function UsersSettings() {
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <p className="font-display font-bold text-foreground">{u.name}</p>
                           {u.id === currentUser?.id && (
-                            <span className="text-[10px] font-mono bg-muted text-muted-foreground px-1.5 py-0.5 rounded">you</span>
+                            <span className="text-xs font-mono bg-muted text-muted-foreground px-1.5 py-0.5 rounded">you</span>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">{u.email}</p>
@@ -1724,11 +1724,11 @@ function UsersSettings() {
                     </div>
                   </div>
                   <div className="mt-3 flex items-center justify-between">
-                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${rolePillCls[u.role] ?? rolePillCls.member}`}>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${rolePillCls[u.role] ?? rolePillCls.member}`}>
                       {roleLabels[u.role as Role] ?? u.role}
                     </span>
                     {u.created_at && (
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-xs text-muted-foreground">
                         {new Date(u.created_at).toLocaleDateString()}
                       </span>
                     )}
@@ -1971,10 +1971,10 @@ function RegistriesSettings() {
 
         {/* System types */}
         <div className="mb-3">
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">System</span>
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">System</span>
           <div className="flex flex-wrap gap-1.5 mt-1.5">
             {SYSTEM_CONTEXT_TYPES.map(t => (
-              <span key={t.type_name} className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-muted text-muted-foreground">
+              <span key={t.type_name} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground">
                 {t.label}
               </span>
             ))}
@@ -1982,7 +1982,7 @@ function RegistriesSettings() {
         </div>
 
         {/* Custom types */}
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Custom</span>
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Custom</span>
         <div className="space-y-1.5 mb-3 mt-1.5">
           {ctxLoading ? (
             <div className="h-8 bg-muted/50 rounded animate-pulse" />
@@ -1991,7 +1991,7 @@ function RegistriesSettings() {
           ) : contextTypes.map((t: any) => (
             <div key={t.type_name} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card">
               <span className="text-sm font-medium text-foreground flex-1">{t.label || t.type_name}</span>
-              <span className="text-[10px] font-mono text-muted-foreground">{t.type_name}</span>
+              <span className="text-xs font-mono text-muted-foreground">{t.type_name}</span>
               {t.description && <span className="text-xs text-muted-foreground hidden sm:inline truncate max-w-[200px]">{t.description}</span>}
               <button
                 onClick={() => {
@@ -2031,19 +2031,19 @@ function RegistriesSettings() {
 
         {/* System types grouped by category */}
         <div className="mb-3">
-          <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">System</span>
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">System</span>
           <div className="flex flex-wrap gap-1.5 mt-1.5">
             {SYSTEM_ACTIVITY_TYPES.map(t => (
-              <span key={t.type_name} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-muted text-muted-foreground">
+              <span key={t.type_name} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground">
                 {t.label}
-                <span className="text-[9px] opacity-60">{t.category}</span>
+                <span className="text-xs opacity-60">{t.category}</span>
               </span>
             ))}
           </div>
         </div>
 
         {/* Custom types */}
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Custom</span>
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Custom</span>
         <div className="space-y-1.5 mb-3 mt-1.5">
           {actLoading ? (
             <div className="h-8 bg-muted/50 rounded animate-pulse" />
@@ -2052,8 +2052,8 @@ function RegistriesSettings() {
           ) : activityTypes.map((t: any) => (
             <div key={t.type_name} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-card">
               <span className="text-sm font-medium text-foreground flex-1">{t.label || t.type_name}</span>
-              <span className="text-[10px] font-mono text-muted-foreground">{t.type_name}</span>
-              {t.category && <span className="px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground">{t.category}</span>}
+              <span className="text-xs font-mono text-muted-foreground">{t.type_name}</span>
+              {t.category && <span className="px-1.5 py-0.5 rounded text-xs bg-muted text-muted-foreground">{t.category}</span>}
               <button
                 onClick={() => {
                   if (confirmDelete === t.type_name) {

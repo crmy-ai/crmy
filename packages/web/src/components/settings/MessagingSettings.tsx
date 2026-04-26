@@ -416,11 +416,11 @@ function ChannelRow({ channel, onDelete }: { channel: ChannelData; onDelete: () 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-foreground truncate">{channel.name}</span>
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border uppercase">
+            <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border uppercase">
               {providerDef?.label ?? providerKey}
             </span>
             {channel.is_default && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/20 font-semibold">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 border border-amber-500/20 font-semibold">
                 Default
               </span>
             )}

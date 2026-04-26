@@ -50,26 +50,26 @@ function RunRow({ run }: { run: any }) {
           <div className="flex items-center gap-2 flex-wrap">
             <Badge
               variant={ok ? 'default' : fail ? 'destructive' : 'secondary'}
-              className="text-[10px]"
+              className="text-xs"
             >
               {run.status}
             </Badge>
             {run.actions_run != null && run.actions_total != null && (
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-xs text-muted-foreground">
                 {run.actions_run}/{run.actions_total} actions
               </span>
             )}
             {run.duration_ms != null && (
-              <span className="text-[10px] text-muted-foreground">{run.duration_ms}ms</span>
+              <span className="text-xs text-muted-foreground">{run.duration_ms}ms</span>
             )}
           </div>
           {run.error && (
-            <p className="text-[10px] text-destructive truncate mt-0.5">{run.error}</p>
+            <p className="text-xs text-destructive truncate mt-0.5">{run.error}</p>
           )}
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {run.started_at ? new Date(run.started_at).toLocaleString() : ''}
           </span>
           {logs.length > 0 && (
@@ -82,7 +82,7 @@ function RunRow({ run }: { run: any }) {
 
       {expanded && logs.length > 0 && (
         <div className="border-t border-border px-2.5 pb-2.5 pt-2">
-          <table className="w-full text-[10px]">
+          <table className="w-full text-xs">
             <thead>
               <tr className="text-muted-foreground">
                 <th className="text-left pb-1 pr-2 font-medium">#</th>
@@ -146,7 +146,7 @@ function TestTab({ workflowId, triggerEvent }: { workflowId: string; triggerEven
 
   return (
     <div className="space-y-3">
-      <p className="text-[10px] text-muted-foreground">
+      <p className="text-xs text-muted-foreground">
         Test your workflow with a sample payload. No actions will be executed.
       </p>
 
@@ -158,7 +158,7 @@ function TestTab({ workflowId, triggerEvent }: { workflowId: string; triggerEven
           value={payload}
           onChange={e => { setPayload(e.target.value); setParseError(''); }}
           rows={8}
-          className={textareaCls + ' text-[11px]'}
+          className={textareaCls + ' text-xs'}
           spellCheck={false}
         />
         {parseError && <p className="text-xs text-destructive">{parseError}</p>}
@@ -199,12 +199,12 @@ function TestTab({ workflowId, triggerEvent }: { workflowId: string; triggerEven
           {/* Filter details */}
           {result.filter_match_details && (
             <div className="space-y-1">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Filter Conditions
               </p>
               {result.filter_match_details.mismatches?.length > 0
                 ? result.filter_match_details.mismatches.map((m: any, i: number) => (
-                    <div key={i} className="flex items-center gap-2 text-[10px] text-destructive">
+                    <div key={i} className="flex items-center gap-2 text-xs text-destructive">
                       <XCircle className="w-3 h-3 shrink-0" />
                       <span>
                         <span className="font-mono">{m.field}</span>: expected{' '}
@@ -214,7 +214,7 @@ function TestTab({ workflowId, triggerEvent }: { workflowId: string; triggerEven
                     </div>
                   ))
                 : (
-                    <p className="text-[10px] text-emerald-500 flex items-center gap-1">
+                    <p className="text-xs text-emerald-500 flex items-center gap-1">
                       <CheckCircle2 className="w-3 h-3" /> All conditions match
                     </p>
                   )
@@ -225,11 +225,11 @@ function TestTab({ workflowId, triggerEvent }: { workflowId: string; triggerEven
           {/* Actions table */}
           {Array.isArray(result.actions) && result.actions.length > 0 && (
             <div className="space-y-1">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Actions
               </p>
               <div className="rounded-lg border border-border overflow-hidden">
-                <table className="w-full text-[10px]">
+                <table className="w-full text-xs">
                   <thead className="bg-muted/40">
                     <tr className="text-muted-foreground">
                       <th className="text-left px-2.5 py-1.5 font-medium">#</th>
@@ -342,11 +342,11 @@ export function WorkflowDrawer() {
         <h3 className="text-base font-display font-bold text-foreground flex-1 truncate">
           {wf.name}
         </h3>
-        <Badge variant={wf.is_active !== false ? 'default' : 'secondary'} className="text-[10px] shrink-0">
+        <Badge variant={wf.is_active !== false ? 'default' : 'secondary'} className="text-xs shrink-0">
           {wf.is_active !== false ? 'Active' : 'Paused'}
         </Badge>
         {hasHITL && (
-          <Badge className="shrink-0 text-[9px] bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/15 px-1.5">
+          <Badge className="shrink-0 text-xs bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/15 px-1.5">
             <UserCheck className="w-2.5 h-2.5 mr-0.5" />Human
           </Badge>
         )}
@@ -394,7 +394,7 @@ export function WorkflowDrawer() {
 
           {/* Trigger */}
           <div>
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Trigger</p>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Trigger</p>
             <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs ${
               isManual
                 ? 'bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400'
@@ -404,14 +404,14 @@ export function WorkflowDrawer() {
               <span className="font-mono font-medium">{wf.trigger_event}</span>
             </div>
             {isManual && (
-              <p className="text-[10px] text-muted-foreground mt-1">Manual only — no automatic trigger.</p>
+              <p className="text-xs text-muted-foreground mt-1">Manual only — no automatic trigger.</p>
             )}
           </div>
 
           {/* Filter conditions */}
           {wf.trigger_filter && Object.keys(wf.trigger_filter).length > 0 && (
             <div>
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">
                 Conditions
               </p>
               <WorkflowFilterBuilder
@@ -425,7 +425,7 @@ export function WorkflowDrawer() {
           {/* Actions */}
           {Array.isArray(wf.actions) && wf.actions.length > 0 && (
             <div>
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
                 Actions ({wf.actions.length})
               </p>
               <div className="space-y-1">
@@ -440,7 +440,7 @@ export function WorkflowDrawer() {
                         ? 'border-amber-500/30 bg-amber-500/5'
                         : 'border-border bg-muted/20'
                     }`}>
-                      <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold shrink-0 ${
+                      <span className={`w-4 h-4 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
                         isHITLStep ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400' : 'bg-muted text-muted-foreground'
                       }`}>
                         {i + 1}
@@ -459,7 +459,7 @@ export function WorkflowDrawer() {
           )}
 
           {/* Stats */}
-          <div className="flex flex-wrap gap-3 text-[10px] text-muted-foreground">
+          <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
             {wf.run_count != null && <span>{wf.run_count} total runs</span>}
             {wf.last_run_at && <span>Last run {new Date(wf.last_run_at).toLocaleString()}</span>}
             {wf.error_count > 0 && <span className="text-amber-500">⚠ {wf.error_count} errors</span>}

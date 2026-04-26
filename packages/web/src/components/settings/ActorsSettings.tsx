@@ -178,7 +178,7 @@ function ActorDetailPanel({
             <div className="flex items-center gap-2">
               <Shield className="w-4 h-4 text-muted-foreground" />
               <span className="text-sm font-semibold text-foreground">Permissions</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
                 {(actor.scopes ?? []).length} scopes
               </span>
             </div>
@@ -205,7 +205,7 @@ function ActorDetailPanel({
               <div className="space-y-3">
                 {SCOPE_GROUPS.map(group => (
                   <div key={group.label}>
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{group.label}</p>
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{group.label}</p>
                     <div className="flex flex-wrap gap-1.5">
                       {group.scopes.map(s => {
                         const active = scopeDraft.includes(s.value);
@@ -230,7 +230,7 @@ function ActorDetailPanel({
                   <p className="text-xs text-muted-foreground">No permissions assigned.</p>
                 ) : (
                   (actor.scopes ?? []).map(s => (
-                    <span key={s} className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-primary/10 text-primary border border-primary/20">
+                    <span key={s} className="px-2 py-0.5 rounded-md text-xs font-medium bg-primary/10 text-primary border border-primary/20">
                       {s}
                     </span>
                   ))
@@ -246,7 +246,7 @@ function ActorDetailPanel({
             <div className="flex items-center gap-2">
               <Key className="w-4 h-4 text-muted-foreground" />
               <span className="text-sm font-semibold text-foreground">API Keys</span>
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
                 {keys.length}
               </span>
             </div>
@@ -301,7 +301,7 @@ function ActorDetailPanel({
                   <Key className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold text-foreground">{k.label}</p>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       {k.last_used_at ? `Last used ${new Date(k.last_used_at).toLocaleDateString()}` : 'Never used'}
                       {' · Created '}
                       {new Date(k.created_at).toLocaleDateString()}
@@ -408,7 +408,7 @@ function SpecializationsPanel({ actor }: { actor: ActorRow }) {
         <div className="flex items-center gap-2">
           <Star className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm font-semibold text-foreground">Skills & Availability</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">{specs.length}</span>
+          <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">{specs.length}</span>
         </div>
         <button onClick={() => setShowAdd(!showAdd)}
           className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90">
@@ -420,7 +420,7 @@ function SpecializationsPanel({ actor }: { actor: ActorRow }) {
       <div className="px-4 py-3 space-y-3">
         {/* Availability toggle */}
         <div>
-          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Availability</p>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Availability</p>
           <div className="flex gap-1.5">
             {AVAILABILITY_OPTIONS.map((opt) => {
               const Icon = opt.icon;
@@ -443,11 +443,11 @@ function SpecializationsPanel({ actor }: { actor: ActorRow }) {
           <div className="rounded-lg border border-primary/30 bg-muted/20 p-3 space-y-2">
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Skill Tag</label>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Skill Tag</label>
                 <input type="text" value={newSkill} onChange={(e) => setNewSkill(e.target.value)} placeholder="e.g. email_outreach" className={inputCls} />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Proficiency</label>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Proficiency</label>
                 <select value={newProficiency} onChange={(e) => setNewProficiency(e.target.value as typeof newProficiency)} className={inputCls}>
                   {PROFICIENCY_LEVELS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
                 </select>
@@ -474,7 +474,7 @@ function SpecializationsPanel({ actor }: { actor: ActorRow }) {
             {specs.map((s) => (
               <div key={s.skill_tag} className="flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md border border-border bg-background group">
                 <span className="text-xs text-foreground font-medium">{s.skill_tag}</span>
-                <span className={`text-[10px] px-1 rounded border font-semibold ml-1 ${proficiencyColor[s.proficiency] ?? 'text-muted-foreground'}`}>
+                <span className={`text-xs px-1 rounded border font-semibold ml-1 ${proficiencyColor[s.proficiency] ?? 'text-muted-foreground'}`}>
                   {s.proficiency}
                 </span>
                 <button onClick={() => handleDelete(s.skill_tag)}
@@ -890,7 +890,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
           >
             {'icon' in t && t.icon && <t.icon className="w-3 h-3" />}
             {t.label}
-            <span className="text-[10px] opacity-60">{t.count}</span>
+            <span className="text-xs opacity-60">{t.count}</span>
           </button>
         ))}
       </div>
@@ -1105,13 +1105,13 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                               <div>
                                 <span className="font-semibold text-foreground">{actor.display_name}</span>
                                 {actor.user_id && (
-                                  <span className="ml-1.5 text-[10px] font-mono bg-muted text-muted-foreground px-1 py-0.5 rounded">auth</span>
+                                  <span className="ml-1.5 text-xs font-mono bg-muted text-muted-foreground px-1 py-0.5 rounded">auth</span>
                                 )}
                               </div>
                             </div>
                           </td>
                           <td className="px-4 py-3">
-                            <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border capitalize ${typePillCls[actor.actor_type]}`}>
+                            <span className={`text-xs font-semibold px-1.5 py-0.5 rounded border capitalize ${typePillCls[actor.actor_type]}`}>
                               {actor.actor_type}
                             </span>
                           </td>
@@ -1136,7 +1136,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                           <td className="px-4 py-3">
                             {actor.actor_type === 'human' ? (
                               actor.role ? (
-                                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${rolePillCls[actor.role] ?? rolePillCls.member}`}>
+                                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${rolePillCls[actor.role] ?? rolePillCls.member}`}>
                                   {roleLabels[actor.role] ?? actor.role}
                                 </span>
                               ) : <span className="text-xs text-muted-foreground/40">—</span>
@@ -1149,7 +1149,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                             )}
                           </td>
                           <td className="px-4 py-3">
-                            <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                            <span className={`inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded border ${
                               actor.is_active
                                 ? 'bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/30'
                                 : 'bg-muted text-muted-foreground border-border'
@@ -1265,11 +1265,11 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                       <div>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <p className="font-display font-bold text-foreground">{actor.display_name}</p>
-                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border capitalize ${typePillCls[actor.actor_type]}`}>
+                          <span className={`text-xs font-semibold px-1.5 py-0.5 rounded border capitalize ${typePillCls[actor.actor_type]}`}>
                             {actor.actor_type}
                           </span>
                           {actor.user_id && (
-                            <span className="text-[10px] font-mono bg-muted text-muted-foreground px-1 py-0.5 rounded">auth</span>
+                            <span className="text-xs font-mono bg-muted text-muted-foreground px-1 py-0.5 rounded">auth</span>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground">{actor.email || (actor.agent_identifier ?? 'No email')}</p>
@@ -1301,14 +1301,14 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                   <div className="mt-3 flex items-center justify-between flex-wrap gap-2">
                     <div className="flex items-center gap-2">
                       {actor.actor_type === 'human' && actor.role && (
-                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${rolePillCls[actor.role] ?? rolePillCls.member}`}>
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${rolePillCls[actor.role] ?? rolePillCls.member}`}>
                           {roleLabels[actor.role] ?? actor.role}
                         </span>
                       )}
                       {actor.actor_type === 'agent' && actor.agent_model && (
-                        <span className="text-[10px] font-mono text-muted-foreground">{actor.agent_model}</span>
+                        <span className="text-xs font-mono text-muted-foreground">{actor.agent_model}</span>
                       )}
-                      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                      <span className={`inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded border ${
                         actor.is_active
                           ? 'bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/30'
                           : 'bg-muted text-muted-foreground border-border'
@@ -1318,7 +1318,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                       </span>
                     </div>
                     {actor.created_at && (
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-xs text-muted-foreground">
                         {new Date(actor.created_at).toLocaleDateString()}
                       </span>
                     )}

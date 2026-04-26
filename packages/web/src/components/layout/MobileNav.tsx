@@ -37,7 +37,7 @@ export function MobileNav() {
               <motion.span
                 initial={{ opacity: 0, y: 4 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="text-[10px] font-display font-semibold text-primary relative z-10 mt-0.5"
+                className="text-xs font-display font-semibold text-primary relative z-10 mt-0.5"
               >
                 {tab.label}
               </motion.span>

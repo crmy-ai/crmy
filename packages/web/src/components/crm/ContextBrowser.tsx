@@ -85,7 +85,7 @@ function ConfidencePill({ value }: { value: number | null | undefined }) {
     ? 'bg-warning/15 text-warning'
     : 'bg-destructive/15 text-destructive';
   return (
-    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${cls}`}>
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold ${cls}`}>
       {pct}%
     </span>
   );
@@ -102,7 +102,7 @@ function SimilarityPill({ value }: { value: number | null | undefined }) {
     : 'bg-muted text-muted-foreground';
   return (
     <span title={`${pct}% similarity`}
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold ${cls}`}>
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold ${cls}`}>
       <Sparkles className="w-2.5 h-2.5" />
       {label}
     </span>
@@ -113,7 +113,7 @@ function ValidUntilBadge({ date }: { date: string | null | undefined }) {
   if (!date) return null;
   const expired = isPast(new Date(date));
   return (
-    <span className={`inline-flex items-center gap-1 text-[10px] font-medium ${expired ? 'text-destructive' : 'text-muted-foreground'}`}>
+    <span className={`inline-flex items-center gap-1 text-xs font-medium ${expired ? 'text-destructive' : 'text-muted-foreground'}`}>
       {expired && <AlertTriangle className="w-3 h-3" />}
       {expired ? 'Expired ' : 'Valid until '}
       {formatDistanceToNow(new Date(date), { addSuffix: true })}
@@ -166,7 +166,7 @@ function SubjectChip({
   return (
     <button
       onClick={subjectId ? () => openDrawer(drawerType, subjectId) : undefined}
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium transition-colors ${
         subjectId
           ? 'hover:opacity-80 cursor-pointer'
           : 'cursor-default'
@@ -968,7 +968,7 @@ export function ContextBrowser() {
                           </span>
                         )}
                         {entry.context_type && (
-                          <Badge variant="outline" className="text-[10px] capitalize">
+                          <Badge variant="outline" className="text-xs capitalize">
                             {entry.context_type.replace(/_/g, ' ')}
                           </Badge>
                         )}
@@ -978,7 +978,7 @@ export function ContextBrowser() {
                           subjectName={entry.subject_name}
                         />
                         {entry.is_current === false && (
-                          <Badge variant="outline" className="text-[10px] text-muted-foreground border-muted">
+                          <Badge variant="outline" className="text-xs text-muted-foreground border-muted">
                             superseded
                           </Badge>
                         )}
@@ -990,13 +990,13 @@ export function ContextBrowser() {
                       )}
                       <div className="flex items-center gap-3 flex-wrap">
                         {entry.tags?.length > 0 && (
-                          <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
                             <Tag className="w-3 h-3" />
                             {entry.tags.slice(0, 4).join(', ')}
                             {entry.tags.length > 4 && ` +${entry.tags.length - 4}`}
                           </span>
                         )}
-                        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
                           <Clock className="w-3 h-3" />
                           {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
                         </span>
@@ -1012,7 +1012,7 @@ export function ContextBrowser() {
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-6 text-[10px] text-destructive border-destructive/30 hover:bg-destructive/10"
+                          className="h-6 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
                           onClick={(e) => { e.stopPropagation(); reviewEntry.mutate(entry.id); }}
                           disabled={reviewEntry.isPending}
                         >

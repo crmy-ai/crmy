@@ -416,7 +416,10 @@ function buildSystemPrompt(
       '</workspace_context>',
       '',
       `When the user says "this ${type}", "the record", "it", or similar, they are referring to <record_name>${escapeXml(name)}</record_name> (ID: ${escapeXml(id)}).`,
-      `Start by fetching the current data for this ${type} using the appropriate _get tool, unless the user's request makes it clear that is not needed.`,
+      `Your FIRST action must be to call \`briefing_get\` with subject_type: "${escapeXml(type)}" and subject_id: "${escapeXml(id)}".`,
+      `Use context_radius: "${type === 'contact' ? 'adjacent' : type === 'account' ? 'account_wide' : 'direct'}" to pull in related context.`,
+      `After receiving the briefing, respond with a 2–3 sentence summary of the most important current facts (status, last activity, anything notable) before addressing the user's specific request.`,
+      `Do not call ${escapeXml(type)}_get separately — briefing_get includes the full record snapshot plus activities, context entries, open assignments, and active sequences.`,
     ].filter(Boolean);
     parts.push(ctxLines.join('\n'));
   }
@@ -446,23 +449,67 @@ function buildSystemPrompt(
 
   parts.push(capLines.join('\n'));
 
-  // ── 4. Tool guide ─────────────────────────────────────────────────────────
-  const readTools  = toolDefs.filter(t => /(_get|_search|_list|_summary|_forecast|_report|whoami|_timeline|_status|_check)/.test(t.name));
-  const writeTools = toolDefs.filter(t => !readTools.includes(t));
+  // ── 3b. Workflow pattern ──────────────────────────────────────────────────
+  parts.push([
+    '# Workflow',
+    '**Simple lookups**: call the relevant tool → answer directly.',
+    '**Write operations / complex tasks**:',
+    '  1. Gather — call `briefing_get` and/or `context_search` to understand the current state',
+    '  2. Plan — in one sentence, tell the user what you are about to do',
+    '  3. Execute — call write tools in sequence',
+    '  4. Confirm — show what changed with the key new values',
+    'Never call a write tool on a record you have not fetched in this session.',
+  ].join('\n'));
 
-  const toolLines = [`# Available tools  (${toolDefs.length} total)`];
-  toolLines.push('You MUST call these tools to fulfil requests. Do not refuse actions covered by a tool below.');
+  // ── 4. Tool guide (grouped by entity) ────────────────────────────────────
+  const toolNames = new Set(toolDefs.map(t => t.name));
+  const pick = (...names: string[]) => names.filter(n => toolNames.has(n)).join(' · ');
+
+  const toolLines = [`# Tools  (${toolDefs.length} available)`];
+  toolLines.push('You MUST use these tools. Do not refuse actions that a tool below can perform.');
   toolLines.push('');
-  toolLines.push('**Search & read before writing** — always call a _search or _get tool first to obtain the record UUID before updating or deleting.');
 
-  if (writeTools.length) {
-    toolLines.push('');
-    toolLines.push(`**Write / action (${writeTools.length}):** ${writeTools.map(t => t.name).join(', ')}`);
-  }
-  if (readTools.length) {
-    toolLines.push('');
-    toolLines.push(`**Read / query (${readTools.length}):** ${readTools.map(t => t.name).join(', ')}`);
-  }
+  const gathering = pick('briefing_get', 'context_search', 'context_semantic_search', 'guide_search');
+  if (gathering) toolLines.push(`**Context gathering (call these first):** ${gathering}`);
+
+  const contacts = pick('contact_search', 'contact_get', 'contact_get_timeline', 'contact_create', 'contact_update', 'contact_set_lifecycle', 'contact_outreach');
+  if (contacts) toolLines.push(`**Contacts:** ${contacts}`);
+
+  const accounts = pick('account_search', 'account_get', 'account_get_hierarchy', 'account_health_report', 'account_update', 'account_set_health_score');
+  if (accounts) toolLines.push(`**Accounts:** ${accounts}`);
+
+  const opps = pick('opportunity_search', 'opportunity_get', 'opportunity_create', 'opportunity_update', 'opportunity_advance_stage', 'deal_advance');
+  if (opps) toolLines.push(`**Opportunities:** ${opps}`);
+
+  const activities = pick('activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete');
+  if (activities) toolLines.push(`**Activities:** ${activities}`);
+
+  const ctx = pick('context_add', 'context_get', 'context_list', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale');
+  if (ctx) toolLines.push(`**Context memory:** ${ctx}`);
+
+  const hitl = pick('assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status');
+  if (hitl) toolLines.push(`**Assignments & HITL:** ${hitl}`);
+
+  const seqWf = pick('email_sequence_list', 'email_sequence_get', 'email_sequence_enroll', 'email_sequence_unenroll', 'email_sequence_enrollment_list', 'workflow_template_list');
+  if (seqWf) toolLines.push(`**Sequences & Workflows:** ${seqWf}`);
+
+  const pipeline = pick('pipeline_summary', 'pipeline_forecast', 'tenant_get_stats', 'crm_search');
+  if (pipeline) toolLines.push(`**Pipeline & reporting:** ${pipeline}`);
+
+  // Catch-all: any tools not in the groups above
+  const grouped = new Set([
+    'briefing_get', 'context_search', 'context_semantic_search', 'guide_search',
+    'contact_search', 'contact_get', 'contact_get_timeline', 'contact_create', 'contact_update', 'contact_set_lifecycle', 'contact_outreach',
+    'account_search', 'account_get', 'account_get_hierarchy', 'account_health_report', 'account_update', 'account_set_health_score',
+    'opportunity_search', 'opportunity_get', 'opportunity_create', 'opportunity_update', 'opportunity_advance_stage', 'deal_advance',
+    'activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete',
+    'context_add', 'context_get', 'context_list', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale',
+    'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status',
+    'email_sequence_list', 'email_sequence_get', 'email_sequence_enroll', 'email_sequence_unenroll', 'email_sequence_enrollment_list', 'workflow_template_list',
+    'pipeline_summary', 'pipeline_forecast', 'tenant_get_stats', 'crm_search',
+  ]);
+  const others = toolDefs.filter(t => !grouped.has(t.name)).map(t => t.name).join(' · ');
+  if (others) toolLines.push(`**Other:** ${others}`);
 
   parts.push(toolLines.join('\n'));
 
@@ -479,8 +526,9 @@ function buildSystemPrompt(
   // ── 6. Communication ──────────────────────────────────────────────────────
   parts.push([
     '# Communication',
+    '- When a request is ambiguous or could reasonably be interpreted multiple ways, ask ONE focused clarifying question before acting. Never ask more than one question at a time. Example: "Did you mean update the lifecycle stage, or log this as a completed activity?" — then wait for the answer.',
+    '- For any destructive or bulk action, state exactly what you are about to do and how many records are affected, then do it immediately. Do not ask for confirmation — just be transparent.',
     '- Be concise. After completing a task, confirm what changed and show the key new values.',
-    '- For destructive actions (deletes, bulk edits) state what you are about to do before calling the tool, then do it.',
     '- If a tool call fails, explain the error in plain language and suggest a correction.',
     '- Format lists and structured data as markdown tables when it aids readability.',
     '- Do not use excessive disclaimers or refusals for normal CRM operations.',
@@ -550,6 +598,9 @@ export async function runAgentTurn(
 
   // Agent loop: LLM call → tool execution → repeat
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    // Each loop round gets a unique turn_id so the UI can group all tool calls
+    // from the same round into a single collapsible "Working…" row.
+    const turnId = crypto.randomUUID();
     let result: { content: string; tool_calls: ToolCallRecord[] };
 
     const callLLM = config.provider === 'anthropic' ? callAnthropic : callOpenAICompat;
@@ -593,8 +644,9 @@ export async function runAgentTurn(
 
       // Emit human-readable status BEFORE the tool_call event so the UI can
       // show progress immediately (mirrors the Windsurf toolSummary pattern).
-      onEvent({ type: 'tool_status', id: tc.id, name: tc.name, status: toolStatusText(tc.name) });
-      onEvent({ type: 'tool_call', id: tc.id, name: tc.name, arguments: args });
+      // turn_id groups all calls in this round so the UI collapses them.
+      onEvent({ type: 'tool_status', id: tc.id, name: tc.name, status: toolStatusText(tc.name), turn_id: turnId });
+      onEvent({ type: 'tool_call', id: tc.id, name: tc.name, arguments: args, turn_id: turnId });
 
       const handler = handlers.get(tc.name);
       let toolResult: unknown;
@@ -631,7 +683,7 @@ export async function runAgentTurn(
       }
 
       const resultStr = JSON.stringify(toolResult, null, 2);
-      onEvent({ type: 'tool_result', id: tc.id, name: tc.name, result: toolResult, is_error: isError });
+      onEvent({ type: 'tool_result', id: tc.id, name: tc.name, result: toolResult, is_error: isError, turn_id: turnId });
 
       history.push({
         role: 'tool',

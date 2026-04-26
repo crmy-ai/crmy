@@ -133,7 +133,7 @@ function SubjectPicker({
       <div className={`flex items-center gap-2 ${isLarge ? 'h-10 pl-4 pr-3 text-base' : 'h-8 pl-3 pr-2 text-sm'} rounded-xl border border-border bg-muted/50`}>
         <Icon className={`flex-shrink-0 ${isLarge ? 'w-4 h-4' : 'w-3.5 h-3.5'}`} style={{ color: cfg.color }} />
         <span className="font-medium text-foreground">{subject.name}</span>
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground capitalize ml-0.5">
+        <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground capitalize ml-0.5">
           {subject.type.replace('_', ' ')}
         </span>
         <button
@@ -181,7 +181,7 @@ function SubjectPicker({
                 const Icon = cfg.icon;
                 return (
                   <div key={type}>
-                    <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <div className="px-3 pt-2.5 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       {cfg.label}
                     </div>
                     {rows.map((r: AnyRecord) => {
@@ -201,7 +201,7 @@ function SubjectPicker({
                           </div>
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-foreground truncate">{name}</p>
-                            {sub && <p className="text-[10px] text-muted-foreground truncate capitalize">{sub}</p>}
+                            {sub && <p className="text-xs text-muted-foreground truncate capitalize">{sub}</p>}
                           </div>
                         </button>
                       );

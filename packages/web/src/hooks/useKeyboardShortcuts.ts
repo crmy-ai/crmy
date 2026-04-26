@@ -5,7 +5,7 @@ import { useAppStore } from '@/store/appStore';
 export function useKeyboardShortcuts() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { setCommandPaletteOpen, openDrawer, setShortcutsOpen, toggleZenMode, openQuickAdd } = useAppStore();
+  const { setCommandPaletteOpen, openDrawer, setShortcutsOpen, toggleZenMode, openQuickAdd, toggleAgentPanel, closeAgentPanel } = useAppStore();
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const target = e.target as HTMLElement;
@@ -18,10 +18,10 @@ export function useKeyboardShortcuts() {
       return;
     }
 
-    // Cmd+J — Workspace Agent
+    // Cmd+J — toggle persistent agent panel
     if ((e.metaKey || e.ctrlKey) && e.key === 'j') {
       e.preventDefault();
-      navigate('/agent');
+      toggleAgentPanel();
       return;
     }
 
@@ -32,12 +32,11 @@ export function useKeyboardShortcuts() {
       return;
     }
 
-    // Escape
+    // Escape — close panel first, then other overlays
     if (e.key === 'Escape') {
-      // On /agent, go back to previous page
-      if (location.pathname === '/agent') {
+      if (useAppStore.getState().agentPanelOpen) {
         e.preventDefault();
-        navigate(-1);
+        closeAgentPanel();
         return;
       }
       useAppStore.getState().closeDrawer();
@@ -86,7 +85,7 @@ export function useKeyboardShortcuts() {
       setTimeout(() => window.removeEventListener('keydown', handler), 1000);
       return;
     }
-  }, [navigate, location.pathname, setCommandPaletteOpen, openDrawer, setShortcutsOpen, toggleZenMode, openQuickAdd]);
+  }, [navigate, location.pathname, setCommandPaletteOpen, openDrawer, setShortcutsOpen, toggleZenMode, openQuickAdd, toggleAgentPanel, closeAgentPanel]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);

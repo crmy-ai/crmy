@@ -352,7 +352,7 @@ export default function AgentSettings() {
               aria-label="Enable Local Workspace Agent"
             />
             {!canEnable && !enabled && (
-              <p className="text-[10px] text-muted-foreground text-right max-w-[160px]">
+              <p className="text-xs text-muted-foreground text-right max-w-[160px]">
                 Save a provider &amp; model below first
               </p>
             )}
@@ -428,7 +428,7 @@ export default function AgentSettings() {
               <div className="flex items-center justify-between">
                 <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">API Key</label>
                 {keyConfigured && !newApiKey && (
-                  <span className="text-[10px] text-muted-foreground">
+                  <span className="text-xs text-muted-foreground">
                     Enter a new key to replace the stored one
                   </span>
                 )}
@@ -539,7 +539,7 @@ export default function AgentSettings() {
               </div>
             )}
             {testStatus === 'idle' && (
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Test your connection before saving to confirm the key works.
               </p>
             )}
@@ -621,21 +621,21 @@ export default function AgentSettings() {
               <div className="flex items-center justify-between">
                 <p className="text-xs font-medium text-foreground">Token pricing <span className="font-normal text-muted-foreground">(USD per million tokens)</span></p>
                 {priceSource === 'openrouter' && (
-                  <span className="text-[10px] text-violet-500 font-medium">Live from OpenRouter</span>
+                  <span className="text-xs text-violet-500 font-medium">Live from OpenRouter</span>
                 )}
                 {priceSource === 'default' && (
-                  <span className="text-[10px] text-muted-foreground">Default for model</span>
+                  <span className="text-xs text-muted-foreground">Default for model</span>
                 )}
                 {priceSource === 'user' && (
-                  <span className="text-[10px] text-primary font-medium">Custom</span>
+                  <span className="text-xs text-primary font-medium">Custom</span>
                 )}
                 {priceSource === 'free' && (
-                  <span className="text-[10px] text-green-600 font-medium">Free (local)</span>
+                  <span className="text-xs text-green-600 font-medium">Free (local)</span>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Input ($/M)</label>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Input ($/M)</label>
                   <input
                     type="number"
                     min="0"
@@ -647,7 +647,7 @@ export default function AgentSettings() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Output ($/M)</label>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Output ($/M)</label>
                   <input
                     type="number"
                     min="0"
@@ -668,12 +668,12 @@ export default function AgentSettings() {
                     parseFloat(outputPricePerM || '0'),
                   )}
                   {priceSource !== 'free' && (
-                    <span className="ml-1 text-[10px]">· estimated (1.5× input, 0.6× output of max tokens)</span>
+                    <span className="ml-1 text-xs">· estimated (1.5× input, 0.6× output of max tokens)</span>
                   )}
                 </p>
               )}
               {priceSource === 'unknown' && inputPricePerM === '' && (
-                <p className="text-[10px] text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   Select a known model above to auto-fill prices, or enter them manually.
                 </p>
               )}
