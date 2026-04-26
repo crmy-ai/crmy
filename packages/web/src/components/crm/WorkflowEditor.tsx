@@ -44,6 +44,7 @@ import {
 } from '@/lib/workflowConstants';
 import { WorkflowFilterBuilder } from './WorkflowFilterBuilder';
 import { VarField } from '@/components/ui/VarField';
+import { EditorErrorBoundary } from './EditorErrorBoundary';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -734,12 +735,29 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
 
   // ── Validation ───────────────────────────────────────────────────────────
 
+  /** Detect an opening {{ that is never closed, e.g. {{contact.name */
+  const UNCLOSED_VAR = /\{\{(?![^{}]*\}\})/;
+
   const validate = (): boolean => {
     const e: Record<string, string> = {};
     if (!name.trim())    e.name    = 'Name is required';
     if (!trigger.trim()) e.trigger = 'Trigger event is required';
     actions.forEach((a, i) => {
-      if (!isActionValid(a)) e[`action_${i}`] = 'Fill in all required fields';
+      if (!isActionValid(a)) {
+        e[`action_${i}`] = 'Fill in all required fields';
+      } else {
+        // Variable syntax check on all string config values
+        const def = ACTION_TYPES.find(d => d.value === a.type);
+        if (def) {
+          for (const field of def.configFields) {
+            const val = a.config[field.key];
+            if (typeof val === 'string' && UNCLOSED_VAR.test(val)) {
+              e[`action_${i}_${field.key}`] = `Unclosed {{ in "${field.label}" — did you forget }}?`;
+              if (!e[`action_${i}`]) e[`action_${i}`] = `Variable syntax error in "${field.label}"`;
+            }
+          }
+        }
+      }
     });
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -906,18 +924,20 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
               {actions.map((action, i) => (
                 <div key={i}>
                   <FlowConnector isHITL={requiresApproval(action)} />
-                  <ActionCard
-                    index={i}
-                    action={action}
-                    onChange={a => updateAction(i, a)}
-                    onRemove={() => removeAction(i)}
-                    onMoveUp={() => moveUp(i)}
-                    onMoveDown={() => moveDown(i)}
-                    canMoveUp={i > 0}
-                    canMoveDown={i < actions.length - 1}
-                    canRemove={actions.length > 1}
-                    triggerEvent={trigger}
-                  />
+                  <EditorErrorBoundary label="action">
+                    <ActionCard
+                      index={i}
+                      action={action}
+                      onChange={a => updateAction(i, a)}
+                      onRemove={() => removeAction(i)}
+                      onMoveUp={() => moveUp(i)}
+                      onMoveDown={() => moveDown(i)}
+                      canMoveUp={i > 0}
+                      canMoveDown={i < actions.length - 1}
+                      canRemove={actions.length > 1}
+                      triggerEvent={trigger}
+                    />
+                  </EditorErrorBoundary>
                   {errors[`action_${i}`] && (
                     <p className="text-xs text-destructive mt-1 pl-1">{errors[`action_${i}`]}</p>
                   )}

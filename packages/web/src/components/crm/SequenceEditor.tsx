@@ -29,6 +29,7 @@ import {
   TypedStepBuilder, SEQUENCE_TRIGGER_EVENTS,
   type SequenceStep,
 } from '@/pages/Sequences';
+import { EditorErrorBoundary } from './EditorErrorBoundary';
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -52,16 +53,22 @@ function SettingsPanel({
   description, onDescriptionChange,
   goalEvent, onGoalEventChange,
   exitOnReply, onExitOnReplyChange,
+  exitOnUnsubscribe, onExitOnUnsubscribeChange,
+  maxActiveEnrollments, onMaxActiveEnrollmentsChange,
   aiPersona, onAiPersonaChange,
 }: {
-  description:          string;
-  onDescriptionChange:  (v: string) => void;
-  goalEvent:            string;
-  onGoalEventChange:    (v: string) => void;
-  exitOnReply:          boolean;
-  onExitOnReplyChange:  (v: boolean) => void;
-  aiPersona:            string;
-  onAiPersonaChange:    (v: string) => void;
+  description:                    string;
+  onDescriptionChange:            (v: string) => void;
+  goalEvent:                      string;
+  onGoalEventChange:              (v: string) => void;
+  exitOnReply:                    boolean;
+  onExitOnReplyChange:            (v: boolean) => void;
+  exitOnUnsubscribe:              boolean;
+  onExitOnUnsubscribeChange:      (v: boolean) => void;
+  maxActiveEnrollments:           string;
+  onMaxActiveEnrollmentsChange:   (v: string) => void;
+  aiPersona:                      string;
+  onAiPersonaChange:              (v: string) => void;
 }) {
   return (
     <div className="space-y-5">
@@ -107,6 +114,43 @@ function SettingsPanel({
             Stop email steps when the contact replies to any email in this sequence.
           </p>
         </div>
+      </div>
+
+      {/* Exit on unsubscribe */}
+      <div className="flex items-start gap-3">
+        <Switch
+          id="exit-on-unsubscribe"
+          checked={exitOnUnsubscribe}
+          onCheckedChange={onExitOnUnsubscribeChange}
+          className="mt-0.5 shrink-0"
+        />
+        <div>
+          <label htmlFor="exit-on-unsubscribe" className="text-xs font-medium text-foreground cursor-pointer">
+            Exit on unsubscribe
+          </label>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            Stop sending when a contact opts out. Recommended for CAN-SPAM / GDPR compliance.
+          </p>
+        </div>
+      </div>
+
+      {/* Max active enrollments */}
+      <div>
+        <label className={labelCls}>
+          Max active enrollments
+          <span className="ml-1 normal-case font-normal text-muted-foreground/60">(optional)</span>
+        </label>
+        <p className="text-[10px] text-muted-foreground mb-1.5">
+          Cap the number of contacts actively progressing through this sequence. Leave blank for unlimited.
+        </p>
+        <input
+          type="number"
+          min="1"
+          value={maxActiveEnrollments}
+          onChange={e => onMaxActiveEnrollmentsChange(e.target.value)}
+          placeholder="Unlimited"
+          className={fieldCls}
+        />
       </div>
 
       {/* AI Persona */}
@@ -156,13 +200,17 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
 
   // ── Editor state ─────────────────────────────────────────────────────────
 
-  const [name,        setName]        = useState(() => sequence?.name        ?? '');
-  const [description, setDescription] = useState(() => sequence?.description ?? '');
-  const [isActive,    setIsActive]    = useState(() => sequence?.is_active   ?? true);
-  const [goalEvent,   setGoalEvent]   = useState(() => sequence?.goal_event  ?? '');
-  const [exitOnReply, setExitOnReply] = useState(() => sequence?.exit_on_reply ?? true);
-  const [aiPersona,   setAiPersona]   = useState(() => sequence?.ai_persona  ?? '');
-  const [steps,       setSteps]       = useState<SequenceStep[]>(() =>
+  const [name,                  setName]                  = useState(() => sequence?.name        ?? '');
+  const [description,           setDescription]           = useState(() => sequence?.description ?? '');
+  const [isActive,              setIsActive]              = useState(() => sequence?.is_active   ?? true);
+  const [goalEvent,             setGoalEvent]             = useState(() => sequence?.goal_event  ?? '');
+  const [exitOnReply,           setExitOnReply]           = useState(() => sequence?.exit_on_reply ?? true);
+  const [exitOnUnsubscribe,     setExitOnUnsubscribe]     = useState(() => sequence?.exit_on_unsubscribe ?? true);
+  const [maxActiveEnrollments,  setMaxActiveEnrollments]  = useState(() =>
+    sequence?.max_active_enrollments != null ? String(sequence.max_active_enrollments) : '',
+  );
+  const [aiPersona,             setAiPersona]             = useState(() => sequence?.ai_persona  ?? '');
+  const [steps,                 setSteps]                 = useState<SequenceStep[]>(() =>
     Array.isArray(sequence?.steps) ? sequence.steps as SequenceStep[] : [],
   );
 
@@ -181,6 +229,8 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
     setIsActive(seq?.is_active ?? true);
     setGoalEvent(seq?.goal_event ?? '');
     setExitOnReply(seq?.exit_on_reply ?? true);
+    setExitOnUnsubscribe(seq?.exit_on_unsubscribe ?? true);
+    setMaxActiveEnrollments(seq?.max_active_enrollments != null ? String(seq.max_active_enrollments) : '');
     setAiPersona(seq?.ai_persona ?? '');
     setSteps(Array.isArray(seq?.steps) ? seq.steps as SequenceStep[] : []);
     setErrors({});
@@ -188,10 +238,34 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
 
   // ── Validation ───────────────────────────────────────────────────────────
 
+  /** Detect an opening {{ that is never closed, e.g. {{contact.name */
+  const UNCLOSED_VAR = /\{\{(?![^{}]*\}\})/;
+
+  /** String fields in sequence steps that support {{variables}} */
+  const STEP_VAR_FIELDS: Record<string, string[]> = {
+    email:        ['subject', 'body_text', 'body_html', 'ai_prompt'],
+    notification: ['title', 'body'],
+    webhook:      ['url', 'body_template'],
+    ai_action:    ['prompt'],
+  };
+
   const validate = (): boolean => {
     const e: Record<string, string> = {};
     if (!name.trim()) e.name = 'Name is required';
     if (steps.length === 0) e.steps = 'Add at least one step';
+
+    // Variable syntax check
+    steps.forEach((step, i) => {
+      const fields = STEP_VAR_FIELDS[step.type] ?? [];
+      for (const field of fields) {
+        const val = (step as unknown as Record<string, unknown>)[field];
+        if (typeof val === 'string' && UNCLOSED_VAR.test(val)) {
+          e[`step_${i}_${field}`] = `Unclosed {{ in "${field}" on step ${i + 1} — did you forget }}?`;
+          if (!e.steps) e.steps = `Variable syntax error in step ${i + 1}`;
+        }
+      }
+    });
+
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -202,13 +276,16 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
     if (!validate()) return;
     setSaving(true);
     try {
+      const maxEnroll = maxActiveEnrollments.trim() ? Number(maxActiveEnrollments) : undefined;
       const payload = {
-        name:          name.trim(),
-        description:   description.trim() || undefined,
-        is_active:     isActive,
-        goal_event:    goalEvent || undefined,
-        exit_on_reply: exitOnReply,
-        ai_persona:    aiPersona.trim() || undefined,
+        name:                   name.trim(),
+        description:            description.trim() || undefined,
+        is_active:              isActive,
+        goal_event:             goalEvent || undefined,
+        exit_on_reply:          exitOnReply,
+        exit_on_unsubscribe:    exitOnUnsubscribe,
+        max_active_enrollments: maxEnroll && maxEnroll > 0 ? maxEnroll : null,
+        ai_persona:             aiPersona.trim() || undefined,
         steps,
       };
 
@@ -294,6 +371,10 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
               onGoalEventChange={setGoalEvent}
               exitOnReply={exitOnReply}
               onExitOnReplyChange={setExitOnReply}
+              exitOnUnsubscribe={exitOnUnsubscribe}
+              onExitOnUnsubscribeChange={setExitOnUnsubscribe}
+              maxActiveEnrollments={maxActiveEnrollments}
+              onMaxActiveEnrollmentsChange={setMaxActiveEnrollments}
               aiPersona={aiPersona}
               onAiPersonaChange={setAiPersona}
             />
@@ -322,7 +403,9 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
               </div>
 
               {/* Step builder */}
-              <TypedStepBuilder steps={steps} onChange={setSteps} />
+              <EditorErrorBoundary label="step">
+                <TypedStepBuilder steps={steps} onChange={setSteps} />
+              </EditorErrorBoundary>
 
               {errors.steps && (
                 <p className="text-xs text-destructive">{errors.steps}</p>

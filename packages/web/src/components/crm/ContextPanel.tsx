@@ -58,7 +58,7 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
   const [selectMode, setSelectMode] = useState(false);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: contextData, isLoading } = useContextEntries({ subject_type: subjectType, subject_id: subjectId, is_current: true, limit: 50 }) as any;
+  const { data: contextData, isLoading, isError } = useContextEntries({ subject_type: subjectType, subject_id: subjectId, is_current: true, limit: 50 }) as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: staleData } = useStaleContextEntries({ subject_type: subjectType, subject_id: subjectId, limit: 10 }) as any;
   const reviewMutation = useReviewContextEntry();
@@ -119,6 +119,17 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
         <div className="h-4 bg-muted rounded w-1/3" />
         <div className="h-20 bg-muted rounded" />
         <div className="h-20 bg-muted rounded" />
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="px-4 mx-4 mt-4">
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2.5 text-xs text-destructive">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          <span>Could not load context entries. Check your connection and try refreshing.</span>
+        </div>
       </div>
     );
   }

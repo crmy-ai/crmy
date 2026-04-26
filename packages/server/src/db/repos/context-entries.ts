@@ -365,11 +365,23 @@ export async function reviewContextEntry(
   id: UUID,
   extendDays?: number,
 ): Promise<ContextEntry | null> {
-  const validUntilExpr = extendDays
-    ? `valid_until = now() + interval '${extendDays} days',`
-    : '';
+  // Use a parameterized interval multiplication ($3 * INTERVAL '1 day') to
+  // avoid any string interpolation in the query — safe even if extendDays is
+  // supplied by an untrusted source.
+  if (extendDays != null) {
+    const result = await db.query(
+      `UPDATE context_entries
+       SET reviewed_at = now(),
+           valid_until = now() + ($3 * INTERVAL '1 day'),
+           updated_at  = now()
+       WHERE id = $1 AND tenant_id = $2
+       RETURNING *`,
+      [id, tenantId, Math.max(1, Math.floor(Number(extendDays)))],
+    );
+    return (result.rows[0] as ContextEntry) ?? null;
+  }
   const result = await db.query(
-    `UPDATE context_entries SET reviewed_at = now(), ${validUntilExpr} updated_at = now()
+    `UPDATE context_entries SET reviewed_at = now(), updated_at = now()
      WHERE id = $1 AND tenant_id = $2
      RETURNING *`,
     [id, tenantId],
@@ -601,6 +613,9 @@ export async function semanticSearch(
   const lim = filters?.limit ?? 20;
   params.push(lim);
 
+  // Use LEFT JOIN for actor lookup (single join vs two correlated subqueries).
+  // Subject name still uses correlated subqueries since it's a CASE expression
+  // across four different tables — a lateral join would be more complex.
   const result = await db.query(
     `SELECT c.*,
        1 - (c.embedding <=> $2::vector) AS similarity,
@@ -610,9 +625,10 @@ export async function semanticSearch(
          WHEN 'opportunity' THEN (SELECT name  FROM opportunities  WHERE id = c.subject_id AND tenant_id = c.tenant_id)
          WHEN 'use_case'    THEN (SELECT COALESCE(name, title) FROM use_cases WHERE id = c.subject_id AND tenant_id = c.tenant_id)
        END AS subject_name,
-       (SELECT display_name FROM actors WHERE id = c.authored_by) AS authored_by_name,
-       (SELECT actor_type   FROM actors WHERE id = c.authored_by) AS authored_by_type
+       a.display_name AS authored_by_name,
+       a.actor_type   AS authored_by_type
      FROM context_entries c
+     LEFT JOIN actors a ON a.id = c.authored_by
      WHERE ${conditions.join(' AND ')}
      ORDER BY c.embedding <=> $2::vector
      LIMIT $${idx}`,

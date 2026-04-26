@@ -14,24 +14,35 @@ CRMy is a TypeScript monorepo with the following packages:
 | `packages/web` | `@crmy/web` | React SPA served at `/app` |
 | `packages/openclaw-plugin` | `@crmy/openclaw-plugin` | Plugin for OpenClaw integration |
 
-### MCP tools (111 total)
+### MCP tools (175+)
 
 MCP tool definitions live in `packages/server/src/mcp/tools/`. Each tool file exports an array of `ToolDef` objects with the following shape:
 
 - **`name`** — unique tool identifier
 - **`description`** — human-readable description shown to the model (aim for 2–4 sentences covering: what the tool does, when to use it, what it returns)
+- **`tier`** — `'core'` for standard tools; controls governor enforcement
 - **`inputSchema`** — a Zod schema for input validation
 - **`handler`** — receives parsed input + `ActorContext` and returns a result object
 
-Tool files: `context-entries.ts`, `actors.ts`, `activities.ts`, `assignments.ts`, `hitl.ts`, `contacts.ts`, `accounts.ts`, `opportunities.ts`, `analytics.ts`, `use-cases.ts`, `registries.ts`, `notes.ts`, `workflows.ts`, `webhooks.ts`, `emails.ts`, `custom-fields.ts`, `meta.ts`
+Tool files: `context-entries.ts`, `actors.ts`, `activities.ts`, `assignments.ts`, `hitl.ts`, `contacts.ts`, `accounts.ts`, `opportunities.ts`, `analytics.ts`, `use-cases.ts`, `registries.ts`, `notes.ts`, `workflows.ts`, `webhooks.ts`, `emails.ts`, `email-sequences.ts`, `custom-fields.ts`, `meta.ts`
 
 Tool ordering in the manifest (defined in `packages/server/src/mcp/server.ts`) matters — tools listed first are more likely to be selected by the LLM. Briefing and context tools come first.
 
 ### SQL migrations
 
-Migrations live in `packages/server/migrations/` and are numbered sequentially (001–022+). There is no ORM — all queries use the `pg` Pool directly with raw SQL.
+Migrations live in `packages/server/migrations/` and are numbered sequentially (001–042+). There is no ORM — all queries use the `pg` Pool directly with raw SQL.
 
 Migration 022 (`022_pgvector.sql`) is conditional — only runs when `ENABLE_PGVECTOR=true`.
+
+Key migrations to be aware of when developing:
+
+| Range | Area |
+|---|---|
+| 001–020 | Core schema (contacts, accounts, opportunities, activities, actors, assignments, context) |
+| 021–030 | Context Engine v2 (pgvector, extraction pipeline, types registry, auto-extract flag) |
+| 031–039 | Automation engine (workflows, sequences, HITL, email sequences) |
+| 040–041 | Automation performance indexes + sequence rate limits |
+| 042 | Context memory indexes (tenant-scoped, authored-by, extraction backlog) |
 
 ### Web UI pages (18)
 
@@ -154,11 +165,13 @@ CRMy is built iteratively via versioned spec files passed to Claude Code (Opus).
 
 1. **Add or improve an MCP tool description** (`packages/server/src/mcp/tools/`)
 2. **Add a `context_type` or `activity_type`** to the registry seed data
-3. **Improve error messages in the CLI** (`packages/cli/src/commands/`)
-4. **Add a recipe** to `docs/recipes/` — follow the pattern in the existing 3 recipes
-5. **Report a bug** in the `briefing_get` response with a specific scenario
-6. **Add a web UI page** for a backend feature that lacks one
-7. **Add a `crmy doctor` check** for something that catches new contributors off guard
+3. **Add a workflow template** to `packages/server/src/lib/workflow-templates.ts` — follow the existing 8 patterns
+4. **Improve error messages in the CLI** (`packages/cli/src/commands/`)
+5. **Add a recipe** to `docs/recipes/` — follow the pattern in the existing 3 recipes
+6. **Report a bug** in the `briefing_get` response with a specific scenario
+7. **Add a web UI page** for a backend feature that lacks one
+8. **Add a `crmy doctor` check** for something that catches new contributors off guard
+9. **Add a test** for a service or repo function in `packages/server/src/` — test coverage is an active gap
 
 ## Code conventions
 
@@ -182,20 +195,23 @@ crmy/
 │   ├── shared/          TypeScript types + Zod schemas
 │   ├── server/
 │   │   ├── src/
-│   │   │   ├── mcp/tools/     111 MCP tool definitions (18 files)
-│   │   │   ├── rest/          REST API router
+│   │   │   ├── mcp/tools/     175+ MCP tool definitions (18 files)
+│   │   │   ├── rest/          REST API router (all endpoints)
 │   │   │   ├── db/            Pool, migrations, repositories
+│   │   │   │   └── repos/     One repo per entity (context-entries, activities, etc.)
 │   │   │   ├── auth/          JWT + API key auth
-│   │   │   ├── agent/         AI extraction pipeline
+│   │   │   ├── agent/         AI extraction pipeline (extraction.ts, providers/llm.ts)
+│   │   │   ├── services/      Briefing, sequence-executor, HITL handler
 │   │   │   ├── workflows/     Event-driven automation engine
+│   │   │   ├── lib/           Shared utilities (file-extract, workflow-templates, etc.)
 │   │   │   └── index.ts       Server entry point + createApp()
-│   │   └── migrations/        22+ SQL migration files
+│   │   └── migrations/        42+ SQL migration files
 │   ├── cli/
 │   │   └── src/commands/      30+ CLI commands (init, server, doctor, etc.)
 │   └── web/
 │       └── src/
-│           ├── pages/         18 page components
-│           ├── components/crm/ 19 drawer/panel components
+│           ├── pages/         20+ page components
+│           ├── components/crm/ Editor error boundary, context panel, workflow/sequence editors
 │           └── api/hooks.ts   TanStack Query hooks
 ├── docker/                    Dockerfile + docker-compose.yml
 ├── docs/recipes/              3 agent tutorial walkthroughs

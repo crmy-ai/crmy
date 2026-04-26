@@ -224,8 +224,8 @@ context_semantic_search query="deals at risk due to competitor pressure"
 
 | Category | Tools |
 |---|---|
-| **Briefing** | `briefing_get` — with `context_radius` (direct/adjacent/account_wide) and `token_budget` |
-| **Context** | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_stale`, `context_diff`, `context_ingest`, `context_ingest_auto`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
+| **Briefing** | `briefing_get` — with `context_radius` (direct/adjacent/account_wide), `token_budget`, and `dropped_entries` in response |
+| **Context** | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_review_batch` ★, `context_stale`, `context_bulk_mark_stale` ★, `context_diff`, `context_ingest`, `context_ingest_auto`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
 | **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise` |
 | **Assignments** | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | **HITL** | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
@@ -238,12 +238,14 @@ context_semantic_search query="deals at risk due to competitor pressure"
 | Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
 | Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
 | Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
-| Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
+| Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list`, `workflow_template_list` ★ |
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
 | Emails | `email_create`, `email_get`, `email_search`, `email_provider_set`, `email_provider_get` |
 | Email Sequences | `email_sequence_create`, `email_sequence_get`, `email_sequence_update`, `email_sequence_delete`, `email_sequence_list`, `email_sequence_enroll`, `email_sequence_unenroll`, `email_sequence_enrollment_list` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
 | Meta | `schema_get`, `entity_resolve`, `guide_search` |
+
+★ New in v0.7
 
 ---
 
@@ -374,16 +376,17 @@ Available at `/app` when the server is running. The web UI provides full CRUD fo
 - **Memory Hub** — pipeline stats, recent activity feed, context overview with Knowledge tab for cross-entity context browsing
 - **Contact/Account drawers** — Detail, Brief, and Graph tabs; Brief surfaces a full structured briefing inline; Graph opens a full-page Obsidian-style memory graph
 - **Memory Graph** — dark canvas visualization showing entity nodes, context clusters, related records, activities, and assignments in a concentric radial layout; sidebar for category filtering; click any node to open a detail Sheet drawer
-- **Context page** — browse and search context entries; inline keyword/semantic search toggle; semantic fallback to keyword when pgvector is unavailable
+- **Context page** — browse and search context entries; inline keyword/semantic search toggle; semantic fallback to keyword (with toast notification) when pgvector is unavailable; **Add** button for manually crafting entries without ingestion; 15 MB upload guard with clear error
 - **Context import** — paste text or upload a file (PDF, DOCX, TXT, MD); subjects are auto-detected from the document using entity resolution — no manual subject selection needed; smart clipboard paste detection
 - **Assignments** — My Queue / Delegated / All tabs with status-based filtering
-- **HITL Approvals** — approve or reject pending agent action requests
-- **Workflows** — create and manage event-driven automations
+- **HITL Approvals** — approve or reject pending agent action requests; sequence step cards show full email preview + enrollment progress with **Approve & Send** / **Decline & Skip** actions
+- **Workflows** — create event-driven automations; start from 8 built-in GTM templates; per-action log drill-down in run history; variable syntax validated before save; crash-isolated editor sections
+- **Sequences** — email sequence management; enrollment status filters (All / Active / Paused / Completed); Resume button for paused enrollments awaiting HITL approval
 - **Emails** — compose, view, and track outbound emails with approval flow
 - **Settings → Registries** — manage custom context types and activity types
 - **Settings → Actors** — view and configure registered agents
 - **Settings → Local AI Agent** — enable auto-extraction of context from activities; configure provider, model, and capability flags
-- **Command palette** — `⌘K` for cross-entity search and quick navigation
+- **Command palette** — `⌘K` for cross-entity search, quick navigation, and automation shortcuts (New Trigger, New Sequence, Go to Automations)
 
 **First-run setup (Docker):** There are no default credentials. After `docker compose up`, create your first admin account using one of these methods:
 
@@ -491,6 +494,8 @@ docs/recipes/              Agent tutorial walkthroughs
 | `EMBEDDING_PROVIDER` | No | — | Embedding service (`openai` or compatible) |
 | `EMBEDDING_API_KEY` | No | — | API key for embedding provider |
 | `NODE_ENV` | No | — | Set `production` to enable security hardening |
+| `LLM_TIMEOUT_MS` | No | `30000` | Hard timeout (ms) for LLM extraction calls |
+| `WORKFLOW_FAILURE_ALERT_THRESHOLD` | No | `3` | Consecutive failures before a HITL escalation fires |
 
 See [`.env.example`](.env.example) for the full reference with descriptions.
 
@@ -588,6 +593,48 @@ Step-by-step guides for building agents on CRMy, each with MCP tool calls, CLI e
 - [**Post-Meeting Agent**](docs/recipes/post-meeting-agent.md) — Process call transcripts into structured CRM context
 - [**Outreach Agent**](docs/recipes/outreach-agent.md) — Briefing-driven outreach with HITL approval flow
 - [**Pipeline Review Agent**](docs/recipes/pipeline-review-agent.md) — Weekly pipeline forecast and at-risk deal identification
+
+---
+
+## What's new in v0.7
+
+### Enterprise-grade context & memory
+
+The extraction pipeline, briefing service, and semantic search layer have been hardened for production multi-agent deployments:
+
+- **Concurrent extraction** — activities are now extracted in parallel (`Promise.allSettled`). A batch of 20 activities drops from ~100s to ~10s.
+- **LLM timeout guard** — all LLM calls have a 30-second hard timeout via `AbortController`. Set `LLM_TIMEOUT_MS` to customize.
+- **Orphaned-entry prevention** — activities with no `subject_type`/`subject_id` are now marked `skipped` instead of writing entries with a corrupted subject.
+- **SQL injection fix** — the `extend_days` parameter in context entry review was string-interpolated into SQL; it is now fully parameterized.
+- **`dropped_entries` in briefings** — when the token budget is exhausted, the briefing response now tells agents exactly what was cut, so they can request it explicitly.
+- **6 new DB indexes** (migration 042) — covering the primary briefing path, semantic search pre-filter, authored-by, source-activity, and the extraction backlog polling query.
+
+#### Two new bulk MCP tools for agents managing large context queues:
+
+```
+context_review_batch    { entry_ids: [...200], extend_days: 30 }
+context_bulk_mark_stale { entry_ids: [...200], reason: "outdated" }
+```
+
+### Automation engine hardening
+
+- **HITL auto-resume** — approving a sequence HITL request now actually sends the email and advances the enrollment. Previously the enrollment stayed `paused` forever.
+- **Trigger deduplication** — burst events no longer create duplicate workflow runs. Runs are deduplicated by `event_id`.
+- **Failure alerts** — after 3 consecutive workflow failures, an urgent HITL escalation appears in the Handoffs queue automatically.
+- **Workflow templates** — `workflow_template_list` MCP tool returns 8 ready-to-use GTM patterns (lead qualification, deal won, churn risk, email engaged, inbound reply, and more). Select from the "From template" picker in the editor.
+- **Command palette** — `⌘K` now includes New Trigger, New Sequence, and Go to Automations actions, plus live search across workflow and sequence names.
+- **HITL sequence preview** — sequence step approval cards now show the full email preview and enrollment progress, with **Approve & Send** / **Decline & Skip** buttons instead of raw JSON.
+- **Editor crash isolation** — a React error boundary wraps editor sub-sections so a single misconfigured action card doesn't close the entire dialog.
+- **Variable syntax validation** — unclosed `{{variable` references are caught client-side before save.
+
+### Web UI
+
+- **Add context entry modal** — a new **Add** button in the Context browser opens a full form (subject, type, title, body, confidence, tags, source, expiry). No more paste-only ingestion.
+- **Semantic search fallback toast** — one-shot toast when pgvector is unavailable, on top of the existing inline banner.
+- **15 MB upload guard** — oversized files are rejected with a clear error message before upload.
+- **ContextPanel error state** — fetch failures now show an `AlertTriangle` card instead of silently disappearing.
+- **Sequence enrollment filters** — All / Active / Paused / Completed tabs, loading skeleton, and a Resume button for paused enrollments awaiting HITL approval.
+- **Run history drill-down** — workflow run cards are now expandable to show per-action logs: type, status, duration, and inline error message.
 
 ---
 

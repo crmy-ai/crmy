@@ -110,6 +110,14 @@ export async function extractContextFromActivity(
     return 0;
   }
 
+  // Reject activities without an explicit CRM subject — falling back to
+  // activity.id as subject_id would create orphaned context entries that
+  // cannot be associated with any contact, account, opportunity, or use case.
+  if (!activity.subject_type || !activity.subject_id) {
+    await markExtractionStatus(db, activityId, 'skipped', 'Activity has no subject_type or subject_id — cannot create context entries');
+    return 0;
+  }
+
   // Skip activities without meaningful text
   const content = buildActivityContent(activity);
   if (!content.trim()) {
@@ -178,8 +186,8 @@ export async function extractContextFromActivity(
 
     try {
       const created = await contextRepo.createContextEntry(db, tenantId, {
-        subject_type: (activity.subject_type ?? 'contact') as 'contact' | 'account' | 'opportunity' | 'use_case',
-        subject_id: activity.subject_id ?? activity.id, // fallback to activity id if no subject
+        subject_type: activity.subject_type as 'contact' | 'account' | 'opportunity' | 'use_case',
+        subject_id: activity.subject_id,
         context_type: entry.context_type,
         authored_by: extractorActor.id,
         title: entry.title,
@@ -222,12 +230,23 @@ export async function processPendingExtractions(db: DbPool, limit = 20): Promise
     [limit],
   );
 
-  for (const row of result.rows as { tenant_id: string; id: string }[]) {
-    try {
-      await extractContextFromActivity(db, row.tenant_id, row.id);
-    } catch (err) {
-      console.error(`[extraction] Background extraction failed for ${row.id}:`, err);
-    }
+  if (result.rows.length === 0) return;
+
+  // Process concurrently — extraction is LLM I/O bound, so parallel calls
+  // reduce total latency from O(n × latency) to O(max_latency).
+  // allSettled ensures one failure doesn't abort the rest of the batch.
+  const outcomes = await Promise.allSettled(
+    (result.rows as { tenant_id: string; id: string }[]).map(row =>
+      extractContextFromActivity(db, row.tenant_id, row.id),
+    ),
+  );
+
+  const failed = outcomes.filter(o => o.status === 'rejected');
+  if (failed.length > 0) {
+    console.error(
+      `[extraction] ${failed.length}/${outcomes.length} activities failed:`,
+      failed.map(f => (f as PromiseRejectedResult).reason?.message ?? f),
+    );
   }
 }
 

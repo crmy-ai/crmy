@@ -105,9 +105,46 @@ function ActionReadView({ actions }: { actions: any[] }) {
 
 // ── Runs tab ───────────────────────────────────────────────────────────────────
 
+function RunActionLogs({ logs }: { logs: any[] }) {
+  if (!logs?.length) return null;
+  return (
+    <div className="border-t border-border bg-muted/30 px-3 py-2.5 space-y-1.5">
+      {logs.map((log: any, i: number) => {
+        const def = ACTION_TYPES.find(d => d.value === log.type);
+        const isFailed = log.status === 'failed';
+        const isCompleted = log.status === 'completed';
+        const resolved = log.resolved_config ?? {};
+        const preview = Object.values(resolved).find(v => typeof v === 'string' && (v as string).length > 0) as string | undefined;
+        return (
+          <div key={i} className="flex items-start gap-2 text-[10px]">
+            <span className={`shrink-0 font-mono w-4 text-muted-foreground`}>{i + 1}.</span>
+            <span className={`font-semibold shrink-0 ${isFailed ? 'text-destructive' : isCompleted ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
+              {def?.label ?? log.type}
+            </span>
+            <span className="text-muted-foreground shrink-0">→</span>
+            <span className={`shrink-0 ${isFailed ? 'text-destructive' : isCompleted ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500'}`}>
+              {log.status}
+            </span>
+            {log.duration_ms != null && (
+              <span className="text-muted-foreground shrink-0">({log.duration_ms}ms)</span>
+            )}
+            {isFailed && log.error && (
+              <span className="text-destructive font-medium truncate flex-1">{log.error}</span>
+            )}
+            {!isFailed && preview && (
+              <span className="text-muted-foreground truncate flex-1 font-mono">{String(preview).slice(0, 80)}</span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function RunsTab({ workflowId }: { workflowId: string }) {
   const { data, isLoading } = useWorkflowRuns(workflowId, { limit: 20 }) as any;
   const runs: any[] = data?.data ?? data?.runs ?? [];
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
 
   if (isLoading) return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
@@ -128,27 +165,42 @@ function RunsTab({ workflowId }: { workflowId: string }) {
       {runs.map((run: any) => {
         const cfg = RUN_STATUS[run.status] ?? RUN_STATUS.pending;
         const Icon = cfg.Icon;
+        const hasLogs = Array.isArray(run.action_logs) && run.action_logs.length > 0;
+        const isExpanded = expandedRunId === run.id;
         return (
-          <div key={run.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-card text-xs">
-            <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded border font-semibold shrink-0 ${cfg.cls}`}>
-              <Icon className={`w-3 h-3 ${run.status === 'running' ? 'animate-spin' : ''}`} />
-              {cfg.label}
-            </span>
-            <div className="flex-1 min-w-0">
-              <p className="text-foreground font-medium truncate">
-                {run.trigger_event ?? 'manual'}
-              </p>
-              {run.objective && (
-                <p className="text-[10px] text-orange-500 truncate font-medium">"{run.objective}"</p>
-              )}
-              {run.error && (
-                <p className="text-destructive truncate">{run.error}</p>
+          <div key={run.id} className="rounded-lg border border-border bg-card overflow-hidden text-xs">
+            <div
+              className={`flex items-center gap-3 px-3 py-2.5 ${hasLogs ? 'cursor-pointer hover:bg-muted/30 transition-colors' : ''}`}
+              onClick={() => hasLogs && setExpandedRunId(isExpanded ? null : run.id)}
+            >
+              <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded border font-semibold shrink-0 ${cfg.cls}`}>
+                <Icon className={`w-3 h-3 ${run.status === 'running' ? 'animate-spin' : ''}`} />
+                {cfg.label}
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-foreground font-medium truncate">
+                  {run.trigger_event ?? 'manual'}
+                </p>
+                {run.objective && (
+                  <p className="text-[10px] text-orange-500 truncate font-medium">"{run.objective}"</p>
+                )}
+                {run.error && (
+                  <p className="text-destructive truncate">{run.error}</p>
+                )}
+              </div>
+              <div className="text-right text-muted-foreground shrink-0">
+                <p>{run.actions_run ?? 0}/{run.actions_total ?? '?'} actions</p>
+                <p>{run.started_at ? new Date(run.started_at).toLocaleString() : ''}</p>
+              </div>
+              {hasLogs && (
+                <span className="text-muted-foreground shrink-0 ml-1">
+                  {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </span>
               )}
             </div>
-            <div className="text-right text-muted-foreground shrink-0">
-              <p>{run.actions_run ?? 0}/{run.actions_total ?? '?'} actions</p>
-              <p>{run.started_at ? new Date(run.started_at).toLocaleString() : ''}</p>
-            </div>
+            {isExpanded && hasLogs && (
+              <RunActionLogs logs={run.action_logs} />
+            )}
           </div>
         );
       })}

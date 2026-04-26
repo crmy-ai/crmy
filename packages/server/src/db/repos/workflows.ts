@@ -220,11 +220,12 @@ export async function incrementRunCount(db: DbPool, workflowId: UUID): Promise<v
   );
 }
 
-export async function incrementErrorCount(db: DbPool, workflowId: UUID): Promise<void> {
-  await db.query(
-    'UPDATE workflows SET error_count = error_count + 1, last_error_at = now() WHERE id = $1',
+export async function incrementErrorCount(db: DbPool, workflowId: UUID): Promise<number> {
+  const result = await db.query(
+    'UPDATE workflows SET error_count = error_count + 1, last_error_at = now() WHERE id = $1 RETURNING error_count',
     [workflowId],
   );
+  return result.rows[0]?.error_count ?? 0;
 }
 
 export async function appendActionLog(

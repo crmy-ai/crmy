@@ -56,26 +56,40 @@ function computePriorityScore(
  * When budget is tight, truncate the body of the last entry that partially fits
  * rather than dropping it entirely.
  */
+interface TokenBudgetResult {
+  entries: ContextEntry[];
+  tokenEstimate: number;
+  truncated: boolean;
+  /** Summary of entries that didn't fit — helps agents know what was omitted. */
+  dropped_entries?: Array<{ context_type: string; title?: string; confidence?: number }>;
+}
+
 function applyTokenBudget(
   entries: ContextEntry[],
   weights: Map<string, { priority_weight: number; confidence_half_life_days: number | null }>,
   tokenBudget: number,
-): { entries: ContextEntry[]; tokenEstimate: number; truncated: boolean } {
+): TokenBudgetResult {
   const now = new Date();
   const scored = entries.map(e => ({ entry: e, score: computePriorityScore(e, weights, now) }));
   scored.sort((a, b) => b.score - a.score);
 
   const packed: ContextEntry[] = [];
+  const dropped: Array<{ context_type: string; title?: string; confidence?: number }> = [];
   let used = 0;
   let truncated = false;
+  let budgetExhausted = false;
 
   for (const { entry } of scored) {
+    if (budgetExhausted) {
+      dropped.push({ context_type: entry.context_type, title: entry.title, confidence: entry.confidence ?? undefined });
+      continue;
+    }
     const cost = estimateTokens(entry);
     if (used + cost <= tokenBudget) {
       packed.push(entry);
       used += cost;
     } else {
-      // Try to fit a truncated version
+      // Try to fit a truncated version of this entry
       const remaining = tokenBudget - used;
       const bodyBudgetChars = remaining * 4 - (entry.title?.length ?? 0) - 80;
       if (bodyBudgetChars >= 100) {
@@ -86,13 +100,19 @@ function applyTokenBudget(
         used += Math.ceil((bodyBudgetChars + (entry.title?.length ?? 0) + 80) / 4);
         truncated = true;
       } else {
+        dropped.push({ context_type: entry.context_type, title: entry.title, confidence: entry.confidence ?? undefined });
         truncated = true;
       }
-      break;
+      budgetExhausted = true;
     }
   }
 
-  return { entries: packed, tokenEstimate: used, truncated };
+  return {
+    entries: packed,
+    tokenEstimate: used,
+    truncated,
+    ...(dropped.length > 0 ? { dropped_entries: dropped } : {}),
+  };
 }
 
 /** Group context entries by context_type. */
@@ -156,18 +176,19 @@ async function resolveRadiusSubjects(
     }
 
     if (accountId) {
-      // Pull all contacts and opportunities under the account, beyond what's in related
-      const contacts = await contactRepo.searchContacts(db, tenantId, {
-        account_id: accountId,
-        limit: 50,
-      });
-      for (const c of contacts.data) add('contact', c.id);
-
-      const opps = await oppRepo.searchOpportunities(db, tenantId, {
-        account_id: accountId,
-        limit: 20,
-      });
-      for (const o of opps.data) add('opportunity', o.id);
+      // Single UNION ALL query instead of two separate repo calls (avoids N+1).
+      // Caps to 50 contacts + 20 opportunities to keep briefing manageable.
+      const accountRows = await db.query<{ subject_type: string; subject_id: UUID }>(
+        `(SELECT 'contact'     AS subject_type, id AS subject_id
+          FROM contacts      WHERE tenant_id = $1 AND account_id = $2 LIMIT 50)
+         UNION ALL
+         (SELECT 'opportunity' AS subject_type, id AS subject_id
+          FROM opportunities  WHERE tenant_id = $1 AND account_id = $2 LIMIT 20)`,
+        [tenantId, accountId],
+      );
+      for (const row of accountRows.rows) {
+        add(row.subject_type as SubjectType, row.subject_id);
+      }
     }
   }
 
@@ -202,14 +223,13 @@ export async function assembleBriefing(
   // 3. Related objects
   const related_objects = await getRelatedObjects(db, tenantId, subjectType, subjectId, subject);
 
-  // 4. Activity timeline
+  // 4. Activity timeline — pass sinceDate to SQL to avoid fetching and
+  //    discarding rows in JavaScript.
   const timelineResult = await activityRepo.getSubjectTimeline(
-    db, tenantId, subjectType, subjectId, { limit: 10 },
+    db, tenantId, subjectType, subjectId,
+    { limit: 10, since: sinceDate ?? undefined },
   );
-  let activities = timelineResult.activities;
-  if (sinceDate) {
-    activities = activities.filter(a => (a.occurred_at ?? a.created_at) >= sinceDate);
-  }
+  const activities = timelineResult.activities;
 
   // 5. Open assignments
   const assignmentResult = await assignmentRepo.searchAssignments(db, tenantId, {
@@ -270,12 +290,14 @@ export async function assembleBriefing(
   // 8. Token budgeting + priority ranking (priority 1)
   let tokenEstimate: number | undefined;
   let truncated: boolean | undefined;
+  let droppedEntries: Array<{ context_type: string; title?: string; confidence?: number }> | undefined;
   let context_entries: Record<string, ContextEntry[]>;
 
   if (options?.token_budget) {
     const result = applyTokenBudget(ownEntries, typeWeights, options.token_budget);
     tokenEstimate = result.tokenEstimate;
     truncated = result.truncated;
+    droppedEntries = result.dropped_entries;
     context_entries = groupByType(result.entries);
   } else {
     context_entries = groupByType(ownEntries);
@@ -351,6 +373,7 @@ export async function assembleBriefing(
     ...(adjacent_context ? { adjacent_context } : {}),
     ...(tokenEstimate !== undefined ? { token_estimate: tokenEstimate } : {}),
     ...(truncated !== undefined ? { truncated } : {}),
+    ...(droppedEntries?.length ? { dropped_entries: droppedEntries } : {}),
   };
 }
 

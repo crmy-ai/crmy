@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { useState, useMemo } from 'react';
-import { ShieldCheck, Clock, Bot, ChevronDown, ChevronUp, AlertTriangle, Flame, AlertCircle } from 'lucide-react';
+import { ShieldCheck, Clock, Bot, ChevronDown, ChevronUp, AlertTriangle, Flame, AlertCircle, Mail, ListOrdered, CheckCircle2, Send } from 'lucide-react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -61,6 +61,90 @@ function AgentContextSection({ snapshotId }: { snapshotId: string }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Rich preview for sequence.step.send HITL requests.
+ * Shows the email to be sent plus enrollment progress context.
+ */
+function SequenceStepPreview({ payload }: { payload: Record<string, unknown> }) {
+  const [showBody, setShowBody] = useState(false);
+
+  const toEmail      = payload.to_email      as string | undefined;
+  const subject      = payload.subject       as string | undefined;
+  const bodyText     = payload.body_text     as string | undefined;
+  const enrollmentId = payload.enrollment_id as string | undefined;
+  const stepIndex    = payload.step_index    as number | undefined;
+  const totalSteps   = payload.total_steps   as number | undefined;
+  const sequenceName = payload.sequence_name as string | undefined;
+  const contactName  = payload.contact_name  as string | undefined;
+
+  return (
+    <div className="rounded-lg border border-border overflow-hidden text-xs">
+      {/* Email header */}
+      <div className="px-3 py-2.5 bg-muted/30 border-b border-border flex items-center gap-2">
+        <Mail className="w-3.5 h-3.5 text-primary shrink-0" />
+        <span className="font-semibold text-foreground">Email to send</span>
+        {sequenceName && (
+          <span className="ml-auto text-muted-foreground flex items-center gap-1">
+            <ListOrdered className="w-3 h-3" />
+            {sequenceName}
+            {stepIndex != null && totalSteps != null && (
+              <span className="ml-1">· Step {stepIndex + 1}/{totalSteps}</span>
+            )}
+          </span>
+        )}
+      </div>
+
+      <div className="p-3 space-y-2">
+        {/* Envelope fields */}
+        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
+          {contactName && (
+            <>
+              <span className="text-muted-foreground font-medium">To:</span>
+              <span className="text-foreground font-medium">{contactName} {toEmail ? `<${toEmail}>` : ''}</span>
+            </>
+          )}
+          {!contactName && toEmail && (
+            <>
+              <span className="text-muted-foreground font-medium">To:</span>
+              <span className="text-foreground">{toEmail}</span>
+            </>
+          )}
+          {subject && (
+            <>
+              <span className="text-muted-foreground font-medium">Subject:</span>
+              <span className="text-foreground font-medium">{subject}</span>
+            </>
+          )}
+        </div>
+
+        {/* Body preview */}
+        {bodyText && (
+          <div>
+            <button
+              className="text-[11px] text-primary hover:underline"
+              onClick={() => setShowBody(b => !b)}
+            >
+              {showBody ? 'Hide body' : 'Preview body'}
+            </button>
+            {showBody && (
+              <pre className="mt-2 whitespace-pre-wrap text-[11px] text-foreground bg-muted/30 rounded-md p-2.5 max-h-48 overflow-auto border border-border">
+                {bodyText}
+              </pre>
+            )}
+          </div>
+        )}
+
+        {/* Enrollment context */}
+        {enrollmentId && (
+          <p className="text-muted-foreground">
+            Enrollment: <span className="font-mono text-[10px]">{enrollmentId.slice(0, 8)}…</span>
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -200,20 +284,24 @@ export function HITLPage() {
                     <p className="text-sm text-foreground">{r.action_summary}</p>
                   </div>
 
-                  {/* Payload toggle */}
-                  <div>
-                    <button
-                      className="text-xs text-primary hover:underline"
-                      onClick={() => setExpanded({ ...expanded, [r.id]: !expanded[r.id] })}
-                    >
-                      {expanded[r.id] ? 'Hide payload' : 'Show payload'}
-                    </button>
-                    {expanded[r.id] && (
-                      <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted p-3 text-xs">
-                        {JSON.stringify(r.action_payload, null, 2)}
-                      </pre>
-                    )}
-                  </div>
+                  {/* Sequence step rich preview — shown instead of raw payload */}
+                  {r.action_type === 'sequence.step.send' ? (
+                    <SequenceStepPreview payload={r.action_payload ?? {}} />
+                  ) : (
+                    <div>
+                      <button
+                        className="text-xs text-primary hover:underline"
+                        onClick={() => setExpanded({ ...expanded, [r.id]: !expanded[r.id] })}
+                      >
+                        {expanded[r.id] ? 'Hide payload' : 'Show payload'}
+                      </button>
+                      {expanded[r.id] && (
+                        <pre className="mt-2 max-h-48 overflow-auto rounded bg-muted p-3 text-xs">
+                          {JSON.stringify(r.action_payload, null, 2)}
+                        </pre>
+                      )}
+                    </div>
+                  )}
 
                   {/* Agent reasoning snapshot */}
                   {r.handoff_snapshot_id && (
@@ -233,15 +321,19 @@ export function HITLPage() {
                       size="sm"
                       onClick={() => resolve.mutate({ id: r.id, status: 'rejected', note: notes[r.id] })}
                       disabled={resolve.isPending}
+                      className={r.action_type === 'sequence.step.send' ? 'bg-muted text-foreground border border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30' : ''}
                     >
-                      Reject
+                      {r.action_type === 'sequence.step.send' ? 'Decline & Skip' : 'Reject'}
                     </Button>
                     <Button
                       size="sm"
                       onClick={() => resolve.mutate({ id: r.id, status: 'approved', note: notes[r.id] })}
                       disabled={resolve.isPending}
+                      className={r.action_type === 'sequence.step.send' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''}
                     >
-                      Approve
+                      {r.action_type === 'sequence.step.send' ? (
+                        <><Send className="w-3.5 h-3.5 mr-1.5" />Approve &amp; Send</>
+                      ) : 'Approve'}
                     </Button>
                   </div>
                 </CardContent>

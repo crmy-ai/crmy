@@ -25,6 +25,8 @@ import { enforceToolScopes, requireScopes } from '../auth/scopes.js';
 import * as governorLimits from '../db/repos/governor-limits.js';
 import { getSpec } from '../openapi/spec.js';
 import { extractTextFromBuffer } from '../lib/file-extract.js';
+import { resumeEnrollmentAfterHITL } from '../services/sequence-executor.js';
+import { z } from 'zod';
 
 function getActor(req: Request): ActorContext {
   return req.actor!;
@@ -373,6 +375,15 @@ export function apiRouter(db: DbPool): Router {
       const actor = getActor(req);
       const handler = toolHandler(db, 'hitl_resolve');
       const result = await handler({ request_id: p(req, 'id'), ...req.body }, actor);
+
+      // Auto-resume paused sequence enrollments after HITL approval/rejection
+      const hitlReq = (result as any)?.request ?? result;
+      if (hitlReq?.action_type === 'sequence.step.send') {
+        resumeEnrollmentAfterHITL(db, hitlReq).catch((err) =>
+          console.error('[router] resumeEnrollmentAfterHITL failed:', { id: hitlReq.id, err }),
+        );
+      }
+
       res.json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -1204,12 +1215,31 @@ export function apiRouter(db: DbPool): Router {
   router.post('/workflows/:id/trigger', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+
+      // Validate the trigger body before handing off to the engine
+      const triggerBodySchema = z.object({
+        subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case']).optional(),
+        subject_id:   z.string().uuid('subject_id must be a valid UUID').optional(),
+        objective:    z.string().max(500).optional(),
+        variables:    z.record(z.unknown()).optional(),
+        idempotency_key: z.string().max(128).optional(),
+      }).passthrough();
+
+      const parsed = triggerBodySchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Invalid trigger payload',
+          details: parsed.error.flatten().fieldErrors,
+        });
+        return;
+      }
+
       const { executeWorkflowDirect } = await import('../workflows/engine.js');
       const result = await executeWorkflowDirect(
         db,
         actor.tenant_id,
         p(req, 'id'),
-        req.body ?? {},
+        parsed.data,
       );
       res.json(result);
     } catch (err) { handleError(res, err); }

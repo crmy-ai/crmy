@@ -205,7 +205,7 @@ export async function getSubjectTimeline(
   tenantId: UUID,
   subjectType: string,
   subjectId: UUID,
-  filters: { limit: number; types?: string[] },
+  filters: { limit: number; types?: string[]; since?: string },
 ): Promise<{ activities: Activity[]; total: number }> {
   const conditions: string[] = ['tenant_id = $1', 'subject_type = $2', 'subject_id = $3'];
   const params: unknown[] = [tenantId, subjectType, subjectId];
@@ -214,6 +214,12 @@ export async function getSubjectTimeline(
   if (filters.types && filters.types.length > 0) {
     conditions.push(`type = ANY($${idx})`);
     params.push(filters.types);
+    idx++;
+  }
+
+  if (filters.since) {
+    conditions.push(`COALESCE(occurred_at, created_at) >= $${idx}`);
+    params.push(filters.since);
     idx++;
   }
 

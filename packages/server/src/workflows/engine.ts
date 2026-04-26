@@ -5,8 +5,12 @@ import type { DbPool } from '../db/pool.js';
 import type { UUID, Activity } from '@crmy/shared';
 import * as wfRepo from '../db/repos/workflows.js';
 import type { WorkflowRow } from '../db/repos/workflows.js';
+import * as hitlRepo from '../db/repos/hitl.js';
 import { emitEvent } from '../events/emitter.js';
 import { interpolate, buildVariableContext, resolveConfig } from './variables.js';
+
+/** How many consecutive failures trigger a Handoffs alert (configurable via env) */
+const FAILURE_ALERT_THRESHOLD = Number(process.env.WORKFLOW_FAILURE_ALERT_THRESHOLD ?? 3);
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -54,6 +58,18 @@ export function createWorkflowEngine(db: DbPool): WorkflowEngine {
       for (const workflow of workflows) {
         // Check trigger filter
         if (!matchesFilter(workflow.trigger_filter, payload)) continue;
+
+        // Deduplication: skip if this event was already processed by this workflow
+        if (eventId) {
+          const dup = await db.query(
+            `SELECT id FROM workflow_runs WHERE workflow_id = $1 AND event_id = $2 LIMIT 1`,
+            [workflow.id, eventId],
+          );
+          if (dup.rows.length > 0) {
+            console.info(`[workflow:dedup] Skipping duplicate event_id=${eventId} for workflow ${workflow.id}`);
+            continue;
+          }
+        }
 
         // Rate limiting: check runs in the last hour
         if (workflow.max_runs_per_hour) {
@@ -115,7 +131,25 @@ export function createWorkflowEngine(db: DbPool): WorkflowEngine {
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Unknown error';
           await wfRepo.updateRun(db, run.id, { status: 'failed', error: message });
-          await wfRepo.incrementErrorCount(db, workflow.id);
+          const newErrorCount = await wfRepo.incrementErrorCount(db, workflow.id);
+
+          // Surface repeated failures as a HITL escalation so humans are notified
+          if (newErrorCount >= FAILURE_ALERT_THRESHOLD) {
+            hitlRepo.createHITLRequest(db, tenantId, {
+              agent_id: 'system',
+              action_type: 'workflow.repeated_failure',
+              action_summary: `Workflow "${workflow.name}" has failed ${newErrorCount} consecutive time${newErrorCount !== 1 ? 's' : ''}`,
+              action_payload: {
+                workflow_id: workflow.id,
+                workflow_name: workflow.name,
+                error_count: newErrorCount,
+                last_error: message,
+                run_id: run.id,
+              },
+              priority: 'urgent',
+              sla_minutes: 240,
+            }).catch((e) => console.error('[workflow:failure-alert] Failed to create HITL request:', e));
+          }
         }
       }
     },

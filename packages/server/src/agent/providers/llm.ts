@@ -21,6 +21,32 @@
 
 import type { DbPool } from '../../db/pool.js';
 
+/** Default timeout for background LLM calls (30 seconds). */
+const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? 30_000);
+
+/**
+ * Wrapper around fetch that aborts after `timeoutMs` milliseconds.
+ * Throws a clear error so callers can distinguish timeouts from API errors.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs = LLM_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`LLM request timed out after ${timeoutMs}ms (${url})`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface LLMCallOptions {
   system: string;
   user: string;
@@ -93,7 +119,7 @@ async function callAnthropicSync(
   maxTokens: number,
 ): Promise<string> {
   const url = `${baseUrl.replace(/\/+$/, '')}/messages`;
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -127,7 +153,7 @@ async function callOpenAICompatSync(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
 
-  const res = await fetch(url, {
+  const res = await fetchWithTimeout(url, {
     method: 'POST',
     headers,
     body: JSON.stringify({

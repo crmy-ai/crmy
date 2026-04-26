@@ -24,6 +24,9 @@ export interface SequenceRow {
   tags?: string[];
   // v3 columns (added by 039_sequences_actor_activity)
   owner_actor_id?: UUID;
+  // v4 columns (added by 041_sequence_rate_limits)
+  max_active_enrollments?: number;
+  exit_on_unsubscribe?: boolean;
 }
 
 /** Backward-compat alias */
@@ -115,6 +118,8 @@ export async function updateSequence(
     ai_persona: 'ai_persona',
     tags: 'tags',
     owner_actor_id: 'owner_actor_id',
+    max_active_enrollments: 'max_active_enrollments',
+    exit_on_unsubscribe: 'exit_on_unsubscribe',
   };
 
   const sets: string[] = ['updated_at = now()'];
@@ -209,6 +214,33 @@ export async function enrollContact(
   const seq = await getSequence(db, tenantId, data.sequence_id);
   if (!seq) throw new Error('Sequence not found');
   if (!seq.is_active) throw new Error('Sequence is not active');
+
+  // Pre-INSERT duplicate guard — avoids relying on error-string parsing
+  const dupCheck = await db.query(
+    `SELECT id FROM sequence_enrollments
+     WHERE sequence_id = $1 AND contact_id = $2 AND tenant_id = $3
+       AND status IN ('active','paused') LIMIT 1`,
+    [data.sequence_id, data.contact_id, tenantId],
+  );
+  if (dupCheck.rows.length > 0) {
+    throw Object.assign(new Error('Contact is already actively enrolled in this sequence'), { code: 'DUPLICATE_ENROLLMENT' });
+  }
+
+  // Enrollment cap check
+  const seqWithCap = seq as SequenceRow & { max_active_enrollments?: number };
+  if (seqWithCap.max_active_enrollments) {
+    const capCheck = await db.query(
+      `SELECT COUNT(*)::int AS cnt FROM sequence_enrollments
+       WHERE sequence_id = $1 AND tenant_id = $2 AND status IN ('active','paused')`,
+      [data.sequence_id, tenantId],
+    );
+    if ((capCheck.rows[0]?.cnt ?? 0) >= seqWithCap.max_active_enrollments) {
+      throw Object.assign(
+        new Error(`Sequence enrollment limit reached (max ${seqWithCap.max_active_enrollments})`),
+        { code: 'ENROLLMENT_LIMIT_REACHED' },
+      );
+    }
+  }
 
   const startStep = data.start_at_step ?? 0;
   const steps = seq.steps as { delay_days?: number; delay_hours?: number }[];

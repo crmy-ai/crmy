@@ -217,7 +217,7 @@ async function executeStep(
         objectType: 'sequence_enrollment',
         objectId: enrollment.id,
         afterData: { enrollment_id: enrollment.id, sequence_id: enrollment.sequence_id },
-      }).catch(() => {});
+      }).catch((err) => console.warn('[sequences] enrollment_completed event failed:', err));
     } else {
       const nextStep = steps[nextIndex];
       const delayDays = (nextStep as { delay_days?: number }).delay_days ?? 0;
@@ -290,6 +290,23 @@ async function executeEmailStep(
       status: 'skipped',
       error: 'Contact has no email address',
     });
+    return;
+  }
+
+  // Compliance: skip if contact has opted out of email (CAN-SPAM / GDPR)
+  const seqWithFlag = sequence as seqRepo.SequenceRow & { exit_on_unsubscribe?: boolean };
+  const exitOnUnsub = seqWithFlag.exit_on_unsubscribe !== false; // default true
+  if (exitOnUnsub && (contact as any)?.email_opted_out) {
+    await seqRepo.logStepExecution(db, {
+      enrollment_id: enrollment.id,
+      tenant_id: enrollment.tenant_id,
+      step_index: stepIndex,
+      step_type: 'email',
+      status: 'skipped',
+      error: 'Contact has opted out of email',
+    });
+    // Also cancel the enrollment — no point continuing if they've opted out
+    await seqRepo.cancelEnrollment(db, enrollment.id, 'unsubscribed');
     return;
   }
 
@@ -369,7 +386,8 @@ async function executeEmailStep(
   });
 
   // Fire-and-forget context extraction from the email content
-  triggerExtraction(db, enrollment.tenant_id, activity.id).catch(() => {});
+  triggerExtraction(db, enrollment.tenant_id, activity.id).catch((err) =>
+    console.warn('[sequences] context extraction failed after email step:', { enrollmentId: enrollment.id, stepIndex, err }));
 
   const execution = await seqRepo.logStepExecution(db, {
     enrollment_id: enrollment.id,
@@ -394,7 +412,7 @@ async function executeEmailStep(
     objectType: 'sequence_enrollment',
     objectId: enrollment.id,
     afterData: { step_index: stepIndex, step_type: 'email', email_id: email.id, activity_id: activity.id },
-  }).catch(() => {});
+  }).catch((err) => console.warn('[sequences] step_executed event failed:', { enrollmentId: enrollment.id, stepIndex, err }));
 }
 
 async function executeNotificationStep(
@@ -703,7 +721,7 @@ async function executeBranchStep(
         source_agent: `sequence:${enrollment.sequence_id}`,
         occurred_at: new Date().toISOString(),
         detail: { enrollment_id: enrollment.id, step_index: stepIndex, condition },
-      }).catch(() => {});
+      }).catch((err) => console.warn('[sequences] branch activity failed:', { enrollmentId: enrollment.id, err }));
 
       if (condition.exit) {
         await seqRepo.completeEnrollment(db, enrollment.id, 'branch_exit');
@@ -786,7 +804,8 @@ async function executeAiActionStep(
   });
 
   // Fire-and-forget context extraction from the AI action result
-  triggerExtraction(db, enrollment.tenant_id, activity.id).catch(() => {});
+  triggerExtraction(db, enrollment.tenant_id, activity.id).catch((err) =>
+    console.warn('[sequences] context extraction failed after ai_action step:', { enrollmentId: enrollment.id, stepIndex, err }));
 
   const execution = await seqRepo.logStepExecution(db, {
     enrollment_id: enrollment.id,
@@ -893,7 +912,7 @@ export async function handleSequenceReply(
       objectType: 'sequence_enrollment',
       objectId: enrollment_id,
       afterData: { enrollment_id, sequence_id, from_email: fromEmail, exit_reason: 'replied' },
-    }).catch(() => {});
+    }).catch((err) => console.warn('[sequences] contact_replied event failed:', { enrollment_id, err }));
   }
 }
 
@@ -936,6 +955,130 @@ export async function handleSequenceGoalEvent(
       objectType: 'sequence_enrollment',
       objectId: row.enrollment_id,
       afterData: { enrollment_id: row.enrollment_id, goal_event: eventType },
-    }).catch(() => {});
+    }).catch((err) => console.warn('[sequences] goal_met event failed:', { enrollment_id: row.enrollment_id, err }));
+  }
+}
+
+// ── HITL auto-resume ───────────────────────────────────────────────────────────
+
+/**
+ * Called automatically after a HITL request with action_type='sequence.step.send'
+ * is approved or rejected. Resumes the paused enrollment.
+ *
+ * Approved  → sends the pre-drafted email, marks step sent, advances enrollment.
+ * Rejected  → skips the step, advances enrollment so the sequence continues.
+ */
+export async function resumeEnrollmentAfterHITL(
+  db: DbPool,
+  hitlRequest: { id: string; tenant_id: string; action_payload: unknown; status: string },
+): Promise<void> {
+  const payload = (hitlRequest.action_payload ?? {}) as Record<string, unknown>;
+  const enrollmentId = payload.enrollment_id as string | undefined;
+  const stepIndex    = payload.step_index    as number | undefined;
+  const toEmail      = payload.to_email      as string | undefined;
+  const subject      = payload.subject       as string | undefined;
+  const bodyText     = payload.body_text     as string | undefined;
+
+  if (!enrollmentId || stepIndex == null) {
+    console.warn('[sequences] resumeEnrollmentAfterHITL: missing enrollment_id or step_index in payload', payload);
+    return;
+  }
+
+  // Verify enrollment is still paused
+  const enrollResult = await db.query(
+    `SELECT * FROM sequence_enrollments WHERE id = $1 AND tenant_id = $2 AND status = 'paused' LIMIT 1`,
+    [enrollmentId, hitlRequest.tenant_id],
+  );
+  const enrollment = enrollResult.rows[0];
+  if (!enrollment) {
+    console.warn('[sequences] resumeEnrollmentAfterHITL: enrollment not found or not paused', enrollmentId);
+    return;
+  }
+
+  const sequence = await seqRepo.getSequence(db, hitlRequest.tenant_id as UUID, enrollment.sequence_id);
+  if (!sequence) return;
+
+  const approved = hitlRequest.status === 'approved' || hitlRequest.status === 'auto_approved';
+
+  if (approved && toEmail && subject) {
+    // Send the pre-drafted email
+    try {
+      const contact = await contactRepo.getContact(db, hitlRequest.tenant_id as UUID, enrollment.contact_id);
+      const email = await emailRepo.createEmail(db, hitlRequest.tenant_id as UUID, {
+        contact_id: enrollment.contact_id,
+        to_email: toEmail,
+        to_name: [(contact as any)?.first_name, (contact as any)?.last_name].filter(Boolean).join(' ') || undefined,
+        subject,
+        body_text: bodyText ?? '',
+        status: 'draft',
+      } as any);
+
+      await deliverEmail(db, hitlRequest.tenant_id as UUID, email.id);
+
+      await db.query(
+        `UPDATE emails SET enrollment_id = $1, sequence_id = $2 WHERE id = $3`,
+        [enrollmentId, enrollment.sequence_id, email.id],
+      );
+
+      // Update the step execution from approval_pending → sent
+      await db.query(
+        `UPDATE sequence_step_executions
+         SET status = 'sent', executed_at = now(), email_id = $1,
+             metadata = metadata || jsonb_build_object('approved_at', $2)
+         WHERE enrollment_id = $3 AND step_index = $4`,
+        [email.id, new Date().toISOString(), enrollmentId, stepIndex],
+      );
+
+      console.info('[sequences] HITL-approved email sent', { enrollmentId, stepIndex, toEmail });
+    } catch (err) {
+      console.error('[sequences] Failed to send HITL-approved email:', { enrollmentId, stepIndex, err });
+      // Mark step failed so the retry mechanism can handle it
+      await db.query(
+        `UPDATE sequence_step_executions
+         SET status = 'failed', error = $1
+         WHERE enrollment_id = $2 AND step_index = $3 AND status = 'approval_pending'`,
+        [err instanceof Error ? err.message : String(err), enrollmentId, stepIndex],
+      );
+      return;
+    }
+  } else if (!approved) {
+    // Rejected — mark step skipped
+    await db.query(
+      `UPDATE sequence_step_executions
+       SET status = 'skipped', executed_at = now(),
+           metadata = metadata || jsonb_build_object('rejected_at', $1)
+       WHERE enrollment_id = $2 AND step_index = $3 AND status = 'approval_pending'`,
+      [new Date().toISOString(), enrollmentId, stepIndex],
+    );
+    console.info('[sequences] HITL-rejected step skipped', { enrollmentId, stepIndex });
+  }
+
+  // Advance enrollment to next step
+  const steps = (sequence.steps as SequenceStep[]);
+  const nextIndex = stepIndex + 1;
+
+  if (nextIndex >= steps.length) {
+    await seqRepo.completeEnrollment(db, enrollmentId as UUID, 'completed');
+    emitEvent(db, {
+      tenantId: hitlRequest.tenant_id as UUID,
+      eventType: 'sequence.enrollment_completed',
+      actorType: 'system',
+      objectType: 'sequence_enrollment',
+      objectId: enrollmentId,
+      afterData: { enrollment_id: enrollmentId, sequence_id: enrollment.sequence_id },
+    }).catch((err) => console.warn('[sequences] enrollment_completed event failed after HITL resume:', err));
+  } else {
+    const nextStep = steps[nextIndex];
+    const delayDays  = (nextStep as { delay_days?: number }).delay_days ?? 0;
+    const delayHours = (nextStep as { delay_hours?: number }).delay_hours ?? 0;
+    const delayMs    = (delayDays * 86_400_000) + (delayHours * 3_600_000);
+    const nextSendAt = new Date(Date.now() + delayMs).toISOString();
+    await db.query(
+      `UPDATE sequence_enrollments
+       SET status = 'active', current_step = $1, next_send_at = $2, paused_at = NULL, updated_at = now()
+       WHERE id = $3`,
+      [nextIndex, nextSendAt, enrollmentId],
+    );
+    console.info('[sequences] enrollment resumed after HITL', { enrollmentId, nextIndex, nextSendAt });
   }
 }

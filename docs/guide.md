@@ -1066,7 +1066,27 @@ CRMy automatically assigns stale entries for review — a background worker runs
 Tools:
 - `context_stale` — list entries that need review
 - `context_review` — confirm an entry is still accurate (bumps `reviewed_at`)
+- `context_review_batch` — mark up to 200 entries reviewed in a single call (v0.7+)
+- `context_bulk_mark_stale` — invalidate up to 200 entries in a single call, with optional reason tag (v0.7+)
 - `context_stale_assign` — trigger the stale review loop on-demand (normally runs automatically)
+
+#### Bulk review example
+
+Agents managing large context queues can process many entries at once without hitting rate limits from individual calls:
+
+```
+# Mark 50 entries as reviewed, extending valid_until by 30 days
+context_review_batch {
+  entry_ids: ["uuid1", "uuid2", ... "uuid50"],
+  extend_days: 30
+}
+
+# Bulk-invalidate outdated research entries
+context_bulk_mark_stale {
+  entry_ids: ["uuid-a", "uuid-b", ...],
+  reason: "superseded-by-q2-research"
+}
+```
 
 ### Structured data queries
 
@@ -1296,6 +1316,23 @@ How it works:
 4. The response includes `token_estimate` (actual tokens used) and `truncated: true` if any body was cut
 
 When no `token_budget` is given, all entries are returned sorted by score, and `token_estimate` is still included for reference.
+
+#### `dropped_entries` (v0.7+)
+
+When the token budget is exhausted and entries are dropped, the briefing response includes a `dropped_entries` summary listing the `context_type`, `title`, and `confidence` of every entry that was omitted. Agents can use this to:
+
+- Request specific dropped entries with `context_get`
+- Widen the budget on a follow-up `briefing_get` call
+- Inform the user that some context was deprioritized
+
+```json
+{
+  "dropped_entries": [
+    { "context_type": "research", "title": "TAM analysis Q4 2025", "confidence": 0.6 },
+    { "context_type": "agent_reasoning", "confidence": 0.4 }
+  ]
+}
+```
 
 ### Text format
 
@@ -1821,8 +1858,34 @@ Every workflow execution creates a `workflow_run` record with:
 
 - `status`: running, completed, failed
 - `actions_run` / `actions_total`
+- `action_logs`: JSONB array with per-action detail — type, status, duration_ms, resolved config, and error
 - `error` (if failed)
 - Timestamps
+
+The web UI **Runs** tab expands each run to show the full `action_logs` breakdown.
+
+### Trigger deduplication
+
+Workflow runs are deduplicated by `event_id`. If the same event fires multiple times (network retries, burst publishers), only the first run is created. When triggering manually via REST, pass an optional `idempotency_key` to prevent duplicate runs within a 5-minute window.
+
+### Failure alerts
+
+After a configurable number of consecutive failures (default: 3, set via `WORKFLOW_FAILURE_ALERT_THRESHOLD`), CRMy creates an urgent `workflow.repeated_failure` HITL request in the Handoffs queue. This surfaces repeated automation failures to operators without requiring a separate alerting system.
+
+### Workflow templates
+
+Eight built-in GTM workflow templates are available via the `workflow_template_list` MCP tool or the **From template** picker in the web UI workflow editor:
+
+| Template | Trigger | Key actions |
+|---|---|---|
+| Lead Qualification | `contact.created` | context_entry + assign_owner + notify |
+| Deal Won | `opportunity.stage_changed` → Closed Won | notify + create_activity |
+| Churn Risk Alert | `use_case.health_changed` → at-risk | HITL checkpoint + notify |
+| Email Engaged | `email.opened` | add_tag + enroll_sequence |
+| Inbound Reply | `email.replied` | update_lifecycle + create_activity + notify |
+| Assignment Overdue | `assignment.overdue` | notify + escalate (HITL) |
+| ICP Outreach | `contact.created` + ICP filter | context_entry + enroll_sequence |
+| Opportunity Stalled | `opportunity.no_activity` | notify + HITL checkpoint |
 
 ### MCP tools
 
@@ -1834,6 +1897,7 @@ Every workflow execution creates a `workflow_run` record with:
 | `workflow_delete` | Delete workflow and run history |
 | `workflow_list` | List workflows. Filter by `trigger_event` or `is_active` |
 | `workflow_run_list` | List runs for a workflow. Filter by `status` |
+| `workflow_template_list` | List available GTM workflow templates (static, no DB) |
 
 ### CLI
 

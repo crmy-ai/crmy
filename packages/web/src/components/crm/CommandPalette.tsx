@@ -5,16 +5,16 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Command } from 'cmdk';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Users, Briefcase, LayoutDashboard, FolderKanban, Activity, Settings, Search, Building2, ClipboardList } from 'lucide-react';
+import { Users, Briefcase, LayoutDashboard, FolderKanban, Activity, Settings, Search, Building2, ClipboardList, Zap, ListOrdered, Plus } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { cn } from '@/lib/utils';
 import { ContactAvatar } from './ContactAvatar';
-import { useSearch } from '@/api/hooks';
+import { useSearch, useWorkflows, useSequences } from '@/api/hooks';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { ENTITY_COLORS } from '@/lib/entityColors';
 
 export function CommandPalette() {
-  const { commandPaletteOpen, setCommandPaletteOpen, openDrawer } = useAppStore();
+  const { commandPaletteOpen, setCommandPaletteOpen, openDrawer, openWorkflowEditor, openSequenceEditor } = useAppStore();
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
@@ -34,6 +34,24 @@ export function CommandPalette() {
   const useCases: any[]     = searchResults?.useCases     ?? [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const assignments: any[]  = searchResults?.assignments  ?? [];
+
+  // Automations data for search-through
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: wfData } = useWorkflows({ limit: 100 }) as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: seqData } = useSequences({ limit: 100 }) as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const allWorkflows: any[] = wfData?.data ?? wfData?.workflows ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const allSequences: any[] = seqData?.data ?? seqData?.sequences ?? [];
+
+  // Filter automations by query when searching
+  const matchedWorkflows = query
+    ? allWorkflows.filter((w: any) => w.name?.toLowerCase().includes(query.toLowerCase())).slice(0, 5)
+    : [];
+  const matchedSequences = query
+    ? allSequences.filter((s: any) => s.name?.toLowerCase().includes(query.toLowerCase())).slice(0, 5)
+    : [];
 
   useEffect(() => {
     if (commandPaletteOpen) {
@@ -80,6 +98,7 @@ export function CommandPalette() {
               { label: 'Opportunities', icon: Briefcase,       path: '/opportunities',   color: ENTITY_COLORS.opportunities },
               { label: 'Use Cases',     icon: FolderKanban,    path: '/use-cases',       color: ENTITY_COLORS.useCases },
               { label: 'Activities',    icon: Activity,        path: '/activities',      color: ENTITY_COLORS.activities },
+              { label: 'Automations',   icon: Zap,             path: '/automations',     color: ENTITY_COLORS.workflows },
               { label: 'Handoffs',      icon: ClipboardList,   path: '/handoffs',        color: ENTITY_COLORS.assignments },
               { label: 'Settings',      icon: Settings,        path: '/settings',        color: null },
             ].map((page) => (
@@ -93,6 +112,31 @@ export function CommandPalette() {
                 {page.label}
               </Command.Item>
             ))}
+          </Command.Group>
+        )}
+
+        {!query && (
+          <Command.Group heading="Automations" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
+            <Command.Item
+              value="New Trigger new workflow automation"
+              onSelect={() => runAction(() => { navigate('/automations'); openWorkflowEditor(null); })}
+              className={itemClass}
+            >
+              <span className="w-5 h-5 rounded-full bg-amber-500/15 flex items-center justify-center shrink-0">
+                <Plus className="w-3 h-3 text-amber-500" />
+              </span>
+              New Trigger
+            </Command.Item>
+            <Command.Item
+              value="New Sequence email automation"
+              onSelect={() => runAction(() => { navigate('/automations'); openSequenceEditor(null); })}
+              className={itemClass}
+            >
+              <span className="w-5 h-5 rounded-full bg-orange-500/15 flex items-center justify-center shrink-0">
+                <Plus className="w-3 h-3 text-orange-500" />
+              </span>
+              New Sequence
+            </Command.Item>
           </Command.Group>
         )}
 
@@ -194,6 +238,40 @@ export function CommandPalette() {
               >
                 <ClipboardList className={cn('w-4 h-4', ENTITY_COLORS.assignments.text)} />
                 <span>{a.title as string}</span>
+              </Command.Item>
+            ))}
+          </Command.Group>
+        )}
+
+        {matchedWorkflows.length > 0 && (
+          <Command.Group heading="Triggers" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
+            {matchedWorkflows.map((w: any) => (
+              <Command.Item
+                key={w.id as string}
+                value={`trigger workflow ${w.name}`}
+                onSelect={() => runAction(() => { navigate('/automations'); openWorkflowEditor(w.id as string); })}
+                className={itemClass}
+              >
+                <Zap className={cn('w-4 h-4', ENTITY_COLORS.workflows.text)} />
+                <span>{w.name as string}</span>
+                {!w.is_active && <span className="text-muted-foreground text-xs ml-auto">Paused</span>}
+              </Command.Item>
+            ))}
+          </Command.Group>
+        )}
+
+        {matchedSequences.length > 0 && (
+          <Command.Group heading="Sequences" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
+            {matchedSequences.map((s: any) => (
+              <Command.Item
+                key={s.id as string}
+                value={`sequence email ${s.name}`}
+                onSelect={() => runAction(() => { navigate('/automations'); openSequenceEditor(s.id as string); })}
+                className={itemClass}
+              >
+                <ListOrdered className={cn('w-4 h-4', ENTITY_COLORS.sequences.text)} />
+                <span>{s.name as string}</span>
+                {!s.is_active && <span className="text-muted-foreground text-xs ml-auto">Paused</span>}
               </Command.Item>
             ))}
           </Command.Group>

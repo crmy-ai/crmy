@@ -4,7 +4,171 @@ All notable changes to CRMy are documented here.
 
 ---
 
-## [0.7.0] — 2026-04-09
+## [0.7.0] — 2026-04-25
+
+### Highlights
+
+Enterprise hardening across two critical subsystems: the context/memory pipeline and the automation engine. No breaking changes — all changes are additive or correctness fixes. This release makes CRMy production-ready for multi-agent, high-volume deployments with dependable extraction, reliable automation execution, and fully closed HITL loops.
+
+---
+
+### Context & Memory Engine — Resilience and Performance
+
+#### Concurrent extraction pipeline
+`processPendingExtractions` now runs all pending activity extractions concurrently via `Promise.allSettled`. Previously, 20 activities processed serially took ~100 seconds. Concurrently they complete in ~10 seconds. Failed extractions no longer block subsequent ones.
+
+#### LLM fetch timeout guard
+All LLM provider calls now use an `AbortController` with a 30-second hard timeout (configurable via `LLM_TIMEOUT_MS`). Previously a hung provider connection would block an extraction worker indefinitely.
+
+#### Orphaned extraction guard
+The extraction pipeline now validates that an activity has both `subject_type` and `subject_id` before writing context entries. Previously, activities with no subject silently created orphaned entries using `activity.id` as the subject — corrupting the context index.
+
+#### SQL injection fix in `reviewContextEntry`
+The `extend_days` parameter in context entry review was previously interpolated directly into a SQL string (`interval '${n} days'`). It is now fully parameterized (`$3 * INTERVAL '1 day'`).
+
+#### Token budget visibility — `dropped_entries`
+The briefing response now includes a `dropped_entries` summary field when the token budget is exhausted. Agents can now see exactly what context was deprioritized and why — enabling follow-up queries for the dropped content.
+
+#### New DB indexes — migration 042
+Six new PostgreSQL indexes targeting the most common query patterns:
+
+| Index | Purpose |
+|---|---|
+| `idx_context_subject_tenant` | Primary briefing lookup — tenant + subject + currency + time |
+| `idx_context_tenant_current` | Semantic search pre-filter (partial index on `is_current = true`) |
+| `idx_context_fts_tenant` | Full-text search tenant scoping |
+| `idx_context_source_activity` | Source activity lookup (partial index, non-null only) |
+| `idx_context_authored_by` | Entries by actor (partial index, non-null only) |
+| `idx_activities_extraction_pending` | Extraction backlog polling (partial index on `extraction_status = 'pending'`) |
+
+#### New MCP tools — bulk context operations
+
+**`context_review_batch`** — Mark up to 200 context entries as reviewed in a single call. Processes in batches of 20 with `Promise.allSettled`. Returns `{ updated, not_found, extend_days }`.
+
+**`context_bulk_mark_stale`** — Invalidate up to 200 entries in a single parameterized `UPDATE`. Optionally appends a reason tag. Returns `{ updated, not_found_or_already_stale, reason }`.
+
+These tools enable agents to efficiently batch-review stale context queues instead of making 200 individual `context_review` calls.
+
+#### N+1 query elimination in briefing
+The `account_wide` context radius now uses a single `UNION ALL` query to gather all contacts and opportunities for an account, replacing two separate repository calls.
+
+#### Actor subquery optimization in semantic search
+Semantic search results now use a single `LEFT JOIN actors` instead of two correlated subqueries per row for `authored_by_name` and `authored_by_type`.
+
+#### Activity `sinceDate` filter pushed to SQL
+The `sinceDate` filter in briefing timeline queries is now applied in the SQL `WHERE` clause instead of filtering a full result set in JavaScript. Reduces data transfer for briefings with many historical activities.
+
+---
+
+### Automation Engine — Enterprise Hardening
+
+#### HITL auto-resume for paused sequence enrollments
+Previously, approving a HITL request for a sequence email step left the enrollment paused permanently. Now, when a HITL request with `action_type = 'sequence.step.send'` is resolved:
+- **Approved** → sends the pending email, marks the step `sent`, advances `current_step`, computes `next_send_at`, sets enrollment back to `active`
+- **Declined** → marks the step `skipped`, advances to the next step, sets enrollment back to `active`
+
+#### Workflow trigger deduplication
+Workflow runs are now deduplicated by `event_id`. If the same event fires multiple times (burst), only the first run is created. Manual triggers support an optional `idempotency_key`.
+
+#### Repeated workflow failure alerts
+After a configurable threshold of consecutive failures (default: 3, set via `WORKFLOW_FAILURE_ALERT_THRESHOLD`), CRMy creates an urgent `workflow.repeated_failure` HITL request in the Handoffs queue. Humans are notified via the existing Handoffs UI without requiring a new notification system.
+
+#### New DB indexes — migrations 040 and 041
+- `seq_enrollments_due_idx` — sequence executor polls this table every 60s; without this index it was a full table scan at scale
+- `seq_enrollments_tenant_status_idx` — enrollment listing by tenant
+- `workflow_runs_tenant_time_idx` — run history listing
+- `sequences_tenant_active_idx` — active-only sequence queries
+- `workflow_runs_event_idx` — deduplication event_id lookup (partial, non-null only)
+
+#### Workflow template library — `workflow_template_list` MCP tool
+Eight static GTM workflow templates, selectable via the new `workflow_template_list` MCP tool or the "From template" picker in the workflow editor:
+
+| Template | Trigger | Actions |
+|---|---|---|
+| Lead Qualification | `contact.created` | context_entry + assign_owner + notify |
+| Deal Won | `opportunity.stage_changed` → Closed Won | notify + activity |
+| Churn Risk Alert | `use_case.health_changed` → at-risk | HITL checkpoint + notify |
+| Email Engaged | `email.opened` | add_tag + enroll_sequence |
+| Inbound Reply | `email.replied` | update_lifecycle + activity + notify |
+| Assignment Overdue | `assignment.overdue` | notify + escalate (HITL) |
+| ICP Outreach | `contact.created` + ICP filter | context_entry + enroll_sequence |
+| Opportunity Stalled | `opportunity.no_activity` | notify + HITL checkpoint |
+
+#### Editor crash isolation
+A React error boundary (`EditorErrorBoundary`) now wraps the action list in WorkflowEditor and the step list in SequenceEditor. A crash in a nested component (e.g. a misconfigured ActionCard) renders an inline recovery UI instead of closing the entire dialog.
+
+#### Variable syntax validation
+Saving a workflow or sequence with unclosed `{{variable` references now fails client-side with a field-level error, preventing runtime failures from malformed variable tokens.
+
+#### Manual trigger payload validation
+`POST /workflows/:id/trigger` now validates the request body with Zod before passing it to the execution engine. Malformed payloads return a 400 with structured error details instead of cryptic engine errors.
+
+---
+
+### Web UI Improvements
+
+#### ContextBrowser — Add Entry modal
+A new **Add** button (secondary, alongside the existing Import button) opens a form dialog for manually crafting a context entry. Fields: subject (type + entity picker), context type, title, body, confidence (0–1), tags (comma-separated, auto-cleaned), source, and expiry date. Uses the same `POST /context` endpoint as the MCP `context_add` tool.
+
+#### ContextBrowser — Semantic search fallback toast
+When pgvector is unavailable and the user switches to semantic mode, a destructive toast notification fires once (deduped via ref) in addition to the existing inline banner. Both the transient toast and the persistent banner ensure the fallback is noticed.
+
+#### ContextBrowser — File size validation
+A 15 MB client-side guard prevents sending oversized uploads. Previously, large files would be sent to the API and fail with a generic error.
+
+#### ContextPanel — Error state
+The context panel now renders an `AlertTriangle` error card when the context fetch fails. Previously it silently returned `null`, giving users no feedback that context was unavailable.
+
+#### Command palette — Automation actions
+The `⌘K` command palette now includes:
+- **New Trigger** — opens the WorkflowEditor in create mode
+- **New Sequence** — opens the SequenceEditor in create mode  
+- **Go to Automations** — navigates to the Automations page
+- **Search results** from existing workflows and sequences by name
+
+#### HITL — Sequence step preview
+HITL cards for `action_type = 'sequence.step.send'` now show a rich preview instead of raw JSON:
+- Full email envelope (subject, from, to)
+- Body preview
+- Enrollment progress (steps sent, current step, steps remaining)
+- **Approve & Send** / **Decline & Skip** buttons with distinct styling
+
+#### Sequences — Enrollment status visibility
+The enrollment tab now includes:
+- Skeleton loading state during fetch
+- Status filter tabs: All / Active / Paused / Completed
+- "Waiting for approval" chip + **Resume** button for paused enrollments
+- `exit_reason` label for cancelled enrollments
+
+#### Workflows — Action log drill-down
+Each run in the Runs tab can be expanded to show per-action detail: action type, status, duration in ms, resolved config, and inline error message for failed steps. No backend change required — `action_logs` was already returned by the API.
+
+---
+
+### Breaking changes
+
+None. All database changes use `ADD COLUMN IF NOT EXISTS` or new tables. New columns have defaults that preserve existing behavior.
+
+---
+
+### Migrations
+
+```bash
+crmy migrate   # applies 040, 041, 042
+```
+
+---
+
+### Environment variables added
+
+| Variable | Default | Description |
+|---|---|---|
+| `LLM_TIMEOUT_MS` | `30000` | Hard timeout for LLM extraction calls (AbortController) |
+| `WORKFLOW_FAILURE_ALERT_THRESHOLD` | `3` | Consecutive failures before a HITL escalation is created |
+
+---
+
+## [0.6.2] — 2026-04-09
 
 ### Highlights
 

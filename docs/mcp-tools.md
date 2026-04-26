@@ -356,7 +356,12 @@ Delete a workflow and its run history.
 ### workflow_run_list
 List execution runs for a workflow.
 - **Input**: `workflow_id` (required), `status` (running|completed|failed), `limit`, `cursor`
-- **Output**: `{ runs, next_cursor, total }`
+- **Output**: `{ runs, next_cursor, total }` — each run includes `action_logs` with per-action type, status, duration_ms, and error
+
+### workflow_template_list ★ v0.7
+List available built-in GTM workflow templates. Templates are static (no DB) and can be used as a starting point for `workflow_create`. Use the `category` filter to narrow results.
+- **Input**: `category` (optional)
+- **Output**: `{ templates }` — array of template objects with name, description, trigger_event, trigger_filter, and actions
 
 ## Webhook Tools
 
@@ -513,8 +518,18 @@ Supersede an existing context entry with updated content. Marks the old entry as
 
 ### context_review
 Mark a context entry as reviewed (still accurate). Sets `reviewed_at = now()`.
-- **Input**: `id` (required)
+- **Input**: `id` (required), `extend_days` (optional — extend `valid_until` by N days)
 - **Output**: `{ context_entry }`
+
+### context_review_batch ★ v0.7
+Mark up to 200 context entries as reviewed in a single call. Processes in parallel batches of 20 with `Promise.allSettled` — individual failures do not block others.
+- **Input**: `entry_ids` (required, array, max 200), `extend_days` (optional — extend `valid_until` by N days for all updated entries)
+- **Output**: `{ updated, not_found, extend_days, message }`
+
+### context_bulk_mark_stale ★ v0.7
+Invalidate up to 200 context entries in a single parameterized UPDATE. Sets `valid_until = now()` on all matching current entries. Optionally appends a reason tag to each entry's `tags` array.
+- **Input**: `entry_ids` (required, array, max 200), `reason` (optional — tag added to each invalidated entry, e.g. `"superseded-by-q2-research"`)
+- **Output**: `{ updated, not_found_or_already_stale, reason, message }`
 
 ### context_stale
 List stale context entries where `valid_until` has passed but `is_current` is still `true`.
@@ -544,9 +559,9 @@ Trigger the stale context review loop for the current tenant on-demand. Normally
 ### briefing_get
 Get a unified briefing for any CRM object — assembles the record, related objects, activity timeline, open assignments, context entries, and staleness warnings in one call.
 - **Input**: `subject_type` (required), `subject_id` (required), `since`, `context_types`, `include_stale`, `format` (`"json"` | `"text"`), `context_radius` (`"direct"` | `"adjacent"` | `"account_wide"`, default `"direct"`), `token_budget`
-- **Output (json)**: `{ briefing: { record, related, activities, open_assignments, context, stale_warnings, adjacent_context?, token_estimate, truncated? } }`
+- **Output (json)**: `{ briefing: { record, related, activities, open_assignments, context, stale_warnings, adjacent_context?, token_estimate, truncated?, dropped_entries? } }`
 - **Output (text)**: `{ briefing_text }` — a formatted string ready for prompt injection
-- **Note**: `token_budget` enables priority-ranked, budget-constrained packing. Entries are scored by `effective_confidence × priority_weight` (with per-type half-life decay) and greedily packed. Pass `context_radius: "adjacent"` or `"account_wide"` to pull in context from related entities.
+- **Note**: `token_budget` enables priority-ranked, budget-constrained packing. Entries are scored by `effective_confidence × priority_weight` (with per-type half-life decay) and greedily packed. Pass `context_radius: "adjacent"` or `"account_wide"` to pull in context from related entities. When entries are dropped due to budget exhaustion, `dropped_entries` summarizes what was cut (context_type, title, confidence) so agents can request specific entries via `context_get`.
 
 ## Actor Tools
 

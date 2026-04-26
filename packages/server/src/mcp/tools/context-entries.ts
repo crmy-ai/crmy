@@ -645,5 +645,91 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         return { ...stats, dry_run: input.dry_run };
       },
     },
+
+    // ── Bulk operations ────────────────────────────────────────────────────────
+
+    {
+      name: 'context_review_batch',
+      tier: 'core',
+      description: 'Mark multiple stale context entries as reviewed in a single call — far more efficient than calling context_review for each one. Optionally extend valid_until by a number of days for all entries at once. Useful after a quarterly review or account health check where multiple facts have been re-verified. Returns counts of updated and not-found entries.',
+      inputSchema: z.object({
+        entry_ids:   z.array(z.string().uuid()).min(1).max(200)
+          .describe('UUIDs of the context entries to mark reviewed (max 200 per call)'),
+        extend_days: z.number().int().min(1).max(730).optional()
+          .describe('Extend valid_until by this many days from now for all reviewed entries. Omit to clear staleness without extending.'),
+      }),
+      handler: async (
+        input: { entry_ids: string[]; extend_days?: number },
+        actor: ActorContext,
+      ) => {
+        let updated = 0;
+        let not_found = 0;
+        // Process in parallel batches of 20 to avoid overwhelming the DB
+        const batchSize = 20;
+        for (let i = 0; i < input.entry_ids.length; i += batchSize) {
+          const batch = input.entry_ids.slice(i, i + batchSize);
+          const results = await Promise.allSettled(
+            batch.map(id =>
+              contextRepo.reviewContextEntry(db, actor.tenant_id as UUID, id as UUID, input.extend_days),
+            ),
+          );
+          for (const r of results) {
+            if (r.status === 'fulfilled' && r.value) updated++;
+            else not_found++;
+          }
+        }
+        return {
+          updated,
+          not_found,
+          extend_days: input.extend_days ?? null,
+          message: `Marked ${updated} entr${updated !== 1 ? 'ies' : 'y'} as reviewed${input.extend_days ? `, extended by ${input.extend_days} days` : ''}.`,
+        };
+      },
+    },
+
+    {
+      name: 'context_bulk_mark_stale',
+      tier: 'core',
+      description: 'Immediately mark multiple context entries as expired/stale by setting their valid_until to now. Use this after learning that previously recorded information is no longer accurate — for example, after a contact changes roles, a competitor announces a product change, or an org chart restructure. This flags entries for reverification without deleting them (history is preserved). Optionally supply a reason that gets appended to each entry\'s tags for audit purposes.',
+      inputSchema: z.object({
+        entry_ids: z.array(z.string().uuid()).min(1).max(200)
+          .describe('UUIDs of the context entries to mark stale (max 200 per call)'),
+        reason:    z.string().max(200).optional()
+          .describe('Human-readable reason for marking stale, e.g. "Contact left the company" or "Competitor product discontinued". Added as a tag for audit purposes.'),
+      }),
+      handler: async (
+        input: { entry_ids: string[]; reason?: string },
+        actor: ActorContext,
+      ) => {
+        if (input.entry_ids.length === 0) return { updated: 0 };
+
+        // Parameterized bulk UPDATE — sets valid_until = now() for all listed IDs
+        const placeholders = input.entry_ids.map((_, i) => `$${i + 3}`).join(', ');
+        const reasonTag = input.reason ? input.reason.slice(0, 200) : null;
+
+        const result = await db.query(
+          `UPDATE context_entries
+           SET valid_until = now(),
+               tags = CASE
+                 WHEN $2::text IS NOT NULL
+                 THEN tags || jsonb_build_array($2::text)
+                 ELSE tags
+               END,
+               updated_at = now()
+           WHERE tenant_id = $1
+             AND id IN (${placeholders})
+             AND is_current = TRUE
+           RETURNING id`,
+          [actor.tenant_id, reasonTag, ...input.entry_ids],
+        );
+
+        return {
+          updated: result.rows.length,
+          not_found_or_already_stale: input.entry_ids.length - result.rows.length,
+          reason: input.reason ?? null,
+          message: `Marked ${result.rows.length} entr${result.rows.length !== 1 ? 'ies' : 'y'} as stale.`,
+        };
+      },
+    },
   ];
 }

@@ -13,6 +13,7 @@ import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
 import { invalidateWorkflowCache, dryRunWorkflow, executeWorkflowDirect } from '../../workflows/engine.js';
 import type { ToolDef } from '../server.js';
+import { WORKFLOW_TEMPLATES, getTemplatesByCategory, getTemplateById } from '../../lib/workflow-templates.js';
 
 export function workflowTools(db: DbPool): ToolDef[] {
   return [
@@ -202,6 +203,44 @@ export function workflowTools(db: DbPool): ToolDef[] {
           ...(input.subject_id   ? { _subject_id:   input.subject_id   } : {}),
         };
         return executeWorkflowDirect(db, actor.tenant_id, input.id, payload);
+      },
+    },
+    {
+      name: 'workflow_template_list',
+      tier: 'core',
+      description: 'List available workflow templates for common GTM patterns (lead qualification, deal won, churn risk, inbound reply, assignment overdue, etc.). Each template returns a ready-to-use workflow configuration that can be passed directly to workflow_create. Use this to help users bootstrap automations quickly instead of building from scratch.',
+      inputSchema: z.object({
+        category: z.string().optional().describe('Filter templates by category (Inbound, Revenue, Customer Success, Outreach, Operations). Omit to return all templates.'),
+        id:       z.string().optional().describe('Return a single template by its ID'),
+      }),
+      handler: async (input: { category?: string; id?: string }) => {
+        if (input.id) {
+          const tpl = getTemplateById(input.id);
+          if (!tpl) throw Object.assign(new Error(`Template "${input.id}" not found`), { status: 404 });
+          return { template: tpl };
+        }
+
+        if (input.category) {
+          const byCategory = getTemplatesByCategory();
+          const templates = byCategory[input.category] ?? [];
+          return {
+            category: input.category,
+            count: templates.length,
+            templates,
+          };
+        }
+
+        return {
+          count: WORKFLOW_TEMPLATES.length,
+          categories: Object.keys(getTemplatesByCategory()),
+          templates: WORKFLOW_TEMPLATES.map(t => ({
+            id:          t.id,
+            category:    t.category,
+            name:        t.name,
+            description: t.description,
+            trigger_event: t.trigger_event,
+          })),
+        };
       },
     },
   ];

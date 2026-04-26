@@ -12,6 +12,7 @@ import {
   useContextIngest,
   useDetectSubjects,
   useIngestFile,
+  useCreateContextEntry,
   useContacts,
   useAccounts,
   useOpportunities,
@@ -424,6 +425,17 @@ const SORT_OPTIONS: SortOption[] = [
 
 // ── ContextBrowser ────────────────────────────────────────────────────────────
 
+type AddEntryForm = {
+  subject_type: string; subject_id: string; subject_label: string;
+  context_type: string; title: string; body: string;
+  confidence: string; tags: string; source: string; valid_until: string;
+};
+const BLANK_ADD_FORM: AddEntryForm = {
+  subject_type: '', subject_id: '', subject_label: '',
+  context_type: '', title: '', body: '',
+  confidence: '', tags: '', source: '', valid_until: '',
+};
+
 export function ContextBrowser() {
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -461,6 +473,11 @@ export function ContextBrowser() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const detectDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
+  // Add Entry dialog state
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState<AddEntryForm>(BLANK_ADD_FORM);
+  const [adding, setAdding] = useState(false);
+
   // Detail drawer state
   const [selectedEntry, setSelectedEntry] = useState<any | null>(null);
   const [drawerOpen,    setDrawerOpen]    = useState(false);
@@ -475,6 +492,7 @@ export function ContextBrowser() {
   const ingestMutation   = useContextIngest();
   const detectSubjects   = useDetectSubjects();
   const ingestFileMut    = useIngestFile();
+  const createEntry      = useCreateContextEntry();
 
   // Smart paste: read clipboard when dialog opens
   useEffect(() => {
@@ -521,7 +539,16 @@ export function ContextBrowser() {
   }, [detectSubjects]);
 
   // File upload handler
+  const MAX_FILE_BYTES = 15 * 1024 * 1024; // 15 MB — server truncates extracted text at ~120k chars
   const handleFileUpload = useCallback(async (file: File) => {
+    if (file.size > MAX_FILE_BYTES) {
+      toast({
+        title: 'File too large',
+        description: `Maximum upload size is 15 MB. This file is ${(file.size / (1024 * 1024)).toFixed(1)} MB. Try splitting the document or pasting key excerpts as text instead.`,
+        variant: 'destructive',
+      });
+      return;
+    }
     setUploadFile(file);
     setUploadSource(file.name);
     setUploadParsing(true);
@@ -671,6 +698,20 @@ export function ContextBrowser() {
   } = useSemanticSearch(searchMode === 'semantic' ? q : '', semanticParams);
   const semanticEntries: any[] = (semanticData as any)?.entries ?? (semanticData as any)?.data ?? [];
 
+  // Toast once when semantic search fails so users notice even if they scrolled past the inline banner
+  const semanticErrorToastedRef = useRef(false);
+  useEffect(() => {
+    if (semanticError && searchMode === 'semantic' && !semanticErrorToastedRef.current) {
+      semanticErrorToastedRef.current = true;
+      toast({
+        title: 'Semantic search unavailable',
+        description: 'pgvector is not enabled on this instance. Showing keyword results instead. Set ENABLE_PGVECTOR=true to activate semantic search.',
+        variant: 'destructive',
+      });
+    }
+    if (!semanticError) semanticErrorToastedRef.current = false;
+  }, [semanticError, searchMode]);
+
   // When semantic search errors, fall back to keyword results
   const effectiveMode = searchMode === 'semantic' && semanticError ? 'keyword' : searchMode;
 
@@ -751,6 +792,53 @@ export function ContextBrowser() {
     }
   }, [ingestTab, ingestText, ingestSubjects, ingestSource, uploadText, uploadSubjects, uploadSource, ingestMutation, closeIngestDialog]);
 
+  // Handle manual entry creation
+  const handleAddEntry = useCallback(async () => {
+    if (!addForm.subject_type || !addForm.subject_id || !addForm.context_type || !addForm.body.trim()) {
+      toast({
+        title: 'Missing required fields',
+        description: 'Subject, context type, and body are required.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    const confidenceNum = addForm.confidence !== '' ? parseFloat(addForm.confidence) : undefined;
+    if (confidenceNum !== undefined && (isNaN(confidenceNum) || confidenceNum < 0 || confidenceNum > 1)) {
+      toast({ title: 'Invalid confidence', description: 'Confidence must be between 0 and 1.', variant: 'destructive' });
+      return;
+    }
+    const tags = addForm.tags
+      .split(',')
+      .map(t => t.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''))
+      .filter(t => t.length > 0);
+
+    setAdding(true);
+    try {
+      await createEntry.mutateAsync({
+        subject_type: addForm.subject_type,
+        subject_id: addForm.subject_id,
+        context_type: addForm.context_type,
+        title: addForm.title.trim() || undefined,
+        body: addForm.body.trim(),
+        confidence: confidenceNum,
+        tags,
+        source: addForm.source.trim() || undefined,
+        valid_until: addForm.valid_until || undefined,
+      });
+      toast({ title: 'Context entry created', description: `Added to ${addForm.subject_label || addForm.subject_type}.` });
+      setAddOpen(false);
+      setAddForm(BLANK_ADD_FORM);
+    } catch (err) {
+      toast({
+        title: 'Failed to create entry',
+        description: err instanceof Error ? err.message : 'Try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setAdding(false);
+    }
+  }, [addForm, createEntry]);
+
   const searchModeToggle = (
     <div className="flex items-center gap-0.5 bg-muted rounded-xl p-0.5 flex-shrink-0">
       <button
@@ -797,6 +885,8 @@ export function ContextBrowser() {
         sortOptions={SORT_OPTIONS}
         currentSort={sort}
         onSortChange={handleSortChange}
+        onSecondaryAdd={() => { setAddForm(BLANK_ADD_FORM); setAddOpen(true); }}
+        secondaryAddLabel="Add"
         onAdd={() => { setIngestOpen(true); setIngestTab('text'); }}
         addLabel="Import"
         entityType="context"
@@ -1151,6 +1241,155 @@ export function ContextBrowser() {
             >
               {ingesting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               Extract &amp; Import
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Add Context Entry Dialog ────────────────────────────────────────── */}
+      <Dialog open={addOpen} onOpenChange={(open) => { if (!open) { setAddOpen(false); setAddForm(BLANK_ADD_FORM); } else setAddOpen(true); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Plus className="w-5 h-5 text-primary" />
+              Add context entry
+            </DialogTitle>
+            <DialogDescription>
+              Manually record a belief, preference, or note about any CRM object.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            {/* Subject type + entity picker */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Subject <span className="text-destructive">*</span></label>
+              <div className="flex gap-2">
+                <Select
+                  value={addForm.subject_type}
+                  onValueChange={(v) => setAddForm(f => ({ ...f, subject_type: v, subject_id: '', subject_label: '' }))}
+                >
+                  <SelectTrigger className="h-9 w-36 flex-shrink-0 text-sm">
+                    <SelectValue placeholder="Type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SUBJECT_TYPES.map(t => (
+                      <SelectItem key={t} value={t}>{subjectTypeLabel(t)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {addForm.subject_type ? (
+                  <EntityPicker
+                    subjectType={addForm.subject_type}
+                    selectedId={addForm.subject_id}
+                    selectedLabel={addForm.subject_label}
+                    onSelect={(id, name) => setAddForm(f => ({ ...f, subject_id: id, subject_label: name }))}
+                  />
+                ) : (
+                  <div className="flex-1 h-9 px-3 rounded-lg border border-border bg-muted/40 text-sm text-muted-foreground flex items-center">
+                    Select a type first
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Context type */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Context type <span className="text-destructive">*</span></label>
+              <Select
+                value={addForm.context_type}
+                onValueChange={(v) => setAddForm(f => ({ ...f, context_type: v }))}
+              >
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue placeholder="Select type…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {contextTypeOptions.map(t => (
+                    <SelectItem key={t} value={t} className="capitalize">{t.replace(/_/g, ' ')}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Title */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Title <span className="opacity-40">(optional)</span></label>
+              <Input
+                placeholder="Short summary…"
+                value={addForm.title}
+                onChange={(e) => setAddForm(f => ({ ...f, title: e.target.value }))}
+                className="h-9 text-sm"
+              />
+            </div>
+
+            {/* Body */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Body <span className="text-destructive">*</span></label>
+              <Textarea
+                placeholder="What do you know about this contact or account…"
+                value={addForm.body}
+                onChange={(e) => setAddForm(f => ({ ...f, body: e.target.value }))}
+                className="min-h-[100px] text-sm"
+              />
+            </div>
+
+            {/* Confidence + Tags row */}
+            <div className="flex gap-2">
+              <div className="space-y-1.5 w-28 flex-shrink-0">
+                <label className="text-xs font-medium text-muted-foreground">Confidence <span className="opacity-40">0–1</span></label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  placeholder="0.85"
+                  value={addForm.confidence}
+                  onChange={(e) => setAddForm(f => ({ ...f, confidence: e.target.value }))}
+                  className="h-9 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5 flex-1">
+                <label className="text-xs font-medium text-muted-foreground">Tags <span className="opacity-40">comma-separated</span></label>
+                <Input
+                  placeholder="budget, expansion, q2"
+                  value={addForm.tags}
+                  onChange={(e) => setAddForm(f => ({ ...f, tags: e.target.value }))}
+                  className="h-9 text-sm"
+                />
+              </div>
+            </div>
+
+            {/* Source + Valid Until row */}
+            <div className="flex gap-2">
+              <div className="space-y-1.5 flex-1">
+                <label className="text-xs font-medium text-muted-foreground">Source <span className="opacity-40">optional</span></label>
+                <Input
+                  placeholder="e.g. Q1 review call"
+                  value={addForm.source}
+                  onChange={(e) => setAddForm(f => ({ ...f, source: e.target.value }))}
+                  className="h-9 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5 w-40 flex-shrink-0">
+                <label className="text-xs font-medium text-muted-foreground">Expires <span className="opacity-40">optional</span></label>
+                <Input
+                  type="date"
+                  value={addForm.valid_until}
+                  onChange={(e) => setAddForm(f => ({ ...f, valid_until: e.target.value }))}
+                  className="h-9 text-sm"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setAddOpen(false); setAddForm(BLANK_ADD_FORM); }}>Cancel</Button>
+            <Button
+              onClick={handleAddEntry}
+              disabled={adding || !addForm.subject_id || !addForm.context_type || !addForm.body.trim()}
+              className="gap-1.5"
+            >
+              {adding && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Save entry
             </Button>
           </DialogFooter>
         </DialogContent>
