@@ -26,7 +26,7 @@ export function SearchResultsPage() {
             const type = r.object_type ?? r.type ?? 'unknown';
             const href =
               type === 'contact' ? `/app/contacts/${r.id}`
-              : type === 'account' ? `/app/accounts/${r.id}`
+              : type === 'account' ? `/app/companies/${r.id}`
               : type === 'opportunity' ? `/app/opportunities/${r.id}`
               : type === 'use_case' ? `/app/use-cases/${r.id}`
               : '#';

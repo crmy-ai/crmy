@@ -102,7 +102,7 @@ export async function checkContactDuplicate(
   // ── Email exact match (score 100 — definitive) ──
   if (input.email) {
     const { rows } = await db.query(
-      `SELECT id, first_name || ' ' || last_name AS name
+      `SELECT id, first_name || COALESCE(' ' || NULLIF(last_name, ''), '') AS name
        FROM contacts
        WHERE tenant_id=$1 AND lower(email)=lower($2) AND id!=$3 AND merged_into IS NULL
        LIMIT 5`,
@@ -116,7 +116,7 @@ export async function checkContactDuplicate(
     const digits = normalizePhone(input.phone);
     if (digits) {
       const { rows } = await db.query(
-        `SELECT id, first_name || ' ' || last_name AS name
+        `SELECT id, first_name || COALESCE(' ' || NULLIF(last_name, ''), '') AS name
          FROM contacts
          WHERE tenant_id=$1 AND regexp_replace(COALESCE(phone,''), '\\D', '', 'g')=$2 AND id!=$3 AND merged_into IS NULL
          LIMIT 5`,
@@ -129,10 +129,10 @@ export async function checkContactDuplicate(
   // ── Name + account_id exact (score 85 — high) ──
   if (input.account_id) {
     const { rows } = await db.query(
-      `SELECT id, first_name || ' ' || last_name AS name
+      `SELECT id, first_name || COALESCE(' ' || NULLIF(last_name, ''), '') AS name
        FROM contacts
        WHERE tenant_id=$1 AND account_id=$2
-         AND lower(first_name || ' ' || last_name)=lower($3)
+         AND lower(first_name || COALESCE(' ' || NULLIF(last_name, ''), ''))=lower($3)
          AND id!=$4 AND merged_into IS NULL
        LIMIT 5`,
       [tenantId, input.account_id, fullName, excl],
@@ -143,11 +143,11 @@ export async function checkContactDuplicate(
   // ── Name + company_name exact (score 80 — high) ──
   if (input.company_name) {
     const { rows } = await db.query(
-      `SELECT id, first_name || ' ' || last_name AS name
+      `SELECT id, first_name || COALESCE(' ' || NULLIF(last_name, ''), '') AS name
        FROM contacts
        WHERE tenant_id=$1
          AND lower(company_name)=lower($2)
-         AND lower(first_name || ' ' || last_name)=lower($3)
+         AND lower(first_name || COALESCE(' ' || NULLIF(last_name, ''), ''))=lower($3)
          AND id!=$4 AND merged_into IS NULL
        LIMIT 5`,
       [tenantId, input.company_name, fullName, excl],
@@ -158,7 +158,7 @@ export async function checkContactDuplicate(
   // ── Alias contains incoming email (score 85) ──
   if (input.email) {
     const { rows } = await db.query(
-      `SELECT id, first_name || ' ' || last_name AS name
+      `SELECT id, first_name || COALESCE(' ' || NULLIF(last_name, ''), '') AS name
        FROM contacts
        WHERE tenant_id=$1 AND $2=ANY(aliases) AND id!=$3 AND merged_into IS NULL
        LIMIT 5`,
@@ -170,7 +170,7 @@ export async function checkContactDuplicate(
   // ── Alias contains incoming name (score 80) ──
   if (fullName) {
     const { rows } = await db.query(
-      `SELECT id, first_name || ' ' || last_name AS name
+      `SELECT id, first_name || COALESCE(' ' || NULLIF(last_name, ''), '') AS name
        FROM contacts
        WHERE tenant_id=$1 AND lower($2)=ANY(aliases) AND id!=$3 AND merged_into IS NULL
        LIMIT 5`,
@@ -182,10 +182,10 @@ export async function checkContactDuplicate(
   // ── Name exact, no company context (score 60 — medium) ──
   if (!input.account_id && !input.company_name) {
     const { rows } = await db.query(
-      `SELECT id, first_name || ' ' || last_name AS name
+      `SELECT id, first_name || COALESCE(' ' || NULLIF(last_name, ''), '') AS name
        FROM contacts
        WHERE tenant_id=$1
-         AND lower(first_name || ' ' || last_name)=lower($2)
+         AND lower(first_name || COALESCE(' ' || NULLIF(last_name, ''), ''))=lower($2)
          AND id!=$3 AND merged_into IS NULL
        LIMIT 5`,
       [tenantId, fullName, excl],
@@ -195,11 +195,11 @@ export async function checkContactDuplicate(
 
   // ── Fuzzy name similarity > 0.80 via pg_trgm (max score 65) ──
   const { rows: fuzzy } = await db.query(
-    `SELECT id, first_name || ' ' || last_name AS name,
-            similarity(lower(first_name || ' ' || last_name), lower($2)) AS sim
+    `SELECT id, first_name || COALESCE(' ' || NULLIF(last_name, ''), '') AS name,
+            similarity(lower(first_name || COALESCE(' ' || NULLIF(last_name, ''), '')), lower($2)) AS sim
      FROM contacts
      WHERE tenant_id=$1
-       AND similarity(lower(first_name || ' ' || last_name), lower($2)) > 0.80
+       AND similarity(lower(first_name || COALESCE(' ' || NULLIF(last_name, ''), '')), lower($2)) > 0.80
        AND id!=$3 AND merged_into IS NULL
      ORDER BY sim DESC
      LIMIT 5`,
@@ -285,10 +285,10 @@ export async function checkAccountDuplicate(
 
   // ── Fuzzy name similarity > 0.75 via pg_trgm (max score 70) ──
   const { rows: fuzzy } = await db.query(
-    `SELECT id, name, similarity(lower(name), lower($2)) AS sim
+    `SELECT id, COALESCE(name, '') AS name, similarity(lower(COALESCE(name, '')), lower($2)) AS sim
      FROM accounts
      WHERE tenant_id=$1
-       AND similarity(lower(name), lower($2)) > 0.75
+       AND similarity(lower(COALESCE(name, '')), lower($2)) > 0.75
        AND id!=$3 AND merged_into IS NULL
      ORDER BY sim DESC
      LIMIT 5`,

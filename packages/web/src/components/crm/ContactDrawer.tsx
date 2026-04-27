@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useRef } from 'react';
-import { useContact, useActivities, useUpdateContact, useDeleteContact, useUsers, useCustomFields, useContextEntries, useCreateContextEntry, useRescoreContact, useAccounts } from '@/api/hooks';
+import { EntityCombobox } from '@/components/ui/entity-combobox';
+import { useQueryClient } from '@tanstack/react-query';
+import { useContact, useActivities, useUpdateContact, useDeleteContact, useUsers, useCustomFields, useContextEntries, useCreateContextEntry, useRescoreContact } from '@/api/hooks';
 import { ContactAvatar } from './ContactAvatar';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
@@ -49,13 +51,6 @@ function ContactEditForm({
     account_id: contact.account_id ?? '',
   });
 
-  // Account picker state
-  const [accountQ, setAccountQ] = useState(contact.account_name ?? '');
-  const [accountPickerOpen, setAccountPickerOpen] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: accountsData } = useAccounts({ q: accountQ || undefined, limit: 8 }) as any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const accountResults: any[] = accountsData?.data ?? [];
 
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
@@ -150,48 +145,13 @@ function ContactEditForm({
         )}
         {/* Account association */}
         <div className="space-y-1.5">
-          <label className={labelClass}>Account</label>
-          {fields.account_id ? (
-            <div className="flex items-center gap-2 h-10 px-3 rounded-md border border-border bg-background text-sm">
-              <span className="flex-1 text-foreground truncate">{accountQ || fields.account_id}</span>
-              <button
-                type="button"
-                onClick={() => { set('account_id', ''); setAccountQ(''); }}
-                className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"
-                aria-label="Remove account"
-              >
-                ×
-              </button>
-            </div>
-          ) : (
-            <div className="relative">
-              <input
-                type="text"
-                value={accountQ}
-                onChange={e => { setAccountQ(e.target.value); setAccountPickerOpen(true); }}
-                onFocus={() => setAccountPickerOpen(true)}
-                onBlur={() => setTimeout(() => setAccountPickerOpen(false), 150)}
-                placeholder="Search accounts…"
-                className={inputClass}
-              />
-              {accountPickerOpen && accountResults.length > 0 && (
-                <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-card border border-border rounded-md shadow-lg overflow-hidden max-h-48 overflow-y-auto">
-                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                  {accountResults.map((a: any) => (
-                    <button
-                      key={a.id}
-                      type="button"
-                      onMouseDown={() => { set('account_id', a.id); setAccountQ(a.name); setAccountPickerOpen(false); }}
-                      className="w-full text-left px-3 py-2 hover:bg-muted transition-colors"
-                    >
-                      <p className="text-sm font-medium text-foreground truncate">{a.name}</p>
-                      {a.website && <p className="text-xs text-muted-foreground truncate">{a.website}</p>}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          <label className={labelClass}>Company</label>
+          <EntityCombobox
+            entityType="account"
+            value={fields.account_id}
+            onChange={v => set('account_id', v)}
+            placeholder="Search companies…"
+          />
         </div>
 
         {fieldDefs.length > 0 && (
@@ -264,6 +224,7 @@ function ContactEditForm({
 export function ContactDrawer() {
   const { drawerEntityId, openAIWithContext, closeDrawer, drawerBriefing } = useAppStore();
   const { enabled: agentEnabled } = useAgentSettings();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
@@ -312,7 +273,7 @@ export function ContactDrawer() {
     return (
       <>
         <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} />
-        <BriefingPanel subjectType="contact" subjectId={drawerEntityId!} onClose={() => setView('detail')} />
+        <BriefingPanel subjectType="contact" subjectId={drawerEntityId!} subjectName={name} onClose={() => setView('detail')} />
       </>
     );
   }
@@ -429,6 +390,7 @@ export function ContactDrawer() {
               disabled={!noteBody.trim() || createNote.isPending}
               onClick={async () => {
                 await createNote.mutateAsync({ subject_type: 'contact', subject_id: drawerEntityId, context_type: 'note', body: noteBody.trim() });
+                queryClient.invalidateQueries({ queryKey: ['briefing', 'contact', drawerEntityId] });
                 setNoteBody('');
                 setNoting(false);
                 toast({ title: 'Note saved' });

@@ -90,7 +90,8 @@ function AnimatedRoutes() {
         <Routes location={location}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/contacts" element={<Contacts />} />
-          <Route path="/accounts" element={<Accounts />} />
+          <Route path="/companies" element={<Accounts />} />
+          <Route path="/accounts" element={<Navigate to="/companies" replace />} />
           <Route path="/opportunities" element={<Opportunities />} />
           <Route path="/use-cases" element={<UseCasesPage />} />
           <Route path="/activities" element={<Activities />} />
@@ -109,6 +110,7 @@ function AnimatedRoutes() {
           <Route path="/contacts/:id/graph" element={<MemoryGraphPage />} />
           <Route path="/inbound" element={<Navigate to="/emails" replace />} />
           <Route path="/audit-log" element={<AuditLogPage />} />
+          <Route path="/companies/:id/graph" element={<MemoryGraphPage />} />
           <Route path="/accounts/:id/graph" element={<MemoryGraphPage />} />
           <Route path="/agent" element={<Agent />} />
           <Route path="/agent/activity" element={<AgentActivity />} />

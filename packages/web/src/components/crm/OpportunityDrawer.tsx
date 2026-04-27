@@ -2,16 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { useOpportunity, useUpdateOpportunity, useDeleteOpportunity, useUsers, useCustomFields, useRescoreOpportunity } from '@/api/hooks';
+import { useOpportunity, useUpdateOpportunity, useDeleteOpportunity, useUsers, useCustomFields, useRescoreOpportunity, useAccount, useContact } from '@/api/hooks';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge, CustomFieldsSection, DealHealthBadge } from './CrmWidgets';
-import { Sparkles, TrendingUp, Calendar, User, Pencil, ChevronLeft, Trash2, FileText } from 'lucide-react';
+import { Sparkles, TrendingUp, Calendar, User, Pencil, ChevronLeft, Trash2, FileText, Building2 } from 'lucide-react';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
+import { EntityCombobox } from '@/components/ui/entity-combobox';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -41,6 +42,8 @@ function OpportunityEditForm({
     probability: opportunity.probability != null ? String(opportunity.probability) : '',
     description: opportunity.description ?? '',
     owner_id: opportunity.owner_id ?? '',
+    account_id: opportunity.account_id ?? '',
+    contact_id: opportunity.contact_id ?? '',
   });
 
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, string>>(() => {
@@ -68,9 +71,15 @@ function OpportunityEditForm({
   const handleSave = () => {
     const payload: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(fields)) {
-      if (v === '') continue;
-      if (k === 'amount' || k === 'probability') payload[k] = Number(v) || 0;
-      else payload[k] = v;
+      if (k === 'account_id' || k === 'contact_id') {
+        payload[k] = v || null; // allow explicit clearing
+      } else if (v === '') {
+        continue;
+      } else if (k === 'amount' || k === 'probability') {
+        payload[k] = Number(v) || 0;
+      } else {
+        payload[k] = v;
+      }
     }
     const cfPayload: Record<string, unknown> = {};
     for (const def of fieldDefs) {
@@ -102,6 +111,24 @@ function OpportunityEditForm({
           <select value={fields.stage} onChange={e => set('stage', e.target.value)} className={`${inputClass} pr-3`}>
             {OPP_STAGES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
           </select>
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>Company</label>
+          <EntityCombobox
+            entityType="account"
+            value={fields.account_id}
+            onChange={v => set('account_id', v)}
+            placeholder="No company"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <label className={labelClass}>Contact</label>
+          <EntityCombobox
+            entityType="contact"
+            value={fields.contact_id}
+            onChange={v => set('contact_id', v)}
+            placeholder="No contact"
+          />
         </div>
         {[
           { key: 'amount', label: 'Amount ($)', type: 'number', placeholder: '50000' },
@@ -217,7 +244,7 @@ function OpportunityEditForm({
 }
 
 export function OpportunityDrawer() {
-  const { drawerEntityId, openAIWithContext, closeDrawer } = useAppStore();
+  const { drawerEntityId, openAIWithContext, closeDrawer, openDrawer } = useAppStore();
   const { enabled: agentEnabled } = useAgentSettings();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
@@ -227,6 +254,12 @@ export function OpportunityDrawer() {
   const updateOpportunity = useUpdateOpportunity(drawerEntityId ?? '');
   const deleteOpportunity = useDeleteOpportunity(drawerEntityId ?? '');
   const rescore = useRescoreOpportunity(drawerEntityId ?? '');
+  // These must stay above early returns to satisfy rules of hooks
+  const opportunity = oppData?.opportunity ?? null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: linkedAccData } = useAccount(opportunity?.account_id ?? '') as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: linkedConData } = useContact(opportunity?.contact_id ?? '') as any;
 
   if (isLoading) {
     return (
@@ -237,11 +270,10 @@ export function OpportunityDrawer() {
     );
   }
 
-  if (!oppData?.opportunity) {
+  if (!opportunity) {
     return <div className="p-4 text-muted-foreground">Opportunity not found</div>;
   }
 
-  const opportunity = oppData.opportunity;
   const name: string = opportunity.name ?? '';
   const amount: number = opportunity.amount ?? 0;
   const stage: string = opportunity.stage ?? '';
@@ -249,6 +281,9 @@ export function OpportunityDrawer() {
   const forecastCat: string = opportunity.forecast_cat ?? '';
   const closeDate: string = opportunity.close_date ? new Date(opportunity.close_date as string).toLocaleDateString() : '—';
   const dealHealthScore: number | null = opportunity.deal_health_score ?? null;
+  const linkedAccount = linkedAccData?.account ?? null;
+  const linkedContact = linkedConData?.contact ?? null;
+  const linkedContactName = linkedContact ? [linkedContact.first_name, linkedContact.last_name].filter(Boolean).join(' ') : null;
 
   if (briefing) {
     return <BriefingPanel subjectType="opportunity" subjectId={drawerEntityId!} onClose={() => setBriefing(false)} />;
@@ -359,6 +394,36 @@ export function OpportunityDrawer() {
       {/* Details */}
       <div className="p-4 mx-4 mt-2 space-y-3">
         <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide">Details</h3>
+        {linkedAccount && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground flex items-center gap-1"><Building2 className="w-3 h-3" /> Company</span>
+            <button
+              onClick={() => openDrawer('account', opportunity.account_id)}
+              className="text-sm text-accent hover:underline font-medium"
+            >
+              {linkedAccount.name}
+            </button>
+          </div>
+        )}
+        {linkedContactName && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground flex items-center gap-1"><User className="w-3 h-3" /> Contact</span>
+            <button
+              onClick={() => openDrawer('contact', opportunity.contact_id)}
+              className="text-sm text-accent hover:underline font-medium"
+            >
+              {linkedContactName}
+            </button>
+          </div>
+        )}
+        {!linkedAccount && !linkedContactName && (
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground">Company & Contact</span>
+            <button onClick={() => setEditing(true)} className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
+              Link via Edit
+            </button>
+          </div>
+        )}
         {[
           { label: 'Stage', value: stage },
           { label: 'Forecast', value: forecastCat || undefined },

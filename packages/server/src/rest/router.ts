@@ -1797,6 +1797,71 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  // Generate a short AI summary of a briefing (requires configured LLM)
+  router.post('/briefing/:subject_type/:subject_id/summary', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const subjectType = p(req, 'subject_type');
+      const subjectId = p(req, 'subject_id');
+
+      // Assemble briefing directly (same data as GET endpoint)
+      const { assembleBriefing } = await import('../services/briefing.js');
+      const briefing = await assembleBriefing(
+        db,
+        actor.tenant_id,
+        subjectType as 'contact' | 'account' | 'opportunity' | 'use_case',
+        subjectId,
+        { include_stale: false },
+      );
+
+      // Build compact text representation for the LLM
+      const lines: string[] = [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sub = briefing.subject as Record<string, any>;
+      const recordName = [sub.first_name, sub.last_name].filter(Boolean).join(' ') || String(sub.name ?? subjectId);
+      lines.push(`Record type: ${subjectType} — ${recordName}`);
+      if (sub.lifecycle_stage) lines.push(`Lifecycle: ${sub.lifecycle_stage}`);
+      if (sub.stage) lines.push(`Stage: ${sub.stage}`);
+      if (sub.company_name) lines.push(`Company: ${sub.company_name}`);
+      if (sub.amount) lines.push(`Amount: ${sub.amount}`);
+      if (sub.close_date) lines.push(`Close date: ${sub.close_date}`);
+      if (briefing.activities?.length) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        lines.push(`Recent activities (${briefing.activities.length}): ${briefing.activities.slice(0, 5).map((a: any) => a.type ?? a.activity_type).join(', ')}`);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const lastAct = briefing.activities[0] as any;
+        if (lastAct?.body) lines.push(`Last activity note: ${String(lastAct.body).slice(0, 300)}`);
+      }
+      if (briefing.open_assignments?.length) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        lines.push(`Open assignments: ${briefing.open_assignments.map((a: any) => a.title).join('; ')}`);
+      }
+      if (briefing.context_entries) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const [type, entries] of Object.entries(briefing.context_entries as Record<string, any[]>)) {
+          for (const e of entries.slice(0, 3)) {
+            lines.push(`${type}: ${e.title ? `${e.title} — ` : ''}${String(e.body ?? '').slice(0, 200)}`);
+          }
+        }
+      }
+
+      // Need at least a few meaningful lines to generate a useful summary
+      if (lines.length < 3) {
+        res.json({ summary: null });
+        return;
+      }
+
+      const { callLLM } = await import('../agent/providers/llm.js');
+      const summary = await callLLM(db, actor.tenant_id, {
+        system: 'You are a concise CRM assistant. Summarize the CRM record in 2–3 sentences. Focus on what matters most right now — current status, open items, risks, or relationship context. Be specific and actionable. No filler phrases.',
+        user: lines.join('\n'),
+        maxTokens: 200,
+      });
+
+      res.json({ summary: summary?.trim() || null });
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Assignment: Start, Block, Cancel ---
   router.post('/assignments/:id/start', async (req: Request, res: Response) => {
     try {

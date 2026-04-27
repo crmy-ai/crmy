@@ -5,7 +5,8 @@ import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { X, Send, Sparkles, Check, FileText, Pencil, ChevronLeft } from 'lucide-react';
-import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useCreateAssignment, useAccounts, useContacts, useOpportunities, useUseCases, useActors } from '@/api/hooks';
+import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useCreateAssignment, useActors } from '@/api/hooks';
+import { EntityCombobox } from '@/components/ui/entity-combobox';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker, DateTimePicker } from '@/components/ui/date-picker';
 import { DuplicateWarning, type DuplicateCandidate } from '@/components/crm/DuplicateWarning';
@@ -353,6 +354,7 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
   ],
   opportunity: [
     { key: 'name', label: 'Opportunity Name', placeholder: 'e.g. Acme Enterprise', required: true },
+    { key: 'account_id', label: 'Company', fieldType: 'account-select' },
     { key: 'amount', label: 'Amount ($)', placeholder: '850000', inputType: 'number' },
     { key: 'close_date', label: 'Close Date', inputType: 'date' },
     { key: 'description', label: 'Description', placeholder: 'Optional notes', fieldType: 'textarea' },
@@ -402,38 +404,15 @@ const SUBJECT_TYPE_OPTIONS = [
 ];
 
 function EntitySelect({ subjectType, value, onChange }: { subjectType: string; value: string; onChange: (v: string) => void }) {
-  const { data: contactsData } = useContacts(subjectType === 'contact' ? { limit: 100 } : undefined);
-  const { data: accountsData } = useAccounts(subjectType === 'account' ? { limit: 100 } : undefined);
-  const { data: oppsData } = useOpportunities(subjectType === 'opportunity' ? { limit: 100 } : undefined);
-  const { data: ucsData } = useUseCases(subjectType === 'use_case' ? { limit: 100 } : undefined);
-
-  const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let entities: Array<{ id: string; label: string }> = [];
-  if (subjectType === 'contact') {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    entities = ((contactsData?.data ?? []) as any[]).map(c => ({ id: c.id, label: `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.email || c.id }));
-  } else if (subjectType === 'account') {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    entities = ((accountsData?.data ?? []) as any[]).map(a => ({ id: a.id, label: a.name ?? a.id }));
-  } else if (subjectType === 'opportunity') {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    entities = ((oppsData?.data ?? []) as any[]).map(o => ({ id: o.id, label: o.name ?? o.id }));
-  } else if (subjectType === 'use_case') {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    entities = ((ucsData?.data ?? []) as any[]).map(u => ({ id: u.id, label: u.name ?? u.id }));
-  }
-
-  if (!subjectType) return null;
-
+  const validTypes = ['account', 'contact', 'opportunity', 'use_case'];
+  if (!subjectType || !validTypes.includes(subjectType)) return null;
   return (
-    <select value={value} onChange={e => onChange(e.target.value)} className={`${inputClass} pr-3`}>
-      <option value="">Select {subjectType.replace('_', ' ')}…</option>
-      {entities.map(e => (
-        <option key={e.id} value={e.id}>{e.label}</option>
-      ))}
-    </select>
+    <EntityCombobox
+      entityType={subjectType as 'account' | 'contact' | 'opportunity' | 'use_case'}
+      value={value}
+      onChange={onChange}
+      placeholder={`Select ${subjectType.replace('_', ' ')}…`}
+    />
   );
 }
 
@@ -459,8 +438,6 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [duplicateCandidates, setDuplicateCandidates] = useState<DuplicateCandidate[] | null>(null);
   const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null);
-  const { data: accountsData } = useAccounts({ limit: 200 });
-  const accounts = (accountsData?.data ?? []) as Array<{ id: string; name: string }>;
   const { openDrawer, closeQuickAdd } = useAppStore();
 
   const createContact = useCreateContact();
@@ -602,16 +579,12 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
                 ))}
               </select>
             ) : f.fieldType === 'account-select' ? (
-              <select
+              <EntityCombobox
+                entityType="account"
                 value={fields[f.key] || ''}
-                onChange={(e) => set(f.key, e.target.value)}
-                className={`${inputClass} pr-3`}
-              >
-                <option value="">Select account…</option>
-                {accounts.map(a => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
+                onChange={(v) => set(f.key, v)}
+                placeholder="Select company…"
+              />
             ) : f.fieldType === 'subject-type-select' ? (
               <select
                 value={fields[f.key] || ''}

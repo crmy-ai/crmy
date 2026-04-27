@@ -19,7 +19,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     {
       name: 'account_create',
       tier: 'extended',
-      description: 'Create a new account representing a company or organization. Before calling this, prefer using entity_resolve to check if the account already exists. If a potential duplicate is detected (same domain or same name), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record. Pass allow_duplicates: true to skip the check after confirming with the user.',
+      description: 'Create a new company record. Before calling this, prefer using entity_resolve to check if the company already exists. If a potential duplicate is detected (same domain or same name), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record. Pass allow_duplicates: true to skip the check after confirming with the user.',
       inputSchema: accountCreate,
       handler: async (input: z.infer<typeof accountCreate>, actor: ActorContext) => {
         // ── Duplicate check ──
@@ -82,7 +82,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     {
       name: 'account_get',
       tier: 'core',
-      description: 'Retrieve a single account by UUID, including its linked contacts and open opportunities. Returns the full account profile with health_score, annual_revenue, industry, and custom fields. Pass include_context_entries: true to also get current context entries without a full briefing. For a comprehensive view with activity timeline and staleness warnings, use briefing_get instead.',
+      description: 'Retrieve a single company by UUID, including its linked contacts and open opportunities. Returns the full company profile with health_score, annual_revenue, industry, and custom fields. Pass include_context_entries: true to also get current context entries without a full briefing. For a comprehensive view with activity timeline and staleness warnings, use briefing_get instead.',
       inputSchema: z.object({
         id: z.string().uuid(),
         include_context_entries: z.boolean().optional().default(false).describe('If true, also return current context entries for this account'),
@@ -106,7 +106,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     {
       name: 'account_search',
       tier: 'core',
-      description: 'Search accounts with flexible filters. Use query to search by name or domain, industry to filter by sector, owner_id for accounts owned by a specific user, min_revenue for revenue thresholds, and tags for custom categorization. Returns paginated results with cursor-based pagination.',
+      description: 'Search companies with flexible filters. Use query to search by name or domain, industry to filter by sector, owner_id for companies owned by a specific user, min_revenue for revenue thresholds, and tags for custom categorization. Returns paginated results with cursor-based pagination.',
       inputSchema: accountSearch,
       handler: async (input: z.infer<typeof accountSearch>, actor: ActorContext) => {
         const result = await accountRepo.searchAccounts(db, actor.tenant_id, {
@@ -119,7 +119,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     {
       name: 'account_update',
       tier: 'extended',
-      description: 'Update an account by passing its id and a patch object with the fields to change. Supports all account fields including name, industry, domain, annual_revenue, tags, and custom_fields.',
+      description: 'Update a company record by passing its id and a patch object with the fields to change. Supports all company fields including name, industry, domain, annual_revenue, tags, and custom_fields.',
       inputSchema: accountUpdate,
       handler: async (input: z.infer<typeof accountUpdate>, actor: ActorContext) => {
         const before = await accountRepo.getAccount(db, actor.tenant_id, input.id);
@@ -149,7 +149,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     {
       name: 'account_set_health_score',
       tier: 'extended',
-      description: 'Set the health score (0–100) for an account to reflect its current relationship health. Use this after evaluating engagement patterns, support tickets, NPS responses, or other health signals. Scores below 50 typically indicate at-risk accounts that need attention.',
+      description: 'Set the health score (0–100) for a company to reflect its current relationship health. Use this after evaluating engagement patterns, support tickets, NPS responses, or other health signals. Scores below 50 typically indicate at-risk companies that need attention.',
       inputSchema: accountSetHealth,
       handler: async (input: z.infer<typeof accountSetHealth>, actor: ActorContext) => {
         const before = await accountRepo.getAccount(db, actor.tenant_id, input.id);
@@ -179,7 +179,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     {
       name: 'account_get_hierarchy',
       tier: 'extended',
-      description: 'Get the parent/child hierarchy for an account, showing its position in a corporate structure. Returns the parent account (if any) and all child accounts. Useful for understanding organizational relationships in enterprise deals.',
+      description: 'Get the parent/child hierarchy for a company, showing its position in a corporate structure. Returns the parent company (if any) and all child companies. Useful for understanding organizational relationships in enterprise deals.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input: { id: string }, actor: ActorContext) => {
         const result = await accountRepo.getAccountHierarchy(db, actor.tenant_id, input.id);
@@ -190,11 +190,11 @@ export function accountTools(db: DbPool): ToolDef[] {
     {
       name: 'account_delete',
       tier: 'admin',
-      description: 'Permanently delete an account and all associated data. This is a destructive action that requires admin or owner role. Consider archiving or reassigning contacts and opportunities before deletion.',
+      description: 'Permanently delete a company and all associated data. This is a destructive action that requires admin or owner role. Consider archiving or reassigning contacts and opportunities before deletion.',
       inputSchema: z.object({ id: z.string().uuid() }),
       handler: async (input: { id: string }, actor: ActorContext) => {
         if (actor.role !== 'admin' && actor.role !== 'owner') {
-          throw permissionDenied('Only admins and owners can delete accounts');
+          throw permissionDenied('Only admins and owners can delete companies');
         }
         const before = await accountRepo.getAccount(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Account', input.id);
@@ -217,7 +217,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     {
       name: 'account_merge',
       tier: 'extended',
-      description: 'Merge a duplicate account (secondary) into a primary account. All contacts, opportunities, use cases, and activities linked to the secondary are reassigned to the primary. The secondary account is soft-deleted (merged_into set to primary_id). The primary retains its field values; the secondary\'s domain, name, and aliases are appended to the primary\'s aliases list. Use this to clean up duplicate company records.',
+      description: 'Merge a duplicate company (secondary) into a primary company. All contacts, opportunities, use cases, and activities linked to the secondary are reassigned to the primary. The secondary company is soft-deleted (merged_into set to primary_id). The primary retains its field values; the secondary\'s domain, name, and aliases are appended to the primary\'s aliases list. Use this to clean up duplicate company records.',
       inputSchema: z.object({
         primary_id: z.string().uuid().describe('The account to keep — its profile fields are preserved'),
         secondary_id: z.string().uuid().describe('The duplicate account to absorb — will be soft-deleted after merge'),
@@ -226,7 +226,7 @@ export function accountTools(db: DbPool): ToolDef[] {
         type AccountRow = { merged_into?: string; domain?: string; name?: string; aliases?: string[] };
 
         if (input.primary_id === input.secondary_id) {
-          throw new Error('primary_id and secondary_id must be different accounts');
+          throw new Error('primary_id and secondary_id must be different companies');
         }
 
         const [primary, secondary] = await Promise.all([
@@ -239,7 +239,7 @@ export function accountTools(db: DbPool): ToolDef[] {
         const sec = secondary as unknown as AccountRow;
         const pri = primary as unknown as AccountRow;
         if (sec.merged_into) {
-          throw new Error('Secondary account has already been merged into another record');
+          throw new Error('Secondary company has already been merged into another record');
         }
 
         let merged: Record<string, number> = {};

@@ -37,7 +37,7 @@ const agentNavItems = [
 // Data tier — knowledge base objects
 const dataNavItems = [
   { icon: Users,       label: 'Contacts',      path: '/contacts',      color: ENTITY_COLORS.contacts },
-  { icon: Building2,   label: 'Accounts',      path: '/accounts',      color: ENTITY_COLORS.accounts },
+  { icon: Building2,   label: 'Companies',     path: '/companies',     color: ENTITY_COLORS.accounts },
   { icon: Briefcase,   label: 'Opportunities', path: '/opportunities', color: ENTITY_COLORS.opportunities },
   { icon: FolderKanban,label: 'Use Cases',     path: '/use-cases',     color: ENTITY_COLORS.useCases },
   { icon: Activity,    label: 'Activities',    path: '/activities',    color: ENTITY_COLORS.activities },

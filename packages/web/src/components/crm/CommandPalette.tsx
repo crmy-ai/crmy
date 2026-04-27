@@ -94,7 +94,7 @@ export function CommandPalette() {
             {[
               { label: 'Dashboard',     icon: LayoutDashboard, path: '/',               color: ENTITY_COLORS.dashboard },
               { label: 'Contacts',      icon: Users,           path: '/contacts',        color: ENTITY_COLORS.contacts },
-              { label: 'Accounts',      icon: Building2,       path: '/accounts',        color: ENTITY_COLORS.accounts },
+              { label: 'Companies',     icon: Building2,       path: '/companies',       color: ENTITY_COLORS.accounts },
               { label: 'Opportunities', icon: Briefcase,       path: '/opportunities',   color: ENTITY_COLORS.opportunities },
               { label: 'Use Cases',     icon: FolderKanban,    path: '/use-cases',       color: ENTITY_COLORS.useCases },
               { label: 'Activities',    icon: Activity,        path: '/activities',      color: ENTITY_COLORS.activities },
@@ -158,12 +158,12 @@ export function CommandPalette() {
         )}
 
         {accounts.length > 0 && (
-          <Command.Group heading="Accounts" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
+          <Command.Group heading="Companies" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
             {accounts.slice(0, 5).map((a) => (
               <Command.Item
                 key={a.id as string}
                 value={`${a.name} ${a.domain ?? ''}`}
-                onSelect={() => runAction(() => { navigate('/accounts'); openDrawer('account', a.id as string); })}
+                onSelect={() => runAction(() => { navigate('/companies'); openDrawer('account', a.id as string); })}
                 className={itemClass}
               >
                 <Building2 className={cn('w-4 h-4', ENTITY_COLORS.accounts.text)} />

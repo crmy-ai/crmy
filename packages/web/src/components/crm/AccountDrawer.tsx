@@ -208,7 +208,7 @@ export function AccountDrawer() {
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
-  const graphHref = drawerEntityId ? `/accounts/${drawerEntityId}/graph` : undefined;
+  const graphHref = drawerEntityId ? `/companies/${drawerEntityId}/graph` : undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: accountData, isLoading } = useAccount(drawerEntityId ?? '') as any;
   const updateAccount = useUpdateAccount(drawerEntityId ?? '');

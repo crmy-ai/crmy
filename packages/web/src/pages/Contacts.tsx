@@ -135,7 +135,6 @@ export default function Contacts() {
                 <thead>
                   <tr className="border-b border-border bg-surface-sunken/50">
                     <SortHeader label="Name" sortKey="name" />
-                    <SortHeader label="Company" sortKey="company" />
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Phone</th>
                     <SortHeader label="Stage" sortKey="lifecycle_stage" />
                     <SortHeader label="Score" sortKey="lead_score" />
@@ -147,13 +146,12 @@ export default function Contacts() {
                     <tr key={c.id as string} onClick={() => openDrawer('contact', c.id as string)}
                       className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer group transition-colors ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <ContactAvatar name={displayName(c)} className="w-8 h-8 text-xs" />
-                          <span className="font-semibold text-foreground">{displayName(c)}</span>
+                        <div>
+                          <p className="font-display font-bold text-foreground">{displayName(c)}</p>
+                          {c.company_name && <p className="text-xs text-muted-foreground">{c.company_name as string}</p>}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{(c.company_name as string) || '—'}</td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">{(c.phone as string) || '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{(c.phone as string) || '—'}</td>
                       <td className="px-4 py-3">{c.lifecycle_stage ? <StageBadge stage={c.lifecycle_stage as string} /> : '—'}</td>
                       <td className="px-4 py-3">
                         {c.lead_score != null ? <LeadScoreBadge score={c.lead_score as number} /> : <span className="text-muted-foreground text-xs">—</span>}

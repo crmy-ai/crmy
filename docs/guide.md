@@ -12,7 +12,7 @@ Complete documentation for CRMy — the agent-first open source CRM.
 4. [Web UI](#web-ui)
 5. [Core Concepts](#core-concepts)
 6. [Contacts](#contacts)
-7. [Accounts](#accounts)
+7. [Companies](#companies)
 8. [Opportunities](#opportunities)
 9. [Activities](#activities)
 10. [Actors](#actors)
@@ -389,14 +389,14 @@ The operator's overview of agent activity. Two tabs sit in the page body:
   - **Brief**: AI-generated structured briefing (relationship history, key themes, open items)
   - **Graph**: full-page Memory Graph — see [Memory Graph](#memory-graph) below
 
-#### Accounts (`/app/accounts`)
+#### Companies (`/app/companies`)
 
 - **List**: searchable table with name, industry, revenue, employees, health score
-- **Create** (`/app/accounts/new`): name, domain, industry, website
-- **Detail** (`/app/accounts/:id`): three-tab layout:
-  - **Overview**: account info, contacts, opportunities, use cases
-  - **Brief**: AI-generated account briefing surfaced inline
-  - **Graph**: full-page Memory Graph for the account
+- **Create** (`/app/companies/new`): name, domain, industry, website
+- **Detail** (`/app/companies/:id`): three-tab layout:
+  - **Overview**: company info, contacts, opportunities, use cases
+  - **Brief**: AI-generated company briefing surfaced inline
+  - **Graph**: full-page Memory Graph for the company
 
 #### Pipeline (`/app/pipeline`)
 
@@ -647,21 +647,21 @@ GET    /api/v1/contacts/:id/timeline
 
 ---
 
-## Accounts
+## Companies
 
-Accounts represent companies or organizations. Accounts can have parent/child hierarchies, health scores, and linked contacts and opportunities.
+Companies represent organizations. Companies can have parent/child hierarchies, health scores, and linked contacts and opportunities.
 
 ### MCP tools
 
 | Tool | Description |
 |---|---|
-| `account_create` | Create an account. Required: `name`. Optional: `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `aliases`, `tags`, `custom_fields` |
-| `account_get` | Get account with its contacts and open opportunities |
+| `account_create` | Create a company. Required: `name`. Optional: `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `aliases`, `tags`, `custom_fields` |
+| `account_get` | Get a company with its contacts and open opportunities |
 | `account_search` | Search with filters: `query`, `industry`, `owner_id`, `min_revenue`, `tags`. Query matches name, domain, and any alias. |
 | `account_update` | Patch any fields. Supports `aliases` array. |
 | `account_set_health_score` | Set score (0-100) with `rationale` |
 | `account_get_hierarchy` | Get parent/child tree |
-| `account_delete` | Permanently delete an account. Admin/owner role required. |
+| `account_delete` | Permanently delete a company. Admin/owner role required. |
 
 ### CLI
 

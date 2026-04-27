@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { useUseCase, useUseCaseTimeline, useUpdateUseCase, useDeleteUseCase, useUsers, useCustomFields, useOpportunities } from '@/api/hooks';
+import { useUseCase, useUseCaseTimeline, useUpdateUseCase, useDeleteUseCase, useUsers, useCustomFields } from '@/api/hooks';
+import { EntityCombobox } from '@/components/ui/entity-combobox';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
@@ -79,10 +80,6 @@ function UseCaseEditForm({
   const { data: usersData } = useUsers() as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const users: any[] = usersData?.data ?? [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: oppsData } = useOpportunities({ limit: 200 }) as any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const opportunities: any[] = oppsData?.data ?? [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: customFieldDefs } = useCustomFields('use_case') as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -206,18 +203,15 @@ function UseCaseEditForm({
 
         {/* Ownership */}
         {sectionLabel('Ownership')}
-        {opportunities.length > 0 && (
-          <div className="space-y-1.5">
-            <label className={labelClass}>Linked Opportunity</label>
-            <select value={fields.opportunity_id} onChange={e => set('opportunity_id', e.target.value)} className={`${inputClass} pr-3`}>
-              <option value="">None</option>
-              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              {opportunities.map((o: any) => (
-                <option key={o.id} value={o.id}>{o.name}</option>
-              ))}
-            </select>
-          </div>
-        )}
+        <div className="space-y-1.5">
+          <label className={labelClass}>Linked Opportunity</label>
+          <EntityCombobox
+            entityType="opportunity"
+            value={fields.opportunity_id}
+            onChange={v => set('opportunity_id', v)}
+            placeholder="No linked opportunity"
+          />
+        </div>
         {users.length > 0 && (
           <div className="space-y-1.5">
             <label className={labelClass}>Owner</label>
@@ -335,7 +329,7 @@ export function UseCaseDrawer() {
   const timeline: Array<Record<string, unknown>> = timelineData?.data ?? timelineData ?? [];
 
   if (briefing) {
-    return <BriefingPanel subjectType="use_case" subjectId={drawerEntityId!} onClose={() => setBriefing(false)} />;
+    return <BriefingPanel subjectType="use_case" subjectId={drawerEntityId!} subjectName={name} onClose={() => setBriefing(false)} />;
   }
 
   if (editing) {

@@ -42,40 +42,40 @@ Get the activity timeline for a contact.
 - **Input**: `id` (required), `limit`, `types`
 - **Output**: `{ activities, total }`
 
-## Account Tools
+## Company Tools
 
 ### account_create
-Create a new account.
+Create a new company.
 - **Input**: `name` (required), `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `aliases`, `tags`, `custom_fields`
 - **Output**: `{ account, event_id }`
 
 ### account_get
-Get an account with its contacts and open opportunities.
+Get a company with its contacts and open opportunities.
 - **Input**: `id` (required)
 - **Output**: `{ account, contacts, open_opportunities }`
 
 ### account_search
-Search accounts.
+Search companies.
 - **Input**: `query`, `industry`, `owner_id`, `min_revenue`, `tags`, `limit`, `cursor`
 - **Output**: `{ accounts, next_cursor, total }`
 
 ### account_update
-Update an account.
+Update a company.
 - **Input**: `id` (required), `patch` (object with fields to update, including `aliases: string[]`)
 - **Output**: `{ account, event_id }`
 
 ### account_set_health_score
-Set account health score (0-100).
+Set company health score (0-100).
 - **Input**: `id` (required), `score` (required), `rationale`
 - **Output**: `{ account, event_id }`
 
 ### account_get_hierarchy
-Get parent/child hierarchy.
+Get parent/child hierarchy for a company.
 - **Input**: `id` (required)
 - **Output**: `{ root, children, depth }`
 
 ### account_delete
-Delete an account (admin/owner only).
+Delete a company (admin/owner only).
 - **Input**: `id` (required)
 - **Output**: `{ deleted: true, event_id }`
 

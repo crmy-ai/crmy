@@ -151,7 +151,7 @@ Response:
 }
 ```
 
-Works on contacts, accounts, opportunities, and use cases.
+Works on contacts, companies, opportunities, and use cases.
 
 ---
 
@@ -185,7 +185,7 @@ Four primitives that form the agent's shared workspace:
 
 | Primitive | What it does |
 |-----------|-------------|
-| **Actors** | First-class identity for humans and AI agents. Every action is attributed to an actor. Agents self-register — no admin setup. Query `actor_expertise` to route reviews to the person who knows most about an account. |
+| **Actors** | First-class identity for humans and AI agents. Every action is attributed to an actor. Agents self-register — no admin setup. Query `actor_expertise` to route reviews to the person who knows most about a company. |
 | **Activities** | Everything that happened — calls, emails, meetings. Structured `detail` payloads, polymorphic subjects, retroactive `occurred_at` timestamps, and auto-extraction into context entries. Bulk-ingest raw documents with `context_ingest`. |
 | **Assignments** | Structured handoffs. Agents create assignments for humans; humans create assignments for agents. Stateful lifecycle: `pending → accepted → in_progress → completed`. Stale context entries automatically generate review assignments. |
 | **Context Entries** | The memory layer. Typed, tagged, versioned knowledge attached to any CRM object. Priority weights and confidence half-life decay ensure the most important, fresh context surfaces first. `context_radius` expands briefings to adjacent entities. Token-budget-aware packing fits context into any LLM context window. |
@@ -231,7 +231,7 @@ context_semantic_search query="deals at risk due to competitor pressure"
 | **HITL** | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
 | Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
 | Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
-| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_health_report`, `account_delete` |
+| Companies | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_health_report`, `account_delete` |
 | Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete` |
 | Messaging | `message_channel_create`, `message_channel_update`, `message_channel_get`, `message_channel_delete`, `message_channel_list`, `message_send`, `message_delivery_get`, `message_delivery_search` |
 | Analytics | `pipeline_summary`, `pipeline_forecast`, `crm_search`, `account_health_report`, `tenant_get_stats` |
@@ -272,10 +272,10 @@ Contacts
   crmy contacts get <id>                 Get contact details
   crmy contacts delete <id>              Delete (admin/owner only)
 
-Accounts
-  crmy accounts list                     List accounts
+Companies
+  crmy accounts list                     List companies
   crmy accounts create                   Interactive create
-  crmy accounts get <id>                 Get account + contacts + opps
+  crmy accounts get <id>                 Get company + contacts + opps
   crmy accounts delete <id>              Delete (admin/owner only)
 
 Opportunities
@@ -369,12 +369,12 @@ Available at `/app` when the server is running. The web UI provides full CRUD fo
 | Section | Pages |
 |---------|-------|
 | **Agent Hub** | Memory Hub (dashboard), Approvals (HITL), Agents, Context, Workflows, Handoffs (assignments) |
-| **CRM Data** | Contacts, Accounts, Opportunities, Use Cases, Activities, Emails |
+| **CRM Data** | Contacts, Companies, Opportunities, Use Cases, Activities, Emails |
 | **System** | Settings (Profile, Appearance, API Keys, Webhooks, Custom Fields, Actors, Registries, Local AI Agent, Database) |
 
 **Key features:**
 - **Memory Hub** — pipeline stats, recent activity feed, context overview with Knowledge tab for cross-entity context browsing
-- **Contact/Account drawers** — Detail, Brief, and Graph tabs; Brief surfaces a full structured briefing inline; Graph opens a full-page Obsidian-style memory graph
+- **Contact/Company drawers** — Detail, Brief, and Graph tabs; Brief surfaces a full structured briefing inline; Graph opens a full-page Obsidian-style memory graph
 - **Memory Graph** — dark canvas visualization showing entity nodes, context clusters, related records, activities, and assignments in a concentric radial layout; sidebar for category filtering; click any node to open a detail Sheet drawer
 - **Context page** — browse and search context entries; inline keyword/semantic search toggle; semantic fallback to keyword (with toast notification) when pgvector is unavailable; **Add** button for manually crafting entries without ingestion; 15 MB upload guard with clear error
 - **Context import** — paste text or upload a file (PDF, DOCX, TXT, MD); subjects are auto-detected from the document using entity resolution — no manual subject selection needed; smart clipboard paste detection
@@ -662,7 +662,7 @@ context_ingest_auto {
 
 ### Memory Graph — full redesign
 
-The entity memory graph (`/contacts/:id/graph`, `/accounts/:id/graph`) is now an Obsidian-style dark canvas visualization:
+The entity memory graph (`/contacts/:id/graph`, `/companies/:id/graph`) is now an Obsidian-style dark canvas visualization:
 
 - **6 node types**: entity center, related objects, context type clusters, individual context entries, activities, and assignments
 - **5-zone concentric radial layout**: related records on the right arc, context clusters on the left, leaf entries orbiting their cluster, activities and assignments in the lower arcs
@@ -672,7 +672,7 @@ The entity memory graph (`/contacts/:id/graph`, `/accounts/:id/graph`) is now an
 
 ### UI simplifications
 
-- **Accounts list**: removed the initials circle avatar — accounts are companies, not people
+- **Companies list**: removed the initials circle avatar — companies are organizations, not people
 - **Context page**: keyword/semantic search toggle moved inline with the search bar
 - **Dashboard**: Overview/Knowledge tab toggle moved from the header into the page body
 - **BriefingPanel**: larger fonts, colored activity-type icons, activity count pill

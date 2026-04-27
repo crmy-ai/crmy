@@ -152,8 +152,8 @@ export default function Dashboard() {
           <StatCard
             icon={Inbox}
             label="Open handoffs"
-            value="—"
-            sub="view assignments"
+            value={pendingHITL.length}
+            sub={pendingHITL.length > 0 ? 'needs your review' : 'all clear'}
             color="bg-amber-500/15 text-amber-500"
             href="/handoffs"
             delay={0.04}

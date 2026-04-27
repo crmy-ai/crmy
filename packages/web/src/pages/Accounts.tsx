@@ -146,7 +146,7 @@ export default function Accounts() {
   return (
     <div className="flex flex-col h-full">
       <TopBar
-        title="Accounts"
+        title="Companies"
         icon={Building2}
         iconClassName="text-[#8b5cf6]"
         description="Companies and organizations."
@@ -162,11 +162,11 @@ export default function Accounts() {
       </TopBar>
 
       <ListToolbar
-        searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search accounts..."
+        searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search companies..."
         filters={filterConfigs} activeFilters={activeFilters} onFilterChange={handleFilterChange}
         onClearFilters={() => setActiveFilters({})} sortOptions={sortOptions} currentSort={sort}
         onSortChange={handleSortChange} entityType="accounts"
-        onAdd={() => openQuickAdd('account')} addLabel="New Account"
+        onAdd={() => openQuickAdd('account')} addLabel="New Company"
       />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">
@@ -176,7 +176,7 @@ export default function Accounts() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <p className="text-sm">No accounts found.</p>
+            <p className="text-sm">No companies found.</p>
             <button onClick={() => { setSearch(''); setActiveFilters({}); }} className="mt-2 text-xs text-primary font-semibold hover:underline">Clear all filters</button>
           </div>
         ) : effectiveView === 'table' ? (
@@ -199,7 +199,7 @@ export default function Accounts() {
                       className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer group transition-colors ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
                       <td className="px-4 py-3">
                         <div>
-                          <span className="font-semibold text-foreground">{a.name as string}</span>
+                          <p className="font-display font-bold text-foreground">{a.name as string}</p>
                           {a.website && <p className="text-xs text-muted-foreground">{a.website as string}</p>}
                         </div>
                       </td>

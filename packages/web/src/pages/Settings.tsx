@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Zap, ListOrdered, GitBranch } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Zap, ListOrdered, GitBranch, Info, Globe } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -12,7 +12,7 @@ import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
-import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useWorkflows, useSequences, useSequenceEnrollments } from '@/api/hooks';
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useWorkflows, useSequences, useSequenceEnrollments } from '@/api/hooks';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import AgentSettings from '@/pages/AgentSettings';
 import ActorsSettings from '@/components/settings/ActorsSettings';
@@ -831,31 +831,207 @@ function WebhookDeliveryLog({ webhookId }: { webhookId: string }) {
   );
 }
 
+const WEBHOOK_EVENT_GROUPS = [
+  { label: 'Contacts', events: [
+    { value: 'contact.created', label: 'Created' },
+    { value: 'contact.updated', label: 'Updated' },
+    { value: 'contact.deleted', label: 'Deleted' },
+    { value: 'contact.merged', label: 'Merged' },
+    { value: 'contact.lifecycle_changed', label: 'Lifecycle changed' },
+  ]},
+  { label: 'Accounts', events: [
+    { value: 'account.created', label: 'Created' },
+    { value: 'account.updated', label: 'Updated' },
+    { value: 'account.deleted', label: 'Deleted' },
+  ]},
+  { label: 'Opportunities', events: [
+    { value: 'opportunity.created', label: 'Created' },
+    { value: 'opportunity.updated', label: 'Updated' },
+    { value: 'opportunity.stage_changed', label: 'Stage changed' },
+    { value: 'opportunity.deleted', label: 'Deleted' },
+  ]},
+  { label: 'Activities', events: [
+    { value: 'activity.created', label: 'Created' },
+    { value: 'activity.updated', label: 'Updated' },
+    { value: 'activity.completed', label: 'Completed' },
+  ]},
+  { label: 'Assignments', events: [
+    { value: 'assignment.created', label: 'Created' },
+    { value: 'assignment.accepted', label: 'Accepted' },
+    { value: 'assignment.completed', label: 'Completed' },
+    { value: 'assignment.declined', label: 'Declined' },
+  ]},
+  { label: 'Sequences', events: [
+    { value: 'sequence.enrolled', label: 'Contact enrolled' },
+    { value: 'sequence.completed', label: 'Contact completed' },
+    { value: 'sequence.unenrolled', label: 'Contact unenrolled' },
+    { value: 'sequence.step_sent', label: 'Step sent' },
+  ]},
+  { label: 'Email', events: [
+    { value: 'email.received', label: 'Received' },
+    { value: 'email.sent', label: 'Sent' },
+  ]},
+  { label: 'Context', events: [
+    { value: 'context.created', label: 'Entry created' },
+    { value: 'context.updated', label: 'Entry updated' },
+  ]},
+  { label: 'Use Cases', events: [
+    { value: 'use_case.created', label: 'Created' },
+    { value: 'use_case.updated', label: 'Updated' },
+    { value: 'use_case.stage_changed', label: 'Stage changed' },
+  ]},
+];
+
+const ALL_WEBHOOK_EVENTS = WEBHOOK_EVENT_GROUPS.flatMap(g => g.events);
+
+function WebhookEventCheckboxes({
+  selected,
+  onChange,
+}: {
+  selected: string[];
+  onChange: (events: string[]) => void;
+}) {
+  const toggle = (value: string) => {
+    onChange(selected.includes(value) ? selected.filter(e => e !== value) : [...selected, value]);
+  };
+  const toggleGroup = (groupEvents: { value: string; label: string }[]) => {
+    const values = groupEvents.map(e => e.value);
+    const allSelected = values.every(v => selected.includes(v));
+    if (allSelected) {
+      onChange(selected.filter(v => !values.includes(v)));
+    } else {
+      onChange([...new Set([...selected, ...values])]);
+    }
+  };
+  return (
+    <div className="space-y-3">
+      {WEBHOOK_EVENT_GROUPS.map((group) => {
+        const groupValues = group.events.map(e => e.value);
+        const allSelected = groupValues.every(v => selected.includes(v));
+        const someSelected = groupValues.some(v => selected.includes(v));
+        return (
+          <div key={group.label}>
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-xs font-mono text-muted-foreground uppercase tracking-wider">{group.label}</span>
+              <button
+                type="button"
+                onClick={() => toggleGroup(group.events)}
+                className="text-[10px] text-primary hover:underline ml-1"
+              >
+                {allSelected ? 'None' : someSelected ? 'All' : 'All'}
+              </button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
+              {group.events.map((ev) => (
+                <label key={ev.value} className="flex items-center gap-2 cursor-pointer group">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(ev.value)}
+                    onChange={() => toggle(ev.value)}
+                    className="w-3.5 h-3.5 rounded border-border accent-primary"
+                  />
+                  <span className="text-xs text-foreground group-hover:text-foreground/80 select-none">{ev.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function WebhooksSettings() {
   const { data, isLoading } = useWebhooks();
   const createWebhook = useCreateWebhook();
+  const updateWebhook = useUpdateWebhook();
   const deleteWebhook = useDeleteWebhook();
-  const [showCreate, setShowCreate] = useState(false);
-  const [newUrl, setNewUrl] = useState('');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const webhooks = (data as any)?.data ?? [];
+  const [showCreate, setShowCreate] = useState(false);
+  const [showHowItWorks, setShowHowItWorks] = useState(false);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'created_at', dir: 'desc' });
+  const [page, setPage] = useState(1);
+
+  const [newUrl, setNewUrl] = useState('');
+  const [newEvents, setNewEvents] = useState<string[]>(['contact.created', 'opportunity.updated']);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [editingEventsId, setEditingEventsId] = useState<string | null>(null);
+  const [editEvents, setEditEvents] = useState<string[]>([]);
+
+  const PAGE_SIZE = 10;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const webhooks: any[] = (data as any)?.data ?? [];
+
+  const filtered = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let result: any[] = [...webhooks];
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(wh => wh.url?.toLowerCase().includes(q));
+    }
+    if (statusFilter === 'active') result = result.filter(wh => wh.is_active !== false);
+    if (statusFilter === 'inactive') result = result.filter(wh => wh.is_active === false);
+    if (categoryFilter) {
+      const group = WEBHOOK_EVENT_GROUPS.find(g => g.label === categoryFilter);
+      if (group) {
+        const vals = group.events.map(e => e.value);
+        result = result.filter(wh => (wh.events ?? []).some((ev: string) => vals.includes(ev)));
+      }
+    }
+    result.sort((a, b) => {
+      const va: string = sort.key === 'url' ? (a.url ?? '') : (a[sort.key] ?? '');
+      const vb: string = sort.key === 'url' ? (b.url ?? '') : (b[sort.key] ?? '');
+      return sort.dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+    return result;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [webhooks, search, statusFilter, categoryFilter, sort]);
+
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const resetCreate = () => {
+    setShowCreate(false);
+    setNewUrl('');
+    setNewEvents(['contact.created', 'opportunity.updated']);
+  };
 
   const handleCreate = async () => {
-    if (!newUrl.trim()) return;
+    if (!newUrl.trim() || newEvents.length === 0) return;
     try {
-      await createWebhook.mutateAsync({ url: newUrl.trim(), events: ['contact.created', 'opportunity.updated'] });
-      setNewUrl('');
-      setShowCreate(false);
+      await createWebhook.mutateAsync({ url: newUrl.trim(), events: newEvents });
+      resetCreate();
       toast({ title: 'Webhook created' });
     } catch {
       toast({ title: 'Error', description: 'Failed to create webhook.', variant: 'destructive' });
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const startEditEvents = (wh: any) => {
+    setEditingEventsId(wh.id);
+    setEditEvents(wh.events ?? []);
+    setExpandedId(wh.id);
+  };
+
+  const handleSaveEvents = async (id: string) => {
+    try {
+      await updateWebhook.mutateAsync({ id, data: { events: editEvents } });
+      setEditingEventsId(null);
+      toast({ title: 'Webhook updated' });
+    } catch {
+      toast({ title: 'Error', description: 'Failed to update webhook.', variant: 'destructive' });
+    }
+  };
+
   const handleDelete = async (id: string) => {
     try {
       await deleteWebhook.mutateAsync(id);
+      setDeleteId(null);
+      if (expandedId === id) setExpandedId(null);
       toast({ title: 'Webhook deleted' });
     } catch {
       toast({ title: 'Error', description: 'Failed to delete webhook.', variant: 'destructive' });
@@ -863,63 +1039,254 @@ function WebhooksSettings() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
+    <div className="space-y-4">
+      {/* Header */}
+      <div>
         <h2 className="font-display font-bold text-lg text-foreground">Webhooks</h2>
-        <button onClick={() => setShowCreate(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors">
-          <Plus className="w-3.5 h-3.5" /> New Webhook
-        </button>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Receive real-time HTTP POST notifications when CRM events occur. Register a URL and choose which events to subscribe to.{' '}
+          <button
+            onClick={() => setShowHowItWorks(v => !v)}
+            className="inline-flex items-center gap-1 text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+          >
+            <Info className="w-3 h-3" />
+            <span>{showHowItWorks ? 'Hide details' : 'How it works'}</span>
+          </button>
+        </p>
+
+        {/* How it works — inline table */}
+        {showHowItWorks && (
+          <div className="mt-3 bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-surface-sunken/50">
+                  <th className="text-left px-4 py-2.5 text-xs font-display font-semibold text-muted-foreground w-36">Concept</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-display font-semibold text-muted-foreground">Detail</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[
+                  { concept: 'Method', detail: <><code className="px-1 py-0.5 rounded bg-muted text-xs font-mono">POST</code> with a JSON body to your endpoint URL</> },
+                  { concept: 'Timeout', detail: <>Your server must respond <code className="px-1 py-0.5 rounded bg-muted text-xs font-mono">2xx</code> within 10 seconds; failed deliveries appear in the log</> },
+                  { concept: 'Payload fields', detail: <><code className="px-1 py-0.5 rounded bg-muted text-xs font-mono">event</code>, <code className="px-1 py-0.5 rounded bg-muted text-xs font-mono">timestamp</code>, <code className="px-1 py-0.5 rounded bg-muted text-xs font-mono">tenant_id</code>, <code className="px-1 py-0.5 rounded bg-muted text-xs font-mono">data</code> (the full object)</> },
+                  { concept: 'Signature', detail: <><code className="px-1 py-0.5 rounded bg-muted text-xs font-mono">X-CRMy-Signature</code> header — HMAC-SHA256 of the raw body signed with your webhook secret</> },
+                  { concept: 'Verification', detail: <pre className="text-[10px] font-mono bg-muted/60 rounded p-1.5 overflow-x-auto inline-block">{`crypto.createHmac('sha256', SECRET).update(rawBody).digest('hex')`}</pre> },
+                ].map(({ concept, detail }, i) => (
+                  <tr key={concept} className={`border-b border-border last:border-0 ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
+                    <td className="px-4 py-2.5 text-xs font-semibold text-muted-foreground align-top">{concept}</td>
+                    <td className="px-4 py-2.5 text-xs text-foreground/80 align-top">{detail}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
+      {/* Create form */}
       {showCreate && (
-        <div className="mb-4 p-4 rounded-xl border border-border bg-muted/30 flex items-center gap-2 max-w-lg">
-          <input value={newUrl} onChange={(e) => setNewUrl(e.target.value)}
-            placeholder="https://your-server.com/webhook"
-            className="flex-1 h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
-            onKeyDown={(e) => e.key === 'Enter' && handleCreate()} />
-          <button onClick={handleCreate} disabled={!newUrl.trim() || createWebhook.isPending}
-            className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
-            Create
-          </button>
-          <button onClick={() => { setShowCreate(false); setNewUrl(''); }} className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold">Cancel</button>
+        <div className="p-5 rounded-xl border border-border bg-card space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-foreground">Create new webhook</h3>
+            <button onClick={resetCreate} className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Endpoint URL <span className="text-destructive">*</span></label>
+            <input
+              value={newUrl}
+              onChange={(e) => setNewUrl(e.target.value)}
+              placeholder="https://your-server.com/webhook"
+              className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
+              autoFocus
+              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+            />
+          </div>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Events <span className="text-destructive">*</span></label>
+              <div className="flex items-center gap-3">
+                <button type="button" onClick={() => setNewEvents(ALL_WEBHOOK_EVENTS.map(e => e.value))} className="text-[10px] text-primary hover:underline">Select all</button>
+                <button type="button" onClick={() => setNewEvents([])} className="text-[10px] text-muted-foreground hover:underline">Clear</button>
+              </div>
+            </div>
+            <WebhookEventCheckboxes selected={newEvents} onChange={setNewEvents} />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button
+              onClick={handleCreate}
+              disabled={!newUrl.trim() || newEvents.length === 0 || createWebhook.isPending}
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors"
+            >
+              {createWebhook.isPending ? 'Creating…' : 'Create Webhook'}
+            </button>
+            <button onClick={resetCreate} className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
+          </div>
         </div>
       )}
 
-      <div className="space-y-2 max-w-2xl">
-        {isLoading ? (
-          <div className="space-y-2">{[...Array(2)].map((_, i) => <div key={i} className="h-14 bg-muted/50 rounded-xl animate-pulse" />)}</div>
-        ) : webhooks.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-4">No webhooks configured.</p>
-        ) : webhooks.map((wh: any) => (
-          <div key={wh.id} className="rounded-xl border border-border bg-card overflow-hidden">
-            <div
-              className="flex items-center gap-3 p-3 cursor-pointer hover:bg-muted/30 transition-colors"
-              onClick={() => setExpandedId(expandedId === wh.id ? null : wh.id)}
-            >
-              <ChevronRight className={`w-3.5 h-3.5 text-muted-foreground transition-transform ${expandedId === wh.id ? 'rotate-90' : ''}`} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-foreground truncate">{wh.url}</p>
-                {wh.events && (
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {(wh.events as string[]).map((ev) => (
-                      <span key={ev} className="px-1.5 py-0.5 rounded text-xs font-mono bg-muted text-muted-foreground">{ev}</span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <button onClick={(e) => { e.stopPropagation(); handleDelete(wh.id); }} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-            {expandedId === wh.id && (
-              <div className="border-t border-border bg-muted/10">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-4 pt-2">Recent deliveries</p>
-                <WebhookDeliveryLog webhookId={wh.id} />
-              </div>
-            )}
-          </div>
-        ))}
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="relative flex-1 min-w-0 max-w-xs">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="Search webhooks…"
+            className="w-full h-9 pl-9 pr-3 rounded-xl border border-border bg-card text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30 transition-all" />
+        </div>
+        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value as 'all' | 'active' | 'inactive'); setPage(1); }}
+          className="h-9 px-3 rounded-xl border border-border bg-card text-sm text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30 flex-shrink-0">
+          <option value="all">All status</option>
+          <option value="active">Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+        <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setPage(1); }}
+          className="h-9 px-3 rounded-xl border border-border bg-card text-sm text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30 flex-shrink-0">
+          <option value="">All events</option>
+          {WEBHOOK_EVENT_GROUPS.map(g => <option key={g.label} value={g.label}>{g.label}</option>)}
+        </select>
+        <select value={`${sort.key}_${sort.dir}`} onChange={e => { const [k, ...rest] = e.target.value.split('_'); setSort({ key: k, dir: rest.join('_') as 'asc' | 'desc' }); setPage(1); }}
+          className="h-9 px-3 rounded-xl border border-border bg-card text-sm text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30 flex-shrink-0">
+          <option value="created_at_desc">Newest first</option>
+          <option value="created_at_asc">Oldest first</option>
+          <option value="url_asc">URL A–Z</option>
+          <option value="url_desc">URL Z–A</option>
+        </select>
+        <button onClick={() => setShowCreate(true)} disabled={showCreate}
+          className="h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale disabled:opacity-50">
+          <Plus className="w-4 h-4" /> New Webhook
+        </button>
       </div>
+
+      {/* Table */}
+      {isLoading ? (
+        <div className="space-y-2">{[...Array(2)].map((_, i) => <div key={i} className="h-14 bg-muted/50 rounded-2xl animate-pulse" />)}</div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-14 text-center">
+          <Globe className="w-8 h-8 text-muted-foreground/30 mb-3" />
+          <p className="text-sm text-muted-foreground">{webhooks.length === 0 ? 'No webhooks configured yet.' : 'No webhooks match your filters.'}</p>
+          {webhooks.length === 0 && <button onClick={() => setShowCreate(true)} className="mt-3 text-xs text-primary hover:underline">Create your first webhook</button>}
+        </div>
+      ) : (
+        <>
+          <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-surface-sunken/50">
+                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Endpoint</th>
+                    <th className="text-left px-4 py-3 hidden md:table-cell text-xs font-display font-semibold text-muted-foreground">Events</th>
+                    <th className="text-left px-4 py-3 hidden sm:table-cell text-xs font-display font-semibold text-muted-foreground">Status</th>
+                    <th className="px-2 py-3 w-24" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated.map((wh: any, i: number) => (
+                    <React.Fragment key={wh.id}>
+                      <tr
+                        className={`border-b border-border last:border-0 hover:bg-primary/5 transition-colors group cursor-pointer ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}
+                        onClick={() => { setExpandedId(prev => prev === wh.id ? null : wh.id); if (editingEventsId === wh.id) setEditingEventsId(null); }}
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                              <Globe className="w-3.5 h-3.5 text-primary" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-semibold text-foreground font-mono truncate">{wh.url}</p>
+                              <p className="text-xs font-mono text-muted-foreground">{wh.id.slice(0, 14)}…</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 hidden md:table-cell" onClick={e => e.stopPropagation()}>
+                          <button
+                            onClick={() => { setExpandedId(prev => prev === wh.id ? null : wh.id); if (editingEventsId === wh.id) setEditingEventsId(null); }}
+                            className="flex items-center gap-1.5 hover:text-foreground transition-colors"
+                          >
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border font-mono">
+                              {(wh.events ?? []).length} event{(wh.events ?? []).length !== 1 ? 's' : ''}
+                            </span>
+                            <ChevronRight className={`w-3 h-3 text-muted-foreground transition-transform ${expandedId === wh.id ? 'rotate-90' : ''}`} />
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 hidden sm:table-cell">
+                          <span className={`inline-flex items-center gap-1.5 text-xs ${wh.is_active !== false ? 'text-emerald-500' : 'text-muted-foreground'}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${wh.is_active !== false ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
+                            {wh.is_active !== false ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        <td className="px-2 py-3" onClick={e => e.stopPropagation()}>
+                          <div className="flex items-center gap-1 justify-end">
+                            {deleteId === wh.id ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs text-muted-foreground">Delete?</span>
+                                <button onClick={() => handleDelete(wh.id)} className="px-2 py-1 rounded bg-destructive text-destructive-foreground text-xs font-semibold hover:bg-destructive/90 transition-colors">Yes</button>
+                                <button onClick={() => setDeleteId(null)} className="px-2 py-1 rounded bg-muted text-muted-foreground text-xs hover:bg-muted/80 transition-colors">No</button>
+                              </div>
+                            ) : (
+                              <>
+                                <button onClick={() => startEditEvents(wh)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors opacity-0 group-hover:opacity-100" title="Edit events">
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button onClick={() => setDeleteId(wh.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors opacity-0 group-hover:opacity-100" title="Delete">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
+                            <button
+                              onClick={() => { setExpandedId(prev => prev === wh.id ? null : wh.id); if (editingEventsId === wh.id) setEditingEventsId(null); }}
+                              className={`p-1.5 rounded-lg transition-colors ${expandedId === wh.id ? 'text-primary bg-primary/10' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}
+                            >
+                              <ChevronRight className={`w-3.5 h-3.5 transition-transform ${expandedId === wh.id ? 'rotate-90' : ''}`} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {/* Expanded row */}
+                      {expandedId === wh.id && (
+                        <tr>
+                          <td colSpan={4} className="p-0 border-b border-border last:border-0">
+                            <div className="bg-muted/10">
+                              {editingEventsId === wh.id ? (
+                                <div className="p-4 space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Edit subscribed events</p>
+                                    <div className="flex gap-3">
+                                      <button type="button" onClick={() => setEditEvents(ALL_WEBHOOK_EVENTS.map(e => e.value))} className="text-[10px] text-primary hover:underline">Select all</button>
+                                      <button type="button" onClick={() => setEditEvents([])} className="text-[10px] text-muted-foreground hover:underline">Clear</button>
+                                    </div>
+                                  </div>
+                                  <WebhookEventCheckboxes selected={editEvents} onChange={setEditEvents} />
+                                  <div className="flex gap-2">
+                                    <button onClick={() => handleSaveEvents(wh.id)} disabled={editEvents.length === 0 || updateWebhook.isPending}
+                                      className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                                      {updateWebhook.isPending ? 'Saving…' : 'Save Changes'}
+                                    </button>
+                                    <button onClick={() => setEditingEventsId(null)}
+                                      className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div>
+                                  <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider px-4 pt-3 pb-1">Recent deliveries</p>
+                                  <WebhookDeliveryLog webhookId={wh.id} />
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          {filtered.length > PAGE_SIZE && (
+            <PaginationBar page={page} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} />
+          )}
+        </>
+      )}
     </div>
   );
 }

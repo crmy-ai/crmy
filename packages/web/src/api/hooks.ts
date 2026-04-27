@@ -376,6 +376,13 @@ export function useCreateWebhook() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['webhooks'] }),
   });
 }
+export function useUpdateWebhook() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) => api.patch(`webhooks/${id}`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['webhooks'] }),
+  });
+}
 export function useDeleteWebhook() {
   const qc = useQueryClient();
   return useMutation({
@@ -1054,6 +1061,12 @@ export function useBriefing(subjectType: string, subjectId: string, params?: { f
     queryKey: ['briefing', subjectType, subjectId, params],
     queryFn: () => api.get(url),
     enabled: !!subjectType && !!subjectId,
+  });
+}
+
+export function useBriefingSummary(subjectType: string, subjectId: string) {
+  return useMutation({
+    mutationFn: () => api.post<{ summary: string | null }>(`briefing/${subjectType}/${subjectId}/summary`, {}),
   });
 }
 

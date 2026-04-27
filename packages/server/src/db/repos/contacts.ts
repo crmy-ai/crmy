@@ -38,7 +38,7 @@ export async function createContact(
 
 export async function getContact(db: DbPool, tenantId: UUID, id: UUID): Promise<Contact | null> {
   const result = await db.query(
-    'SELECT * FROM contacts WHERE id = $1 AND tenant_id = $2',
+    'SELECT * FROM contacts WHERE id = $1 AND tenant_id = $2 AND merged_into IS NULL',
     [id, tenantId],
   );
   return (result.rows[0] as Contact) ?? null;
@@ -57,7 +57,7 @@ export async function searchContacts(
     cursor?: string;
   },
 ): Promise<PaginatedResponse<Contact>> {
-  const conditions: string[] = ['c.tenant_id = $1'];
+  const conditions: string[] = ['c.tenant_id = $1', 'c.merged_into IS NULL'];
   const params: unknown[] = [tenantId];
   let idx = 2;
 

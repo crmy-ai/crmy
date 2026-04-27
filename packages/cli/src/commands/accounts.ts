@@ -5,7 +5,7 @@ import { Command } from 'commander';
 import { getClient } from '../client.js';
 
 export function accountsCommand(): Command {
-  const cmd = new Command('accounts').description('Manage accounts');
+  const cmd = new Command('accounts').description('Manage companies');
 
   cmd.command('list')
     .option('-q, --query <query>', 'Search query')
@@ -14,7 +14,7 @@ export function accountsCommand(): Command {
       const result = await client.call('account_search', { query: opts.query, limit: 20 });
       const data = JSON.parse(result);
       if (data.accounts?.length === 0) {
-        console.log('No accounts found.');
+        console.log('No companies found.');
         return;
       }
       console.table(data.accounts?.map((a: Record<string, unknown>) => ({
@@ -27,7 +27,7 @@ export function accountsCommand(): Command {
     });
 
   cmd.command('get <id>')
-    .description('Get account details including contacts and open opportunities')
+    .description('Get company details including contacts and open opportunities')
     .action(async (id) => {
       const client = await getClient();
       const result = await client.call('account_get', { id });
@@ -36,11 +36,11 @@ export function accountsCommand(): Command {
     });
 
   cmd.command('create')
-    .description('Create a new account')
+    .description('Create a new company')
     .action(async () => {
       const { default: inquirer } = await import('inquirer');
       const answers = await inquirer.prompt([
-        { type: 'input', name: 'name', message: 'Account name:' },
+        { type: 'input', name: 'name', message: 'Company name:' },
         { type: 'input', name: 'domain', message: 'Domain (optional):' },
         { type: 'input', name: 'industry', message: 'Industry (optional):' },
         { type: 'input', name: 'website', message: 'Website (optional):' },
@@ -54,16 +54,16 @@ export function accountsCommand(): Command {
         website: answers.website || undefined,
       });
       const data = JSON.parse(result);
-      console.log(`\n  Created account: ${data.account.id}\n`);
+      console.log(`\n  Created company: ${data.account.id}\n`);
       await client.close();
     });
 
   cmd.command('delete <id>')
-    .description('Permanently delete an account (admin/owner only)')
+    .description('Permanently delete a company (admin/owner only)')
     .action(async (id) => {
       const { default: inquirer } = await import('inquirer');
       const { confirm } = await inquirer.prompt([
-        { type: 'confirm', name: 'confirm', message: `Delete account ${id}? This cannot be undone.`, default: false },
+        { type: 'confirm', name: 'confirm', message: `Delete company ${id}? This cannot be undone.`, default: false },
       ]);
       if (!confirm) { console.log('  Cancelled.'); return; }
 

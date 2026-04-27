@@ -37,7 +37,7 @@ export async function createAccount(
 
 export async function getAccount(db: DbPool, tenantId: UUID, id: UUID): Promise<Account | null> {
   const result = await db.query(
-    'SELECT * FROM accounts WHERE id = $1 AND tenant_id = $2',
+    'SELECT * FROM accounts WHERE id = $1 AND tenant_id = $2 AND merged_into IS NULL',
     [id, tenantId],
   );
   return (result.rows[0] as Account) ?? null;
@@ -45,7 +45,7 @@ export async function getAccount(db: DbPool, tenantId: UUID, id: UUID): Promise<
 
 export async function getAccountContacts(db: DbPool, tenantId: UUID, accountId: UUID): Promise<Contact[]> {
   const result = await db.query(
-    'SELECT * FROM contacts WHERE account_id = $1 AND tenant_id = $2 ORDER BY created_at DESC',
+    'SELECT * FROM contacts WHERE account_id = $1 AND tenant_id = $2 AND merged_into IS NULL ORDER BY created_at DESC',
     [accountId, tenantId],
   );
   return result.rows as Contact[];
@@ -75,7 +75,7 @@ export async function searchAccounts(
     cursor?: string;
   },
 ): Promise<PaginatedResponse<Account>> {
-  const conditions: string[] = ['a.tenant_id = $1'];
+  const conditions: string[] = ['a.tenant_id = $1', 'a.merged_into IS NULL'];
   const params: unknown[] = [tenantId];
   let idx = 2;
 
