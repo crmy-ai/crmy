@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TopBar } from '@/components/layout/TopBar';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -13,13 +13,14 @@ import {
   useDeleteSequence, useSequenceEnrollments,
   useUnenrollFromSequence, useContacts, useSequenceAnalytics,
   useEnrollmentActivities, useEnrollmentContext, useEnrollInSequenceWithObjective,
+  useDraftSequencePreview,
 } from '@/api/hooks';
 import {
   ListOrdered, Plus, Trash2, Pencil, Power, PowerOff, ChevronDown, ChevronUp,
   X, GripVertical, Users, CheckCircle2, Clock, XCircle, Loader2,
   PlayCircle, BarChart3, Mail, Bell, ClipboardList, Webhook,
   Timer, GitBranch, Bot, Zap, TrendingUp, Activity,
-  ChevronRight, MessageSquare, Lightbulb, Variable, Target,
+  ChevronRight, MessageSquare, Lightbulb, Variable, Target, Sparkles, Check,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 
@@ -167,6 +168,117 @@ export function defaultStep(type: StepType): SequenceStep {
   }
 }
 
+// ─── Email Step Fields (own component for draft-preview state) ────────────────
+
+function EmailStepFields({
+  step, onChange, vaf,
+}: {
+  step: SequenceStep & { type: 'email' };
+  onChange: (patch: Record<string, unknown>) => void;
+  vaf: (extra?: Record<string, unknown>) => { extraVariables?: Record<string, unknown> };
+}) {
+  type DraftState = { subject: string; body_text: string } | null;
+  const [draft, setDraft] = useState<DraftState>(null);
+  const draftMutation = useDraftSequencePreview();
+
+  const handlePreview = useCallback(async () => {
+    setDraft(null);
+    try {
+      const result = await draftMutation.mutateAsync({
+        subject:   step.subject ?? '',
+        body_text: step.body_text ?? '',
+        ai_prompt: step.ai_prompt ?? '',
+      });
+      setDraft(result as DraftState);
+    } catch {
+      toast({ title: 'Preview failed', description: 'Could not generate draft — check agent configuration.', variant: 'destructive' });
+    }
+  }, [draftMutation, step.subject, step.body_text, step.ai_prompt]);
+
+  return (
+    <div className="space-y-2">
+      <VariableAwareField
+        label="Subject"
+        value={step.subject ?? ''}
+        onChange={v => onChange({ subject: v })}
+        placeholder="e.g. Following up, {{contact.first_name}}"
+        {...vaf()}
+      />
+      <VariableAwareField
+        as="textarea"
+        label="Body"
+        value={step.body_text ?? ''}
+        onChange={v => onChange({ body_text: v })}
+        placeholder="Email body — supports {{variables}}"
+        rows={4}
+        {...vaf()}
+      />
+      <div className="flex items-center gap-4 flex-wrap">
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" checked={!!step.ai_generate} onChange={e => onChange({ ai_generate: e.target.checked })}
+            className="w-4 h-4 rounded border-border accent-primary" />
+          <span className="text-xs font-medium text-foreground">AI generate content</span>
+        </label>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" checked={!!step.require_approval} onChange={e => onChange({ require_approval: e.target.checked })}
+            className="w-4 h-4 rounded border-border accent-primary" />
+          <span className="text-xs font-medium text-foreground">Require approval before send</span>
+        </label>
+      </div>
+      {step.ai_generate && (
+        <>
+          <VariableAwareField
+            as="textarea"
+            label="AI prompt"
+            value={step.ai_prompt ?? ''}
+            onChange={v => onChange({ ai_prompt: v })}
+            placeholder="Describe what to write, or leave blank for contact-aware generation"
+            rows={2}
+            {...vaf()}
+          />
+          <button
+            onClick={handlePreview}
+            disabled={draftMutation.isPending}
+            className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+          >
+            {draftMutation.isPending
+              ? <><Loader2 className="w-3 h-3 animate-spin" /> Generating preview…</>
+              : <><Sparkles className="w-3 h-3" /> Preview AI draft</>}
+          </button>
+          {draft && (
+            <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold text-primary/80">AI Draft Preview</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { onChange({ subject: draft.subject, body_text: draft.body_text }); setDraft(null); }}
+                    className="flex items-center gap-1 text-xs text-primary font-medium hover:underline"
+                  >
+                    <Check className="w-3 h-3" /> Use this draft
+                  </button>
+                  <button onClick={() => setDraft(null)} className="text-xs text-muted-foreground hover:text-foreground">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <div>
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/60 mb-0.5">Subject</p>
+                  <p className="text-xs text-foreground">{draft.subject}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground/60 mb-0.5">Body</p>
+                  <pre className="text-xs text-foreground whitespace-pre-wrap font-sans leading-relaxed">{draft.body_text}</pre>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Step Type Builder ─────────────────────────────────────────────────────────
 
 export function StepFields({
@@ -181,47 +293,7 @@ export function StepFields({
 
   switch (step.type) {
     case 'email': return (
-      <div className="space-y-2">
-        <VariableAwareField
-          label="Subject"
-          value={step.subject ?? ''}
-          onChange={v => up({ subject: v })}
-          placeholder="e.g. Following up, {{contact.first_name}}"
-          {...vaf()}
-        />
-        <VariableAwareField
-          as="textarea"
-          label="Body"
-          value={step.body_text ?? ''}
-          onChange={v => up({ body_text: v })}
-          placeholder="Email body — supports {{variables}}"
-          rows={4}
-          {...vaf()}
-        />
-        <div className="flex items-center gap-4 flex-wrap">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={!!step.ai_generate} onChange={e => up({ ai_generate: e.target.checked })}
-              className="w-4 h-4 rounded border-border accent-primary" />
-            <span className="text-xs font-medium text-foreground">AI generate content</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={!!step.require_approval} onChange={e => up({ require_approval: e.target.checked })}
-              className="w-4 h-4 rounded border-border accent-primary" />
-            <span className="text-xs font-medium text-foreground">Require approval before send</span>
-          </label>
-        </div>
-        {step.ai_generate && (
-          <VariableAwareField
-            as="textarea"
-            label="AI prompt"
-            value={step.ai_prompt ?? ''}
-            onChange={v => up({ ai_prompt: v })}
-            placeholder="Describe what to write, or leave blank for contact-aware generation"
-            rows={2}
-            {...vaf()}
-          />
-        )}
-      </div>
+      <EmailStepFields step={step} onChange={up} vaf={vaf} />
     );
     case 'notification': return (
       <div className="space-y-2">

@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Zap, ListOrdered, GitBranch } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -12,7 +12,7 @@ import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
-import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType } from '@/api/hooks';
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useWorkflows, useSequences, useSequenceEnrollments } from '@/api/hooks';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import AgentSettings from '@/pages/AgentSettings';
 import ActorsSettings from '@/components/settings/ActorsSettings';
@@ -32,6 +32,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: MessageSquare, label: 'Messaging', path: '/settings/messaging',   roles: ['admin', 'owner'] },
   { icon: ShieldCheck, label: 'HITL Rules', path: '/settings/hitl-rules',  roles: ['admin', 'owner'] },
   { icon: Sparkles,   label: 'Model Settings', path: '/settings/model',     roles: ['admin', 'owner'] },
+  { icon: Zap,        label: 'Automations',   path: '/settings/automations',  roles: ['admin', 'owner'] },
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
 ];
 
@@ -1745,6 +1746,120 @@ function UsersSettings() {
   );
 }
 
+function AutomationSettings() {
+  const { data: workflowsData } = useWorkflows({ limit: 100 });
+  const { data: sequencesData } = useSequences({ limit: 100 });
+  const { data: enrollmentsData } = useSequenceEnrollments({ status: 'active', limit: 1 });
+  const { openWorkflowEditor, openSequenceEditor } = useAppStore();
+
+  const workflows = (workflowsData?.data ?? []) as Array<{ id: string; name: string; is_active: boolean }>;
+  const sequences = (sequencesData?.data ?? []) as Array<{ id: string; name: string; is_active: boolean; max_active_enrollments?: number | null; exit_on_unsubscribe: boolean }>;
+  const activeWorkflows = workflows.filter(w => w.is_active).length;
+  const activeSequences = sequences.filter(s => s.is_active).length;
+  const totalEnrollments = (enrollmentsData as { total?: number } | undefined)?.total ?? 0;
+
+  const cardCls = 'rounded-xl border border-border bg-card p-5 space-y-4';
+  const labelCls = 'block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1';
+  const valueCls = 'text-sm font-medium text-foreground';
+
+  return (
+    <div className="space-y-6">
+      {/* Overview stats */}
+      <div className={cardCls}>
+        <h3 className="text-sm font-semibold text-foreground">System Overview</h3>
+        <div className="grid grid-cols-3 gap-4">
+          {[
+            { icon: GitBranch, label: 'Active Triggers', value: activeWorkflows, total: workflows.length },
+            { icon: ListOrdered, label: 'Active Sequences', value: activeSequences, total: sequences.length },
+            { icon: Users, label: 'Active Enrollments', value: totalEnrollments },
+          ].map(({ icon: Icon, label, value, total }) => (
+            <div key={label} className="rounded-lg bg-muted/40 p-3 text-center">
+              <Icon className="w-4 h-4 mx-auto mb-1 text-primary" />
+              <p className="text-lg font-bold text-foreground">{value}{total !== undefined ? <span className="text-sm font-normal text-muted-foreground"> / {total}</span> : ''}</p>
+              <p className="text-xs text-muted-foreground">{label}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Global defaults */}
+      <div className={cardCls}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-foreground">Global Defaults</h3>
+          <span className="text-xs text-muted-foreground">Configurable per workflow/sequence</span>
+        </div>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <p className={labelCls}>Failure Alert Threshold</p>
+            <p className={valueCls}>3 consecutive failures → HITL escalation</p>
+          </div>
+          <div>
+            <p className={labelCls}>Max Tool Rounds (Agent)</p>
+            <p className={valueCls}>10 rounds per agent turn</p>
+          </div>
+          <div>
+            <p className={labelCls}>Action Timeout</p>
+            <p className={valueCls}>30 seconds per workflow action</p>
+          </div>
+          <div>
+            <p className={labelCls}>Sequence Tick Interval</p>
+            <p className={valueCls}>Every 60 seconds</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Sequence compliance summary */}
+      {sequences.length > 0 && (
+        <div className={cardCls}>
+          <h3 className="text-sm font-semibold text-foreground">Sequence Compliance</h3>
+          <div className="space-y-2">
+            {sequences.map(s => (
+              <div key={s.id} className="flex items-center gap-3 py-2 border-b border-border last:border-0">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{s.name}</p>
+                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                    <span className={`text-xs ${s.exit_on_unsubscribe ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      {s.exit_on_unsubscribe ? '✓ Exits on unsubscribe' : '⚠ Does not exit on unsubscribe'}
+                    </span>
+                    {s.max_active_enrollments && (
+                      <span className="text-xs text-muted-foreground">· max {s.max_active_enrollments} enrollments</span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => openSequenceEditor(s.id)}
+                  className="text-xs text-primary hover:underline shrink-0"
+                >
+                  Edit
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Quick actions */}
+      <div className={cardCls}>
+        <h3 className="text-sm font-semibold text-foreground">Quick Actions</h3>
+        <div className="flex gap-3 flex-wrap">
+          <button
+            onClick={() => openWorkflowEditor(null)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+          >
+            <GitBranch className="w-4 h-4 text-primary" /> New Trigger
+          </button>
+          <button
+            onClick={() => openSequenceEditor(null)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+          >
+            <ListOrdered className="w-4 h-4 text-primary" /> New Sequence
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DatabaseSettings() {
   const { data, isLoading } = useDbConfig();
   const testConfig = useTestDbConfig();
@@ -2145,6 +2260,7 @@ export default function Settings() {
             <Route path="messaging" element={<RequireRole roles={['admin', 'owner']}><MessagingSettings /></RequireRole>} />
             <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
             <Route path="model" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
+            <Route path="automations" element={<RequireRole roles={['admin', 'owner']}><AutomationSettings /></RequireRole>} />
             <Route path="database" element={<RequireRole roles={['admin', 'owner']}><DatabaseSettings /></RequireRole>} />
           </Routes>
         </div>

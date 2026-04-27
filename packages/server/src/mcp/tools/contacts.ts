@@ -10,10 +10,11 @@ import * as activityRepo from '../../db/repos/activities.js';
 import * as contextRepo from '../../db/repos/context-entries.js';
 import * as oppRepo from '../../db/repos/opportunities.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound, permissionDenied } from '@crmy/shared';
+import { notFound, permissionDenied, duplicateError } from '@crmy/shared';
 import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import { computeLeadScore } from '../../services/scoring.js';
+import { checkContactDuplicate } from '../../services/deduplication.js';
 import type { ToolDef } from '../server.js';
 
 export function contactTools(db: DbPool): ToolDef[] {
@@ -21,24 +22,63 @@ export function contactTools(db: DbPool): ToolDef[] {
     {
       name: 'contact_create',
       tier: 'core',
-      description: 'Create a new contact record. Contact names are stored as first_name (required) and last_name (optional) separately — never as a single name field. Also accepts email, phone, title, company_name, account_id, lifecycle_stage (lead/prospect/active/customer/churned/champion), tags, and custom_fields.',
+      description: 'Create a new contact record. Contact names are stored as first_name (required) and last_name (optional) separately. Before calling this tool, prefer using entity_resolve to check if the contact already exists. If a potential duplicate is detected (same email, or same name + company/account), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record instead of erroring. Pass allow_duplicates: true to skip the check entirely after confirming with the user.',
       inputSchema: contactCreate,
       handler: async (input: z.infer<typeof contactCreate>, actor: ActorContext) => {
+        // ── Duplicate check ──
+        if (!input.allow_duplicates) {
+          const dedup = await checkContactDuplicate(db, actor.tenant_id, {
+            first_name: input.first_name,
+            last_name: input.last_name,
+            email: input.email,
+            phone: input.phone,
+            company_name: input.company_name,
+            account_id: input.account_id,
+          });
+
+          if (dedup.confidence === 'definitive' || dedup.confidence === 'high') {
+            if (input.if_exists === 'return_existing' && dedup.candidates[0]) {
+              const existing = await contactRepo.getContact(db, actor.tenant_id, dedup.candidates[0].id);
+              return {
+                contact: existing,
+                was_existing: true,
+                duplicate_confidence: dedup.confidence,
+                matched_by: dedup.candidates[0].reasons,
+              };
+            }
+            throw duplicateError(
+              `A similar contact already exists (${dedup.candidates[0]?.reasons.join(', ')})`,
+              dedup.candidates,
+            );
+          }
+
+          if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
+            input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'contact', input.custom_fields, { isCreate: true });
+          }
+          const contact = await contactRepo.createContact(db, actor.tenant_id, { ...input, created_by: actor.actor_id });
+          const event_id = await emitEvent(db, {
+            tenantId: actor.tenant_id, eventType: 'contact.created',
+            actorId: actor.actor_id, actorType: actor.actor_type,
+            objectType: 'contact', objectId: contact.id, afterData: contact,
+          });
+          indexDocument(db, 'contact', contact as unknown as Record<string, unknown>)
+            .catch((err: unknown) => console.warn(`[search] contact index ${contact.id}: ${(err as Error).message}`));
+          return {
+            contact,
+            event_id,
+            potential_duplicates: dedup.confidence === 'medium' ? dedup.candidates : undefined,
+          };
+        }
+
+        // allow_duplicates=true — skip check
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
           input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'contact', input.custom_fields, { isCreate: true });
         }
-        const contact = await contactRepo.createContact(db, actor.tenant_id, {
-          ...input,
-          created_by: actor.actor_id,
-        });
+        const contact = await contactRepo.createContact(db, actor.tenant_id, { ...input, created_by: actor.actor_id });
         const event_id = await emitEvent(db, {
-          tenantId: actor.tenant_id,
-          eventType: 'contact.created',
-          actorId: actor.actor_id,
-          actorType: actor.actor_type,
-          objectType: 'contact',
-          objectId: contact.id,
-          afterData: contact,
+          tenantId: actor.tenant_id, eventType: 'contact.created',
+          actorId: actor.actor_id, actorType: actor.actor_type,
+          objectType: 'contact', objectId: contact.id, afterData: contact,
         });
         indexDocument(db, 'contact', contact as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] contact index ${contact.id}: ${(err as Error).message}`));
@@ -213,6 +253,94 @@ export function contactTools(db: DbPool): ToolDef[] {
           [score, input.contact_id, actor.tenant_id],
         );
         return { contact_id: input.contact_id, lead_score: score, score_breakdown: breakdown, last_updated: new Date().toISOString() };
+      },
+    },
+    {
+      name: 'contact_merge',
+      tier: 'extended',
+      description: 'Merge a duplicate contact (secondary) into a primary contact. All activities, context entries, opportunities, assignments, and sequence enrollments are reassigned to the primary. The secondary contact is soft-deleted (merged_into set to primary_id). The primary retains its own field values; the secondary\'s email, phone, and aliases are appended to the primary\'s aliases list. Use this to clean up duplicate records after identifying them.',
+      inputSchema: z.object({
+        primary_id: z.string().uuid().describe('The contact to keep — its profile fields are preserved'),
+        secondary_id: z.string().uuid().describe('The duplicate contact to absorb — will be soft-deleted after merge'),
+      }),
+      handler: async (input: { primary_id: string; secondary_id: string }, actor: ActorContext) => {
+        if (input.primary_id === input.secondary_id) {
+          throw new Error('primary_id and secondary_id must be different contacts');
+        }
+
+        type ContactRow = { merged_into?: string; email?: string; phone?: string; first_name?: string; last_name?: string; aliases?: string[] };
+        const [primary, secondary] = await Promise.all([
+          contactRepo.getContact(db, actor.tenant_id, input.primary_id),
+          contactRepo.getContact(db, actor.tenant_id, input.secondary_id),
+        ]);
+        if (!primary) throw notFound('Contact', input.primary_id);
+        if (!secondary) throw notFound('Contact', input.secondary_id);
+        const sec = secondary as unknown as ContactRow;
+        const pri = primary as unknown as ContactRow;
+        if (sec.merged_into) {
+          throw new Error('Secondary contact has already been merged into another record');
+        }
+
+        // Merge in a transaction
+        let merged: Record<string, number> = {};
+        await db.query('BEGIN');
+        try {
+          // Reassign child records
+          const [acts, ctx, opps, asgn, seqEnr] = await Promise.all([
+            db.query('UPDATE activities SET contact_id=$1 WHERE contact_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]),
+            db.query('UPDATE context_entries SET subject_id=$1 WHERE subject_id=$2 AND subject_type=$3 AND tenant_id=$4', [input.primary_id, input.secondary_id, 'contact', actor.tenant_id]),
+            db.query('UPDATE opportunities SET contact_id=$1 WHERE contact_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]),
+            db.query('UPDATE assignments SET subject_id=$1 WHERE subject_id=$2 AND subject_type=$3 AND tenant_id=$4', [input.primary_id, input.secondary_id, 'contact', actor.tenant_id]),
+            db.query('UPDATE sequence_enrollments SET contact_id=$1 WHERE contact_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]),
+          ]);
+          merged = {
+            activities: acts.rowCount ?? 0,
+            context_entries: ctx.rowCount ?? 0,
+            opportunities: opps.rowCount ?? 0,
+            assignments: asgn.rowCount ?? 0,
+            sequence_enrollments: seqEnr.rowCount ?? 0,
+          };
+
+          // Merge aliases: add secondary email, phone, name, and aliases to primary
+          const newAliases = [...(pri.aliases ?? [])];
+          const toAdd: string[] = [];
+          if (sec.email) toAdd.push(sec.email);
+          if (sec.phone) toAdd.push(sec.phone);
+          const secName = `${sec.first_name ?? ''} ${sec.last_name ?? ''}`.trim();
+          if (secName) toAdd.push(secName);
+          for (const a of (sec.aliases ?? [])) toAdd.push(a);
+          for (const a of toAdd) {
+            if (!newAliases.includes(a)) newAliases.push(a);
+          }
+          await db.query(
+            'UPDATE contacts SET aliases=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3',
+            [JSON.stringify(newAliases), input.primary_id, actor.tenant_id],
+          );
+          await db.query(
+            'UPDATE contacts SET merged_into=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3',
+            [input.primary_id, input.secondary_id, actor.tenant_id],
+          );
+          await db.query('COMMIT');
+        } catch (err) {
+          await db.query('ROLLBACK');
+          throw err;
+        }
+
+        // Re-index primary, remove secondary from search
+        const updatedPrimary = await contactRepo.getContact(db, actor.tenant_id, input.primary_id);
+        indexDocument(db, 'contact', updatedPrimary as unknown as Record<string, unknown>)
+          .catch(() => {});
+        removeDocument(db, actor.tenant_id, 'contact', input.secondary_id)
+          .catch(() => {});
+
+        await emitEvent(db, {
+          tenantId: actor.tenant_id, eventType: 'contact.merged',
+          actorId: actor.actor_id, actorType: actor.actor_type,
+          objectType: 'contact', objectId: input.primary_id,
+          afterData: { primary_id: input.primary_id, secondary_id: input.secondary_id, merged },
+        });
+
+        return { primary: updatedPrimary, secondary_id: input.secondary_id, merged_count: merged };
       },
     },
   ];

@@ -532,6 +532,12 @@ function buildSystemPrompt(
     '- If a tool call fails, explain the error in plain language and suggest a correction.',
     '- Format lists and structured data as markdown tables when it aids readability.',
     '- Do not use excessive disclaimers or refusals for normal CRM operations.',
+    '',
+    '# Duplicate Prevention',
+    '- Before calling contact_create or account_create, ALWAYS call entity_resolve with the name (and email or domain if available). If status is "resolved", use the existing record\'s ID — never create a duplicate. If status is "ambiguous", present the candidates to the user: "I found existing records that may match — [names]. Which one should I use, or should I create a new one?"',
+    '- If contact_create or account_create returns a 409 error with candidates, present them clearly: "A similar [entity] already exists: [name] (matched by: [reason]). Should I use this existing record, or create a new one?" Wait for the user\'s explicit answer before proceeding.',
+    '- Use if_exists: "return_existing" only when the user has explicitly requested an idempotent operation (e.g., "make sure this contact exists", bulk import, or data sync).',
+    '- To clean up existing duplicates, use contact_merge or account_merge — never delete one and update the other manually.',
   ].join('\n'));
 
   // ── 6. Safety ─────────────────────────────────────────────────────────────
@@ -613,6 +619,9 @@ export async function runAgentTurn(
         config,
         key as string,
         (text) => onEvent({ type: 'delta', content: text }),
+        // Emit reasoning blocks with the current turn_id so the UI can group
+        // thinking with the tool calls that follow it in the same round.
+        (text) => onEvent({ type: 'thinking', content: text, turn_id: turnId }),
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : 'LLM call failed';

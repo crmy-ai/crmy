@@ -25,8 +25,6 @@ import { SequenceEditor } from '@/components/crm/SequenceEditor';
 import { EmailDrawer } from '@/components/crm/EmailDrawer';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useAppStore } from '@/store/appStore';
-import { GlobalAgentPanel } from '@/components/crm/GlobalAgentPanel';
-import { AIFab } from '@/components/crm/AIFab';
 import { useTheme } from '@/hooks/useTheme';
 import { AgentSettingsProvider } from '@/contexts/AgentSettingsContext';
 
@@ -180,11 +178,6 @@ function AppContent() {
       <ShortcutsOverlay />
       <QuickAddDrawer />
 
-      {/* Persistent agent panel — always mounted so SSE streams survive navigation */}
-      <GlobalAgentPanel />
-
-      {/* FAB — opens the panel from any page */}
-      {!zenMode && <AIFab />}
     </div>
   );
 }

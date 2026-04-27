@@ -19,6 +19,15 @@ export const subjectType = z.enum(['contact', 'account', 'opportunity', 'use_cas
 const tags = z.array(z.string()).default([]);
 const customFields = z.record(z.unknown()).default({});
 
+// -- Deduplication controls (shared across create schemas) --
+
+const dedupControls = {
+  allow_duplicates: z.boolean().optional().default(false)
+    .describe('Skip duplicate check and create unconditionally. Use only after presenting candidates to the user.'),
+  if_exists: z.enum(['warn', 'return_existing']).optional().default('warn')
+    .describe('warn: return 409 with candidates when a duplicate is found. return_existing: silently return the best-matching existing record instead of creating.'),
+};
+
 // -- Contact schemas --
 
 export const contactCreate = z.object({
@@ -34,6 +43,7 @@ export const contactCreate = z.object({
   tags,
   custom_fields: customFields,
   source: z.string().optional(),
+  ...dedupControls,
 });
 
 export const contactUpdate = z.object({
@@ -91,6 +101,7 @@ export const accountCreate = z.object({
   aliases: z.array(z.string()).default([]),
   tags,
   custom_fields: customFields,
+  ...dedupControls,
 });
 
 export const accountUpdate = z.object({
@@ -139,6 +150,7 @@ export const opportunityCreate = z.object({
   stage: oppStage.default('prospecting'),
   description: z.string().optional(),
   custom_fields: customFields,
+  ...dedupControls,
 });
 
 export const opportunityUpdate = z.object({

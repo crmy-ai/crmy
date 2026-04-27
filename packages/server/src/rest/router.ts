@@ -939,6 +939,34 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  // AI draft preview — generate a sample draft for an email step without saving or enrolling.
+  // Accepts the step config directly so it works for both new and existing sequences.
+  router.post('/sequences/draft-preview', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const { subject = '', body_text = '', ai_prompt = '', ai_persona } = req.body as {
+        subject?: string; body_text?: string; ai_prompt?: string; ai_persona?: string;
+      };
+
+      const { callLLM } = await import('../agent/providers/llm.js');
+      const systemPrompt = ai_persona?.trim() ||
+        'You are a sales assistant drafting personalized outreach emails. Return JSON: {"subject":"...","body_text":"..."}';
+      const userPrompt = [
+        `Template subject: ${subject || '(none)'}`,
+        `Template body: ${body_text || '(none)'}`,
+        `Instruction: ${ai_prompt || 'Write a short, personalized outreach email using the template above.'}`,
+        '',
+        'Return ONLY valid JSON: {"subject":"...","body_text":"..."}',
+      ].join('\n');
+
+      const raw = await callLLM(db, actor.tenant_id, { system: systemPrompt, user: userPrompt, maxTokens: 1024 });
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error('LLM did not return valid JSON');
+      const draft = JSON.parse(match[0]) as { subject?: string; body_text?: string };
+      res.json({ subject: draft.subject ?? subject, body_text: draft.body_text ?? body_text });
+    } catch (err) { handleError(res, err); }
+  });
+
   // Enrollment collaboration sub-resources
   router.get('/sequences/enrollments/:enrollmentId/activities', async (req: Request, res: Response) => {
     try {

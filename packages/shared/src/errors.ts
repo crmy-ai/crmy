@@ -47,3 +47,24 @@ export function permissionDenied(message = 'Permission denied'): CrmyError {
 export function unauthorized(message = 'Unauthorized'): CrmyError {
   return new CrmyError('UNAUTHORIZED', message, 401);
 }
+
+// ── Duplicate detection ──────────────────────────────────────────────────────
+
+export interface DuplicateCandidate {
+  id: string;
+  name: string;
+  score: number;
+  reasons: string[];
+}
+
+/**
+ * Thrown when a create operation detects an existing record that likely
+ * matches the incoming data. Carries up to 5 ranked candidates for the
+ * caller to present to the user.
+ */
+export function duplicateError(
+  message: string,
+  candidates: DuplicateCandidate[],
+): CrmyError {
+  return new CrmyError('CONFLICT', message, 409, { candidates });
+}

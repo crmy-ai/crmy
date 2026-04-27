@@ -8,6 +8,8 @@ import { X, Send, Sparkles, Check, FileText, Pencil, ChevronLeft } from 'lucide-
 import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useCreateAssignment, useAccounts, useContacts, useOpportunities, useUseCases, useActors } from '@/api/hooks';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker, DateTimePicker } from '@/components/ui/date-picker';
+import { DuplicateWarning, type DuplicateCandidate } from '@/components/crm/DuplicateWarning';
+import { ApiError } from '@/api/client';
 
 const typeLabels: Record<string, string> = {
   contact: 'Contact',
@@ -107,6 +109,9 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
   const [extractedFields, setExtractedFields] = useState<Record<string, unknown> | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [chatDuplicates, setChatDuplicates] = useState<DuplicateCandidate[] | null>(null);
+  const [chatPendingFields, setChatPendingFields] = useState<Record<string, unknown> | null>(null);
+  const { openDrawer, closeQuickAdd } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -153,23 +158,31 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
     ]);
   };
 
-  const handleConfirm = async () => {
-    if (!extractedFields || isSubmitting) return;
+  const handleConfirm = async (fields = extractedFields, allowDuplicates = false) => {
+    if (!fields || isSubmitting) return;
     setIsSubmitting(true);
 
     try {
-      if (type === 'contact') await createContact.mutateAsync(extractedFields);
-      else if (type === 'account') await createAccount.mutateAsync(extractedFields);
-      else if (type === 'opportunity') await createOpportunity.mutateAsync(extractedFields);
-      else if (type === 'use-case') await createUseCase.mutateAsync(extractedFields);
-      else if (type === 'activity') await createActivity.mutateAsync(extractedFields);
-      else if (type === 'assignment') await createAssignment.mutateAsync(extractedFields);
+      const payload = allowDuplicates ? { ...fields, allow_duplicates: true } : fields;
+      if (type === 'contact') await createContact.mutateAsync(payload);
+      else if (type === 'account') await createAccount.mutateAsync(payload);
+      else if (type === 'opportunity') await createOpportunity.mutateAsync(payload);
+      else if (type === 'use-case') await createUseCase.mutateAsync(payload);
+      else if (type === 'activity') await createActivity.mutateAsync(payload);
+      else if (type === 'assignment') await createAssignment.mutateAsync(payload);
 
+      setChatDuplicates(null);
+      setChatPendingFields(null);
       setConfirmed(true);
       toast({ title: `${typeLabels[type]} created!`, description: 'Successfully added to your CRM.' });
       setTimeout(onClose, 1200);
     } catch (err) {
-      toast({ title: `Failed to create ${typeLabels[type]}`, description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+      if (err instanceof ApiError && err.status === 409 && err.candidates.length > 0) {
+        setChatDuplicates(err.candidates as DuplicateCandidate[]);
+        setChatPendingFields(fields);
+      } else {
+        toast({ title: `Failed to create ${typeLabels[type]}`, description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -192,6 +205,31 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
       }
     }
   };
+
+  // ── Duplicate warning (chat mode) ───────────────────────────────────────
+  if (chatDuplicates && chatPendingFields) {
+    const entityType = type as 'contact' | 'account' | 'opportunity' | 'use-case';
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <span className="font-display font-bold text-foreground">New {typeLabels[type]}</span>
+          <button onClick={onClose}><X className="w-4 h-4 text-muted-foreground" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-4">
+          <DuplicateWarning
+            entityType={entityType}
+            candidates={chatDuplicates}
+            onUseExisting={(id) => {
+              openDrawer(entityType === 'use-case' ? 'use-case' : entityType as Parameters<typeof openDrawer>[0], id);
+              closeQuickAdd();
+            }}
+            onCreateAnyway={() => handleConfirm(chatPendingFields, true)}
+            onCancel={() => { setChatDuplicates(null); setChatPendingFields(null); }}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -251,7 +289,7 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
       {showConfirmButton && (
         <div className="px-4 pb-2">
           <button
-            onClick={handleConfirm}
+            onClick={() => handleConfirm()}
             disabled={isSubmitting}
             className="w-full py-2.5 rounded-xl bg-success text-success-foreground text-sm font-semibold hover:bg-success/90 transition-colors disabled:opacity-50"
           >
@@ -419,8 +457,11 @@ function ActorSelect({ value, onChange }: { value: string; onChange: (v: string)
 function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClose: () => void; onBack: () => void; backLabel?: string }) {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [duplicateCandidates, setDuplicateCandidates] = useState<DuplicateCandidate[] | null>(null);
+  const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null);
   const { data: accountsData } = useAccounts({ limit: 200 });
   const accounts = (accountsData?.data ?? []) as Array<{ id: string; name: string }>;
+  const { openDrawer, closeQuickAdd } = useAppStore();
 
   const createContact = useCreateContact();
   const createAccount = useCreateAccount();
@@ -441,62 +482,56 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
 
   const set = (key: string, val: string) => setFields(prev => ({ ...prev, [key]: val }));
 
+  const buildPayload = (): Record<string, unknown> => {
+    const payload: Record<string, unknown> = { ...fields };
+    if (type === 'contact') delete payload.name;
+    if (type === 'opportunity') { if (fields.amount) payload.amount = parseFloat(fields.amount) || 0; payload.stage = 'prospecting'; }
+    if (type === 'use-case') { if (!payload.stage) payload.stage = 'discovery'; if (fields.attributed_arr) payload.attributed_arr = parseFloat(fields.attributed_arr) || 0; }
+    if (type === 'account' && fields.website) payload.website = fields.website.startsWith('http') ? fields.website : `https://${fields.website}`;
+    if (type === 'activity') {
+      if (fields.occurred_at) payload.occurred_at = new Date(fields.occurred_at).toISOString();
+      if (!fields.subject_type) { delete payload.subject_type; delete payload.subject_id; }
+      if (!fields.subject_id) delete payload.subject_id;
+      if (!fields.outcome) delete payload.outcome;
+      if (!fields.occurred_at) delete payload.occurred_at;
+    }
+    if (type === 'assignment') {
+      if (fields.due_at) payload.due_at = new Date(fields.due_at + 'T00:00:00').toISOString();
+      if (!fields.subject_type) { delete payload.subject_type; delete payload.subject_id; }
+      if (!fields.subject_id) delete payload.subject_id;
+      if (!fields.context) delete payload.context;
+      if (!fields.description) delete payload.description;
+      if (!fields.due_at) delete payload.due_at;
+      if (!fields.priority) payload.priority = 'normal';
+    }
+    return payload;
+  };
+
+  const executeCreate = async (payload: Record<string, unknown>) => {
+    if (type === 'contact') await createContact.mutateAsync(payload);
+    else if (type === 'account') await createAccount.mutateAsync(payload);
+    else if (type === 'opportunity') await createOpportunity.mutateAsync(payload);
+    else if (type === 'use-case') await createUseCase.mutateAsync(payload);
+    else if (type === 'activity') await createActivity.mutateAsync(payload);
+    else if (type === 'assignment') await createAssignment.mutateAsync(payload);
+    const label = fields.first_name ?? fields.title ?? fields.name ?? fields.subject ?? typeLabels[type];
+    toast({ title: `${typeLabels[type]} created`, description: `${label} has been added.` });
+    onClose();
+  };
+
   const handleSubmit = async () => {
     if (!isValid() || isSubmitting) return;
     setIsSubmitting(true);
+    const payload = buildPayload();
     try {
-      const payload: Record<string, unknown> = { ...fields };
-
-      if (type === 'contact') {
-        delete payload.name; // server uses first_name/last_name
-      }
-      if (type === 'opportunity') {
-        if (fields.amount) payload.amount = parseFloat(fields.amount) || 0;
-        payload.stage = 'prospecting';
-      }
-      if (type === 'use-case') {
-        if (!payload.stage) payload.stage = 'discovery';
-        if (fields.attributed_arr) payload.attributed_arr = parseFloat(fields.attributed_arr) || 0;
-      }
-      if (type === 'account' && fields.website) {
-        payload.website = fields.website.startsWith('http') ? fields.website : `https://${fields.website}`;
-      }
-      if (type === 'activity') {
-        // Convert occurred_at from datetime-local to ISO string
-        if (fields.occurred_at) {
-          payload.occurred_at = new Date(fields.occurred_at).toISOString();
-        }
-        // Clean up empty optional fields
-        if (!fields.subject_type) { delete payload.subject_type; delete payload.subject_id; }
-        if (!fields.subject_id) delete payload.subject_id;
-        if (!fields.outcome) delete payload.outcome;
-        if (!fields.occurred_at) delete payload.occurred_at;
-      }
-
-      if (type === 'assignment') {
-        // Convert date string to ISO datetime
-        if (fields.due_at) payload.due_at = new Date(fields.due_at + 'T00:00:00').toISOString();
-        // Strip empty optional fields
-        if (!fields.subject_type) { delete payload.subject_type; delete payload.subject_id; }
-        if (!fields.subject_id) delete payload.subject_id;
-        if (!fields.context) delete payload.context;
-        if (!fields.description) delete payload.description;
-        if (!fields.due_at) delete payload.due_at;
-        if (!fields.priority) payload.priority = 'normal';
-      }
-
-      if (type === 'contact') await createContact.mutateAsync(payload);
-      else if (type === 'account') await createAccount.mutateAsync(payload);
-      else if (type === 'opportunity') await createOpportunity.mutateAsync(payload);
-      else if (type === 'use-case') await createUseCase.mutateAsync(payload);
-      else if (type === 'activity') await createActivity.mutateAsync(payload);
-      else if (type === 'assignment') await createAssignment.mutateAsync(payload);
-
-      const label = fields.first_name ?? fields.title ?? fields.name ?? fields.subject ?? typeLabels[type];
-      toast({ title: `${typeLabels[type]} created`, description: `${label} has been added.` });
-      onClose();
+      await executeCreate(payload);
     } catch (err) {
-      toast({ title: `Failed to create ${typeLabels[type]}`, description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+      if (err instanceof ApiError && err.status === 409 && err.candidates.length > 0) {
+        setDuplicateCandidates(err.candidates as DuplicateCandidate[]);
+        setPendingPayload(payload);
+      } else {
+        toast({ title: `Failed to create ${typeLabels[type]}`, description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -512,6 +547,36 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
     if (f.dependsOn.values) return f.dependsOn.values.includes(depVal);
     return true;
   };
+
+  // ── Duplicate warning overlay ────────────────────────────────────────────
+  if (duplicateCandidates && pendingPayload) {
+    const entityType = type as 'contact' | 'account' | 'opportunity' | 'use-case';
+    return (
+      <div className="flex-1 overflow-y-auto p-4">
+        <DuplicateWarning
+          entityType={entityType}
+          candidates={duplicateCandidates}
+          onUseExisting={(id) => {
+            openDrawer(entityType === 'use-case' ? 'use-case' : entityType as Parameters<typeof openDrawer>[0], id);
+            closeQuickAdd();
+          }}
+          onCreateAnyway={async () => {
+            setDuplicateCandidates(null);
+            setIsSubmitting(true);
+            try {
+              await executeCreate({ ...pendingPayload, allow_duplicates: true });
+            } catch (err) {
+              toast({ title: `Failed to create ${typeLabels[type]}`, description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+            } finally {
+              setIsSubmitting(false);
+              setPendingPayload(null);
+            }
+          }}
+          onCancel={() => { setDuplicateCandidates(null); setPendingPayload(null); }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 overflow-y-auto p-4">

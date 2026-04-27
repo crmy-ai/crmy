@@ -8,11 +8,12 @@ import type { ActorContext } from '@crmy/shared';
 import * as oppRepo from '../../db/repos/opportunities.js';
 import * as contextRepo from '../../db/repos/context-entries.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound, validationError, permissionDenied } from '@crmy/shared';
+import { notFound, validationError, permissionDenied, duplicateError } from '@crmy/shared';
 import { validateOpportunityTransition } from '../../services/state-machine.js';
 import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import { computeDealHealthScore } from '../../services/scoring.js';
+import { checkOpportunityDuplicate } from '../../services/deduplication.js';
 import type { ToolDef } from '../server.js';
 
 export function opportunityTools(db: DbPool): ToolDef[] {
@@ -20,24 +21,61 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     {
       name: 'opportunity_create',
       tier: 'extended',
-      description: 'Create a new sales opportunity linked to an account. Set stage, amount (in cents), close_date, probability, and forecast_cat to build the pipeline record. The amount field represents ARR in cents (e.g. 180000 for $1,800). Link to an account_id and optionally a primary contact_id.',
+      description: 'Create a new sales opportunity linked to an account. Set stage, amount (in cents), close_date, probability, and forecast_cat to build the pipeline record. The amount field represents ARR in cents (e.g. 180000 for $1,800). If a duplicate opportunity is detected (same name on the same account), a 409 is returned with candidates. Pass allow_duplicates: true to create anyway.',
       inputSchema: opportunityCreate,
       handler: async (input: z.infer<typeof opportunityCreate>, actor: ActorContext) => {
+        // ── Duplicate check ──
+        if (!input.allow_duplicates) {
+          const dedup = await checkOpportunityDuplicate(db, actor.tenant_id, {
+            name: input.name,
+            account_id: input.account_id,
+            amount: input.amount,
+            close_date: input.close_date,
+          });
+
+          if (dedup.confidence === 'definitive' || dedup.confidence === 'high') {
+            if (input.if_exists === 'return_existing' && dedup.candidates[0]) {
+              const existing = await oppRepo.getOpportunity(db, actor.tenant_id, dedup.candidates[0].id);
+              return {
+                opportunity: existing,
+                was_existing: true,
+                duplicate_confidence: dedup.confidence,
+                matched_by: dedup.candidates[0].reasons,
+              };
+            }
+            throw duplicateError(
+              `A similar opportunity already exists (${dedup.candidates[0]?.reasons.join(', ')})`,
+              dedup.candidates,
+            );
+          }
+
+          if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
+            input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'opportunity', input.custom_fields, { isCreate: true });
+          }
+          const opportunity = await oppRepo.createOpportunity(db, actor.tenant_id, { ...input, created_by: actor.actor_id });
+          const event_id = await emitEvent(db, {
+            tenantId: actor.tenant_id, eventType: 'opportunity.created',
+            actorId: actor.actor_id, actorType: actor.actor_type,
+            objectType: 'opportunity', objectId: opportunity.id, afterData: opportunity,
+          });
+          indexDocument(db, 'opportunity', opportunity as unknown as Record<string, unknown>)
+            .catch((err: unknown) => console.warn(`[search] opportunity index ${opportunity.id}: ${(err as Error).message}`));
+          return {
+            opportunity,
+            event_id,
+            potential_duplicates: dedup.confidence === 'medium' ? dedup.candidates : undefined,
+          };
+        }
+
+        // allow_duplicates=true — skip check
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
           input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'opportunity', input.custom_fields, { isCreate: true });
         }
-        const opportunity = await oppRepo.createOpportunity(db, actor.tenant_id, {
-          ...input,
-          created_by: actor.actor_id,
-        });
+        const opportunity = await oppRepo.createOpportunity(db, actor.tenant_id, { ...input, created_by: actor.actor_id });
         const event_id = await emitEvent(db, {
-          tenantId: actor.tenant_id,
-          eventType: 'opportunity.created',
-          actorId: actor.actor_id,
-          actorType: actor.actor_type,
-          objectType: 'opportunity',
-          objectId: opportunity.id,
-          afterData: opportunity,
+          tenantId: actor.tenant_id, eventType: 'opportunity.created',
+          actorId: actor.actor_id, actorType: actor.actor_type,
+          objectType: 'opportunity', objectId: opportunity.id, afterData: opportunity,
         });
         indexDocument(db, 'opportunity', opportunity as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] opportunity index ${opportunity.id}: ${(err as Error).message}`));

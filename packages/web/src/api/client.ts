@@ -3,6 +3,19 @@
 
 const BASE = '/api/v1';
 
+/**
+ * Structured API error that preserves the full response body so callers can
+ * inspect status codes, validation details, and duplicate candidates.
+ */
+export class ApiError extends Error {
+  constructor(public readonly body: Record<string, unknown>) {
+    super((body.detail as string) || `HTTP ${body.status ?? 'error'}`);
+    this.name = 'ApiError';
+  }
+  get status(): number { return (this.body.status as number) ?? 0; }
+  get candidates(): unknown[] { return (this.body.candidates as unknown[]) ?? []; }
+}
+
 function getToken(): string | null {
   return localStorage.getItem('crmy_token');
 }
@@ -53,8 +66,8 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(body.detail || `HTTP ${res.status}`);
+    const body = await res.json().catch(() => ({ detail: res.statusText, status: res.status }));
+    throw new ApiError(body);
   }
 
   if (res.status === 204) return undefined as T;

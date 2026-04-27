@@ -519,6 +519,14 @@ export function useEnrollInSequenceWithObjective() {
   });
 }
 
+/** Generate a sample AI draft for an email step without saving or enrolling. */
+export function useDraftSequencePreview() {
+  return useMutation({
+    mutationFn: (step: { subject?: string; body_text?: string; ai_prompt?: string; ai_persona?: string }) =>
+      api.post<{ subject: string; body_text: string }>('sequences/draft-preview', step),
+  });
+}
+
 // Inbound emails (activities with direction=inbound)
 export function useInboundEmails(params?: { limit?: number; cursor?: string }) {
   return useList('inbound-emails', 'activities', {

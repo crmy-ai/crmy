@@ -60,6 +60,9 @@ export type AgentEvent =
   | { type: 'tool_status'; id: string; name: string; status: string; turn_id: string }
   | { type: 'tool_call'; id: string; name: string; arguments: Record<string, unknown>; turn_id: string }
   | { type: 'tool_result'; id: string; name: string; result: unknown; is_error: boolean; turn_id: string }
+  /** Extended reasoning block emitted when the model supports thinking (e.g. claude-3-7-sonnet).
+   *  turn_id matches the tool calls that follow so the UI can associate reasoning with actions. */
+  | { type: 'thinking'; content: string; turn_id: string }
   | { type: 'done'; session_id: string; label: string | null }
   | { type: 'error'; message: string };
 

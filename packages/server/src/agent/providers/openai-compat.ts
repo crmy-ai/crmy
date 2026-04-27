@@ -13,6 +13,7 @@ export async function callOpenAICompat(
   config: AgentConfig,
   apiKey: string | null,
   onDelta: (text: string) => void,
+  _onThinking?: (text: string) => void, // not supported by OpenAI-compatible providers
 ): Promise<{ content: string; tool_calls: ToolCallRecord[] }> {
   const openaiMessages = toOpenAIFormat(messages);
   const openaiTools = tools.length > 0 ? tools.map(t => ({

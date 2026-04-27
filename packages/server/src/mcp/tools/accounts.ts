@@ -8,9 +8,10 @@ import type { ActorContext } from '@crmy/shared';
 import * as accountRepo from '../../db/repos/accounts.js';
 import * as contextRepo from '../../db/repos/context-entries.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound, permissionDenied } from '@crmy/shared';
+import { notFound, permissionDenied, duplicateError } from '@crmy/shared';
 import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
+import { checkAccountDuplicate } from '../../services/deduplication.js';
 import type { ToolDef } from '../server.js';
 
 export function accountTools(db: DbPool): ToolDef[] {
@@ -18,24 +19,60 @@ export function accountTools(db: DbPool): ToolDef[] {
     {
       name: 'account_create',
       tier: 'extended',
-      description: 'Create a new account representing a company or organization. Set name, industry, domain, website, annual_revenue, and employee_count to build a complete profile. Accounts are the top-level entity that contacts, opportunities, and use cases roll up to.',
+      description: 'Create a new account representing a company or organization. Before calling this, prefer using entity_resolve to check if the account already exists. If a potential duplicate is detected (same domain or same name), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record. Pass allow_duplicates: true to skip the check after confirming with the user.',
       inputSchema: accountCreate,
       handler: async (input: z.infer<typeof accountCreate>, actor: ActorContext) => {
+        // ── Duplicate check ──
+        if (!input.allow_duplicates) {
+          const dedup = await checkAccountDuplicate(db, actor.tenant_id, {
+            name: input.name,
+            domain: input.domain,
+            website: input.website,
+          });
+
+          if (dedup.confidence === 'definitive' || dedup.confidence === 'high') {
+            if (input.if_exists === 'return_existing' && dedup.candidates[0]) {
+              const existing = await accountRepo.getAccount(db, actor.tenant_id, dedup.candidates[0].id);
+              return {
+                account: existing,
+                was_existing: true,
+                duplicate_confidence: dedup.confidence,
+                matched_by: dedup.candidates[0].reasons,
+              };
+            }
+            throw duplicateError(
+              `A similar account already exists (${dedup.candidates[0]?.reasons.join(', ')})`,
+              dedup.candidates,
+            );
+          }
+
+          if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
+            input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'account', input.custom_fields, { isCreate: true });
+          }
+          const account = await accountRepo.createAccount(db, actor.tenant_id, { ...input, created_by: actor.actor_id });
+          const event_id = await emitEvent(db, {
+            tenantId: actor.tenant_id, eventType: 'account.created',
+            actorId: actor.actor_id, actorType: actor.actor_type,
+            objectType: 'account', objectId: account.id, afterData: account,
+          });
+          indexDocument(db, 'account', account as unknown as Record<string, unknown>)
+            .catch((err: unknown) => console.warn(`[search] account index ${account.id}: ${(err as Error).message}`));
+          return {
+            account,
+            event_id,
+            potential_duplicates: dedup.confidence === 'medium' ? dedup.candidates : undefined,
+          };
+        }
+
+        // allow_duplicates=true — skip check
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
           input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'account', input.custom_fields, { isCreate: true });
         }
-        const account = await accountRepo.createAccount(db, actor.tenant_id, {
-          ...input,
-          created_by: actor.actor_id,
-        });
+        const account = await accountRepo.createAccount(db, actor.tenant_id, { ...input, created_by: actor.actor_id });
         const event_id = await emitEvent(db, {
-          tenantId: actor.tenant_id,
-          eventType: 'account.created',
-          actorId: actor.actor_id,
-          actorType: actor.actor_type,
-          objectType: 'account',
-          objectId: account.id,
-          afterData: account,
+          tenantId: actor.tenant_id, eventType: 'account.created',
+          actorId: actor.actor_id, actorType: actor.actor_type,
+          objectType: 'account', objectId: account.id, afterData: account,
         });
         indexDocument(db, 'account', account as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] account index ${account.id}: ${(err as Error).message}`));
@@ -175,6 +212,89 @@ export function accountTools(db: DbPool): ToolDef[] {
           beforeData: before,
         });
         return { deleted: true };
+      },
+    },
+    {
+      name: 'account_merge',
+      tier: 'extended',
+      description: 'Merge a duplicate account (secondary) into a primary account. All contacts, opportunities, use cases, and activities linked to the secondary are reassigned to the primary. The secondary account is soft-deleted (merged_into set to primary_id). The primary retains its field values; the secondary\'s domain, name, and aliases are appended to the primary\'s aliases list. Use this to clean up duplicate company records.',
+      inputSchema: z.object({
+        primary_id: z.string().uuid().describe('The account to keep — its profile fields are preserved'),
+        secondary_id: z.string().uuid().describe('The duplicate account to absorb — will be soft-deleted after merge'),
+      }),
+      handler: async (input: { primary_id: string; secondary_id: string }, actor: ActorContext) => {
+        type AccountRow = { merged_into?: string; domain?: string; name?: string; aliases?: string[] };
+
+        if (input.primary_id === input.secondary_id) {
+          throw new Error('primary_id and secondary_id must be different accounts');
+        }
+
+        const [primary, secondary] = await Promise.all([
+          accountRepo.getAccount(db, actor.tenant_id, input.primary_id),
+          accountRepo.getAccount(db, actor.tenant_id, input.secondary_id),
+        ]);
+        if (!primary) throw notFound('Account', input.primary_id);
+        if (!secondary) throw notFound('Account', input.secondary_id);
+
+        const sec = secondary as unknown as AccountRow;
+        const pri = primary as unknown as AccountRow;
+        if (sec.merged_into) {
+          throw new Error('Secondary account has already been merged into another record');
+        }
+
+        let merged: Record<string, number> = {};
+        await db.query('BEGIN');
+        try {
+          const [contacts, opps, useCases, acts] = await Promise.all([
+            db.query('UPDATE contacts SET account_id=$1 WHERE account_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]),
+            db.query('UPDATE opportunities SET account_id=$1 WHERE account_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]),
+            db.query('UPDATE use_cases SET account_id=$1 WHERE account_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]),
+            db.query('UPDATE activities SET account_id=$1 WHERE account_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]),
+          ]);
+          merged = {
+            contacts: contacts.rowCount ?? 0,
+            opportunities: opps.rowCount ?? 0,
+            use_cases: useCases.rowCount ?? 0,
+            activities: acts.rowCount ?? 0,
+          };
+
+          // Merge aliases: add secondary domain, name, and aliases into primary
+          const newAliases = [...(pri.aliases ?? [])];
+          const toAdd: string[] = [];
+          if (sec.domain) toAdd.push(sec.domain);
+          if (sec.name) toAdd.push(sec.name);
+          for (const a of (sec.aliases ?? [])) toAdd.push(a);
+          for (const a of toAdd) {
+            if (!newAliases.includes(a)) newAliases.push(a);
+          }
+          await db.query(
+            'UPDATE accounts SET aliases=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3',
+            [JSON.stringify(newAliases), input.primary_id, actor.tenant_id],
+          );
+
+          await db.query(
+            'UPDATE accounts SET merged_into=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3',
+            [input.primary_id, input.secondary_id, actor.tenant_id],
+          );
+
+          await db.query('COMMIT');
+        } catch (err) {
+          await db.query('ROLLBACK');
+          throw err;
+        }
+
+        const updatedPrimary = await accountRepo.getAccount(db, actor.tenant_id, input.primary_id);
+        indexDocument(db, 'account', updatedPrimary as unknown as Record<string, unknown>).catch(() => {});
+        removeDocument(db, actor.tenant_id, 'account', input.secondary_id).catch(() => {});
+
+        await emitEvent(db, {
+          tenantId: actor.tenant_id, eventType: 'account.merged',
+          actorId: actor.actor_id, actorType: actor.actor_type,
+          objectType: 'account', objectId: input.primary_id,
+          afterData: { primary_id: input.primary_id, secondary_id: input.secondary_id, merged },
+        });
+
+        return { primary: updatedPrimary, secondary_id: input.secondary_id, merged_count: merged };
       },
     },
   ];

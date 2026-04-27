@@ -16,11 +16,12 @@ import {
 import {
   Send, Bot, X, User, Briefcase, Building, Layers, Clock, Loader2, Wrench,
   ChevronDown, ChevronRight, Pencil, Trash2, Check, MessageSquare,
+  Brain, Eye, EyeOff,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   streamChat, groupToolMessages, getSuggestions, SYSTEM_INIT_PREFIX,
-  type DisplayMessage, type RenderItem, type ToolGroupItem,
+  type DisplayMessage, type RenderItem, type ToolGroupItem, type ToolGroupStep,
 } from '@/lib/agentStream';
 
 const typeIcons: Record<string, typeof User> = {
@@ -148,6 +149,17 @@ export default function Agent() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Verbose mode: when on, show reasoning bubbles and tool call/result details.
+  // Persisted to localStorage so users who build trust can keep it hidden.
+  const [verbose, setVerbose] = useState<boolean>(() => {
+    try { return localStorage.getItem('crmy_agent_verbose') !== 'false'; } catch { return true; }
+  });
+  const toggleVerbose = () => setVerbose(v => {
+    const next = !v;
+    try { localStorage.setItem('crmy_agent_verbose', String(next)); } catch {}
+    return next;
+  });
+
   const { aiContext } = useAppStore();
   const { enabled, loading: configLoading, connectivity } = useAgentSettings();
   const { data: sessionsData, refetch: refetchSessions } = useAgentSessions();
@@ -193,6 +205,15 @@ export default function Agent() {
               });
               break;
             }
+            case 'thinking':
+              setMessages(prev => {
+                const last = prev[prev.length - 1];
+                if (last?.kind === 'thinking' && last.turn_id === event.turn_id) {
+                  return [...prev.slice(0, -1), { ...last, content: last.content + event.content }];
+                }
+                return [...prev, { kind: 'thinking', content: event.content, turn_id: event.turn_id }];
+              });
+              break;
             case 'tool_status':
               setMessages(prev => {
                 const existing = prev.findIndex(m => m.kind === 'tool_status' && m.id === event.id);
@@ -201,12 +222,18 @@ export default function Agent() {
                 return [...prev, msg];
               });
               break;
+            case 'tool_call':
+              setMessages(prev => [...prev, { kind: 'tool_call', id: event.id, name: event.name, arguments: event.arguments, turn_id: event.turn_id }]);
+              break;
             case 'tool_result':
-              setMessages(prev => prev.map(m =>
-                m.kind === 'tool_status' && m.id === event.id
-                  ? { ...m, status: event.is_error ? `Error from ${m.name.replace(/_/g, ' ')}` : m.status.replace('…', ' ✓') }
-                  : m
-              ));
+              setMessages(prev => {
+                const updated = prev.map(m =>
+                  m.kind === 'tool_status' && m.id === event.id
+                    ? { ...m, status: event.is_error ? `Error from ${m.name.replace(/_/g, ' ')}` : m.status.replace('…', ' ✓') }
+                    : m
+                );
+                return [...updated, { kind: 'tool_result' as const, id: event.id, name: event.name, is_error: event.is_error, result: event.result, turn_id: event.turn_id }];
+              });
               break;
             case 'done':
               refetchSessions();
@@ -359,20 +386,33 @@ export default function Agent() {
             });
             break;
 
+          case 'thinking': {
+            // Accumulate reasoning text — one bubble per turn_id
+            setMessages(prev => {
+              const last = prev[prev.length - 1];
+              if (last?.kind === 'thinking' && last.turn_id === event.turn_id) {
+                return [...prev.slice(0, -1), { ...last, content: last.content + event.content }];
+              }
+              return [...prev, { kind: 'thinking', content: event.content, turn_id: event.turn_id }];
+            });
+            break;
+          }
+
           case 'tool_call':
-            // tool_call arrives right after tool_status — no UI action needed
-            // (the status line already shows the user what's happening)
+            // Store in messages so groupToolMessages can attach arguments to ToolGroupStep
+            setMessages(prev => [...prev, { kind: 'tool_call', id: event.id, name: event.name, arguments: event.arguments, turn_id: event.turn_id }]);
             break;
 
           case 'tool_result':
-            // Update the matching tool_status to show completion
-            setMessages(prev =>
-              prev.map(m =>
+            // Update status text AND store result so groupToolMessages can show it in expanded view
+            setMessages(prev => {
+              const updated = prev.map(m =>
                 m.kind === 'tool_status' && m.id === event.id
                   ? { ...m, status: event.is_error ? `Error from ${m.name.replace(/_/g, ' ')}` : m.status.replace('…', ' ✓'), turn_id: event.turn_id }
                   : m
-              )
-            );
+              );
+              return [...updated, { kind: 'tool_result' as const, id: event.id, name: event.name, is_error: event.is_error, result: event.result, turn_id: event.turn_id }];
+            });
             break;
 
           case 'error':
@@ -488,6 +528,13 @@ export default function Agent() {
                   </button>
                 )}
                 <button
+                  onClick={toggleVerbose}
+                  title={verbose ? 'Hide reasoning & tool details' : 'Show reasoning & tool details'}
+                  className={`p-1 rounded-md transition-colors ${verbose ? 'text-primary bg-primary/10 hover:bg-primary/20' : 'text-muted-foreground hover:bg-muted'}`}
+                >
+                  {verbose ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                </button>
+                <button
                   onClick={startNewChat}
                   className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full hover:bg-muted/80 transition-colors"
                 >
@@ -535,7 +582,7 @@ export default function Agent() {
               </div>
             )}
             {groupToolMessages(messages).map((item, i) => (
-              <MessageBubble key={i} item={item} index={i} />
+              <MessageBubble key={i} item={item} index={i} verbose={verbose} />
             ))}
             {streaming && !['assistant', 'tool_status'].includes(messages[messages.length - 1]?.kind ?? '') && (
               <TypingIndicator />
@@ -643,11 +690,98 @@ function TypingIndicator() {
   );
 }
 
+// ── Thinking Bubble ─────────────────────────────────────────────────────────
+
+function ThinkingBubble({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const lines = content.trim().split('\n').length;
+  const preview = content.trim().split('\n').slice(0, 2).join(' ').slice(0, 100);
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="flex justify-start pl-10">
+      <div className="max-w-[80%] rounded-xl border border-primary/20 bg-primary/5 text-xs overflow-hidden">
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-primary/10 transition-colors"
+        >
+          <Brain className="w-3 h-3 text-primary/60 shrink-0" />
+          <span className="text-primary/70 font-medium shrink-0">
+            {expanded ? 'Reasoning' : `Reasoned · ${lines} line${lines !== 1 ? 's' : ''}`}
+          </span>
+          {!expanded && (
+            <span className="text-muted-foreground truncate flex-1 min-w-0">{preview}</span>
+          )}
+          {expanded
+            ? <ChevronDown className="w-3 h-3 text-muted-foreground ml-auto shrink-0" />
+            : <ChevronRight className="w-3 h-3 text-muted-foreground ml-auto shrink-0" />}
+        </button>
+        {expanded && (
+          <div className="px-3 pb-3 pt-1 border-t border-primary/10">
+            <pre className="whitespace-pre-wrap text-muted-foreground font-mono text-[11px] leading-relaxed">
+              {content}
+            </pre>
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+// ── Expandable Step ──────────────────────────────────────────────────────────
+
+function ExpandableStep({ step, verbose }: { step: ToolGroupStep; verbose: boolean }) {
+  const [open, setOpen] = useState(false);
+  const done = step.status.endsWith('✓');
+  const err = step.status.startsWith('Error') || step.is_error;
+  const hasDetail = verbose && (step.arguments !== undefined || step.result !== undefined);
+
+  return (
+    <div className="text-xs text-muted-foreground">
+      <button
+        onClick={() => hasDetail && setOpen(v => !v)}
+        className={`flex items-center gap-1.5 w-full text-left py-0.5 ${hasDetail ? 'hover:text-foreground transition-colors cursor-pointer' : 'cursor-default'}`}
+      >
+        <code className="font-mono text-muted-foreground/60 bg-muted px-1 rounded shrink-0">{step.name}</code>
+        <span className={err ? 'text-destructive' : done ? 'text-muted-foreground' : 'text-foreground/60'}>
+          {step.status}
+        </span>
+        {hasDetail && (
+          <span className="ml-auto opacity-60">
+            {open ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
+          </span>
+        )}
+      </button>
+      {open && verbose && (
+        <div className="mt-1 ml-2 space-y-2">
+          {step.arguments !== undefined && (
+            <div>
+              <p className="text-muted-foreground/50 uppercase tracking-wider text-[10px] mb-0.5">Input</p>
+              <pre className="text-[10px] font-mono bg-muted/50 rounded p-1.5 overflow-x-auto max-h-32 text-foreground/70">
+                {JSON.stringify(step.arguments, null, 2)}
+              </pre>
+            </div>
+          )}
+          {step.result !== undefined && (
+            <div>
+              <p className={`uppercase tracking-wider text-[10px] mb-0.5 ${step.is_error ? 'text-destructive/70' : 'text-muted-foreground/50'}`}>
+                {step.is_error ? 'Error' : 'Output'}
+              </p>
+              <pre className={`text-[10px] font-mono rounded p-1.5 overflow-x-auto max-h-40 ${step.is_error ? 'bg-destructive/10 text-destructive' : 'bg-muted/50 text-foreground/70'}`}>
+                {JSON.stringify(step.result, null, 2)}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Tool Group (collapsible) ─────────────────────────────────────────────────
 
-function ToolGroup({ group }: { group: ToolGroupItem }) {
-  const allDone = group.steps.every(s => s.status.endsWith('✓') || s.status.startsWith('Error'));
-  const hasError = group.steps.some(s => s.status.startsWith('Error'));
+function ToolGroup({ group, verbose }: { group: ToolGroupItem; verbose: boolean }) {
+  const allDone = group.steps.every(s => s.status.endsWith('✓') || s.status.startsWith('Error') || s.is_error);
+  const hasError = group.steps.some(s => s.status.startsWith('Error') || s.is_error);
   const [expanded, setExpanded] = useState(hasError); // auto-expand on error
 
   // While running: show current active step name
@@ -674,18 +808,9 @@ function ToolGroup({ group }: { group: ToolGroupItem }) {
       </button>
       {expanded && (
         <div className="mt-1 ml-5 space-y-0.5 border-l border-border pl-3">
-          {group.steps.map(step => {
-            const done = step.status.endsWith('✓');
-            const err = step.status.startsWith('Error');
-            return (
-              <div key={step.id} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <code className="font-mono text-muted-foreground/60 bg-muted px-1 rounded shrink-0">{step.name}</code>
-                <span className={err ? 'text-destructive' : done ? 'text-muted-foreground' : 'text-foreground/60'}>
-                  {step.status}
-                </span>
-              </div>
-            );
-          })}
+          {group.steps.map(step => (
+            <ExpandableStep key={step.id} step={step} verbose={verbose} />
+          ))}
         </div>
       )}
     </motion.div>
@@ -694,12 +819,16 @@ function ToolGroup({ group }: { group: ToolGroupItem }) {
 
 // ── Message Bubble ──────────────────────────────────────────────────────────
 
-function MessageBubble({ item, index }: { item: RenderItem; index: number }) {
+function MessageBubble({ item, index, verbose }: { item: RenderItem; index: number; verbose: boolean }) {
   if (item.kind === 'tool_group') {
-    return <ToolGroup group={item} />;
+    return <ToolGroup group={item} verbose={verbose} />;
   }
 
   const msg = item as DisplayMessage;
+
+  if (msg.kind === 'thinking') {
+    return verbose ? <ThinkingBubble content={msg.content} /> : null;
+  }
 
   if (msg.kind === 'tool_status' || msg.kind === 'tool_call' || msg.kind === 'tool_result') {
     // These are handled by ToolGroup — skip
