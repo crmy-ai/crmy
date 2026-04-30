@@ -34,9 +34,22 @@ export interface ProviderDef {
   baseUrl: string;
   /** Tailwind bg-* class for the provider colour dot */
   dotColor: string;
-  /** Whether an API key is required (hidden for Ollama) */
+  /** Whether an API key is required (hidden for Ollama / local models) */
   requiresKey: boolean;
   models: ModelDef[];
+  /**
+   * Whether this provider emits extended reasoning / thinking blocks.
+   * Only Anthropic supports this — via the `thinking` API parameter and
+   * interleaved-thinking beta. All other providers should show a notice.
+   */
+  supportsThinking: boolean;
+  /**
+   * Whether the provider uses Anthropic's Messages API format (`/messages`).
+   * False = OpenAI-compatible format (`/chat/completions`).
+   * The server routes to the correct provider implementation based on the
+   * `provider` field stored in the agent config.
+   */
+  isAnthropicFormat: boolean;
 }
 
 export const PROVIDERS: ProviderDef[] = [
@@ -46,6 +59,8 @@ export const PROVIDERS: ProviderDef[] = [
     baseUrl: 'https://api.anthropic.com/v1',
     dotColor: 'bg-orange-400',
     requiresKey: true,
+    isAnthropicFormat: true,
+    supportsThinking: true,
     models: [
       { id: 'claude-opus-4-20250514',    label: 'Claude Opus 4',    inputPricePerM: 15,   outputPricePerM: 75   },
       { id: 'claude-sonnet-4-20250514',  label: 'Claude Sonnet 4',  inputPricePerM: 3,    outputPricePerM: 15   },
@@ -58,6 +73,8 @@ export const PROVIDERS: ProviderDef[] = [
     baseUrl: 'https://api.openai.com/v1',
     dotColor: 'bg-green-500',
     requiresKey: true,
+    isAnthropicFormat: false,
+    supportsThinking: false,
     models: [
       { id: 'gpt-4o',      label: 'GPT-4o',       inputPricePerM: 2.50,  outputPricePerM: 10   },
       { id: 'gpt-4o-mini', label: 'GPT-4o mini',  inputPricePerM: 0.15,  outputPricePerM: 0.60 },
@@ -72,6 +89,8 @@ export const PROVIDERS: ProviderDef[] = [
     baseUrl: 'https://openrouter.ai/api/v1',
     dotColor: 'bg-violet-500',
     requiresKey: true,
+    isAnthropicFormat: false,
+    supportsThinking: false,
     models: [
       // Pricing is fetched live from openrouter.ai/api/v1/models when this provider is active.
       // Fallback static prices are provided here for offline / initial render.
@@ -90,23 +109,30 @@ export const PROVIDERS: ProviderDef[] = [
     baseUrl: 'http://localhost:11434/v1',
     dotColor: 'bg-blue-400',
     requiresKey: false,
+    isAnthropicFormat: false,
+    supportsThinking: false,
     models: [
       // Ollama runs locally — no token cost.
-      { id: 'llama3.2',     label: 'Llama 3.2 (8B)',  inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'llama3.2:1b',  label: 'Llama 3.2 (1B)',  inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'mistral',      label: 'Mistral 7B',       inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'phi3',         label: 'Phi-3 Mini',       inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'codellama',    label: 'Code Llama',       inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'gemma2',       label: 'Gemma 2 (9B)',     inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'deepseek-r1',  label: 'DeepSeek R1',      inputPricePerM: 0, outputPricePerM: 0 },
+      // Tool calling works with models that support it (e.g. llama3.2, mistral-nemo).
+      // Use `ollama list` to see what's pulled, then enter the name under "Custom model ID".
+      { id: 'llama3.2',          label: 'Llama 3.2 (8B)',      inputPricePerM: 0, outputPricePerM: 0 },
+      { id: 'llama3.2:1b',       label: 'Llama 3.2 (1B)',      inputPricePerM: 0, outputPricePerM: 0 },
+      { id: 'mistral-nemo',      label: 'Mistral Nemo (12B)',   inputPricePerM: 0, outputPricePerM: 0 },
+      { id: 'mistral',           label: 'Mistral 7B',           inputPricePerM: 0, outputPricePerM: 0 },
+      { id: 'phi3',              label: 'Phi-3 Mini',           inputPricePerM: 0, outputPricePerM: 0 },
+      { id: 'gemma2',            label: 'Gemma 2 (9B)',         inputPricePerM: 0, outputPricePerM: 0 },
+      { id: 'deepseek-r1:8b',    label: 'DeepSeek R1 (8B)',     inputPricePerM: 0, outputPricePerM: 0 },
+      { id: 'qwen2.5:7b',        label: 'Qwen 2.5 (7B)',        inputPricePerM: 0, outputPricePerM: 0 },
     ],
   },
   {
     id: 'custom',
-    label: 'Custom / Other',
+    label: 'Custom / Other (OpenAI-compatible)',
     baseUrl: '',
     dotColor: 'bg-slate-400',
     requiresKey: false,
+    isAnthropicFormat: false,
+    supportsThinking: false,
     models: [],
   },
 ];

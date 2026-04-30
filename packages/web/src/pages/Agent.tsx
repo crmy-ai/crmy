@@ -20,9 +20,11 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  streamChat, groupToolMessages, getSuggestions, SYSTEM_INIT_PREFIX,
+  streamChat, groupToolMessages, getSuggestions,
+  SYSTEM_INIT_PREFIX, COMPACT_SUMMARY_PREFIX, COMPACT_ACK_PREFIX,
   type DisplayMessage, type RenderItem, type ToolGroupItem, type ToolGroupStep,
 } from '@/lib/agentStream';
+import { AgentMarkdown } from '@/components/ui/agent-markdown';
 
 const typeIcons: Record<string, typeof User> = {
   contact: User, opportunity: Briefcase, 'use-case': Layers, account: Building,
@@ -30,6 +32,30 @@ const typeIcons: Record<string, typeof User> = {
 const typeLabels: Record<string, string> = {
   contact: 'Contact', opportunity: 'Opportunity', 'use-case': 'Use Case', account: 'Account',
 };
+
+// ── Message filtering helpers ────────────────────────────────────────────────
+
+type RawMsg = { role: string; content: string };
+
+/** True for messages that should count as visible / meaningful in the chat. */
+function isVisibleMsg(m: RawMsg): boolean {
+  if (m.role === 'system') return false;
+  if (m.role === 'user' && m.content?.startsWith(SYSTEM_INIT_PREFIX)) return false;
+  if (m.role === 'user' && m.content?.startsWith(COMPACT_SUMMARY_PREFIX)) return false;
+  if (m.role === 'assistant' && m.content?.startsWith(COMPACT_ACK_PREFIX)) return false;
+  return true;
+}
+
+/** Convert raw server messages into the display format shown in the chat UI. */
+function rawMsgsToDisplay(rawMsgs: RawMsg[]): DisplayMessage[] {
+  const display: DisplayMessage[] = [];
+  for (const msg of rawMsgs) {
+    if (!isVisibleMsg(msg)) continue;
+    if (msg.role === 'user') display.push({ kind: 'user', content: msg.content });
+    if (msg.role === 'assistant' && msg.content) display.push({ kind: 'assistant', content: msg.content });
+  }
+  return display;
+}
 
 // ── Session item with rename/delete ─────────────────────────────────────────
 
@@ -299,21 +325,13 @@ export default function Agent() {
       if (res.ok) {
         const { data } = await res.json();
         const rawMsgs: { role: string; content: string }[] = data.messages ?? [];
-        const display: DisplayMessage[] = [];
-        for (const msg of rawMsgs) {
-          if (msg.role === 'system') continue;
-          // Filter out internal auto-greet prompts — only show the agent's response
-          if (msg.role === 'user' && msg.content?.startsWith(SYSTEM_INIT_PREFIX)) continue;
-          if (msg.role === 'user') display.push({ kind: 'user', content: msg.content });
-          if (msg.role === 'assistant' && msg.content) display.push({ kind: 'assistant', content: msg.content });
-        }
-        setMessages(display);
+        setMessages(rawMsgsToDisplay(rawMsgs));
 
         // Detect an incomplete turn: if the last meaningful message is from the user,
         // the server is still (or was) working on a response. Start polling.
         const lastMeaningful = [...rawMsgs]
           .reverse()
-          .find(m => m.role !== 'system' && !(m.role === 'user' && m.content?.startsWith(SYSTEM_INIT_PREFIX)));
+          .find(m => isVisibleMsg(m));
         if (lastMeaningful?.role === 'user') {
           setIsSessionPending(true);
         }
@@ -485,13 +503,7 @@ export default function Agent() {
           .then(r => r.ok ? r.json() : null)
           .then(json => {
             if (!json?.data?.messages) return;
-            const display: DisplayMessage[] = [];
-            for (const msg of json.data.messages as { role: string; content: string }[]) {
-              if (msg.role === 'system') continue;
-              if (msg.role === 'user' && msg.content?.startsWith(SYSTEM_INIT_PREFIX)) continue;
-              if (msg.role === 'user') display.push({ kind: 'user', content: msg.content });
-              if (msg.role === 'assistant' && msg.content) display.push({ kind: 'assistant', content: msg.content });
-            }
+            const display = rawMsgsToDisplay(json.data.messages as { role: string; content: string }[]);
             if (display.length > 0) setMessages(display);
           })
           .catch(() => { /* ignore */ });
@@ -535,19 +547,10 @@ export default function Agent() {
         const { data } = await res.json();
         const rawMsgs: { role: string; content: string }[] = data.messages ?? [];
         // If the last meaningful message is now from assistant, the turn completed.
-        const lastMeaningful = [...rawMsgs]
-          .reverse()
-          .find(m => m.role !== 'system' && !(m.role === 'user' && m.content?.startsWith(SYSTEM_INIT_PREFIX)));
+        const lastMeaningful = [...rawMsgs].reverse().find(m => isVisibleMsg(m));
         if (lastMeaningful?.role === 'assistant') {
           setIsSessionPending(false);
-          const display: DisplayMessage[] = [];
-          for (const msg of rawMsgs) {
-            if (msg.role === 'system') continue;
-            if (msg.role === 'user' && msg.content?.startsWith(SYSTEM_INIT_PREFIX)) continue;
-            if (msg.role === 'user') display.push({ kind: 'user', content: msg.content });
-            if (msg.role === 'assistant' && msg.content) display.push({ kind: 'assistant', content: msg.content });
-          }
-          setMessages(display);
+          setMessages(rawMsgsToDisplay(rawMsgs));
           refetchSessions();
         }
       } catch { /* ignore */ }
@@ -1002,13 +1005,13 @@ function MessageBubble({ item, index, verbose, onRetry }: { item: RenderItem; in
         </div>
       )}
       <div
-        className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap
+        className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm
           ${isUser
-            ? 'bg-gradient-to-br from-primary to-primary/80 text-primary-foreground rounded-br-md'
+            ? 'whitespace-pre-wrap bg-gradient-to-br from-primary to-primary/80 text-primary-foreground rounded-br-md'
             : 'bg-card border border-border text-foreground rounded-bl-md shadow-sm'
           }`}
       >
-        {msg.content}
+        {isUser ? msg.content : <AgentMarkdown content={msg.content} />}
       </div>
     </motion.div>
   );

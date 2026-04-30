@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { useInboxCounts } from '@/api/hooks';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import crmyLogo from '@/assets/crmy-logo.png';
 import { ENTITY_COLORS } from '@/lib/entityColors';
 
@@ -112,6 +113,7 @@ export function Sidebar() {
   const location = useLocation();
   const { sidebarExpanded, setSidebarExpanded } = useAppStore();
   const { hitlCount, assignCount } = useInboxCounts();
+  const { enabled: agentEnabled } = useAgentSettings();
 
   function isActive(path: string) {
     return path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
@@ -154,6 +156,14 @@ export function Sidebar() {
         {agentNavItems.map((item) => (
           <NavItem key={item.path} item={item} active={isActive(item.path)} badge={badge(item.path)} />
         ))}
+
+        {/* Workspace Agent — only shown when the agent is enabled */}
+        {agentEnabled && (
+          <NavItem
+            item={{ icon: Bot, label: 'Workspace Agent', path: '/agent', color: ENTITY_COLORS.agents }}
+            active={isActive('/agent')}
+          />
+        )}
 
         {/* Divider */}
         <div className="mt-2 mb-1">

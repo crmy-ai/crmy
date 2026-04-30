@@ -51,6 +51,12 @@ export type RenderItem = DisplayMessage | ToolGroupItem;
 /** Prefix for internal auto-greet prompts. Filtered out of displayed history. */
 export const SYSTEM_INIT_PREFIX = '[SYSTEM_INIT]';
 
+/** Prefix for compacted-context user messages. Filtered out of displayed history. */
+export const COMPACT_SUMMARY_PREFIX = '[COMPACTED_CONTEXT]';
+
+/** Prefix for the agent's acknowledgement of a compacted context. Filtered out of displayed history. */
+export const COMPACT_ACK_PREFIX = '[COMPACT_ACK]';
+
 // ── SSE stream helper ─────────────────────────────────────────────────────────
 
 export async function streamChat(

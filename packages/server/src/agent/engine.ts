@@ -9,6 +9,7 @@ import { decrypt } from './crypto.js';
 import { callAnthropic } from './providers/anthropic.js';
 import { callOpenAICompat } from './providers/openai-compat.js';
 import { logToolCall } from '../db/repos/agent-activity.js';
+import { needsCompaction, compactHistory } from './compaction.js';
 import type {
   AgentConfig,
   AgentEvent,
@@ -18,6 +19,23 @@ import type {
 } from './types.js';
 
 const MAX_TOOL_ROUNDS = 10; // prevent runaway loops
+
+/**
+ * Hard timeout per tool call. If a handler doesn't resolve within this window
+ * (stuck DB query, hung HTTP call, etc.) we surface a timeout error to the LLM
+ * so it can report the failure rather than blocking the whole agent turn.
+ */
+const TOOL_TIMEOUT_MS = 30_000;
+
+/**
+ * Maximum characters for a single tool result kept in the live in-turn history.
+ * Trimming here prevents a single large briefing_get from pushing the payload
+ * toward the 200K token context limit before compaction can fire.
+ * This is intentionally more generous than TOOL_RESULT_MAX_CHARS in compaction.ts
+ * (which governs long-term persistence); the LLM benefits from richer context
+ * within a turn even if we trim more aggressively when writing to the DB.
+ */
+const TOOL_RESULT_LIVE_MAX_CHARS = 15_000;
 
 // ── XML escaping ─────────────────────────────────────────────────────────────
 
@@ -32,6 +50,24 @@ function escapeXml(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
+
+// ── Tool timeout helper ───────────────────────────────────────────────────────
+
+/**
+ * Race a promise against a hard timeout. On expiry, rejects with a descriptive
+ * error that the LLM can read and relay to the user.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, toolName: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Tool '${toolName}' did not respond within ${ms / 1000}s`)),
+        ms,
+      ),
+    ),
+  ]);
 }
 
 // ── Tool status messages ──────────────────────────────────────────────────────
@@ -110,19 +146,28 @@ const TOOL_STATUS_MAP: Record<string, string> = {
   use_case_update_consumption: 'Updating consumption data…',
 
   // Context / memory
-  context_search:       'Searching workspace memory…',
-  context_semantic_search: 'Searching workspace memory…',
-  context_get:          'Reading context entry…',
-  context_list:         'Loading context entries…',
-  context_add:          'Saving to workspace memory…',
-  context_ingest:       'Ingesting context…',
-  context_extract:      'Extracting context…',
-  context_review:       'Reviewing context…',
-  context_stale:        'Checking for stale context…',
-  context_stale_assign: 'Assigning stale context for review…',
-  context_supersede:    'Superseding context entry…',
-  context_diff:         'Diffing context entries…',
-  context_embed_backfill: 'Backfilling embeddings…',
+  context_search:              'Searching workspace memory…',
+  context_semantic_search:     'Searching workspace memory…',
+  context_get:                 'Reading context entry…',
+  context_list:                'Loading context entries…',
+  context_add:                 'Saving to workspace memory…',
+  context_ingest:              'Ingesting context…',
+  context_ingest_auto:         'Auto-ingesting context…',
+  context_extract:             'Extracting context…',
+  context_review:              'Reviewing context…',
+  context_review_batch:        'Batch-reviewing context entries…',
+  context_stale:               'Checking for stale context…',
+  context_stale_assign:        'Assigning stale context for review…',
+  context_supersede:           'Superseding context entry…',
+  context_diff:                'Diffing context entries…',
+  context_embed_backfill:      'Backfilling embeddings…',
+  context_bulk_mark_stale:     'Marking context entries as stale…',
+  context_consolidate:         'Consolidating context entries…',
+  context_detect_contradictions: 'Detecting contradictions in context…',
+  context_resolve_contradiction: 'Resolving context contradiction…',
+  context_type_list:           'Loading context types…',
+  context_type_add:            'Adding context type…',
+  context_type_remove:         'Removing context type…',
 
   // Pipeline / reporting
   pipeline_summary:     'Loading pipeline summary…',
@@ -602,6 +647,36 @@ export async function runAgentTurn(
   const sessionId = opts?.sessionId;
   let turnIndex = 0;
 
+  // ── Auto-compaction ────────────────────────────────────────────────────────
+  // If the accumulated history exceeds the threshold, summarise the old portion
+  // before making the first LLM call. This keeps the context window healthy for
+  // long sessions without losing what was worked on earlier.
+  if (needsCompaction(history)) {
+    const compactTurnId = crypto.randomUUID();
+    onEvent({
+      type: 'tool_status',
+      id: 'compact',
+      name: 'compact_context',
+      status: 'Compacting conversation context…',
+      turn_id: compactTurnId,
+    });
+    try {
+      const compacted = await compactHistory(history, config);
+      // Splice in place so callers referencing the original array see the update
+      history.splice(0, history.length, ...compacted);
+      onEvent({
+        type: 'tool_status',
+        id: 'compact',
+        name: 'compact_context',
+        status: 'Context compacted ✓',
+        turn_id: compactTurnId,
+      });
+    } catch (err) {
+      // Non-fatal: log and proceed with the un-compacted history
+      console.error('[agent] compaction failed, proceeding without compaction:', err);
+    }
+  }
+
   // Agent loop: LLM call → tool execution → repeat
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     // Each loop round gets a unique turn_id so the UI can group all tool calls
@@ -609,20 +684,29 @@ export async function runAgentTurn(
     const turnId = crypto.randomUUID();
     let result: { content: string; tool_calls: ToolCallRecord[] };
 
-    const callLLM = config.provider === 'anthropic' ? callAnthropic : callOpenAICompat;
-    const key = config.provider === 'ollama' ? null : apiKey;
-
     try {
-      result = await callLLM(
-        history,
-        toolDefs,
-        config,
-        key as string,
-        (text) => onEvent({ type: 'delta', content: text }),
-        // Emit reasoning blocks with the current turn_id so the UI can group
-        // thinking with the tool calls that follow it in the same round.
-        (text) => onEvent({ type: 'thinking', content: text, turn_id: turnId }),
-      );
+      if (config.provider === 'anthropic') {
+        result = await callAnthropic(
+          history,
+          toolDefs,
+          config,
+          apiKey,
+          (text) => onEvent({ type: 'delta', content: text }),
+          // Emit reasoning blocks with the current turn_id so the UI can group
+          // thinking with the tool calls that follow it in the same round.
+          (text) => onEvent({ type: 'thinking', content: text, turn_id: turnId }),
+        );
+      } else {
+        // OpenAI-compatible providers (OpenAI, OpenRouter, Ollama, custom)
+        // Thinking/reasoning is not supported — onThinking is a no-op for these.
+        result = await callOpenAICompat(
+          history,
+          toolDefs,
+          config,
+          apiKey || null,
+          (text) => onEvent({ type: 'delta', content: text }),
+        );
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'LLM call failed';
       onEvent({ type: 'error', message });

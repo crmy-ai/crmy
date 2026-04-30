@@ -9,6 +9,7 @@ import * as agentRepo from '../db/repos/agent.js';
 import * as activityRepo from '../db/repos/agent-activity.js';
 import { encrypt, decrypt } from './crypto.js';
 import { runAgentTurn } from './engine.js';
+import { trimForPersistence, estimateHistoryChars } from './compaction.js';
 import type { AgentEvent, ConversationMessage } from './types.js';
 
 function getActor(req: Request): ActorContext {
@@ -334,10 +335,19 @@ export function agentRouter(db: DbPool): Router {
         label = effectiveMessage.length > 60 ? effectiveMessage.slice(0, 57) + '...' : effectiveMessage;
       }
 
+      // Trim large tool results before writing back to DB. The LLM has already
+      // consumed them; future turns only need the gist. This keeps the stored
+      // history lean so compaction is triggered less often.
+      const persistHistory = trimForPersistence(updatedHistory);
+
+      // Estimate token count (1 token ≈ 4 chars) for observability.
+      const tokenCount = Math.round(estimateHistoryChars(persistHistory) / 4);
+
       // Persist updated session
       await agentRepo.updateSession(db, actor.tenant_id, session.id, {
-        messages: updatedHistory,
+        messages: persistHistory,
         label,
+        token_count: tokenCount,
       });
 
       sendEvent({ type: 'done', session_id: session.id, label: label ?? null });

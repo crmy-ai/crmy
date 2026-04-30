@@ -411,6 +411,29 @@ export default function AgentSettings() {
             </Select>
           </div>
 
+          {/* Provider capability notices */}
+          {!providerDef.isAnthropicFormat && (
+            <div className="py-3 space-y-1.5">
+              <div className="p-3 rounded-lg bg-blue-500/8 border border-blue-500/20 space-y-1.5">
+                {provider === 'ollama' ? (
+                  <>
+                    <p className="text-xs font-medium text-blue-700 dark:text-blue-400">Ollama — local model</p>
+                    <p className="text-xs text-blue-700/80 dark:text-blue-400/80">
+                      Tool calling works with models that support function calling (e.g. <code className="font-mono">llama3.2</code>, <code className="font-mono">mistral-nemo</code>). Models without tool support will still chat but cannot take CRM actions. Extended reasoning is not available.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs font-medium text-blue-700 dark:text-blue-400">OpenAI-compatible provider</p>
+                    <p className="text-xs text-blue-700/80 dark:text-blue-400/80">
+                      Tool calling works with models that support function calling. Extended reasoning / thinking blocks are only available with Anthropic models — the agent will not show reasoning steps for this provider.
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Base URL */}
           <div className="py-4 space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Base URL</label>
