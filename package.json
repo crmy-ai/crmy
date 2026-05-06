@@ -1,6 +1,6 @@
 {
   "name": "@crmy/core",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "CRMy — the agent-first open source CRM",
   "private": false,
   "workspaces": [
