@@ -3,6 +3,20 @@
 
 import type { DbPool } from '../pool.js';
 import type { Opportunity, Activity, UUID, PaginatedResponse } from '@crmy/shared';
+import { CrmyError } from '@crmy/shared';
+
+interface MutationOptions {
+  expectedVersion?: number;
+}
+
+function concurrencyConflict(entity: string, id: UUID, expectedVersion: number): CrmyError {
+  return new CrmyError(
+    'CONFLICT',
+    `${entity} ${id} was modified by another writer; refresh the object and retry with the latest row_version`,
+    409,
+    { expected_version: expectedVersion },
+  );
+}
 
 export async function createOpportunity(
   db: DbPool,
@@ -146,6 +160,7 @@ export async function updateOpportunity(
   tenantId: UUID,
   id: UUID,
   patch: Record<string, unknown>,
+  options: MutationOptions = {},
 ): Promise<Opportunity | null> {
   const allowedFields = [
     'name', 'account_id', 'contact_id', 'owner_id', 'stage', 'amount',
@@ -153,9 +168,10 @@ export async function updateOpportunity(
     'description', 'lost_reason', 'custom_fields',
   ];
 
-  const sets: string[] = ['updated_at = now()'];
+  const sets: string[] = ['updated_at = now()', 'row_version = row_version + 1'];
   const params: unknown[] = [tenantId, id];
   let idx = 3;
+  let changed = false;
 
   for (const field of allowedFields) {
     if (field in patch) {
@@ -163,15 +179,25 @@ export async function updateOpportunity(
       sets.push(`${field} = $${idx}`);
       params.push(value);
       idx++;
+      changed = true;
     }
   }
 
-  if (sets.length === 1) return getOpportunity(db, tenantId, id);
+  if (!changed) return getOpportunity(db, tenantId, id);
+
+  let versionClause = '';
+  if (options.expectedVersion !== undefined) {
+    versionClause = ` AND row_version = $${idx}`;
+    params.push(options.expectedVersion);
+  }
 
   const result = await db.query(
-    `UPDATE opportunities SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2 RETURNING *`,
+    `UPDATE opportunities SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2${versionClause} RETURNING *`,
     params,
   );
+  if (result.rows.length === 0 && options.expectedVersion !== undefined) {
+    throw concurrencyConflict('Opportunity', id, options.expectedVersion);
+  }
   return (result.rows[0] as Opportunity) ?? null;
 }
 
@@ -293,10 +319,24 @@ export async function getPipelineForecast(
   };
 }
 
-export async function deleteOpportunity(db: DbPool, tenantId: UUID, id: UUID): Promise<boolean> {
+export async function deleteOpportunity(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  options: MutationOptions = {},
+): Promise<boolean> {
+  const params: unknown[] = [tenantId, id];
+  let versionClause = '';
+  if (options.expectedVersion !== undefined) {
+    versionClause = ' AND row_version = $3';
+    params.push(options.expectedVersion);
+  }
   const result = await db.query(
-    'DELETE FROM opportunities WHERE tenant_id = $1 AND id = $2',
-    [tenantId, id],
+    `DELETE FROM opportunities WHERE tenant_id = $1 AND id = $2${versionClause}`,
+    params,
   );
+  if ((result.rowCount ?? 0) === 0 && options.expectedVersion !== undefined) {
+    throw concurrencyConflict('Opportunity', id, options.expectedVersion);
+  }
   return (result.rowCount ?? 0) > 0;
 }

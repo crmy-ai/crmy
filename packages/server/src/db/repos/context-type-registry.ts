@@ -395,11 +395,12 @@ export async function getExtractableTypes(
 /** Get schema for a single context type (used for validation). */
 export async function getContextTypeSchema(
   db: DbPool,
+  tenantId: UUID,
   typeName: string,
 ): Promise<Record<string, unknown> | null> {
   const result = await db.query(
-    'SELECT json_schema FROM context_type_registry WHERE type_name = $1',
-    [typeName],
+    'SELECT json_schema FROM context_type_registry WHERE tenant_id = $1 AND type_name = $2',
+    [tenantId, typeName],
   );
   return (result.rows[0]?.json_schema as Record<string, unknown>) ?? null;
 }

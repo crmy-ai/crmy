@@ -5,6 +5,7 @@ import type { DbPool } from '../pool.js';
 import type { ContextEntry, UUID, PaginatedResponse } from '@crmy/shared';
 import type { EmbeddingConfig } from '../../agent/providers/embeddings.js';
 import { embedText } from '../../agent/providers/embeddings.js';
+import { withTransaction } from '../transaction.js';
 
 export async function createContextEntry(
   db: DbPool,
@@ -317,43 +318,54 @@ export async function supersedeContextEntry(
     authored_by: UUID;
   },
 ): Promise<{ old: ContextEntry; new: ContextEntry }> {
-  // Mark old entry as not current
-  await db.query(
-    `UPDATE context_entries SET is_current = false, updated_at = now()
-     WHERE id = $1 AND tenant_id = $2`,
-    [existingId, tenantId],
-  );
+  return withTransaction(db, async (tx) => {
+    const oldResult = await tx.query(
+      `SELECT * FROM context_entries
+       WHERE id = $1 AND tenant_id = $2
+       FOR UPDATE`,
+      [existingId, tenantId],
+    );
+    const oldEntry = oldResult.rows[0] as ContextEntry | undefined;
+    if (!oldEntry) throw new Error('Context entry not found');
+    if (!oldEntry.is_current) throw new Error('Context entry has already been superseded');
 
-  const oldEntry = await getContextEntry(db, tenantId, existingId);
-  if (!oldEntry) throw new Error('Context entry not found');
+    await tx.query(
+      `UPDATE context_entries SET is_current = false, updated_at = now()
+       WHERE id = $1 AND tenant_id = $2`,
+      [existingId, tenantId],
+    );
 
-  // Create new entry that supersedes the old one
-  const result = await db.query(
-    `INSERT INTO context_entries (tenant_id, subject_type, subject_id,
-       context_type, authored_by, title, body, structured_data,
-       confidence, tags, is_current, supersedes_id, source, source_ref,
-       source_activity_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11,$12,$13,$14)
-     RETURNING *`,
-    [
-      tenantId,
-      oldEntry.subject_type,
-      oldEntry.subject_id,
-      oldEntry.context_type,
-      newData.authored_by,
-      newData.title ?? oldEntry.title,
-      newData.body,
-      JSON.stringify(newData.structured_data ?? oldEntry.structured_data),
-      newData.confidence ?? oldEntry.confidence,
-      JSON.stringify(newData.tags ?? oldEntry.tags ?? []),
-      existingId,
-      oldEntry.source,
-      oldEntry.source_ref,
-      oldEntry.source_activity_id,
-    ],
-  );
+    const result = await tx.query(
+      `INSERT INTO context_entries (tenant_id, subject_type, subject_id,
+         context_type, authored_by, title, body, structured_data,
+         confidence, tags, is_current, supersedes_id, source, source_ref,
+         source_activity_id, valid_until, visibility, mentions, pinned)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11,$12,$13,$14,$15,$16,$17,$18)
+       RETURNING *`,
+      [
+        tenantId,
+        oldEntry.subject_type,
+        oldEntry.subject_id,
+        oldEntry.context_type,
+        newData.authored_by,
+        newData.title ?? oldEntry.title,
+        newData.body,
+        JSON.stringify(newData.structured_data ?? oldEntry.structured_data),
+        newData.confidence ?? oldEntry.confidence,
+        JSON.stringify(newData.tags ?? oldEntry.tags ?? []),
+        existingId,
+        oldEntry.source,
+        oldEntry.source_ref,
+        oldEntry.source_activity_id,
+        oldEntry.valid_until ?? null,
+        (oldEntry as unknown as Record<string, unknown>).visibility ?? 'internal',
+        JSON.stringify((oldEntry as unknown as Record<string, unknown>).mentions ?? []),
+        (oldEntry as unknown as Record<string, unknown>).pinned ?? false,
+      ],
+    );
 
-  return { old: oldEntry, new: result.rows[0] as ContextEntry };
+    return { old: oldEntry, new: result.rows[0] as ContextEntry };
+  });
 }
 
 /**

@@ -16,6 +16,8 @@ import { parseInboundEmail } from '../../email/inbound-parser.js';
 import { extractContextFromActivity } from '../../agent/extraction.js';
 import { entityResolve } from '../../services/entity-resolve.js';
 import type { ToolDef } from '../server.js';
+import { runToolOperation } from '../tool-operation.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 
 /** Redact provider-specific sensitive fields before returning config to callers. */
 function redactProviderConfig(provider: string, config: Record<string, unknown>): Record<string, unknown> {
@@ -44,6 +46,7 @@ export function emailTools(db: DbPool): ToolDef[] {
       description: 'Draft an outbound email linked to a contact. By default require_approval is true, which creates a HITL request for human review before sending — this is the recommended approach for high-stakes communications. Set require_approval to false only for routine, low-risk sends. The email is stored as a draft until approved.',
       inputSchema: emailCreate,
       handler: async (input: z.infer<typeof emailCreate>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'email_create', input, async () => {
         const bodyText = input.body_text ?? input.body_html?.replace(/<[^>]+>/g, '') ?? '';
 
         let hitlRequestId: string | undefined;
@@ -93,10 +96,30 @@ export function emailTools(db: DbPool): ToolDef[] {
         if (input.require_approval === false) {
           await deliverEmail(db, actor.tenant_id, email.id);
           const sent = await emailRepo.getEmail(db, actor.tenant_id, email.id);
-          return { email: sent ?? email, event_id };
+          return {
+            email: sent ?? email,
+            event_id,
+            mutation: mutationReceipt(actor, {
+              objectType: 'email',
+              objectId: email.id,
+              eventId: event_id,
+              sideEffects: ['email_delivery:attempted'],
+            }),
+          };
         }
 
-        return { email, hitl_request_id: hitlRequestId, event_id };
+        return {
+          email,
+          hitl_request_id: hitlRequestId,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'email',
+            objectId: email.id,
+            eventId: event_id,
+            sideEffects: hitlRequestId ? ['hitl_request:created'] : [],
+          }),
+        };
+        });
       },
     },
     {
@@ -140,6 +163,7 @@ export function emailTools(db: DbPool): ToolDef[] {
         'This overwrites any existing provider config for the tenant.',
       inputSchema: emailProviderSet,
       handler: async (input: z.infer<typeof emailProviderSet>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'email_provider_set', input, async () => {
         const provider = getEmailProvider(input.provider);
         if (!provider) {
           return {
@@ -159,7 +183,15 @@ export function emailTools(db: DbPool): ToolDef[] {
           from_email: input.from_email,
         });
 
-        return { ...result, config: redactProviderConfig(input.provider, result.config) };
+        return {
+          ...result,
+          config: redactProviderConfig(input.provider, result.config),
+          mutation: mutationReceipt(actor, {
+            objectType: 'email_provider',
+            objectId: result.id,
+          }),
+        };
+        });
       },
     },
     {
@@ -181,6 +213,7 @@ export function emailTools(db: DbPool): ToolDef[] {
           .describe('Skip entity resolution and link directly to this contact.'),
         raw_payload: z.record(z.unknown()).optional()
           .describe('Raw provider webhook payload — if provided, parsed fields above are ignored and the payload is auto-detected (SendGrid, Postmark, Mailgun).'),
+        idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (input: {
         from_email: string;
@@ -190,7 +223,9 @@ export function emailTools(db: DbPool): ToolDef[] {
         received_at?: string;
         contact_id?: string;
         raw_payload?: Record<string, unknown>;
+        idempotency_key?: string;
       }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'email_ingest', input, async () => {
         let fromEmail = input.from_email;
         let fromName = input.from_name;
         let subject = input.subject;
@@ -237,7 +272,7 @@ export function emailTools(db: DbPool): ToolDef[] {
           console.error('[email_ingest] extraction error:', err);
         });
 
-        await emitEvent(db, {
+        const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
           eventType: 'activity.created',
           actorId: actor.actor_id,
@@ -247,7 +282,18 @@ export function emailTools(db: DbPool): ToolDef[] {
           afterData: activity,
         });
 
-        return { activity_id: activity.id, contact_id: contactId ?? null };
+        return {
+          activity_id: activity.id,
+          contact_id: contactId ?? null,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'activity',
+            objectId: activity.id,
+            eventId: event_id,
+            sideEffects: ['context_extraction:queued'],
+          }),
+        };
+        });
       },
     },
     {

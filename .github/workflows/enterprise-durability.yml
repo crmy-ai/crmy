@@ -1,0 +1,45 @@
+name: Enterprise Durability
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  durability:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: crmy_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d crmy_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/crmy_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build --workspace=packages/shared
+
+      - run: npm run build --workspace=packages/server
+
+      - run: node --test packages/server/test/durability.test.mjs
+
+      - run: node --test packages/server/test/integration-durability.test.mjs

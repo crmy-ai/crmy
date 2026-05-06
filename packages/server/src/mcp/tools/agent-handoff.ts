@@ -7,6 +7,8 @@ import type { ActorContext } from '@crmy/shared';
 import * as snapshotRepo from '../../db/repos/handoff-snapshots.js';
 import { notFound } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
+import { runToolOperation } from '../tool-operation.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 
 const keyFindingSchema = z.object({
   finding: z.string().min(1).describe('A specific finding, belief, or observation the agent holds'),
@@ -41,6 +43,7 @@ export function agentHandoffTools(db: DbPool): ToolDef[] {
           .describe('Your overall confidence in the current state, 0–1'),
         handoff_type: z.enum(['hitl', 'assignment', 'pause']).default('hitl')
           .describe('Why you are handing off: hitl = approval needed, assignment = delegate to human, pause = resuming later'),
+        idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (input: {
         subject_type?: 'contact' | 'account' | 'opportunity' | 'use_case';
@@ -50,7 +53,9 @@ export function agentHandoffTools(db: DbPool): ToolDef[] {
         tools_called: Array<{ tool_name: string; args_summary?: string; result_summary?: string }>;
         confidence?: number;
         handoff_type: 'hitl' | 'assignment' | 'pause';
+        idempotency_key?: string;
       }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'agent_capture_handoff', input, async () => {
         const snapshot = await snapshotRepo.createSnapshot(db, actor.tenant_id, {
           actor_id: actor.actor_id,
           subject_type: input.subject_type,
@@ -66,7 +71,12 @@ export function agentHandoffTools(db: DbPool): ToolDef[] {
           snapshot_id: snapshot.id,
           handoff_type: snapshot.handoff_type,
           created_at: snapshot.created_at,
+          mutation: mutationReceipt(actor, {
+            objectType: 'handoff_snapshot',
+            objectId: snapshot.id,
+          }),
         };
+        });
       },
     },
     {
@@ -76,8 +86,10 @@ export function agentHandoffTools(db: DbPool): ToolDef[] {
       inputSchema: z.object({
         snapshot_id: z.string().uuid()
           .describe('The snapshot_id returned by agent_capture_handoff'),
+        idempotency_key: z.string().max(128).optional(),
       }),
-      handler: async (input: { snapshot_id: string }, actor: ActorContext) => {
+      handler: async (input: { snapshot_id: string; idempotency_key?: string }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'agent_resume_handoff', input, async () => {
         const snapshot = await snapshotRepo.getSnapshot(db, actor.tenant_id, input.snapshot_id);
         if (!snapshot) throw notFound('Handoff snapshot', input.snapshot_id);
 
@@ -107,7 +119,12 @@ export function agentHandoffTools(db: DbPool): ToolDef[] {
           new_context_since_snapshot: new_context,
           new_activities_since_snapshot: new_activities,
           resumed_at: new Date().toISOString(),
+          mutation: mutationReceipt(actor, {
+            objectType: 'handoff_snapshot',
+            objectId: snapshot.id,
+          }),
         };
+        });
       },
     },
   ];

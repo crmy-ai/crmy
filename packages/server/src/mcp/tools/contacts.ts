@@ -4,18 +4,47 @@
 import { z } from 'zod';
 import { contactCreate, contactUpdate, contactSearch, contactSetLifecycle, contactGetTimeline } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
-import type { ActorContext } from '@crmy/shared';
+import type { ActorContext, Contact } from '@crmy/shared';
 import * as contactRepo from '../../db/repos/contacts.js';
 import * as activityRepo from '../../db/repos/activities.js';
 import * as contextRepo from '../../db/repos/context-entries.js';
 import * as oppRepo from '../../db/repos/opportunities.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound, permissionDenied, duplicateError } from '@crmy/shared';
+import { CrmyError, notFound, permissionDenied, duplicateError } from '@crmy/shared';
 import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import { computeLeadScore } from '../../services/scoring.js';
 import { checkContactDuplicate } from '../../services/deduplication.js';
+import { runIdempotent } from '../../db/repos/idempotency.js';
+import { withTransaction } from '../../db/transaction.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+
+function runContactOperation<T>(
+  db: DbPool,
+  actor: ActorContext,
+  operation: string,
+  input: object,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const idempotencyKey = (input as { idempotency_key?: string }).idempotency_key;
+  return runIdempotent(db, {
+    tenantId: actor.tenant_id,
+    actorId: actor.actor_id,
+    operation,
+    key: idempotencyKey,
+    request: input,
+  }, fn);
+}
+
+function concurrencyConflict(entity: string, id: string, expectedVersion: number): CrmyError {
+  return new CrmyError(
+    'CONFLICT',
+    `${entity} ${id} was modified by another writer; refresh the object and retry with the latest row_version`,
+    409,
+    { expected_version: expectedVersion },
+  );
+}
 
 export function contactTools(db: DbPool): ToolDef[] {
   return [
@@ -25,6 +54,7 @@ export function contactTools(db: DbPool): ToolDef[] {
       description: 'Create a new contact record. Contact names are stored as first_name (required) and last_name (optional) separately. Before calling this tool, prefer using entity_resolve to check if the contact already exists. If a potential duplicate is detected (same email, or same name + company/account), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record instead of erroring. Pass allow_duplicates: true to skip the check entirely after confirming with the user.',
       inputSchema: contactCreate,
       handler: async (input: z.infer<typeof contactCreate>, actor: ActorContext) => {
+        return runContactOperation(db, actor, 'contact_create', input, async () => {
         // ── Duplicate check ──
         if (!input.allow_duplicates) {
           const dedup = await checkContactDuplicate(db, actor.tenant_id, {
@@ -66,6 +96,13 @@ export function contactTools(db: DbPool): ToolDef[] {
           return {
             contact,
             event_id,
+            mutation: mutationReceipt(actor, {
+              objectType: 'contact',
+              objectId: contact.id,
+              rowVersion: contact.row_version,
+              eventId: event_id,
+              sideEffects: ['search_index:queued'],
+            }),
             potential_duplicates: dedup.confidence === 'medium' ? dedup.candidates : undefined,
           };
         }
@@ -82,7 +119,18 @@ export function contactTools(db: DbPool): ToolDef[] {
         });
         indexDocument(db, 'contact', contact as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] contact index ${contact.id}: ${(err as Error).message}`));
-        return { contact, event_id };
+        return {
+          contact,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'contact',
+            objectId: contact.id,
+            rowVersion: contact.row_version,
+            eventId: event_id,
+            sideEffects: ['search_index:queued'],
+          }),
+        };
+        });
       },
     },
     {
@@ -142,13 +190,16 @@ export function contactTools(db: DbPool): ToolDef[] {
       description: 'Update a contact record. Pass the contact UUID as id and a patch object containing only the fields to change. Contact names are stored as first_name and last_name separately — to rename a contact pass { first_name: "Thomas" } or { last_name: "Rivera" } or both. Other patchable fields: email, phone, title, company_name, account_id, lifecycle_stage, tags, custom_fields. Example: { id: "<uuid>", patch: { first_name: "Thomas", last_name: "Rivera" } }',
       inputSchema: contactUpdate,
       handler: async (input: z.infer<typeof contactUpdate>, actor: ActorContext) => {
+        return runContactOperation(db, actor, 'contact_update', input, async () => {
         const before = await contactRepo.getContact(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Contact', input.id);
 
         if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
           input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'contact', input.patch.custom_fields);
         }
-        const contact = await contactRepo.updateContact(db, actor.tenant_id, input.id, input.patch);
+        const contact = await contactRepo.updateContact(db, actor.tenant_id, input.id, input.patch, {
+          expectedVersion: input.expected_version,
+        });
         if (!contact) throw notFound('Contact', input.id);
 
         const event_id = await emitEvent(db, {
@@ -163,20 +214,34 @@ export function contactTools(db: DbPool): ToolDef[] {
         });
         indexDocument(db, 'contact', contact as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] contact index ${contact.id}: ${(err as Error).message}`));
-        return { contact, event_id };
+        return {
+          contact,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'contact',
+            objectId: contact.id,
+            rowVersion: contact.row_version,
+            eventId: event_id,
+            sideEffects: ['search_index:queued'],
+          }),
+        };
+        });
       },
     },
     {
       name: 'contact_set_lifecycle',
       tier: 'core',
-      description: 'Set the lifecycle stage of a contact to reflect their current position in the sales funnel. Valid stages: lead, prospect, active, customer, churned, champion. Use this when a contact progresses through the pipeline or changes status.',
+      description: 'Set the lifecycle stage of a contact to reflect their current position in the funnel. Valid stages: lead, prospect, customer, churned. Use this when a contact progresses through the pipeline or changes status.',
       inputSchema: contactSetLifecycle,
       handler: async (input: z.infer<typeof contactSetLifecycle>, actor: ActorContext) => {
+        return runContactOperation(db, actor, 'contact_set_lifecycle', input, async () => {
         const before = await contactRepo.getContact(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Contact', input.id);
 
         const contact = await contactRepo.updateContact(db, actor.tenant_id, input.id, {
           lifecycle_stage: input.lifecycle_stage,
+        }, {
+          expectedVersion: input.expected_version,
         });
         if (!contact) throw notFound('Contact', input.id);
 
@@ -193,7 +258,18 @@ export function contactTools(db: DbPool): ToolDef[] {
         });
         indexDocument(db, 'contact', contact as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] contact index ${contact.id}: ${(err as Error).message}`));
-        return { contact, event_id };
+        return {
+          contact,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'contact',
+            objectId: contact.id,
+            rowVersion: contact.row_version,
+            eventId: event_id,
+            sideEffects: ['search_index:queued'],
+          }),
+        };
+        });
       },
     },
     {
@@ -215,18 +291,25 @@ export function contactTools(db: DbPool): ToolDef[] {
       name: 'contact_delete',
       tier: 'admin',
       description: 'Permanently delete a contact and all associated data. This is a destructive action that requires admin or owner role. Consider archiving or reassigning activities before deletion.',
-      inputSchema: z.object({ id: z.string().uuid() }),
-      handler: async (input: { id: string }, actor: ActorContext) => {
+      inputSchema: z.object({
+        id: z.string().uuid(),
+        idempotency_key: z.string().max(128).optional(),
+        expected_version: z.number().int().positive().optional(),
+      }),
+      handler: async (input: { id: string; idempotency_key?: string; expected_version?: number }, actor: ActorContext) => {
+        return runContactOperation(db, actor, 'contact_delete', input, async () => {
         if (actor.role !== 'admin' && actor.role !== 'owner') {
           throw permissionDenied('Only admins and owners can delete contacts');
         }
         const before = await contactRepo.getContact(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Contact', input.id);
 
-        await contactRepo.deleteContact(db, actor.tenant_id, input.id);
+        await contactRepo.deleteContact(db, actor.tenant_id, input.id, {
+          expectedVersion: input.expected_version,
+        });
         removeDocument(db, actor.tenant_id, 'contact', input.id)
           .catch((err: unknown) => console.warn(`[search] contact remove ${input.id}: ${(err as Error).message}`));
-        await emitEvent(db, {
+        const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
           eventType: 'contact.deleted',
           actorId: actor.actor_id,
@@ -235,7 +318,18 @@ export function contactTools(db: DbPool): ToolDef[] {
           objectId: input.id,
           beforeData: before,
         });
-        return { deleted: true };
+        return {
+          deleted: true,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'contact',
+            objectId: input.id,
+            rowVersion: before.row_version,
+            eventId: event_id,
+            sideEffects: ['search_remove:queued'],
+          }),
+        };
+        });
       },
     },
     {
@@ -244,15 +338,40 @@ export function contactTools(db: DbPool): ToolDef[] {
       description: 'Compute or retrieve the lead score (0–100) for a contact. The score reflects recency and volume of activities, quality of context entries, lifecycle stage, and engagement quality (calls/meetings weighted higher than emails). Returns the score with a breakdown by component so you can understand what\'s driving it. Use this before prioritising which contacts to follow up on.',
       inputSchema: z.object({
         contact_id: z.string().uuid().describe('ID of the contact to score'),
+        idempotency_key: z.string().max(128).optional(),
+        expected_version: z.number().int().positive().optional(),
       }),
-      handler: async (input: { contact_id: string }, actor: ActorContext) => {
+      handler: async (input: { contact_id: string; idempotency_key?: string; expected_version?: number }, actor: ActorContext) => {
+        return runContactOperation(db, actor, 'contact_score', input, async () => {
+        const before = await contactRepo.getContact(db, actor.tenant_id, input.contact_id);
+        if (!before) throw notFound('Contact', input.contact_id);
         const { score, breakdown } = await computeLeadScore(db, actor.tenant_id, input.contact_id);
         // Persist score
-        await db.query(
-          'UPDATE contacts SET lead_score = $1, lead_score_updated_at = now() WHERE id = $2 AND tenant_id = $3',
-          [score, input.contact_id, actor.tenant_id],
+        const params: unknown[] = [score, input.contact_id, actor.tenant_id];
+        const versionClause = input.expected_version !== undefined ? ' AND row_version = $4' : '';
+        if (input.expected_version !== undefined) params.push(input.expected_version);
+        const updated = await db.query(
+          `UPDATE contacts
+           SET lead_score = $1, lead_score_updated_at = now(), row_version = row_version + 1, updated_at = now()
+           WHERE id = $2 AND tenant_id = $3${versionClause}
+           RETURNING row_version`,
+          params,
         );
-        return { contact_id: input.contact_id, lead_score: score, score_breakdown: breakdown, last_updated: new Date().toISOString() };
+        if (updated.rows.length === 0 && input.expected_version !== undefined) {
+          throw concurrencyConflict('Contact', input.contact_id, input.expected_version);
+        }
+        return {
+          contact_id: input.contact_id,
+          lead_score: score,
+          score_breakdown: breakdown,
+          last_updated: new Date().toISOString(),
+          mutation: mutationReceipt(actor, {
+            objectType: 'contact',
+            objectId: input.contact_id,
+            rowVersion: updated.rows[0]?.row_version,
+          }),
+        };
+        });
       },
     },
     {
@@ -262,8 +381,18 @@ export function contactTools(db: DbPool): ToolDef[] {
       inputSchema: z.object({
         primary_id: z.string().uuid().describe('The contact to keep — its profile fields are preserved'),
         secondary_id: z.string().uuid().describe('The duplicate contact to absorb — will be soft-deleted after merge'),
+        idempotency_key: z.string().max(128).optional(),
+        primary_expected_version: z.number().int().positive().optional(),
+        secondary_expected_version: z.number().int().positive().optional(),
       }),
-      handler: async (input: { primary_id: string; secondary_id: string }, actor: ActorContext) => {
+      handler: async (input: {
+        primary_id: string;
+        secondary_id: string;
+        idempotency_key?: string;
+        primary_expected_version?: number;
+        secondary_expected_version?: number;
+      }, actor: ActorContext) => {
+        return runContactOperation(db, actor, 'contact_merge', input, async () => {
         if (input.primary_id === input.secondary_id) {
           throw new Error('primary_id and secondary_id must be different contacts');
         }
@@ -280,19 +409,23 @@ export function contactTools(db: DbPool): ToolDef[] {
         if (sec.merged_into) {
           throw new Error('Secondary contact has already been merged into another record');
         }
+        if (input.primary_expected_version !== undefined && primary.row_version !== input.primary_expected_version) {
+          throw concurrencyConflict('Contact', input.primary_id, input.primary_expected_version);
+        }
+        if (input.secondary_expected_version !== undefined && secondary.row_version !== input.secondary_expected_version) {
+          throw concurrencyConflict('Contact', input.secondary_id, input.secondary_expected_version);
+        }
 
-        // Merge in a transaction
         let merged: Record<string, number> = {};
-        await db.query('BEGIN');
-        try {
+        let updatedPrimary: Contact | null = null;
+        let event_id: number | undefined;
+        await withTransaction(db, async (tx) => {
           // Reassign child records
-          const [acts, ctx, opps, asgn, seqEnr] = await Promise.all([
-            db.query('UPDATE activities SET contact_id=$1 WHERE contact_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]),
-            db.query('UPDATE context_entries SET subject_id=$1 WHERE subject_id=$2 AND subject_type=$3 AND tenant_id=$4', [input.primary_id, input.secondary_id, 'contact', actor.tenant_id]),
-            db.query('UPDATE opportunities SET contact_id=$1 WHERE contact_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]),
-            db.query('UPDATE assignments SET subject_id=$1 WHERE subject_id=$2 AND subject_type=$3 AND tenant_id=$4', [input.primary_id, input.secondary_id, 'contact', actor.tenant_id]),
-            db.query('UPDATE sequence_enrollments SET contact_id=$1 WHERE contact_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]),
-          ]);
+          const acts = await tx.query('UPDATE activities SET contact_id=$1 WHERE contact_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]);
+          const ctx = await tx.query('UPDATE context_entries SET subject_id=$1 WHERE subject_id=$2 AND subject_type=$3 AND tenant_id=$4', [input.primary_id, input.secondary_id, 'contact', actor.tenant_id]);
+          const opps = await tx.query('UPDATE opportunities SET contact_id=$1 WHERE contact_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]);
+          const asgn = await tx.query('UPDATE assignments SET subject_id=$1 WHERE subject_id=$2 AND subject_type=$3 AND tenant_id=$4', [input.primary_id, input.secondary_id, 'contact', actor.tenant_id]);
+          const seqEnr = await tx.query('UPDATE sequence_enrollments SET contact_id=$1 WHERE contact_id=$2 AND tenant_id=$3', [input.primary_id, input.secondary_id, actor.tenant_id]);
           merged = {
             activities: acts.rowCount ?? 0,
             context_entries: ctx.rowCount ?? 0,
@@ -312,35 +445,59 @@ export function contactTools(db: DbPool): ToolDef[] {
           for (const a of toAdd) {
             if (!newAliases.includes(a)) newAliases.push(a);
           }
-          await db.query(
-            'UPDATE contacts SET aliases=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3',
-            [JSON.stringify(newAliases), input.primary_id, actor.tenant_id],
+          const primaryParams: unknown[] = [newAliases, input.primary_id, actor.tenant_id];
+          const primaryVersionClause = input.primary_expected_version !== undefined ? ' AND row_version = $4' : '';
+          if (input.primary_expected_version !== undefined) primaryParams.push(input.primary_expected_version);
+          const primaryUpdate = await tx.query(
+            `UPDATE contacts SET aliases=$1, updated_at=now(), row_version = row_version + 1
+             WHERE id=$2 AND tenant_id=$3${primaryVersionClause}`,
+            primaryParams,
           );
-          await db.query(
-            'UPDATE contacts SET merged_into=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3',
-            [input.primary_id, input.secondary_id, actor.tenant_id],
+          if ((primaryUpdate.rowCount ?? 0) === 0 && input.primary_expected_version !== undefined) {
+            throw concurrencyConflict('Contact', input.primary_id, input.primary_expected_version);
+          }
+
+          const secondaryParams: unknown[] = [input.primary_id, input.secondary_id, actor.tenant_id];
+          const secondaryVersionClause = input.secondary_expected_version !== undefined ? ' AND row_version = $4' : '';
+          if (input.secondary_expected_version !== undefined) secondaryParams.push(input.secondary_expected_version);
+          const secondaryUpdate = await tx.query(
+            `UPDATE contacts SET merged_into=$1, updated_at=now(), row_version = row_version + 1
+             WHERE id=$2 AND tenant_id=$3${secondaryVersionClause}`,
+            secondaryParams,
           );
-          await db.query('COMMIT');
-        } catch (err) {
-          await db.query('ROLLBACK');
-          throw err;
-        }
+          if ((secondaryUpdate.rowCount ?? 0) === 0 && input.secondary_expected_version !== undefined) {
+            throw concurrencyConflict('Contact', input.secondary_id, input.secondary_expected_version);
+          }
+
+          updatedPrimary = await contactRepo.getContact(tx, actor.tenant_id, input.primary_id);
+          event_id = await emitEvent(tx, {
+            tenantId: actor.tenant_id, eventType: 'contact.merged',
+            actorId: actor.actor_id, actorType: actor.actor_type,
+            objectType: 'contact', objectId: input.primary_id,
+            afterData: { primary_id: input.primary_id, secondary_id: input.secondary_id, merged },
+          });
+        });
 
         // Re-index primary, remove secondary from search
-        const updatedPrimary = await contactRepo.getContact(db, actor.tenant_id, input.primary_id);
         indexDocument(db, 'contact', updatedPrimary as unknown as Record<string, unknown>)
           .catch(() => {});
         removeDocument(db, actor.tenant_id, 'contact', input.secondary_id)
           .catch(() => {});
 
-        await emitEvent(db, {
-          tenantId: actor.tenant_id, eventType: 'contact.merged',
-          actorId: actor.actor_id, actorType: actor.actor_type,
-          objectType: 'contact', objectId: input.primary_id,
-          afterData: { primary_id: input.primary_id, secondary_id: input.secondary_id, merged },
+        return {
+          primary: updatedPrimary,
+          secondary_id: input.secondary_id,
+          merged_count: merged,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'contact',
+            objectId: input.primary_id,
+            rowVersion: (updatedPrimary as Contact | null)?.row_version,
+            eventId: event_id,
+            sideEffects: ['search_index:queued', 'search_remove:queued'],
+          }),
+        };
         });
-
-        return { primary: updatedPrimary, secondary_id: input.secondary_id, merged_count: merged };
       },
     },
   ];

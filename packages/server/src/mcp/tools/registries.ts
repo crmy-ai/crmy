@@ -11,6 +11,8 @@ import * as activityTypeRepo from '../../db/repos/activity-type-registry.js';
 import * as contextTypeRepo from '../../db/repos/context-type-registry.js';
 import { CrmyError } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
+import { runToolOperation } from '../tool-operation.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 
 export function registryTools(db: DbPool): ToolDef[] {
   return [
@@ -39,8 +41,16 @@ export function registryTools(db: DbPool): ToolDef[] {
       description: 'Register a new custom activity type to extend the built-in types. The type_name must be lowercase with underscores (e.g. "demo_given", "contract_signed"). Specify a category and optional description. Once registered, the type is available in activity_create.',
       inputSchema: activityTypeRegistryAdd,
       handler: async (input: z.infer<typeof activityTypeRegistryAdd>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'activity_type_add', input, async () => {
         const entry = await activityTypeRepo.addActivityType(db, actor.tenant_id, input);
-        return { activity_type: entry };
+        return {
+          activity_type: entry,
+          mutation: mutationReceipt(actor, {
+            objectType: 'activity_type',
+            objectId: input.type_name,
+          }),
+        };
+        });
       },
     },
     {
@@ -49,6 +59,7 @@ export function registryTools(db: DbPool): ToolDef[] {
       description: 'Remove a custom activity type from the registry. Built-in default types cannot be removed. Existing activities using this type are not affected.',
       inputSchema: activityTypeRegistryRemove,
       handler: async (input: z.infer<typeof activityTypeRegistryRemove>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'activity_type_remove', input, async () => {
         const removed = await activityTypeRepo.removeActivityType(db, actor.tenant_id, input.type_name);
         if (!removed) {
           throw new CrmyError(
@@ -57,7 +68,15 @@ export function registryTools(db: DbPool): ToolDef[] {
             400,
           );
         }
-        return { removed: true, type_name: input.type_name };
+        return {
+          removed: true,
+          type_name: input.type_name,
+          mutation: mutationReceipt(actor, {
+            objectType: 'activity_type',
+            objectId: input.type_name,
+          }),
+        };
+        });
       },
     },
 
@@ -78,8 +97,16 @@ export function registryTools(db: DbPool): ToolDef[] {
       description: 'Register a new custom context type to extend the built-in taxonomy. Specify a type name, optional description, and JSON Schema for structured_data validation. Once registered, the type is available in context_add.',
       inputSchema: contextTypeRegistryAdd,
       handler: async (input: z.infer<typeof contextTypeRegistryAdd>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'context_type_add', input, async () => {
         const entry = await contextTypeRepo.addContextType(db, actor.tenant_id, input);
-        return { context_type: entry };
+        return {
+          context_type: entry,
+          mutation: mutationReceipt(actor, {
+            objectType: 'context_type',
+            objectId: input.type_name,
+          }),
+        };
+        });
       },
     },
     {
@@ -88,6 +115,7 @@ export function registryTools(db: DbPool): ToolDef[] {
       description: 'Remove a custom context type from the registry. Built-in default types cannot be removed. Existing context entries using this type are not affected.',
       inputSchema: contextTypeRegistryRemove,
       handler: async (input: z.infer<typeof contextTypeRegistryRemove>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'context_type_remove', input, async () => {
         const removed = await contextTypeRepo.removeContextType(db, actor.tenant_id, input.type_name);
         if (!removed) {
           throw new CrmyError(
@@ -96,7 +124,15 @@ export function registryTools(db: DbPool): ToolDef[] {
             400,
           );
         }
-        return { removed: true, type_name: input.type_name };
+        return {
+          removed: true,
+          type_name: input.type_name,
+          mutation: mutationReceipt(actor, {
+            objectType: 'context_type',
+            objectId: input.type_name,
+          }),
+        };
+        });
       },
     },
   ];

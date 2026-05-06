@@ -43,6 +43,7 @@ export interface Contact {
   created_by?: UUID;
   created_at: string;
   updated_at: string;
+  row_version: number;
 }
 
 export interface Account {
@@ -64,6 +65,7 @@ export interface Account {
   created_by?: UUID;
   created_at: string;
   updated_at: string;
+  row_version: number;
 }
 
 export interface Opportunity {
@@ -85,14 +87,16 @@ export interface Opportunity {
   created_by?: UUID;
   created_at: string;
   updated_at: string;
+  row_version: number;
 }
 
 export interface Activity {
   id: UUID;
   tenant_id: UUID;
   type: 'call' | 'email' | 'meeting' | 'note' | 'task' | 'demo' | 'proposal' | 'research' | 'handoff' | 'status_update'
-      | 'outreach_email' | 'outreach_call' | 'meeting_held' | 'meeting_scheduled'
-      | 'note_added' | 'research_completed';
+      | 'outreach_email' | 'outreach_call' | 'outreach_linkedin' | 'outreach_other'
+      | 'meeting_held' | 'meeting_scheduled' | 'note_added' | 'research_completed'
+      | 'stage_change';
   subject: string;
   body?: string;
   status: string;
@@ -235,6 +239,7 @@ export interface UseCase {
   created_by?: UUID;
   created_at: string;
   updated_at: string;
+  row_version: number;
 }
 
 export interface UseCaseContact {

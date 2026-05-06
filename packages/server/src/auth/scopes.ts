@@ -18,6 +18,9 @@ const TOOL_SCOPES: Record<string, string[]> = {
   contact_update: ['contacts:write'],
   contact_delete: ['contacts:write'],
   contact_set_lifecycle: ['contacts:write'],
+  contact_get_opportunities: ['contacts:read', 'opportunities:read'],
+  contact_score: ['contacts:write'],
+  contact_merge: ['contacts:write'],
   // Compound action tools
   deal_advance: ['opportunities:write', 'activities:write'],
   contact_outreach: ['contacts:read', 'activities:write'],
@@ -31,6 +34,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   account_update: ['accounts:write'],
   account_delete: ['accounts:write'],
   account_set_health_score: ['accounts:write'],
+  account_merge: ['accounts:write'],
 
   // ── Opportunities ──
   opportunity_get: ['opportunities:read'],
@@ -39,6 +43,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   opportunity_update: ['opportunities:write'],
   opportunity_advance_stage: ['opportunities:write'],
   opportunity_delete: ['opportunities:write'],
+  opportunity_health_score: ['opportunities:write'],
 
   // ── Activities ──
   activity_get: ['activities:read'],
@@ -57,8 +62,8 @@ const TOOL_SCOPES: Record<string, string[]> = {
   assignment_complete: ['assignments:write'],
   assignment_decline: ['assignments:write'],
   assignment_start: ['assignments:write'],
-  assignment_block: ['assignments:update'],
-  assignment_cancel: ['assignments:update'],
+  assignment_block: ['assignments:write'],
+  assignment_cancel: ['assignments:write'],
 
   // ── Context ──
   context_get: ['context:read'],
@@ -73,6 +78,15 @@ const TOOL_SCOPES: Record<string, string[]> = {
   context_extract: ['context:write'],
   context_ingest: ['context:write'],
   context_stale_assign: ['context:write'],
+  context_ingest_auto: ['context:write'],
+  context_bulk_mark_stale: ['context:write'],
+  context_embed_backfill: ['context:write'],
+  context_semantic_search: ['context:read'],
+  context_detect_contradictions: ['context:read'],
+  context_contradiction_assign: ['context:read', 'assignments:write'],
+  context_resolve_contradiction: ['context:write'],
+  context_consolidate: ['context:write'],
+  context_review_batch: ['context:write'],
 
   // ── Use Cases ──
   use_case_get: ['accounts:read'],
@@ -93,6 +107,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   email_get: ['activities:read'],
   email_search: ['activities:read'],
   email_create: ['activities:write'],
+  email_ingest: ['activities:write', 'context:write'],
   email_provider_set: ['write'],
   email_provider_get: ['read'],
   email_sequence_create: ['activities:write'],
@@ -103,6 +118,22 @@ const TOOL_SCOPES: Record<string, string[]> = {
   email_sequence_enroll: ['activities:write'],
   email_sequence_unenroll: ['activities:write'],
   email_sequence_enrollment_list: ['activities:read'],
+  sequence_create: ['activities:write'],
+  sequence_get: ['activities:read'],
+  sequence_update: ['activities:write'],
+  sequence_delete: ['activities:write'],
+  sequence_list: ['activities:read'],
+  sequence_enroll: ['activities:write'],
+  sequence_unenroll: ['activities:write'],
+  sequence_pause: ['activities:write'],
+  sequence_resume: ['activities:write'],
+  sequence_advance: ['activities:write'],
+  sequence_enrollment_get: ['activities:read'],
+  sequence_enrollment_context: ['activities:read', 'context:read'],
+  sequence_enrollment_list: ['activities:read'],
+  sequence_draft_step: ['activities:write'],
+  sequence_analytics: ['activities:read'],
+  sequence_clone: ['activities:write'],
 
   // ── Webhooks ──
   webhook_get: ['read'],
@@ -125,6 +156,11 @@ const TOOL_SCOPES: Record<string, string[]> = {
   workflow_create: ['write'],
   workflow_update: ['write'],
   workflow_delete: ['write'],
+  workflow_test: ['read'],
+  workflow_clone: ['write'],
+  workflow_trigger: ['write'],
+  workflow_run_replay: ['write'],
+  workflow_template_list: ['read'],
 
   // ── Registries ──
   activity_type_list: ['read'],
@@ -140,6 +176,9 @@ const TOOL_SCOPES: Record<string, string[]> = {
   actor_expertise: ['read'],
   actor_register: ['write'],
   actor_update: ['write'],
+  agent_register_specialization: ['write'],
+  agent_find_specialist: ['read'],
+  agent_set_availability: ['write'],
   actor_whoami: [],  // always allowed
 
   // ── HITL ──
@@ -147,12 +186,28 @@ const TOOL_SCOPES: Record<string, string[]> = {
   hitl_list_pending: ['read'],
   hitl_submit_request: ['write'],
   hitl_resolve: ['write'],
+  hitl_rule_create: ['write'],
+  hitl_rule_list: ['read'],
+  hitl_rule_delete: ['write'],
+
+  // ── Agent handoff ──
+  agent_capture_handoff: ['write'],
+  agent_resume_handoff: ['read', 'write'],
 
   // ── Analytics / Meta ──
   pipeline_summary: ['opportunities:read'],
   pipeline_forecast: ['opportunities:read'],
   crm_search: ['read'],
   tenant_get_stats: ['read'],
+  ops_status_get: ['read'],
+  ops_job_recover: ['write'],
+  ops_data_quality_get: ['read'],
+  ops_data_quality_repair: ['write'],
+  ops_audit_get: ['read'],
+  ops_privacy_export: ['read'],
+  ops_pii_redact: ['write'],
+  ops_privacy_delete: ['write'],
+  ops_retention_apply: ['write'],
   entity_resolve: [],  // always allowed
   schema_get: [],      // always allowed
   guide_search: [],    // always allowed
@@ -174,8 +229,14 @@ const TOOL_SCOPES: Record<string, string[]> = {
  */
 function actorHasScope(actor: ActorContext, requiredScope: string): boolean {
   const scopes = actor.scopes;
-  // No scopes defined = JWT user (full access)
-  if (!scopes) return true;
+  // No scopes defined = verified JWT user (full access). Constructed actors,
+  // anonymous actors, and API-key actors must carry explicit scopes.
+  if (!scopes) {
+    return actor.actor_type === 'user'
+      && Boolean(actor.tenant_id)
+      && Boolean(actor.actor_id)
+      && actor.actor_id !== 'anonymous';
+  }
 
   // Direct match
   if (scopes.includes(requiredScope)) return true;

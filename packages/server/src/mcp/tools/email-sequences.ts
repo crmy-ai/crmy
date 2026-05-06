@@ -17,6 +17,8 @@ import * as seqRepo from '../../db/repos/email-sequences.js';
 import { getSequenceAnalytics } from '../../services/sequence-analytics.js';
 import { interpolate, buildVariableContext } from '../../workflows/variables.js';
 import { callLLM } from '../../agent/providers/llm.js';
+import { runToolOperation } from '../tool-operation.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 
 export function emailSequenceTools(db: DbPool): ToolDef[] {
   return [
@@ -33,9 +35,18 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
         'Set exit_on_reply=true (default) to stop sending when a contact replies.',
       inputSchema: sequenceCreate,
       handler: async (input: z.infer<typeof sequenceCreate>, actor: ActorContext) => {
-        return seqRepo.createSequence(db, actor.tenant_id, {
+        return runToolOperation(db, actor, 'sequence_create', input, async () => {
+        const sequence = await seqRepo.createSequence(db, actor.tenant_id, {
           ...input,
           created_by: actor.actor_id as any,
+        });
+        return {
+          sequence,
+          mutation: mutationReceipt(actor, {
+            objectType: 'sequence',
+            objectId: sequence.id,
+          }),
+        };
         });
       },
     },
@@ -56,7 +67,17 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
       description: 'Update a sequence name, description, steps, settings, or active status.',
       inputSchema: sequenceUpdate,
       handler: async (input: z.infer<typeof sequenceUpdate>, actor: ActorContext) => {
-        return (await seqRepo.updateSequence(db, actor.tenant_id, input.id, input.patch)) ?? { error: 'Sequence not found' };
+        return runToolOperation(db, actor, 'sequence_update', input, async () => {
+        const sequence = await seqRepo.updateSequence(db, actor.tenant_id, input.id, input.patch);
+        if (!sequence) return { error: 'Sequence not found' };
+        return {
+          sequence,
+          mutation: mutationReceipt(actor, {
+            objectType: 'sequence',
+            objectId: sequence.id,
+          }),
+        };
+        });
       },
     },
 
@@ -66,7 +87,15 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
       description: 'Delete a sequence. All active enrollments will be cancelled.',
       inputSchema: sequenceDelete,
       handler: async (input: z.infer<typeof sequenceDelete>, actor: ActorContext) => {
-        return { deleted: await seqRepo.deleteSequence(db, actor.tenant_id, input.id) };
+        return runToolOperation(db, actor, 'sequence_delete', input, async () => {
+        return {
+          deleted: await seqRepo.deleteSequence(db, actor.tenant_id, input.id),
+          mutation: mutationReceipt(actor, {
+            objectType: 'sequence',
+            objectId: input.id,
+          }),
+        };
+        });
       },
     },
 
@@ -96,8 +125,9 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
         'Use start_at_step to skip early steps.',
       inputSchema: sequenceEnroll,
       handler: async (input: z.infer<typeof sequenceEnroll>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'sequence_enroll', input, async () => {
         try {
-          return await seqRepo.enrollContact(db, actor.tenant_id, {
+          const enrollment = await seqRepo.enrollContact(db, actor.tenant_id, {
             sequence_id: input.sequence_id,
             contact_id: input.contact_id,
             enrolled_by: actor.actor_id,
@@ -106,6 +136,13 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
             start_at_step: input.start_at_step,
             objective: input.objective,
           });
+          return {
+            enrollment,
+            mutation: mutationReceipt(actor, {
+              objectType: 'sequence_enrollment',
+              objectId: enrollment.id,
+            }),
+          };
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Enrollment failed';
           if (msg.includes('unique') || msg.includes('duplicate')) {
@@ -113,6 +150,7 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
           }
           throw err;
         }
+        });
       },
     },
 
@@ -122,8 +160,16 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
       description: 'Cancel an active enrollment by enrollment ID.',
       inputSchema: sequenceUnenroll,
       handler: async (input: z.infer<typeof sequenceUnenroll>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'sequence_unenroll', input, async () => {
         const cancelled = await seqRepo.unenrollContact(db, actor.tenant_id, input.id);
-        return { cancelled };
+        return {
+          cancelled,
+          mutation: mutationReceipt(actor, {
+            objectType: 'sequence_enrollment',
+            objectId: input.id,
+          }),
+        };
+        });
       },
     },
 
@@ -133,10 +179,18 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
       description: 'Pause an active enrollment. The contact will not receive any more steps until resumed.',
       inputSchema: sequencePause,
       handler: async (input: z.infer<typeof sequencePause>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'sequence_pause', input, async () => {
         const enrollment = await seqRepo.getEnrollment(db, actor.tenant_id, input.id);
         if (!enrollment) throw validationError('Enrollment not found');
         const paused = await seqRepo.pauseEnrollment(db, input.id);
-        return { paused };
+        return {
+          paused,
+          mutation: mutationReceipt(actor, {
+            objectType: 'sequence_enrollment',
+            objectId: input.id,
+          }),
+        };
+        });
       },
     },
 
@@ -146,10 +200,18 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
       description: 'Resume a paused enrollment. The next step will execute on its next scheduled time.',
       inputSchema: sequenceResume,
       handler: async (input: z.infer<typeof sequenceResume>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'sequence_resume', input, async () => {
         const enrollment = await seqRepo.getEnrollment(db, actor.tenant_id, input.id);
         if (!enrollment) throw validationError('Enrollment not found');
         const resumed = await seqRepo.resumeEnrollment(db, input.id);
-        return { resumed };
+        return {
+          resumed,
+          mutation: mutationReceipt(actor, {
+            objectType: 'sequence_enrollment',
+            objectId: input.id,
+          }),
+        };
+        });
       },
     },
 
@@ -162,13 +224,22 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
         'The skipped step is not executed.',
       inputSchema: sequenceAdvance,
       handler: async (input: z.infer<typeof sequenceAdvance>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'sequence_advance', input, async () => {
         const enrollment = await seqRepo.getEnrollment(db, actor.tenant_id, input.id);
         if (!enrollment) throw validationError('Enrollment not found');
         const seq = await seqRepo.getSequence(db, actor.tenant_id, enrollment.sequence_id);
         if (!seq) throw validationError('Sequence not found');
         const targetStep = input.skip_to_step ?? enrollment.current_step + 1;
         const updated = await seqRepo.advanceToStep(db, actor.tenant_id, input.id, targetStep);
-        return { enrollment: updated, advanced_to_step: targetStep };
+        return {
+          enrollment: updated,
+          advanced_to_step: targetStep,
+          mutation: mutationReceipt(actor, {
+            objectType: 'sequence_enrollment',
+            objectId: input.id,
+          }),
+        };
+        });
       },
     },
 
@@ -344,11 +415,13 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
       inputSchema: z.object({
         id:   z.string().uuid().describe('UUID of the sequence to clone'),
         name: z.string().min(1).max(200).optional().describe('Name for the new sequence (defaults to "<original name> (copy)")'),
+        idempotency_key: z.string().max(128).optional(),
       }),
-      handler: async (input: { id: string; name?: string }, actor: ActorContext) => {
+      handler: async (input: { id: string; name?: string; idempotency_key?: string }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'sequence_clone', input, async () => {
         const src = await seqRepo.getSequence(db, actor.tenant_id, input.id);
         if (!src) throw notFound('Sequence', input.id);
-        return seqRepo.createSequence(db, actor.tenant_id, {
+        const sequence = await seqRepo.createSequence(db, actor.tenant_id, {
           name:            input.name ?? `${src.name} (copy)`,
           description:     src.description,
           steps:           src.steps,
@@ -359,6 +432,14 @@ export function emailSequenceTools(db: DbPool): ToolDef[] {
           tags:            src.tags,
           owner_actor_id:  src.owner_actor_id,
           created_by:      actor.actor_id,
+        });
+        return {
+          sequence,
+          mutation: mutationReceipt(actor, {
+            objectType: 'sequence',
+            objectId: sequence.id,
+          }),
+        };
         });
       },
     },

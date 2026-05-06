@@ -32,15 +32,25 @@ Set the lifecycle stage of a contact.
 - **Input**: `id` (required), `lifecycle_stage` (required), `reason`
 - **Output**: `{ contact, event_id }`
 
-### contact_log_activity
-Log an activity for a contact.
-- **Input**: `contact_id` (required), `type` (required), `subject` (required), `body`, `opportunity_id`, `due_at`, `direction`
-- **Output**: `{ activity, event_id }`
-
 ### contact_get_timeline
 Get the activity timeline for a contact.
 - **Input**: `id` (required), `limit`, `types`
 - **Output**: `{ activities, total }`
+
+### contact_get_opportunities
+Get all opportunities linked to a contact.
+- **Input**: `contact_id` (required), `stage`, `limit`
+- **Output**: `{ contact_id, opportunities, total }`
+
+### contact_score
+Compute and persist the lead score for a contact.
+- **Input**: `contact_id` (required), `idempotency_key`, `expected_version`
+- **Output**: `{ contact_id, lead_score, score_breakdown, last_updated, mutation }`
+
+### contact_merge
+Merge a duplicate contact into a primary contact.
+- **Input**: `primary_id` (required), `secondary_id` (required), `idempotency_key`, `primary_expected_version`, `secondary_expected_version`
+- **Output**: `{ primary, secondary_id, merged_count, event_id, mutation }`
 
 ## Company Tools
 
@@ -358,10 +368,64 @@ List execution runs for a workflow.
 - **Input**: `workflow_id` (required), `status` (running|completed|failed), `limit`, `cursor`
 - **Output**: `{ runs, next_cursor, total }` — each run includes `action_logs` with per-action type, status, duration_ms, and error
 
+### workflow_run_replay ★ v0.7
+Replay a failed or parked workflow run by creating a new direct run with an operator-supplied payload. The replay is explicit: CRMy does not silently reuse hidden side effects.
+- **Input**: `run_id` (required), `variables` (object), `reason` (required), `subject_type`, `subject_id`, `idempotency_key`
+- **Output**: `{ replay_of_run_id, workflow_id, workflow_name, replay, mutation }`
+
 ### workflow_template_list ★ v0.7
 List available built-in GTM workflow templates. Templates are static (no DB) and can be used as a starting point for `workflow_create`. Use the `category` filter to narrow results.
 - **Input**: `category` (optional)
 - **Output**: `{ templates }` — array of template objects with name, description, trigger_event, trigger_filter, and actions
+
+## Operational Governance Tools
+
+These tools are admin/owner-only and are designed for enterprise durability, incident response, privacy workflows, and operator review.
+
+### ops_status_get ★ v0.7
+Return tenant-scoped health for durable queues and async jobs.
+- **Input**: `include_samples`, `sample_limit`
+- **Output**: `{ generated_at, tenant_id, queues, attention_required }`
+
+### ops_job_recover ★ v0.7
+Retry, park, or mark failed a durable async job with an audit entry.
+- **Input**: `queue_name`, `job_id`, `action` (`retry`|`park`|`mark_failed`), `reason`
+- **Output**: `{ queue_name, job_id, action, previous_status, new_status, recovered, recovered_at }`
+
+### ops_data_quality_get ★ v0.7
+Run data-quality checks for malformed lifecycle/stage values, missing canonical subjects, orphaned actor links, missing search-index rows, and stuck context indexing work.
+- **Input**: `sample_limit`, `include_clean`
+- **Output**: `{ generated_at, checks, summary }`
+
+### ops_data_quality_repair ★ v0.7
+Repair only deterministic, low-risk data-quality findings. Defaults to dry run.
+- **Input**: `check_name` (`activities_missing_canonical_subject`|`current_context_missing_search_index`|`stuck_context_outbox_processing`), `dry_run`, `limit`
+- **Output**: `{ check_name, dry_run, action, repaired_count, event_id? }`
+
+### ops_audit_get ★ v0.7
+Retrieve tenant-scoped audit events.
+- **Input**: `object_type`, `object_id`, `actor_id`, `event_type`, `since`, `limit`
+- **Output**: `{ audit_events, total }`
+
+### ops_privacy_export ★ v0.7
+Export all directly attached subject data for privacy or legal review.
+- **Input**: `subject_type`, `subject_id`
+- **Output**: `{ exported_at, tenant_id, subject_type, subject_id, subject, activities, context_entries, assignments, events }`
+
+### ops_pii_redact ★ v0.7
+Redact direct PII fields from a contact or account. Defaults to dry run.
+- **Input**: `subject_type` (`contact`|`account`), `subject_id`, `reason`, `dry_run`
+- **Output**: `{ subject_type, subject_id, dry_run, redacted_fields, event_id? }`
+
+### ops_privacy_delete ★ v0.7
+Delete a CRM subject for privacy compliance after review. Defaults to dry run and reports linked-row counts.
+- **Input**: `subject_type`, `subject_id`, `reason`, `dry_run`
+- **Output**: `{ subject_type, subject_id, dry_run, deleted, affected, event_id? }`
+
+### ops_retention_apply ★ v0.7
+Apply tenant retention cleanup to supported operational tables. Defaults to dry run.
+- **Input**: `older_than_days`, `targets` (`events`|`ops_recovery_log`|`context_outbox_complete`|`idempotency_keys`), `dry_run`
+- **Output**: `{ dry_run, older_than_days, results }`
 
 ## Webhook Tools
 

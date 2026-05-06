@@ -4,44 +4,82 @@
 import type { DbPool } from '../pool.js';
 import type { Activity, UUID, PaginatedResponse } from '@crmy/shared';
 
+type ActivityCreateData = Partial<Activity> & { created_by?: UUID };
+
+function canonicalizeActivitySubject(data: ActivityCreateData): ActivityCreateData {
+  const normalized = { ...data };
+  const links: Array<{ type: NonNullable<Activity['subject_type']>; id: UUID }> = [];
+
+  if (normalized.contact_id) links.push({ type: 'contact', id: normalized.contact_id });
+  if (normalized.account_id) links.push({ type: 'account', id: normalized.account_id });
+  if (normalized.opportunity_id) links.push({ type: 'opportunity', id: normalized.opportunity_id });
+  if (normalized.use_case_id) links.push({ type: 'use_case', id: normalized.use_case_id });
+
+  if ((!normalized.subject_type || !normalized.subject_id) && links.length > 0) {
+    normalized.subject_type ??= links[0].type;
+    normalized.subject_id ??= links[0].id;
+  }
+
+  if (normalized.subject_type && normalized.subject_id) {
+    switch (normalized.subject_type) {
+      case 'contact':
+        normalized.contact_id ??= normalized.subject_id;
+        break;
+      case 'account':
+        normalized.account_id ??= normalized.subject_id;
+        break;
+      case 'opportunity':
+        normalized.opportunity_id ??= normalized.subject_id;
+        break;
+      case 'use_case':
+        normalized.use_case_id ??= normalized.subject_id;
+        break;
+    }
+  }
+
+  return normalized;
+}
+
 export async function createActivity(
   db: DbPool,
   tenantId: UUID,
-  data: Partial<Activity> & { created_by?: UUID },
+  data: ActivityCreateData,
 ): Promise<Activity> {
+  const normalized = canonicalizeActivitySubject(data);
   const result = await db.query(
     `INSERT INTO activities (tenant_id, type, subject, body, status, direction,
-       due_at, contact_id, account_id, opportunity_id, owner_id,
+       due_at, contact_id, account_id, opportunity_id, use_case_id, owner_id,
        source_agent, custom_fields, created_by,
        performed_by, subject_type, subject_id, related_type, related_id,
        detail, occurred_at, outcome)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,
-             $15,$16,$17,$18,$19,$20,$21,$22)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+             $16,$17,$18,$19,$20,$21,$22,$23)
      RETURNING *`,
     [
       tenantId,
-      data.type,
-      data.subject,
-      data.body ?? null,
-      data.status ?? (data.due_at ? 'pending' : 'completed'),
-      data.direction ?? null,
-      data.due_at ?? null,
-      data.contact_id ?? null,
-      data.account_id ?? null,
-      data.opportunity_id ?? null,
-      data.owner_id ?? data.created_by ?? null,
-      data.source_agent ?? null,
-      JSON.stringify(data.custom_fields ?? {}),
-      data.created_by ?? null,
+      normalized.type,
+      normalized.subject,
+      normalized.body ?? null,
+      normalized.status ?? (normalized.due_at ? 'pending' : 'completed'),
+      normalized.direction ?? null,
+      normalized.due_at ?? null,
+      normalized.contact_id ?? null,
+      normalized.account_id ?? null,
+      normalized.opportunity_id ?? null,
+      normalized.use_case_id ?? null,
+      normalized.owner_id ?? normalized.created_by ?? null,
+      normalized.source_agent ?? null,
+      JSON.stringify(normalized.custom_fields ?? {}),
+      normalized.created_by ?? null,
       // Context Engine fields
-      data.performed_by ?? null,
-      data.subject_type ?? null,
-      data.subject_id ?? null,
-      data.related_type ?? null,
-      data.related_id ?? null,
-      JSON.stringify(data.detail ?? {}),
-      data.occurred_at ?? new Date().toISOString(),
-      data.outcome ?? null,
+      normalized.performed_by ?? null,
+      normalized.subject_type ?? null,
+      normalized.subject_id ?? null,
+      normalized.related_type ?? null,
+      normalized.related_id ?? null,
+      JSON.stringify(normalized.detail ?? {}),
+      normalized.occurred_at ?? new Date().toISOString(),
+      normalized.outcome ?? null,
     ],
   );
   return result.rows[0] as Activity;
@@ -62,6 +100,7 @@ export async function searchActivities(
     contact_id?: UUID;
     account_id?: UUID;
     opportunity_id?: UUID;
+    use_case_id?: UUID;
     type?: string;
     direction?: string;
     subject_type?: string;
@@ -89,6 +128,11 @@ export async function searchActivities(
   if (filters.opportunity_id) {
     conditions.push(`a.opportunity_id = $${idx}`);
     params.push(filters.opportunity_id);
+    idx++;
+  }
+  if (filters.use_case_id) {
+    conditions.push(`a.use_case_id = $${idx}`);
+    params.push(filters.use_case_id);
     idx++;
   }
   if (filters.type) {
@@ -157,7 +201,11 @@ export async function updateActivity(
   id: UUID,
   patch: Record<string, unknown>,
 ): Promise<Activity | null> {
-  const allowedFields = ['subject', 'body', 'status', 'due_at', 'completed_at', 'custom_fields'];
+  const allowedFields = [
+    'subject', 'body', 'status', 'due_at', 'completed_at', 'custom_fields',
+    'direction', 'performed_by', 'subject_type', 'subject_id', 'related_type',
+    'related_id', 'detail', 'occurred_at', 'outcome',
+  ];
 
   const sets: string[] = ['updated_at = now()'];
   const params: unknown[] = [tenantId, id];
@@ -165,7 +213,7 @@ export async function updateActivity(
 
   for (const field of allowedFields) {
     if (field in patch) {
-      const value = field === 'custom_fields' ? JSON.stringify(patch[field]) : patch[field];
+      const value = field === 'custom_fields' || field === 'detail' ? JSON.stringify(patch[field]) : patch[field];
       sets.push(`${field} = $${idx}`);
       params.push(value);
       idx++;

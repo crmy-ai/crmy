@@ -9,6 +9,8 @@ import * as hitlRepo from '../../db/repos/hitl.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, validationError } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
+import { runToolOperation } from '../tool-operation.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 
 export function hitlTools(db: DbPool): ToolDef[] {
   return [
@@ -18,6 +20,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
       description: 'Submit a human-in-the-loop approval request before executing any high-stakes action that should not be taken autonomously: sending proposals, making commitments, escalating pricing, or contacting executives for the first time. Set auto_approve_after_seconds to enable time-boxed autonomy (e.g. 3600 for "proceed in 1 hour if no human response"). Set priority ("low"|"normal"|"high"|"urgent") and sla_minutes to control notification urgency and escalation timing. Always poll hitl_check_status before proceeding — never assume approval. The human sees the request in the HITL Queue in the web UI and can approve, reject, or add a note.',
       inputSchema: hitlSubmit,
       handler: async (input: z.infer<typeof hitlSubmit>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'hitl_submit_request', input, async () => {
         const request = await hitlRepo.createHITLRequest(db, actor.tenant_id, {
           agent_id: actor.actor_id,
           action_type: input.action_type,
@@ -29,7 +32,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
           escalate_to_id: input.escalate_to_id,
         });
 
-        await emitEvent(db, {
+        const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
           eventType: 'hitl.submitted',
           actorId: actor.actor_id,
@@ -39,7 +42,17 @@ export function hitlTools(db: DbPool): ToolDef[] {
           afterData: request,
         });
 
-        return { request_id: request.id, status: request.status };
+        return {
+          request_id: request.id,
+          status: request.status,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'hitl_request',
+            objectId: request.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -69,6 +82,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
       description: 'Approve or reject a pending HITL request as a human reviewer. Pass the request_id, decision ("approved" or "rejected"), and an optional note explaining your reasoning. The requesting agent will see the decision when it next polls hitl_check_status. Typically called from the web UI or by a human actor through the CLI.',
       inputSchema: hitlResolve,
       handler: async (input: z.infer<typeof hitlResolve>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'hitl_resolve', input, async () => {
         const request = await hitlRepo.resolveHITLRequest(
           db,
           actor.tenant_id,
@@ -79,7 +93,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
         );
         if (!request) throw notFound('HITL Request (or already resolved)', input.request_id);
 
-        await emitEvent(db, {
+        const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
           eventType: input.decision === 'approved' ? 'hitl.approved' : 'hitl.rejected',
           actorId: actor.actor_id,
@@ -89,7 +103,16 @@ export function hitlTools(db: DbPool): ToolDef[] {
           afterData: request,
         });
 
-        return { request };
+        return {
+          request,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'hitl_request',
+            objectId: request.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     // ── Auto-approval rule management ────────────────────────────────────────
@@ -115,6 +138,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
         ]).default({}).describe('Condition expression (empty = always match)'),
         decision: z.enum(['approved', 'rejected']).describe('Decision to apply when rule matches'),
         priority: z.number().int().default(0).describe('Higher priority rules are evaluated first'),
+        idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (input: {
         name: string;
@@ -122,7 +146,9 @@ export function hitlTools(db: DbPool): ToolDef[] {
         condition: unknown;
         decision: 'approved' | 'rejected';
         priority?: number;
+        idempotency_key?: string;
       }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'hitl_rule_create', input, async () => {
         try {
           const result = await db.query(
             `INSERT INTO hitl_approval_rules (tenant_id, name, action_type, condition, decision, priority)
@@ -136,7 +162,14 @@ export function hitlTools(db: DbPool): ToolDef[] {
               input.priority ?? 0,
             ],
           );
-          return { rule: result.rows[0] };
+          const rule = result.rows[0];
+          return {
+            rule,
+            mutation: mutationReceipt(actor, {
+              objectType: 'hitl_approval_rule',
+              objectId: rule.id,
+            }),
+          };
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Failed to create approval rule';
           if (msg.includes('unique') || msg.includes('duplicate')) {
@@ -144,6 +177,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
           }
           throw err;
         }
+        });
       },
     },
     {
@@ -165,14 +199,24 @@ export function hitlTools(db: DbPool): ToolDef[] {
       description: 'Delete an auto-approval rule by ID. The rule is permanently removed. Use hitl_rule_list to find rule IDs.',
       inputSchema: z.object({
         id: z.string().uuid().describe('ID of the rule to delete'),
+        idempotency_key: z.string().max(128).optional(),
       }),
-      handler: async (input: { id: string }, actor: ActorContext) => {
+      handler: async (input: { id: string; idempotency_key?: string }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'hitl_rule_delete', input, async () => {
         const result = await db.query(
           'DELETE FROM hitl_approval_rules WHERE id = $1 AND tenant_id = $2 RETURNING id',
           [input.id, actor.tenant_id],
         );
         if (result.rows.length === 0) throw notFound('HITL approval rule', input.id as UUID);
-        return { deleted: true, id: input.id };
+        return {
+          deleted: true,
+          id: input.id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'hitl_approval_rule',
+            objectId: input.id,
+          }),
+        };
+        });
       },
     },
   ];

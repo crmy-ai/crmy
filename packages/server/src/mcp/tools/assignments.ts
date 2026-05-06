@@ -14,7 +14,25 @@ import * as governorLimits from '../../db/repos/governor-limits.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, validationError } from '@crmy/shared';
 import { validateAssignmentAction } from '../../services/state-machine.js';
+import { runIdempotent } from '../../db/repos/idempotency.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+
+function runAssignmentOperation<T>(
+  db: DbPool,
+  actor: ActorContext,
+  operation: string,
+  input: { idempotency_key?: string },
+  fn: () => Promise<T>,
+): Promise<T> {
+  return runIdempotent(db, {
+    tenantId: actor.tenant_id,
+    actorId: actor.actor_id,
+    operation,
+    key: input.idempotency_key,
+    request: input,
+  }, fn);
+}
 
 export function assignmentTools(db: DbPool): ToolDef[] {
   return [
@@ -24,6 +42,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       description: 'Create an assignment to hand off work from one actor to another — this is the agent-to-human (or agent-to-agent) coordination primitive. The context field (plain text) is the handoff brief: write it as if explaining to a colleague what they need to know — what you tried, what you learned, what the assignee needs to do, and what to avoid. Set priority to "urgent" sparingly as it surfaces at the top of the human queue. The human sees assignments in the web UI Assignments view and via "crmy assignments list --mine". The assigner is automatically set to the current actor.',
       inputSchema: assignmentCreate,
       handler: async (input: z.infer<typeof assignmentCreate>, actor: ActorContext) => {
+        return runAssignmentOperation(db, actor, 'assignment_create', input, async () => {
         // Enforce governor limit on active assignments
         const activeCount = await governorLimits.countActiveAssignments(db, actor.tenant_id);
         await governorLimits.enforceLimit(db, actor.tenant_id, 'assignments_active', activeCount);
@@ -41,7 +60,16 @@ export function assignmentTools(db: DbPool): ToolDef[] {
           objectId: assignment.id,
           afterData: assignment,
         });
-        return { assignment, event_id };
+        return {
+          assignment,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'assignment',
+            objectId: assignment.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -74,6 +102,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       description: 'Update an assignment by passing its id and a patch object with fields to change. Use this to modify the context brief, adjust priority, update the due date, or change the assignee. For status transitions, prefer the dedicated accept/start/complete/block/decline/cancel tools instead.',
       inputSchema: assignmentUpdate,
       handler: async (input: z.infer<typeof assignmentUpdate>, actor: ActorContext) => {
+        return runAssignmentOperation(db, actor, 'assignment_update', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
 
@@ -90,7 +119,16 @@ export function assignmentTools(db: DbPool): ToolDef[] {
           beforeData: before,
           afterData: assignment,
         });
-        return { assignment, event_id };
+        return {
+          assignment,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'assignment',
+            objectId: assignment.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -99,6 +137,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       description: 'Accept a pending assignment, transitioning it from "pending" to "accepted" status. Call this when you are ready to take ownership of the work. The assignment must be in "pending" status.',
       inputSchema: assignmentAccept,
       handler: async (input: z.infer<typeof assignmentAccept>, actor: ActorContext) => {
+        return runAssignmentOperation(db, actor, 'assignment_accept', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
 
@@ -118,7 +157,16 @@ export function assignmentTools(db: DbPool): ToolDef[] {
           beforeData: { status: before.status },
           afterData: { status: 'accepted' },
         });
-        return { assignment, event_id };
+        return {
+          assignment,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'assignment',
+            objectId: assignment.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -127,6 +175,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       description: 'Mark an assignment as completed. Optionally pass completed_by_activity_id to link the activity that fulfilled the assignment — this creates a clear audit trail showing exactly what action completed the work.',
       inputSchema: assignmentComplete,
       handler: async (input: z.infer<typeof assignmentComplete>, actor: ActorContext) => {
+        return runAssignmentOperation(db, actor, 'assignment_complete', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
 
@@ -148,7 +197,16 @@ export function assignmentTools(db: DbPool): ToolDef[] {
           beforeData: { status: before.status },
           afterData: { status: 'completed' },
         });
-        return { assignment, event_id };
+        return {
+          assignment,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'assignment',
+            objectId: assignment.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -157,6 +215,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       description: 'Decline a pending assignment you cannot or should not handle. Optionally provide a reason so the assigner understands why and can reassign. The reason is stored in the assignment metadata for audit.',
       inputSchema: assignmentDecline,
       handler: async (input: z.infer<typeof assignmentDecline>, actor: ActorContext) => {
+        return runAssignmentOperation(db, actor, 'assignment_decline', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
 
@@ -184,7 +243,16 @@ export function assignmentTools(db: DbPool): ToolDef[] {
           afterData: { status: 'declined' },
           metadata: input.reason ? { reason: input.reason } : undefined,
         });
-        return { assignment, event_id };
+        return {
+          assignment,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'assignment',
+            objectId: assignment.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -193,6 +261,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       description: 'Begin working on an accepted assignment, transitioning it from "accepted" to "in_progress" status. Call this when you actively start the work so the assigner can see progress.',
       inputSchema: assignmentStart,
       handler: async (input: z.infer<typeof assignmentStart>, actor: ActorContext) => {
+        return runAssignmentOperation(db, actor, 'assignment_start', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
 
@@ -212,7 +281,16 @@ export function assignmentTools(db: DbPool): ToolDef[] {
           beforeData: { status: before.status },
           afterData: { status: 'in_progress' },
         });
-        return { assignment, event_id };
+        return {
+          assignment,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'assignment',
+            objectId: assignment.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -221,6 +299,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       description: 'Mark an in-progress assignment as blocked when you cannot continue without external input or resolution. Provide a reason describing what is blocking progress so the assigner or team can help unblock.',
       inputSchema: assignmentBlock,
       handler: async (input: z.infer<typeof assignmentBlock>, actor: ActorContext) => {
+        return runAssignmentOperation(db, actor, 'assignment_block', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
 
@@ -247,7 +326,16 @@ export function assignmentTools(db: DbPool): ToolDef[] {
           afterData: { status: 'blocked' },
           metadata: input.reason ? { reason: input.reason } : undefined,
         });
-        return { assignment, event_id };
+        return {
+          assignment,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'assignment',
+            objectId: assignment.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -256,6 +344,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       description: 'Cancel an assignment that is no longer needed. Works from any non-terminal state (pending, accepted, in_progress, blocked). Optionally provide a reason explaining why the work is no longer required.',
       inputSchema: assignmentCancel,
       handler: async (input: z.infer<typeof assignmentCancel>, actor: ActorContext) => {
+        return runAssignmentOperation(db, actor, 'assignment_cancel', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
 
@@ -282,7 +371,16 @@ export function assignmentTools(db: DbPool): ToolDef[] {
           afterData: { status: 'cancelled' },
           metadata: input.reason ? { reason: input.reason } : undefined,
         });
-        return { assignment, event_id };
+        return {
+          assignment,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'assignment',
+            objectId: assignment.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
   ];

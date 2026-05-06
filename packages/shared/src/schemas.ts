@@ -11,13 +11,20 @@ export const limit = z.number().int().min(1).max(100).default(20);
 export const lifecycleStage = z.enum(['lead', 'prospect', 'customer', 'churned']);
 export const oppStage = z.enum(['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost']);
 export const forecastCat = z.enum(['pipeline', 'best_case', 'commit', 'closed']);
-export const activityType = z.enum(['call', 'email', 'meeting', 'note', 'task', 'demo', 'proposal', 'research', 'handoff', 'status_update']);
+export const activityType = z.enum([
+  'call', 'email', 'meeting', 'note', 'task', 'demo', 'proposal', 'research', 'handoff', 'status_update',
+  'outreach_email', 'outreach_call', 'outreach_linkedin', 'outreach_other',
+  'meeting_held', 'meeting_scheduled', 'note_added', 'research_completed', 'stage_change',
+]);
 export const direction = z.enum(['inbound', 'outbound']);
 export const userRole = z.enum(['owner', 'admin', 'member']);
 export const subjectType = z.enum(['contact', 'account', 'opportunity', 'use_case']);
 
 const tags = z.array(z.string()).default([]);
 const customFields = z.record(z.unknown()).default({});
+const idempotencyKey = z.string().max(128).optional();
+const expectedVersion = z.number().int().positive().optional()
+  .describe('Optional optimistic concurrency guard. Pass the row_version from the last read to prevent overwriting newer state.');
 
 // -- Deduplication controls (shared across create schemas) --
 
@@ -43,11 +50,14 @@ export const contactCreate = z.object({
   tags,
   custom_fields: customFields,
   source: z.string().optional(),
+  idempotency_key: idempotencyKey,
   ...dedupControls,
 });
 
 export const contactUpdate = z.object({
   id: uuid,
+  idempotency_key: idempotencyKey,
+  expected_version: expectedVersion,
   patch: z.object({
     first_name: z.string().min(1).optional(),
     last_name: z.string().optional(),
@@ -79,6 +89,8 @@ export const contactSetLifecycle = z.object({
   id: uuid,
   lifecycle_stage: lifecycleStage,
   reason: z.string().optional(),
+  idempotency_key: idempotencyKey,
+  expected_version: expectedVersion,
 });
 
 export const contactGetTimeline = z.object({
@@ -101,11 +113,14 @@ export const accountCreate = z.object({
   aliases: z.array(z.string()).default([]),
   tags,
   custom_fields: customFields,
+  idempotency_key: idempotencyKey,
   ...dedupControls,
 });
 
 export const accountUpdate = z.object({
   id: uuid,
+  idempotency_key: idempotencyKey,
+  expected_version: expectedVersion,
   patch: z.object({
     name: z.string().min(1).optional(),
     domain: z.string().optional(),
@@ -136,6 +151,8 @@ export const accountSetHealth = z.object({
   id: uuid,
   score: z.number().int().min(0).max(100),
   rationale: z.string().optional(),
+  idempotency_key: idempotencyKey,
+  expected_version: expectedVersion,
 });
 
 // -- Opportunity schemas --
@@ -150,11 +167,14 @@ export const opportunityCreate = z.object({
   stage: oppStage.default('prospecting'),
   description: z.string().optional(),
   custom_fields: customFields,
+  idempotency_key: idempotencyKey,
   ...dedupControls,
 });
 
 export const opportunityUpdate = z.object({
   id: uuid,
+  idempotency_key: idempotencyKey,
+  expected_version: expectedVersion,
   patch: z.object({
     name: z.string().min(1).optional(),
     account_id: uuid.nullable().optional(),
@@ -187,6 +207,8 @@ export const opportunityAdvanceStage = z.object({
   stage: oppStage,
   note: z.string().optional(),
   lost_reason: z.string().optional(),
+  idempotency_key: idempotencyKey,
+  expected_version: expectedVersion,
 });
 
 export const pipelineSummary = z.object({
@@ -203,6 +225,7 @@ export const activityCreate = z.object({
   contact_id: uuid.optional(),
   account_id: uuid.optional(),
   opportunity_id: uuid.optional(),
+  use_case_id: uuid.optional(),
   due_at: z.string().optional(),
   direction: direction.optional(),
   custom_fields: customFields,
@@ -215,15 +238,27 @@ export const activityCreate = z.object({
   detail: z.record(z.unknown()).optional(),
   occurred_at: z.string().optional(),
   outcome: z.string().optional(),
+  idempotency_key: idempotencyKey,
 });
 
 export const activityUpdate = z.object({
   id: uuid,
+  idempotency_key: idempotencyKey,
   patch: z.object({
     subject: z.string().min(1).optional(),
     body: z.string().nullable().optional(),
     status: z.string().optional(),
     due_at: z.string().nullable().optional(),
+    completed_at: z.string().nullable().optional(),
+    direction: direction.optional(),
+    performed_by: uuid.nullable().optional(),
+    subject_type: subjectType.optional(),
+    subject_id: uuid.optional(),
+    related_type: subjectType.nullable().optional(),
+    related_id: uuid.nullable().optional(),
+    detail: z.record(z.unknown()).optional(),
+    occurred_at: z.string().optional(),
+    outcome: z.string().nullable().optional(),
     custom_fields: z.record(z.unknown()).optional(),
   }),
 });
@@ -232,6 +267,7 @@ export const activitySearch = z.object({
   contact_id: uuid.optional(),
   account_id: uuid.optional(),
   opportunity_id: uuid.optional(),
+  use_case_id: uuid.optional(),
   type: activityType.optional(),
   subject_type: subjectType.optional(),
   subject_id: uuid.optional(),
@@ -245,6 +281,7 @@ export const activityComplete = z.object({
   id: uuid,
   completed_at: z.string().optional(),
   note: z.string().optional(),
+  idempotency_key: idempotencyKey,
 });
 
 // -- Compound action schemas --
@@ -253,6 +290,8 @@ export const dealAdvance = z.object({
   opportunity_id: uuid,
   stage: oppStage,
   note: z.string().optional(),
+  idempotency_key: idempotencyKey,
+  expected_version: expectedVersion,
   context: z.object({
     title: z.string(),
     body: z.string(),
@@ -266,6 +305,7 @@ export const contactOutreach = z.object({
   subject: z.string().min(1),
   body: z.string().optional(),
   outcome: z.string().optional(),
+  idempotency_key: idempotencyKey,
   context: z.object({
     title: z.string(),
     body: z.string(),
@@ -301,6 +341,7 @@ export const hitlSubmit = z.object({
     .describe('Minutes before SLA breach triggers escalation. Default: 1440 (24h)'),
   escalate_to_id: z.string().uuid().optional()
     .describe('Actor ID to escalate to if SLA breaches. Defaults to most senior active human.'),
+  idempotency_key: idempotencyKey,
 });
 
 export const hitlCheckStatus = z.object({
@@ -315,6 +356,7 @@ export const hitlResolve = z.object({
   request_id: uuid,
   decision: z.enum(['approved', 'rejected']),
   note: z.string().optional(),
+  idempotency_key: idempotencyKey,
 });
 
 // -- Meta schemas --
@@ -372,10 +414,13 @@ export const useCaseCreate = z.object({
   sunset_date: z.string().optional(),
   tags,
   custom_fields: customFields,
+  idempotency_key: idempotencyKey,
 });
 
 export const useCaseUpdate = z.object({
   id: uuid,
+  idempotency_key: idempotencyKey,
+  expected_version: expectedVersion,
   patch: z.object({
     name: z.string().min(1).optional(),
     stage: useCaseStage.optional(),
@@ -408,35 +453,47 @@ export const useCaseSearch = z.object({
 });
 
 export const useCaseGet = z.object({ id: uuid });
-export const useCaseDelete = z.object({ id: uuid });
+export const useCaseDelete = z.object({
+  id: uuid,
+  idempotency_key: idempotencyKey,
+  expected_version: expectedVersion,
+});
 
 export const useCaseAdvanceStage = z.object({
   id: uuid,
   stage: useCaseStage,
   note: z.string().optional(),
+  idempotency_key: idempotencyKey,
+  expected_version: expectedVersion,
 });
 
 export const useCaseUpdateConsumption = z.object({
   id: uuid,
   consumption_current: z.number().int(),
   note: z.string().optional(),
+  idempotency_key: idempotencyKey,
+  expected_version: expectedVersion,
 });
 
 export const useCaseSetHealth = z.object({
   id: uuid,
   score: z.number().int().min(0).max(100),
   rationale: z.string().optional(),
+  idempotency_key: idempotencyKey,
+  expected_version: expectedVersion,
 });
 
 export const useCaseLinkContact = z.object({
   use_case_id: uuid,
   contact_id: uuid,
   role: z.string().default('stakeholder'),
+  idempotency_key: idempotencyKey,
 });
 
 export const useCaseUnlinkContact = z.object({
   use_case_id: uuid,
   contact_id: uuid,
+  idempotency_key: idempotencyKey,
 });
 
 export const useCaseListContacts = z.object({
@@ -460,10 +517,12 @@ export const webhookCreate = z.object({
   url: z.string().url(),
   events: z.array(z.string()).min(1),
   description: z.string().optional(),
+  idempotency_key: idempotencyKey,
 });
 
 export const webhookUpdate = z.object({
   id: uuid,
+  idempotency_key: idempotencyKey,
   patch: z.object({
     url: z.string().url().optional(),
     events: z.array(z.string()).optional(),
@@ -472,7 +531,7 @@ export const webhookUpdate = z.object({
   }),
 });
 
-export const webhookDelete = z.object({ id: uuid });
+export const webhookDelete = z.object({ id: uuid, idempotency_key: idempotencyKey });
 export const webhookGet = z.object({ id: uuid });
 
 export const webhookList = z.object({
@@ -500,6 +559,7 @@ export const emailCreate = z.object({
   body_text: z.string().optional(),
   to_address: z.string().email(),
   require_approval: z.boolean().default(true),
+  idempotency_key: idempotencyKey,
 });
 
 export const emailGet = z.object({ id: uuid });
@@ -516,6 +576,7 @@ export const emailProviderSet = z.object({
   config: z.record(z.unknown()),
   from_name: z.string().min(1),
   from_email: z.string().email(),
+  idempotency_key: idempotencyKey,
 });
 
 export const emailProviderGet = z.object({});
@@ -609,13 +670,15 @@ export const sequenceCreate = z.object({
   exit_on_reply: z.boolean().optional(),
   ai_persona: z.string().optional(),
   tags: z.array(z.string()).optional(),
+  idempotency_key: idempotencyKey,
 });
 
 export const sequenceGet = z.object({ id: uuid });
-export const sequenceDelete = z.object({ id: uuid });
+export const sequenceDelete = z.object({ id: uuid, idempotency_key: idempotencyKey });
 
 export const sequenceUpdate = z.object({
   id: uuid,
+  idempotency_key: idempotencyKey,
   patch: z.object({
     name: z.string().min(1).optional(),
     description: z.string().optional(),
@@ -643,20 +706,22 @@ export const sequenceEnroll = z.object({
   start_at_step: z.number().int().min(0).optional(),
   /** What the enrolling actor is trying to achieve — visible in briefings and the sandbox view. */
   objective: z.string().max(500).optional(),
+  idempotency_key: idempotencyKey,
 });
 
 export const sequenceEnrollmentContext = z.object({
   enrollment_id: uuid,
 });
 
-export const sequenceUnenroll = z.object({ id: uuid });
-export const sequencePause = z.object({ id: uuid });
-export const sequenceResume = z.object({ id: uuid });
+export const sequenceUnenroll = z.object({ id: uuid, idempotency_key: idempotencyKey });
+export const sequencePause = z.object({ id: uuid, idempotency_key: idempotencyKey });
+export const sequenceResume = z.object({ id: uuid, idempotency_key: idempotencyKey });
 
 export const sequenceAdvance = z.object({
   id: uuid,
   skip_to_step: z.number().int().min(0).optional(),
   reason: z.string().optional(),
+  idempotency_key: idempotencyKey,
 });
 
 export const sequenceEnrollmentGet = z.object({ id: uuid });
@@ -703,10 +768,12 @@ export const customFieldCreate = z.object({
   required: z.boolean().default(false),
   options: z.array(z.string()).optional(),
   default_value: z.unknown().optional(),
+  idempotency_key: idempotencyKey,
 });
 
 export const customFieldUpdate = z.object({
   id: uuid,
+  idempotency_key: idempotencyKey,
   patch: z.object({
     label: z.string().min(1).optional(),
     description: z.string().nullable().optional(),
@@ -717,7 +784,7 @@ export const customFieldUpdate = z.object({
   }),
 });
 
-export const customFieldDelete = z.object({ id: uuid });
+export const customFieldDelete = z.object({ id: uuid, idempotency_key: idempotencyKey });
 
 export const customFieldList = z.object({
   object_type: z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case']),
@@ -898,10 +965,12 @@ export const workflowCreate = z.object({
   actions: z.array(workflowAction).min(1).max(20),
   is_active: z.boolean().default(true),
   max_runs_per_hour: z.number().int().min(1).max(1000).optional().describe('Rate limit: maximum workflow runs allowed per hour'),
+  idempotency_key: idempotencyKey,
 });
 
 export const workflowUpdate = z.object({
   id: uuid,
+  idempotency_key: idempotencyKey,
   patch: z.object({
     name: z.string().min(1).optional(),
     description: z.string().nullable().optional(),
@@ -914,7 +983,7 @@ export const workflowUpdate = z.object({
 });
 
 export const workflowGet = z.object({ id: uuid });
-export const workflowDelete = z.object({ id: uuid });
+export const workflowDelete = z.object({ id: uuid, idempotency_key: idempotencyKey });
 
 export const workflowList = z.object({
   trigger_event: z.string().optional(),
@@ -938,10 +1007,12 @@ export const messagingChannelCreate = z.object({
   config: z.record(z.unknown()),
   is_active: z.boolean().default(true),
   is_default: z.boolean().default(false),
+  idempotency_key: idempotencyKey,
 });
 
 export const messagingChannelUpdate = z.object({
   id: uuid,
+  idempotency_key: idempotencyKey,
   patch: z.object({
     name: z.string().min(1).optional(),
     config: z.record(z.unknown()).optional(),
@@ -951,7 +1022,7 @@ export const messagingChannelUpdate = z.object({
 });
 
 export const messagingChannelGet = z.object({ id: uuid });
-export const messagingChannelDelete = z.object({ id: uuid });
+export const messagingChannelDelete = z.object({ id: uuid, idempotency_key: idempotencyKey });
 
 export const messagingChannelList = z.object({
   provider: z.string().optional(),
@@ -966,6 +1037,7 @@ export const messageSend = z.object({
   subject: z.string().optional(),
   body: z.string().min(1),
   metadata: z.record(z.unknown()).default({}),
+  idempotency_key: idempotencyKey,
 });
 
 export const messageDeliveryGet = z.object({ id: uuid });
@@ -997,10 +1069,12 @@ export const activityTypeRegistryAdd = z.object({
   label: z.string().min(1).max(200),
   description: z.string().optional(),
   category: activityTypeCategory,
+  idempotency_key: idempotencyKey,
 });
 
 export const activityTypeRegistryRemove = z.object({
   type_name: z.string().min(1),
+  idempotency_key: idempotencyKey,
 });
 
 export const activityTypeRegistryList = z.object({
@@ -1013,10 +1087,12 @@ export const contextTypeRegistryAdd = z.object({
   type_name: z.string().min(1).max(100).regex(/^[a-z][a-z0-9_]*$/),
   label: z.string().min(1).max(200),
   description: z.string().optional(),
+  idempotency_key: idempotencyKey,
 });
 
 export const contextTypeRegistryRemove = z.object({
   type_name: z.string().min(1),
+  idempotency_key: idempotencyKey,
 });
 
 export const contextTypeRegistryList = z.object({});
@@ -1087,6 +1163,7 @@ export const contextEmbedBackfill = z.object({
     .describe('Optional: limit backfill to entries for a specific entity type.'),
   dry_run: z.boolean().default(false)
     .describe('If true, count pending entries without embedding them.'),
+  idempotency_key: idempotencyKey,
 });
 
 // -- Context review schema --
@@ -1095,6 +1172,7 @@ export const contextReview = z.object({
   id: uuid,
   extend_days: z.number().int().min(1).max(3650).optional()
     .describe('Extend valid_until by this many days from now. If omitted, uses the type\'s half_life_days or defaults to 30.'),
+  idempotency_key: idempotencyKey,
 });
 
 // -- Context stale list schema --
@@ -1117,10 +1195,12 @@ export const actorCreate = z.object({
   agent_identifier: z.string().optional(),
   agent_model: z.string().optional(),
   metadata: z.record(z.unknown()).default({}),
+  idempotency_key: idempotencyKey,
 });
 
 export const actorUpdate = z.object({
   id: uuid,
+  idempotency_key: idempotencyKey,
   patch: z.object({
     display_name: z.string().min(1).optional(),
     email: z.string().email().nullable().optional(),
@@ -1157,10 +1237,12 @@ export const assignmentCreate = z.object({
   due_at: z.string().optional(),
   context: z.string().optional(),
   metadata: z.record(z.unknown()).default({}),
+  idempotency_key: idempotencyKey,
 });
 
 export const assignmentUpdate = z.object({
   id: uuid,
+  idempotency_key: idempotencyKey,
   patch: z.object({
     title: z.string().min(1).optional(),
     description: z.string().nullable().optional(),
@@ -1185,28 +1267,32 @@ export const assignmentSearch = z.object({
   cursor,
 });
 
-export const assignmentAccept = z.object({ id: uuid });
+export const assignmentAccept = z.object({ id: uuid, idempotency_key: idempotencyKey });
 
 export const assignmentComplete = z.object({
   id: uuid,
   completed_by_activity_id: uuid.optional(),
+  idempotency_key: idempotencyKey,
 });
 
 export const assignmentDecline = z.object({
   id: uuid,
   reason: z.string().optional(),
+  idempotency_key: idempotencyKey,
 });
 
-export const assignmentStart = z.object({ id: uuid });
+export const assignmentStart = z.object({ id: uuid, idempotency_key: idempotencyKey });
 
 export const assignmentBlock = z.object({
   id: uuid,
   reason: z.string().optional(),
+  idempotency_key: idempotencyKey,
 });
 
 export const assignmentCancel = z.object({
   id: uuid,
   reason: z.string().optional(),
+  idempotency_key: idempotencyKey,
 });
 
 // -- Context Entry schemas --
@@ -1231,6 +1317,9 @@ export const contextEntryCreate = z.object({
   visibility: z.enum(['internal', 'external']).default('internal'),
   mentions: z.array(z.string()).default([]),
   pinned: z.boolean().default(false),
+  allow_similar: z.boolean().optional().default(false)
+    .describe('Bypass context convergence warnings and create a separate current entry even when similar or conflicting current context exists. Prefer context_supersede unless the new entry is intentionally distinct.'),
+  idempotency_key: idempotencyKey,
 });
 
 export const contextEntryGet = z.object({ id: uuid });
@@ -1258,6 +1347,7 @@ export const contextEntrySupersede = z.object({
   structured_data: z.record(z.unknown()).optional(),
   confidence: z.number().min(0).max(1).optional(),
   tags: z.array(contextTag).max(20).optional(),
+  idempotency_key: idempotencyKey,
 });
 
 export const activityGetTimeline = z.object({
@@ -1301,4 +1391,5 @@ export const contextIngest = z.object({
   document: z.string().min(1).max(100000),
   /** Short description of the document (appears as the activity subject) */
   source_label: z.string().optional(),
+  idempotency_key: idempotencyKey,
 });

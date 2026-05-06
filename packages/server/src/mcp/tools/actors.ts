@@ -10,6 +10,8 @@ import * as governorLimits from '../../db/repos/governor-limits.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, validationError } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
+import { runToolOperation } from '../tool-operation.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 
 export function actorTools(db: DbPool): ToolDef[] {
   return [
@@ -19,6 +21,7 @@ export function actorTools(db: DbPool): ToolDef[] {
       description: 'Register a new actor (human or agent) in the CRMy system. Agents should call this at the start of each session — it is idempotent, so calling it when already registered is safe and returns the existing actor. Provide actor_type ("human" or "agent"), display_name, and for agents: agent_identifier and agent_model. The returned actor ID is used in all subsequent tool calls as performed_by and authored_by.',
       inputSchema: actorCreate,
       handler: async (input: z.infer<typeof actorCreate>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'actor_register', input, async () => {
         // Enforce governor limit on active actor count
         const activeCount = await governorLimits.countActiveActors(db, actor.tenant_id);
         await governorLimits.enforceLimit(db, actor.tenant_id, 'actors_max', activeCount);
@@ -33,7 +36,16 @@ export function actorTools(db: DbPool): ToolDef[] {
           objectId: created.id,
           afterData: created,
         });
-        return { actor: created, event_id };
+        return {
+          actor: created,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'actor',
+            objectId: created.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -66,6 +78,7 @@ export function actorTools(db: DbPool): ToolDef[] {
       description: 'Update an actor profile. Pass the actor id and a patch object with the fields to change (display_name, email, agent_model, metadata, is_active). Use this to update agent configuration or deactivate an actor.',
       inputSchema: actorUpdate,
       handler: async (input: z.infer<typeof actorUpdate>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'actor_update', input, async () => {
         const before = await actorRepo.getActor(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Actor', input.id);
 
@@ -82,7 +95,16 @@ export function actorTools(db: DbPool): ToolDef[] {
           beforeData: before,
           afterData: updated,
         });
-        return { actor: updated, event_id };
+        return {
+          actor: updated,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'actor',
+            objectId: updated.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -178,14 +200,23 @@ export function actorTools(db: DbPool): ToolDef[] {
         skill_tag: z.string().min(1).max(50).describe('Short skill identifier, e.g. "pricing", "legal"'),
         proficiency: z.enum(['novice', 'intermediate', 'expert']).default('intermediate'),
         description: z.string().max(300).optional().describe('What you can do with this skill'),
+        idempotency_key: z.string().max(128).optional(),
       }),
-      handler: async (input: { skill_tag: string; proficiency?: string; description?: string }, actor: ActorContext) => {
+      handler: async (input: { skill_tag: string; proficiency?: string; description?: string; idempotency_key?: string }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'agent_register_specialization', input, async () => {
         const spec = await actorRepo.upsertSpecialization(db, actor.tenant_id, actor.actor_id, {
           skill_tag: input.skill_tag,
           proficiency: input.proficiency,
           description: input.description,
         });
-        return { specialization: spec };
+        return {
+          specialization: spec,
+          mutation: mutationReceipt(actor, {
+            objectType: 'actor',
+            objectId: actor.actor_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -222,10 +253,20 @@ export function actorTools(db: DbPool): ToolDef[] {
       description: 'Update your availability status so other agents know whether you can take work. Set to "busy" when you are actively working on a task, "available" when idle, and "offline" when shutting down.',
       inputSchema: z.object({
         status: z.enum(['available', 'busy', 'offline']).describe('Your availability status'),
+        idempotency_key: z.string().max(128).optional(),
       }),
-      handler: async (input: { status: 'available' | 'busy' | 'offline' }, actor: ActorContext) => {
+      handler: async (input: { status: 'available' | 'busy' | 'offline'; idempotency_key?: string }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'agent_set_availability', input, async () => {
         await actorRepo.setAvailabilityStatus(db, actor.tenant_id, actor.actor_id, input.status);
-        return { actor_id: actor.actor_id, availability_status: input.status };
+        return {
+          actor_id: actor.actor_id,
+          availability_status: input.status,
+          mutation: mutationReceipt(actor, {
+            objectType: 'actor',
+            objectId: actor.actor_id,
+          }),
+        };
+        });
       },
     },
   ];

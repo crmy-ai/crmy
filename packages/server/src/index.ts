@@ -21,6 +21,7 @@ import { cleanExpiredSessions } from './db/repos/agent.js';
 import { processPendingExtractions } from './agent/extraction.js';
 import { processStaleEntries } from './services/staleness.js';
 import { loadPlugins, shutdownPlugins, type PluginConfig } from './plugins/index.js';
+import { CrmyError, unauthorized, type ActorContext } from '@crmy/shared';
 
 async function purgeOldWorkflowRuns(db: DbPool): Promise<void> {
   await db.query(
@@ -30,7 +31,6 @@ async function purgeOldWorkflowRuns(db: DbPool): Promise<void> {
   );
 }
 import { eventBus } from './events/bus.js';
-import type { ActorContext } from '@crmy/shared';
 
 // Read package version at runtime — avoids hardcoding across builds
 const _require = createRequire(import.meta.url);
@@ -161,22 +161,37 @@ export async function createApp(config: ServerConfig) {
 
   // Helper: authenticate and return actor from Authorization header
   async function extractMcpActor(req: express.Request): Promise<ActorContext> {
-    let actor: ActorContext = {
-      tenant_id: '',
-      actor_id: 'anonymous',
-      actor_type: 'agent',
-      role: 'member',
-    };
     const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      const fakeReq = { headers: req.headers, actor: undefined } as express.Request;
-      const fakeRes = { status: () => ({ json: () => {} }) } as unknown as express.Response;
-      await new Promise<void>((resolve) => {
-        authMiddleware(db, config.jwtSecret)(fakeReq, fakeRes, () => resolve());
-      });
-      if (fakeReq.actor) actor = fakeReq.actor;
+    if (!authHeader?.startsWith('Bearer ')) {
+      throw unauthorized('MCP requires an Authorization: Bearer token header');
     }
-    return actor;
+
+    const fakeReq = { headers: req.headers, actor: undefined } as express.Request;
+    let authFailure: { status: number; body: unknown } | undefined;
+
+    await new Promise<void>((resolve) => {
+      const fakeRes = {
+        status: (status: number) => ({
+          json: (body: unknown) => {
+            authFailure = { status, body };
+            resolve();
+          },
+        }),
+      } as unknown as express.Response;
+
+      Promise.resolve(authMiddleware(db, config.jwtSecret)(fakeReq, fakeRes, () => resolve()))
+        .catch((err) => {
+          authFailure = { status: 500, body: { detail: err instanceof Error ? err.message : 'Authentication failed' } };
+          resolve();
+        });
+    });
+
+    if (!fakeReq.actor) {
+      const detail = (authFailure?.body as { detail?: string } | undefined)?.detail ?? 'Invalid MCP credentials';
+      throw unauthorized(detail);
+    }
+
+    return fakeReq.actor;
   }
 
   // MCP Streamable HTTP endpoint — stateful sessions for resource subscriptions
@@ -217,6 +232,10 @@ export async function createApp(config: ServerConfig) {
     } catch (err) {
       console.error('MCP error:', err);
       if (!res.headersSent) {
+        if (err instanceof CrmyError) {
+          res.status(err.status).json(err.toJSON());
+          return;
+        }
         res.status(500).json({ error: 'MCP request failed' });
       }
     }

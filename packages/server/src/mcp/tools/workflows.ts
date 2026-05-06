@@ -14,6 +14,8 @@ import { notFound } from '@crmy/shared';
 import { invalidateWorkflowCache, dryRunWorkflow, executeWorkflowDirect } from '../../workflows/engine.js';
 import type { ToolDef } from '../server.js';
 import { WORKFLOW_TEMPLATES, getTemplatesByCategory, getTemplateById } from '../../lib/workflow-templates.js';
+import { runToolOperation } from '../tool-operation.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 
 export function workflowTools(db: DbPool): ToolDef[] {
   return [
@@ -23,6 +25,7 @@ export function workflowTools(db: DbPool): ToolDef[] {
       description: 'Create an automation workflow triggered by a CRM event (e.g. "contact.created", "opportunity.stage_changed"). Define the trigger event, optional filter conditions, and a sequence of up to 20 typed actions. Supports {{variable}} interpolation in action config fields. Set max_runs_per_hour to rate-limit high-frequency triggers.',
       inputSchema: workflowCreate,
       handler: async (input: z.infer<typeof workflowCreate>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'workflow_create', input, async () => {
         const workflow = await wfRepo.createWorkflow(db, actor.tenant_id, {
           ...input,
           actions: input.actions as unknown[],
@@ -38,7 +41,17 @@ export function workflowTools(db: DbPool): ToolDef[] {
           objectId: workflow.id,
           afterData: { name: workflow.name, trigger: workflow.trigger_event, is_active: workflow.is_active },
         });
-        return { workflow, event_id };
+        return {
+          workflow,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'workflow',
+            objectId: workflow.id,
+            eventId: event_id,
+            sideEffects: ['workflow_cache:invalidated'],
+          }),
+        };
+        });
       },
     },
     {
@@ -59,6 +72,7 @@ export function workflowTools(db: DbPool): ToolDef[] {
       description: 'Update a workflow configuration including its trigger event, filter conditions, actions, active status, and rate limit. Use is_active: false to temporarily disable a workflow without deleting it.',
       inputSchema: workflowUpdate,
       handler: async (input: z.infer<typeof workflowUpdate>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'workflow_update', input, async () => {
         const before = await wfRepo.getWorkflow(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Workflow', input.id);
 
@@ -69,7 +83,7 @@ export function workflowTools(db: DbPool): ToolDef[] {
         invalidateWorkflowCache(actor.tenant_id);
 
         // Emit audit event
-        await emitEvent(db, {
+        const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
           eventType: 'workflow.updated',
           actorId: actor.actor_id,
@@ -80,7 +94,17 @@ export function workflowTools(db: DbPool): ToolDef[] {
           afterData: { name: workflow?.name, is_active: workflow?.is_active, trigger_event: workflow?.trigger_event },
         });
 
-        return { workflow };
+        return {
+          workflow,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'workflow',
+            objectId: input.id,
+            eventId: event_id,
+            sideEffects: ['workflow_cache:invalidated'],
+          }),
+        };
+        });
       },
     },
     {
@@ -89,6 +113,7 @@ export function workflowTools(db: DbPool): ToolDef[] {
       description: 'Delete a workflow and its entire run history. This is a destructive action — the workflow stops executing and all execution records are removed. Consider using workflow_update with is_active: false to disable without deleting.',
       inputSchema: workflowDelete,
       handler: async (input: z.infer<typeof workflowDelete>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'workflow_delete', input, async () => {
         const workflow = await wfRepo.getWorkflow(db, actor.tenant_id, input.id);
         if (!workflow) throw notFound('Workflow', input.id);
 
@@ -97,7 +122,7 @@ export function workflowTools(db: DbPool): ToolDef[] {
 
         invalidateWorkflowCache(actor.tenant_id);
 
-        await emitEvent(db, {
+        const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
           eventType: 'workflow.deleted',
           actorId: actor.actor_id,
@@ -107,7 +132,17 @@ export function workflowTools(db: DbPool): ToolDef[] {
           beforeData: { name: workflow.name, trigger_event: workflow.trigger_event },
         });
 
-        return { deleted: true };
+        return {
+          deleted: true,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'workflow',
+            objectId: input.id,
+            eventId: event_id,
+            sideEffects: ['workflow_cache:invalidated'],
+          }),
+        };
+        });
       },
     },
     {
@@ -160,8 +195,10 @@ export function workflowTools(db: DbPool): ToolDef[] {
       inputSchema: z.object({
         id: z.string().uuid().describe('UUID of the workflow to clone'),
         name: z.string().min(1).optional().describe('Custom name for the clone (defaults to "Copy of <original name>")'),
+        idempotency_key: z.string().max(128).optional(),
       }),
-      handler: async (input: { id: string; name?: string }, actor: ActorContext) => {
+      handler: async (input: { id: string; name?: string; idempotency_key?: string }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'workflow_clone', input, async () => {
         const source = await wfRepo.getWorkflow(db, actor.tenant_id, input.id);
         if (!source) throw notFound('Workflow', input.id);
 
@@ -177,7 +214,15 @@ export function workflowTools(db: DbPool): ToolDef[] {
         });
 
         invalidateWorkflowCache(actor.tenant_id);
-        return { workflow: clone };
+        return {
+          workflow: clone,
+          mutation: mutationReceipt(actor, {
+            objectType: 'workflow',
+            objectId: clone.id,
+            sideEffects: ['workflow_cache:invalidated'],
+          }),
+        };
+        });
       },
     },
     {
@@ -192,17 +237,84 @@ export function workflowTools(db: DbPool): ToolDef[] {
           .describe('UUID of the subject entity'),
         variables: z.record(z.unknown()).optional()
           .describe('Additional variables to inject into action templates, merged on top of subject fields'),
+        idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (
-        input: { id: string; subject_type?: string; subject_id?: string; variables?: Record<string, unknown> },
+        input: { id: string; subject_type?: string; subject_id?: string; variables?: Record<string, unknown>; idempotency_key?: string },
         actor: ActorContext,
       ) => {
+        return runToolOperation(db, actor, 'workflow_trigger', input, async () => {
         const payload: Record<string, unknown> = {
           ...(input.variables ?? {}),
           ...(input.subject_type ? { _subject_type: input.subject_type } : {}),
           ...(input.subject_id   ? { _subject_id:   input.subject_id   } : {}),
         };
-        return executeWorkflowDirect(db, actor.tenant_id, input.id, payload);
+        const result = await executeWorkflowDirect(db, actor.tenant_id, input.id, payload);
+        return {
+          ...result,
+          mutation: mutationReceipt(actor, {
+            objectType: 'workflow',
+            objectId: input.id,
+            sideEffects: ['workflow_run:created'],
+          }),
+        };
+        });
+      },
+    },
+    {
+      name: 'workflow_run_replay',
+      tier: 'admin',
+      description: 'Replay a failed or parked workflow run by creating a new direct run for the same workflow with an explicit operator-supplied payload. Workflow runs do not persist the original event payload, so this tool requires variables and optional subject fields instead of blindly replaying hidden side effects. The response links the new run to replay_of_run_id for auditability.',
+      inputSchema: z.object({
+        run_id: z.string().uuid().describe('Failed or parked workflow_run id to replay from'),
+        subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case']).optional(),
+        subject_id: z.string().uuid().optional(),
+        variables: z.record(z.unknown()).default({}),
+        reason: z.string().min(1).max(1000),
+        idempotency_key: z.string().max(128).optional(),
+      }),
+      handler: async (
+        input: { run_id: string; subject_type?: string; subject_id?: string; variables: Record<string, unknown>; reason: string; idempotency_key?: string },
+        actor: ActorContext,
+      ) => {
+        return runToolOperation(db, actor, 'workflow_run_replay', input, async () => {
+          const runResult = await db.query(
+            `SELECT wr.*, w.tenant_id, w.id AS workflow_id, w.name AS workflow_name
+             FROM workflow_runs wr
+             JOIN workflows w ON w.id = wr.workflow_id
+             WHERE wr.id = $1 AND w.tenant_id = $2`,
+            [input.run_id, actor.tenant_id],
+          );
+          const run = runResult.rows[0];
+          if (!run) throw notFound('WorkflowRun', input.run_id);
+          if (!['failed', 'parked'].includes(run.status)) {
+            throw Object.assign(new Error('Only failed or parked workflow runs can be replayed'), {
+              code: 'VALIDATION_ERROR',
+              status: 422,
+            });
+          }
+
+          const payload: Record<string, unknown> = {
+            ...input.variables,
+            _replay_of_run_id: input.run_id,
+            _replay_reason: input.reason,
+            ...(input.subject_type ? { _subject_type: input.subject_type } : {}),
+            ...(input.subject_id ? { _subject_id: input.subject_id } : {}),
+          };
+          const replay = await executeWorkflowDirect(db, actor.tenant_id, run.workflow_id, payload);
+
+          return {
+            replay_of_run_id: input.run_id,
+            workflow_id: run.workflow_id,
+            workflow_name: run.workflow_name,
+            replay,
+            mutation: mutationReceipt(actor, {
+              objectType: 'workflow',
+              objectId: run.workflow_id,
+              sideEffects: ['workflow_run:created'],
+            }),
+          };
+        });
       },
     },
     {

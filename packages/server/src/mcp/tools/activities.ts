@@ -12,6 +12,8 @@ import { notFound } from '@crmy/shared';
 import { indexDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import { triggerExtraction } from '../../agent/extraction.js';
+import { runIdempotent } from '../../db/repos/idempotency.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
 
 export function activityTools(db: DbPool): ToolDef[] {
@@ -19,9 +21,16 @@ export function activityTools(db: DbPool): ToolDef[] {
     {
       name: 'activity_create',
       tier: 'core',
-      description: 'Log a meaningful action: outreach sent, call made, meeting held, stage changed, proposal drafted, research completed. Set occurred_at to when the event actually happened, not when you are logging it — this is critical for accurate timelines when logging retroactively. The detail field is a free JSONB payload for type-specific data: for outreach_email include {to, subject, channel}, for meeting_held include {duration_minutes, attendees}, for stage_change include {from_stage, to_stage}. If an LLM backend is configured, CRMy auto-extracts context entries from the activity description. To log an activity for a contact, set subject_type to "contact" and subject_id to the contact UUID.',
+      description: 'Log a meaningful action: outreach sent, call made, meeting held, stage changed, proposal drafted, research completed. Set occurred_at to when the event actually happened, not when you are logging it — this is critical for accurate timelines when logging retroactively. The detail field is a free JSONB payload for type-specific data: for outreach_email include {to, subject, channel}, for meeting_held include {duration_minutes, attendees}, for stage_change include {from_stage, to_stage}. If an LLM backend is configured, CRMy auto-extracts context entries from the activity description. Prefer setting subject_type and subject_id. If you pass contact_id, account_id, opportunity_id, or use_case_id without subject_type/subject_id, CRMy derives the canonical subject automatically.',
       inputSchema: activityCreate,
       handler: async (input: z.infer<typeof activityCreate>, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'activity_create',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         // Enforce governor limit on daily activity count
         const todayCount = await governorLimits.countActivitiesToday(db, actor.tenant_id);
         await governorLimits.enforceLimit(db, actor.tenant_id, 'activities_per_day', todayCount);
@@ -52,7 +61,17 @@ export function activityTools(db: DbPool): ToolDef[] {
         indexDocument(db, 'activity', activity as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] activity index ${activity.id}: ${(err as Error).message}`));
 
-        return { activity, event_id };
+        return {
+          activity,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'activity',
+            objectId: activity.id,
+            eventId: event_id,
+            sideEffects: ['context_extraction:queued', 'search_index:queued'],
+          }),
+        };
+        });
       },
     },
     {
@@ -85,6 +104,13 @@ export function activityTools(db: DbPool): ToolDef[] {
       description: 'Mark an activity as completed, setting its status and completed_at timestamp. Optionally add a completion note that appends to the activity body. If a note is added and an LLM backend is configured, context extraction re-runs on the updated content.',
       inputSchema: activityComplete,
       handler: async (input: z.infer<typeof activityComplete>, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'activity_complete',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         const before = await activityRepo.getActivity(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Activity', input.id);
 
@@ -119,15 +145,32 @@ export function activityTools(db: DbPool): ToolDef[] {
         });
         indexDocument(db, 'activity', activity as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] activity index ${activity.id}: ${(err as Error).message}`));
-        return { activity, event_id };
+        return {
+          activity,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'activity',
+            objectId: activity.id,
+            eventId: event_id,
+            sideEffects: input.note ? ['context_extraction:queued', 'search_index:queued'] : ['search_index:queued'],
+          }),
+        };
+        });
       },
     },
     {
       name: 'activity_update',
       tier: 'extended',
-      description: 'Update an existing activity record. Pass the id and a patch object with fields to change (body, subject, outcome, detail, custom_fields, etc.). If the body content changes, context extraction automatically re-runs to capture any new information.',
+      description: 'Update an existing activity record. Pass the id and a patch object with fields to change (body, subject, outcome, detail, occurred_at, custom_fields, etc.). If extractable content changes, context extraction automatically re-runs to capture any new information.',
       inputSchema: activityUpdate,
       handler: async (input: z.infer<typeof activityUpdate>, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'activity_update',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         const before = await activityRepo.getActivity(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Activity', input.id);
 
@@ -137,8 +180,8 @@ export function activityTools(db: DbPool): ToolDef[] {
         const activity = await activityRepo.updateActivity(db, actor.tenant_id, input.id, input.patch);
         if (!activity) throw notFound('Activity', input.id);
 
-        // Re-extract if body content changed
-        if (input.patch.body != null) {
+        // Re-extract if content used by the extraction prompt changed.
+        if (input.patch.body != null || input.patch.detail != null || input.patch.outcome != null) {
           triggerExtraction(db, actor.tenant_id, input.id).catch(err =>
             console.error('[extraction] trigger on update failed:', err),
           );
@@ -156,7 +199,18 @@ export function activityTools(db: DbPool): ToolDef[] {
         });
         indexDocument(db, 'activity', activity as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] activity index ${activity.id}: ${(err as Error).message}`));
-        return { activity, event_id };
+        const extractionQueued = input.patch.body != null || input.patch.detail != null || input.patch.outcome != null;
+        return {
+          activity,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'activity',
+            objectId: activity.id,
+            eventId: event_id,
+            sideEffects: extractionQueued ? ['context_extraction:queued', 'search_index:queued'] : ['search_index:queued'],
+          }),
+        };
+        });
       },
     },
     {

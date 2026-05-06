@@ -3,6 +3,20 @@
 
 import type { DbPool } from '../pool.js';
 import type { Account, Contact, Opportunity, UUID, PaginatedResponse } from '@crmy/shared';
+import { CrmyError } from '@crmy/shared';
+
+interface MutationOptions {
+  expectedVersion?: number;
+}
+
+function concurrencyConflict(entity: string, id: UUID, expectedVersion: number): CrmyError {
+  return new CrmyError(
+    'CONFLICT',
+    `${entity} ${id} was modified by another writer; refresh the object and retry with the latest row_version`,
+    409,
+    { expected_version: expectedVersion },
+  );
+}
 
 export async function createAccount(
   db: DbPool,
@@ -142,6 +156,7 @@ export async function updateAccount(
   tenantId: UUID,
   id: UUID,
   patch: Record<string, unknown>,
+  options: MutationOptions = {},
 ): Promise<Account | null> {
   const allowedFields = [
     'name', 'domain', 'industry', 'employee_count', 'annual_revenue',
@@ -149,9 +164,10 @@ export async function updateAccount(
     'aliases', 'tags', 'custom_fields',
   ];
 
-  const sets: string[] = ['updated_at = now()'];
+  const sets: string[] = ['updated_at = now()', 'row_version = row_version + 1'];
   const params: unknown[] = [tenantId, id];
   let idx = 3;
+  let changed = false;
 
   for (const field of allowedFields) {
     if (field in patch) {
@@ -159,15 +175,25 @@ export async function updateAccount(
       sets.push(`${field} = $${idx}`);
       params.push(value);
       idx++;
+      changed = true;
     }
   }
 
-  if (sets.length === 1) return getAccount(db, tenantId, id);
+  if (!changed) return getAccount(db, tenantId, id);
+
+  let versionClause = '';
+  if (options.expectedVersion !== undefined) {
+    versionClause = ` AND row_version = $${idx}`;
+    params.push(options.expectedVersion);
+  }
 
   const result = await db.query(
-    `UPDATE accounts SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2 RETURNING *`,
+    `UPDATE accounts SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2${versionClause} RETURNING *`,
     params,
   );
+  if (result.rows.length === 0 && options.expectedVersion !== undefined) {
+    throw concurrencyConflict('Account', id, options.expectedVersion);
+  }
   return (result.rows[0] as Account) ?? null;
 }
 
@@ -216,10 +242,24 @@ export async function getAccountHierarchy(
   };
 }
 
-export async function deleteAccount(db: DbPool, tenantId: UUID, id: UUID): Promise<boolean> {
+export async function deleteAccount(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  options: MutationOptions = {},
+): Promise<boolean> {
+  const params: unknown[] = [tenantId, id];
+  let versionClause = '';
+  if (options.expectedVersion !== undefined) {
+    versionClause = ' AND row_version = $3';
+    params.push(options.expectedVersion);
+  }
   const result = await db.query(
-    'DELETE FROM accounts WHERE tenant_id = $1 AND id = $2',
-    [tenantId, id],
+    `DELETE FROM accounts WHERE tenant_id = $1 AND id = $2${versionClause}`,
+    params,
   );
+  if ((result.rowCount ?? 0) === 0 && options.expectedVersion !== undefined) {
+    throw concurrencyConflict('Account', id, options.expectedVersion);
+  }
   return (result.rowCount ?? 0) > 0;
 }

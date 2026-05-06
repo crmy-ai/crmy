@@ -16,7 +16,26 @@ import { notFound, validationError } from '@crmy/shared';
 import { validateUseCaseTransition } from '../../services/state-machine.js';
 import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
+import { runIdempotent } from '../../db/repos/idempotency.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+
+function runUseCaseOperation<T>(
+  db: DbPool,
+  actor: ActorContext,
+  operation: string,
+  input: object,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const idempotencyKey = (input as { idempotency_key?: string }).idempotency_key;
+  return runIdempotent(db, {
+    tenantId: actor.tenant_id,
+    actorId: actor.actor_id,
+    operation,
+    key: idempotencyKey,
+    request: input,
+  }, fn);
+}
 
 export function useCaseTools(db: DbPool): ToolDef[] {
   return [
@@ -26,6 +45,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       description: 'Create a new use case for an account to track a consumption-based workload or deployment. Use cases complement opportunities by tracking ongoing product usage after a deal closes. Set product_line, target consumption metrics, and stage (discovery, poc, production, scaling, sunset).',
       inputSchema: useCaseCreate,
       handler: async (input: z.infer<typeof useCaseCreate>, actor: ActorContext) => {
+        return runUseCaseOperation(db, actor, 'use_case_create', input, async () => {
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
           input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'use_case', input.custom_fields, { isCreate: true });
         }
@@ -44,7 +64,18 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         });
         indexDocument(db, 'use_case', uc as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] use_case index ${uc.id}: ${(err as Error).message}`));
-        return { use_case: uc, event_id };
+        return {
+          use_case: uc,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'use_case',
+            objectId: uc.id,
+            rowVersion: uc.row_version,
+            eventId: event_id,
+            sideEffects: ['search_index:queued'],
+          }),
+        };
+        });
       },
     },
     {
@@ -78,13 +109,16 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       description: 'Update a use case by passing its id and a patch object with fields to change. Supports all use case fields including product_line, consumption metrics, tags, and custom_fields.',
       inputSchema: useCaseUpdate,
       handler: async (input: z.infer<typeof useCaseUpdate>, actor: ActorContext) => {
+        return runUseCaseOperation(db, actor, 'use_case_update', input, async () => {
         const before = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!before) throw notFound('UseCase', input.id);
 
         if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
           input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'use_case', input.patch.custom_fields);
         }
-        const uc = await ucRepo.updateUseCase(db, actor.tenant_id, input.id, input.patch);
+        const uc = await ucRepo.updateUseCase(db, actor.tenant_id, input.id, input.patch, {
+          expectedVersion: input.expected_version,
+        });
         if (!uc) throw notFound('UseCase', input.id);
 
         const event_id = await emitEvent(db, {
@@ -99,7 +133,18 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         });
         indexDocument(db, 'use_case', uc as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] use_case index ${uc.id}: ${(err as Error).message}`));
-        return { use_case: uc, event_id };
+        return {
+          use_case: uc,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'use_case',
+            objectId: uc.id,
+            rowVersion: uc.row_version,
+            eventId: event_id,
+            sideEffects: ['search_index:queued'],
+          }),
+        };
+        });
       },
     },
     {
@@ -108,10 +153,13 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       description: 'Delete a use case by UUID. This permanently removes the use case and unlinks all associated contacts. Consider advancing to "sunset" stage instead to preserve the historical record.',
       inputSchema: useCaseDelete,
       handler: async (input: z.infer<typeof useCaseDelete>, actor: ActorContext) => {
+        return runUseCaseOperation(db, actor, 'use_case_delete', input, async () => {
         const uc = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!uc) throw notFound('UseCase', input.id);
 
-        await ucRepo.deleteUseCase(db, actor.tenant_id, input.id);
+        await ucRepo.deleteUseCase(db, actor.tenant_id, input.id, {
+          expectedVersion: input.expected_version,
+        });
         removeDocument(db, actor.tenant_id, 'use_case', input.id)
           .catch((err: unknown) => console.warn(`[search] use_case remove ${input.id}: ${(err as Error).message}`));
 
@@ -124,7 +172,18 @@ export function useCaseTools(db: DbPool): ToolDef[] {
           objectId: input.id,
           beforeData: uc,
         });
-        return { deleted: true, event_id };
+        return {
+          deleted: true,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'use_case',
+            objectId: input.id,
+            rowVersion: uc.row_version,
+            eventId: event_id,
+            sideEffects: ['search_remove:queued'],
+          }),
+        };
+        });
       },
     },
     {
@@ -133,6 +192,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       description: 'Advance a use case to its next lifecycle stage: discovery, poc, production, scaling, or sunset. Logs the stage transition as an activity for the audit trail. Use this to track product adoption progress.',
       inputSchema: useCaseAdvanceStage,
       handler: async (input: z.infer<typeof useCaseAdvanceStage>, actor: ActorContext) => {
+        return runUseCaseOperation(db, actor, 'use_case_advance_stage', input, async () => {
         const before = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!before) throw notFound('UseCase', input.id);
 
@@ -145,6 +205,8 @@ export function useCaseTools(db: DbPool): ToolDef[] {
 
         const uc = await ucRepo.updateUseCase(db, actor.tenant_id, input.id, {
           stage: input.stage,
+        }, {
+          expectedVersion: input.expected_version,
         });
         if (!uc) throw notFound('UseCase', input.id);
 
@@ -161,7 +223,18 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         });
         indexDocument(db, 'use_case', uc as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] use_case index ${uc.id}: ${(err as Error).message}`));
-        return { use_case: uc, event_id };
+        return {
+          use_case: uc,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'use_case',
+            objectId: uc.id,
+            rowVersion: uc.row_version,
+            eventId: event_id,
+            sideEffects: ['search_index:queued'],
+          }),
+        };
+        });
       },
     },
     {
@@ -170,11 +243,14 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       description: 'Update the current consumption metrics for a use case. Set actual usage values against targets to track product adoption. The consumption ratio (actual/target) feeds into health score calculations.',
       inputSchema: useCaseUpdateConsumption,
       handler: async (input: z.infer<typeof useCaseUpdateConsumption>, actor: ActorContext) => {
+        return runUseCaseOperation(db, actor, 'use_case_update_consumption', input, async () => {
         const before = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!before) throw notFound('UseCase', input.id);
 
         const uc = await ucRepo.updateUseCase(db, actor.tenant_id, input.id, {
           consumption_current: input.consumption_current,
+        }, {
+          expectedVersion: input.expected_version,
         });
         if (!uc) throw notFound('UseCase', input.id);
 
@@ -191,7 +267,18 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         });
         indexDocument(db, 'use_case', uc as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] use_case index ${uc.id}: ${(err as Error).message}`));
-        return { use_case: uc, event_id };
+        return {
+          use_case: uc,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'use_case',
+            objectId: uc.id,
+            rowVersion: uc.row_version,
+            eventId: event_id,
+            sideEffects: ['search_index:queued'],
+          }),
+        };
+        });
       },
     },
     {
@@ -200,11 +287,14 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       description: 'Set the health score (0–100) for a use case to reflect current adoption health. Consider consumption ratio, user engagement, support ticket volume, and stakeholder sentiment when setting this score.',
       inputSchema: useCaseSetHealth,
       handler: async (input: z.infer<typeof useCaseSetHealth>, actor: ActorContext) => {
+        return runUseCaseOperation(db, actor, 'use_case_set_health', input, async () => {
         const before = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!before) throw notFound('UseCase', input.id);
 
         const uc = await ucRepo.updateUseCase(db, actor.tenant_id, input.id, {
           health_score: input.score,
+        }, {
+          expectedVersion: input.expected_version,
         });
         if (!uc) throw notFound('UseCase', input.id);
 
@@ -219,7 +309,17 @@ export function useCaseTools(db: DbPool): ToolDef[] {
           afterData: { health_score: uc.health_score },
           metadata: input.rationale ? { rationale: input.rationale } : {},
         });
-        return { use_case: uc, event_id };
+        return {
+          use_case: uc,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'use_case',
+            objectId: uc.id,
+            rowVersion: uc.row_version,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -228,6 +328,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       description: 'Link a contact to a use case with an optional role description (e.g. "champion", "end user", "executive sponsor"). Creates a many-to-many relationship between the contact and the use case.',
       inputSchema: useCaseLinkContact,
       handler: async (input: z.infer<typeof useCaseLinkContact>, actor: ActorContext) => {
+        return runUseCaseOperation(db, actor, 'use_case_link_contact', input, async () => {
         const uc = await ucRepo.getUseCase(db, actor.tenant_id, input.use_case_id);
         if (!uc) throw notFound('UseCase', input.use_case_id);
 
@@ -242,7 +343,17 @@ export function useCaseTools(db: DbPool): ToolDef[] {
           objectId: input.use_case_id,
           afterData: link,
         });
-        return { link, event_id };
+        return {
+          link,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'use_case',
+            objectId: input.use_case_id,
+            rowVersion: uc.row_version,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -251,6 +362,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       description: 'Remove a contact from a use case, breaking the many-to-many link. The contact record itself is not affected.',
       inputSchema: useCaseUnlinkContact,
       handler: async (input: z.infer<typeof useCaseUnlinkContact>, actor: ActorContext) => {
+        return runUseCaseOperation(db, actor, 'use_case_unlink_contact', input, async () => {
         const removed = await ucRepo.unlinkContact(db, input.use_case_id, input.contact_id);
         if (!removed) throw notFound('UseCaseContact', `${input.use_case_id}/${input.contact_id}`);
 
@@ -263,7 +375,16 @@ export function useCaseTools(db: DbPool): ToolDef[] {
           objectId: input.use_case_id,
           afterData: { contact_id: input.contact_id },
         });
-        return { removed: true, event_id };
+        return {
+          removed: true,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'use_case',
+            objectId: input.use_case_id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {

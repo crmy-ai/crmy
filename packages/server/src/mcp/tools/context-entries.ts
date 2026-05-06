@@ -19,10 +19,14 @@ import * as governorLimits from '../../db/repos/governor-limits.js';
 import { assembleBriefing, formatBriefingText } from '../../services/briefing.js';
 import { processStaleEntriesForTenant } from '../../services/staleness.js';
 import { emitEvent } from '../../events/emitter.js';
-import { notFound, validationError } from '@crmy/shared';
+import { CrmyError, notFound, validationError } from '@crmy/shared';
 import { extractContextFromActivity } from '../../agent/extraction.js';
 import { detectContradictions } from '../../services/contradictions.js';
 import { consolidateContextEntries } from '../../services/consolidation.js';
+import { checkContextConvergence } from '../../services/context-convergence.js';
+import { createContradictionReviewAssignments } from '../../services/context-review-assignments.js';
+import { runIdempotent } from '../../db/repos/idempotency.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
 
 /**
@@ -60,9 +64,16 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_add',
       tier: 'core',
-      description: 'Store a typed knowledge entry about a contact, account, opportunity, or use case — this is how agents write memory. Call this after every meaningful interaction to capture what you learned. Set context_type to the taxonomy key: objection, preference, competitive_intel, relationship_map, meeting_notes, research, summary, decision, sentiment_analysis, agent_reasoning, or transcript. Set confidence (0.0–1.0) for agent-authored entries: 1.0 for confirmed facts, 0.6–0.8 for inferences, below 0.5 for hypotheses. Set valid_until whenever the information has a shelf life (competitive pricing, org chart details, budget cycles). Use supersedes_id to replace an existing entry rather than creating a duplicate when updating a belief. Use context_type "note" for threaded comments — supports parent_id for replies, visibility ("internal"/"external"), @mentions, and pinned flag.',
+      description: 'Store a typed knowledge entry about a contact, account, opportunity, or use case — this is how agents write memory. Before creating a new current entry, CRMy checks existing current context on the same subject and type; likely duplicates, updates, or contradictions are rejected with suggested actions so agents can use context_supersede or request review instead of creating noisy memory. Set context_type to the taxonomy key: objection, preference, competitive_intel, relationship_map, meeting_notes, research, summary, decision, sentiment_analysis, agent_reasoning, or transcript. Set confidence (0.0–1.0) for agent-authored entries: 1.0 for confirmed facts, 0.6–0.8 for inferences, below 0.5 for hypotheses. Set valid_until whenever the information has a shelf life (competitive pricing, org chart details, budget cycles). Pass allow_similar only when the new entry is intentionally separate from the suggested existing entries. Use context_type "note" for threaded comments — supports parent_id for replies, visibility ("internal"/"external"), @mentions, and pinned flag.',
       inputSchema: contextEntryCreate,
       handler: async (input: z.infer<typeof contextEntryCreate>, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_add',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         // Enforce governor limit on context entry count
         const entryCount = await governorLimits.countContextEntries(db, actor.tenant_id);
         await governorLimits.enforceLimit(db, actor.tenant_id, 'context_entries_max', entryCount);
@@ -73,6 +84,27 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           if (input.body.length > maxChars) {
             throw validationError(`Context body exceeds maximum length (${input.body.length} > ${maxChars} chars)`);
           }
+        }
+
+        const convergence = await checkContextConvergence(db, actor.tenant_id, {
+          subject_type: input.subject_type,
+          subject_id: input.subject_id,
+          context_type: input.context_type,
+          title: input.title,
+          body: input.body,
+          structured_data: input.structured_data as Record<string, unknown> | undefined,
+        });
+
+        if (!input.allow_similar && convergence.should_block) {
+          throw new CrmyError(
+            'CONFLICT',
+            `Similar or conflicting current context already exists; suggested action: ${convergence.suggested_action}`,
+            409,
+            {
+              suggested_action: convergence.suggested_action,
+              candidates: convergence.candidates,
+            },
+          );
         }
 
         const entry = await contextRepo.createContextEntry(db, actor.tenant_id, {
@@ -103,15 +135,27 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           .catch((err: unknown) => console.warn(`[outbox] context_add enqueue ${entry.id}: ${(err as Error).message}`));
 
         // Soft-validate structured_data against the context type's JSON Schema
-        const schema = await contextTypeRepo.getContextTypeSchema(db, input.context_type);
+        const schema = await contextTypeRepo.getContextTypeSchema(db, actor.tenant_id, input.context_type);
         const validation_warnings = schema && input.structured_data
           ? validateAgainstSchema(input.structured_data as Record<string, unknown>, schema)
           : [];
         return {
           context_entry: entry,
           event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'context_entry',
+            objectId: entry.id,
+            eventId: event_id,
+            sideEffects: ['embedding:queued', 'search_index:queued'],
+          }),
+          context_convergence: {
+            suggested_action: convergence.suggested_action,
+            candidates: convergence.candidates,
+            bypassed: input.allow_similar && convergence.candidates.length > 0,
+          },
           ...(validation_warnings.length > 0 ? { validation_warnings } : {}),
         };
+        });
       },
     },
     {
@@ -147,6 +191,13 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'Replace an existing context entry with updated information — use this instead of context_add when you have new information that contradicts or updates an existing belief. Marks the old entry as not current (preserving the full audit trail) and creates a new entry that references it. Find the entry to supersede with context_list or context_search first, then pass its ID along with the updated body and confidence. This is the correct way to update beliefs — never create a duplicate entry with context_add when you mean to revise.',
       inputSchema: contextEntrySupersede,
       handler: async (input: z.infer<typeof contextEntrySupersede>, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_supersede',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         const existing = await contextRepo.getContextEntry(db, actor.tenant_id, input.id);
         if (!existing) throw notFound('ContextEntry', input.id);
 
@@ -187,7 +238,18 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         outboxRepo.insertJob(db, actor.tenant_id, 'context_entry', result.new.id, result.new as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[outbox] context_supersede enqueue ${result.new.id}: ${(err as Error).message}`));
 
-        return { context_entry: result.new, superseded: result.old, event_id };
+        return {
+          context_entry: result.new,
+          superseded: result.old,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'context_entry',
+            objectId: result.new.id,
+            eventId: event_id,
+            sideEffects: ['embedding:queued', 'search_index:queued'],
+          }),
+        };
+        });
       },
     },
     {
@@ -214,6 +276,13 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'Mark a context entry as reviewed and still accurate. Resets reviewed_at to now and optionally extends valid_until by extend_days days (default: type half-life or 30 days). Use this after verifying an entry is still correct — prevents the staleness system from re-queuing it immediately.',
       inputSchema: contextReview,
       handler: async (input: z.infer<typeof contextReview>, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_review',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         // Determine extend_days: use provided value, fall back to type half_life, then 30
         let extendDays = input.extend_days;
         if (!extendDays) {
@@ -225,7 +294,14 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         }
         const entry = await contextRepo.reviewContextEntry(db, actor.tenant_id, input.id, extendDays);
         if (!entry) throw notFound('ContextEntry', input.id);
-        return { context_entry: entry };
+        return {
+          context_entry: entry,
+          mutation: mutationReceipt(actor, {
+            objectType: 'context_entry',
+            objectId: entry.id,
+          }),
+        };
+        });
       },
     },
     {
@@ -246,10 +322,28 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       name: 'context_extract',
       tier: 'admin',
       description: 'Re-run the automatic context extraction pipeline on a specific activity. Useful for backfilling entries on older activities or retrying after an error. Returns the number of context entries created.',
-      inputSchema: z.object({ activity_id: z.string().uuid().describe('ID of the activity to extract context from') }),
-      handler: async (input: { activity_id: string }, actor: ActorContext) => {
+      inputSchema: z.object({
+        activity_id: z.string().uuid().describe('ID of the activity to extract context from'),
+        idempotency_key: z.string().max(128).optional(),
+      }),
+      handler: async (input: { activity_id: string; idempotency_key?: string }, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_extract',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         const count = await extractContextFromActivity(db, actor.tenant_id, input.activity_id);
-        return { extracted_count: count };
+        return {
+          extracted_count: count,
+          mutation: mutationReceipt(actor, {
+            objectType: 'activity',
+            objectId: input.activity_id,
+            sideEffects: ['context_extraction:completed'],
+          }),
+        };
+        });
       },
     },
     {
@@ -320,6 +414,13 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'Ingest a raw document (transcript, email, meeting notes, etc.) and auto-extract all structured context entries from it. Creates an activity as provenance and runs the full extraction pipeline. Returns all context entries produced.',
       inputSchema: contextIngest,
       handler: async (input: z.infer<typeof contextIngest>, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_ingest',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         // Enforce body length limit
         const maxChars = await governorLimits.getLimit(db, actor.tenant_id, 'context_body_max_chars');
         if (input.document.length > maxChars * 2) {
@@ -347,7 +448,17 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           { source_activity_id: activity.id, current_only: true, limit: 50 },
         );
 
-        return { extracted_count, context_entries: entries, activity_id: activity.id };
+        return {
+          extracted_count,
+          context_entries: entries,
+          activity_id: activity.id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'activity',
+            objectId: activity.id,
+            sideEffects: ['context_extraction:completed'],
+          }),
+        };
+        });
       },
     },
     {
@@ -360,11 +471,19 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         context_type: z.string().optional().describe('Override the context type for all extracted entries (e.g. "meeting_notes")'),
         confidence_threshold: z.number().min(0).max(1).default(0.6)
           .describe('Minimum entity resolution confidence to link an entry. 0.6 = medium+high (default). Set lower to include more speculative matches.'),
+        idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (
-        input: { document: string; source_label?: string; context_type?: string; confidence_threshold: number },
+        input: { document: string; source_label?: string; context_type?: string; confidence_threshold: number; idempotency_key?: string },
         actor: ActorContext,
       ) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_ingest_auto',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         // Step 1: extract candidate entity names from the document text
         const candidates = new Set<string>();
         const phraseRe = /\b([A-Z][a-zA-Z]{1,}(?:\s+[A-Z][a-zA-Z]{1,}){0,3})\b/g;
@@ -457,7 +576,13 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           subjects_resolved: subjectResults,
           entries_created: totalCreated,
           low_confidence_skipped: skipped.length > 0 ? skipped : undefined,
+          mutation: mutationReceipt(actor, {
+            objectType: 'context_entry',
+            objectId: subjectResults[0]?.activity_id ?? 'multiple',
+            sideEffects: ['context_extraction:completed'],
+          }),
         };
+        });
       },
     },
     {
@@ -467,12 +592,28 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       inputSchema: z.object({
         limit: z.number().int().min(1).max(100).default(20)
           .describe('Maximum number of stale entries to process in this call'),
+        idempotency_key: z.string().max(128).optional(),
       }),
-      handler: async (input: { limit: number }, actor: ActorContext) => {
+      handler: async (input: { limit: number; idempotency_key?: string }, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_stale_assign',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         const assignments_created = await processStaleEntriesForTenant(
           db, actor.tenant_id, input.limit,
         );
-        return { assignments_created };
+        return {
+          assignments_created,
+          mutation: mutationReceipt(actor, {
+            objectType: 'assignment',
+            objectId: 'stale-context-review',
+            sideEffects: ['assignments:created'],
+          }),
+        };
+        });
       },
     },
     {
@@ -542,6 +683,57 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       },
     },
     {
+      name: 'context_contradiction_assign',
+      tier: 'extended',
+      description: 'Scan a subject for contradictory current context and create durable review assignments for unresolved conflicts. Assignments are deduplicated by the conflicting entry pair so repeated scans do not spam reviewers. Use this when briefing_get or context_detect_contradictions returns warnings that need human or agent resolution.',
+      inputSchema: z.object({
+        subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case'])
+          .describe('Type of the CRM subject to check'),
+        subject_id: z.string().uuid()
+          .describe('ID of the subject to check'),
+        context_type: z.string().optional()
+          .describe('If provided, only check entries of this context type. Omit to check all eligible types.'),
+        limit: z.number().int().min(1).max(50).default(20),
+        idempotency_key: z.string().max(128).optional(),
+      }),
+      handler: async (
+        input: { subject_type: SubjectType; subject_id: string; context_type?: string; limit: number; idempotency_key?: string },
+        actor: ActorContext,
+      ) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_contradiction_assign',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
+          const result = await createContradictionReviewAssignments(
+            db,
+            actor.tenant_id,
+            actor.actor_id,
+            {
+              subject_type: input.subject_type,
+              subject_id: input.subject_id,
+              context_type: input.context_type,
+              limit: input.limit,
+            },
+          );
+
+          return {
+            assignments_created: result.assignments.length,
+            assignments: result.assignments,
+            contradiction_warnings: result.warnings,
+            skipped_existing: result.skipped_existing,
+            mutation: mutationReceipt(actor, {
+              objectType: 'assignment',
+              objectId: result.assignments[0]?.id ?? input.subject_id,
+              sideEffects: result.assignments.length > 0 ? ['assignments:created'] : [],
+            }),
+          };
+        });
+      },
+    },
+    {
       name: 'context_resolve_contradiction',
       tier: 'extended',
       description: 'Resolve a contradiction between two context entries by superseding the incorrect one with the correct one. The kept entry is preserved as-is; the superseded entry is marked not current (full audit trail maintained). Provide a resolution_note explaining why you chose to keep one over the other. Find the entry IDs from context_detect_contradictions or briefing_get contradiction_warnings.',
@@ -552,11 +744,19 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           .describe('ID of the entry to supersede (mark as no longer current)'),
         resolution_note: z.string().min(1).max(500)
           .describe('Brief explanation of why the kept entry is correct'),
+        idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (
-        input: { keep_entry_id: string; supersede_entry_id: string; resolution_note: string },
+        input: { keep_entry_id: string; supersede_entry_id: string; resolution_note: string; idempotency_key?: string },
         actor: ActorContext,
       ) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_resolve_contradiction',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         // Fetch the entry to keep so we can supersede with its content
         const keepEntry = await contextRepo.getContextEntry(db, actor.tenant_id, input.keep_entry_id);
         if (!keepEntry) return notFound('context_entry', input.keep_entry_id);
@@ -584,7 +784,12 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           superseded_entry: result.old,
           resolution_entry: result.new,
           resolution_note: input.resolution_note,
+          mutation: mutationReceipt(actor, {
+            objectType: 'context_entry',
+            objectId: result.new.id,
+          }),
         };
+        });
       },
     },
     {
@@ -602,6 +807,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           .describe('Specific entry IDs to consolidate. If omitted, uses all current entries of context_type.'),
         max_entries: z.number().int().min(2).max(20).default(10)
           .describe('Maximum number of entries to consolidate when entry_ids is omitted.'),
+        idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (input: {
         subject_type: 'contact' | 'account' | 'opportunity' | 'use_case';
@@ -609,7 +815,15 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         context_type: string;
         entry_ids?: string[];
         max_entries?: number;
+        idempotency_key?: string;
       }, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_consolidate',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         const result = await consolidateContextEntries(
           db,
           actor.tenant_id,
@@ -620,7 +834,14 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           input.entry_ids as UUID[] | undefined,
           input.max_entries ?? 10,
         );
-        return result;
+        return {
+          ...result,
+          mutation: mutationReceipt(actor, {
+            objectType: 'context_entry',
+            objectId: result.consolidated_entry?.id ?? input.subject_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -629,6 +850,13 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'Admin tool: generate embeddings for context entries that have not yet been embedded. Call with dry_run: true first to see how many entries are pending, then with dry_run: false to process a batch. Loop calls until pending reaches 0. Requires ENABLE_PGVECTOR=true and EMBEDDING_PROVIDER to be configured.',
       inputSchema: contextEmbedBackfill,
       handler: async (input: z.infer<typeof contextEmbedBackfill>, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_embed_backfill',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         const embConfig = loadEmbeddingConfig();
         if (!embConfig) {
           return { error: 'EMBEDDING_PROVIDER is not configured. Set ENABLE_PGVECTOR=true and EMBEDDING_PROVIDER to enable semantic search.' };
@@ -642,7 +870,16 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           input.subject_type,
           input.dry_run,
         );
-        return { ...stats, dry_run: input.dry_run };
+        return {
+          ...stats,
+          dry_run: input.dry_run,
+          mutation: mutationReceipt(actor, {
+            objectType: 'context_entry',
+            objectId: 'embedding-backfill',
+            sideEffects: input.dry_run ? [] : ['embeddings:updated'],
+          }),
+        };
+        });
       },
     },
 
@@ -657,11 +894,19 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           .describe('UUIDs of the context entries to mark reviewed (max 200 per call)'),
         extend_days: z.number().int().min(1).max(730).optional()
           .describe('Extend valid_until by this many days from now for all reviewed entries. Omit to clear staleness without extending.'),
+        idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (
-        input: { entry_ids: string[]; extend_days?: number },
+        input: { entry_ids: string[]; extend_days?: number; idempotency_key?: string },
         actor: ActorContext,
       ) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_review_batch',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         let updated = 0;
         let not_found = 0;
         // Process in parallel batches of 20 to avoid overwhelming the DB
@@ -683,7 +928,12 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           not_found,
           extend_days: input.extend_days ?? null,
           message: `Marked ${updated} entr${updated !== 1 ? 'ies' : 'y'} as reviewed${input.extend_days ? `, extended by ${input.extend_days} days` : ''}.`,
+          mutation: mutationReceipt(actor, {
+            objectType: 'context_entry',
+            objectId: 'batch',
+          }),
         };
+        });
       },
     },
 
@@ -696,11 +946,19 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           .describe('UUIDs of the context entries to mark stale (max 200 per call)'),
         reason:    z.string().max(200).optional()
           .describe('Human-readable reason for marking stale, e.g. "Contact left the company" or "Competitor product discontinued". Added as a tag for audit purposes.'),
+        idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (
-        input: { entry_ids: string[]; reason?: string },
+        input: { entry_ids: string[]; reason?: string; idempotency_key?: string },
         actor: ActorContext,
       ) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_bulk_mark_stale',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         if (input.entry_ids.length === 0) return { updated: 0 };
 
         // Parameterized bulk UPDATE — sets valid_until = now() for all listed IDs
@@ -728,7 +986,12 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           not_found_or_already_stale: input.entry_ids.length - result.rows.length,
           reason: input.reason ?? null,
           message: `Marked ${result.rows.length} entr${result.rows.length !== 1 ? 'ies' : 'y'} as stale.`,
+          mutation: mutationReceipt(actor, {
+            objectType: 'context_entry',
+            objectId: 'batch',
+          }),
         };
+        });
       },
     },
   ];

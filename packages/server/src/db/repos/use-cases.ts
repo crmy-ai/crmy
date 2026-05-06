@@ -3,6 +3,20 @@
 
 import type { DbPool } from '../pool.js';
 import type { UseCase, UseCaseContact, Activity, UUID, PaginatedResponse } from '@crmy/shared';
+import { CrmyError } from '@crmy/shared';
+
+interface MutationOptions {
+  expectedVersion?: number;
+}
+
+function concurrencyConflict(entity: string, id: UUID, expectedVersion: number): CrmyError {
+  return new CrmyError(
+    'CONFLICT',
+    `${entity} ${id} was modified by another writer; refresh the object and retry with the latest row_version`,
+    409,
+    { expected_version: expectedVersion },
+  );
+}
 
 export async function createUseCase(
   db: DbPool,
@@ -55,6 +69,7 @@ export async function updateUseCase(
   tenantId: UUID,
   id: UUID,
   patch: Record<string, unknown>,
+  options: MutationOptions = {},
 ): Promise<UseCase | null> {
   const allowedFields = [
     'name', 'description', 'opportunity_id', 'owner_id', 'stage',
@@ -65,9 +80,10 @@ export async function updateUseCase(
     'tags', 'custom_fields',
   ];
 
-  const sets: string[] = ['updated_at = now()'];
+  const sets: string[] = ['updated_at = now()', 'row_version = row_version + 1'];
   const params: unknown[] = [tenantId, id];
   let idx = 3;
+  let changed = false;
 
   for (const field of allowedFields) {
     if (field in patch) {
@@ -75,23 +91,47 @@ export async function updateUseCase(
       sets.push(`${field} = $${idx}`);
       params.push(value);
       idx++;
+      changed = true;
     }
   }
 
-  if (sets.length === 1) return getUseCase(db, tenantId, id);
+  if (!changed) return getUseCase(db, tenantId, id);
+
+  let versionClause = '';
+  if (options.expectedVersion !== undefined) {
+    versionClause = ` AND row_version = $${idx}`;
+    params.push(options.expectedVersion);
+  }
 
   const result = await db.query(
-    `UPDATE use_cases SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2 RETURNING *`,
+    `UPDATE use_cases SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2${versionClause} RETURNING *`,
     params,
   );
+  if (result.rows.length === 0 && options.expectedVersion !== undefined) {
+    throw concurrencyConflict('UseCase', id, options.expectedVersion);
+  }
   return (result.rows[0] as UseCase) ?? null;
 }
 
-export async function deleteUseCase(db: DbPool, tenantId: UUID, id: UUID): Promise<boolean> {
+export async function deleteUseCase(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  options: MutationOptions = {},
+): Promise<boolean> {
+  const params: unknown[] = [id, tenantId];
+  let versionClause = '';
+  if (options.expectedVersion !== undefined) {
+    versionClause = ' AND row_version = $3';
+    params.push(options.expectedVersion);
+  }
   const result = await db.query(
-    'DELETE FROM use_cases WHERE id = $1 AND tenant_id = $2',
-    [id, tenantId],
+    `DELETE FROM use_cases WHERE id = $1 AND tenant_id = $2${versionClause}`,
+    params,
   );
+  if ((result.rowCount ?? 0) === 0 && options.expectedVersion !== undefined) {
+    throw concurrencyConflict('UseCase', id, options.expectedVersion);
+  }
   return (result.rowCount ?? 0) > 0;
 }
 

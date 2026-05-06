@@ -12,6 +12,8 @@ import * as webhookRepo from '../../db/repos/webhooks.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
+import { runToolOperation } from '../tool-operation.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 
 export function webhookTools(db: DbPool): ToolDef[] {
   return [
@@ -21,11 +23,12 @@ export function webhookTools(db: DbPool): ToolDef[] {
       description: 'Register a new webhook endpoint to receive real-time event notifications. Specify the URL, events to subscribe to (e.g. "contact.created", "opportunity.stage_changed"), and an optional secret for HMAC signature verification. CRMy sends POST requests with the event payload to your endpoint.',
       inputSchema: webhookCreate,
       handler: async (input: z.infer<typeof webhookCreate>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'webhook_create', input, async () => {
         const webhook = await webhookRepo.createWebhook(db, actor.tenant_id, {
           ...input,
           created_by: actor.actor_id,
         });
-        await emitEvent(db, {
+        const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
           eventType: 'webhook.created',
           actorId: actor.actor_id,
@@ -34,7 +37,16 @@ export function webhookTools(db: DbPool): ToolDef[] {
           objectId: webhook.id,
           afterData: { id: webhook.id, url: webhook.url, events: webhook.event_types },
         });
-        return { webhook };
+        return {
+          webhook,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'webhook',
+            objectId: webhook.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -54,10 +66,30 @@ export function webhookTools(db: DbPool): ToolDef[] {
       description: 'Update a webhook endpoint configuration including its URL, subscribed events, active status, and secret. Use this to change event subscriptions or temporarily disable a webhook.',
       inputSchema: webhookUpdate,
       handler: async (input: z.infer<typeof webhookUpdate>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'webhook_update', input, async () => {
         const before = await webhookRepo.getWebhook(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Webhook', input.id);
         const webhook = await webhookRepo.updateWebhook(db, actor.tenant_id, input.id, input.patch);
-        return { webhook };
+        const event_id = await emitEvent(db, {
+          tenantId: actor.tenant_id,
+          eventType: 'webhook.updated',
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          objectType: 'webhook',
+          objectId: input.id,
+          beforeData: before,
+          afterData: webhook,
+        });
+        return {
+          webhook,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'webhook',
+            objectId: input.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {
@@ -66,9 +98,30 @@ export function webhookTools(db: DbPool): ToolDef[] {
       description: 'Delete a webhook endpoint and stop all future deliveries. Past delivery records are retained for debugging.',
       inputSchema: webhookDelete,
       handler: async (input: z.infer<typeof webhookDelete>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'webhook_delete', input, async () => {
+        const before = await webhookRepo.getWebhook(db, actor.tenant_id, input.id);
+        if (!before) throw notFound('Webhook', input.id);
         const deleted = await webhookRepo.deleteWebhook(db, actor.tenant_id, input.id);
         if (!deleted) throw notFound('Webhook', input.id);
-        return { deleted: true };
+        const event_id = await emitEvent(db, {
+          tenantId: actor.tenant_id,
+          eventType: 'webhook.deleted',
+          actorId: actor.actor_id,
+          actorType: actor.actor_type,
+          objectType: 'webhook',
+          objectId: input.id,
+          beforeData: before,
+        });
+        return {
+          deleted: true,
+          event_id,
+          mutation: mutationReceipt(actor, {
+            objectType: 'webhook',
+            objectId: input.id,
+            eventId: event_id,
+          }),
+        };
+        });
       },
     },
     {

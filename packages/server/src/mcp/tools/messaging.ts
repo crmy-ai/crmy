@@ -18,6 +18,8 @@ import type { ToolDef } from '../server.js';
 import * as msgRepo from '../../db/repos/messaging.js';
 import { sendMessage } from '../../messaging/delivery.js';
 import { getProvider, listProviderTypes } from '../../messaging/providers/index.js';
+import { runToolOperation } from '../tool-operation.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 
 export function messagingTools(db: DbPool): ToolDef[] {
   return [
@@ -33,6 +35,7 @@ export function messagingTools(db: DbPool): ToolDef[] {
         'Use message_channel_list to see existing channels before creating duplicates.',
       inputSchema: messagingChannelCreate,
       handler: async (input: z.infer<typeof messagingChannelCreate>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'message_channel_create', input, async () => {
         // Validate provider exists
         const provider = getProvider(input.provider);
         if (!provider) {
@@ -47,13 +50,21 @@ export function messagingTools(db: DbPool): ToolDef[] {
           return { error: `Invalid config for provider "${input.provider}": ${validation.error}` };
         }
 
-        return msgRepo.createChannel(db, actor.tenant_id, {
+        const channel = await msgRepo.createChannel(db, actor.tenant_id, {
           name: input.name,
           provider: input.provider,
           config: input.config,
           is_active: input.is_active,
           is_default: input.is_default,
           created_by: actor.actor_id,
+        });
+        return {
+          channel,
+          mutation: mutationReceipt(actor, {
+            objectType: 'message_channel',
+            objectId: channel.id,
+          }),
+        };
         });
       },
     },
@@ -64,6 +75,7 @@ export function messagingTools(db: DbPool): ToolDef[] {
       description: 'Update an existing messaging channel configuration. Can change the name, config, or active status.',
       inputSchema: messagingChannelUpdate,
       handler: async (input: z.infer<typeof messagingChannelUpdate>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'message_channel_update', input, async () => {
         // If config is being updated, validate it
         if (input.patch.config) {
           const existing = await msgRepo.getChannel(db, actor.tenant_id, input.id);
@@ -79,7 +91,15 @@ export function messagingTools(db: DbPool): ToolDef[] {
         }
 
         const updated = await msgRepo.updateChannel(db, actor.tenant_id, input.id, input.patch);
-        return updated ?? { error: 'Channel not found' };
+        if (!updated) return { error: 'Channel not found' };
+        return {
+          channel: updated,
+          mutation: mutationReceipt(actor, {
+            objectType: 'message_channel',
+            objectId: updated.id,
+          }),
+        };
+        });
       },
     },
 
@@ -100,8 +120,16 @@ export function messagingTools(db: DbPool): ToolDef[] {
       description: 'Delete a messaging channel. This does not delete past delivery records.',
       inputSchema: messagingChannelDelete,
       handler: async (input: z.infer<typeof messagingChannelDelete>, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'message_channel_delete', input, async () => {
         const deleted = await msgRepo.deleteChannel(db, actor.tenant_id, input.id);
-        return { deleted };
+        return {
+          deleted,
+          mutation: mutationReceipt(actor, {
+            objectType: 'message_channel',
+            objectId: input.id,
+          }),
+        };
+        });
       },
     },
 
@@ -134,12 +162,21 @@ export function messagingTools(db: DbPool): ToolDef[] {
         'for email it would be the to-address. If omitted, the channel\'s default target is used.',
       inputSchema: messageSend,
       handler: async (input: z.infer<typeof messageSend>, actor: ActorContext) => {
-        return sendMessage(db, actor.tenant_id, {
+        return runToolOperation(db, actor, 'message_send', input, async () => {
+        const delivery = await sendMessage(db, actor.tenant_id, {
           channel_id: input.channel_id,
           recipient: input.recipient,
           subject: input.subject,
           body: input.body,
           metadata: input.metadata,
+        });
+        return {
+          ...delivery,
+          mutation: mutationReceipt(actor, {
+            objectType: 'message_delivery',
+            objectId: delivery.id,
+          }),
+        };
         });
       },
     },

@@ -281,7 +281,7 @@ API keys can be created with a restricted set of scopes to limit what the key is
 | `accounts:read` / `accounts:write` | Account records and use cases |
 | `opportunities:read` / `opportunities:write` | Pipeline and deal records |
 | `activities:read` / `activities:write` | Activities, notes, emails |
-| `assignments:create` / `assignments:update` | Assignment lifecycle |
+| `assignments:read` / `assignments:write` | Assignment lifecycle |
 | `context:read` / `context:write` | Context entries and briefings |
 | `read` | All `:read` scopes (wildcard) |
 | `write` | All `:write` scopes (wildcard) |
@@ -545,7 +545,7 @@ The Actors tab in Settings provides a full view of every registered identity in 
 | Accounts | `accounts:read`, `accounts:write` |
 | Opportunities | `opportunities:read`, `opportunities:write` |
 | Activities | `activities:read`, `activities:write` |
-| Assignments | `assignments:create`, `assignments:update` |
+| Assignments | `assignments:read`, `assignments:write` |
 | Context | `context:read`, `context:write` |
 
 *API Keys section*: lists all API keys bound to this actor. Each key shows label, creation date, expiry, and last-used date. Actions:
@@ -621,8 +621,10 @@ Contacts are people you interact with. They can be linked to an account and have
 | `contact_search` | Search with filters: `query`, `lifecycle_stage`, `account_id`, `owner_id`, `tags`. Query matches name, email, company, and any alias. |
 | `contact_update` | Patch any fields via `{ id, patch: { ... } }`. Supports `aliases` array. |
 | `contact_set_lifecycle` | Change stage with optional `reason` |
-| `contact_log_activity` | Log a call, email, meeting, note, or task for a contact |
 | `contact_get_timeline` | Get the activity timeline with optional type filter |
+| `contact_get_opportunities` | List opportunities linked to a contact |
+| `contact_score` | Compute and persist the contact lead score |
+| `contact_merge` | Merge a duplicate contact into a primary contact |
 | `contact_delete` | Permanently delete a contact. Admin/owner role required. |
 
 ### CLI
@@ -1544,7 +1546,7 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 4. For REST routes: `enforceToolScopes(toolName, actor)` or `requireScopes(actor, ...scopes)` is called
 5. If any required scope is missing → HTTP 403 with an explanatory message
 
-**JWT users (human login) bypass all scope checks** — they always have full access.
+**Verified JWT users (human login) have full access.** Constructed actors, anonymous actors, agents, and API keys must carry explicit scopes. Tools that are intentionally public are limited to identity/schema/help lookups such as `actor_whoami`, `entity_resolve`, `schema_get`, and `guide_search`.
 
 ### Wildcard resolution
 
@@ -1560,8 +1562,8 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 | Tool | Required scopes |
 |---|---|
 | `contact_get`, `contact_search`, `contact_get_timeline` | `contacts:read` |
-| `contact_create`, `contact_update`, `contact_delete`, `contact_set_lifecycle` | `contacts:write` |
-| `contact_log_activity` | `contacts:write`, `activities:write` |
+| `contact_get_opportunities` | `contacts:read`, `opportunities:read` |
+| `contact_create`, `contact_update`, `contact_delete`, `contact_set_lifecycle`, `contact_score`, `contact_merge` | `contacts:write` |
 | `account_get`, `account_search`, `account_get_hierarchy`, `account_health_report` | `accounts:read` |
 | `account_create`, `account_update`, `account_delete`, `account_set_health_score` | `accounts:write` |
 | `opportunity_get`, `opportunity_search` | `opportunities:read` |
@@ -1569,23 +1571,27 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 | `pipeline_summary`, `pipeline_forecast` | `opportunities:read` |
 | `activity_get`, `activity_search`, `activity_get_timeline` | `activities:read` |
 | `activity_create`, `activity_update`, `activity_complete` | `activities:write` |
-| `assignment_get`, `assignment_list`, `assignment_create` | `assignments:create` |
-| `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` | `assignments:update` |
+| `assignment_get`, `assignment_list` | `assignments:read` |
+| `assignment_create`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` | `assignments:write` |
 | `use_case_get`, `use_case_search`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` | `accounts:read` |
 | `use_case_create`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_unlink_contact` | `accounts:write` |
 | `use_case_link_contact` | `accounts:write`, `contacts:read` |
 | `context_get`, `context_search`, `context_list`, `context_stale`, `context_diff`, `briefing_get` | `context:read` |
-| `context_add`, `context_supersede`, `context_review`, `context_extract`, `context_ingest`, `context_stale_assign` | `context:write` |
+| `context_add`, `context_supersede`, `context_review`, `context_extract`, `context_ingest`, `context_ingest_auto`, `context_bulk_mark_stale`, `context_embed_backfill`, `context_stale_assign`, `context_review_batch`, `context_resolve_contradiction`, `context_consolidate` | `context:write` |
+| `context_detect_contradictions`, `context_semantic_search` | `context:read` |
+| `context_contradiction_assign` | `context:read`, `assignments:write` |
 | `note_get`, `note_list` | `activities:read` |
 | `note_create`, `note_update`, `note_delete` | `activities:write` |
 | `email_get`, `email_search` | `activities:read` |
 | `email_create` | `activities:write` |
 | `hitl_check_status`, `hitl_list_pending` | `read` |
 | `hitl_submit_request`, `hitl_resolve` | `write` |
-| `actor_get`, `actor_list`, `actor_expertise`, `crm_search`, `tenant_get_stats` | `read` |
-| `actor_register`, `actor_update` | `write` |
+| `actor_get`, `actor_list`, `actor_expertise`, `agent_find_specialist`, `crm_search`, `tenant_get_stats` | `read` |
+| `actor_register`, `actor_update`, `agent_register_specialization`, `agent_set_availability` | `write` |
+| `ops_status_get`, `ops_data_quality_get`, `ops_audit_get`, `ops_privacy_export` | `read` plus admin/owner visibility |
+| `ops_job_recover`, `ops_data_quality_repair`, `ops_pii_redact`, `ops_privacy_delete`, `ops_retention_apply` | `write` plus admin/owner visibility |
 | `webhook_*`, `custom_field_*`, `workflow_*` | `read` or `write` (general) |
-| `actor_whoami`, `entity_resolve`, `schema_get` | *(always allowed)* |
+| `actor_whoami`, `entity_resolve`, `schema_get`, `guide_search` | *(always allowed)* |
 
 ### Error response
 
@@ -2463,7 +2469,7 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 | Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
 | Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
-| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
+| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_get_timeline`, `contact_get_opportunities`, `contact_score`, `contact_merge`, `contact_delete` |
 | Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_health_report`, `account_delete` |
 | Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete` |
 | Messaging | `message_channel_create`, `message_channel_update`, `message_channel_get`, `message_channel_delete`, `message_channel_list`, `message_send`, `message_delivery_get`, `message_delivery_search` |
@@ -2477,6 +2483,7 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
 | Identity | `entity_resolve` |
 | Analytics | `crm_search`, `pipeline_summary`, `pipeline_forecast`, `account_health_report`, `tenant_get_stats` |
+| Operations | `ops_status_get`, `ops_job_recover`, `ops_data_quality_get`, `ops_data_quality_repair`, `ops_audit_get`, `ops_privacy_export`, `ops_pii_redact`, `ops_privacy_delete`, `ops_retention_apply` |
 | Meta | `schema_get`, `guide_search` |
 
 ---

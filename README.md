@@ -230,7 +230,7 @@ context_semantic_search query="deals at risk due to competitor pressure"
 | **Assignments** | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | **HITL** | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
 | Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
-| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_log_activity`, `contact_get_timeline`, `contact_delete` |
+| Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_get_timeline`, `contact_get_opportunities`, `contact_score`, `contact_merge`, `contact_delete` |
 | Companies | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_health_report`, `account_delete` |
 | Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete` |
 | Messaging | `message_channel_create`, `message_channel_update`, `message_channel_get`, `message_channel_delete`, `message_channel_list`, `message_send`, `message_delivery_get`, `message_delivery_search` |
@@ -243,6 +243,7 @@ context_semantic_search query="deals at risk due to competitor pressure"
 | Emails | `email_create`, `email_get`, `email_search`, `email_provider_set`, `email_provider_get` |
 | Email Sequences | `email_sequence_create`, `email_sequence_get`, `email_sequence_update`, `email_sequence_delete`, `email_sequence_list`, `email_sequence_enroll`, `email_sequence_unenroll`, `email_sequence_enrollment_list` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
+| Operations | `ops_status_get`, `ops_job_recover`, `ops_data_quality_get`, `ops_data_quality_repair`, `ops_audit_get`, `ops_privacy_export`, `ops_pii_redact`, `ops_privacy_delete`, `ops_retention_apply` ★ |
 | Meta | `schema_get`, `entity_resolve`, `guide_search` |
 
 ★ New in v0.7
@@ -452,7 +453,7 @@ Content-Type: application/json
 | `accounts:read` / `accounts:write` | Account records |
 | `opportunities:read` / `opportunities:write` | Pipeline and deals |
 | `activities:read` / `activities:write` | Activities |
-| `assignments:create` / `assignments:update` | Assignment lifecycle |
+| `assignments:read` / `assignments:write` | Assignment lifecycle |
 | `context:read` / `context:write` | Context entries and briefings |
 
 ---
@@ -474,7 +475,9 @@ docs/recipes/              Agent tutorial walkthroughs
 - **MCP-first** — All CRM operations are MCP tools. REST API and CLI are thin wrappers around the same handlers.
 - **Raw SQL** — No ORM. Every query is readable and auditable.
 - **Event sourcing** — Every mutation appends to an `events` table. Full audit trail, never overwritten.
-- **Scope enforcement** — API key scopes checked before every handler. JWT users always have full access.
+- **Scope enforcement** — API key scopes checked before every handler. Every MCP tool must be explicitly mapped to required scopes unless intentionally public.
+- **Deterministic writes** — Mutating agent operations support idempotency, optimistic concurrency, transactions for compound writes, and mutation receipts.
+- **Operational governance** — Admin tools expose queue health, audited recovery actions, data-quality checks/repairs, audit retrieval, privacy export/redaction/delete previews, and tenant retention cleanup.
 - **Governor limits** — Plan-based quotas on actors, activities, and context entries. Prevents runaway agents.
 - **Plugins** — Extensible lifecycle hooks for custom integrations.
 - **Workflows** — Event-driven automation with configurable triggers and actions.
@@ -597,6 +600,19 @@ Step-by-step guides for building agents on CRMy, each with MCP tool calls, CLI e
 ---
 
 ## What's new in v0.7
+
+### Enterprise durability for agent state
+
+CRMy's local-first context layer now has the safety rails expected for repeated enterprise agent runs:
+
+- **Authenticated MCP sessions** — no anonymous fallback; constructed actors need explicit scopes.
+- **Idempotent mutations** — retry-safe operation keys prevent duplicate writes after agent or network retries.
+- **Optimistic concurrency** — core revenue objects expose `row_version` and support expected-version guards.
+- **Transactional compound actions** — multi-record tools such as deal advancement and outreach commit or roll back as a unit.
+- **Mutation receipts** — writes return actor, event, object, version, and side-effect metadata so agents can reason about what actually changed.
+- **Context convergence** — duplicate/similarity/conflict checks before `context_add`, atomic supersession, contradiction assignment, and workflow replay lineage.
+- **Operator controls** — `ops_status_get`, `ops_job_recover`, data-quality checks/repairs, audit retrieval, privacy export/redaction/delete, and retention cleanup.
+- **CI durability workflow** — `.github/workflows/enterprise-durability.yml` runs unit durability checks and migrated-Postgres integration tests.
 
 ### Enterprise-grade context & memory
 

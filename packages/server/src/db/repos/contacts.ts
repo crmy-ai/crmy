@@ -3,6 +3,20 @@
 
 import type { DbPool } from '../pool.js';
 import type { Contact, UUID, PaginatedResponse } from '@crmy/shared';
+import { CrmyError } from '@crmy/shared';
+
+interface MutationOptions {
+  expectedVersion?: number;
+}
+
+function concurrencyConflict(entity: string, id: UUID, expectedVersion: number): CrmyError {
+  return new CrmyError(
+    'CONFLICT',
+    `${entity} ${id} was modified by another writer; refresh the object and retry with the latest row_version`,
+    409,
+    { expected_version: expectedVersion },
+  );
+}
 
 export async function createContact(
   db: DbPool,
@@ -124,15 +138,17 @@ export async function updateContact(
   tenantId: UUID,
   id: UUID,
   patch: Record<string, unknown>,
+  options: MutationOptions = {},
 ): Promise<Contact | null> {
   const allowedFields = [
     'first_name', 'last_name', 'email', 'phone', 'title', 'company_name',
     'account_id', 'owner_id', 'lifecycle_stage', 'source', 'aliases', 'tags', 'custom_fields',
   ];
 
-  const sets: string[] = ['updated_at = now()'];
+  const sets: string[] = ['updated_at = now()', 'row_version = row_version + 1'];
   const params: unknown[] = [tenantId, id];
   let idx = 3;
+  let changed = false;
 
   for (const field of allowedFields) {
     if (field in patch) {
@@ -140,22 +156,46 @@ export async function updateContact(
       sets.push(`${field} = $${idx}`);
       params.push(value);
       idx++;
+      changed = true;
     }
   }
 
-  if (sets.length === 1) return getContact(db, tenantId, id);
+  if (!changed) return getContact(db, tenantId, id);
+
+  let versionClause = '';
+  if (options.expectedVersion !== undefined) {
+    versionClause = ` AND row_version = $${idx}`;
+    params.push(options.expectedVersion);
+  }
 
   const result = await db.query(
-    `UPDATE contacts SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2 RETURNING *`,
+    `UPDATE contacts SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2${versionClause} RETURNING *`,
     params,
   );
+  if (result.rows.length === 0 && options.expectedVersion !== undefined) {
+    throw concurrencyConflict('Contact', id, options.expectedVersion);
+  }
   return (result.rows[0] as Contact) ?? null;
 }
 
-export async function deleteContact(db: DbPool, tenantId: UUID, id: UUID): Promise<boolean> {
+export async function deleteContact(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  options: MutationOptions = {},
+): Promise<boolean> {
+  const params: unknown[] = [tenantId, id];
+  let versionClause = '';
+  if (options.expectedVersion !== undefined) {
+    versionClause = ' AND row_version = $3';
+    params.push(options.expectedVersion);
+  }
   const result = await db.query(
-    'DELETE FROM contacts WHERE tenant_id = $1 AND id = $2',
-    [tenantId, id],
+    `DELETE FROM contacts WHERE tenant_id = $1 AND id = $2${versionClause}`,
+    params,
   );
+  if ((result.rowCount ?? 0) === 0 && options.expectedVersion !== undefined) {
+    throw concurrencyConflict('Contact', id, options.expectedVersion);
+  }
   return (result.rowCount ?? 0) > 0;
 }
