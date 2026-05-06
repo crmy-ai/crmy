@@ -44,13 +44,13 @@ Complete documentation for CRMy — the agent-first open source CRM.
 ### Install
 
 ```bash
-npm install -g crmy
+npm install -g @crmy/cli
 ```
 
 Or use with npx (no install):
 
 ```bash
-npx crmy init
+npx @crmy/cli init
 ```
 
 ### Prerequisites
@@ -62,13 +62,13 @@ npx crmy init
 
 ```bash
 # 1. Initialize (interactive — sets up DB, user, API key)
-npx crmy init
+npx @crmy/cli init
 
 # 2. Start the server (REST API + MCP + Web UI at /app)
-npx crmy server
+npx @crmy/cli server
 
 # 3. Add to Claude Code as an MCP server
-claude mcp add crmy -- npx crmy mcp
+claude mcp add crmy -- npx @crmy/cli mcp
 ```
 
 ### Quick setup — Remote mode
@@ -2439,7 +2439,7 @@ See [mcp-tools.md](mcp-tools.md) for the original core tool reference. All tools
 
 ```bash
 # Claude Code
-claude mcp add crmy -- npx crmy mcp
+claude mcp add crmy -- npx @crmy/cli mcp
 
 # claude_desktop_config.json / .cursor/mcp.json
 {
@@ -2707,8 +2707,8 @@ Base URL: `/api/v1`
 ### Running migrations
 
 ```bash
-npx crmy migrate run      # apply pending migrations
-npx crmy migrate status   # show migration status
+npx @crmy/cli migrate run      # apply pending migrations
+npx @crmy/cli migrate status   # show migration status
 ```
 
 Migrations run automatically on server startup and during `crmy init`.

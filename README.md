@@ -1,12 +1,24 @@
 # CRMy
 
-The context backend for sales agents. Deploy CRMy alongside your AI agent to give it typed, versioned memory about every contact, account, and deal — and a single `briefing_get` call that assembles everything it needs before each action.
+Durable customer context for AI agents.
+
+CRMy is a local-first operational state layer that gives agents typed revenue objects, persistent context, scoped tools, and retry-safe writes through MCP, REST, and CLI.
+
+Instead of rebuilding customer state from raw CRM queries, notes, emails, and prior tool calls every run, agents call `briefing_get`, act through structured tools, and leave behind auditable, versioned state.
+
+Use CRMy when your agent needs to:
+
+- remember customers across runs
+- reason over current and historical customer state
+- update revenue objects safely
+- avoid duplicate, stale, or contradictory memory
+- recover from retries, failed jobs, and partial workflows
 
 MCP-native. PostgreSQL-backed. Open source.
 
 ---
 
-## The problem
+## The problem CRMy solves
 
 Your agent takes an action — sends an email, advances a deal, books a follow-up call. Before it acts, it needs to know:
 
@@ -16,69 +28,91 @@ Your agent takes an action — sends an email, advances a deal, books a follow-u
 - Are there open assignments on this contact right now?
 - What context is stale and might be wrong?
 
-Assembling that from raw queries is 5–10 API calls, schema knowledge, and brittle glue code. CRMy's `briefing_get` returns it in one shot — via MCP, CLI, or REST.
+Assembling that from raw queries is 5-10 API calls, schema knowledge, and brittle glue code. CRMy's `briefing_get` returns it in one shot, then mutating tools update the underlying state with idempotency, optimistic concurrency, audit events, and scoped access.
 
 ---
 
 ## Quickstart
 
-Choose your deploy path:
-
-### Path A — Try it in 60 seconds (Railway)
-
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/crmy)
-
-One click. No local setup. Demo data loads automatically.
-
-### Path B — Docker (local, recommended for dev)
+The fastest local path is npm plus PostgreSQL. You need Node.js 20+ and a Postgres database. If you do not already have Postgres running, start one with Docker:
 
 ```bash
-# Clone and start PostgreSQL + server together
-git clone https://github.com/crmy-ai/crmy.git && cd crmy
+docker run --name crmy-postgres \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=crmy \
+  -p 5432:5432 \
+  -d pgvector/pgvector:pg16
+```
 
-# Set your JWT secret (required)
+Then initialize CRMy:
+
+```bash
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crmy
+export CRMY_ADMIN_EMAIL=admin@example.com
+export CRMY_ADMIN_PASSWORD=change-me-please-123
+
+npx @crmy/cli init --yes
+npx @crmy/cli doctor
+npx @crmy/cli server
+```
+
+Open:
+
+```text
+Web UI   http://localhost:3000/app
+REST     http://localhost:3000/api/v1
+MCP      http://localhost:3000/mcp
+Health   http://localhost:3000/health
+```
+
+What `init --yes` does:
+
+1. Connects to PostgreSQL.
+2. Creates the `crmy` database if it is missing on local Postgres.
+3. Runs migrations.
+4. Creates the first owner account.
+5. Writes `.crmy.json` with a local API key.
+6. Seeds demo data so the examples below work immediately.
+
+Prefer interactive setup? Run:
+
+```bash
+npx @crmy/cli init
+```
+
+Prefer a global install?
+
+```bash
+npm install -g @crmy/cli
+```
+
+The binary is `crmy`, so `crmy init`, `crmy doctor`, and `crmy server` are equivalent to the `npx @crmy/cli ...` commands above.
+
+### Docker Compose alternative
+
+For a full local stack managed by Compose:
+
+```bash
+git clone https://github.com/crmy-ai/crmy.git
+cd crmy
+
 export JWT_SECRET=$(openssl rand -hex 32)
+export CRMY_ADMIN_EMAIL=admin@example.com
+export CRMY_ADMIN_PASSWORD=change-me-please-123
+export CRMY_SEED_DEMO=true
 
-# Optional: auto-create admin and seed demo data
-export CRMY_ADMIN_EMAIL=you@example.com
-export CRMY_ADMIN_PASSWORD=your-secure-password-here
-
-CRMY_SEED_DEMO=true docker compose -f docker/docker-compose.yml up -d
+docker compose -f docker/docker-compose.yml up -d
 ```
-
-### Path C — npm (bring your own Postgres)
-
-```bash
-npx @crmy/cli init          # connect to PostgreSQL, run migrations, create admin
-npx @crmy/cli server        # starts on :3000
-```
-
-The `init` wizard will:
-1. Connect to your PostgreSQL (retries up to 5 times)
-2. Create the database if it doesn't exist (local installs)
-3. Run all migrations
-4. Optionally enable semantic search (pgvector)
-5. Create your admin account
-6. Seed demo data
-
-Use `crmy init --yes` for fully non-interactive setup (requires `CRMY_ADMIN_EMAIL` + `CRMY_ADMIN_PASSWORD` env vars).
-
-### Verify your setup
-
-```bash
-crmy doctor                  # 8-point diagnostic check
-```
-
-`crmy doctor` verifies: Node.js version, config file, PostgreSQL connectivity, migration status, admin user, pgvector availability, port availability, and JWT secret strength.
 
 ### Try it
 
 With demo data loaded, try these to see CRMy in action:
 
 ```bash
-crmy briefing contact:d0000000-0000-4000-c000-000000000001   # Sarah Chen at Acme Corp
-crmy briefing account:d0000000-0000-4000-b000-000000000001   # Acme Corp — full account context
-crmy assignments list --mine                                   # Open assignments queue
+npx @crmy/cli briefing contact:d0000000-0000-4000-c000-000000000001   # Sarah Chen at Acme Corp
+npx @crmy/cli briefing account:d0000000-0000-4000-b000-000000000001   # Acme Corp account context
+npx @crmy/cli assignments list --mine                                  # Open assignments queue
 ```
 
 ### Connect via MCP
@@ -119,7 +153,7 @@ Add to `.cursor/mcp.json` or equivalent:
 }
 ```
 
-Once connected, your agent has access to 175+ MCP tools. No API calls, no auth wiring — just tool calls.
+Once connected, your agent has access to 160+ scoped MCP tools. Local stdio MCP uses the `.crmy.json` written by `init`; remote HTTP MCP uses scoped API keys.
 
 ---
 
@@ -132,7 +166,7 @@ Via MCP (natural language):
 Via CLI:
 
 ```bash
-crmy briefing contact:<id>
+npx @crmy/cli briefing contact:<id>
 ```
 
 Response:
@@ -220,28 +254,28 @@ context_semantic_search query="deals at risk due to competitor pressure"
 
 ---
 
-## MCP Tools (175+)
+## MCP Tools (160+)
 
 | Category | Tools |
 |---|---|
 | **Briefing** | `briefing_get` — with `context_radius` (direct/adjacent/account_wide), `token_budget`, and `dropped_entries` in response |
 | **Context** | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_review_batch` ★, `context_stale`, `context_bulk_mark_stale` ★, `context_diff`, `context_ingest`, `context_ingest_auto`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
-| **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise` |
+| **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise`, `agent_register_specialization`, `agent_find_specialist`, `agent_set_availability` |
 | **Assignments** | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
-| **HITL** | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
+| **HITL** | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve`, `hitl_rule_create`, `hitl_rule_list`, `hitl_rule_delete` |
+| **Agent Handoff** | `agent_capture_handoff`, `agent_resume_handoff` |
 | Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
 | Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_get_timeline`, `contact_get_opportunities`, `contact_score`, `contact_merge`, `contact_delete` |
-| Companies | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_health_report`, `account_delete` |
-| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete` |
+| Companies | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_health_report`, `account_merge`, `account_delete` |
+| Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_health_score`, `opportunity_delete` |
 | Messaging | `message_channel_create`, `message_channel_update`, `message_channel_get`, `message_channel_delete`, `message_channel_list`, `message_send`, `message_delivery_get`, `message_delivery_search` |
 | Analytics | `pipeline_summary`, `pipeline_forecast`, `crm_search`, `account_health_report`, `tenant_get_stats` |
 | Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
 | Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
-| Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
-| Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list`, `workflow_template_list` ★ |
+| Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list`, `workflow_test`, `workflow_clone`, `workflow_trigger`, `workflow_run_replay`, `workflow_template_list` ★ |
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
 | Emails | `email_create`, `email_get`, `email_search`, `email_provider_set`, `email_provider_get` |
-| Email Sequences | `email_sequence_create`, `email_sequence_get`, `email_sequence_update`, `email_sequence_delete`, `email_sequence_list`, `email_sequence_enroll`, `email_sequence_unenroll`, `email_sequence_enrollment_list` |
+| Sequences | `sequence_create`, `sequence_get`, `sequence_update`, `sequence_delete`, `sequence_list`, `sequence_enroll`, `sequence_unenroll`, `sequence_pause`, `sequence_resume`, `sequence_advance`, `sequence_enrollment_get`, `sequence_enrollment_context`, `sequence_enrollment_list`, `sequence_draft_step`, `sequence_analytics`, `sequence_clone` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
 | Operations | `ops_status_get`, `ops_job_recover`, `ops_data_quality_get`, `ops_data_quality_repair`, `ops_audit_get`, `ops_privacy_export`, `ops_pii_redact`, `ops_privacy_delete`, `ops_retention_apply` ★ |
 | Meta | `schema_get`, `entity_resolve`, `guide_search` |
@@ -408,7 +442,7 @@ curl -X POST http://localhost:3000/auth/register \
 
 ## REST API
 
-All MCP tools have a corresponding REST endpoint at `/api/v1/*`. Use the API directly for integrations that can't run MCP, or when building custom tooling.
+Core CRM objects, context, assignments, workflows, webhooks, email, actors, and admin surfaces have REST endpoints at `/api/v1/*`. MCP remains the complete agent-facing tool surface; use REST for integrations that cannot run MCP or for custom web tooling.
 
 Server URLs when running:
 
@@ -521,7 +555,7 @@ The init wizard handles everything — database creation, migrations, admin acco
 
 ```bash
 npx @crmy/cli init
-npx @crmy/cli server     # starts on :3000 with hot reload via the CLI
+npx @crmy/cli server     # starts the API, Web UI, and MCP HTTP endpoint on :3000
 ```
 
 ### Option B — Manual setup
@@ -708,7 +742,7 @@ The entity memory graph (`/contacts/:id/graph`, `/companies/:id/graph`) is now a
 - **Node.js version gate** — clear error on Node < 20 instead of cryptic ESM failures
 
 ### MCP tools
-- **175+ tools** with rewritten descriptions optimized for LLM tool selection
+- **160+ tools** with rewritten descriptions optimized for LLM tool selection
 - **Tool ordering** — briefing and context tools first in manifest, signaling priority to agents
 - **Semantic search** — `context_semantic_search` and `context_embed_backfill` (pgvector)
 - **Multi-channel messaging** — `message_channel_create`, `message_send`, `message_delivery_get` with Slack built-in, extensible via plugins
@@ -721,7 +755,6 @@ The entity memory graph (`/contacts/:id/graph`, `/companies/:id/graph`) is now a
 - **Settings → Registries** — manage custom context and activity types
 
 ### Self-hosting
-- **Railway one-click deploy** — `railway.toml` template
 - **Render.com blueprint** — `render.yaml` with auto-provisioned DB and JWT secret
 - **Docker Compose** — pgvector-ready Postgres, health checks, env var configuration
 - **JWT secret enforcement** — server rejects known-bad secrets in production

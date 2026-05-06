@@ -188,13 +188,13 @@ async function main() {
   // Brightside Health contacts
   await db.query(
     `INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage)
-     VALUES ($1, $2, 'Priya', 'Nair', 'p.nair@brightsidehealth.com', 'CTO', $3, 'active')
+     VALUES ($1, $2, 'Priya', 'Nair', 'p.nair@brightsidehealth.com', 'CTO', $3, 'customer')
      ON CONFLICT (id) DO NOTHING`,
     [IDS.CT_PRIYA_NAIR, tenantId, IDS.ACCT_BRIGHTSIDE],
   );
   await db.query(
     `INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage)
-     VALUES ($1, $2, 'Jordan', 'Liu', 'j.liu@brightsidehealth.com', 'RevOps Lead', $3, 'active')
+     VALUES ($1, $2, 'Jordan', 'Liu', 'j.liu@brightsidehealth.com', 'RevOps Lead', $3, 'customer')
      ON CONFLICT (id) DO NOTHING`,
     [IDS.CT_JORDAN_LIU, tenantId, IDS.ACCT_BRIGHTSIDE],
   );
@@ -202,13 +202,13 @@ async function main() {
   // Vertex Logistics contacts
   await db.query(
     `INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage)
-     VALUES ($1, $2, 'Tomás', 'Rivera', 't.rivera@vertex.io', 'Head of Sales Ops', $3, 'champion')
+     VALUES ($1, $2, 'Tomás', 'Rivera', 't.rivera@vertex.io', 'Head of Sales Ops', $3, 'customer')
      ON CONFLICT (id) DO NOTHING`,
     [IDS.CT_TOMAS_RIVERA, tenantId, IDS.ACCT_VERTEX],
   );
   await db.query(
     `INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage)
-     VALUES ($1, $2, 'Keiko', 'Yamamoto', 'k.yamamoto@vertex.io', 'CEO', $3, 'champion')
+     VALUES ($1, $2, 'Keiko', 'Yamamoto', 'k.yamamoto@vertex.io', 'CEO', $3, 'customer')
      ON CONFLICT (id) DO NOTHING`,
     [IDS.CT_KEIKO_YAMAMOTO, tenantId, IDS.ACCT_VERTEX],
   );

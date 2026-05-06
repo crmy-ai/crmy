@@ -118,35 +118,35 @@ async function main() {
   const marcus  = await upsertContact(db, tenantId, { first_name: 'Marcus',   last_name: 'Webb',        email: 'marcus.webb@acme.com',         title: 'CTO',                        company_name: 'Acme Corp',              lifecycle_stage: 'customer',     account_id: acme.id });
 
   // Globex Industries
-  const priya   = await upsertContact(db, tenantId, { first_name: 'Priya',    last_name: 'Patel',       email: 'p.patel@globex.io',            title: 'Director of Operations',     company_name: 'Globex Industries',     lifecycle_stage: 'opportunity',  account_id: globex.id });
-  const james   = await upsertContact(db, tenantId, { first_name: 'James',    last_name: 'Okonkwo',     email: 'jokonkwo@globex.io',           title: 'Head of IT',                 company_name: 'Globex Industries',     lifecycle_stage: 'qualified',    account_id: globex.id });
+  const priya   = await upsertContact(db, tenantId, { first_name: 'Priya',    last_name: 'Patel',       email: 'p.patel@globex.io',            title: 'Director of Operations',     company_name: 'Globex Industries',     lifecycle_stage: 'prospect',  account_id: globex.id });
+  const james   = await upsertContact(db, tenantId, { first_name: 'James',    last_name: 'Okonkwo',     email: 'jokonkwo@globex.io',           title: 'Head of IT',                 company_name: 'Globex Industries',     lifecycle_stage: 'prospect',    account_id: globex.id });
 
   // Initech Solutions
   const nina    = await upsertContact(db, tenantId, { first_name: 'Nina',     last_name: 'Hartmann',    email: 'nina@initech.co',              title: 'CFO',                        company_name: 'Initech Solutions',     lifecycle_stage: 'lead',         account_id: initech.id });
   const tom     = await upsertContact(db, tenantId, { first_name: 'Tom',      last_name: 'Bradley',     email: 'tbradley@initech.co',          title: 'Procurement Manager',        company_name: 'Initech Solutions',     lifecycle_stage: 'lead',         account_id: initech.id });
 
   // NovaTech Systems
-  const diana   = await upsertContact(db, tenantId, { first_name: 'Diana',    last_name: 'Reyes',       email: 'd.reyes@novatech.io',          title: 'Chief Product Officer',      company_name: 'NovaTech Systems',      lifecycle_stage: 'opportunity',  account_id: novaTech.id });
-  const kevin   = await upsertContact(db, tenantId, { first_name: 'Kevin',    last_name: 'Marsh',       email: 'k.marsh@novatech.io',          title: 'VP of Sales',                company_name: 'NovaTech Systems',      lifecycle_stage: 'qualified',    account_id: novaTech.id });
+  const diana   = await upsertContact(db, tenantId, { first_name: 'Diana',    last_name: 'Reyes',       email: 'd.reyes@novatech.io',          title: 'Chief Product Officer',      company_name: 'NovaTech Systems',      lifecycle_stage: 'prospect',  account_id: novaTech.id });
+  const kevin   = await upsertContact(db, tenantId, { first_name: 'Kevin',    last_name: 'Marsh',       email: 'k.marsh@novatech.io',          title: 'VP of Sales',                company_name: 'NovaTech Systems',      lifecycle_stage: 'prospect',    account_id: novaTech.id });
 
   // CloudNine Platforms
   const lena    = await upsertContact(db, tenantId, { first_name: 'Lena',     last_name: 'Park',        email: 'lena@cloudnine.dev',           title: 'CEO',                        company_name: 'CloudNine Platforms',   lifecycle_stage: 'customer',     account_id: cloudNine.id });
 
   // BlueSky Healthcare
-  const rachel  = await upsertContact(db, tenantId, { first_name: 'Rachel',   last_name: 'Torres',      email: 'r.torres@bluesky.health',      title: 'CIO',                        company_name: 'BlueSky Healthcare',    lifecycle_stage: 'opportunity',  account_id: blueSky.id });
-  const dan     = await upsertContact(db, tenantId, { first_name: 'Daniel',   last_name: 'Sung',        email: 'd.sung@bluesky.health',        title: 'VP of IT',                   company_name: 'BlueSky Healthcare',    lifecycle_stage: 'qualified',    account_id: blueSky.id });
+  const rachel  = await upsertContact(db, tenantId, { first_name: 'Rachel',   last_name: 'Torres',      email: 'r.torres@bluesky.health',      title: 'CIO',                        company_name: 'BlueSky Healthcare',    lifecycle_stage: 'prospect',  account_id: blueSky.id });
+  const dan     = await upsertContact(db, tenantId, { first_name: 'Daniel',   last_name: 'Sung',        email: 'd.sung@bluesky.health',        title: 'VP of IT',                   company_name: 'BlueSky Healthcare',    lifecycle_stage: 'prospect',    account_id: blueSky.id });
 
   // Cornerstone Capital
-  const amanda  = await upsertContact(db, tenantId, { first_name: 'Amanda',   last_name: 'Forsythe',    email: 'a.forsythe@cornerstonecap.com',title: 'Managing Director',           company_name: 'Cornerstone Capital',   lifecycle_stage: 'opportunity',  account_id: cornerstone.id });
+  const amanda  = await upsertContact(db, tenantId, { first_name: 'Amanda',   last_name: 'Forsythe',    email: 'a.forsythe@cornerstonecap.com',title: 'Managing Director',           company_name: 'Cornerstone Capital',   lifecycle_stage: 'prospect',  account_id: cornerstone.id });
 
   // Orion Financial
   const victor  = await upsertContact(db, tenantId, { first_name: 'Victor',   last_name: 'Huang',       email: 'v.huang@orionfinancial.com',   title: 'Head of Operations',         company_name: 'Orion Financial',       lifecycle_stage: 'lead',         account_id: orion.id });
 
   // Nexus Fintech
-  const sophie  = await upsertContact(db, tenantId, { first_name: 'Sophie',   last_name: 'Laurent',     email: 's.laurent@nexusfin.io',        title: 'Co-founder & CTO',           company_name: 'Nexus Fintech',         lifecycle_stage: 'opportunity',  account_id: nexusFin.id });
+  const sophie  = await upsertContact(db, tenantId, { first_name: 'Sophie',   last_name: 'Laurent',     email: 's.laurent@nexusfin.io',        title: 'Co-founder & CTO',           company_name: 'Nexus Fintech',         lifecycle_stage: 'prospect',  account_id: nexusFin.id });
 
   // Ridgeline Manufacturing
-  const garrett = await upsertContact(db, tenantId, { first_name: 'Garrett',  last_name: 'Mills',       email: 'g.mills@ridgeline-mfg.com',    title: 'VP of Operations',           company_name: 'Ridgeline Manufacturing',lifecycle_stage: 'qualified',   account_id: ridgeline.id });
+  const garrett = await upsertContact(db, tenantId, { first_name: 'Garrett',  last_name: 'Mills',       email: 'g.mills@ridgeline-mfg.com',    title: 'VP of Operations',           company_name: 'Ridgeline Manufacturing',lifecycle_stage: 'prospect',   account_id: ridgeline.id });
 
   // Pinnacle Pharma
   const claire  = await upsertContact(db, tenantId, { first_name: 'Claire',   last_name: 'Weston',      email: 'c.weston@pinnaclepharm.com',   title: 'SVP of Digital Strategy',    company_name: 'Pinnacle Pharma',       lifecycle_stage: 'lead',         account_id: pinnacleRx.id });
@@ -155,29 +155,29 @@ async function main() {
   const omar    = await upsertContact(db, tenantId, { first_name: 'Omar',     last_name: 'Khalid',      email: 'o.khalid@medcore.io',          title: 'Director of Technology',     company_name: 'MedCore Systems',       lifecycle_stage: 'lead',         account_id: medCore.id });
 
   // Meridian Logistics
-  const tanya   = await upsertContact(db, tenantId, { first_name: 'Tanya',    last_name: 'Novak',       email: 't.novak@meridianlog.com',      title: 'VP of Supply Chain',         company_name: 'Meridian Logistics',    lifecycle_stage: 'opportunity',  account_id: meridian.id });
+  const tanya   = await upsertContact(db, tenantId, { first_name: 'Tanya',    last_name: 'Novak',       email: 't.novak@meridianlog.com',      title: 'VP of Supply Chain',         company_name: 'Meridian Logistics',    lifecycle_stage: 'prospect',  account_id: meridian.id });
 
   // Harbor Logistics
-  const ben     = await upsertContact(db, tenantId, { first_name: 'Benjamin', last_name: 'Owens',       email: 'b.owens@harborlog.co',         title: 'Head of Procurement',        company_name: 'Harbor Logistics',      lifecycle_stage: 'qualified',    account_id: harbor.id });
+  const ben     = await upsertContact(db, tenantId, { first_name: 'Benjamin', last_name: 'Owens',       email: 'b.owens@harborlog.co',         title: 'Head of Procurement',        company_name: 'Harbor Logistics',      lifecycle_stage: 'prospect',    account_id: harbor.id });
 
   // ClearPath Energy
-  const elise   = await upsertContact(db, tenantId, { first_name: 'Elise',    last_name: 'Fontaine',    email: 'e.fontaine@clearpathener.com', title: 'Chief Digital Officer',      company_name: 'ClearPath Energy',      lifecycle_stage: 'opportunity',  account_id: clearPath.id });
-  const raj     = await upsertContact(db, tenantId, { first_name: 'Raj',      last_name: 'Mehta',       email: 'r.mehta@clearpathener.com',    title: 'Director of IT',             company_name: 'ClearPath Energy',      lifecycle_stage: 'qualified',    account_id: clearPath.id });
+  const elise   = await upsertContact(db, tenantId, { first_name: 'Elise',    last_name: 'Fontaine',    email: 'e.fontaine@clearpathener.com', title: 'Chief Digital Officer',      company_name: 'ClearPath Energy',      lifecycle_stage: 'prospect',  account_id: clearPath.id });
+  const raj     = await upsertContact(db, tenantId, { first_name: 'Raj',      last_name: 'Mehta',       email: 'r.mehta@clearpathener.com',    title: 'Director of IT',             company_name: 'ClearPath Energy',      lifecycle_stage: 'prospect',    account_id: clearPath.id });
 
   // DataBridge Inc
-  const morgan  = await upsertContact(db, tenantId, { first_name: 'Morgan',   last_name: 'Shaw',        email: 'm.shaw@databridge.io',         title: 'VP of Product',              company_name: 'DataBridge Inc',        lifecycle_stage: 'opportunity',  account_id: dataBridge.id });
+  const morgan  = await upsertContact(db, tenantId, { first_name: 'Morgan',   last_name: 'Shaw',        email: 'm.shaw@databridge.io',         title: 'VP of Product',              company_name: 'DataBridge Inc',        lifecycle_stage: 'prospect',  account_id: dataBridge.id });
 
   // Apex Analytics
   const alex2   = await upsertContact(db, tenantId, { first_name: 'Alex',     last_name: 'Thornton',    email: 'a.thornton@apexanalytics.com', title: 'Head of Data Science',       company_name: 'Apex Analytics',        lifecycle_stage: 'customer',     account_id: apexAnalytics.id });
 
   // Ironclad Security
-  const finn    = await upsertContact(db, tenantId, { first_name: 'Finn',     last_name: 'O\'Brien',    email: 'f.obrien@ironcladsec.com',     title: 'CISO',                       company_name: 'Ironclad Security',     lifecycle_stage: 'opportunity',  account_id: ironclad.id });
+  const finn    = await upsertContact(db, tenantId, { first_name: 'Finn',     last_name: 'O\'Brien',    email: 'f.obrien@ironcladsec.com',     title: 'CISO',                       company_name: 'Ironclad Security',     lifecycle_stage: 'prospect',  account_id: ironclad.id });
 
   // Stellar Retail Group
   const jade    = await upsertContact(db, tenantId, { first_name: 'Jade',     last_name: 'Morrison',    email: 'j.morrison@stellarretail.com', title: 'Director of eCommerce',      company_name: 'Stellar Retail Group',  lifecycle_stage: 'lead',         account_id: stellar.id });
 
   // Olympus Retail
-  const carlos  = await upsertContact(db, tenantId, { first_name: 'Carlos',   last_name: 'Vega',        email: 'c.vega@olympusretail.com',     title: 'VP of Technology',           company_name: 'Olympus Retail',        lifecycle_stage: 'qualified',    account_id: olympus.id });
+  const carlos  = await upsertContact(db, tenantId, { first_name: 'Carlos',   last_name: 'Vega',        email: 'c.vega@olympusretail.com',     title: 'VP of Technology',           company_name: 'Olympus Retail',        lifecycle_stage: 'prospect',    account_id: olympus.id });
 
   // Prism Insurance
   const helena  = await upsertContact(db, tenantId, { first_name: 'Helena',   last_name: 'Cross',       email: 'h.cross@prismins.com',         title: 'Chief Risk Officer',         company_name: 'Prism Insurance',       lifecycle_stage: 'lead',         account_id: prismIns.id });
@@ -189,7 +189,7 @@ async function main() {
   const zoe     = await upsertContact(db, tenantId, { first_name: 'Zoe',      last_name: 'Chen',        email: 'z.chen@quantumcc.ai',          title: 'CEO',                        company_name: 'Quantum Computing Co',  lifecycle_stage: 'customer',     account_id: quantum.id });
 
   // Cascade Software
-  const ian     = await upsertContact(db, tenantId, { first_name: 'Ian',      last_name: 'Gallagher',   email: 'i.gallagher@cascadesw.com',    title: 'VP of Engineering',          company_name: 'Cascade Software',      lifecycle_stage: 'opportunity',  account_id: cascade.id });
+  const ian     = await upsertContact(db, tenantId, { first_name: 'Ian',      last_name: 'Gallagher',   email: 'i.gallagher@cascadesw.com',    title: 'VP of Engineering',          company_name: 'Cascade Software',      lifecycle_stage: 'prospect',  account_id: cascade.id });
 
   // Summit Consulting
   const grace   = await upsertContact(db, tenantId, { first_name: 'Grace',    last_name: 'Adeyemi',     email: 'g.adeyemi@summitconsult.com',  title: 'Principal Consultant',       company_name: 'Summit Consulting',     lifecycle_stage: 'customer',     account_id: summit.id });
@@ -201,13 +201,13 @@ async function main() {
   const mia     = await upsertContact(db, tenantId, { first_name: 'Mia',      last_name: 'Jacobs',      email: 'm.jacobs@vantagerealty.com',   title: 'Chief Technology Officer',   company_name: 'Vantage Realty Group',  lifecycle_stage: 'lead',         account_id: vantage.id });
 
   // Nautilus Media
-  const evan    = await upsertContact(db, tenantId, { first_name: 'Evan',     last_name: 'Whitfield',   email: 'e.whitfield@nautilusmedia.com',title: 'VP of Digital Products',     company_name: 'Nautilus Media',        lifecycle_stage: 'opportunity',  account_id: nautilus.id });
+  const evan    = await upsertContact(db, tenantId, { first_name: 'Evan',     last_name: 'Whitfield',   email: 'e.whitfield@nautilusmedia.com',title: 'VP of Digital Products',     company_name: 'Nautilus Media',        lifecycle_stage: 'prospect',  account_id: nautilus.id });
 
   // TerraForge Agriculture
   const lara    = await upsertContact(db, tenantId, { first_name: 'Lara',     last_name: 'Fischer',     email: 'l.fischer@terraforge.ag',      title: 'Head of Technology',         company_name: 'TerraForge Agriculture',lifecycle_stage: 'lead',         account_id: terraForge.id });
 
   // Pulse Biomedical
-  const nick    = await upsertContact(db, tenantId, { first_name: 'Nicholas', last_name: 'Strand',      email: 'n.strand@pulsebio.com',        title: 'VP of Engineering',          company_name: 'Pulse Biomedical',      lifecycle_stage: 'opportunity',  account_id: pulseBio.id });
+  const nick    = await upsertContact(db, tenantId, { first_name: 'Nicholas', last_name: 'Strand',      email: 'n.strand@pulsebio.com',        title: 'VP of Engineering',          company_name: 'Pulse Biomedical',      lifecycle_stage: 'prospect',  account_id: pulseBio.id });
 
   console.log(`  Seeded 36 contacts`);
 
