@@ -1791,6 +1791,8 @@ export function apiRouter(db: DbPool): Router {
         since: qs(req.query.since),
         context_types: req.query.context_types ? (qs(req.query.context_types) ?? '').split(',') : undefined,
         include_stale: req.query.include_stale === 'true',
+        context_radius: qs(req.query.context_radius),
+        token_budget: req.query.token_budget ? Number(qs(req.query.token_budget)) : undefined,
         format: qs(req.query.format) ?? 'json',
       }, actor);
       res.json(result);

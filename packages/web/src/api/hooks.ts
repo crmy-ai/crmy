@@ -1048,7 +1048,14 @@ export function useInboxCounts() {
 }
 
 // Briefing
-export function useBriefing(subjectType: string, subjectId: string, params?: { format?: string; since?: string; context_types?: string; include_stale?: boolean }) {
+export function useBriefing(subjectType: string, subjectId: string, params?: {
+  format?: string;
+  since?: string;
+  context_types?: string;
+  include_stale?: boolean;
+  context_radius?: 'direct' | 'adjacent' | 'account_wide';
+  token_budget?: number;
+}) {
   const searchParams = new URLSearchParams();
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
@@ -1283,4 +1290,3 @@ export function useDeleteMessagingChannel(id: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['messaging-channels'] }),
   });
 }
-
