@@ -4,13 +4,14 @@ Durable customer context for AI agents.
 
 CRMy is a local-first operational state layer that gives agents typed revenue objects, persistent context, scoped tools, and retry-safe writes through MCP, REST, and CLI.
 
-Instead of rebuilding customer state from raw CRM queries, notes, emails, and prior tool calls every run, agents call `briefing_get`, act through structured tools, and leave behind auditable, versioned state.
+Instead of rebuilding customer state from raw CRM queries, notes, emails, and prior tool calls every run, agents call `briefing_get`, act through structured tools, escalate to humans when judgment is needed, and leave behind auditable, versioned state.
 
 Use CRMy when your agent needs to:
 
 - remember customers across runs
 - reason over current and historical customer state
 - update revenue objects safely
+- pause for human approval or handoff without losing context
 - avoid duplicate, stale, or contradictory memory
 - recover from retries, failed jobs, and partial workflows
 
@@ -26,6 +27,7 @@ Your agent takes an action — sends an email, advances a deal, books a follow-u
 - What happened last week? Last quarter?
 - What did prior agent turns learn about this account?
 - Are there open assignments on this contact right now?
+- Is there a human approval, review, or handoff blocking progress?
 - What context is stale and might be wrong?
 
 Assembling that from raw queries is 5-10 API calls, schema knowledge, and brittle glue code. CRMy's `briefing_get` returns it in one shot, then mutating tools update the underlying state with idempotency, optimistic concurrency, audit events, and scoped access.
@@ -153,7 +155,7 @@ Add to `.cursor/mcp.json` or equivalent:
 }
 ```
 
-Once connected, your agent has access to 160+ scoped MCP tools. Local stdio MCP uses the `.crmy.json` written by `init`; remote HTTP MCP uses scoped API keys.
+Once connected, your agent has access to scoped MCP tools for briefings, context, revenue objects, assignments, HITL approvals, workflows, messaging, and operations. Local stdio MCP uses the `.crmy.json` written by `init`; remote HTTP MCP uses scoped API keys.
 
 ---
 
@@ -211,6 +213,12 @@ Works on contacts, companies, opportunities, and use cases.
    → logged to audit trail; context entry written
 ```
 
+### Human-in-the-loop handoffs
+
+CRMy gives agents a durable escalation path when automation should stop and a human should step in.
+
+Agents can create assignments, submit HITL approval requests, capture handoff snapshots, route work to humans or specialist agents, and later resume from the same customer context. That matters for enterprise workflows where approvals, exception handling, and auditability are part of the product experience rather than afterthoughts.
+
 ---
 
 ## Context Engine
@@ -221,7 +229,7 @@ Four primitives that form the agent's shared workspace:
 |-----------|-------------|
 | **Actors** | First-class identity for humans and AI agents. Every action is attributed to an actor. Agents self-register — no admin setup. Query `actor_expertise` to route reviews to the person who knows most about a company. |
 | **Activities** | Everything that happened — calls, emails, meetings. Structured `detail` payloads, polymorphic subjects, retroactive `occurred_at` timestamps, and auto-extraction into context entries. Bulk-ingest raw documents with `context_ingest`. |
-| **Assignments** | Structured handoffs. Agents create assignments for humans; humans create assignments for agents. Stateful lifecycle: `pending → accepted → in_progress → completed`. Stale context entries automatically generate review assignments. |
+| **Assignments** | Structured handoffs. Agents create assignments for humans; humans create assignments for agents. Stateful lifecycle: `pending → accepted → in_progress → completed`. Stale context entries automatically generate review assignments, and handoff snapshots preserve context for the next actor. |
 | **Context Entries** | The memory layer. Typed, tagged, versioned knowledge attached to any CRM object. Priority weights and confidence half-life decay ensure the most important, fresh context surfaces first. `context_radius` expands briefings to adjacent entities. Token-budget-aware packing fits context into any LLM context window. |
 
 ### Semantic search (optional, v0.6+)
@@ -254,7 +262,7 @@ context_semantic_search query="deals at risk due to competitor pressure"
 
 ---
 
-## MCP Tools (160+)
+## MCP Tools
 
 | Category | Tools |
 |---|---|
@@ -300,6 +308,7 @@ Authentication
   crmy auth login                        Sign in (stores JWT)
   crmy auth status                       Show auth state + token expiry
   crmy auth logout                       Clear stored credentials
+  crmy reset-password --email <email>    Reset a local user's password in PostgreSQL
 
 Contacts
   crmy contacts list [--q <query>]       List contacts
@@ -742,7 +751,7 @@ The entity memory graph (`/contacts/:id/graph`, `/companies/:id/graph`) is now a
 - **Node.js version gate** — clear error on Node < 20 instead of cryptic ESM failures
 
 ### MCP tools
-- **160+ tools** with rewritten descriptions optimized for LLM tool selection
+- **Scoped MCP tool surface** with rewritten descriptions optimized for LLM tool selection
 - **Tool ordering** — briefing and context tools first in manifest, signaling priority to agents
 - **Semantic search** — `context_semantic_search` and `context_embed_backfill` (pgvector)
 - **Multi-channel messaging** — `message_channel_create`, `message_send`, `message_delivery_get` with Slack built-in, extensible via plugins

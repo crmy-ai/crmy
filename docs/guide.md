@@ -126,6 +126,23 @@ environment:
 
 If the server starts with no users and none of the above methods has been used, it will print a prominent warning in the logs with setup instructions.
 
+#### Reset a local admin password
+
+For local installs, reset any user's password directly in PostgreSQL with the CLI:
+
+```bash
+npx @crmy/cli reset-password --email admin@yourcompany.com
+```
+
+The command uses the database URL from `.crmy.json` or `DATABASE_URL`, prompts for a new password, and updates every matching user record. Passwords must be at least 12 characters.
+
+If `.crmy.json` is missing, set the database URL first:
+
+```bash
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crmy
+npx @crmy/cli reset-password --email admin@yourcompany.com
+```
+
 ### Develop from source
 
 ```bash
@@ -203,6 +220,21 @@ crmy auth logout
 ```
 
 Credentials are stored in `~/.crmy/auth.json` (file permissions `0600`). The JWT token has a 1-hour expiration — run `crmy login` again when it expires.
+
+#### Password recovery for local installs
+
+If you lose the local admin password, reset it directly against the configured PostgreSQL database:
+
+```bash
+npx @crmy/cli reset-password --email admin@yourcompany.com
+```
+
+Use `DATABASE_URL` if the CLI has not been initialized in the current project:
+
+```bash
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crmy \
+  npx @crmy/cli reset-password --email admin@yourcompany.com
+```
 
 #### Headless / CI mode
 
@@ -2459,7 +2491,7 @@ Content-Type: application/json
 
 Uses the MCP Streamable HTTP transport. Each request creates a new session.
 
-### Full tool list (175+)
+### Full tool list
 
 | Category | Tools |
 |---|---|

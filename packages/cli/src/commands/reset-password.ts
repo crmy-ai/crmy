@@ -51,13 +51,15 @@ export function resetPasswordCommand(): Command {
             validate: (v: string) =>
               v.length >= 12 ? true : 'Password must be at least 12 characters',
           },
+        ]);
+        await inquirer.prompt([
           {
             type: 'password',
             name: 'confirm',
             message: 'Confirm new password:',
             mask: '*',
-            validate: (v: string, a?: { password?: string }) =>
-              v === a?.password ? true : 'Passwords do not match',
+            validate: (v: string) =>
+              v === answer.password ? true : 'Passwords do not match',
           },
         ]);
         newPassword = answer.password;

@@ -318,13 +318,15 @@ export function initCommand(): Command {
             mask: '*',
             validate: validatePassword,
           },
+        ]);
+        await inquirer.prompt([
           {
             type: 'password',
             name: 'confirmPassword',
             message: '  Confirm password:',
             mask: '*',
-            validate: (input: string, answers: Record<string, string> | undefined) =>
-              input === answers?.password ? true : 'Passwords do not match',
+            validate: (input: string) =>
+              input === answers.password ? true : 'Passwords do not match',
           },
         ]);
         name = answers.name;
