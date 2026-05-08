@@ -10,9 +10,11 @@ import { StageBadge, CustomFieldsSection, DealHealthBadge } from './CrmWidgets';
 import { Sparkles, TrendingUp, Calendar, User, Pencil, ChevronLeft, Trash2, FileText, Building2 } from 'lucide-react';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
+import { ObjectActionBar } from './ObjectActionBar';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EntityCombobox } from '@/components/ui/entity-combobox';
+import { assertReferenceExists } from '@/lib/referenceValidation';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -28,7 +30,7 @@ function OpportunityEditForm({
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   opportunity: any;
-  onSave: (data: Record<string, unknown>) => void;
+  onSave: (data: Record<string, unknown>) => void | Promise<void>;
   onCancel: () => void;
   onDelete: () => void;
   isSaving: boolean;
@@ -68,7 +70,14 @@ function OpportunityEditForm({
   const set = (key: string, val: string) => setFields(prev => ({ ...prev, [key]: val }));
   const setCF = (key: string, val: string) => setCustomFieldValues(prev => ({ ...prev, [key]: val }));
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    try {
+      if (fields.account_id) await assertReferenceExists('account', fields.account_id, 'account');
+      if (fields.contact_id) await assertReferenceExists('contact', fields.contact_id, 'contact');
+    } catch (err) {
+      toast({ title: 'Check relationship links', description: err instanceof Error ? err.message : 'Choose another linked record.', variant: 'destructive' });
+      return;
+    }
     const payload: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(fields)) {
       if (k === 'account_id' || k === 'contact_id') {
@@ -375,6 +384,11 @@ export function OpportunityDrawer() {
           )}
         </div>
       </div>
+
+      <ObjectActionBar
+        context={{ type: 'opportunity', id: opportunity.id, name, detail: `$${(amount / 1000).toFixed(0)}K` }}
+        onBrief={() => setBriefing(true)}
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 p-4 mx-4 mt-4">

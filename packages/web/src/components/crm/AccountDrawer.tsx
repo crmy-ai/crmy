@@ -11,6 +11,7 @@ import { Sparkles, Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2 
 import { DrawerTabBar, type DrawerView } from './DrawerTabBar';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
+import { ObjectActionBar } from './ObjectActionBar';
 import { CustomFieldsSection } from './CrmWidgets';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -324,6 +325,10 @@ export function AccountDrawer() {
       </div>
 
       <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} />
+      <ObjectActionBar
+        context={{ type: 'account', id: account.id, name, detail: industry }}
+        onBrief={() => setView('brief')}
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 p-4 mx-4 mt-4">

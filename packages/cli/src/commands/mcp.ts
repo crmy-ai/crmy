@@ -4,6 +4,7 @@
 import { Command } from 'commander';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadConfigFile } from '../config.js';
+import type { ActorContext } from '@crmy/shared';
 
 export function mcpCommand(): Command {
   return new Command('mcp')
@@ -50,7 +51,7 @@ export function mcpCommand(): Command {
       }
 
       // Resolve actor from API key
-      let actor = {
+      let actor: ActorContext = {
         tenant_id:  '',
         actor_id:   'cli-agent',
         actor_type: 'agent' as const,
@@ -73,6 +74,7 @@ export function mcpCommand(): Command {
             actor_id:   row.user_id ?? 'api-key-agent',
             actor_type: 'agent',
             role:       row.role ?? 'member',
+            scopes:     row.scopes ?? undefined,
           };
         }
       }
@@ -95,7 +97,7 @@ export function mcpCommand(): Command {
         process.exit(1);
       }
 
-      const server    = createMcpServer(db, () => actor);
+      const server    = createMcpServer(db, actor, () => actor);
       const transport = new StdioServerTransport();
       await server.connect(transport);
     });

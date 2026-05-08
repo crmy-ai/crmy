@@ -268,7 +268,7 @@ function EmailProviderSection() {
         </div>
         <div>
           <h3 className="text-sm font-semibold text-foreground">Email Provider</h3>
-          <p className="text-xs text-muted-foreground">Configure outbound email delivery for CRM emails and sequences.</p>
+          <p className="text-xs text-muted-foreground">Configure outbound email delivery for agent-drafted emails and sequences.</p>
         </div>
         <div className="ml-auto">
           {configured ? (
@@ -758,7 +758,7 @@ export default function MessagingSettings() {
     <div className="space-y-8 max-w-3xl">
       <div>
         <h2 className="font-display font-bold text-lg text-foreground mb-1">Messaging</h2>
-        <p className="text-sm text-muted-foreground">Configure email delivery and notification channels for your CRM.</p>
+        <p className="text-sm text-muted-foreground">Configure email delivery and notification channels for your customer context workspace.</p>
       </div>
 
       <EmailProviderSection />

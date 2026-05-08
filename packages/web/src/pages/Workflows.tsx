@@ -1,10 +1,11 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TopBar } from '@/components/layout/TopBar';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { PaginationBar } from '@/components/crm/PaginationBar';
 import {
   useWorkflows, useDeleteWorkflow, useUpdateWorkflowById,
   useManualTriggerWorkflow, useWorkflowRuns, useTestWorkflow,
@@ -19,6 +20,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
 import { ACTION_TYPES } from '@/lib/workflowConstants';
+import { STATUS_TONES } from '@/lib/entityColors';
+import { headerDescription } from '@/lib/headerCopy';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -41,11 +44,11 @@ const SORT_OPTIONS: SortOption[] = [
 ];
 
 const RUN_STATUS: Record<string, { label: string; cls: string; Icon: typeof CheckCircle2 }> = {
-  completed: { label: 'Completed', cls: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20', Icon: CheckCircle2 },
-  failed:    { label: 'Failed',    cls: 'text-destructive bg-destructive/10 border-destructive/20', Icon: XCircle },
-  running:   { label: 'Running',   cls: 'text-blue-500 bg-blue-500/10 border-blue-500/20',         Icon: Loader2 },
-  pending:   { label: 'Pending',   cls: 'text-amber-500 bg-amber-500/10 border-amber-500/20',      Icon: Clock },
-  skipped:   { label: 'Skipped',   cls: 'text-muted-foreground bg-muted border-border',            Icon: ArrowRight },
+  completed: { label: 'Completed', cls: STATUS_TONES.success,     Icon: CheckCircle2 },
+  failed:    { label: 'Failed',    cls: STATUS_TONES.destructive, Icon: XCircle },
+  running:   { label: 'Running',   cls: STATUS_TONES.info,        Icon: Loader2 },
+  pending:   { label: 'Pending',   cls: STATUS_TONES.warning,     Icon: Clock },
+  skipped:   { label: 'Skipped',   cls: STATUS_TONES.muted,       Icon: ArrowRight },
 };
 
 // ── Action read view ───────────────────────────────────────────────────────────
@@ -549,6 +552,8 @@ export default function WorkflowsPage({ embedded }: { embedded?: boolean } = {})
   const [search,        setSearch]        = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [sort,          setSort]          = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  const [page,          setPage]          = useState(1);
+  const [pageSize,      setPageSize]      = useState(25);
 
   const { data, isLoading } = useWorkflows() as any;
   const workflows: any[] = (data as any)?.data ?? [];
@@ -598,7 +603,10 @@ export default function WorkflowsPage({ embedded }: { embedded?: boolean } = {})
     }
 
     return items;
-  }, [workflows, search, activeFilters, sort]);
+	  }, [workflows, search, activeFilters, sort]);
+
+  useEffect(() => { setPage(1); }, [search, activeFilters, sort]);
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <div className={embedded ? 'flex-1 min-h-0 flex flex-col' : 'flex flex-col h-full'}>
@@ -607,10 +615,7 @@ export default function WorkflowsPage({ embedded }: { embedded?: boolean } = {})
           title="Triggers"
           icon={Zap}
           iconClassName="text-amber-500"
-          description="Event-driven automations that trigger on CRM events and execute a chain of actions."
-          badge={workflows.length > 0 ? (
-            <span className="text-xs text-muted-foreground">{workflows.length} total</span>
-          ) : undefined}
+          description={headerDescription('Run actions when events happen', filtered.length, 'trigger')}
         />
       )}
 
@@ -648,7 +653,7 @@ export default function WorkflowsPage({ embedded }: { embedded?: boolean } = {})
             </div>
             <h2 className="text-lg font-display font-semibold text-foreground mb-1">No triggers yet</h2>
             <p className="text-sm text-muted-foreground max-w-sm mb-4">
-              Create your first trigger to automate CRM actions when events occur.
+              Create your first trigger to automate customer-context actions when events occur.
             </p>
             <button
               onClick={() => openWorkflowEditor(null)}
@@ -666,13 +671,16 @@ export default function WorkflowsPage({ embedded }: { embedded?: boolean } = {})
             <Zap className="w-8 h-8 mb-2 text-muted-foreground/30" />
             <p className="text-sm text-muted-foreground">No triggers match your search</p>
           </motion.div>
-        ) : (
-          <div className="space-y-3">
-            {filtered.map((wf: any) => (
-              <TriggerRow key={wf.id} wf={wf} />
-            ))}
-          </div>
-        )}
+	        ) : (
+	          <>
+	            <div className="space-y-3">
+	              {paginated.map((wf: any) => (
+	                <TriggerRow key={wf.id} wf={wf} />
+	              ))}
+	            </div>
+	            <PaginationBar page={page} pageSize={pageSize} total={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
+	          </>
+	        )}
       </div>
     </div>
   );

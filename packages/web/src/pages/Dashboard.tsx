@@ -7,7 +7,9 @@ import { ContextBrowser } from '@/components/crm/ContextBrowser';
 import { GraphTab } from './GraphExplorerPage';
 import { TopBar } from '@/components/layout/TopBar';
 import { ActivityFeed } from '@/components/crm/CrmWidgets';
-import { useHITLRequests, useResolveHITL, useContextEntries, useActors } from '@/api/hooks';
+import { SeedSampleDataButton } from '@/components/crm/OnboardingEmptyState';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
+import { useHITLRequests, useResolveHITL, useContextEntries, useActors, useDbConfig } from '@/api/hooks';
 import { motion } from 'framer-motion';
 import {
   ShieldCheck,
@@ -22,10 +24,27 @@ import {
   Layers,
   Brain,
   Network,
+  Database,
+  Sparkles,
+  ArrowUpRight,
+  X,
+  RotateCcw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+
+const ACTIVATION_SKIPPED_STORAGE_KEY = 'crmy-activation-skipped-steps';
+
+function readSkippedActivationSteps(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(ACTIVATION_SKIPPED_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, boolean> : {};
+  } catch {
+    return {};
+  }
+}
 
 function timeAgo(date: string) {
   const diff = Date.now() - new Date(date).getTime();
@@ -35,6 +54,82 @@ function timeAgo(date: string) {
   const hours = Math.floor(mins / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+function SetupStep({
+  icon: Icon,
+  title,
+  detail,
+  status,
+  href,
+  skipped,
+  onSkipToggle,
+}: {
+  icon: React.ElementType;
+  title: string;
+  detail: string;
+  status: 'ready' | 'action' | 'watch';
+  href: string;
+  skipped: boolean;
+  onSkipToggle: () => void;
+}) {
+  const isReady = status === 'ready';
+  const effectiveSkipped = skipped && !isReady;
+  const color = effectiveSkipped
+    ? 'text-muted-foreground bg-muted border-border'
+    : status === 'ready'
+    ? 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20'
+    : status === 'watch'
+      ? 'text-amber-600 dark:text-amber-400 bg-amber-500/10 border-amber-500/20'
+      : 'text-primary bg-primary/10 border-primary/20';
+  const isComplete = isReady || effectiveSkipped;
+
+  return (
+    <div className={`group flex items-start gap-3 rounded-xl border bg-card p-3 transition-all ${
+      effectiveSkipped ? 'border-border/70 opacity-80' : 'border-border hover:border-primary/30 hover:shadow-sm'
+    }`}>
+      <Link to={href} className="flex min-w-0 flex-1 items-start gap-3">
+        <div className={`w-8 h-8 rounded-lg border flex items-center justify-center flex-shrink-0 ${color}`}>
+          <Icon className="w-4 h-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-foreground truncate">{title}</p>
+            {effectiveSkipped && (
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Skipped
+              </span>
+            )}
+            <ArrowUpRight className="w-3.5 h-3.5 text-muted-foreground/50 group-hover:text-primary transition-colors" />
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">{detail}</p>
+        </div>
+      </Link>
+      <div className="flex flex-shrink-0 items-start gap-2">
+        {!isReady && (
+          <button
+            type="button"
+            onClick={onSkipToggle}
+            className="mt-0.5 h-6 rounded-md px-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          >
+            {effectiveSkipped ? 'Undo' : 'Skip'}
+          </button>
+        )}
+        <div
+          className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-md border ${
+            isComplete
+              ? effectiveSkipped
+                ? 'border-muted-foreground/30 bg-muted text-muted-foreground'
+                : 'border-emerald-500/40 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+              : 'border-border bg-background text-transparent'
+          }`}
+          aria-label={isReady ? 'Complete' : effectiveSkipped ? 'Skipped' : 'Incomplete'}
+        >
+          {isComplete && (effectiveSkipped ? <X className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />)}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function StatCard({
@@ -84,6 +179,8 @@ export default function Dashboard() {
   const activeTab = searchParams.get('tab') ?? 'overview';
   const [activityWindow, setActivityWindow] = useState<'today' | 'week'>('today');
   const [notes, setNotes] = useState<Record<string, string>>({});
+  const [activationDismissed, setActivationDismissed] = useState(() => localStorage.getItem('crmy-activation-dismissed') === 'true');
+  const [skippedActivationSteps, setSkippedActivationSteps] = useState<Record<string, boolean>>(readSkippedActivationSteps);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: hitlData } = useHITLRequests() as any;
@@ -94,6 +191,8 @@ export default function Dashboard() {
   const { data: staleData } = useContextEntries({ is_current: false, limit: 200 }) as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: actorsData } = useActors({ limit: 200 }) as any;
+  const { data: dbInfo } = useDbConfig() as any;
+  const { enabled: agentEnabled } = useAgentSettings();
 
   const hitlRequests: any[] = hitlData?.data ?? [];
   const pendingHITL = hitlRequests.filter((r: any) => r.status === 'pending');
@@ -102,14 +201,50 @@ export default function Dashboard() {
   const actors: any[] = actorsData?.data ?? [];
   const activeActors = actors.filter((a: any) => a.is_active);
   const agents = actors.filter((a: any) => a.actor_type === 'agent');
+  const dbConnected = Boolean(dbInfo?.database || dbInfo?.host);
+  const sampleSeeded = Boolean(dbInfo?.sample_data?.seeded);
+  const pgvectorEnabled = Boolean(dbInfo?.pgvector_enabled);
+  const handoffReady = pendingHITL.length === 0;
+  const activationSteps = [
+    { id: 'database', complete: dbConnected },
+    { id: 'sample-data', complete: sampleSeeded },
+    { id: 'pgvector', complete: pgvectorEnabled },
+    { id: 'workspace-agent', complete: agentEnabled },
+    { id: 'context-memory', complete: contextTotal > 0 },
+    { id: 'handoffs', complete: handoffReady },
+  ];
+  const activationTotal = activationSteps.length;
+  const activationComplete = activationSteps.filter(step => step.complete || skippedActivationSteps[step.id]).length;
+  const activationIsComplete = activationComplete === activationTotal;
+  const showActivation = !activationDismissed || !activationIsComplete;
+
+  const hideActivation = () => {
+    localStorage.setItem('crmy-activation-dismissed', 'true');
+    setActivationDismissed(true);
+  };
+
+  const restoreActivation = () => {
+    localStorage.removeItem('crmy-activation-dismissed');
+    setActivationDismissed(false);
+  };
+
+  const toggleActivationSkip = (stepId: string) => {
+    setSkippedActivationSteps(prev => {
+      const next = { ...prev };
+      if (next[stepId]) delete next[stepId];
+      else next[stepId] = true;
+      localStorage.setItem(ACTIVATION_SKIPPED_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
 
   return (
     <div className="flex flex-col h-full">
       <TopBar
-        title="Context"
+        title="Overview"
         icon={Brain}
         iconClassName="text-primary"
-        description="Agent memory — context entries, handoffs, and active agents at a glance."
+        description="Operational state, customer context, scoped agents, handoffs, and reliability at a glance."
       />
 
       {/* Tab bar */}
@@ -120,7 +255,7 @@ export default function Dashboard() {
             activeTab === 'overview' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
-          <Brain className="w-3.5 h-3.5" /> Overview
+          <Brain className="w-3.5 h-3.5" /> Status
         </button>
         <button
           onClick={() => setSearchParams({ tab: 'knowledge' })}
@@ -136,7 +271,7 @@ export default function Dashboard() {
             activeTab === 'graph' ? 'border-[#0ea5e9] text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
           }`}
         >
-          <Network className="w-3.5 h-3.5" /> Graph
+          <Network className="w-3.5 h-3.5" /> Memory Graph
         </button>
       </div>
 
@@ -146,6 +281,112 @@ export default function Dashboard() {
         <GraphTab />
       ) : (
       <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
+        {!showActivation && activationIsComplete && (
+          <div className="mb-3 flex justify-end">
+            <button
+              type="button"
+              onClick={restoreActivation}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Show setup
+            </button>
+          </div>
+        )}
+
+        {/* Activation checklist */}
+        {showActivation && (
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 }}>
+            <div className="mb-4 md:mb-6 rounded-2xl border border-border bg-surface p-4 md:p-5 shadow-sm">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+                <div>
+                  <h2 className="font-display font-bold text-foreground flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-primary" />
+                    Activate CRMy
+                  </h2>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Follow the path from stored state to agent action, or skip anything that does not apply to this workspace.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                    activationIsComplete
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {activationIsComplete && <CheckCircle2 className="w-3.5 h-3.5" />}
+                    {activationComplete}/{activationTotal} ready
+                  </span>
+                  {!sampleSeeded && <SeedSampleDataButton />}
+                  {activationIsComplete && (
+                    <button
+                      onClick={hideActivation}
+                      className="h-9 px-3 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    >
+                      Hide setup
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                <SetupStep
+                  icon={Database}
+                  title={dbConnected ? 'Database connected' : 'Connect database'}
+                  detail={dbConnected ? 'Operational state is available.' : 'Choose local Postgres, Neon, Supabase, Lakebase, or RDS.'}
+                  status={dbConnected ? 'ready' : 'action'}
+                  href="/settings/database"
+                  skipped={Boolean(skippedActivationSteps.database)}
+                  onSkipToggle={() => toggleActivationSkip('database')}
+                />
+                <SetupStep
+                  icon={Layers}
+                  title={sampleSeeded ? 'Sample data loaded' : 'Load sample data'}
+                  detail={sampleSeeded ? 'Demo records are available for evaluation.' : 'Seed demo objects to try briefings and context search quickly.'}
+                  status={sampleSeeded ? 'ready' : 'action'}
+                  href="/settings/database"
+                  skipped={Boolean(skippedActivationSteps['sample-data'])}
+                  onSkipToggle={() => toggleActivationSkip('sample-data')}
+                />
+                <SetupStep
+                  icon={Brain}
+                  title={pgvectorEnabled ? 'Semantic context ready' : 'Enable pgvector'}
+                  detail={pgvectorEnabled ? 'Vector search can retrieve related customer context.' : 'Keyword search still works; pgvector unlocks semantic retrieval.'}
+                  status={pgvectorEnabled ? 'ready' : 'watch'}
+                  href="/settings/database"
+                  skipped={Boolean(skippedActivationSteps.pgvector)}
+                  onSkipToggle={() => toggleActivationSkip('pgvector')}
+                />
+                <SetupStep
+                  icon={Bot}
+                  title={agentEnabled ? 'Workspace Agent enabled' : 'Configure Workspace Agent'}
+                  detail={agentEnabled ? 'The app can reason over local customer context.' : 'Use a local or hosted model for private workspace reasoning.'}
+                  status={agentEnabled ? 'ready' : 'action'}
+                  href="/settings/model"
+                  skipped={Boolean(skippedActivationSteps['workspace-agent'])}
+                  onSkipToggle={() => toggleActivationSkip('workspace-agent')}
+                />
+                <SetupStep
+                  icon={Library}
+                  title={contextTotal > 0 ? 'Context memory exists' : 'Add first context'}
+                  detail={contextTotal > 0 ? `${contextTotal} context entries available.` : 'Paste notes or add a manual memory for a customer object.'}
+                  status={contextTotal > 0 ? 'ready' : 'action'}
+                  href="/context"
+                  skipped={Boolean(skippedActivationSteps['context-memory'])}
+                  onSkipToggle={() => toggleActivationSkip('context-memory')}
+                />
+                <SetupStep
+                  icon={ShieldCheck}
+                  title="Handoff loop ready"
+                  detail={pendingHITL.length > 0 ? `${pendingHITL.length} decisions need review.` : 'Agent escalations and human approvals appear here.'}
+                  status={pendingHITL.length > 0 ? 'watch' : 'ready'}
+                  href="/handoffs"
+                  skipped={Boolean(skippedActivationSteps.handoffs)}
+                  onSkipToggle={() => toggleActivationSkip('handoffs')}
+                />
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* Stat row */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-4 md:mb-6">
@@ -164,7 +405,7 @@ export default function Dashboard() {
             value={contextTotal}
             sub={staleCount > 0 ? `${staleCount} stale` : 'all current'}
             color="bg-[#0ea5e9]/15 text-[#0ea5e9]"
-            href="/?tab=knowledge"
+            href="/context"
             delay={0.07}
           />
           <StatCard
@@ -173,7 +414,7 @@ export default function Dashboard() {
             value={activeActors.length}
             sub={actors.length > 0 ? `of ${actors.length} registered` : 'none registered'}
             color="bg-[#6366f1]/15 text-[#6366f1]"
-            href="/agents"
+            href="/settings/agents"
             delay={0.1}
           />
         </div>
@@ -294,7 +535,7 @@ export default function Dashboard() {
                     <Bot className="w-4 h-4 text-[#6366f1]" />
                     Agents
                   </h3>
-                  <Link to="/agents" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  <Link to="/settings/agents" className="text-xs text-primary hover:underline flex items-center gap-1">
                     Manage <ArrowRight className="w-3 h-3" />
                   </Link>
                 </div>
@@ -302,7 +543,7 @@ export default function Dashboard() {
                   <div className="text-center py-6">
                     <Bot className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
                     <p className="text-xs text-muted-foreground">No agents registered yet.</p>
-                    <Link to="/agents" className="text-xs text-primary hover:underline mt-1 inline-block">
+                    <Link to="/settings/agents" className="text-xs text-primary hover:underline mt-1 inline-block">
                       Register your first agent
                     </Link>
                   </div>
@@ -323,7 +564,7 @@ export default function Dashboard() {
                       </div>
                     ))}
                     {agents.length > 5 && (
-                      <Link to="/agents" className="text-xs text-muted-foreground hover:text-primary block text-center pt-1">
+                      <Link to="/settings/agents" className="text-xs text-muted-foreground hover:text-primary block text-center pt-1">
                         +{agents.length - 5} more
                       </Link>
                     )}
@@ -340,7 +581,7 @@ export default function Dashboard() {
                     <Library className="w-4 h-4 text-[#0ea5e9]" />
                     Context health
                   </h3>
-                  <Link to="/?tab=knowledge" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  <Link to="/context" className="text-xs text-primary hover:underline flex items-center gap-1">
                     Browse <ArrowRight className="w-3 h-3" />
                   </Link>
                 </div>
@@ -360,7 +601,7 @@ export default function Dashboard() {
                   </div>
                   {staleCount > 0 && (
                     <Link
-                      to="/?tab=knowledge&stale=true"
+                      to="/context"
                       className="flex items-center gap-1 text-xs text-destructive hover:underline"
                     >
                       <AlertCircle className="w-3 h-3" />

@@ -47,7 +47,7 @@ function estimateCostPerTurn(maxTokens: number, inputPricePerM: number, outputPr
   return `~$${cost.toFixed(3)} / turn`;
 }
 
-const defaultSystemPrompt = `You are a CRMy workspace assistant with direct API access to the CRM.
+const defaultSystemPrompt = `You are a CRMy workspace assistant with direct API access to typed revenue objects, customer context, and scoped operational tools.
 
 CORE RULES:
 1. Use your tools to complete every task directly — never tell the user to use the UI instead.
@@ -329,7 +329,7 @@ export default function AgentSettings() {
     <div className="space-y-5 max-w-2xl">
       <div>
         <h2 className="font-display font-bold text-lg text-foreground mb-1">Model Settings</h2>
-        <p className="text-sm text-muted-foreground">Configure the AI model and workspace agent for your team.</p>
+        <p className="text-sm text-muted-foreground">Configure the model that powers in-app reasoning over your operational state layer.</p>
       </div>
 
       {/* ── SECTION 1: Enable ────────────────────────────────────────────── */}
@@ -341,7 +341,7 @@ export default function AgentSettings() {
             </div>
             <div>
               <h3 className="text-sm font-semibold text-foreground">Enable Local Workspace Agent</h3>
-              <p className="text-xs text-muted-foreground">Toggle AI features on or off for this workspace</p>
+              <p className="text-xs text-muted-foreground">Let the app reason over local CRMy state with your chosen model</p>
             </div>
           </div>
           <div className="flex flex-col items-end gap-1">
@@ -360,7 +360,7 @@ export default function AgentSettings() {
         </div>
 
         <div className="px-5 py-4 text-sm text-muted-foreground leading-relaxed">
-          The Local Workspace Agent connects your CRM to an LLM of your choice — running on your own infrastructure or a provider you control. Once enabled, team members can chat with the agent to search records, log activities, update opportunities, and run bulk actions without leaving the workspace. The agent only has access to data within your tenant and operates under the permission scopes you configure below.
+          The Local Workspace Agent gives the web app a model-backed operator that can read typed revenue objects, assemble persistent customer context, log activities, draft handoffs, and update state through the same scoped tools your external agents use. Use a local or self-hosted model when customer context cannot leave your environment, when you want offline/dev parity, or when you need predictable cost and data residency. Provider-hosted models are also supported; either way, access stays tenant-scoped and follows the permissions below.
         </div>
       </div>
 
@@ -419,7 +419,7 @@ export default function AgentSettings() {
                   <>
                     <p className="text-xs font-medium text-blue-700 dark:text-blue-400">Ollama — local model</p>
                     <p className="text-xs text-blue-700/80 dark:text-blue-400/80">
-                      Tool calling works with models that support function calling (e.g. <code className="font-mono">llama3.2</code>, <code className="font-mono">mistral-nemo</code>). Models without tool support will still chat but cannot take CRM actions. Extended reasoning is not available.
+                      Tool calling works with models that support function calling (e.g. <code className="font-mono">llama3.2</code>, <code className="font-mono">mistral-nemo</code>). Models without tool support will still chat but cannot take CRMy actions. Extended reasoning is not available.
                     </p>
                   </>
                 ) : (
@@ -770,8 +770,8 @@ export default function AgentSettings() {
           <div className="py-3 space-y-2">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-foreground">Allow agent to write CRM objects</p>
-                <p className="text-xs text-muted-foreground">Agent can create and edit contacts, accounts, and opportunities</p>
+                <p className="text-sm font-medium text-foreground">Allow agent to write revenue objects</p>
+                <p className="text-xs text-muted-foreground">Agent can create and edit contacts, companies, opportunities, and related state</p>
               </div>
               <Switch
                 checked={canWriteObjects}
@@ -784,14 +784,14 @@ export default function AgentSettings() {
                     toast({ title: 'Failed to save', variant: 'destructive' });
                   }
                 }}
-                aria-label="Allow agent to write CRM objects"
+                aria-label="Allow agent to write revenue objects"
               />
             </div>
             {canWriteObjects && (
               <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
                 <TriangleAlert className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
                 <p className="text-xs text-amber-700 dark:text-amber-400">
-                  Granting write access means the agent can modify CRM records autonomously. Review agent actions regularly.
+                  Granting write access means the agent can modify operational records autonomously. Review agent actions regularly.
                 </p>
               </div>
             )}

@@ -341,6 +341,8 @@ export const hitlSubmit = z.object({
     .describe('Minutes before SLA breach triggers escalation. Default: 1440 (24h)'),
   escalate_to_id: z.string().uuid().optional()
     .describe('Actor ID to escalate to if SLA breaches. Defaults to most senior active human.'),
+  handoff_snapshot_id: uuid.optional()
+    .describe('Agent handoff snapshot ID captured with agent_capture_handoff before submitting this review.'),
   idempotency_key: idempotencyKey,
 });
 
@@ -1246,10 +1248,14 @@ export const assignmentUpdate = z.object({
   patch: z.object({
     title: z.string().min(1).optional(),
     description: z.string().nullable().optional(),
+    assignment_type: z.string().min(1).optional(),
+    assigned_to: uuid.optional(),
     priority: assignmentPriority.optional(),
     due_at: z.string().nullable().optional(),
     status: assignmentStatus.optional(),
     context: z.string().nullable().optional(),
+    subject_type: subjectType.nullable().optional(),
+    subject_id: uuid.nullable().optional(),
     metadata: z.record(z.unknown()).optional(),
   }),
 });

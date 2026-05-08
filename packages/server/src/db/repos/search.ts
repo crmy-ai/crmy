@@ -16,6 +16,7 @@ export async function crmSearch(
   activities: Record<string, unknown>[];
   useCases: Record<string, unknown>[];
   assignments: Record<string, unknown>[];
+  contextEntries: Record<string, unknown>[];
 }> {
   // ── Unified index path ────────────────────────────────────────────────────
   // Query the search_index table using PostgreSQL full-text search.
@@ -41,6 +42,7 @@ export async function crmSearch(
       const activities: Record<string, unknown>[] = [];
       const useCases: Record<string, unknown>[] = [];
       const assignments: Record<string, unknown>[] = [];
+      const contextEntries: Record<string, unknown>[] = [];
 
       for (const row of indexResult.rows as { entity_type: string; entity_id: string; metadata: Record<string, unknown> }[]) {
         const entity = { ...row.metadata, id: row.entity_id };
@@ -50,28 +52,62 @@ export async function crmSearch(
           case 'opportunity': opportunities.push(entity as unknown as Opportunity); break;
           case 'activity':    activities.push(entity);                         break;
           case 'use_case':    useCases.push(entity);                           break;
+          case 'assignment':  assignments.push(entity);                         break;
+          case 'context_entry': contextEntries.push(entity);                    break;
         }
       }
 
+      const fallback = await legacyCrmSearch(db, tenantId, query, limit);
       return {
-        contacts:      contacts.slice(0, limit),
-        accounts:      accounts.slice(0, limit),
-        opportunities: opportunities.slice(0, limit),
-        activities:    activities.slice(0, limit),
-        useCases:      useCases.slice(0, limit),
-        assignments:   assignments.slice(0, limit),
+        contacts:      mergeById(contacts, fallback.contacts, limit),
+        accounts:      mergeById(accounts, fallback.accounts, limit),
+        opportunities: mergeById(opportunities, fallback.opportunities, limit),
+        activities:    mergeById(activities, fallback.activities, limit),
+        useCases:      mergeById(useCases, fallback.useCases, limit),
+        assignments:   mergeById(assignments, fallback.assignments, limit),
+        contextEntries: mergeById(contextEntries, fallback.contextEntries, limit),
       };
     }
   } catch {
     // Table not yet created (migration pending) — fall through to ILIKE.
   }
 
+  return legacyCrmSearch(db, tenantId, query, limit);
+}
+
+function mergeById<T extends { id?: unknown }>(primary: T[], fallback: T[], limit: number): T[] {
+  const seen = new Set<string>();
+  const merged: T[] = [];
+  for (const item of [...primary, ...fallback]) {
+    const id = item.id == null ? JSON.stringify(item) : String(item.id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    merged.push(item);
+    if (merged.length >= limit) break;
+  }
+  return merged;
+}
+
+async function legacyCrmSearch(
+  db: DbPool,
+  tenantId: UUID,
+  query: string,
+  limit: number,
+): Promise<{
+  contacts: Contact[];
+  accounts: Account[];
+  opportunities: Opportunity[];
+  activities: Record<string, unknown>[];
+  useCases: Record<string, unknown>[];
+  assignments: Record<string, unknown>[];
+  contextEntries: Record<string, unknown>[];
+}> {
   // ── Legacy fallback: parallel ILIKE scans ────────────────────────────────
   // Used during the migration window before search_index is populated, or when
   // a query returns zero results from the index (e.g. new tenant, no docs yet).
   const pattern = `%${query}%`;
 
-  const [contacts, accounts, opportunities, activities, useCases, assignments] = await Promise.all([
+  const [contacts, accounts, opportunities, activities, useCases, assignments, contextEntries] = await Promise.all([
     db.query(
       `SELECT * FROM contacts
        WHERE tenant_id = $1
@@ -116,6 +152,15 @@ export async function crmSearch(
        ORDER BY created_at DESC LIMIT $3`,
       [tenantId, pattern, limit],
     ),
+    db.query(
+      `SELECT * FROM context_entries
+       WHERE tenant_id = $1
+         AND is_current = true
+         AND (title ILIKE $2 OR body ILIKE $2 OR context_type ILIKE $2
+              OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(tags) _t WHERE _t ILIKE $2))
+       ORDER BY updated_at DESC LIMIT $3`,
+      [tenantId, pattern, limit],
+    ),
   ]);
 
   return {
@@ -125,6 +170,7 @@ export async function crmSearch(
     activities:    activities.rows,
     useCases:      useCases.rows,
     assignments:   assignments.rows,
+    contextEntries: contextEntries.rows,
   };
 }
 

@@ -4,14 +4,16 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
+import { OnboardingEmptyState } from '@/components/crm/OnboardingEmptyState';
 import { useAccounts } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { motion } from 'framer-motion';
-import { LayoutGrid, List, ChevronUp, ChevronDown, Sparkles, Globe, DollarSign, Heart, Building2, FileText, Plus } from 'lucide-react';
+import { LayoutGrid, List, ChevronUp, ChevronDown, Sparkles, Globe, DollarSign, Heart, Building2, FileText } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { headerDescription } from '@/lib/headerCopy';
 
 type ViewMode = 'table' | 'cards';
 
@@ -149,7 +151,7 @@ export default function Accounts() {
         title="Companies"
         icon={Building2}
         iconClassName="text-[#8b5cf6]"
-        description="Companies and organizations."
+        description={headerDescription('Manage companies and account context', filtered.length, 'company', 'companies')}
       >
         <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           <button onClick={() => setView('table')} className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
@@ -175,10 +177,22 @@ export default function Accounts() {
             {[...Array(5)].map((_, i) => <div key={i} className="h-14 bg-muted/50 rounded-xl animate-pulse" />)}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <p className="text-sm">No companies found.</p>
-            <button onClick={() => { setSearch(''); setActiveFilters({}); }} className="mt-2 text-xs text-primary font-semibold hover:underline">Clear all filters</button>
-          </div>
+          allAccounts.length === 0 && !search && Object.keys(activeFilters).length === 0 ? (
+            <OnboardingEmptyState
+              icon={Building2}
+              title="Add your first company"
+              description="Companies connect stakeholders, opportunities, activities, and context."
+              primary={{ label: 'New Company', onClick: () => openQuickAdd('account') }}
+            />
+          ) : (
+            <OnboardingEmptyState
+              icon={Building2}
+              title="No companies match"
+              description="Adjust the search or filters to find the company you need."
+              primary={{ label: 'Clear filters', onClick: () => { setSearch(''); setActiveFilters({}); } }}
+              showSampleData={false}
+            />
+          )
         ) : effectiveView === 'table' ? (
           <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">

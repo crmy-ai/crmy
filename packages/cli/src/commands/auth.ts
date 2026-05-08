@@ -73,10 +73,10 @@ export function authCommand(): Command {
 
       if (!email || !password) {
         const { default: inquirer } = await import('inquirer');
-        const answers = await inquirer.prompt([
-          ...(email ? [] : [{ type: 'input', name: 'email', message: 'Email:' }]),
-          ...(password ? [] : [{ type: 'password', name: 'password', message: 'Password:', mask: '*' }]),
-        ]);
+        const questions: Array<{ type: 'input' | 'password'; name: string; message: string; mask?: string }> = [];
+        if (!email) questions.push({ type: 'input', name: 'email', message: 'Email:' });
+        if (!password) questions.push({ type: 'password', name: 'password', message: 'Password:', mask: '*' });
+        const answers = await inquirer.prompt(questions);
         email = email ?? answers.email;
         password = password ?? answers.password;
       }

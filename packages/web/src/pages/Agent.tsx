@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { AgentStatusDot } from '@/components/crm/CrmWidgets';
 import { useAppStore, type AIContextEntity } from '@/store/appStore';
@@ -25,6 +26,8 @@ import {
   type DisplayMessage, type RenderItem, type ToolGroupItem, type ToolGroupStep,
 } from '@/lib/agentStream';
 import { AgentMarkdown } from '@/components/ui/agent-markdown';
+
+const agentDescription = 'Private workspace reasoning over typed revenue objects, customer context, and scoped CRMy tools.';
 
 const typeIcons: Record<string, typeof User> = {
   contact: User, opportunity: Briefcase, 'use-case': Layers, account: Building,
@@ -574,7 +577,7 @@ export default function Agent() {
   if (configLoading) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="Workspace Agent" icon={Bot} iconClassName="text-primary" description="AI-powered assistant with access to your full CRM context." />
+        <TopBar title="Workspace Agent" icon={Bot} iconClassName="text-primary" description={agentDescription} />
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/40" />
         </div>
@@ -586,15 +589,20 @@ export default function Agent() {
   if (!enabled) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="Workspace Agent" icon={Bot} iconClassName="text-primary" description="AI-powered assistant with access to your full CRM context." />
+        <TopBar title="Workspace Agent" icon={Bot} iconClassName="text-primary" description={agentDescription} />
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center max-w-md space-y-3">
             <Bot className="w-12 h-12 mx-auto text-muted-foreground/40" />
             <h2 className="text-lg font-display font-bold text-foreground">Workspace Agent is not enabled</h2>
             <p className="text-sm text-muted-foreground">
-              An administrator needs to enable the agent and configure an LLM provider in{' '}
-              <span className="text-foreground font-medium">Settings → Local Workspace Agent</span>.
+              Enable it in <span className="text-foreground font-medium">Settings → Model Settings</span> to let the app reason over local customer context, call scoped tools, and keep sensitive workspace state under your control.
             </p>
+            <Link
+              to="/settings/model"
+              className="inline-flex items-center justify-center h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+            >
+              Configure Workspace Agent
+            </Link>
           </div>
         </div>
       </div>
@@ -603,7 +611,7 @@ export default function Agent() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Workspace Agent" icon={Bot} iconClassName="text-primary" description="AI-powered assistant with access to your full CRM context." />
+      <TopBar title="Workspace Agent" icon={Bot} iconClassName="text-primary" description={agentDescription} />
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
 
         {/* ── Chat panel ── */}
@@ -708,7 +716,7 @@ export default function Agent() {
             {messages.length === 0 && (
               <div className="text-center py-12 text-muted-foreground">
                 <Bot className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                <p className="text-sm">Ask your workspace agent anything about your CRM.</p>
+                <p className="text-sm">Ask about customer context, revenue objects, handoffs, or safe next actions.</p>
               </div>
             )}
             {groupToolMessages(messages).map((item, i) => (

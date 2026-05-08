@@ -15,8 +15,10 @@ import { Phone, Mail, StickyNote, Sparkles, Pencil, ChevronLeft, Send, Pin, Tras
 import { DrawerTabBar, type DrawerView } from './DrawerTabBar';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
+import { ObjectActionBar } from './ObjectActionBar';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
+import { assertReferenceExists } from '@/lib/referenceValidation';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -32,7 +34,7 @@ function ContactEditForm({
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   contact: any;
-  onSave: (data: Record<string, unknown>) => void;
+  onSave: (data: Record<string, unknown>) => void | Promise<void>;
   onCancel: () => void;
   onDelete: () => void;
   isSaving: boolean;
@@ -74,7 +76,7 @@ function ContactEditForm({
   const set = (key: string, val: string) => setFields(prev => ({ ...prev, [key]: val }));
   const setCF = (key: string, val: string) => setCustomFieldValues(prev => ({ ...prev, [key]: val }));
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const payload: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(fields)) {
       if (k === 'account_id') continue; // handled separately below
@@ -82,6 +84,12 @@ function ContactEditForm({
     }
     // Always include account_id so it can be explicitly cleared (null) or set
     payload.account_id = fields.account_id || null;
+    try {
+      if (fields.account_id) await assertReferenceExists('account', fields.account_id, 'company');
+    } catch (err) {
+      toast({ title: 'Check company link', description: err instanceof Error ? err.message : 'Choose another company.', variant: 'destructive' });
+      return;
+    }
     const cfPayload: Record<string, unknown> = {};
     for (const def of fieldDefs) {
       const val = customFieldValues[def.field_key] ?? '';
@@ -372,6 +380,10 @@ export function ContactDrawer() {
       </div>
 
       <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} />
+      <ObjectActionBar
+        context={{ type: 'contact', id: contact.id, name, detail: company }}
+        onBrief={() => setView('brief')}
+      />
 
       {/* Note compose panel */}
       {noting && (

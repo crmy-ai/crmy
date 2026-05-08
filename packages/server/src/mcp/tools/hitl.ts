@@ -17,7 +17,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
     {
       name: 'hitl_submit_request',
       tier: 'core',
-      description: 'Submit a human-in-the-loop approval request before executing any high-stakes action that should not be taken autonomously: sending proposals, making commitments, escalating pricing, or contacting executives for the first time. Set auto_approve_after_seconds to enable time-boxed autonomy (e.g. 3600 for "proceed in 1 hour if no human response"). Set priority ("low"|"normal"|"high"|"urgent") and sla_minutes to control notification urgency and escalation timing. Always poll hitl_check_status before proceeding — never assume approval. The human sees the request in the HITL Queue in the web UI and can approve, reject, or add a note.',
+      description: 'Submit a human-in-the-loop approval request before executing any high-stakes action that should not be taken autonomously: sending proposals, making commitments, escalating pricing, or contacting executives for the first time. For enterprise handoffs, call agent_capture_handoff first and pass handoff_snapshot_id so the reviewer sees the agent reasoning, findings, and tool trace. Set auto_approve_after_seconds to enable time-boxed autonomy (e.g. 3600 for "proceed in 1 hour if no human response"). Set priority ("low"|"normal"|"high"|"urgent") and sla_minutes to control notification urgency and escalation timing. Always poll hitl_check_status before proceeding — never assume approval. The human sees the request in the Handoffs queue in the web UI and can approve, reject, or add a note.',
       inputSchema: hitlSubmit,
       handler: async (input: z.infer<typeof hitlSubmit>, actor: ActorContext) => {
         return runToolOperation(db, actor, 'hitl_submit_request', input, async () => {
@@ -30,6 +30,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
           priority: input.priority,
           sla_minutes: input.sla_minutes,
           escalate_to_id: input.escalate_to_id,
+          handoff_snapshot_id: input.handoff_snapshot_id,
         });
 
         const event_id = await emitEvent(db, {

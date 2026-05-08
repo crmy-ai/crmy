@@ -11,8 +11,8 @@ export async function createActor(
 ): Promise<Actor> {
   const result = await db.query(
     `INSERT INTO actors (tenant_id, actor_type, display_name, email, phone, user_id, role,
-       agent_identifier, agent_model, scopes, metadata)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       agent_identifier, agent_model, scopes, metadata, is_active, registration_source, registration_status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      RETURNING *`,
     [
       tenantId,
@@ -26,6 +26,9 @@ export async function createActor(
       data.agent_model ?? null,
       data.scopes ?? (data.actor_type === 'human' ? ['read', 'write'] : ['read']),
       JSON.stringify(data.metadata ?? {}),
+      data.is_active ?? true,
+      data.registration_source ?? 'admin',
+      data.registration_status ?? 'approved',
     ],
   );
   return result.rows[0] as Actor;
@@ -93,7 +96,7 @@ export async function updateActor(
   id: UUID,
   patch: Record<string, unknown>,
 ): Promise<Actor | null> {
-  const allowedFields = ['display_name', 'email', 'phone', 'role', 'agent_identifier', 'agent_model', 'scopes', 'metadata', 'is_active'];
+  const allowedFields = ['display_name', 'email', 'phone', 'role', 'agent_identifier', 'agent_model', 'scopes', 'metadata', 'is_active', 'registration_source', 'registration_status'];
 
   const sets: string[] = ['updated_at = now()'];
   const params: unknown[] = [tenantId, id];

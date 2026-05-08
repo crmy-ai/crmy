@@ -11,38 +11,8 @@ import { emitEvent } from '../events/emitter.js';
 import { authMiddleware } from './middleware.js';
 import * as actorRepo from '../db/repos/actors.js';
 import * as governorLimits from '../db/repos/governor-limits.js';
-
-// ── Password hashing (scrypt) ─────────────────────────────────────────────────
-// New format: "scrypt:<salt_hex>:<hash_hex>"
-// Legacy format: raw 64-char SHA-256 hex (migrated on first login)
-//
-// scrypt parameters: N=16384, r=8, p=1 per OWASP recommendation for
-// interactive logins. This is intentionally slow — ~100ms on modern hardware.
-
-const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 } as const;
-const SCRYPT_KEYLEN = 64;
-
-function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16);
-  const hash = crypto.scryptSync(password, salt, SCRYPT_KEYLEN, SCRYPT_PARAMS);
-  return `scrypt:${salt.toString('hex')}:${hash.toString('hex')}`;
-}
-
-function verifyPassword(password: string, stored: string): boolean {
-  if (stored.startsWith('scrypt:')) {
-    // Modern scrypt format
-    const parts = stored.split(':');
-    if (parts.length !== 3) return false;
-    const salt = Buffer.from(parts[1], 'hex');
-    const expected = Buffer.from(parts[2], 'hex');
-    const derived = crypto.scryptSync(password, salt, SCRYPT_KEYLEN, SCRYPT_PARAMS);
-    // timingSafeEqual prevents timing-based inference of the correct hash
-    return expected.length === derived.length && crypto.timingSafeEqual(derived, expected);
-  }
-  // Legacy SHA-256 format (64-char hex) — accepted during migration period
-  const legacy = crypto.createHash('sha256').update(password).digest('hex');
-  return legacy === stored;
-}
+import { hashPassword, verifyPassword } from './password.js';
+import { hashAuthToken } from '../services/auth-lifecycle.js';
 
 // ── Simple in-memory rate limiter ────────────────────────────────────────────
 // No external dependency. Keyed by "route:ip". Entries auto-expire.
@@ -207,7 +177,7 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
       );
 
       const user = result.rows[0];
-      const passwordOk = user ? verifyPassword(data.password, user.password_hash) : false;
+      const passwordOk = user?.password_hash ? verifyPassword(data.password, user.password_hash) : false;
 
       if (!passwordOk) {
         res.status(401).json({
@@ -219,6 +189,16 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
         return;
       }
 
+      if (user.is_active === false) {
+        res.status(403).json({
+          type: 'https://crmy.ai/errors/permission_denied',
+          title: 'Permission Denied',
+          status: 403,
+          detail: 'This user account is inactive',
+        });
+        return;
+      }
+
       // Opportunistically upgrade legacy SHA-256 hash to scrypt on successful login
       if (user.password_hash && !user.password_hash.startsWith('scrypt:')) {
         db.query(
@@ -226,6 +206,8 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
           [hashPassword(data.password), user.id],
         ).catch(() => {});
       }
+
+      db.query('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]).catch(() => {});
 
       const token = await new jose.SignJWT({
         sub: user.id,
@@ -260,6 +242,111 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
     }
   });
 
+  // GET/POST /auth/setup/:token — one-time invite and password-reset completion
+  router.get('/setup/:token', async (req: Request, res: Response) => {
+    try {
+      const token = typeof req.params.token === 'string' ? req.params.token : '';
+      const result = await db.query(
+        `SELECT t.id, t.token_type, t.expires_at, t.used_at,
+                u.id as user_id, u.email, u.name, u.role, tenant.name as tenant_name
+         FROM user_auth_tokens t
+         JOIN users u ON u.id = t.user_id AND u.tenant_id = t.tenant_id
+         JOIN tenants tenant ON tenant.id = t.tenant_id
+         WHERE t.token_hash = $1`,
+        [hashAuthToken(token)],
+      );
+      const row = result.rows[0];
+      if (!row || row.used_at || new Date(row.expires_at) <= new Date()) {
+        res.status(404).json({
+          type: 'https://crmy.ai/errors/not_found',
+          title: 'Not Found',
+          status: 404,
+          detail: 'Setup link is invalid or expired',
+        });
+        return;
+      }
+      res.json({
+        token_type: row.token_type,
+        expires_at: row.expires_at,
+        user: { id: row.user_id, email: row.email, name: row.name, role: row.role },
+        tenant_name: row.tenant_name,
+      });
+    } catch {
+      res.status(500).json({ detail: 'Failed to validate setup link' });
+    }
+  });
+
+  router.post('/setup/:token', async (req: Request, res: Response) => {
+    const client = await db.connect();
+    try {
+      const token = typeof req.params.token === 'string' ? req.params.token : '';
+      const { password } = req.body as { password?: string };
+      if (!password || password.length < 8) {
+        res.status(400).json({
+          type: 'https://crmy.ai/errors/validation',
+          title: 'Validation Error',
+          status: 400,
+          detail: 'Password must be at least 8 characters',
+        });
+        return;
+      }
+
+      await client.query('BEGIN');
+      const tokenResult = await client.query(
+        `SELECT t.*, u.email, u.name, u.role
+         FROM user_auth_tokens t
+         JOIN users u ON u.id = t.user_id AND u.tenant_id = t.tenant_id
+         WHERE t.token_hash = $1
+         FOR UPDATE`,
+        [hashAuthToken(token)],
+      );
+      const row = tokenResult.rows[0];
+      if (!row || row.used_at || new Date(row.expires_at) <= new Date()) {
+        await client.query('ROLLBACK');
+        res.status(404).json({
+          type: 'https://crmy.ai/errors/not_found',
+          title: 'Not Found',
+          status: 404,
+          detail: 'Setup link is invalid or expired',
+        });
+        return;
+      }
+
+      await client.query(
+        `UPDATE users
+         SET password_hash = $1, is_active = true, password_set_at = now(), updated_at = now()
+         WHERE id = $2 AND tenant_id = $3`,
+        [hashPassword(password), row.user_id, row.tenant_id],
+      );
+      await client.query(
+        `UPDATE user_auth_tokens SET used_at = now(), updated_at = now() WHERE id = $1`,
+        [row.id],
+      );
+      await client.query('COMMIT');
+
+      await emitEvent(db, {
+        tenantId: row.tenant_id,
+        eventType: row.token_type === 'invite' ? 'user.invite_accepted' : 'user.password_reset_completed',
+        actorId: row.user_id,
+        actorType: 'user',
+        objectType: 'user',
+        objectId: row.user_id,
+      });
+
+      res.json({ success: true });
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      res.status(500).json({
+        type: 'https://crmy.ai/errors/internal',
+        title: 'Internal Error',
+        status: 500,
+        detail: err instanceof Error ? err.message : 'Failed to complete setup',
+      });
+    } finally {
+      client.release();
+    }
+  });
+
   // POST /auth/register-agent — Self-registration for agents with minimal scopes.
   // Requires an existing API key with 'write' scope for the tenant.
   const agentRegisterSchema = z.object({
@@ -291,6 +378,9 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
         agent_identifier: data.agent_identifier,
         agent_model: data.agent_model ?? null,
         scopes: minimalScopes,
+        is_active: false,
+        registration_source: 'self_registered',
+        registration_status: 'pending_review',
         metadata: {},
       } as Parameters<typeof actorRepo.ensureActor>[2]);
 

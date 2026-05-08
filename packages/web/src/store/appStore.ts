@@ -112,7 +112,7 @@ export const useAppStore = create<AppState>()(
       openSequenceEditor: (id) => set({ sequenceEditorOpen: true, sequenceEditorId: id }),
       closeSequenceEditor: () => set({ sequenceEditorOpen: false, sequenceEditorId: null }),
 
-      darkVariant: 'warm',
+      darkVariant: 'charcoal',
       setDarkVariant: (variant) => set({ darkVariant: variant }),
     }),
     {

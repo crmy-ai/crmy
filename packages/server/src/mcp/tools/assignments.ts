@@ -16,6 +16,7 @@ import { notFound, validationError } from '@crmy/shared';
 import { validateAssignmentAction } from '../../services/state-machine.js';
 import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
+import { indexDocument } from '../../search/SearchIndexerService.js';
 import type { ToolDef } from '../server.js';
 
 function runAssignmentOperation<T>(
@@ -34,6 +35,55 @@ function runAssignmentOperation<T>(
   }, fn);
 }
 
+const assignmentSubjectTables = {
+  contact: { table: 'contacts', label: 'contact' },
+  account: { table: 'accounts', label: 'account' },
+  opportunity: { table: 'opportunities', label: 'opportunity' },
+  use_case: { table: 'use_cases', label: 'use case' },
+} as const;
+
+async function assertAssignmentSubjectExists(
+  db: DbPool,
+  tenantId: string,
+  subjectType: keyof typeof assignmentSubjectTables,
+  subjectId: string,
+) {
+  const config = assignmentSubjectTables[subjectType];
+  const result = await db.query(
+    `SELECT 1 FROM ${config.table} WHERE tenant_id = $1 AND id = $2 LIMIT 1`,
+    [tenantId, subjectId],
+  );
+  if (result.rowCount === 0) {
+    throw validationError(`Selected ${config.label} does not exist`, [{ field: 'subject_id', message: `Choose an existing ${config.label}` }]);
+  }
+}
+
+async function assertActorExists(db: DbPool, tenantId: string, actorId: string) {
+  const result = await db.query('SELECT 1 FROM actors WHERE tenant_id = $1 AND id = $2 LIMIT 1', [tenantId, actorId]);
+  if (result.rowCount === 0) {
+    throw validationError('Selected assignee does not exist', [{ field: 'assigned_to', message: 'Choose an existing actor' }]);
+  }
+}
+
+async function validateAssignmentSubject(
+  db: DbPool,
+  tenantId: string,
+  subjectType?: keyof typeof assignmentSubjectTables | null,
+  subjectId?: string | null,
+) {
+  if (!subjectType && !subjectId) return;
+  if (!subjectType || !subjectId) {
+    throw validationError('Choose both a linked record type and a record, or leave the link empty', [
+      { field: 'subject_id', message: 'Choose a record for the selected type' },
+    ]);
+  }
+  await assertAssignmentSubjectExists(db, tenantId, subjectType, subjectId);
+}
+
+function queueAssignmentIndex(db: DbPool, assignment: Record<string, unknown>) {
+  indexDocument(db, 'assignment', assignment).catch(() => {});
+}
+
 export function assignmentTools(db: DbPool): ToolDef[] {
   return [
     {
@@ -47,10 +97,14 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         const activeCount = await governorLimits.countActiveAssignments(db, actor.tenant_id);
         await governorLimits.enforceLimit(db, actor.tenant_id, 'assignments_active', activeCount);
 
+        await assertActorExists(db, actor.tenant_id, input.assigned_to);
+        await validateAssignmentSubject(db, actor.tenant_id, input.subject_type, input.subject_id);
+
         const assignment = await assignmentRepo.createAssignment(db, actor.tenant_id, {
           ...input,
           assigned_by: actor.actor_id,
         });
+        queueAssignmentIndex(db, assignment as unknown as Record<string, unknown>);
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
           eventType: 'assignment.created',
@@ -106,8 +160,22 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
 
+        if (input.patch.assigned_to) {
+          await assertActorExists(db, actor.tenant_id, input.patch.assigned_to);
+        }
+
+        if ('subject_type' in input.patch || 'subject_id' in input.patch) {
+          await validateAssignmentSubject(
+            db,
+            actor.tenant_id,
+            input.patch.subject_type as keyof typeof assignmentSubjectTables | null | undefined,
+            input.patch.subject_id as string | null | undefined,
+          );
+        }
+
         const assignment = await assignmentRepo.updateAssignment(db, actor.tenant_id, input.id, input.patch);
         if (!assignment) throw notFound('Assignment', input.id);
+        queueAssignmentIndex(db, assignment as unknown as Record<string, unknown>);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -146,6 +214,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
 
         const assignment = await assignmentRepo.acceptAssignment(db, actor.tenant_id, input.id);
         if (!assignment) throw notFound('Assignment', input.id);
+        queueAssignmentIndex(db, assignment as unknown as Record<string, unknown>);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -186,6 +255,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
           db, actor.tenant_id, input.id, input.completed_by_activity_id,
         );
         if (!assignment) throw notFound('Assignment', input.id);
+        queueAssignmentIndex(db, assignment as unknown as Record<string, unknown>);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -226,11 +296,13 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         if (!assignment) throw notFound('Assignment', input.id);
 
         // If a reason was given, store it in metadata
+        let indexedAssignment = assignment;
         if (input.reason) {
-          await assignmentRepo.updateAssignment(db, actor.tenant_id, input.id, {
+          indexedAssignment = await assignmentRepo.updateAssignment(db, actor.tenant_id, input.id, {
             metadata: { ...((assignment.metadata as Record<string, unknown>) ?? {}), decline_reason: input.reason },
-          });
+          }) ?? assignment;
         }
+        queueAssignmentIndex(db, indexedAssignment as unknown as Record<string, unknown>);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -270,6 +342,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
 
         const assignment = await assignmentRepo.startAssignment(db, actor.tenant_id, input.id);
         if (!assignment) throw notFound('Assignment', input.id);
+        queueAssignmentIndex(db, assignment as unknown as Record<string, unknown>);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -309,11 +382,13 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         const assignment = await assignmentRepo.blockAssignment(db, actor.tenant_id, input.id);
         if (!assignment) throw notFound('Assignment', input.id);
 
+        let indexedAssignment = assignment;
         if (input.reason) {
-          await assignmentRepo.updateAssignment(db, actor.tenant_id, input.id, {
+          indexedAssignment = await assignmentRepo.updateAssignment(db, actor.tenant_id, input.id, {
             metadata: { ...((assignment.metadata as Record<string, unknown>) ?? {}), block_reason: input.reason },
-          });
+          }) ?? assignment;
         }
+        queueAssignmentIndex(db, indexedAssignment as unknown as Record<string, unknown>);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -354,11 +429,13 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         const assignment = await assignmentRepo.cancelAssignment(db, actor.tenant_id, input.id);
         if (!assignment) throw notFound('Assignment', input.id);
 
+        let indexedAssignment = assignment;
         if (input.reason) {
-          await assignmentRepo.updateAssignment(db, actor.tenant_id, input.id, {
+          indexedAssignment = await assignmentRepo.updateAssignment(db, actor.tenant_id, input.id, {
             metadata: { ...((assignment.metadata as Record<string, unknown>) ?? {}), cancel_reason: input.reason },
-          });
+          }) ?? assignment;
         }
+        queueAssignmentIndex(db, indexedAssignment as unknown as Record<string, unknown>);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,

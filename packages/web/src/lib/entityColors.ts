@@ -22,4 +22,28 @@ export const ENTITY_COLORS = {
   emails:        { text: 'text-[#3b82f6]',   bg: 'bg-[#3b82f6]/15',  bar: 'bg-[#3b82f6]' },
   sequences:     { text: 'text-orange-500',  bg: 'bg-orange-500/15', bar: 'bg-orange-500' },
   auditLog:      { text: 'text-[#a78bfa]',   bg: 'bg-[#a78bfa]/15',  bar: 'bg-[#a78bfa]' },
+  operations:    { text: 'text-[#a78bfa]',   bg: 'bg-[#a78bfa]/15',  bar: 'bg-[#a78bfa]' },
+} as const;
+
+export const ENTITY_GRADIENTS: Record<string, string> = {
+  contacts:      'from-primary to-primary/80',
+  accounts:      'from-[#8b5cf6] to-[#8b5cf6]/80',
+  opportunities: 'from-accent to-accent/80',
+  'use cases':   'from-success to-success/80',
+  activities:    'from-warning to-warning/80',
+  assignments:   'from-destructive to-destructive/80',
+  workflows:     'from-amber-500 to-amber-500/80',
+  sequences:     'from-orange-500 to-orange-500/80',
+  context:       'from-[#0ea5e9] to-[#0ea5e9]/80',
+  emails:        'from-[#3b82f6] to-[#3b82f6]/80',
+  actors:        'from-[#6366f1] to-[#6366f1]/80',
+};
+
+export const STATUS_TONES = {
+  success:     'text-success bg-success/10 border-success/25',
+  warning:     'text-warning bg-warning/10 border-warning/30',
+  info:        'text-info bg-info/10 border-info/25',
+  destructive: 'text-destructive bg-destructive/10 border-destructive/25',
+  muted:       'text-muted-foreground bg-muted border-border',
+  primary:     'text-primary bg-primary/10 border-primary/25',
 } as const;

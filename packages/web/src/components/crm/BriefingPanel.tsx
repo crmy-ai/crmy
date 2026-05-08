@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { useBriefing, useBriefingSummary } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { FileText, ChevronDown, ChevronUp, AlertTriangle, ClipboardList, Brain, X, Phone, Mail, Calendar, Monitor, CheckSquare, Activity, Swords, Sparkles, Loader2 } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, AlertTriangle, ClipboardList, Brain, X, Phone, Mail, Calendar, Monitor, CheckSquare, Activity, Swords, Sparkles, Loader2, Network, Gauge, EyeOff } from 'lucide-react';
 import { ACTIVITY_COLORS } from './GraphSidebar';
 import { TYPE_COLORS } from './ContextPanel';
 import { toast } from '@/components/ui/use-toast';
@@ -30,12 +30,36 @@ const ACTIVITY_ICONS: Record<string, React.ElementType> = {
   status_update: Activity,
 };
 
+type ContextRadius = 'direct' | 'adjacent' | 'account_wide';
+type TokenBudget = 'none' | 'compact' | 'standard' | 'deep';
+
+const RADIUS_OPTIONS: Array<{ value: ContextRadius; label: string; hint: string }> = [
+  { value: 'direct', label: 'Direct', hint: 'Only this record' },
+  { value: 'adjacent', label: 'Adjacent', hint: 'Related customer state' },
+  { value: 'account_wide', label: 'Account-wide', hint: 'Full account context' },
+];
+
+const TOKEN_BUDGETS: Record<TokenBudget, { label: string; value?: number; hint: string }> = {
+  none:     { label: 'Full',     hint: 'No budget cap' },
+  compact:  { label: 'Compact',  value: 900,  hint: 'Small agent window' },
+  standard: { label: 'Standard', value: 1800, hint: 'Default preflight' },
+  deep:     { label: 'Deep',     value: 3600, hint: 'Detailed review' },
+};
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: BriefingPanelProps) {
   const [includeStale, setIncludeStale] = useState(true);
+  const [contextRadius, setContextRadius] = useState<ContextRadius>('direct');
+  const [tokenBudget, setTokenBudget] = useState<TokenBudget>('standard');
+  const tokenBudgetValue = TOKEN_BUDGETS[tokenBudget].value;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, isLoading, error } = useBriefing(subjectType, subjectId, { format: 'json', include_stale: includeStale }) as any;
+  const { data, isLoading, error } = useBriefing(subjectType, subjectId, {
+    format: 'json',
+    include_stale: includeStale,
+    context_radius: contextRadius,
+    token_budget: tokenBudgetValue,
+  }) as any;
   const summaryMutation = useBriefingSummary(subjectType, subjectId);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
   const { enabled: agentEnabled, connectivity } = useAgentSettings();
@@ -89,6 +113,8 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
   const activityCount: number = briefing?.activities?.length ?? 0;
   const contextTypes = briefing?.context_entries ? Object.keys(briefing.context_entries) : [];
   const assignmentCount: number = briefing?.open_assignments?.length ?? 0;
+  const adjacentSubjects: any[] = briefing?.adjacent_context ?? [];
+  const droppedEntries: any[] = briefing?.dropped_entries ?? [];
   const isEmpty = activityCount === 0 && assignmentCount === 0 && contextTypes.length === 0;
 
   return (
@@ -116,6 +142,65 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
             {aiSummary}
           </div>
         )}
+
+        {/* Briefing controls */}
+        <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-3">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <Gauge className="w-3.5 h-3.5" />
+            Briefing Preflight
+            {briefing?.token_estimate != null && (
+              <span className="ml-auto normal-case tracking-normal font-mono text-muted-foreground">
+                ~{briefing.token_estimate} tokens
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Network className="w-3 h-3" />
+              Context radius
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {RADIUS_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  onClick={() => setContextRadius(opt.value)}
+                  className={`rounded-lg border px-2 py-1.5 text-left transition-colors ${
+                    contextRadius === opt.value
+                      ? 'border-primary/50 bg-primary/10 text-primary'
+                      : 'border-border bg-card text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <span className="block text-xs font-semibold">{opt.label}</span>
+                  <span className="block text-xs opacity-70 truncate">{opt.hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Brain className="w-3 h-3" />
+              Token budget
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {(Object.entries(TOKEN_BUDGETS) as Array<[TokenBudget, typeof TOKEN_BUDGETS[TokenBudget]]>).map(([key, opt]) => (
+                <button
+                  key={key}
+                  onClick={() => setTokenBudget(key)}
+                  className={`rounded-lg border px-2 py-1.5 text-left transition-colors ${
+                    tokenBudget === key
+                      ? 'border-primary/50 bg-primary/10 text-primary'
+                      : 'border-border bg-card text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <span className="block text-xs font-semibold">{opt.label}</span>
+                  <span className="block text-xs opacity-70 truncate">{opt.hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
 
         {/* Empty state */}
         {isEmpty && (
@@ -286,6 +371,69 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
                         <div key={c.id} className="rounded-xl border border-border bg-card p-3">
                           {c.title && <p className="text-sm font-medium text-foreground mb-1">{c.title}</p>}
                           <p className="text-sm text-muted-foreground leading-relaxed">{c.body}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </BriefingSection>
+        )}
+
+        {/* Dropped context */}
+        {droppedEntries.length > 0 && (
+          <BriefingSection
+            icon={<EyeOff className="w-4 h-4 text-warning" />}
+            title="Dropped From Budget"
+            pill={droppedEntries.length}
+            pillColor="#f59e0b"
+          >
+            <div className="space-y-2">
+              {droppedEntries.map((entry: any, idx: number) => (
+                <div key={`${entry.context_type}-${idx}`} className="rounded-lg border border-warning/30 bg-warning/5 p-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-warning">{entry.context_type?.replace(/_/g, ' ') ?? 'context'}</span>
+                    {entry.confidence != null && (
+                      <span className="text-xs text-muted-foreground">{Math.round(entry.confidence * 100)}% confidence</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-foreground mt-1">{entry.title ?? 'Untitled context entry'}</p>
+                </div>
+              ))}
+              <p className="text-xs text-muted-foreground">
+                Increase the token budget or switch to Full when an agent needs these entries before acting.
+              </p>
+            </div>
+          </BriefingSection>
+        )}
+
+        {/* Adjacent context */}
+        {adjacentSubjects.length > 0 && (
+          <BriefingSection
+            icon={<Network className="w-4 h-4 text-[#0ea5e9]" />}
+            title="Related Context"
+            pill={adjacentSubjects.length}
+            pillColor="#0ea5e9"
+          >
+            <div className="space-y-3">
+              {adjacentSubjects.map((subject: any) => {
+                const groups = Object.entries(subject.context_entries ?? {});
+                const count = groups.reduce((sum, [, entries]) => sum + ((entries as any[])?.length ?? 0), 0);
+                return (
+                  <div key={`${subject.subject_type}:${subject.subject_id}`} className="rounded-xl border border-border bg-card p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-mono text-muted-foreground">{subject.subject_type}</span>
+                      <span className="text-xs text-muted-foreground truncate">{subject.subject_id}</span>
+                      <span className="ml-auto text-xs text-muted-foreground">{count} entries</span>
+                    </div>
+                    <div className="space-y-2">
+                      {groups.slice(0, 3).map(([type, entries]) => (
+                        <div key={type}>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{type.replace(/_/g, ' ')}</p>
+                          {(entries as any[]).slice(0, 2).map((entry: any) => (
+                            <p key={entry.id} className="text-sm text-foreground line-clamp-2">{entry.title ?? entry.body}</p>
+                          ))}
                         </div>
                       ))}
                     </div>

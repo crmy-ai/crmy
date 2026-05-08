@@ -5,16 +5,18 @@ import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { TopBar } from '@/components/layout/TopBar';
+import { OnboardingEmptyState } from '@/components/crm/OnboardingEmptyState';
 import { useContacts } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge, LeadScoreBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { motion } from 'framer-motion';
-import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown, Users, FileText, Plus } from 'lucide-react';
+import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown, Users, FileText } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { stageConfig } from '@/lib/stageConfig';
+import { headerDescription } from '@/lib/headerCopy';
 
 type ViewMode = 'table' | 'cards';
 
@@ -96,7 +98,7 @@ export default function Contacts() {
         title="Contacts"
         icon={Users}
         iconClassName="text-primary"
-        description="People and leads across your CRM."
+        description={headerDescription('Manage people and lifecycle stages', filtered.length, 'contact')}
       >
         <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           <button onClick={() => setView('table')} className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
@@ -122,12 +124,22 @@ export default function Contacts() {
             {[...Array(5)].map((_, i) => <div key={i} className="h-14 bg-muted/50 rounded-xl animate-pulse" />)}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <p className="text-sm">No contacts found.</p>
-            <button onClick={() => { setSearch(''); setActiveFilters({}); }} className="mt-2 text-xs text-primary font-semibold hover:underline">
-              Clear all filters
-            </button>
-          </div>
+          allContacts.length === 0 && !search && Object.keys(activeFilters).length === 0 ? (
+            <OnboardingEmptyState
+              icon={Users}
+              title="Add your first contact"
+              description="Contacts store people, preferences, handoffs, and follow-up history."
+              primary={{ label: 'New Contact', onClick: () => openQuickAdd('contact') }}
+            />
+          ) : (
+            <OnboardingEmptyState
+              icon={Users}
+              title="No contacts match"
+              description="Adjust the search or filters to find the person you need."
+              primary={{ label: 'Clear filters', onClick: () => { setSearch(''); setActiveFilters({}); } }}
+              showSampleData={false}
+            />
+          )
         ) : effectiveView === 'table' ? (
           <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">

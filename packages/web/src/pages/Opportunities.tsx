@@ -4,6 +4,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
+import { OnboardingEmptyState } from '@/components/crm/OnboardingEmptyState';
 import { useOpportunities } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
@@ -15,6 +16,7 @@ import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown, Brie
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { stageConfig } from '@/lib/stageConfig';
+import { headerDescription } from '@/lib/headerCopy';
 
 type ViewMode = 'kanban' | 'table' | 'forecast';
 const kanbanStages = ['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost'];
@@ -149,7 +151,7 @@ export default function Opportunities() {
         title="Opportunities"
         icon={Briefcase}
         iconClassName="text-accent"
-        description="Deals and revenue pipeline."
+        description={headerDescription('Track deals and pipeline stages', filtered.length, 'opportunity', 'opportunities')}
       >
         <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           {[
@@ -286,10 +288,22 @@ export default function Opportunities() {
         ) : view === 'table' ? (
           <div className="px-4 md:px-6">
             {filtered.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-                <p className="text-sm">No opportunities match your filters.</p>
-                <button onClick={() => { setSearch(''); setActiveFilters({}); setCloseDate('all'); }} className="mt-2 text-xs text-primary font-semibold hover:underline">Clear all filters</button>
-              </div>
+              allOpportunities.length === 0 && !search && Object.keys(activeFilters).length === 0 ? (
+                <OnboardingEmptyState
+                  icon={Briefcase}
+                  title="Create your first opportunity"
+                  description="Opportunities track stage, value, context, and next steps."
+                  primary={{ label: 'New Opportunity', onClick: () => openQuickAdd('opportunity') }}
+                />
+              ) : (
+                <OnboardingEmptyState
+                  icon={Briefcase}
+                  title="No opportunities match"
+                  description="Adjust filters or date range to find the deal you need."
+                  primary={{ label: 'Clear filters', onClick: () => { setSearch(''); setActiveFilters({}); setCloseDate('all'); } }}
+                  showSampleData={false}
+                />
+              )
             ) : (
               <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">

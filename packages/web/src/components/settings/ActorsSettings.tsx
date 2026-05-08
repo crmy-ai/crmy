@@ -2,18 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { useActors, useCreateActor, useUpdateActor, useCreateUser, useUsers, useApiKeys, useCreateApiKey, useRevokeApiKey, useAgentSpecializations, useUpsertSpecialization, useDeleteSpecialization, useSetActorAvailability } from '@/api/hooks';
+import { useAdminActors, useApproveActor, useCreateActor, useCreateUser, useInviteUser, useRejectActor, useResetUserPassword, useUpdateActor, useUpdateUser, useApiKeys, useCreateApiKey, useRevokeApiKey, useAgentSpecializations, useUpsertSpecialization, useDeleteSpecialization, useSetActorAvailability, type AdminActorRow } from '@/api/hooks';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
 import { toast } from '@/hooks/use-toast';
+import { headerDescription } from '@/lib/headerCopy';
 import {
   Users, Bot, LayoutGrid, List, ChevronUp, ChevronDown,
-  Pencil, Trash2, Shield, Phone, Mail, MessageSquare,
+  Pencil, Trash2, Shield, Phone, MessageSquare,
   Plus, X, CheckCircle2, CircleDot, Power, PowerOff,
-  Key, Copy, ChevronRight, Lock, Star, Wifi, WifiOff, Coffee,
+  Key, Copy, ChevronRight, Lock, Star, Wifi, WifiOff, Coffee, Send,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -27,16 +28,16 @@ interface ContactChannel {
   primary?: boolean;
 }
 
-interface ActorRow {
+interface ActorRow extends AdminActorRow {
   id: string;
   actor_type: ActorType;
   display_name: string;
-  email?: string;
-  phone?: string;
-  user_id?: string;
-  role?: string;
-  agent_identifier?: string;
-  agent_model?: string;
+  email?: string | null;
+  phone?: string | null;
+  user_id?: string | null;
+  role?: string | null;
+  agent_identifier?: string | null;
+  agent_model?: string | null;
   scopes: string[];
   metadata: Record<string, unknown>;
   is_active: boolean;
@@ -72,8 +73,8 @@ const typePillCls: Record<string, string> = {
 
 const SCOPE_GROUPS = [
   { label: 'General', scopes: [
-    { value: 'read', label: 'Read', desc: 'Read all CRM data' },
-    { value: 'write', label: 'Write', desc: 'Create and modify CRM data' },
+    { value: 'read', label: 'Read', desc: 'Read workspace state and context' },
+    { value: 'write', label: 'Write', desc: 'Create and modify operational state' },
   ]},
   { label: 'Contacts', scopes: [
     { value: 'contacts:read', label: 'Read contacts' },
@@ -92,12 +93,22 @@ const SCOPE_GROUPS = [
     { value: 'activities:write', label: 'Write activities' },
   ]},
   { label: 'Assignments', scopes: [
-    { value: 'assignments:create', label: 'Create assignments' },
-    { value: 'assignments:update', label: 'Update assignments' },
+    { value: 'assignments:read', label: 'Read assignments' },
+    { value: 'assignments:write', label: 'Write assignments' },
   ]},
   { label: 'Context', scopes: [
     { value: 'context:read', label: 'Read context' },
     { value: 'context:write', label: 'Write context' },
+  ]},
+  { label: 'HITL / Handoff', scopes: [
+    { value: 'hitl:read', label: 'Read approvals' },
+    { value: 'hitl:write', label: 'Write approvals' },
+    { value: 'agent:read', label: 'Read handoffs' },
+    { value: 'agent:write', label: 'Write handoffs' },
+  ]},
+  { label: 'Operations', scopes: [
+    { value: 'ops:read', label: 'Read ops' },
+    { value: 'ops:write', label: 'Write ops' },
   ]},
 ];
 
@@ -330,6 +341,19 @@ function ActorDetailPanel({
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function ActorStatusBadges({ actor }: { actor: ActorRow }) {
+  return (
+    <div className="mt-1 flex flex-wrap gap-1">
+      {actor.user_id && <span className="text-xs font-mono bg-muted text-muted-foreground px-1 py-0.5 rounded">auth</span>}
+      {actor.invite_pending && <span className="text-xs font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/30">invite pending</span>}
+      {actor.registration_source === 'self_registered' && <span className="text-xs font-semibold bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded border border-blue-500/30">self-registered</span>}
+      {actor.registration_status === 'pending_review' && <span className="text-xs font-semibold bg-warning/10 text-warning px-1.5 py-0.5 rounded border border-warning/30">pending review</span>}
+      {actor.registration_status === 'rejected' && <span className="text-xs font-semibold bg-destructive/10 text-destructive px-1.5 py-0.5 rounded border border-destructive/30">rejected</span>}
+      {(actor.scopes ?? []).length <= 1 && actor.actor_type === 'agent' && <span className="text-xs font-semibold bg-muted text-muted-foreground px-1.5 py-0.5 rounded border border-border">scope review</span>}
+    </div>
   );
 }
 
@@ -595,7 +619,6 @@ interface HumanFormState {
   email: string;
   phone: string;
   role: string;
-  password: string;
   channels: ContactChannel[];
   createAuthUser: boolean;
 }
@@ -607,7 +630,7 @@ interface AgentFormState {
 }
 
 const initHumanForm = (): HumanFormState => ({
-  name: '', email: '', phone: '', role: 'member', password: '', channels: [], createAuthUser: true,
+  name: '', email: '', phone: '', role: 'member', channels: [], createAuthUser: true,
 });
 
 const initAgentForm = (): AgentFormState => ({
@@ -633,13 +656,18 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
 
   // Data
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: actorsData, isLoading } = useActors({ limit: 200 }) as any;
+  const { data: actorsData, isLoading } = useAdminActors() as { data?: { data: ActorRow[] }; isLoading: boolean };
   const allActors: ActorRow[] = actorsData?.data ?? [];
 
   // Mutations
   const createActor = useCreateActor();
   const updateActor = useUpdateActor();
+  const updateUser = useUpdateUser();
   const createUser = useCreateUser();
+  const inviteUser = useInviteUser();
+  const resetUserPassword = useResetUserPassword();
+  const approveActor = useApproveActor();
+  const rejectActor = useRejectActor();
 
   // Filters
   const [tab, setTab] = useState<TabFilter>('all');
@@ -648,6 +676,8 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [quickFilter, setQuickFilter] = useState<string | null>(null);
+  const [setupLink, setSetupLink] = useState<{ label: string; url: string; emailSent: boolean; emailError?: string } | null>(null);
 
   // Detail panel
   const [expandedActorId, setExpandedActorId] = useState<string | null>(null);
@@ -675,6 +705,12 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
     if (activeFilters.role?.length) {
       result = result.filter(a => a.role && activeFilters.role.includes(a.role));
     }
+    if (quickFilter === 'login_enabled') result = result.filter(a => Boolean(a.user_id));
+    if (quickFilter === 'invite_pending') result = result.filter(a => Boolean(a.invite_pending));
+    if (quickFilter === 'self_registered') result = result.filter(a => a.registration_source === 'self_registered');
+    if (quickFilter === 'needs_scope_review') result = result.filter(a => (a.scopes ?? []).length <= 1 || a.registration_status === 'pending_review');
+    if (quickFilter === 'inactive') result = result.filter(a => !a.is_active || a.user_is_active === false);
+    if (quickFilter === 'pending_review') result = result.filter(a => a.registration_status === 'pending_review');
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(a =>
@@ -692,9 +728,9 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
       });
     }
     return result;
-  }, [allActors, tab, search, activeFilters, sort]);
+  }, [allActors, tab, search, activeFilters, quickFilter, sort]);
 
-  useEffect(() => { setPage(1); }, [tab, search, activeFilters, sort]);
+  useEffect(() => { setPage(1); }, [tab, search, activeFilters, quickFilter, sort]);
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   const humanCount = allActors.filter(a => a.actor_type === 'human').length;
@@ -742,13 +778,28 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
     if (!humanForm.name.trim() || !humanForm.email.trim()) return;
     try {
       // If creating an auth user too, create user first (which auto-creates actor via backend)
-      if (humanForm.createAuthUser && humanForm.password) {
-        await createUser.mutateAsync({
+      if (humanForm.createAuthUser) {
+        const metadata: Record<string, unknown> = {};
+        if (humanForm.channels.length > 0) {
+          metadata.contact_channels = humanForm.channels.filter(c => c.handle.trim());
+        }
+        const result = await createUser.mutateAsync({
           name: humanForm.name.trim(),
           email: humanForm.email.trim(),
-          password: humanForm.password,
+          phone: humanForm.phone.trim() || undefined,
           role: humanForm.role,
+          send_invite: true,
+          metadata,
         });
+        const invite = (result as { invite?: { setup_url: string; email_sent: boolean; email_error?: string } | null }).invite;
+        if (invite) {
+          setSetupLink({
+            label: `Invite for ${humanForm.email.trim()}`,
+            url: invite.setup_url,
+            emailSent: invite.email_sent,
+            emailError: invite.email_error,
+          });
+        }
       } else {
         // Create actor only (no auth user)
         const metadata: Record<string, unknown> = {};
@@ -766,7 +817,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
       }
       setShowCreate(null);
       setHumanForm(initHumanForm());
-      toast({ title: 'Human actor created' });
+      toast({ title: humanForm.createAuthUser ? 'User invited' : 'Human actor created' });
     } catch (err) {
       toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to create', variant: 'destructive' });
     }
@@ -807,6 +858,14 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
       if (editChannels.length > 0) {
         metadata.contact_channels = editChannels.filter(c => c.handle.trim());
       }
+      const actor = allActors.find(a => a.id === editingId);
+      if (actor?.user_id) {
+        await updateUser.mutateAsync({
+          id: actor.user_id,
+          name: editName.trim(),
+          role: editRole || undefined,
+        });
+      }
       await updateActor.mutateAsync({
         id: editingId,
         display_name: editName.trim(),
@@ -827,10 +886,71 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
 
   const toggleActive = async (actor: ActorRow) => {
     try {
-      await updateActor.mutateAsync({ id: actor.id, is_active: !actor.is_active });
+      if (actor.user_id) {
+        await updateUser.mutateAsync({ id: actor.user_id, is_active: !actor.is_active });
+      } else {
+        await updateActor.mutateAsync({ id: actor.id, is_active: !actor.is_active });
+      }
       toast({ title: actor.is_active ? 'Actor deactivated' : 'Actor activated' });
     } catch (err) {
       toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed', variant: 'destructive' });
+    }
+  };
+
+  const handleInviteUser = async (actor: ActorRow) => {
+    if (!actor.user_id) return;
+    try {
+      const result = await inviteUser.mutateAsync(actor.user_id);
+      setSetupLink({
+        label: `Invite for ${actor.user_email ?? actor.email ?? actor.display_name}`,
+        url: result.invite.setup_url,
+        emailSent: result.invite.email_sent,
+        emailError: result.invite.email_error,
+      });
+      toast({ title: result.invite.email_sent ? 'Invite email sent' : 'Invite link created' });
+    } catch (err) {
+      toast({ title: 'Invite failed', description: err instanceof Error ? err.message : 'Could not create invite.', variant: 'destructive' });
+    }
+  };
+
+  const handlePasswordReset = async (actor: ActorRow) => {
+    if (!actor.user_id) return;
+    try {
+      const result = await resetUserPassword.mutateAsync(actor.user_id);
+      setSetupLink({
+        label: `Password reset for ${actor.user_email ?? actor.email ?? actor.display_name}`,
+        url: result.reset.setup_url,
+        emailSent: result.reset.email_sent,
+        emailError: result.reset.email_error,
+      });
+      toast({ title: result.reset.email_sent ? 'Password reset email sent' : 'Password reset link created' });
+    } catch (err) {
+      toast({ title: 'Reset failed', description: err instanceof Error ? err.message : 'Could not create reset link.', variant: 'destructive' });
+    }
+  };
+
+  const handleApproveActor = async (actor: ActorRow) => {
+    try {
+      await approveActor.mutateAsync({
+        id: actor.id,
+        display_name: actor.display_name,
+        agent_identifier: actor.agent_identifier ?? undefined,
+        agent_model: actor.agent_model ?? undefined,
+        scopes: actor.scopes?.length ? actor.scopes : ['read'],
+        is_active: true,
+      });
+      toast({ title: 'Agent approved' });
+    } catch (err) {
+      toast({ title: 'Approval failed', description: err instanceof Error ? err.message : 'Could not approve actor.', variant: 'destructive' });
+    }
+  };
+
+  const handleRejectActor = async (actor: ActorRow) => {
+    try {
+      await rejectActor.mutateAsync({ id: actor.id, reason: 'Rejected from Actors settings' });
+      toast({ title: 'Agent rejected' });
+    } catch (err) {
+      toast({ title: 'Reject failed', description: err instanceof Error ? err.message : 'Could not reject actor.', variant: 'destructive' });
     }
   };
 
@@ -854,9 +974,16 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
 
   return (
     <div className="-mx-6 -my-6 flex flex-col">
-      {/* View toggle — only shown when parent isn't controlling it (e.g. Settings embed) */}
-      {!viewProp && (
-        <div className="flex items-center justify-end px-6 pt-4 pb-2">
+      <div className="flex flex-col gap-3 px-6 pt-6 pb-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <h2 className="font-display text-lg font-bold text-foreground">Actors</h2>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            {headerDescription('Manage users, handoff participants, and agent actors', filtered.length, 'actor')}
+          </p>
+        </div>
+
+        {/* View toggle — only shown when parent isn't controlling it (e.g. Settings embed) */}
+        {!viewProp && (
           <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
             <button
               onClick={() => setView('table')}
@@ -871,11 +998,11 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
               <LayoutGrid className="w-4 h-4" />
             </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Type tabs */}
-      <div className="flex items-center gap-1 px-6 pt-4 pb-2">
+      <div className="flex items-center gap-1 px-6 pb-2">
         {([
           { key: 'all', label: 'All', count: allActors.length },
           { key: 'human', label: 'Humans', count: humanCount, icon: Users },
@@ -895,6 +1022,29 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
         ))}
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 px-6 pb-2">
+        {[
+          { key: 'login_enabled', label: 'Login enabled', count: allActors.filter(a => Boolean(a.user_id)).length },
+          { key: 'invite_pending', label: 'Invite pending', count: allActors.filter(a => Boolean(a.invite_pending)).length },
+          { key: 'self_registered', label: 'Self-registered', count: allActors.filter(a => a.registration_source === 'self_registered').length },
+          { key: 'needs_scope_review', label: 'Needs scope review', count: allActors.filter(a => (a.scopes ?? []).length <= 1 || a.registration_status === 'pending_review').length },
+          { key: 'inactive', label: 'Inactive', count: allActors.filter(a => !a.is_active || a.user_is_active === false).length },
+          { key: 'pending_review', label: 'Pending review', count: allActors.filter(a => a.registration_status === 'pending_review').length },
+        ].map(filter => (
+          <button
+            key={filter.key}
+            onClick={() => setQuickFilter(prev => prev === filter.key ? null : filter.key)}
+            className={`rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
+              quickFilter === filter.key
+                ? 'border-primary/40 bg-primary/15 text-primary'
+                : 'border-border bg-muted/40 text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {filter.label} <span className="opacity-60">{filter.count}</span>
+          </button>
+        ))}
+      </div>
+
       {/* Toolbar */}
       <ListToolbar
         searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search actors..."
@@ -909,6 +1059,33 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
       />
 
       <div className="px-4 md:px-6 pb-8 space-y-3 mt-1">
+        {setupLink && (
+          <div className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-foreground">{setupLink.label}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {setupLink.emailSent
+                    ? 'Email was sent. Keep this fallback link only if you need to share it manually.'
+                    : `Email was not sent${setupLink.emailError ? `: ${setupLink.emailError}` : ''}. Share this one-time setup link manually.`}
+                </p>
+                <p className="mt-2 break-all rounded-lg border border-border bg-background p-2 font-mono text-xs text-foreground">{setupLink.url}</p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  onClick={() => { navigator.clipboard.writeText(setupLink.url); toast({ title: 'Setup link copied' }); }}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
+                </button>
+                <button onClick={() => setSetupLink(null)} className="rounded-lg bg-muted px-3 py-1.5 text-xs font-semibold text-muted-foreground">
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Create forms */}
         <AnimatePresence>
           {showCreate === 'human' && (
@@ -926,7 +1103,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                       onChange={e => setHumanForm(f => ({ ...f, createAuthUser: e.target.checked }))}
                       className="rounded"
                     />
-                    Create login account
+                    Invite login user
                   </label>
                 </div>
               </div>
@@ -957,12 +1134,8 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                 </div>
               </div>
               {humanForm.createAuthUser && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-xs font-medium text-muted-foreground">Password <span className="text-destructive">*</span></label>
-                    <input type="password" value={humanForm.password} onChange={e => setHumanForm(f => ({ ...f, password: e.target.value }))}
-                      placeholder="Min. 8 characters" className={inputCls} />
-                  </div>
+                <div className="rounded-lg border border-border bg-background/60 p-3 text-xs text-muted-foreground">
+                  CRMy will generate a one-time setup link. If outbound email is configured, the user receives it by email; otherwise the link appears here for manual sharing.
                 </div>
               )}
               <ContactChannelsEditor
@@ -972,7 +1145,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
               <div className="flex gap-2 pt-1">
                 <button onClick={handleCreateHuman} disabled={createActor.isPending || createUser.isPending}
                   className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
-                  {createActor.isPending || createUser.isPending ? 'Creating...' : 'Create Human Actor'}
+                  {createActor.isPending || createUser.isPending ? 'Creating...' : humanForm.createAuthUser ? 'Send Invite' : 'Create Human Actor'}
                 </button>
                 <button onClick={() => { setShowCreate(null); setHumanForm(initHumanForm()); }}
                   className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
@@ -1028,8 +1201,8 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
           <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
             <Users className="w-8 h-8 mb-3 opacity-30" />
             <p className="text-sm">No actors found.</p>
-            {(search || Object.keys(activeFilters).length > 0 || tab !== 'all') && (
-              <button onClick={() => { setSearch(''); setActiveFilters({}); setTab('all'); }}
+            {(search || Object.keys(activeFilters).length > 0 || tab !== 'all' || quickFilter) && (
+              <button onClick={() => { setSearch(''); setActiveFilters({}); setTab('all'); setQuickFilter(null); }}
                 className="mt-2 text-xs text-primary font-semibold hover:underline">
                 Clear filters
               </button>
@@ -1104,9 +1277,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                               <ActorAvatar actor={actor} />
                               <div>
                                 <span className="font-semibold text-foreground">{actor.display_name}</span>
-                                {actor.user_id && (
-                                  <span className="ml-1.5 text-xs font-mono bg-muted text-muted-foreground px-1 py-0.5 rounded">auth</span>
-                                )}
+                                <ActorStatusBadges actor={actor} />
                               </div>
                             </div>
                           </td>
@@ -1160,6 +1331,46 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                           </td>
                           <td className="px-2 py-3" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-1 justify-end">
+                              {actor.registration_status === 'pending_review' && (
+                                <>
+                                  <button
+                                    onClick={() => handleApproveActor(actor)}
+                                    disabled={approveActor.isPending}
+                                    className="p-1.5 rounded-lg text-muted-foreground hover:text-green-600 hover:bg-green-500/10 transition-colors"
+                                    title="Approve actor"
+                                  >
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleRejectActor(actor)}
+                                    disabled={rejectActor.isPending}
+                                    className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                    title="Reject actor"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
+                              )}
+                              {actor.user_id && (
+                                <>
+                                  <button
+                                    onClick={() => handleInviteUser(actor)}
+                                    disabled={inviteUser.isPending}
+                                    className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors opacity-0 group-hover:opacity-100"
+                                    title="Send invite link"
+                                  >
+                                    <Send className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handlePasswordReset(actor)}
+                                    disabled={resetUserPassword.isPending}
+                                    className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors opacity-0 group-hover:opacity-100"
+                                    title="Send password reset"
+                                  >
+                                    <Lock className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
+                              )}
                               <button onClick={() => toggleExpand(actor.id)}
                                 className={`p-1.5 rounded-lg transition-colors ${
                                   expandedActorId === actor.id
@@ -1265,19 +1476,57 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                       <div>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <p className="font-display font-bold text-foreground">{actor.display_name}</p>
-                          <span className={`text-xs font-semibold px-1.5 py-0.5 rounded border capitalize ${typePillCls[actor.actor_type]}`}>
-                            {actor.actor_type}
-                          </span>
-                          {actor.user_id && (
-                            <span className="text-xs font-mono bg-muted text-muted-foreground px-1 py-0.5 rounded">auth</span>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground">{actor.email || (actor.agent_identifier ?? 'No email')}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <button onClick={() => toggleExpand(actor.id)}
-                        className={`p-1.5 rounded-lg transition-colors ${
+	                          <span className={`text-xs font-semibold px-1.5 py-0.5 rounded border capitalize ${typePillCls[actor.actor_type]}`}>
+	                            {actor.actor_type}
+	                          </span>
+	                        </div>
+	                        <ActorStatusBadges actor={actor} />
+	                        <p className="text-xs text-muted-foreground">{actor.email || (actor.agent_identifier ?? 'No email')}</p>
+	                      </div>
+	                    </div>
+	                    <div className="flex items-center gap-1 flex-shrink-0">
+	                      {actor.registration_status === 'pending_review' && (
+	                        <>
+	                          <button
+	                            onClick={() => handleApproveActor(actor)}
+	                            disabled={approveActor.isPending}
+	                            className="p-1.5 rounded-lg text-muted-foreground hover:text-green-600 hover:bg-green-500/10 transition-colors"
+	                            title="Approve actor"
+	                          >
+	                            <CheckCircle2 className="w-3.5 h-3.5" />
+	                          </button>
+	                          <button
+	                            onClick={() => handleRejectActor(actor)}
+	                            disabled={rejectActor.isPending}
+	                            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+	                            title="Reject actor"
+	                          >
+	                            <X className="w-3.5 h-3.5" />
+	                          </button>
+	                        </>
+	                      )}
+	                      {actor.user_id && (
+	                        <>
+	                          <button
+	                            onClick={() => handleInviteUser(actor)}
+	                            disabled={inviteUser.isPending}
+	                            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors md:opacity-0 md:group-hover:opacity-100"
+	                            title="Send invite link"
+	                          >
+	                            <Send className="w-3.5 h-3.5" />
+	                          </button>
+	                          <button
+	                            onClick={() => handlePasswordReset(actor)}
+	                            disabled={resetUserPassword.isPending}
+	                            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors md:opacity-0 md:group-hover:opacity-100"
+	                            title="Send password reset"
+	                          >
+	                            <Lock className="w-3.5 h-3.5" />
+	                          </button>
+	                        </>
+	                      )}
+	                      <button onClick={() => toggleExpand(actor.id)}
+	                        className={`p-1.5 rounded-lg transition-colors ${
                           expandedActorId === actor.id
                             ? 'text-primary bg-primary/10'
                             : 'text-muted-foreground hover:text-foreground hover:bg-muted'

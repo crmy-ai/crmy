@@ -476,6 +476,8 @@ export interface Actor {
   metadata: Record<string, unknown>;
   is_active: boolean;
   availability_status?: 'available' | 'busy' | 'offline';
+  registration_source?: 'admin' | 'self_registered' | 'migration';
+  registration_status?: 'approved' | 'pending_review' | 'rejected';
   created_at: string;
   updated_at: string;
 }

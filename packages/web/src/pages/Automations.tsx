@@ -6,12 +6,18 @@ import { TopBar } from '@/components/layout/TopBar';
 import { Zap, ListOrdered } from 'lucide-react';
 import WorkflowsPage from './Workflows';
 import SequencesPage from './Sequences';
+import { useWorkflows, useSequences } from '@/api/hooks';
+import { headerDescription } from '@/lib/headerCopy';
 
 type AutomationsTab = 'triggers' | 'sequences';
 
 export default function AutomationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab = (searchParams.get('tab') ?? 'triggers') as AutomationsTab;
+  const { data: workflowData } = useWorkflows({ limit: 200 }) as any;
+  const { data: sequenceData } = useSequences({ limit: 200 }) as any;
+  const triggerCount = (workflowData?.data ?? workflowData?.workflows ?? []).length;
+  const sequenceCount = (sequenceData?.data ?? sequenceData?.sequences ?? []).length;
 
   const setTab = (t: AutomationsTab) => {
     const existing = Object.fromEntries(searchParams.entries());
@@ -29,7 +35,9 @@ export default function AutomationsPage() {
         title="Automations"
         icon={Zap}
         iconClassName="text-amber-500"
-        description="Event-driven triggers and multi-step contact journeys"
+        description={tab === 'triggers'
+          ? headerDescription('Run actions when events happen', triggerCount, 'trigger')
+          : headerDescription('Manage multi-step outreach', sequenceCount, 'sequence')}
       />
 
       {/* Email-style tab bar */}

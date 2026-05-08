@@ -48,9 +48,9 @@ export async function updateAssignment(
   patch: Record<string, unknown>,
 ): Promise<Assignment | null> {
   const allowedFields = [
-    'title', 'description', 'priority', 'due_at', 'status',
+    'title', 'description', 'assignment_type', 'assigned_to', 'priority', 'due_at', 'status',
     'context', 'metadata', 'accepted_at', 'completed_at',
-    'completed_by_activity_id',
+    'completed_by_activity_id', 'subject_type', 'subject_id',
   ];
 
   const sets: string[] = ['updated_at = now()'];

@@ -1,12 +1,13 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TopBar } from '@/components/layout/TopBar';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
+import { headerDescription } from '@/lib/headerCopy';
 import {
   useHITLRequests,
   useResolveHITL,
@@ -19,6 +20,8 @@ import {
   useDeclineAssignment,
   useBlockAssignment,
   useCancelAssignment,
+  useBriefing,
+  useHandoffSnapshot,
 } from '@/api/hooks';
 import { toast } from '@/components/ui/use-toast';
 import {
@@ -40,6 +43,9 @@ import {
   LayoutGrid,
   ChevronUp,
   ChevronDown,
+  Mail,
+  FileText,
+  ShieldCheck,
 } from 'lucide-react';
 import { formatDistanceToNow, isPast, parseISO } from 'date-fns';
 
@@ -55,6 +61,11 @@ interface HITLRequest {
   action_summary: string;
   action_payload: Record<string, unknown>;
   status: string;
+  priority?: string;
+  sla_minutes?: number;
+  escalated_at?: string;
+  auto_approve_after?: string;
+  handoff_snapshot_id?: string;
 }
 
 interface Assignment {
@@ -148,6 +159,224 @@ function expiryLabel(iso?: string) {
   } catch { return null; }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function firstString(record: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return undefined;
+}
+
+function firstNumber(record: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  }
+  return undefined;
+}
+
+function labelize(value: string) {
+  return value.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function inferApprovalSubject(req: HITLRequest): { subjectType?: string; subjectId?: string; label?: string } {
+  const payload = isRecord(req.action_payload) ? req.action_payload : {};
+  const subjectType = firstString(payload, ['subject_type', '_subject_type', 'entity_type', 'record_type']);
+  const subjectId = firstString(payload, ['subject_id', '_subject_id', 'entity_id', 'record_id']);
+  if (subjectType && subjectId) return { subjectType, subjectId, label: labelize(subjectType) };
+
+  const keyedSubjects: Array<[string, string[], string[]]> = [
+    ['contact', ['contact_id'], ['contact_name', 'to_name', 'recipient_name']],
+    ['account', ['account_id'], ['account_name', 'company_name']],
+    ['opportunity', ['opportunity_id'], ['opportunity_name']],
+    ['use_case', ['use_case_id', 'useCaseId'], ['use_case_name', 'use_case']],
+  ];
+  for (const [type, idKeys, labelKeys] of keyedSubjects) {
+    const id = firstString(payload, idKeys);
+    if (id) return { subjectType: type, subjectId: id, label: firstString(payload, labelKeys) ?? labelize(type) };
+  }
+  return {};
+}
+
+function findSnapshotId(req: HITLRequest): string | undefined {
+  const payload = isRecord(req.action_payload) ? req.action_payload : {};
+  return req.handoff_snapshot_id ?? firstString(payload, ['handoff_snapshot_id', 'handoffSnapshotId', 'snapshot_id']);
+}
+
+function payloadHighlights(payload: Record<string, unknown>) {
+  const fields: Array<[string, unknown, ReactNode]> = [
+    ['To', firstString(payload, ['to_email', 'recipient_email', 'email']), <Mail className="w-3.5 h-3.5" />],
+    ['Subject', firstString(payload, ['subject', 'email_subject']), <FileText className="w-3.5 h-3.5" />],
+    ['Sequence', firstString(payload, ['sequence_name']), <List className="w-3.5 h-3.5" />],
+    ['Step', stepLabel(payload), <ShieldCheck className="w-3.5 h-3.5" />],
+    ['Objective', firstString(payload, ['objective', 'goal']), <ShieldCheck className="w-3.5 h-3.5" />],
+  ];
+  return fields.filter(([, value]) => value !== undefined && value !== null && String(value).trim() !== '');
+}
+
+function stepLabel(payload: Record<string, unknown>) {
+  const step = firstNumber(payload, ['step_index', 'step']);
+  const total = firstNumber(payload, ['total_steps']);
+  if (step == null && total == null) return undefined;
+  return total ? `${step ?? '?'} of ${total}` : String(step);
+}
+
+function ApprovalPayloadSummary({ payload }: { payload: Record<string, unknown> }) {
+  const [showBody, setShowBody] = useState(false);
+  const body = firstString(payload, ['body_text', 'body', 'message', 'content']);
+  const highlights = payloadHighlights(payload);
+
+  if (highlights.length === 0 && !body) return null;
+
+  return (
+    <div className="mx-4 mb-3 rounded-xl border border-border bg-muted/20 overflow-hidden">
+      {highlights.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3">
+          {highlights.map(([label, value, icon]) => (
+            <div key={label} className="flex items-start gap-2 min-w-0 text-xs">
+              <span className="mt-0.5 text-muted-foreground shrink-0">{icon}</span>
+              <div className="min-w-0">
+                <p className="font-medium text-muted-foreground">{label}</p>
+                <p className="text-foreground truncate">{String(value)}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {body && (
+        <div className="border-t border-border px-3 py-2">
+          <button onClick={() => setShowBody(!showBody)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <ChevronRight className={`w-3.5 h-3.5 transition-transform ${showBody ? 'rotate-90' : ''}`} />Message body
+          </button>
+          {showBody && <p className="mt-2 text-xs leading-relaxed text-foreground whitespace-pre-wrap max-h-40 overflow-y-auto">{body}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HandoffSnapshotPreview({ snapshotId }: { snapshotId: string }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading } = useHandoffSnapshot(open ? snapshotId : null) as any;
+  const snapshot = data;
+
+  return (
+    <div className="mx-4 mb-3 border border-border rounded-xl overflow-hidden">
+      <button
+        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted/50 transition-colors"
+        onClick={() => setOpen(!open)}
+      >
+        <Bot className="w-3.5 h-3.5 text-violet-500" />
+        Agent handoff packet
+        {open ? <ChevronUp className="w-3.5 h-3.5 ml-auto" /> : <ChevronDown className="w-3.5 h-3.5 ml-auto" />}
+      </button>
+      {open && (
+        <div className="px-3 pb-3 space-y-3 border-t border-border bg-muted/20">
+          {isLoading ? (
+            <p className="text-xs text-muted-foreground pt-2">Loading...</p>
+          ) : snapshot ? (
+            <>
+              {snapshot.reasoning && (
+                <div className="pt-2">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Reasoning</p>
+                  <p className="text-xs text-foreground whitespace-pre-wrap">{snapshot.reasoning}</p>
+                </div>
+              )}
+              {snapshot.key_findings?.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1">Key findings</p>
+                  <ul className="space-y-1">
+                    {snapshot.key_findings.slice(0, 5).map((finding: any, index: number) => (
+                      <li key={index} className="flex items-start gap-2 text-xs text-foreground">
+                        <span className="text-muted-foreground shrink-0">
+                          {finding.confidence != null ? `${Math.round(finding.confidence * 100)}%` : '-'}
+                        </span>
+                        <span>{finding.finding}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {snapshot.tools_called?.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Tool trace: <span className="text-foreground font-medium">{snapshot.tools_called.length}</span> calls
+                </p>
+              )}
+              {snapshot.confidence != null && (
+                <p className="text-xs text-muted-foreground">
+                  Overall confidence: <span className="text-foreground font-medium">{Math.round(snapshot.confidence * 100)}%</span>
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground pt-2">Snapshot not found.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BriefingContextPreview({ subject }: { subject: { subjectType?: string; subjectId?: string; label?: string } }) {
+  const hasSubject = !!subject.subjectType && !!subject.subjectId;
+  const { data, isLoading } = useBriefing(subject.subjectType ?? '', subject.subjectId ?? '', {
+    format: 'json',
+    include_stale: true,
+    context_radius: 'adjacent',
+    token_budget: 900,
+  }) as any;
+
+  if (!hasSubject) return null;
+
+  const briefing = data?.briefing ?? data;
+  const contextEntries = isRecord(briefing?.context_entries) ? briefing.context_entries : {};
+  const contextCount = Object.values(contextEntries).reduce<number>(
+    (sum, entries) => sum + (Array.isArray(entries) ? entries.length : 0),
+    0,
+  );
+  const activities = Array.isArray(briefing?.activities) ? briefing.activities.length : 0;
+  const assignments = Array.isArray(briefing?.open_assignments) ? briefing.open_assignments.length : 0;
+  const stale = Array.isArray(briefing?.staleness_warnings) ? briefing.staleness_warnings.length : 0;
+  const contradictions = Array.isArray(briefing?.contradiction_warnings) ? briefing.contradiction_warnings.length : 0;
+  const tokens = typeof briefing?.token_estimate === 'number' ? briefing.token_estimate : undefined;
+
+  return (
+    <div className="mx-4 mb-3 rounded-xl border border-border bg-card px-3 py-2">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <p className="text-xs font-semibold text-foreground">Customer context</p>
+        <span className="text-[11px] text-muted-foreground font-mono truncate">{subject.label ?? labelize(subject.subjectType ?? 'record')}</span>
+      </div>
+      {isLoading ? (
+        <p className="text-xs text-muted-foreground">Loading context...</p>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
+          <Metric label="Context" value={contextCount} />
+          <Metric label="Activity" value={activities} />
+          <Metric label="Open tasks" value={assignments} />
+          <Metric label="Stale" value={stale} tone={stale > 0 ? 'warning' : undefined} />
+          <Metric label="Conflicts" value={contradictions} tone={contradictions > 0 ? 'danger' : undefined} />
+          {tokens != null && <p className="sm:col-span-5 text-[11px] text-muted-foreground">Briefing packed to ~{tokens} tokens.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Metric({ label, value, tone }: { label: string; value: number; tone?: 'warning' | 'danger' }) {
+  const toneClass = tone === 'danger' ? 'text-destructive' : tone === 'warning' ? 'text-amber-600' : 'text-foreground';
+  return (
+    <div>
+      <p className={`font-semibold ${toneClass}`}>{value}</p>
+      <p className="text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
 // ─── HITL Approval Card ──────────────────────────────────────────────────────
 
 function HITLCard({ req }: { req: HITLRequest }) {
@@ -156,6 +385,10 @@ function HITLCard({ req }: { req: HITLRequest }) {
   const [showPayload, setShowPayload] = useState(false);
   const [acting, setActing] = useState<'approve' | 'reject' | null>(null);
   const expiry = expiryLabel(req.expires_at);
+  const autoApprove = expiryLabel(req.auto_approve_after);
+  const payload = isRecord(req.action_payload) ? req.action_payload : {};
+  const subject = inferApprovalSubject(req);
+  const snapshotId = findSnapshotId(req);
 
   async function handle(status: 'approved' | 'rejected') {
     setActing(status === 'approved' ? 'approve' : 'reject');
@@ -177,6 +410,8 @@ function HITLCard({ req }: { req: HITLRequest }) {
           <div className="flex items-center gap-2 flex-wrap mb-1">
             <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-600">Approval Request</span>
             <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground font-mono">{req.action_type}</span>
+            {req.priority && <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_COLORS[req.priority] ?? PRIORITY_COLORS.normal}`}>{req.priority}</span>}
+            {req.escalated_at && <span className="text-xs flex items-center gap-1 text-destructive"><AlertTriangle className="w-3 h-3" />Escalated</span>}
             {expiry && (
               <span className={`text-xs flex items-center gap-1 ${expiry.urgent ? 'text-destructive' : 'text-muted-foreground'}`}>
                 <Clock className="w-3 h-3" />{expiry.label}
@@ -187,14 +422,23 @@ function HITLCard({ req }: { req: HITLRequest }) {
           <p className="text-xs text-muted-foreground mt-0.5">{timeAgo(req.created_at)}</p>
         </div>
       </div>
+      <ApprovalPayloadSummary payload={payload} />
+      <BriefingContextPreview subject={subject} />
+      {snapshotId && <HandoffSnapshotPreview snapshotId={snapshotId} />}
+      {(autoApprove || req.sla_minutes) && (
+        <div className="mx-4 mb-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+          {req.sla_minutes && <span className="px-2 py-1 rounded-lg bg-muted/50">SLA {req.sla_minutes} min</span>}
+          {autoApprove && <span className="px-2 py-1 rounded-lg bg-muted/50">Auto approval {autoApprove.label.toLowerCase()}</span>}
+        </div>
+      )}
       <div className="px-4 pb-2">
         <button onClick={() => setShowPayload(!showPayload)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-          <ChevronRight className={`w-3.5 h-3.5 transition-transform ${showPayload ? 'rotate-90' : ''}`} />View payload
+          <ChevronRight className={`w-3.5 h-3.5 transition-transform ${showPayload ? 'rotate-90' : ''}`} />View raw payload
         </button>
         <AnimatePresence>
           {showPayload && (
             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden">
-              <pre className="mt-2 p-3 rounded-xl bg-muted/50 text-xs text-muted-foreground overflow-x-auto max-h-48">{JSON.stringify(req.action_payload, null, 2)}</pre>
+              <pre className="mt-2 p-3 rounded-xl bg-muted/50 text-xs text-muted-foreground overflow-x-auto max-h-48">{JSON.stringify(payload, null, 2)}</pre>
             </motion.div>
           )}
         </AnimatePresence>
@@ -291,7 +535,7 @@ function AssignmentCard({ task, actorMap }: { task: Assignment; actorMap: Map<st
   );
 }
 
-function ActionBtn({ label, icon, onClick, loading, color }: { label: string; icon: React.ReactNode; onClick: () => void; loading: boolean; color: string }) {
+function ActionBtn({ label, icon, onClick, loading, color }: { label: string; icon: ReactNode; onClick: () => void; loading: boolean; color: string }) {
   const colorMap: Record<string, string> = {
     success:     'bg-success text-white hover:bg-success/90',
     destructive: 'border border-destructive/30 text-destructive hover:bg-destructive/10',
@@ -377,9 +621,9 @@ function AssignmentTableRow({ task, actorMap, index }: { task: Assignment; actor
 
 function EmptyState({ tab }: { tab: Tab }) {
   const copy: Record<Tab, { title: string; sub: string }> = {
-    needs_attention: { title: 'All clear!', sub: 'No approvals or tasks waiting for your action.' },
-    delegated:       { title: 'Nothing delegated', sub: 'Assignments you create will appear here.' },
-    all:             { title: 'Nothing here yet', sub: 'Assignments will appear as they are created.' },
+    needs_attention: { title: 'Handoff queue is clear', sub: 'Agent approvals, escalations, and assigned work that need your action will appear here.' },
+    delegated:       { title: 'Nothing delegated', sub: 'Tasks handed to humans or agents will appear here for follow-through.' },
+    all:             { title: 'No handoffs yet', sub: 'This queue records the agent-to-human loop for approvals, reviews, and delegated tasks.' },
   };
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -503,7 +747,7 @@ export default function InboxPage() {
         title="Handoffs"
         icon={InboxIcon}
         iconClassName="text-destructive"
-        description="Review and respond to agent requests and assignments."
+        description={headerDescription('Review agent requests and assignments', filtered.length, 'handoff')}
       >
         <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           {([{ mode: 'card', icon: LayoutGrid }, { mode: 'table', icon: List }] as const).map(({ mode, icon: Icon }) => (

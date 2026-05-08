@@ -2,9 +2,43 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DbPool } from '../pool.js';
-import type { Activity, UUID, PaginatedResponse } from '@crmy/shared';
+import { validationError, type Activity, type UUID, type PaginatedResponse } from '@crmy/shared';
 
 type ActivityCreateData = Partial<Activity> & { created_by?: UUID };
+
+const activityReferenceTables: Record<NonNullable<Activity['subject_type']>, { table: string; label: string }> = {
+  contact: { table: 'contacts', label: 'contact' },
+  account: { table: 'accounts', label: 'account' },
+  opportunity: { table: 'opportunities', label: 'opportunity' },
+  use_case: { table: 'use_cases', label: 'use case' },
+};
+
+async function assertActivityReference(
+  db: DbPool,
+  tenantId: UUID,
+  type: NonNullable<Activity['subject_type']>,
+  id: UUID,
+  field: string,
+) {
+  const config = activityReferenceTables[type];
+  const result = await db.query(
+    `SELECT 1 FROM ${config.table} WHERE tenant_id = $1 AND id = $2 LIMIT 1`,
+    [tenantId, id],
+  );
+  if (result.rowCount === 0) {
+    throw validationError(`Selected ${config.label} does not exist`, [{ field, message: `Choose an existing ${config.label}` }]);
+  }
+}
+
+async function validateActivityReferences(db: DbPool, tenantId: UUID, data: ActivityCreateData) {
+  if (data.contact_id) await assertActivityReference(db, tenantId, 'contact', data.contact_id, 'contact_id');
+  if (data.account_id) await assertActivityReference(db, tenantId, 'account', data.account_id, 'account_id');
+  if (data.opportunity_id) await assertActivityReference(db, tenantId, 'opportunity', data.opportunity_id, 'opportunity_id');
+  if (data.use_case_id) await assertActivityReference(db, tenantId, 'use_case', data.use_case_id, 'use_case_id');
+  if (data.subject_type && data.subject_id) {
+    await assertActivityReference(db, tenantId, data.subject_type, data.subject_id, 'subject_id');
+  }
+}
 
 function canonicalizeActivitySubject(data: ActivityCreateData): ActivityCreateData {
   const normalized = { ...data };
@@ -46,6 +80,7 @@ export async function createActivity(
   data: ActivityCreateData,
 ): Promise<Activity> {
   const normalized = canonicalizeActivitySubject(data);
+  await validateActivityReferences(db, tenantId, normalized);
   const result = await db.query(
     `INSERT INTO activities (tenant_id, type, subject, body, status, direction,
        due_at, contact_id, account_id, opportunity_id, use_case_id, owner_id,

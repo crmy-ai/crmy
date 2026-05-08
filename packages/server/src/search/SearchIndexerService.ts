@@ -26,7 +26,8 @@ export type IndexableEntityType =
   | 'opportunity'
   | 'use_case'
   | 'activity'
-  | 'context_entry';
+  | 'context_entry'
+  | 'assignment';
 
 interface IndexDoc {
   tenant_id: UUID;
@@ -101,6 +102,7 @@ function normalize(entityType: IndexableEntityType, e: Record<string, unknown>):
     case 'use_case':      return normalizeUseCase(e);
     case 'activity':      return normalizeActivity(e);
     case 'context_entry': return normalizeContextEntry(e);
+    case 'assignment':    return normalizeAssignment(e);
   }
 }
 
@@ -235,6 +237,32 @@ function normalizeContextEntry(e: Record<string, unknown>): IndexDoc {
       subject_id: e.subject_id,
       confidence: e.confidence,
       is_current: e.is_current,
+    },
+  };
+}
+
+function normalizeAssignment(e: Record<string, unknown>): IndexDoc {
+  const secondary = [e.description, e.context, e.assignment_type, e.priority]
+    .filter(Boolean).join(' ');
+
+  return {
+    tenant_id: e.tenant_id as UUID,
+    entity_id: e.id as UUID,
+    primary_name: str(e.title) || 'Assignment',
+    secondary_text: secondary,
+    status: str(e.status) || null,
+    owner_id: (e.assigned_to as UUID) ?? null,
+    metadata: {
+      title: e.title,
+      description: e.description,
+      assignment_type: e.assignment_type,
+      assigned_to: e.assigned_to,
+      assigned_by: e.assigned_by,
+      subject_type: e.subject_type,
+      subject_id: e.subject_id,
+      priority: e.priority,
+      status: e.status,
+      due_at: e.due_at,
     },
   };
 }

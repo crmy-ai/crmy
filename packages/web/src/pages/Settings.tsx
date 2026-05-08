@@ -3,8 +3,8 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
-import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Zap, ListOrdered, GitBranch, Info, Globe } from 'lucide-react';
+import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Zap, ListOrdered, GitBranch, Info, Globe, Terminal, Server, AlertTriangle } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -12,7 +12,7 @@ import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
-import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useWorkflows, useSequences, useSequenceEnrollments } from '@/api/hooks';
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useWorkflows, useSequences, useSequenceEnrollments } from '@/api/hooks';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import AgentSettings from '@/pages/AgentSettings';
 import ActorsSettings from '@/components/settings/ActorsSettings';
@@ -27,7 +27,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Lock,       label: 'API Keys',      path: '/settings/api-keys',     roles: ['member', 'admin', 'owner'] },
   { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'] },
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
-  { icon: Bot,        label: 'Agents',        path: '/settings/agents',       roles: ['admin', 'owner'] },
+  { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'] },
   { icon: Tags,       label: 'Registries',    path: '/settings/registries',   roles: ['admin', 'owner'] },
   { icon: MessageSquare, label: 'Messaging', path: '/settings/messaging',   roles: ['admin', 'owner'] },
   { icon: ShieldCheck, label: 'HITL Rules', path: '/settings/hitl-rules',  roles: ['admin', 'owner'] },
@@ -192,13 +192,15 @@ function ProfileSettings() {
 function AppearanceSettings() {
   const { darkVariant, setDarkVariant } = useAppStore();
   const variants: { key: 'warm' | 'charcoal'; label: string; description: string; preview: string }[] = [
-    { key: 'warm', label: 'Warm Brown', description: 'Dark theme with warm, earthy brown tones', preview: 'bg-[hsl(15,25%,7%)]' },
     { key: 'charcoal', label: 'Charcoal', description: 'Dark theme with cool, navy-charcoal tones', preview: 'bg-[hsl(220,16%,8%)]' },
+    { key: 'warm', label: 'Warm Brown', description: 'Dark theme with warm, earthy brown tones', preview: 'bg-[hsl(15,25%,7%)]' },
   ];
   return (
     <div>
-      <h2 className="font-display font-bold text-lg text-foreground mb-2">Appearance</h2>
-      <p className="text-sm text-muted-foreground mb-6">Choose your preferred dark mode style.</p>
+      <div className="mb-6">
+        <h2 className="font-display font-bold text-lg text-foreground">Appearance</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">Choose your preferred dark mode style.</p>
+      </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-md">
         {variants.map((v) => (
           <button key={v.key} onClick={() => setDarkVariant(v.key)}
@@ -242,16 +244,101 @@ const API_KEY_SCOPE_GROUPS = [
     { value: 'activities:write', label: 'Write' },
   ]},
   { label: 'Assignments', scopes: [
-    { value: 'assignments:create', label: 'Create' },
-    { value: 'assignments:update', label: 'Update' },
+    { value: 'assignments:read', label: 'Read' },
+    { value: 'assignments:write', label: 'Write' },
   ]},
   { label: 'Context', scopes: [
     { value: 'context:read', label: 'Read' },
     { value: 'context:write', label: 'Write' },
   ]},
+  { label: 'HITL', scopes: [
+    { value: 'hitl:read', label: 'Read' },
+    { value: 'hitl:write', label: 'Write' },
+  ]},
+  { label: 'Agent', scopes: [
+    { value: 'agent:read', label: 'Read' },
+    { value: 'agent:write', label: 'Write' },
+  ]},
+  { label: 'Workflows', scopes: [
+    { value: 'workflows:read', label: 'Read' },
+    { value: 'workflows:write', label: 'Write' },
+  ]},
+  { label: 'Messaging', scopes: [
+    { value: 'messaging:read', label: 'Read' },
+    { value: 'messaging:write', label: 'Write' },
+  ]},
+  { label: 'Operations', scopes: [
+    { value: 'ops:read', label: 'Read' },
+    { value: 'ops:write', label: 'Write' },
+    { value: 'privacy:read', label: 'Privacy read' },
+    { value: 'privacy:write', label: 'Privacy write' },
+  ]},
 ];
 
 const ALL_SCOPES = API_KEY_SCOPE_GROUPS.flatMap(g => g.scopes);
+
+const SCOPE_TEMPLATES = [
+  {
+    label: 'Read-only analyst',
+    description: 'Can inspect customers, context, briefings, audit surfaces, and tool results.',
+    scopes: ['read', 'ops:read'],
+  },
+  {
+    label: 'Research agent',
+    description: 'Can read revenue state and write customer context, without changing deals or sending messages.',
+    scopes: ['read', 'context:write', 'agent:read', 'agent:write'],
+  },
+  {
+    label: 'Outreach agent',
+    description: 'Can brief, write context, create activities, and request human approval before sends.',
+    scopes: ['read', 'activities:write', 'context:write', 'hitl:read', 'hitl:write', 'agent:read', 'agent:write'],
+  },
+  {
+    label: 'Workflow operator',
+    description: 'Can inspect and run workflows, assignments, messaging, HITL, and operational queues.',
+    scopes: ['read', 'workflows:read', 'workflows:write', 'assignments:read', 'assignments:write', 'messaging:read', 'messaging:write', 'hitl:read', 'hitl:write', 'ops:read'],
+  },
+  {
+    label: 'Admin operator',
+    description: 'Broad access for trusted operators during setup, migration, or incident response.',
+    scopes: ['read', 'write', 'ops:read', 'ops:write', 'privacy:read', 'privacy:write'],
+  },
+];
+
+function McpSetupCard({
+  icon,
+  title,
+  status,
+  body,
+  snippet,
+  onCopy,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  status: string;
+  body: string;
+  snippet: string;
+  onCopy: (text: string) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">{icon}</span>
+          <div>
+            <p className="text-sm font-semibold text-foreground">{title}</p>
+            <p className="text-xs text-success mt-0.5">{status}</p>
+          </div>
+        </div>
+        <button onClick={() => onCopy(snippet)} className="p-1.5 rounded-lg hover:bg-muted transition-colors" title="Copy">
+          <Copy className="w-3.5 h-3.5 text-muted-foreground" />
+        </button>
+      </div>
+      <p className="text-xs text-muted-foreground mt-3">{body}</p>
+      <code className="block mt-3 rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono text-foreground overflow-x-auto whitespace-nowrap">{snippet}</code>
+    </div>
+  );
+}
 
 function ApiKeysSettings() {
   const { data, isLoading } = useApiKeys();
@@ -414,12 +501,39 @@ function ApiKeysSettings() {
     </div>
   );
 
+  const applyTemplate = (scopes: string[]) => setSelectedScopes(scopes);
+  const applyEditTemplate = (scopes: string[]) => setEditScopes(scopes);
+  const hasBroadWrite = (scopes: string[]) => scopes.includes('write');
+  const copySnippet = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast({ title: 'Copied' });
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
       <div>
         <h2 className="font-display font-bold text-lg text-foreground">API Keys</h2>
         <p className="text-sm text-muted-foreground mt-0.5">Manage access tokens for the CRMy REST API and MCP server.</p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <McpSetupCard
+          icon={<Terminal className="w-4 h-4" />}
+          title="Local stdio MCP"
+          status="Uses crmy init config"
+          body="Best for local IDEs and desktop agents. The CLI reads the config created by init."
+          snippet="claude mcp add crmy -- npx @crmy/cli mcp"
+          onCopy={copySnippet}
+        />
+        <McpSetupCard
+          icon={<Server className="w-4 h-4" />}
+          title="HTTP MCP"
+          status="Requires scoped API key"
+          body="Best for remote agents. Send Authorization: Bearer <API key> to the server MCP endpoint."
+          snippet={`curl -H "Authorization: Bearer $CRMY_API_KEY" http://localhost:3000/mcp`}
+          onCopy={copySnippet}
+        />
       </div>
 
       {/* Revealed key banner */}
@@ -467,6 +581,21 @@ function ApiKeysSettings() {
           </div>
           <div className="space-y-2">
             <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Scopes <span className="text-destructive">*</span></label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+              {SCOPE_TEMPLATES.map(template => (
+                <button key={template.label} onClick={() => applyTemplate(template.scopes)}
+                  className="p-2 rounded-lg border border-border bg-background text-left hover:border-primary/40 hover:bg-primary/5 transition-colors">
+                  <p className="text-xs font-semibold text-foreground">{template.label}</p>
+                  <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{template.description}</p>
+                </button>
+              ))}
+            </div>
+            {hasBroadWrite(selectedScopes) && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
+                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>Broad write grants write access across all write-scoped tools. Prefer a narrower template for production agents.</span>
+              </div>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3">
               {API_KEY_SCOPE_GROUPS.map(group => (
                 <div key={group.label} className="space-y-1.5">
@@ -697,6 +826,21 @@ function ApiKeysSettings() {
                                     <div className="px-4 py-3">
                                       {editingScopes === k.id ? (
                                         <div className="space-y-3">
+                                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+                                            {SCOPE_TEMPLATES.map(template => (
+                                              <button key={template.label} onClick={() => applyEditTemplate(template.scopes)}
+                                                className="p-2 rounded-lg border border-border bg-background text-left hover:border-primary/40 hover:bg-primary/5 transition-colors">
+                                                <p className="text-xs font-semibold text-foreground">{template.label}</p>
+                                                <p className="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">{template.description}</p>
+                                              </button>
+                                            ))}
+                                          </div>
+                                          {hasBroadWrite(editScopes) && (
+                                            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">
+                                              <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                                              <span>Broad write grants write access across all write-scoped tools. Prefer a narrower template for production agents.</span>
+                                            </div>
+                                          )}
                                           {API_KEY_SCOPE_GROUPS.map(group => (
                                             <div key={group.label}>
                                               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">{group.label}</p>
@@ -1044,7 +1188,7 @@ function WebhooksSettings() {
       <div>
         <h2 className="font-display font-bold text-lg text-foreground">Webhooks</h2>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Receive real-time HTTP POST notifications when CRM events occur. Register a URL and choose which events to subscribe to.{' '}
+          Receive real-time HTTP POST notifications when operational events occur. Register a URL and choose which events to subscribe to.{' '}
           <button
             onClick={() => setShowHowItWorks(v => !v)}
             className="inline-flex items-center gap-1 text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
@@ -1680,7 +1824,7 @@ function UserForm({
             ))}
           </select>
           <p className="text-xs text-muted-foreground">
-            {form.role === 'owner' ? 'Full access including billing and account deletion' : form.role === 'admin' ? 'Can manage users, settings, and all data' : 'Can access CRM data only'}
+            {form.role === 'owner' ? 'Full access including billing and account deletion' : form.role === 'admin' ? 'Can manage users, settings, and all data' : 'Can access workspace data only'}
           </p>
         </div>
       </div>
@@ -2227,17 +2371,111 @@ function AutomationSettings() {
   );
 }
 
+type DbProviderId = 'local' | 'neon' | 'lakebase' | 'supabase' | 'rds';
+
+const DB_PROVIDER_GUIDES: Record<DbProviderId, {
+  label: string;
+  fit: string;
+  placeholder: string;
+  steps: string[];
+  pgvector: string;
+}> = {
+  local: {
+    label: 'Local Postgres',
+    fit: 'Best for local development, demos, and offline agent workflows.',
+    placeholder: 'postgresql://postgres:postgres@localhost:5432/crmy',
+    steps: [
+      'Run a Postgres 16 image with pgvector, or use your local Postgres install.',
+      'Create a database named crmy if init did not already create it.',
+      'Use sslmode=disable for local Docker or local Postgres.',
+    ],
+    pgvector: 'Use the pgvector/pgvector Docker image, then enable the extension with CREATE EXTENSION IF NOT EXISTS vector.',
+  },
+  neon: {
+    label: 'Neon',
+    fit: 'Good default for serverless Postgres and branch-per-environment workflows.',
+    placeholder: 'postgresql://user:password@ep-example.us-east-2.aws.neon.tech/neondb?sslmode=require',
+    steps: [
+      'Copy the pooled or direct connection string from Neon Project Settings.',
+      'Keep sslmode=require in the URL.',
+      'Use a project role with permission to create extensions during init/migrations.',
+    ],
+    pgvector: 'Neon supports pgvector. Run CREATE EXTENSION IF NOT EXISTS vector in the target database before semantic search.',
+  },
+  lakebase: {
+    label: 'Lakebase',
+    fit: 'Best when your customer context layer should live near Databricks data.',
+    placeholder: 'postgresql://user:password@instance.database.cloud.databricks.com:5432/crmy?sslmode=require',
+    steps: [
+      'Create a Postgres database instance and copy its connection string.',
+      'Use sslmode=require unless your workspace networking policy says otherwise.',
+      'Confirm the CRMy server can reach the Lakebase endpoint from its network.',
+    ],
+    pgvector: 'If pgvector is available in the instance, enable vector before using semantic search. Otherwise CRMy falls back to keyword search.',
+  },
+  supabase: {
+    label: 'Supabase',
+    fit: 'Good for hosted Postgres with dashboard SQL tools and simple extension management.',
+    placeholder: 'postgresql://postgres:password@db.project-ref.supabase.co:5432/postgres?sslmode=require',
+    steps: [
+      'Copy the direct Postgres connection string from Project Settings > Database.',
+      'Use the database password, not the anon or service API key.',
+      'Keep sslmode=require for hosted Supabase.',
+    ],
+    pgvector: 'Enable the vector extension in Database > Extensions or run CREATE EXTENSION IF NOT EXISTS vector.',
+  },
+  rds: {
+    label: 'Amazon RDS',
+    fit: 'Best for managed enterprise AWS deployments and private-network installs.',
+    placeholder: 'postgresql://user:password@mydb.abc123.us-east-1.rds.amazonaws.com:5432/crmy?sslmode=require',
+    steps: [
+      'Use an RDS for PostgreSQL version that supports the vector extension.',
+      'Open network access from the CRMy server security group to RDS port 5432.',
+      'Use sslmode=require when enforcing encrypted connections.',
+    ],
+    pgvector: 'Install/enable pgvector with CREATE EXTENSION IF NOT EXISTS vector after confirming your RDS engine version supports it.',
+  },
+};
+
+function detectDbProvider(host?: string): DbProviderId {
+  const h = (host ?? '').toLowerCase();
+  if (h.includes('neon.tech')) return 'neon';
+  if (h.includes('supabase.co')) return 'supabase';
+  if (h.includes('rds.amazonaws.com')) return 'rds';
+  if (h.includes('databricks') || h.includes('lakebase')) return 'lakebase';
+  return 'local';
+}
+
 function DatabaseSettings() {
   const { data, isLoading } = useDbConfig();
   const testConfig = useTestDbConfig();
   const saveConfig = useSaveDbConfig();
+  const seedSample = useSeedSampleData();
   const [editing, setEditing] = useState(false);
   const [connStr, setConnStr] = useState('');
+  const [provider, setProvider] = useState<DbProviderId>('local');
   const [testResult, setTestResult] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
   const [testError, setTestError] = useState('');
   const [saveSuccess, setSaveSuccess] = useState('');
+  const [showSeedConfirm, setShowSeedConfirm] = useState(false);
 
-  const dbInfo = data as { host: string; port: string; database: string; user: string; ssl: string | null } | undefined;
+  const dbInfo = data as {
+    host: string;
+    port: string;
+    database: string;
+    user: string;
+    ssl: string | null;
+    pgvector_enabled?: boolean;
+    sample_data?: { seeded: boolean; counts: { accounts: number; contacts: number; opportunities: number; context_entries: number } };
+  } | undefined;
+  const currentProvider = detectDbProvider(dbInfo?.host);
+  const selectedGuide = DB_PROVIDER_GUIDES[provider];
+  const sampleCounts = dbInfo?.sample_data?.counts;
+  const hasWorkspaceData = !!sampleCounts && Object.values(sampleCounts).some(count => count > 0);
+
+  useEffect(() => {
+    setProvider(currentProvider);
+  }, [currentProvider]);
 
   const handleTest = async () => {
     setTestResult('testing');
@@ -2265,19 +2503,45 @@ function DatabaseSettings() {
     }
   };
 
-  return (
-    <div>
-      <h2 className="font-display font-bold text-lg text-foreground mb-2">Database Connection</h2>
-      <p className="text-sm text-muted-foreground mb-6">
-        View and update the PostgreSQL database connection. Changes are saved to <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">.env.db</code> and take effect after a server restart.
-      </p>
+  const handleSeedSample = async () => {
+    try {
+      const result = await seedSample.mutateAsync(true);
+      setShowSeedConfirm(false);
+      toast({ title: 'Sample data added', description: result.message });
+    } catch (err) {
+      toast({ title: 'Failed to add sample data', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+    }
+  };
 
-      <div className="space-y-4 max-w-lg">
+  const copyCommand = (text: string) => {
+    navigator.clipboard.writeText(text);
+    toast({ title: 'Copied' });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="mb-6">
+        <h2 className="font-display font-bold text-lg text-foreground">Database Connection</h2>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Connect CRMy to the Postgres database that stores operational state for agents. Changes are saved to <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">.env.db</code> and take effect after a server restart.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-5">
+        <div className="space-y-4">
         {isLoading ? (
           <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-10 bg-muted/50 rounded-lg animate-pulse" />)}</div>
         ) : (
           <div className="p-4 rounded-xl border border-border bg-card space-y-3">
-            <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider mb-2">Current Connection</p>
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div>
+                <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Current Connection</p>
+                <p className="text-xs text-muted-foreground mt-1">Detected provider: {DB_PROVIDER_GUIDES[currentProvider].label}</p>
+              </div>
+              <span className={`text-xs px-2 py-1 rounded-full border ${dbInfo?.pgvector_enabled ? 'border-success/30 bg-success/5 text-success' : 'border-amber-500/30 bg-amber-500/10 text-amber-700'}`}>
+                pgvector {dbInfo?.pgvector_enabled ? 'enabled' : 'not enabled'}
+              </span>
+            </div>
             {[
               { label: 'Host', value: dbInfo?.host || '—' },
               { label: 'Port', value: dbInfo?.port || '—' },
@@ -2290,6 +2554,9 @@ function DatabaseSettings() {
                 <code className="text-sm font-mono text-foreground">{row.value}</code>
               </div>
             ))}
+            <div className="pt-3 mt-3 border-t border-border text-xs text-muted-foreground">
+              pgvector powers semantic context search and embedding similarity. Without it, CRMy still works, but semantic search falls back to keyword search.
+            </div>
           </div>
         )}
 
@@ -2345,6 +2612,90 @@ function DatabaseSettings() {
             <p className="text-xs text-muted-foreground">Test the connection before saving. Save is only enabled after a successful test.</p>
           </div>
         )}
+        </div>
+
+        <aside className="space-y-4">
+          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+            <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Provider Setup</p>
+            <div className="grid grid-cols-2 gap-2">
+              {(Object.keys(DB_PROVIDER_GUIDES) as DbProviderId[]).map(id => (
+                <button
+                  key={id}
+                  onClick={() => setProvider(id)}
+                  className={`px-3 py-2 rounded-lg border text-xs text-left transition-colors ${provider === id ? 'border-primary bg-primary/5 text-primary' : 'border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}`}
+                >
+                  {DB_PROVIDER_GUIDES[id].label}
+                </button>
+              ))}
+            </div>
+            <div className="space-y-2 pt-1">
+              <p className="text-sm font-semibold text-foreground">{selectedGuide.fit}</p>
+              <code className="block rounded-lg border border-border bg-background p-2 text-xs font-mono text-foreground overflow-x-auto whitespace-nowrap">{selectedGuide.placeholder}</code>
+              <button onClick={() => { setConnStr(selectedGuide.placeholder); setEditing(true); setTestResult('idle'); }}
+                className="text-xs text-primary hover:underline">
+                Use as template
+              </button>
+              <ul className="space-y-1.5">
+                {selectedGuide.steps.map(step => (
+                  <li key={step} className="flex gap-2 text-xs text-muted-foreground">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-success mt-0.5 shrink-0" />
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="rounded-lg border border-blue-500/20 bg-blue-500/8 p-3 text-xs text-blue-700 dark:text-blue-400">
+                {selectedGuide.pgvector}
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+            <div>
+              <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Sample Data</p>
+              <p className="text-xs text-muted-foreground mt-1">If you skipped demo data during init, add a small sample account, contact, opportunity, use case, activity, context entry, and assignment.</p>
+            </div>
+            {sampleCounts && (
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                {[
+                  ['Accounts', sampleCounts.accounts],
+                  ['Contacts', sampleCounts.contacts],
+                  ['Opportunities', sampleCounts.opportunities],
+                  ['Context', sampleCounts.context_entries],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-lg border border-border bg-background px-2 py-1.5">
+                    <span className="text-muted-foreground">{label}</span>
+                    <span className="float-right font-mono text-foreground">{value}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {!showSeedConfirm ? (
+              <button onClick={() => setShowSeedConfirm(true)}
+                className="w-full px-3 py-2 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">
+                Add Sample Data
+              </button>
+            ) : (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-3">
+                <div className="flex gap-2 text-xs text-amber-700">
+                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                  <span>{hasWorkspaceData ? 'This workspace already has records. Sample data is idempotent and will not overwrite existing rows, but it will add demo records.' : 'This will add demo records to the current tenant.'}</span>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={handleSeedSample} disabled={seedSample.isPending}
+                    className="flex-1 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40">
+                    {seedSample.isPending ? 'Adding...' : 'Confirm'}
+                  </button>
+                  <button onClick={() => setShowSeedConfirm(false)} className="flex-1 px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            <button onClick={() => copyCommand('crmy seed-demo')} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+              <Copy className="w-3.5 h-3.5" /> Copy CLI alternative
+            </button>
+          </div>
+        </aside>
       </div>
     </div>
   );
@@ -2623,7 +2974,8 @@ export default function Settings() {
             <Route path="webhooks" element={<RequireRole roles={['admin', 'owner']}><WebhooksSettings /></RequireRole>} />
             <Route path="custom-fields" element={<RequireRole roles={['admin', 'owner']}><CustomFieldsSettings /></RequireRole>} />
             <Route path="registries" element={<RequireRole roles={['admin', 'owner']}><RegistriesSettings /></RequireRole>} />
-            <Route path="agents" element={<RequireRole roles={['admin', 'owner']}><ActorsSettings /></RequireRole>} />
+            <Route path="actors" element={<RequireRole roles={['admin', 'owner']}><ActorsSettings /></RequireRole>} />
+            <Route path="agents" element={<Navigate to="/settings/actors" replace />} />
             <Route path="messaging" element={<RequireRole roles={['admin', 'owner']}><MessagingSettings /></RequireRole>} />
             <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
             <Route path="model" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Search, Filter, X, ChevronDown, Plus, ArrowUpDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ENTITY_GRADIENTS } from '@/lib/entityColors';
 
 export type FilterConfig = {
   key: string;
@@ -32,19 +33,6 @@ interface ListToolbarProps {
   entityType: string;
   searchSuffix?: React.ReactNode;
 }
-
-const ENTITY_GRADIENTS: Record<string, string> = {
-  contacts:      'from-primary to-primary/80',
-  accounts:      'from-[#8b5cf6] to-[#8b5cf6]/80',
-  opportunities: 'from-accent to-accent/80',
-  'use cases':   'from-success to-success/80',
-  activities:    'from-warning to-warning/80',
-  assignments:   'from-destructive to-destructive/80',
-  workflows:     'from-amber-500 to-amber-500/80',
-  sequences:     'from-orange-500 to-orange-500/80',
-  context:       'from-[#0ea5e9] to-[#0ea5e9]/80',
-  emails:        'from-[#3b82f6] to-[#3b82f6]/80',
-};
 
 export function ListToolbar({
   searchValue,

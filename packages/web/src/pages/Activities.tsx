@@ -2,14 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useMemo, useEffect } from 'react';
-import { Activity as ActivityIcon, Plus } from 'lucide-react';
+import { Activity as ActivityIcon } from 'lucide-react';
 import { TopBar } from '@/components/layout/TopBar';
+import { OnboardingEmptyState } from '@/components/crm/OnboardingEmptyState';
 import { useActivities, useActivityTypes } from '@/api/hooks';
 import { ActivityFeed } from '@/components/crm/CrmWidgets';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { DatePicker } from '@/components/ui/date-picker';
+import { headerDescription } from '@/lib/headerCopy';
 
 const BUILT_IN_TYPE_OPTIONS = [
   { value: 'call', label: 'Call' },
@@ -197,7 +199,7 @@ export default function Activities() {
         title="Activities"
         icon={ActivityIcon}
         iconClassName="text-warning"
-        description="Calls, emails, meetings, and tasks."
+        description={headerDescription('Track calls, meetings, notes, and tasks', filtered.length, 'activity', 'activities')}
       />
 
       {/* Time range selector */}
@@ -253,6 +255,23 @@ export default function Activities() {
           <div className="space-y-3 pt-2">
             {[...Array(6)].map((_, i) => <div key={i} className="h-12 bg-muted/50 rounded-xl animate-pulse" />)}
           </div>
+        ) : filtered.length === 0 ? (
+          allActivities.length === 0 && !search && Object.keys(activeFilters).length === 0 ? (
+            <OnboardingEmptyState
+              icon={ActivityIcon}
+              title="Log your first activity"
+              description="Activities capture interactions and the latest customer state."
+              primary={{ label: 'Log Activity', onClick: () => openQuickAdd('activity') }}
+            />
+          ) : (
+            <OnboardingEmptyState
+              icon={ActivityIcon}
+              title="No activities match"
+              description="Adjust filters or time range to find the activity you need."
+              primary={{ label: 'Clear filters', onClick: () => { setSearch(''); setActiveFilters({}); setTimeRange('this_week'); } }}
+              showSampleData={false}
+            />
+          )
         ) : (
           <div className="bg-card border border-border rounded-2xl p-4 shadow-sm">
             <ActivityFeed activities={paginated} />

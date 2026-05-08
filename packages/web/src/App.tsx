@@ -29,6 +29,7 @@ import { useTheme } from '@/hooks/useTheme';
 import { AgentSettingsProvider } from '@/contexts/AgentSettingsContext';
 
 import { LoginPage } from '@/pages/auth/Login';
+import { SetupPage } from '@/pages/auth/Setup';
 import Dashboard from '@/pages/Dashboard';
 import Contacts from '@/pages/Contacts';
 import Accounts from '@/pages/Accounts';
@@ -50,6 +51,8 @@ import SequencesPage from '@/pages/Sequences';
 import AutomationsPage from '@/pages/Automations';
 import InboundInboxPage from '@/pages/InboundInbox';
 import AuditLogPage from '@/pages/AuditLog';
+import OperationsPage from '@/pages/Operations';
+import { SearchResultsPage } from '@/pages/SearchResults';
 
 function ThemeApplier() {
   const { darkVariant } = useAppStore();
@@ -105,11 +108,13 @@ function AnimatedRoutes() {
           <Route path="/workflows"   element={<Navigate to="/automations?tab=triggers"  replace />} />
           <Route path="/sequences"   element={<Navigate to="/automations?tab=sequences" replace />} />
           <Route path="/emails" element={<EmailsPage />} />
-          <Route path="/agents" element={<Navigate to="/settings/agents" replace />} />
-          <Route path="/actors" element={<Navigate to="/settings/agents" replace />} />
+          <Route path="/agents" element={<Navigate to="/settings/actors" replace />} />
+          <Route path="/actors" element={<Navigate to="/settings/actors" replace />} />
           <Route path="/contacts/:id/graph" element={<MemoryGraphPage />} />
           <Route path="/inbound" element={<Navigate to="/emails" replace />} />
+          <Route path="/operations" element={<OperationsPage />} />
           <Route path="/audit-log" element={<AuditLogPage />} />
+          <Route path="/search" element={<SearchResultsPage />} />
           <Route path="/companies/:id/graph" element={<MemoryGraphPage />} />
           <Route path="/accounts/:id/graph" element={<MemoryGraphPage />} />
           <Route path="/agent" element={<Agent />} />
@@ -194,6 +199,7 @@ export function App() {
           <ThemeApplier />
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/setup/:token" element={<SetupPage />} />
             <Route
               path="/*"
               element={

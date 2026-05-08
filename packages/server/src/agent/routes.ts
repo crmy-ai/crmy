@@ -11,6 +11,8 @@ import { encrypt, decrypt } from './crypto.js';
 import { runAgentTurn } from './engine.js';
 import { trimForPersistence, estimateHistoryChars } from './compaction.js';
 import type { AgentEvent, ConversationMessage } from './types.js';
+import { getToolsForActor } from '../mcp/server.js';
+import { getToolScopeRequirements } from '../auth/scopes.js';
 
 function getActor(req: Request): ActorContext {
   return req.actor!;
@@ -364,6 +366,19 @@ export function agentRouter(db: DbPool): Router {
 
   // ─── Activity log (admin: tenant-wide, user: own sessions only) ──────────────
 
+  // GET /agent/tools — MCP tool catalog visible to the current actor
+  router.get('/tools', async (req: Request, res: Response) => {
+    const actor = getActor(req);
+    const tools = getToolsForActor(db, actor).map(tool => ({
+      name: tool.name,
+      tier: tool.tier,
+      required_scopes: getToolScopeRequirements(tool.name),
+      description: tool.description,
+      category: tool.name.split('_')[0] ?? 'tool',
+    }));
+    res.json({ data: tools, total: tools.length });
+  });
+
   // GET /agent/activity — tenant-wide tool call log (admin) or own-session log (user)
   router.get('/activity', async (req: Request, res: Response) => {
     const actor = getActor(req);
@@ -407,4 +422,3 @@ export function agentRouter(db: DbPool): Router {
 
   return router;
 }
-

@@ -549,7 +549,55 @@ export function useEvents(params?: { object_type?: string; event_type?: string; 
 }
 
 // Admin: User Management
-type AdminUser = { id: string; email: string; name: string; role: string; created_at: string; updated_at?: string };
+type AdminUser = {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  is_active?: boolean;
+  invited_at?: string | null;
+  password_set_at?: string | null;
+  last_login_at?: string | null;
+  created_at: string;
+  updated_at?: string;
+};
+
+export interface AdminActorRow {
+  id: string;
+  actor_type: 'human' | 'agent';
+  display_name: string;
+  email?: string | null;
+  phone?: string | null;
+  user_id?: string | null;
+  role?: string | null;
+  agent_identifier?: string | null;
+  agent_model?: string | null;
+  scopes: string[];
+  metadata: Record<string, unknown>;
+  is_active: boolean;
+  availability_status?: 'available' | 'busy' | 'offline';
+  registration_source?: 'admin' | 'self_registered' | 'migration';
+  registration_status?: 'approved' | 'pending_review' | 'rejected';
+  user_email?: string | null;
+  user_name?: string | null;
+  user_role?: string | null;
+  user_is_active?: boolean | null;
+  user_invited_at?: string | null;
+  user_password_set_at?: string | null;
+  user_last_login_at?: string | null;
+  invite_pending?: boolean;
+  api_key_count?: number;
+  last_activity_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function useAdminActors() {
+  return useQuery({
+    queryKey: ['admin-actors'],
+    queryFn: () => api.get<{ data: AdminActorRow[] }>('admin/actors'),
+  });
+}
 
 export function useUsers() {
   return useQuery({
@@ -560,24 +608,84 @@ export function useUsers() {
 export function useCreateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name: string; email: string; password: string; role: string }) =>
-      api.post<AdminUser>('admin/users', data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+    mutationFn: (data: { name: string; email: string; phone?: string; password?: string; role: string; send_invite?: boolean; metadata?: Record<string, unknown> }) =>
+      api.post<AdminUser & { invite?: { setup_url: string; email_sent: boolean; email_error?: string } | null }>('admin/users', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-users'] });
+      qc.invalidateQueries({ queryKey: ['admin-actors'] });
+      qc.invalidateQueries({ queryKey: ['actors'] });
+    },
   });
 }
 export function useUpdateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; name?: string; email?: string; role?: string; password?: string }) =>
+    mutationFn: ({ id, ...data }: { id: string; name?: string; email?: string; role?: string; password?: string; is_active?: boolean }) =>
       api.patch<AdminUser>(`admin/users/${id}`, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-users'] });
+      qc.invalidateQueries({ queryKey: ['admin-actors'] });
+      qc.invalidateQueries({ queryKey: ['actors'] });
+    },
   });
 }
 export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`admin/users/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-users'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-users'] });
+      qc.invalidateQueries({ queryKey: ['admin-actors'] });
+      qc.invalidateQueries({ queryKey: ['actors'] });
+    },
+  });
+}
+
+export function useInviteUser() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ success: boolean; invite: { setup_url: string; email_sent: boolean; email_error?: string } }>(`admin/users/${id}/invite`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-users'] });
+      qc.invalidateQueries({ queryKey: ['admin-actors'] });
+    },
+  });
+}
+
+export function useResetUserPassword() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      api.post<{ success: boolean; reset: { setup_url: string; email_sent: boolean; email_error?: string } }>(`admin/users/${id}/password-reset`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-users'] });
+      qc.invalidateQueries({ queryKey: ['admin-actors'] });
+    },
+  });
+}
+
+export function useApproveActor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; display_name?: string; agent_identifier?: string; agent_model?: string; scopes?: string[]; metadata?: Record<string, unknown>; is_active?: boolean }) =>
+      api.post(`admin/actors/${id}/approve`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-actors'] });
+      qc.invalidateQueries({ queryKey: ['actors'] });
+    },
+  });
+}
+
+export function useRejectActor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      api.post(`admin/actors/${id}/reject`, { reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-actors'] });
+      qc.invalidateQueries({ queryKey: ['actors'] });
+    },
   });
 }
 
@@ -585,7 +693,15 @@ export function useDeleteUser() {
 export function useDbConfig() {
   return useQuery({
     queryKey: ['admin-db-config'],
-    queryFn: () => api.get<{ host: string; port: string; database: string; user: string; ssl: string | null }>('admin/db-config'),
+    queryFn: () => api.get<{
+      host: string;
+      port: string;
+      database: string;
+      user: string;
+      ssl: string | null;
+      pgvector_enabled?: boolean;
+      sample_data?: { seeded: boolean; counts: { accounts: number; contacts: number; opportunities: number; context_entries: number } };
+    }>('admin/db-config'),
   });
 }
 export function useTestDbConfig() {
@@ -599,6 +715,22 @@ export function useSaveDbConfig() {
     mutationFn: (connection_string: string) =>
       api.patch<{ success: boolean; message: string }>('admin/db-config', { connection_string }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-db-config'] }),
+  });
+}
+export function useSeedSampleData() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (confirm: boolean) =>
+      api.post<{ success: boolean; message: string; sample_data: unknown }>('admin/sample-data', { confirm }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-db-config'] });
+      qc.invalidateQueries({ queryKey: ['contacts'] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['opportunities'] });
+      qc.invalidateQueries({ queryKey: ['use-cases'] });
+      qc.invalidateQueries({ queryKey: ['activities'] });
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+    },
   });
 }
 
@@ -678,6 +810,7 @@ export function useUpdateActor() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['actors'] });
       qc.invalidateQueries({ queryKey: ['actor'] });
+      qc.invalidateQueries({ queryKey: ['admin-actors'] });
     },
   });
 }
@@ -811,7 +944,11 @@ export function useContextSearch(query: string, params?: { subject_type?: string
 export function useReviewContextEntry() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.post(`context/${id}/review`, {}),
+    mutationFn: (input: string | { id: string; extend_days?: number }) => {
+      const id = typeof input === 'string' ? input : input.id;
+      const body = typeof input === 'string' ? {} : { extend_days: input.extend_days };
+      return api.post(`context/${id}/review`, body);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['context-entries'] });
       qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
@@ -821,6 +958,68 @@ export function useReviewContextEntry() {
 }
 export function useStaleContextEntries(params?: { subject_type?: string; subject_id?: string; limit?: number }) {
   return useList('context-stale', 'context/stale', params);
+}
+export function useReviewContextBatch() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { entry_ids: string[]; extend_days?: number }) => api.post('context/review-batch', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+      qc.invalidateQueries({ queryKey: ['context-stale'] });
+      qc.invalidateQueries({ queryKey: ['briefing'] });
+    },
+  });
+}
+export function useBulkMarkContextStale() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { entry_ids: string[]; reason?: string }) => api.post('context/mark-stale', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+      qc.invalidateQueries({ queryKey: ['context-stale'] });
+      qc.invalidateQueries({ queryKey: ['briefing'] });
+    },
+  });
+}
+export function useContextContradictions(params?: { subject_type?: string; subject_id?: string; context_type?: string }) {
+  const query = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== '') query.set(k, String(v));
+    });
+  }
+  const enabled = !!params?.subject_type && !!params?.subject_id;
+  return useQuery({
+    queryKey: ['context-contradictions', params],
+    queryFn: () => api.get(`context/contradictions?${query}`),
+    enabled,
+  });
+}
+export function useAssignContextContradictions() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { subject_type: string; subject_id: string; context_type?: string; limit?: number }) =>
+      api.post('context/contradictions/assign', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['assignments'] });
+      qc.invalidateQueries({ queryKey: ['context-contradictions'] });
+    },
+  });
+}
+export function useResolveContextContradiction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { keep_entry_id: string; supersede_entry_id: string; resolution_note: string }) =>
+      api.post('context/contradictions/resolve', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+      qc.invalidateQueries({ queryKey: ['context-contradictions'] });
+      qc.invalidateQueries({ queryKey: ['briefing'] });
+    },
+  });
 }
 
 // Assignment actions (v0.5)
@@ -1059,7 +1258,7 @@ export function useBriefing(subjectType: string, subjectId: string, params?: {
   const searchParams = new URLSearchParams();
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined && v !== '') searchParams.set(k, String(v));
+      if (v !== undefined && String(v) !== '') searchParams.set(k, String(v));
     });
   }
   const qs = searchParams.toString();
@@ -1074,6 +1273,36 @@ export function useBriefing(subjectType: string, subjectId: string, params?: {
 export function useBriefingSummary(subjectType: string, subjectId: string) {
   return useMutation({
     mutationFn: () => api.post<{ summary: string | null }>(`briefing/${subjectType}/${subjectId}/summary`, {}),
+  });
+}
+
+// Operations
+export function useOpsStatus(params?: { sample_limit?: number; include_samples?: boolean }) {
+  const searchParams = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && String(v) !== '') searchParams.set(k, String(v));
+    });
+  }
+  const qs = searchParams.toString();
+  return useQuery({
+    queryKey: ['ops-status', params],
+    queryFn: () => api.get(`ops/status${qs ? `?${qs}` : ''}`),
+    refetchInterval: 30_000,
+  });
+}
+
+export function useOpsDataQuality(params?: { sample_limit?: number; include_clean?: boolean }) {
+  const searchParams = new URLSearchParams();
+  if (params) {
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && String(v) !== '') searchParams.set(k, String(v));
+    });
+  }
+  const qs = searchParams.toString();
+  return useQuery({
+    queryKey: ['ops-data-quality', params],
+    queryFn: () => api.get(`ops/data-quality${qs ? `?${qs}` : ''}`),
   });
 }
 
@@ -1204,6 +1433,21 @@ export interface ActivityFilters {
   since?: string;
   limit?: number;
   cursor?: string;
+}
+
+export interface AgentToolCatalogEntry {
+  name: string;
+  tier: 'core' | 'extended' | 'analytics' | 'admin';
+  required_scopes: string[];
+  description: string;
+  category: string;
+}
+
+export function useAgentToolCatalog() {
+  return useQuery<{ data: AgentToolCatalogEntry[]; total: number }>({
+    queryKey: ['agent-tool-catalog'],
+    queryFn: () => api.get('agent/tools'),
+  });
 }
 
 export function useAgentActivity(filters?: ActivityFilters) {

@@ -1,12 +1,16 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
+import { PaginationBar } from '@/components/crm/PaginationBar';
+import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { STATUS_TONES } from '@/lib/entityColors';
+import { headerDescription } from '@/lib/headerCopy';
 import { useEvents } from '@/api/hooks';
 import {
-  ScrollText, Filter, X, ChevronDown, ChevronUp, Bot, User as UserIcon,
-  Cpu, Clock, RefreshCw, Search,
+  ScrollText, X, ChevronDown, ChevronUp, Bot, User as UserIcon,
+  Cpu, Clock, RefreshCw,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -36,20 +40,20 @@ const ACTOR_TYPE_CONFIG = {
 } as const;
 
 const EVENT_TYPE_COLORS: Record<string, string> = {
-  created:     'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
-  updated:     'text-blue-500 bg-blue-500/10 border-blue-500/20',
-  deleted:     'text-destructive bg-destructive/10 border-destructive/20',
-  completed:   'text-emerald-600 bg-emerald-600/10 border-emerald-600/20',
-  submitted:   'text-amber-500 bg-amber-500/10 border-amber-500/20',
+  created:     STATUS_TONES.success,
+  updated:     STATUS_TONES.info,
+  deleted:     STATUS_TONES.destructive,
+  completed:   STATUS_TONES.success,
+  submitted:   STATUS_TONES.warning,
   resolved:    'text-teal-500 bg-teal-500/10 border-teal-500/20',
-  approved:    'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
-  rejected:    'text-destructive bg-destructive/10 border-destructive/20',
+  approved:    STATUS_TONES.success,
+  rejected:    STATUS_TONES.destructive,
   superseded:  'text-purple-500 bg-purple-500/10 border-purple-500/20',
 };
 
 function eventTypeColor(eventType: string): string {
   const verb = eventType.split('.').pop() ?? '';
-  return EVENT_TYPE_COLORS[verb] ?? 'text-muted-foreground bg-muted border-border';
+  return EVENT_TYPE_COLORS[verb] ?? STATUS_TONES.muted;
 }
 
 function relativeTime(ts: string): string {
@@ -256,7 +260,7 @@ function EventRow({ event }: { event: CrmyEvent }) {
   );
 }
 
-// ─── Filters Bar ──────────────────────────────────────────────────────────────
+// ─── Toolbar Config ───────────────────────────────────────────────────────────
 
 const COMMON_OBJECT_TYPES = [
   'contact', 'account', 'opportunity', 'activity', 'context_entry',
@@ -272,65 +276,29 @@ const COMMON_EVENT_TYPES = [
   'assignment.created', 'assignment.completed',
 ];
 
-function FiltersBar({
-  objectType, setObjectType,
-  eventType, setEventType,
-  actorId, setActorId,
-}: {
-  objectType: string; setObjectType: (v: string) => void;
-  eventType: string;  setEventType:  (v: string) => void;
-  actorId: string;    setActorId:    (v: string) => void;
-}) {
-  const selectCls = 'h-8 px-2 pr-6 rounded-lg border border-border bg-background text-xs text-foreground outline-none focus:ring-1 focus:ring-ring appearance-none cursor-pointer';
-  const inputCls  = 'h-8 px-2 rounded-lg border border-border bg-background text-xs text-foreground outline-none focus:ring-1 focus:ring-ring';
+const filterConfigs: FilterConfig[] = [
+  { key: 'object_type', label: 'Object Type', options: COMMON_OBJECT_TYPES.map(t => ({ value: t, label: t })) },
+  { key: 'event_type', label: 'Event Type', options: COMMON_EVENT_TYPES.map(t => ({ value: t, label: t })) },
+];
 
-  const hasFilters = objectType || eventType || actorId;
-
-  return (
-    <div className="flex flex-wrap gap-2 items-center">
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Filter className="w-3.5 h-3.5" />
-        <span className="font-semibold">Filter</span>
-      </div>
-
-      <select value={objectType} onChange={e => setObjectType(e.target.value)} className={selectCls}>
-        <option value="">All object types</option>
-        {COMMON_OBJECT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-      </select>
-
-      <select value={eventType} onChange={e => setEventType(e.target.value)} className={selectCls}>
-        <option value="">All event types</option>
-        {COMMON_EVENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-      </select>
-
-      <input
-        type="text"
-        value={actorId}
-        onChange={e => setActorId(e.target.value)}
-        placeholder="Actor ID…"
-        className={inputCls}
-        style={{ width: 140 }}
-      />
-
-      {hasFilters && (
-        <button
-          onClick={() => { setObjectType(''); setEventType(''); setActorId(''); }}
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <X className="w-3.5 h-3.5" /> Clear
-        </button>
-      )}
-    </div>
-  );
-}
+const sortOptions: SortOption[] = [
+  { key: 'created_at', label: 'Time' },
+  { key: 'event_type', label: 'Event Type' },
+  { key: 'object_type', label: 'Object Type' },
+  { key: 'actor_type', label: 'Actor Type' },
+];
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function AuditLogPage() {
-  const [objectType, setObjectType] = useState('');
-  const [eventType, setEventType]   = useState('');
+  const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [actorId, setActorId]       = useState('');
   const [q, setQ]                   = useState('');
+  const [sort, setSort]             = useState<{ key: string; dir: 'asc' | 'desc' } | null>({ key: 'created_at', dir: 'desc' });
+  const [page, setPage]             = useState(1);
+  const [pageSize, setPageSize]     = useState(25);
+  const objectType = activeFilters.object_type?.[0] ?? '';
+  const eventType = activeFilters.event_type?.[0] ?? '';
 
   const { data, isLoading, refetch, isFetching } = useEvents({
     object_type: objectType || undefined,
@@ -345,14 +313,51 @@ export default function AuditLogPage() {
   };
 
   const events = data?.data ?? [];
-  const filtered = q
-    ? events.filter(e =>
-        e.event_type.includes(q.toLowerCase()) ||
-        e.object_type.includes(q.toLowerCase()) ||
-        (e.object_id ?? '').startsWith(q.toLowerCase()) ||
-        (e.actor_id ?? '').startsWith(q.toLowerCase())
-      )
-    : events;
+  const filtered = (() => {
+    const query = q.trim().toLowerCase();
+    const result = query
+      ? events.filter(e =>
+          e.event_type.toLowerCase().includes(query) ||
+          e.object_type.toLowerCase().includes(query) ||
+          (e.object_id ?? '').toLowerCase().startsWith(query) ||
+          (e.actor_id ?? '').toLowerCase().startsWith(query) ||
+          (e.actor_display_name ?? '').toLowerCase().includes(query)
+        )
+      : [...events];
+    if (sort) {
+      result.sort((a, b) => {
+        const aVal = (a[sort.key as keyof CrmyEvent] ?? '') as string | number;
+        const bVal = (b[sort.key as keyof CrmyEvent] ?? '') as string | number;
+        if (sort.key === 'created_at') {
+          const aTime = new Date(String(aVal)).getTime();
+          const bTime = new Date(String(bVal)).getTime();
+          return sort.dir === 'asc' ? aTime - bTime : bTime - aTime;
+        }
+        return sort.dir === 'asc'
+          ? String(aVal).localeCompare(String(bVal))
+          : String(bVal).localeCompare(String(aVal));
+      });
+    }
+    return result;
+  })();
+
+  const handleFilterChange = (key: string, values: string[]) => {
+    setActiveFilters(prev => {
+      const next = { ...prev };
+      const value = values.at(-1);
+      if (!value) delete next[key];
+      else next[key] = [value];
+      return next;
+    });
+  };
+
+  const handleSortChange = (key: string) => {
+    setSort(prev => prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  };
+
+  useEffect(() => { setPage(1); }, [objectType, eventType, actorId, q, sort]);
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const hasFilters = q || objectType || eventType || actorId;
 
   return (
     <div className="flex flex-col h-full">
@@ -360,7 +365,7 @@ export default function AuditLogPage() {
         title="Audit Log"
         icon={ScrollText}
         iconClassName="text-violet-400"
-        description={`${data?.total ?? 0} event${(data?.total ?? 0) !== 1 ? 's' : ''} in total`}
+        description={headerDescription('Review system changes', filtered.length, 'event')}
       >
         <button
           onClick={() => refetch()}
@@ -372,34 +377,52 @@ export default function AuditLogPage() {
         </button>
       </TopBar>
 
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6 space-y-4">
-        {/* Filters */}
-        <FiltersBar
-          objectType={objectType} setObjectType={setObjectType}
-          eventType={eventType}   setEventType={setEventType}
-          actorId={actorId}       setActorId={setActorId}
-        />
+      <ListToolbar
+        searchValue={q}
+        onSearchChange={setQ}
+        searchPlaceholder="Search events, object IDs, actor IDs..."
+        filters={filterConfigs}
+        activeFilters={activeFilters}
+        onFilterChange={handleFilterChange}
+        onClearFilters={() => setActiveFilters({})}
+        sortOptions={sortOptions}
+        currentSort={sort}
+        onSortChange={handleSortChange}
+        entityType="context"
+        searchSuffix={
+          <div className="relative hidden md:block w-44">
+            <input
+              type="text"
+              value={actorId}
+              onChange={e => setActorId(e.target.value)}
+              placeholder="Actor ID"
+              className="w-full h-9 px-3 pr-8 rounded-xl border border-border bg-card text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+            />
+            {actorId && (
+              <button onClick={() => setActorId('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1">
+                <X className="w-3.5 h-3.5 text-muted-foreground hover:text-foreground" />
+              </button>
+            )}
+          </div>
+        }
+      />
 
-        {/* Search */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-          <input
-            type="text"
-            value={q}
-            onChange={e => setQ(e.target.value)}
-            placeholder="Search events, object IDs, actor IDs…"
-            className="w-full h-9 pl-9 pr-8 rounded-lg border border-border bg-background text-sm outline-none focus:ring-1 focus:ring-ring"
-          />
-          {q && (
-            <button onClick={() => setQ('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground">
-              <X className="w-3.5 h-3.5" />
+      {actorId && (
+        <div className="md:hidden px-4 pb-2">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-muted text-xs text-foreground">
+            <span className="text-muted-foreground">Actor ID:</span> {actorId}
+            <button onClick={() => setActorId('')} className="ml-0.5 hover:text-destructive p-0.5">
+              <X className="w-3 h-3" />
             </button>
-          )}
+          </span>
         </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">
 
         {/* Event list */}
         {isLoading ? (
-          <div className="space-y-2">
+          <div className="space-y-2 pt-2">
             {[1, 2, 3, 4, 5].map(i => <div key={i} className="h-14 rounded-xl bg-muted/50 animate-pulse" />)}
           </div>
         ) : filtered.length === 0 ? (
@@ -408,19 +431,28 @@ export default function AuditLogPage() {
               <ScrollText className="w-8 h-8 text-violet-400" />
             </div>
             <h2 className="text-lg font-display font-semibold text-foreground mb-1">
-              {q || objectType || eventType || actorId ? 'No matching events' : 'No events yet'}
+              {hasFilters ? 'No matching events' : 'No events yet'}
             </h2>
             <p className="text-sm text-muted-foreground max-w-xs">
-              {q || objectType || eventType || actorId
+              {hasFilters
                 ? 'Try adjusting your filters or search query.'
                 : 'All system events — creates, updates, deletions, HITL decisions — are recorded here automatically.'}
             </p>
+            {hasFilters && (
+              <button
+                onClick={() => { setQ(''); setActorId(''); setActiveFilters({}); }}
+                className="mt-4 h-9 px-4 rounded-xl border border-border bg-card text-sm font-semibold text-foreground hover:border-primary/30 transition-all"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
         ) : (
-          <div className="space-y-2">
-            {filtered.map(event => (
+          <div className="space-y-2 pt-2">
+            {paginated.map(event => (
               <EventRow key={event.id} event={event} />
             ))}
+            <PaginationBar page={page} pageSize={pageSize} total={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
             {data && data.total > events.length && (
               <p className="text-center text-xs text-muted-foreground py-2">
                 Showing {events.length} of {data.total} events. Use filters to narrow results.

@@ -986,7 +986,7 @@ export function ContextBrowser() {
                         {searchMode === 'semantic' && <SimilarityPill value={entry.similarity} />}
                       </div>
                       {entry.body && (
-                        <p className="text-xs text-muted-foreground line-clamp-2 mb-2">{entry.body}</p>
+	                        <p className="text-sm text-muted-foreground line-clamp-2 mb-2">{entry.body}</p>
                       )}
                       <div className="flex items-center gap-3 flex-wrap">
                         {entry.tags?.length > 0 && (
@@ -1255,7 +1255,7 @@ export function ContextBrowser() {
               Add context entry
             </DialogTitle>
             <DialogDescription>
-              Manually record a belief, preference, or note about any CRM object.
+              Manually record a belief, preference, or note about any customer object.
             </DialogDescription>
           </DialogHeader>
 

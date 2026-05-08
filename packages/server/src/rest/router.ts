@@ -7,7 +7,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import crypto from 'node:crypto';
 import type { DbPool } from '../db/pool.js';
-import type { ActorContext } from '@crmy/shared';
+import type { ActorContext, UUID } from '@crmy/shared';
 import { CrmyError } from '@crmy/shared';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as accountRepo from '../db/repos/accounts.js';
@@ -26,6 +26,9 @@ import * as governorLimits from '../db/repos/governor-limits.js';
 import { getSpec } from '../openapi/spec.js';
 import { extractTextFromBuffer } from '../lib/file-extract.js';
 import { resumeEnrollmentAfterHITL } from '../services/sequence-executor.js';
+import { getSampleDataStatus, seedSampleData } from '../services/sample-data.js';
+import { hashPassword } from '../auth/password.js';
+import { buildSetupUrl, createUserAuthToken, sendAuthLifecycleEmail } from '../services/auth-lifecycle.js';
 import { z } from 'zod';
 
 function getActor(req: Request): ActorContext {
@@ -73,12 +76,53 @@ function toolHandler(db: DbPool, toolName: string) {
   };
 }
 
+function adminToolHandler(db: DbPool, toolName: string) {
+  const tools = getAllTools(db);
+  const tool = tools.find(t => t.name === toolName);
+  if (!tool) throw new Error(`Tool ${toolName} not found`);
+  return async (input: unknown, actor: ActorContext) => {
+    if (actor.role !== 'admin' && actor.role !== 'owner') {
+      throw new CrmyError(
+        'PERMISSION_DENIED',
+        'Admin or owner access is required',
+        403,
+      );
+    }
+    return tool.handler(input, actor);
+  };
+}
+
 export function apiRouter(db: DbPool): Router {
   const router = Router();
 
   // --- OpenAPI spec (no auth required) ---
   router.get('/openapi.json', (_req, res) => {
     res.json(getSpec());
+  });
+
+  // --- Operations ---
+  router.get('/ops/status', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = adminToolHandler(db, 'ops_status_get');
+      const result = await handler({
+        sample_limit: qn(req.query.sample_limit, 3),
+        include_samples: req.query.include_samples !== 'false',
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/ops/data-quality', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = adminToolHandler(db, 'ops_data_quality_get');
+      const result = await handler({
+        sample_limit: qn(req.query.sample_limit, 10),
+        include_clean: req.query.include_clean === 'true',
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
   });
 
   // --- Contacts ---
@@ -1695,7 +1739,25 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       const handler = toolHandler(db, 'context_review');
-      const result = await handler({ id: p(req, 'id') }, actor);
+      const result = await handler({ id: p(req, 'id'), extend_days: req.body?.extend_days }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/review-batch', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_review_batch');
+      const result = await handler(req.body, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/mark-stale', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_bulk_mark_stale');
+      const result = await handler(req.body, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -1718,6 +1780,37 @@ export function apiRouter(db: DbPool): Router {
         subject_id: qs(req.query.subject_id),
         limit: Math.min(qn(req.query.limit, 20), 100),
       }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/context/contradictions', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_detect_contradictions');
+      const result = await handler({
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        context_type: qs(req.query.context_type),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/contradictions/assign', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_contradiction_assign');
+      const result = await handler(req.body, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/contradictions/resolve', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_resolve_contradiction');
+      const result = await handler(req.body, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -1926,7 +2019,10 @@ export function apiRouter(db: DbPool): Router {
   router.get('/admin/db-config', async (req: Request, res: Response) => {
     try {
       if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
       const url = process.env.DATABASE_URL ?? '';
+      const pgvectorResult = await db.query("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') as enabled");
+      const sampleData = await getSampleDataStatus(db, actor.tenant_id);
       try {
         const parsed = new URL(url);
         res.json({
@@ -1935,9 +2031,11 @@ export function apiRouter(db: DbPool): Router {
           database: parsed.pathname.slice(1),
           user: parsed.username,
           ssl: parsed.searchParams.get('sslmode') || null,
+          pgvector_enabled: Boolean(pgvectorResult.rows[0]?.enabled),
+          sample_data: sampleData,
         });
       } catch {
-        res.json({ host: '', port: '5432', database: '', user: '', ssl: null });
+        res.json({ host: '', port: '5432', database: '', user: '', ssl: null, pgvector_enabled: Boolean(pgvectorResult.rows[0]?.enabled), sample_data: sampleData });
       }
     } catch (err) { handleError(res, err); }
   });
@@ -1993,15 +2091,110 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.post('/admin/sample-data', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const status = await getSampleDataStatus(db, actor.tenant_id);
+      if (!req.body?.confirm && (status.seeded || Object.values(status.counts).some(count => count > 0))) {
+        res.status(409).json({
+          type: 'https://crmy.ai/errors/confirmation_required',
+          title: 'Confirmation Required',
+          status: 409,
+          detail: 'This workspace already has data. Confirm before adding sample records.',
+          sample_data: status,
+        });
+        return;
+      }
+      const result = await seedSampleData(db, actor.tenant_id);
+      res.json({ success: true, message: 'Sample data added. Existing records were left unchanged.', sample_data: result });
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Admin: User Management ---
   const VALID_ROLES = ['member', 'admin', 'owner'];
+
+  async function issueUserAuthLink(
+    req: Request,
+    actor: ActorContext,
+    user: { id: string; tenant_id: string; email: string; name?: string | null },
+    tokenType: 'invite' | 'password_reset',
+  ): Promise<{ setup_url: string; expires_at: string; email_sent: boolean; email_error?: string }> {
+    const token = await createUserAuthToken(db, {
+      tenant_id: user.tenant_id as UUID,
+      user_id: user.id as UUID,
+      token_type: tokenType,
+      created_by: actor.actor_id as UUID,
+    });
+    const setupUrl = buildSetupUrl(req, token.token);
+    const delivery = await sendAuthLifecycleEmail(db, {
+      tenant_id: user.tenant_id as UUID,
+      to_email: user.email,
+      to_name: user.name,
+      token_type: tokenType,
+      setup_url: setupUrl,
+      expires_at: token.expires_at,
+    });
+
+    await emitEvent(db, {
+      tenantId: actor.tenant_id,
+      eventType: tokenType === 'invite' ? 'user.invite_sent' : 'user.password_reset_sent',
+      actorId: actor.actor_id,
+      actorType: actor.actor_type,
+      objectType: 'user',
+      objectId: user.id as UUID,
+      metadata: { email_sent: delivery.sent, email_error: delivery.error },
+    });
+
+    return {
+      setup_url: setupUrl,
+      expires_at: token.expires_at,
+      email_sent: delivery.sent,
+      email_error: delivery.error,
+    };
+  }
+
+  router.get('/admin/actors', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const result = await db.query(
+        `SELECT a.*,
+                u.email as user_email,
+                u.name as user_name,
+                u.role as user_role,
+                u.is_active as user_is_active,
+                u.invited_at as user_invited_at,
+                u.password_set_at as user_password_set_at,
+                u.last_login_at as user_last_login_at,
+                EXISTS (
+                  SELECT 1 FROM user_auth_tokens t
+                  WHERE t.tenant_id = a.tenant_id
+                    AND t.user_id = u.id
+                    AND t.token_type = 'invite'
+                    AND t.used_at IS NULL
+                    AND t.expires_at > now()
+                ) as invite_pending,
+                (SELECT count(*)::int FROM api_keys ak WHERE ak.tenant_id = a.tenant_id AND ak.actor_id = a.id) as api_key_count,
+                (SELECT max(e.created_at) FROM events e WHERE e.tenant_id = a.tenant_id AND e.actor_id = a.id::text) as last_activity_at
+         FROM actors a
+         LEFT JOIN users u ON u.id = a.user_id AND u.tenant_id = a.tenant_id
+         WHERE a.tenant_id = $1
+         ORDER BY
+           CASE WHEN a.registration_status = 'pending_review' THEN 0 ELSE 1 END,
+           a.created_at DESC`,
+        [actor.tenant_id],
+      );
+      res.json({ data: result.rows });
+    } catch (err) { handleError(res, err); }
+  });
 
   router.get('/admin/users', async (req: Request, res: Response) => {
     try {
       if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const result = await db.query(
-        `SELECT id, email, name, role, created_at, updated_at
+        `SELECT id, email, name, role, is_active, invited_at, password_set_at, last_login_at, created_at, updated_at
          FROM users WHERE tenant_id = $1 ORDER BY created_at ASC`,
         [actor.tenant_id],
       );
@@ -2013,8 +2206,14 @@ export function apiRouter(db: DbPool): Router {
     try {
       if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
-      const { name, email, password, role } = req.body as {
-        name?: string; email?: string; password?: string; role?: string;
+      const { name, email, phone, password, role, send_invite, metadata } = req.body as {
+        name?: string;
+        email?: string;
+        phone?: string;
+        password?: string;
+        role?: string;
+        send_invite?: boolean;
+        metadata?: Record<string, unknown>;
       };
 
       if (!name?.trim()) {
@@ -2025,7 +2224,7 @@ export function apiRouter(db: DbPool): Router {
         res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Valid email is required' });
         return;
       }
-      if (!password || password.length < 8) {
+      if (!send_invite && (!password || password.length < 8)) {
         res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Password must be at least 8 characters' });
         return;
       }
@@ -2038,12 +2237,11 @@ export function apiRouter(db: DbPool): Router {
         return;
       }
 
-      const passwordHash = crypto.createHash('sha256').update(password).digest('hex');
       const result = await db.query(
-        `INSERT INTO users (tenant_id, email, name, role, password_hash)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, email, name, role, created_at`,
-        [actor.tenant_id, email.trim(), name.trim(), role, passwordHash],
+        `INSERT INTO users (tenant_id, email, name, role, password_hash, is_active, invited_at, password_set_at)
+         VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 THEN now() ELSE NULL END, CASE WHEN $7 THEN NULL ELSE now() END)
+         RETURNING id, tenant_id, email, name, role, is_active, invited_at, password_set_at, created_at`,
+        [actor.tenant_id, email.trim(), name.trim(), role, send_invite ? null : hashPassword(password!), !send_invite, Boolean(send_invite)],
       );
 
       // Auto-create linked actor
@@ -2051,11 +2249,29 @@ export function apiRouter(db: DbPool): Router {
         actor_type: 'human',
         display_name: name.trim(),
         email: email.trim(),
+        phone: phone?.trim() || undefined,
         user_id: result.rows[0].id,
         role: role,
+        metadata: metadata ?? {},
+        registration_source: 'admin',
+        registration_status: 'approved',
       });
 
-      res.status(201).json(result.rows[0]);
+      await emitEvent(db, {
+        tenantId: actor.tenant_id,
+        eventType: 'user.created',
+        actorId: actor.actor_id,
+        actorType: actor.actor_type,
+        objectType: 'user',
+        objectId: result.rows[0].id,
+        afterData: { email: email.trim(), name: name.trim(), role, invited: Boolean(send_invite) },
+      });
+
+      const invite = send_invite
+        ? await issueUserAuthLink(req, actor, result.rows[0], 'invite')
+        : null;
+
+      res.status(201).json({ ...result.rows[0], invite });
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
       if (msg.includes('duplicate') || msg.includes('unique')) {
@@ -2071,8 +2287,8 @@ export function apiRouter(db: DbPool): Router {
       if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const userId = p(req, 'id');
-      const { name, email, role, password } = req.body as {
-        name?: string; email?: string; role?: string; password?: string;
+      const { name, email, role, password, is_active } = req.body as {
+        name?: string; email?: string; role?: string; password?: string; is_active?: boolean;
       };
 
       const existing = await db.query(
@@ -2092,6 +2308,20 @@ export function apiRouter(db: DbPool): Router {
         res.status(403).json({ type: 'https://crmy.ai/errors/permission_denied', title: 'Permission Denied', status: 403, detail: 'Only owners can assign the owner role' });
         return;
       }
+      if (is_active === false && userId === actor.actor_id) {
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Invalid Operation', status: 400, detail: 'You cannot deactivate your own account' });
+        return;
+      }
+      if (is_active === false && existing.rows[0].role === 'owner') {
+        const ownerCount = await db.query(
+          `SELECT COUNT(*) FROM users WHERE tenant_id = $1 AND role = 'owner' AND is_active IS NOT FALSE`,
+          [actor.tenant_id],
+        );
+        if (parseInt(ownerCount.rows[0].count) <= 1) {
+          res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Invalid Operation', status: 400, detail: 'Cannot deactivate the last active owner account' });
+          return;
+        }
+      }
       if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Valid email is required' });
         return;
@@ -2106,17 +2336,18 @@ export function apiRouter(db: DbPool): Router {
       if (name?.trim()) { cols.push(`name = $${vals.length + 1}`); vals.push(name.trim()); }
       if (email) { cols.push(`email = $${vals.length + 1}`); vals.push(email.trim()); }
       if (role) { cols.push(`role = $${vals.length + 1}`); vals.push(role); }
+      if (is_active !== undefined) { cols.push(`is_active = $${vals.length + 1}`); vals.push(is_active); }
       if (password) {
-        const hash = crypto.createHash('sha256').update(password).digest('hex');
         cols.push(`password_hash = $${vals.length + 1}`);
-        vals.push(hash);
+        vals.push(hashPassword(password));
+        cols.push(`password_set_at = now()`);
       }
 
       vals.push(userId, actor.tenant_id);
       const result = await db.query(
         `UPDATE users SET ${cols.join(', ')}
          WHERE id = $${vals.length - 1} AND tenant_id = $${vals.length}
-         RETURNING id, email, name, role, created_at, updated_at`,
+         RETURNING id, email, name, role, is_active, invited_at, password_set_at, last_login_at, created_at, updated_at`,
         vals,
       );
 
@@ -2127,6 +2358,7 @@ export function apiRouter(db: DbPool): Router {
         if (name?.trim()) actorPatch.display_name = name.trim();
         if (email) actorPatch.email = email.trim();
         if (role) actorPatch.role = role;
+        if (is_active !== undefined) actorPatch.is_active = is_active;
         if (Object.keys(actorPatch).length > 0) {
           await actorRepo.updateActor(db, actor.tenant_id, linkedActor.id, actorPatch);
         }
@@ -2181,6 +2413,108 @@ export function apiRouter(db: DbPool): Router {
 
       await db.query('DELETE FROM users WHERE id = $1 AND tenant_id = $2', [userId, actor.tenant_id]);
       res.json({ deleted: true });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/admin/users/:id/invite', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const userId = p(req, 'id');
+      const result = await db.query(
+        `UPDATE users
+         SET invited_at = now(),
+             is_active = CASE WHEN password_set_at IS NULL THEN false ELSE is_active END,
+             updated_at = now()
+         WHERE id = $1 AND tenant_id = $2
+         RETURNING id, tenant_id, email, name`,
+        [userId, actor.tenant_id],
+      );
+      if (result.rows.length === 0) {
+        res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'User not found' });
+        return;
+      }
+      const invite = await issueUserAuthLink(req, actor, result.rows[0], 'invite');
+      res.json({ success: true, invite });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/admin/users/:id/password-reset', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const userId = p(req, 'id');
+      const result = await db.query(
+        'SELECT id, tenant_id, email, name FROM users WHERE id = $1 AND tenant_id = $2',
+        [userId, actor.tenant_id],
+      );
+      if (result.rows.length === 0) {
+        res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'User not found' });
+        return;
+      }
+      const reset = await issueUserAuthLink(req, actor, result.rows[0], 'password_reset');
+      res.json({ success: true, reset });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/admin/actors/:id/approve', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const actorId = p(req, 'id');
+      const patch = {
+        display_name: req.body?.display_name,
+        agent_identifier: req.body?.agent_identifier,
+        agent_model: req.body?.agent_model,
+        scopes: Array.isArray(req.body?.scopes) ? req.body.scopes : undefined,
+        metadata: req.body?.metadata,
+        is_active: req.body?.is_active !== false,
+        registration_status: 'approved',
+      };
+      const cleanPatch = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
+      const updated = await actorRepo.updateActor(db, actor.tenant_id, actorId, cleanPatch);
+      if (!updated) {
+        res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'Actor not found' });
+        return;
+      }
+      await emitEvent(db, {
+        tenantId: actor.tenant_id,
+        eventType: 'actor.approved',
+        actorId: actor.actor_id,
+        actorType: actor.actor_type,
+        objectType: 'actor',
+        objectId: actorId,
+        afterData: cleanPatch,
+      });
+      res.json({ actor: updated });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/admin/actors/:id/reject', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const actorId = p(req, 'id');
+      const rejectPatch: Record<string, unknown> = {
+        is_active: false,
+        registration_status: 'rejected',
+      };
+      if (req.body?.reason) rejectPatch.metadata = { rejection_reason: req.body.reason };
+      const updated = await actorRepo.updateActor(db, actor.tenant_id, actorId, rejectPatch);
+      if (!updated) {
+        res.status(404).json({ type: 'https://crmy.ai/errors/not_found', title: 'Not Found', status: 404, detail: 'Actor not found' });
+        return;
+      }
+      await emitEvent(db, {
+        tenantId: actor.tenant_id,
+        eventType: 'actor.rejected',
+        actorId: actor.actor_id,
+        actorType: actor.actor_type,
+        objectType: 'actor',
+        objectId: actorId,
+        metadata: { reason: req.body?.reason },
+      });
+      res.json({ actor: updated });
     } catch (err) { handleError(res, err); }
   });
 

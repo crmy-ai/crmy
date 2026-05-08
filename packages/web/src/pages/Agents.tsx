@@ -5,17 +5,21 @@ import { useState } from 'react';
 import { Bot, List, LayoutGrid } from 'lucide-react';
 import { TopBar } from '@/components/layout/TopBar';
 import ActorsSettings from '@/components/settings/ActorsSettings';
+import { headerDescription } from '@/lib/headerCopy';
+import { useActors } from '@/api/hooks';
 
 export default function ActorsPage() {
   const [view, setView] = useState<'table' | 'cards'>('table');
+  const { data: actorsData } = useActors({ limit: 200 }) as any;
+  const actorCount = Number(actorsData?.total ?? actorsData?.data?.length ?? 0);
 
   return (
     <div className="flex flex-col h-full">
       <TopBar
-        title="Agents"
+        title="Actors"
         icon={Bot}
         iconClassName="text-[#6366f1]"
-        description="Manage humans and AI agents with access to your CRMy workspace."
+        description={headerDescription('Manage humans and AI agents', actorCount, 'actor')}
       >
         <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           <button

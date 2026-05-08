@@ -1,9 +1,10 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useEmails, useCreateEmail, useInboundEmails, useContact } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { motion } from 'framer-motion';
@@ -16,21 +17,23 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { STATUS_TONES } from '@/lib/entityColors';
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
+import { headerDescription } from '@/lib/headerCopy';
 
 // ─── Outbound config ──────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof Mail }> = {
-  draft:            { label: 'Draft',            color: 'bg-muted text-muted-foreground',        icon: FileEdit },
-  pending_approval: { label: 'Pending Approval', color: 'bg-warning/15 text-warning',            icon: Clock },
-  approved:         { label: 'Approved',         color: 'bg-emerald-500/15 text-emerald-500',    icon: CheckCircle2 },
-  sending:          { label: 'Sending',          color: 'bg-blue-500/15 text-blue-500',          icon: Send },
-  sent:             { label: 'Sent',             color: 'bg-emerald-500/15 text-emerald-500',    icon: CheckCircle2 },
-  failed:           { label: 'Failed',           color: 'bg-destructive/15 text-destructive',    icon: AlertCircle },
-  rejected:         { label: 'Rejected',         color: 'bg-destructive/15 text-destructive',    icon: XCircle },
+  draft:            { label: 'Draft',            color: STATUS_TONES.muted,       icon: FileEdit },
+  pending_approval: { label: 'Pending Approval', color: STATUS_TONES.warning,     icon: Clock },
+  approved:         { label: 'Approved',         color: STATUS_TONES.success,     icon: CheckCircle2 },
+  sending:          { label: 'Sending',          color: STATUS_TONES.info,        icon: Send },
+  sent:             { label: 'Sent',             color: STATUS_TONES.success,     icon: CheckCircle2 },
+  failed:           { label: 'Failed',           color: STATUS_TONES.destructive, icon: AlertCircle },
+  rejected:         { label: 'Rejected',         color: STATUS_TONES.destructive, icon: XCircle },
 };
 
 const FILTER_CONFIGS: FilterConfig[] = [
@@ -135,6 +138,8 @@ export default function EmailsPage() {
   const [q, setQ] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeTo, setComposeTo] = useState('');
   const [composeSubject, setComposeSubject] = useState('');
@@ -179,6 +184,11 @@ export default function EmailsPage() {
     );
   }, [inboundEmails, q]);
 
+  useEffect(() => { setPage(1); }, [view, q, activeFilters, sort]);
+
+  const activeList = view === 'outbound' ? filteredOutbound : filteredInbound;
+  const paginated = activeList.slice((page - 1) * pageSize, page * pageSize);
+
   const handleCompose = async (status: string) => {
     if (!composeTo.trim() || !composeSubject.trim()) {
       toast({ title: 'Missing fields', description: 'To and subject are required.', variant: 'destructive' });
@@ -202,6 +212,7 @@ export default function EmailsPage() {
   const isLoading = view === 'outbound' ? outboundLoading : inboundLoading;
   const isEmpty   = view === 'outbound' ? filteredOutbound.length === 0 : filteredInbound.length === 0;
   const totalRaw  = view === 'outbound' ? outboundEmails.length : inboundEmails.length;
+  const activeCount = view === 'outbound' ? filteredOutbound.length : filteredInbound.length;
 
   return (
     <div className="flex flex-col h-full">
@@ -210,8 +221,8 @@ export default function EmailsPage() {
         icon={Mail}
         iconClassName="text-blue-500"
         description={view === 'outbound'
-          ? 'Drafted, pending, and sent emails across the CRM.'
-          : 'Received emails from prospects and customers.'}
+          ? headerDescription('Manage outbound email approvals', activeCount, 'email')
+          : headerDescription('Review received customer emails', activeCount, 'email')}
       />
 
       {/* Tab bar */}
@@ -219,7 +230,7 @@ export default function EmailsPage() {
         {(['outbound', 'inbound'] as View[]).map(v => (
           <button
             key={v}
-            onClick={() => { setView(v); setQ(''); setActiveFilters({}); }}
+            onClick={() => { setView(v); setQ(''); setActiveFilters({}); setPage(1); }}
             className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
               view === v
                 ? 'border-primary text-foreground'
@@ -305,7 +316,7 @@ export default function EmailsPage() {
           </motion.div>
         ) : view === 'outbound' ? (
           <div className="space-y-2">
-            {filteredOutbound.map((email: any, i: number) => {
+	            {paginated.map((email: any, i: number) => {
               const cfg = STATUS_CONFIG[email.status] ?? STATUS_CONFIG.draft;
               const Icon = cfg.icon;
               return (
@@ -331,14 +342,16 @@ export default function EmailsPage() {
                 </motion.div>
               );
             })}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {filteredInbound.map((email: any) => (
-              <InboundRow key={email.id} email={email} />
-            ))}
-          </div>
-        )}
+	            <PaginationBar page={page} pageSize={pageSize} total={filteredOutbound.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
+	          </div>
+	        ) : (
+	          <div className="space-y-2">
+	            {paginated.map((email: any) => (
+	              <InboundRow key={email.id} email={email} />
+	            ))}
+	            <PaginationBar page={page} pageSize={pageSize} total={filteredInbound.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
+	          </div>
+	        )}
       </div>
 
       {/* Compose Dialog */}

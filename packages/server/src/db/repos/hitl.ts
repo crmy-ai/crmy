@@ -17,6 +17,7 @@ export async function createHITLRequest(
     priority?: 'low' | 'normal' | 'high' | 'urgent';
     sla_minutes?: number;
     escalate_to_id?: UUID;
+    handoff_snapshot_id?: UUID;
   },
 ): Promise<HITLRequest> {
   // Evaluate auto-approval rules before inserting
@@ -31,8 +32,8 @@ export async function createHITLRequest(
       `INSERT INTO hitl_requests (tenant_id, agent_id, session_id,
          action_type, action_summary, action_payload,
          auto_approve_after, priority, sla_minutes, escalate_to_id,
-         status, resolved_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, $10, now())
+         handoff_snapshot_id, status, resolved_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8, $9, $10, $11, now())
        RETURNING *`,
       [
         tenantId,
@@ -44,6 +45,7 @@ export async function createHITLRequest(
         data.priority ?? 'normal',
         data.sla_minutes ?? 1440,
         data.escalate_to_id ?? null,
+        data.handoff_snapshot_id ?? null,
         ruleResult.decision === 'approved' ? 'auto_approved' : 'rejected',
       ],
     );
@@ -57,8 +59,8 @@ export async function createHITLRequest(
   const result = await db.query(
     `INSERT INTO hitl_requests (tenant_id, agent_id, session_id,
        action_type, action_summary, action_payload,
-       auto_approve_after, priority, sla_minutes, escalate_to_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       auto_approve_after, priority, sla_minutes, escalate_to_id, handoff_snapshot_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING *`,
     [
       tenantId,
@@ -71,6 +73,7 @@ export async function createHITLRequest(
       data.priority ?? 'normal',
       data.sla_minutes ?? 1440,
       data.escalate_to_id ?? null,
+      data.handoff_snapshot_id ?? null,
     ],
   );
   return result.rows[0] as HITLRequest;

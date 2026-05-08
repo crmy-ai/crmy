@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-/** All known CRM trigger events for workflow autocomplete. */
+/** All known operational trigger events for workflow autocomplete. */
 export const TRIGGER_EVENTS = [
   // Manual
   { value: 'manual',                     label: 'Manual / On Demand',         group: 'Manual'        },
@@ -113,12 +113,12 @@ export const ACTION_TYPES: ActionTypeDef[] = [
       { key: 'recipient',  label: 'Recipient',  placeholder: 'e.g. #channel or @user',                        required: false, type: 'text' },
     ],
   },
-  // ── CRM ───────────────────────────────────────────────────────────────────
+  // ── State ─────────────────────────────────────────────────────────────────
   {
     value: 'create_context_entry',
     label: 'Create context entry',
     description: 'Add a note or insight to the triggered entity\'s knowledge base',
-    group: 'CRM',
+    group: 'State',
     supportsVariables: true,
     configFields: [
       { key: 'body',         label: 'Content',      placeholder: 'Note content. Supports {{variables}}.', required: true,  type: 'textarea', hint: 'Supports {{variables}}' },
@@ -128,8 +128,8 @@ export const ACTION_TYPES: ActionTypeDef[] = [
   {
     value: 'create_activity',
     label: 'Create activity',
-    description: 'Log a CRM activity on the triggered entity',
-    group: 'CRM',
+    description: 'Log an activity on the triggered entity',
+    group: 'State',
     supportsVariables: true,
     configFields: [
       { key: 'type',    label: 'Activity type', placeholder: 'e.g. task, call, email, note',   required: true,  type: 'text' },
@@ -141,7 +141,7 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     value: 'update_field',
     label: 'Update field',
     description: 'Set a field value on the triggered entity',
-    group: 'CRM',
+    group: 'State',
     configFields: [
       { key: 'field', label: 'Field name', placeholder: 'e.g. lifecycle_stage', required: true,  type: 'text' },
       { key: 'value', label: 'New value',  placeholder: 'e.g. customer',        required: true,  type: 'text' },
@@ -151,7 +151,7 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     value: 'add_tag',
     label: 'Add tag',
     description: 'Add a tag to the triggered entity',
-    group: 'CRM',
+    group: 'State',
     configFields: [
       { key: 'tag', label: 'Tag', placeholder: 'e.g. hot-lead', required: true, type: 'text' },
     ],
@@ -160,7 +160,7 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     value: 'remove_tag',
     label: 'Remove tag',
     description: 'Remove a tag from the triggered entity',
-    group: 'CRM',
+    group: 'State',
     configFields: [
       { key: 'tag', label: 'Tag', placeholder: 'e.g. unqualified', required: true, type: 'text' },
     ],
@@ -169,7 +169,7 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     value: 'assign_owner',
     label: 'Assign owner',
     description: 'Set the owner of the triggered entity',
-    group: 'CRM',
+    group: 'State',
     configFields: [
       { key: 'owner_id', label: 'Owner ID', placeholder: 'Actor UUID', required: true, type: 'text' },
     ],
@@ -212,7 +212,7 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     value: 'create_note',
     label: 'Create context entry (legacy)',
     description: 'Deprecated — use "Create context entry" instead',
-    group: 'CRM',
+    group: 'State',
     supportsVariables: true,
     configFields: [
       { key: 'body', label: 'Note body', placeholder: 'Note content. Supports {{variables}}.', required: true, type: 'textarea', hint: 'Supports {{variables}}' },
@@ -221,7 +221,7 @@ export const ACTION_TYPES: ActionTypeDef[] = [
 ];
 
 /** Unique action groups in display order */
-export const ACTION_GROUPS = ['Human', 'Outreach', 'CRM', 'Sequences', 'Developer'] as const;
+export const ACTION_GROUPS = ['Human', 'Outreach', 'State', 'Sequences', 'Developer'] as const;
 export type ActionGroup = typeof ACTION_GROUPS[number];
 
 /** Action types shown to users when creating a new workflow (hide deprecated aliases) */

@@ -13,6 +13,7 @@ import {
   useReactFlow,
   type Node,
   type Edge,
+  type MiniMapNodeProps,
 } from '@xyflow/react';
 import { useMemo, useEffect, useRef, useCallback } from 'react';
 import { useBriefing } from '@/api/hooks';
@@ -313,10 +314,11 @@ function EntityNodeComponent({ data }: { data: any }) {
       <Handle type="target" id="t" position={Position.Top} isConnectable={false} style={nh(30, 30)} />
       <div style={{
         width: 60, height: 60, borderRadius: '50%',
-        backgroundColor: color + '18',
+        backgroundColor: 'hsl(var(--card))',
         border: data.isSelected ? `2px solid ${color}` : `1.5px solid ${color}50`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'border-color 0.15s',
+        transition: 'border-color 0.15s, box-shadow 0.15s',
+        boxShadow: `0 0 0 4px ${color}12`,
       }}>
         <Icon size={22} color={color} strokeWidth={1.75} />
       </div>
@@ -349,10 +351,11 @@ function RelatedNodeComponent({ data }: { data: any }) {
       <Handle type="target" id="t" position={Position.Top} isConnectable={false} style={nh(20, 20)} />
       <div style={{
         width: 40, height: 40, borderRadius: '50%',
-        backgroundColor: color + '15',
+        backgroundColor: 'hsl(var(--card))',
         border: data.isSelected ? `1.5px solid ${color}` : `1px solid ${color}45`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        transition: 'border-color 0.15s',
+        transition: 'border-color 0.15s, box-shadow 0.15s',
+        boxShadow: `0 0 0 3px ${color}10`,
       }}>
         <Icon size={15} color={color} strokeWidth={1.75} />
       </div>
@@ -416,11 +419,10 @@ function LeafNodeComponent({ data }: { data: any }) {
   return (
     <div style={{
       width: 12, height: 12, borderRadius: '50%', position: 'relative',
-      backgroundColor: color + '70',
-      border: data.isSelected ? `1.5px solid ${color}` : `1px solid ${color}50`,
+      backgroundColor: data.isStale ? 'hsl(var(--card))' : color,
+      border: data.isSelected ? `1.5px solid ${color}` : `1px solid ${color}`,
       cursor: 'pointer',
-      transition: 'border-color 0.15s',
-      opacity: data.isStale ? 0.4 : 1,
+      transition: 'border-color 0.15s, background-color 0.15s',
     }}>
       {/* Handles at circle center (12×12 bounding box) */}
       <Handle type="source" id="s" position={Position.Top} isConnectable={false} style={nh(6, 6)} />
@@ -480,6 +482,35 @@ const nodeTypes = {
   activityNode:   ActivityNodeComponent,
   assignmentNode: AssignmentNodeComponent,
 };
+
+function RoundMiniMapNode({
+  id,
+  x,
+  y,
+  width,
+  height,
+  color,
+  strokeColor,
+  strokeWidth,
+  className,
+  selected,
+  onClick,
+}: MiniMapNodeProps) {
+  const radius = Math.max(4, Math.min(width, height) / 2);
+  return (
+    <circle
+      id={id}
+      className={className}
+      cx={x + width / 2}
+      cy={y + height / 2}
+      r={radius}
+      fill={color}
+      stroke={strokeColor}
+      strokeWidth={selected ? Math.max(strokeWidth ?? 0, 2) : strokeWidth}
+      onClick={event => onClick?.(event, id)}
+    />
+  );
+}
 
 // ── FitViewBridge — exposes useReactFlow().fitView via ref ────────────────────
 
@@ -649,6 +680,7 @@ export function MemoryGraph({
         />
         <MiniMap
           position="top-right"
+          nodeComponent={RoundMiniMapNode}
           nodeColor={n => {
             const d = n.data as GraphNodeData;
             return n.hidden ? 'transparent' : (d.color ?? '#94a3b8');

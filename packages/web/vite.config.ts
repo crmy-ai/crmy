@@ -6,7 +6,24 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    {
+      name: 'redirect-app-base',
+      configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+          const pathname = req.url?.split('?')[0];
+          if (pathname === '/app') {
+            res.statusCode = 308;
+            res.setHeader('Location', '/app/');
+            res.end();
+            return;
+          }
+          next();
+        });
+      },
+    },
+    react(),
+  ],
   base: '/app/',
   resolve: {
     alias: {

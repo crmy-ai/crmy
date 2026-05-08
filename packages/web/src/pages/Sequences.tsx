@@ -1,10 +1,11 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TopBar } from '@/components/layout/TopBar';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { PaginationBar } from '@/components/crm/PaginationBar';
 import { VariableAwareField } from '@/components/crm/VariableAwareField';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
@@ -23,6 +24,7 @@ import {
   ChevronRight, MessageSquare, Lightbulb, Variable, Target, Sparkles, Check,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { headerDescription } from '@/lib/headerCopy';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -115,7 +117,7 @@ interface Enrollment {
 export const STEP_TYPES: { value: StepType; label: string; icon: typeof Mail; color: string; desc: string }[] = [
   { value: 'email',        label: 'Email',         icon: Mail,         color: 'text-blue-500',    desc: 'Send a personalized email' },
   { value: 'notification', label: 'Notification',  icon: Bell,         color: 'text-amber-500',   desc: 'Notify a team member' },
-  { value: 'task',         label: 'Task',          icon: ClipboardList,color: 'text-emerald-500', desc: 'Create a CRM task' },
+  { value: 'task',         label: 'Task',          icon: ClipboardList,color: 'text-emerald-500', desc: 'Create an operational task' },
   { value: 'webhook',      label: 'Webhook',       icon: Webhook,      color: 'text-purple-500',  desc: 'Call an external endpoint' },
   { value: 'wait',         label: 'Wait / Gate',   icon: Timer,        color: 'text-sky-500',     desc: 'Pause until a condition is met' },
   { value: 'branch',       label: 'Branch',        icon: GitBranch,    color: 'text-rose-500',    desc: 'Conditional fork based on engagement' },
@@ -370,7 +372,7 @@ export function StepFields({
             <option value="delay">Delay only (use step delay fields above)</option>
             <option value="reply">Contact replies to any email in sequence</option>
             <option value="goal_event">Sequence goal event fires</option>
-            <option value="custom_event">Custom CRM event</option>
+            <option value="custom_event">Custom operational event</option>
           </select>
         </div>
         {step.wait_for === 'custom_event' && (
@@ -1120,6 +1122,8 @@ export default function SequencesPage({ embedded }: { embedded?: boolean } = {})
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const sequences = data?.data ?? [];
   const active = sequences.filter(s => s.is_active).length;
@@ -1185,7 +1189,10 @@ export default function SequencesPage({ embedded }: { embedded?: boolean } = {})
     }
 
     return result;
-  }, [sequences, search, activeFilters, sort]);
+	  }, [sequences, search, activeFilters, sort]);
+
+  useEffect(() => { setPage(1); }, [search, activeFilters, sort]);
+  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <div className={embedded ? 'flex-1 min-h-0 flex flex-col' : 'flex flex-col h-full'}>
@@ -1194,7 +1201,7 @@ export default function SequencesPage({ embedded }: { embedded?: boolean } = {})
           title="Sequences"
           icon={Zap}
           iconClassName="text-orange-500"
-          description={`${sequences.length} sequence${sequences.length !== 1 ? 's' : ''} · ${active} active`}
+          description={`${headerDescription('Manage multi-step outreach', filtered.length, 'sequence')} • ${active.toLocaleString()} active`}
         />
       )}
 
@@ -1227,11 +1234,14 @@ export default function SequencesPage({ embedded }: { embedded?: boolean } = {})
             <Zap className="w-8 h-8 mb-2 opacity-30" />
             <p className="text-sm">No sequences match your search</p>
           </div>
-        ) : (
-          <div className="space-y-3">
-            {filtered.map(seq => <SequenceRow key={seq.id} sequence={seq} />)}
-          </div>
-        )}
+	        ) : (
+	          <>
+	            <div className="space-y-3">
+	              {paginated.map(seq => <SequenceRow key={seq.id} sequence={seq} />)}
+	            </div>
+	            <PaginationBar page={page} pageSize={pageSize} total={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
+	          </>
+	        )}
       </div>
     </div>
   );

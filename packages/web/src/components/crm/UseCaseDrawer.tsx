@@ -10,11 +10,13 @@ import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { Sparkles, Calendar, Bot, DollarSign, Pencil, ChevronLeft, Trash2, FileText } from 'lucide-react';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
+import { ObjectActionBar } from './ObjectActionBar';
 import { CustomFieldsSection } from './CrmWidgets';
 import { ActivityTimeline } from './ActivityTimeline';
 import { useCaseStageConfig } from '@/lib/stageConfig';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
+import { assertReferenceExists } from '@/lib/referenceValidation';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -42,7 +44,7 @@ function UseCaseEditForm({
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   useCase: any;
-  onSave: (data: Record<string, unknown>) => void;
+  onSave: (data: Record<string, unknown>) => void | Promise<void>;
   onCancel: () => void;
   onDelete: () => void;
   isSaving: boolean;
@@ -88,11 +90,21 @@ function UseCaseEditForm({
   const set = (key: string, val: string) => setFields(prev => ({ ...prev, [key]: val }));
   const setCF = (key: string, val: string) => setCustomFieldValues(prev => ({ ...prev, [key]: val }));
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    try {
+      if (fields.opportunity_id) await assertReferenceExists('opportunity', fields.opportunity_id, 'opportunity');
+    } catch (err) {
+      toast({ title: 'Check opportunity link', description: err instanceof Error ? err.message : 'Choose another opportunity.', variant: 'destructive' });
+      return;
+    }
     const payload: Record<string, unknown> = {};
     const numericKeys = ['attributed_arr', 'expansion_potential', 'consumption_capacity'];
     for (const [k, v] of Object.entries(fields)) {
       if (k === 'tags') continue; // handled separately
+      if (k === 'opportunity_id') {
+        payload.opportunity_id = v || null;
+        continue;
+      }
       if (v === '') continue;
       if (numericKeys.includes(k)) payload[k] = Number(v) || 0;
       else payload[k] = v;
@@ -395,6 +407,11 @@ export function UseCaseDrawer() {
           )}
         </div>
       </div>
+
+      <ObjectActionBar
+        context={{ type: 'use-case', id: useCase.id, name, detail: stage }}
+        onBrief={() => setBriefing(true)}
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 p-4 mx-4 mt-4">

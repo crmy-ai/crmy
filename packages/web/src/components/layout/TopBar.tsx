@@ -30,14 +30,16 @@ export function TopBar({ title, icon: Icon, iconClassName, description, badge, c
 
   return (
     <header className="sticky top-0 z-30 flex items-center justify-between h-16 px-4 md:px-6 border-b border-border bg-background/80 backdrop-blur-md gap-2">
-      <div className="hidden md:flex flex-col justify-center min-w-0 shrink">
-        <div className="flex items-center gap-2">
-          {Icon && <Icon className={`w-4.5 h-4.5 flex-shrink-0 ${iconClassName ?? 'text-foreground'}`} />}
+      <div className="hidden md:grid grid-cols-[auto_1fr] items-center gap-x-2 min-w-0 shrink">
+        {Icon && (
+          <Icon className={`row-span-2 w-4.5 h-4.5 flex-shrink-0 self-start mt-1 ${iconClassName ?? 'text-foreground'}`} />
+        )}
+        <div className="flex items-center gap-2 min-w-0">
           <h1 className="font-display font-bold text-lg text-foreground truncate">{title}</h1>
           {badge}
         </div>
         {description && (
-          <p className="text-xs text-muted-foreground truncate mt-0.5">{description}</p>
+          <p className={`text-xs text-muted-foreground truncate mt-0.5 ${Icon ? 'col-start-2' : 'col-span-2'}`}>{description}</p>
         )}
       </div>
       <div className="flex items-center gap-1.5 md:ml-auto w-full md:w-auto">

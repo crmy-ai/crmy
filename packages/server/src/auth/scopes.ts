@@ -136,12 +136,12 @@ const TOOL_SCOPES: Record<string, string[]> = {
   sequence_clone: ['activities:write'],
 
   // ── Webhooks ──
-  webhook_get: ['read'],
-  webhook_list: ['read'],
-  webhook_list_deliveries: ['read'],
-  webhook_create: ['write'],
-  webhook_update: ['write'],
-  webhook_delete: ['write'],
+  webhook_get: ['webhooks:read'],
+  webhook_list: ['webhooks:read'],
+  webhook_list_deliveries: ['webhooks:read'],
+  webhook_create: ['webhooks:write'],
+  webhook_update: ['webhooks:write'],
+  webhook_delete: ['webhooks:write'],
 
   // ── Custom Fields ──
   custom_field_list: ['read'],
@@ -150,17 +150,17 @@ const TOOL_SCOPES: Record<string, string[]> = {
   custom_field_delete: ['write'],
 
   // ── Workflows ──
-  workflow_get: ['read'],
-  workflow_list: ['read'],
-  workflow_run_list: ['read'],
-  workflow_create: ['write'],
-  workflow_update: ['write'],
-  workflow_delete: ['write'],
-  workflow_test: ['read'],
-  workflow_clone: ['write'],
-  workflow_trigger: ['write'],
-  workflow_run_replay: ['write'],
-  workflow_template_list: ['read'],
+  workflow_get: ['workflows:read'],
+  workflow_list: ['workflows:read'],
+  workflow_run_list: ['workflows:read'],
+  workflow_create: ['workflows:write'],
+  workflow_update: ['workflows:write'],
+  workflow_delete: ['workflows:write'],
+  workflow_test: ['workflows:read'],
+  workflow_clone: ['workflows:write'],
+  workflow_trigger: ['workflows:write'],
+  workflow_run_replay: ['workflows:write'],
+  workflow_template_list: ['workflows:read'],
 
   // ── Registries ──
   activity_type_list: ['read'],
@@ -182,45 +182,45 @@ const TOOL_SCOPES: Record<string, string[]> = {
   actor_whoami: [],  // always allowed
 
   // ── HITL ──
-  hitl_check_status: ['read'],
-  hitl_list_pending: ['read'],
-  hitl_submit_request: ['write'],
-  hitl_resolve: ['write'],
-  hitl_rule_create: ['write'],
-  hitl_rule_list: ['read'],
-  hitl_rule_delete: ['write'],
+  hitl_check_status: ['hitl:read'],
+  hitl_list_pending: ['hitl:read'],
+  hitl_submit_request: ['hitl:write'],
+  hitl_resolve: ['hitl:write'],
+  hitl_rule_create: ['hitl:write'],
+  hitl_rule_list: ['hitl:read'],
+  hitl_rule_delete: ['hitl:write'],
 
   // ── Agent handoff ──
-  agent_capture_handoff: ['write'],
-  agent_resume_handoff: ['read', 'write'],
+  agent_capture_handoff: ['agent:write'],
+  agent_resume_handoff: ['agent:read', 'agent:write'],
 
   // ── Analytics / Meta ──
   pipeline_summary: ['opportunities:read'],
   pipeline_forecast: ['opportunities:read'],
   crm_search: ['read'],
   tenant_get_stats: ['read'],
-  ops_status_get: ['read'],
-  ops_job_recover: ['write'],
-  ops_data_quality_get: ['read'],
-  ops_data_quality_repair: ['write'],
-  ops_audit_get: ['read'],
-  ops_privacy_export: ['read'],
-  ops_pii_redact: ['write'],
-  ops_privacy_delete: ['write'],
-  ops_retention_apply: ['write'],
+  ops_status_get: ['ops:read'],
+  ops_job_recover: ['ops:write'],
+  ops_data_quality_get: ['ops:read'],
+  ops_data_quality_repair: ['ops:write'],
+  ops_audit_get: ['ops:read'],
+  ops_privacy_export: ['privacy:read'],
+  ops_pii_redact: ['privacy:write'],
+  ops_privacy_delete: ['privacy:write'],
+  ops_retention_apply: ['ops:write'],
   entity_resolve: [],  // always allowed
   schema_get: [],      // always allowed
   guide_search: [],    // always allowed
 
   // ── Messaging ──
-  message_channel_create: ['write'],
-  message_channel_update: ['write'],
-  message_channel_get: ['read'],
-  message_channel_delete: ['write'],
-  message_channel_list: ['read'],
-  message_send: ['write'],
-  message_delivery_get: ['read'],
-  message_delivery_search: ['read'],
+  message_channel_create: ['messaging:write'],
+  message_channel_update: ['messaging:write'],
+  message_channel_get: ['messaging:read'],
+  message_channel_delete: ['messaging:write'],
+  message_channel_list: ['messaging:read'],
+  message_send: ['messaging:write'],
+  message_delivery_get: ['messaging:read'],
+  message_delivery_search: ['messaging:read'],
 };
 
 /**
@@ -264,6 +264,10 @@ export function enforceToolScopes(toolName: string, actor: ActorContext): void {
       );
     }
   }
+}
+
+export function getToolScopeRequirements(toolName: string): string[] {
+  return TOOL_SCOPES[toolName] ?? [];
 }
 
 /**

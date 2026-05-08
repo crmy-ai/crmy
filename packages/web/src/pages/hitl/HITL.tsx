@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useHITLRequests, useResolveHITL, useHandoffSnapshot } from '@/api/hooks';
+import { headerDescription } from '@/lib/headerCopy';
 
 function AgentContextSection({ snapshotId }: { snapshotId: string }) {
   const [open, setOpen] = useState(false);
@@ -184,7 +185,7 @@ export function HITLPage() {
         title="Approvals"
         icon={ShieldCheck}
         iconClassName="text-destructive"
-        description="Human-in-the-loop approvals for agent actions."
+        description={headerDescription('Review agent action approvals', requests.length, 'approval')}
       />
 
       {/* Filter tabs */}

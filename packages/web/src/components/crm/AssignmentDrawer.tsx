@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { DatePicker } from '@/components/ui/date-picker';
 import { toast } from '@/components/ui/use-toast';
+import { EntityCombobox } from '@/components/ui/entity-combobox';
+import { assertSubjectReference, normalizeSubjectLink } from '@/lib/referenceValidation';
 
 // ─── Agent Context Section (reused from HITL page) ────────────────────────────
 
@@ -125,7 +127,7 @@ function AssignmentEditForm({
 }: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   assignment: any;
-  onSave: (data: Record<string, unknown>) => void;
+  onSave: (data: Record<string, unknown>) => void | Promise<void>;
   onCancel: () => void;
   isSaving: boolean;
 }) {
@@ -142,13 +144,22 @@ function AssignmentEditForm({
 
   const set = (key: string, val: string) => setFields(prev => ({ ...prev, [key]: val }));
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const payload: Record<string, unknown> = { ...fields };
     if (!payload.due_at) delete payload.due_at;
     if (!payload.context) delete payload.context;
     if (!payload.description) delete payload.description;
-    if (!payload.subject_type) { delete payload.subject_type; delete payload.subject_id; }
-    else if (!payload.subject_id) delete payload.subject_id;
+    normalizeSubjectLink(payload);
+    if (!fields.subject_type && !fields.subject_id) {
+      payload.subject_type = null;
+      payload.subject_id = null;
+    }
+    try {
+      await assertSubjectReference(payload.subject_type as string | undefined, payload.subject_id as string | undefined);
+    } catch (err) {
+      toast({ title: 'Check linked record', description: err instanceof Error ? err.message : 'Choose another linked record.', variant: 'destructive' });
+      return;
+    }
     if (payload.due_at) payload.due_at = new Date(payload.due_at as string).toISOString();
     onSave(payload);
   };
@@ -204,13 +215,12 @@ function AssignmentEditForm({
         </div>
         {fields.subject_type && (
           <div className="space-y-1.5">
-            <label className={labelClass}>Subject ID</label>
-            <input
-              type="text"
+            <label className={labelClass}>Record</label>
+            <EntityCombobox
+              entityType={fields.subject_type as 'account' | 'contact' | 'opportunity' | 'use_case'}
               value={fields.subject_id}
-              onChange={e => set('subject_id', e.target.value)}
-              placeholder="Record ID"
-              className={inputClass}
+              onChange={v => set('subject_id', v)}
+              placeholder={`Select ${fields.subject_type.replace('_', ' ')}...`}
             />
           </div>
         )}

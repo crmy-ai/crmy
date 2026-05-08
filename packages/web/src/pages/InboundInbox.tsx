@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { useInboundEmails, useContact } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
+import { headerDescription } from '@/lib/headerCopy';
 import {
   Inbox, Mail, User, ArrowDownLeft, Brain, Clock, RefreshCw, Search, X,
 } from 'lucide-react';
@@ -176,7 +177,7 @@ export default function InboundInboxPage() {
         title="Inbound Inbox"
         icon={Inbox}
         iconClassName="text-blue-500"
-        description={`${data?.total ?? 0} received email${(data?.total ?? 0) !== 1 ? 's' : ''}`}
+        description={headerDescription('Review received customer emails', filtered.length, 'email')}
       >
         <button
           onClick={() => refetch()}

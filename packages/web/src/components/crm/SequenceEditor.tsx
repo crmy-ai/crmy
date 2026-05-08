@@ -84,7 +84,7 @@ function SettingsPanel({
       <div>
         <label className={labelCls}>Goal event</label>
         <p className="text-xs text-muted-foreground mb-1.5">
-          When this CRM event fires for the contact, the sequence auto-completes.
+          When this operational event fires for the contact, the sequence auto-completes.
         </p>
         <select
           value={goalEvent}

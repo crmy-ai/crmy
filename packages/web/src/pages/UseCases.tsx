@@ -4,6 +4,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
+import { OnboardingEmptyState } from '@/components/crm/OnboardingEmptyState';
 import { useUseCases } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
@@ -13,6 +14,7 @@ import { motion } from 'framer-motion';
 import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown, FolderKanban } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useCaseStageConfig } from '@/lib/stageConfig';
+import { headerDescription } from '@/lib/headerCopy';
 
 type ViewMode = 'kanban' | 'table' | 'dashboard';
 const kanbanStages = ['discovery', 'poc', 'production', 'scaling', 'sunset'];
@@ -146,7 +148,7 @@ export default function UseCases() {
         title="Use Cases"
         icon={FolderKanban}
         iconClassName="text-success"
-        description="Customer use cases and deployment tracking."
+        description={headerDescription('Track customer goals and deployments', filtered.length, 'use case')}
       >
         <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           {[
@@ -272,20 +274,22 @@ export default function UseCases() {
         ) : view === 'table' ? (
           <div className="px-4 md:px-6">
             {filtered.length === 0 ? (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20 text-center">
-                <FolderKanban className="w-14 h-14 text-muted-foreground/30 mb-4" />
-                <p className="text-base font-display font-semibold text-foreground mb-1">
-                  {allUseCases.length === 0 ? 'No use cases yet' : 'No matches'}
-                </p>
-                <p className="text-sm text-muted-foreground max-w-sm">
-                  {allUseCases.length === 0
-                    ? 'Create a use case to track customer deployments and adoption.'
-                    : 'Try adjusting your search, filters, or date range.'}
-                </p>
-                {(search || Object.keys(activeFilters).length > 0 || prodDate !== 'all') && (
-                  <button onClick={() => { setSearch(''); setActiveFilters({}); setProdDate('all'); }} className="mt-3 text-xs text-primary font-semibold hover:underline">Clear all filters</button>
-                )}
-              </motion.div>
+              allUseCases.length === 0 && !search && Object.keys(activeFilters).length === 0 ? (
+                <OnboardingEmptyState
+                  icon={FolderKanban}
+                  title="Create your first use case"
+                  description="Use cases connect goals, stage, health, and adoption context."
+                  primary={{ label: 'New Use Case', onClick: () => openQuickAdd('use-case') }}
+                />
+              ) : (
+                <OnboardingEmptyState
+                  icon={FolderKanban}
+                  title="No use cases match"
+                  description="Adjust the search, filters, or production date to find the use case you need."
+                  primary={{ label: 'Clear filters', onClick: () => { setSearch(''); setActiveFilters({}); setProdDate('all'); } }}
+                  showSampleData={false}
+                />
+              )
             ) : (
               <div className="bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
                 <div className="overflow-x-auto">

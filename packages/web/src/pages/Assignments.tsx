@@ -23,6 +23,7 @@ import { toast } from '@/components/ui/use-toast';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DatePicker } from '@/components/ui/date-picker';
+import { headerDescription } from '@/lib/headerCopy';
 
 type Tab = 'mine' | 'delegated' | 'all';
 type DrawerType = 'contact' | 'opportunity' | 'use-case' | 'account' | 'assignment';
@@ -388,7 +389,7 @@ export default function AssignmentsPage() {
         title="Assignments"
         icon={ClipboardList}
         iconClassName="text-destructive"
-        description="Task queue and handoffs between agents and humans."
+        description={headerDescription('Review task queue and handoffs', assignments.length, 'assignment')}
       />
 
       {/* Tabs */}

@@ -11,6 +11,7 @@ import { toast } from '@/components/ui/use-toast';
 import { DatePicker, DateTimePicker } from '@/components/ui/date-picker';
 import { DuplicateWarning, type DuplicateCandidate } from '@/components/crm/DuplicateWarning';
 import { ApiError } from '@/api/client';
+import { assertReferenceExists, assertSubjectReference, normalizeSubjectLink, trimStringPayload } from '@/lib/referenceValidation';
 
 const typeLabels: Record<string, string> = {
   contact: 'Contact',
@@ -175,7 +176,7 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
       setChatDuplicates(null);
       setChatPendingFields(null);
       setConfirmed(true);
-      toast({ title: `${typeLabels[type]} created!`, description: 'Successfully added to your CRM.' });
+      toast({ title: `${typeLabels[type]} created!`, description: 'Added to operational state. Next: open it for a briefing or audit trail.' });
       setTimeout(onClose, 1200);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409 && err.candidates.length > 0) {
@@ -336,7 +337,7 @@ type FieldConfig = {
   label: string;
   placeholder?: string;
   inputType?: 'text' | 'email' | 'tel' | 'number' | 'date' | 'url' | 'datetime-local';
-  fieldType?: 'textarea' | 'select' | 'account-select' | 'subject-type-select' | 'entity-select' | 'datalist' | 'actor-select';
+  fieldType?: 'textarea' | 'select' | 'account-select' | 'contact-select' | 'opportunity-select' | 'subject-type-select' | 'entity-select' | 'datalist' | 'actor-select';
   options?: string[];
   datalistId?: string;
   suggestions?: string[];
@@ -351,10 +352,12 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
     { key: 'email', label: 'Email', placeholder: 'email@example.com', inputType: 'email' },
     { key: 'phone', label: 'Phone', placeholder: '(555) 123-4567', inputType: 'tel' },
     { key: 'company_name', label: 'Company', placeholder: 'Company name' },
+    { key: 'account_id', label: 'Existing Account', fieldType: 'account-select' },
   ],
   opportunity: [
     { key: 'name', label: 'Opportunity Name', placeholder: 'e.g. Acme Enterprise', required: true },
-    { key: 'account_id', label: 'Company', fieldType: 'account-select' },
+    { key: 'account_id', label: 'Account', fieldType: 'account-select' },
+    { key: 'contact_id', label: 'Primary Contact', fieldType: 'contact-select' },
     { key: 'amount', label: 'Amount ($)', placeholder: '850000', inputType: 'number' },
     { key: 'close_date', label: 'Close Date', inputType: 'date' },
     { key: 'description', label: 'Description', placeholder: 'Optional notes', fieldType: 'textarea' },
@@ -362,6 +365,7 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
   'use-case': [
     { key: 'name', label: 'Name', placeholder: 'e.g. Corporate Relocation', required: true },
     { key: 'account_id', label: 'Account', fieldType: 'account-select', required: true },
+    { key: 'opportunity_id', label: 'Opportunity', fieldType: 'opportunity-select' },
     { key: 'stage', label: 'Stage', fieldType: 'select', options: ['discovery', 'poc', 'production', 'scaling', 'sunset'] },
     { key: 'attributed_arr', label: 'Attributed ARR ($)', placeholder: '120000', inputType: 'number' },
     { key: 'target_prod_date', label: 'Target Prod Date', inputType: 'date' },
@@ -370,9 +374,11 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
   activity: [
     { key: 'type', label: 'Type', fieldType: 'select', options: ['call', 'email', 'meeting', 'note', 'task', 'demo', 'proposal', 'research', 'handoff', 'status_update'], required: true},
     { key: 'subject', label: 'Subject', placeholder: 'What was this activity about?', required: true },
-    { key: 'subject_type', label: 'Linked To', fieldType: 'subject-type-select', placeholder: 'Link to a CRM record (optional)' },
+    { key: 'subject_type', label: 'Linked To', fieldType: 'subject-type-select', placeholder: 'Link to a customer object (optional)' },
     { key: 'subject_id', label: 'Record', fieldType: 'entity-select', dependsOn: { key: 'subject_type' } },
+    { key: 'direction', label: 'Direction', fieldType: 'select', options: ['inbound', 'outbound'] },
     { key: 'occurred_at', label: 'When', inputType: 'datetime-local', placeholder: 'When did this happen?' },
+    { key: 'duration_minutes', label: 'Duration (minutes)', placeholder: '30', inputType: 'number' },
     { key: 'outcome', label: 'Outcome', fieldType: 'datalist', datalistId: 'outcome-suggestions', suggestions: ['connected', 'voicemail', 'positive', 'negative', 'neutral', 'no_show', 'follow_up_needed'], placeholder: 'e.g. connected, positive, voicemail' },
     { key: 'body', label: 'Notes', placeholder: 'Additional details...', fieldType: 'textarea' },
   ],
@@ -461,27 +467,39 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
 
   const buildPayload = (): Record<string, unknown> => {
     const payload: Record<string, unknown> = { ...fields };
+    trimStringPayload(payload);
     if (type === 'contact') delete payload.name;
     if (type === 'opportunity') { if (fields.amount) payload.amount = parseFloat(fields.amount) || 0; payload.stage = 'prospecting'; }
     if (type === 'use-case') { if (!payload.stage) payload.stage = 'discovery'; if (fields.attributed_arr) payload.attributed_arr = parseFloat(fields.attributed_arr) || 0; }
-    if (type === 'account' && fields.website) payload.website = fields.website.startsWith('http') ? fields.website : `https://${fields.website}`;
+    if (type === 'account' && typeof payload.website === 'string') {
+      payload.website = payload.website.startsWith('http') ? payload.website : `https://${payload.website}`;
+    }
     if (type === 'activity') {
       if (fields.occurred_at) payload.occurred_at = new Date(fields.occurred_at).toISOString();
-      if (!fields.subject_type) { delete payload.subject_type; delete payload.subject_id; }
-      if (!fields.subject_id) delete payload.subject_id;
-      if (!fields.outcome) delete payload.outcome;
-      if (!fields.occurred_at) delete payload.occurred_at;
+      normalizeSubjectLink(payload);
+      if (fields.duration_minutes) {
+        const duration = parseInt(fields.duration_minutes, 10);
+        if (Number.isFinite(duration) && duration > 0) payload.detail = { duration_minutes: duration };
+      }
+      delete payload.duration_minutes;
     }
     if (type === 'assignment') {
       if (fields.due_at) payload.due_at = new Date(fields.due_at + 'T00:00:00').toISOString();
-      if (!fields.subject_type) { delete payload.subject_type; delete payload.subject_id; }
-      if (!fields.subject_id) delete payload.subject_id;
-      if (!fields.context) delete payload.context;
-      if (!fields.description) delete payload.description;
+      normalizeSubjectLink(payload);
       if (!fields.due_at) delete payload.due_at;
       if (!fields.priority) payload.priority = 'normal';
     }
     return payload;
+  };
+
+  const validateReferences = async (payload: Record<string, unknown>) => {
+    if (typeof payload.account_id === 'string') await assertReferenceExists('account', payload.account_id, 'account');
+    if (typeof payload.contact_id === 'string') await assertReferenceExists('contact', payload.contact_id, 'contact');
+    if (typeof payload.opportunity_id === 'string') await assertReferenceExists('opportunity', payload.opportunity_id, 'opportunity');
+    if (typeof payload.assigned_to === 'string') await assertReferenceExists('actor', payload.assigned_to, 'assignee');
+    if (type === 'activity' || type === 'assignment') {
+      await assertSubjectReference(payload.subject_type as string | undefined, payload.subject_id as string | undefined);
+    }
   };
 
   const executeCreate = async (payload: Record<string, unknown>) => {
@@ -492,7 +510,7 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
     else if (type === 'activity') await createActivity.mutateAsync(payload);
     else if (type === 'assignment') await createAssignment.mutateAsync(payload);
     const label = fields.first_name ?? fields.title ?? fields.name ?? fields.subject ?? typeLabels[type];
-    toast({ title: `${typeLabels[type]} created`, description: `${label} has been added.` });
+    toast({ title: `${typeLabels[type]} created`, description: `${label} has been added. Open the record for briefing, context, and audit actions.` });
     onClose();
   };
 
@@ -501,6 +519,7 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
     setIsSubmitting(true);
     const payload = buildPayload();
     try {
+      await validateReferences(payload);
       await executeCreate(payload);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409 && err.candidates.length > 0) {
@@ -584,6 +603,20 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
                 value={fields[f.key] || ''}
                 onChange={(v) => set(f.key, v)}
                 placeholder="Select company…"
+              />
+            ) : f.fieldType === 'contact-select' ? (
+              <EntityCombobox
+                entityType="contact"
+                value={fields[f.key] || ''}
+                onChange={(v) => set(f.key, v)}
+                placeholder="Select contact…"
+              />
+            ) : f.fieldType === 'opportunity-select' ? (
+              <EntityCombobox
+                entityType="opportunity"
+                value={fields[f.key] || ''}
+                onChange={(v) => set(f.key, v)}
+                placeholder="Select opportunity…"
               />
             ) : f.fieldType === 'subject-type-select' ? (
               <select

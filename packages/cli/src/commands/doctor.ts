@@ -85,8 +85,8 @@ export function doctorCommand(): Command {
 
           // ── Check 4: Migrations up to date ────────────────────────────────
           try {
-            const { getMigrationStatus } = await import('@crmy/server/db/migrate');
-            const status = await (getMigrationStatus as (db: typeof db) => Promise<{ applied: string[]; pending: string[] }>)(db);
+            const { getMigrationStatus } = await import('@crmy/server');
+            const status = await getMigrationStatus(db);
             if (status.pending.length === 0) {
               pass(`Migrations up to date (${status.applied.length} applied)`);
               passed++;
