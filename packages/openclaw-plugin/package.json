@@ -1,7 +1,7 @@
 {
   "name": "@crmy/openclaw-plugin",
   "version": "0.7.2",
-  "description": "CRMy plugin for OpenClaw — expose customer context tools in any AI assistant running OpenClaw",
+  "description": "CRMy plugin for OpenClaw — expose customer context, typed revenue objects, HITL handoffs, and audit-safe writes",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -27,10 +27,12 @@
   "license": "Apache-2.0",
   "keywords": [
     "openclaw",
-    "crm",
+    "customer-context",
+    "operational-state",
     "mcp",
     "crmy",
-    "plugin"
+    "plugin",
+    "agents"
   ],
   "repository": {
     "type": "git",

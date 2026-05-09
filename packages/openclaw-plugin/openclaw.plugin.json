@@ -1,16 +1,16 @@
 {
   "id": "crmy",
-  "name": "CRMy — Agent-first CRM",
+  "name": "CRMy — Customer Context Engine",
   "configSchema": {
     "type": "object",
     "properties": {
       "serverUrl": {
         "type": "string",
-        "description": "CRMy server URL. Defaults to the value in ~/.crmy/config.json, then http://localhost:3000."
+        "description": "CRMy server URL. Defaults to .crmy.json, ~/.crmy/config.json, auth state, then http://localhost:3000."
       },
       "apiKey": {
         "type": "string",
-        "description": "CRMy API key (starts with crmy_). Defaults to the value in ~/.crmy/config.json."
+        "description": "CRMy API key or login token. Defaults to CRMY_API_KEY, .crmy.json, ~/.crmy/config.json, then ~/.crmy/auth.json."
       }
     }
   },
@@ -20,8 +20,8 @@
       "placeholder": "http://localhost:3000"
     },
     "apiKey": {
-      "label": "API Key",
-      "placeholder": "crmy_..."
+      "label": "API Key or Token",
+      "placeholder": "crmy_... or login token"
     }
   }
 }

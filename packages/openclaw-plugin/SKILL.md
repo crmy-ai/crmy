@@ -1,278 +1,280 @@
 ---
 name: crmy
-description: CRMy agent — manages contacts, accounts, deals, and pipeline. Search before creating. Log every meaningful interaction. Always suggest a next step.
+description: CRMy context engine for OpenClaw — brief customer records, search and update typed revenue objects, log activities, manage context, create handoffs, and route HITL approvals.
 ---
 
-# CRMy — Your AI-Native CRM
+# CRMy — Operational Customer Context For Agents
 
-You have full access to CRMy via the **`crmy` tool**. Every call takes an `action` string and an optional `params` object.
+You have access to CRMy through the **`crmy`** tool. CRMy is not just a CRM table surface; it is the operational state layer that lets agents remember customer context, work with typed revenue objects, and leave audit-safe state behind.
 
-```
+Every call uses:
+
+```js
 crmy({ action: "<action>", params: { ... } })
 ```
 
----
+Use CRMy to:
 
-## Core Principles
-
-### 1. Search before you create
-Always search before creating any record. Duplicates are expensive.
-
-```
-User: "Add Sarah Chen at Acme"
-→ crmy({ action: "contact.search", params: { q: "Sarah Chen" } })
-→ Found? Confirm before updating. Not found? Create.
-```
-
-### 2. Log every meaningful interaction
-Any time the user mentions a call, meeting, email, or deal news — offer to log it. Don't wait to be asked.
-
-```
-User: "Just got off a call with Marcus, he's interested in enterprise"
-→ crmy({ action: "contact.log_activity", params: { activity_type: "call", subject_type: "contact", subject_id: "<marcus-id>", summary: "...", outcome: "positive" } })
-→ Offer to advance the opportunity stage
-```
-
-### 3. Link everything
-Contacts belong to accounts. Opportunities belong to accounts. Ask about relationships when not provided.
-
-### 4. Always suggest a next step
-- After logging a call → "Want me to advance the deal stage or set a follow-up?"
-- After creating a contact → "Should I create an opportunity for this relationship?"
-- After advancing a stage → "Want me to log what triggered this move?"
+- Get a one-call briefing before acting on a customer record.
+- Search and update contacts, companies, opportunities, use cases, activities, context entries, assignments, and HITL requests.
+- Store persistent context entries with confidence, source, tags, and review metadata.
+- Route work to humans or agents through assignments and approval requests.
+- Check audit events and operations health when trust matters.
 
 ---
 
-## Actions Reference
+## Default Agent Workflow
 
-### `search`
-Global cross-entity search — contacts, accounts, opportunities, activities.
+### 1. Identify yourself
 
+Start substantive work with:
+
+```js
+crmy({ action: "actor.whoami" })
 ```
+
+This tells you which actor will be attributed on writes.
+
+### 2. Resolve the customer record
+
+Search before creating. Prefer exact records over guessed names.
+
+```js
 crmy({ action: "search", params: { q: "Acme", limit: 10 } })
-```
-| Param | Type | Notes |
-|-------|------|-------|
-| q | string | **required** — search query |
-| limit | number | max results (default 10) |
-
----
-
-### `contact.search`
-Search contacts by name, email, company, or keyword.
-
-```
-crmy({ action: "contact.search", params: { q: "Sarah", stage: "customer", limit: 20 } })
-```
-| Param | Type | Notes |
-|-------|------|-------|
-| q | string | **required** |
-| stage | string | filter by lifecycle stage |
-| limit | number | default 20 |
-
----
-
-### `contact.create`
-Create a new contact.
-
-```
-crmy({ action: "contact.create", params: {
-  name: "Sarah Chen",
-  email: "sarah@acme.com",
-  phone: "+1 555 0100",
-  title: "VP Engineering",
-  account_id: "<uuid>",
-  lifecycle_stage: "prospect",
-  notes: "Met at SaaStr 2026"
-}})
-```
-| Param | Required |
-|-------|----------|
-| name | ✓ |
-| email, phone, title, account_id, lifecycle_stage, notes | optional |
-
----
-
-### `contact.update`
-Update fields on an existing contact.
-
-```
-crmy({ action: "contact.update", params: { id: "<uuid>", email: "new@acme.com" } })
-```
-`id` is **required**. Include only the fields to change.
-
----
-
-### `contact.set_stage`
-Change a contact's lifecycle stage.
-
-```
-crmy({ action: "contact.set_stage", params: { id: "<uuid>", stage: "customer", note: "Signed contract" } })
-```
-**Lifecycle stages in order:** `lead` → `prospect` → `customer` → `churned` / `partner`
-
----
-
-### `contact.log_activity`
-Log a call, email, meeting, demo, proposal, or note against any record.
-
-```
-crmy({ action: "contact.log_activity", params: {
-  activity_type: "call",
-  subject_type: "contact",
-  subject_id: "<uuid>",
-  summary: "Discussed enterprise pricing",
-  outcome: "positive",
-  duration_minutes: 30,
-  notes: "Wants a proposal by Friday"
-}})
-```
-| Param | Required | Values |
-|-------|----------|--------|
-| activity_type | ✓ | call, email, meeting, demo, proposal, note |
-| subject_type | ✓ | contact, account, opportunity |
-| subject_id | ✓ | UUID of the record |
-| summary | ✓ | short description |
-| outcome | | positive, neutral, negative |
-| duration_minutes | | for calls and meetings |
-| performed_at | | ISO 8601 (defaults to now) |
-| notes | | detailed notes |
-
----
-
-### `account.search`
-Search companies/accounts.
-
-```
-crmy({ action: "account.search", params: { q: "Acme", industry: "SaaS", limit: 20 } })
+crmy({ action: "contact.search", params: { q: "Sarah Chen", limit: 10 } })
+crmy({ action: "account.search", params: { q: "Acme", limit: 10 } })
 ```
 
----
+### 3. Brief before acting
 
-### `account.create`
-Create a new company/account.
+Before outreach, deal changes, handoffs, or context writes, call `briefing.get`.
 
+```js
+crmy({
+  action: "briefing.get",
+  params: {
+    subject_type: "contact",
+    subject_id: "<uuid>",
+    context_radius: "adjacent",
+    token_budget: 4000,
+    format: "json"
+  }
+})
 ```
-crmy({ action: "account.create", params: {
-  name: "Acme Corp",
-  domain: "acme.com",
-  industry: "SaaS",
-  size: "51-200"
-}})
+
+Use `context_radius: "account_wide"` for deal reviews, renewal risk, and handoffs where related account/contact context matters.
+
+### 4. Check context quality
+
+If a decision depends on memory, check stale and contradictory context.
+
+```js
+crmy({ action: "context.stale", params: { subject_type: "account", subject_id: "<uuid>", limit: 20 } })
+crmy({ action: "context.contradictions", params: { subject_type: "account", subject_id: "<uuid>" } })
 ```
-`name` is **required**.
 
----
+If there are contradictions, do not pick a truth unless the evidence is explicit. Use:
 
-### `opportunity.search`
-Search deals/opportunities.
-
+```js
+crmy({ action: "context.contradictions_assign", params: { subject_type: "account", subject_id: "<uuid>", limit: 5 } })
 ```
-crmy({ action: "opportunity.search", params: { q: "Acme", stage: "proposal", limit: 20 } })
+
+### 5. Write with provenance
+
+When logging activities or adding context, include source, subject, confidence, and useful detail.
+
+```js
+crmy({
+  action: "activity.create",
+  params: {
+    type: "call",
+    subject: "Call with Cody Harris from Databricks",
+    body: "Cody wants a demo on May 20.",
+    subject_type: "contact",
+    subject_id: "<contact-uuid>",
+    outcome: "follow_up_needed",
+    detail: { requested_next_step: "demo", requested_date: "2026-05-20" }
+  }
+})
 ```
-| Param | Notes |
-|-------|-------|
-| q | **required** |
-| stage | filter by deal stage |
-| account_id | filter by account UUID |
 
----
-
-### `opportunity.create`
-Create a new deal.
-
+```js
+crmy({
+  action: "context.add",
+  params: {
+    subject_type: "account",
+    subject_id: "<account-uuid>",
+    context_type: "next_step",
+    title: "Demo requested for May 20",
+    body: "Cody Harris from Databricks requested a CRMy demo on May 20.",
+    confidence: 0.95,
+    source: "call",
+    tags: ["demo", "next-step"]
+  }
+})
 ```
-crmy({ action: "opportunity.create", params: {
-  name: "Acme Corp — Enterprise",
-  account_id: "<uuid>",
-  value: 48000,
-  stage: "prospecting",
-  close_date: "2026-09-30"
-}})
+
+### 6. Escalate risky actions
+
+Use HITL before sending executive outreach, making commercial commitments, changing important state, or acting on ambiguous context.
+
+```js
+crmy({
+  action: "hitl.submit",
+  params: {
+    action_type: "send_email",
+    action_summary: "Send executive follow-up to Priya Nair about MCP openness",
+    action_payload: { contact_id: "<uuid>", body_text: "..." },
+    priority: "high",
+    sla_minutes: 240
+  }
+})
 ```
-`name` is **required**.
 
----
+Poll the request before proceeding:
 
-### `opportunity.advance`
-Move a deal to a new stage.
-
-```
-crmy({ action: "opportunity.advance", params: {
-  id: "<uuid>",
-  stage: "closed_won",
-  note: "Signed MSA received",
-  lost_reason: ""
-}})
-```
-`id` and `stage` are **required**. Always include a `note`.
-
-**Deal stages:** `prospecting` → `qualification` → `proposal` → `negotiation` → `closed_won` / `closed_lost`
-
----
-
-### `pipeline.summary`
-Get pipeline analytics grouped by stage (or owner/forecast_cat).
-
-```
-crmy({ action: "pipeline.summary", params: { group_by: "stage" } })
+```js
+crmy({ action: "hitl.status", params: { id: "<hitl-request-id>" } })
 ```
 
 ---
 
-## Multi-Step Workflows
+## Action Reference
 
-### "Log a call I just had"
-1. `contact.search` — find the contact
-2. `contact.log_activity` — type: call, summary, outcome
-3. If deal mentioned → `opportunity.search` → offer `opportunity.advance`
-4. Suggest: "Want me to update their lifecycle stage?"
+### Identity And Search
 
-### "We just closed a deal"
-1. `opportunity.search` — find the deal
-2. `opportunity.advance` — stage: closed_won + note
-3. `contact.set_stage` — primary contact → customer
-4. `contact.log_activity` — type: meeting, outcome: positive
-5. Celebrate, then: "Should I set up an onboarding follow-up?"
+| Action | Purpose |
+|---|---|
+| `actor.whoami` | Current actor identity and scopes |
+| `actor.list` | List humans and agents |
+| `actor.register` | Register a human or agent actor |
+| `search` | Cross-entity search across customer state |
 
-### "How's the pipeline?"
-1. `pipeline.summary` — group_by: stage
-2. Present as a table: stage | deal count | total value
-3. Highlight any deals stuck in the same stage for 30+ days
-4. Ask: "Want me to look at any of these in detail?"
+### Briefings
 
-### "New lead from the conference"
-1. `contact.search` — avoid duplicate
-2. `contact.create` — lifecycle_stage: lead
-3. `account.search` or `account.create` — find/create their company
-4. `contact.update` — link account_id
-5. `contact.log_activity` — type: meeting (where you met)
-6. Ask: "Want to create an opportunity?"
+| Action | Required params | Notes |
+|---|---|---|
+| `briefing.get` | `subject_type`, `subject_id` | Supports `context_radius`, `token_budget`, `context_types`, `include_stale`, `format` |
 
-### "Who do we know at Stripe?"
-1. `account.search` — q: "Stripe"
-2. `contact.search` — q: "Stripe" (or filter by account_id)
-3. Present: name, title, lifecycle stage, any open deals
+Subject types: `contact`, `account`, `opportunity`, `use_case`.
+
+### Typed Revenue Objects
+
+| Action | Purpose |
+|---|---|
+| `contact.search`, `contact.get`, `contact.create`, `contact.update`, `contact.set_stage`, `contact.timeline` | Contacts with lead lifecycle stages |
+| `account.search`, `account.get`, `account.create`, `account.update` | Companies/accounts |
+| `opportunity.search`, `opportunity.get`, `opportunity.create`, `opportunity.update`, `opportunity.advance` | Deals/pipeline |
+| `use_case.search`, `use_case.get`, `use_case.create`, `use_case.update` | Use cases/deployments |
+
+Important field names:
+
+- Contacts use `first_name`, `last_name`, `email`, `phone`, `title`, `company_name`, `account_id`, `lifecycle_stage`.
+- Opportunities use `name`, `account_id`, `contact_id`, `amount`, `stage`, `close_date`, `description`.
+- Use cases use `name`, `account_id`, `opportunity_id`, `stage`, `attributed_arr`, `target_prod_date`, `description`.
+
+### Activities
+
+| Action | Purpose |
+|---|---|
+| `activity.search` | Search activity timeline |
+| `activity.get` | Fetch one activity |
+| `activity.create` | Log a call, email, meeting, demo, research item, handoff, or note |
+| `activity.update` | Update activity fields |
+
+Prefer `subject_type` + `subject_id`. Use `detail` for structured extras like attendees, duration, requested date, next step, or email metadata.
+
+### Context Engine
+
+| Action | Purpose |
+|---|---|
+| `context.list`, `context.get` | Browse context entries |
+| `context.search` | Keyword search |
+| `context.semantic_search` | Semantic memory search when pgvector is enabled |
+| `context.add` | Store typed customer memory |
+| `context.supersede` | Replace stale/wrong context while preserving audit history |
+| `context.stale` | Find expired context |
+| `context.review_batch` | Mark stale entries reviewed |
+| `context.consolidate` | Merge redundant current entries |
+| `context.contradictions` | Detect conflicting current facts |
+| `context.contradictions_assign` | Create review assignments for conflicts |
+| `context.contradictions_resolve` | Resolve a conflict when evidence is clear |
+
+Context write guidance:
+
+- Use confidence from `0.0` to `1.0`.
+- Use `source` and `source_activity_id` when possible.
+- Use `valid_until` for time-sensitive facts.
+- Use tags for retrieval.
+- Do not create duplicate context if CRMy reports convergence warnings; supersede, consolidate, or ask for review.
+
+### Assignments And HITL
+
+| Action | Purpose |
+|---|---|
+| `assignment.list`, `assignment.get`, `assignment.create`, `assignment.update` | Structured handoffs |
+| `assignment.start`, `assignment.complete`, `assignment.block`, `assignment.cancel` | Assignment lifecycle |
+| `hitl.list`, `hitl.submit`, `hitl.status`, `hitl.resolve` | Human approval requests |
+
+Use assignments for work that should be done later. Use HITL for approval before an action.
+
+### Analytics, Audit, And Ops
+
+| Action | Purpose |
+|---|---|
+| `pipeline.summary` | Pipeline by stage/owner/forecast category |
+| `pipeline.forecast` | Forecast metrics |
+| `audit.events` | Audit trail filtered by object, event, or actor |
+| `ops.status` | Queue/job/system health |
+| `ops.data_quality` | Data quality findings |
+
+---
+
+## High-Value Workflows
+
+### Log a call and update memory
+
+1. `search` or `contact.search` to resolve the person.
+2. `briefing.get` for current context.
+3. `activity.create` with the call summary and structured `detail`.
+4. `context.add` for explicit persistent facts: objections, next steps, commitments, preferences, stakeholders, or risk.
+5. `assignment.create` for the follow-up.
+
+### Prepare outreach
+
+1. `briefing.get` on the contact with `context_radius: "adjacent"`.
+2. `context.semantic_search` for the specific objection or goal.
+3. Draft the message grounded in context.
+4. `activity.create` for the draft.
+5. `hitl.submit` if the message is high-stakes.
+6. After approval, log the final send.
+
+### Review a deal
+
+1. `opportunity.search` to find deals by account, stage, or query.
+2. `briefing.get` on each opportunity with `context_radius: "account_wide"`.
+3. `context.stale` and `context.contradictions`.
+4. `assignment.create` for concrete next actions.
+5. `audit.events` if the user asks what changed.
+
+### Governance cleanup
+
+1. `context.stale` to identify stale entries.
+2. `context.review_batch` only for facts confirmed by recent evidence.
+3. `context.contradictions` for important accounts.
+4. `context.contradictions_assign` when judgment is needed.
+5. `context.consolidate` for redundant non-conflicting entries.
 
 ---
 
 ## Presentation Guidelines
 
-- **Summarize results** — don't dump raw JSON. Use names, not UUIDs.
-- **Format pipeline data** as a table or bullets, not raw numbers.
-- **Confirm before bulk changes** — "I'll update 5 contacts — proceed?"
-- **On API errors** — explain in plain English and suggest a fix:
-  - "Server not reachable — is `npx @crmy/cli server` running?"
-  - "Record not found — want me to search first?"
-
----
-
-## Quick Examples
-
-| User says | Actions |
-|-----------|---------|
-| "Sarah from Acme is ready to move forward" | contact.search → opportunity.search → opportunity.advance → contact.log_activity → contact.set_stage |
-| "Pull up our pipeline" | pipeline.summary → present table → offer drill-down |
-| "Who do we know at Stripe?" | account.search → contact.search → list with stages |
-| "Log that I sent a proposal to Marcus" | contact.search → contact.log_activity (type: proposal) → offer opportunity.advance |
-| "Add a new lead: Jamie Lee, CTO at Horizon" | contact.search (check dup) → contact.create → account.search → link account |
+- Summarize results with names and business meaning; do not dump raw JSON unless asked.
+- Mention stale or contradictory context before making recommendations.
+- Confirm before writes that affect many records or high-stakes workflows.
+- When a required UUID is missing, search first or ask the user which record they mean.
+- Use audit and mutation receipts to explain what changed.
+- On errors, give the likely recovery path:
+  - Server not reachable: start CRMy with `npx @crmy/cli server`.
+  - Missing auth: run `npx @crmy/cli init --yes`, `npx @crmy/cli auth login`, or configure `CRMY_API_KEY`.
+  - Permission denied: ask an admin to adjust actor/API-key scopes in Settings → Actors.
