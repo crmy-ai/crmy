@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from './client';
+import { api, getUser } from './client';
 
 // Generic list hook with pagination
 function useList<T>(key: string, path: string, params?: Record<string, string | number | boolean | undefined>) {
@@ -213,11 +213,28 @@ export function useActivities(params?: {
 }) {
   return useList('activities', 'activities', params);
 }
+export function useActivity(id: string | null) {
+  return useQuery<{ data: Record<string, unknown> }>({
+    queryKey: ['activity', id],
+    queryFn: () => api.get(`activities/${id}`),
+    enabled: !!id,
+  });
+}
 export function useCreateActivity() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: Record<string, unknown>) => api.post('activities', data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['activities'] }),
+  });
+}
+export function useExtractActivityDraft() {
+  return useMutation<{ data: Record<string, unknown>; source: 'agent' }, Error, { text: string }>({
+    mutationFn: (payload) => api.post('agent/extract/activity', payload),
+  });
+}
+export function useExtractRecordDraft() {
+  return useMutation<{ data: Record<string, unknown>; source: 'agent' }, Error, { text: string; object_type: string }>({
+    mutationFn: (payload) => api.post('agent/extract/record', payload),
   });
 }
 
@@ -544,7 +561,7 @@ export function useInboundEmails(params?: { limit?: number; cursor?: string }) {
 }
 
 // Events / Audit log
-export function useEvents(params?: { object_type?: string; event_type?: string; actor_id?: string; limit?: number; cursor?: string }) {
+export function useEvents(params?: { object_type?: string; object_id?: string; event_type?: string; actor_id?: string; limit?: number; cursor?: string }) {
   return useList('events', 'events', params as Record<string, string | number | boolean | undefined>);
 }
 
@@ -1342,9 +1359,11 @@ export interface AgentSessionFull extends AgentSessionSummary {
 }
 
 export function useAgentConfig() {
+  const user = getUser();
   return useQuery<{ data: AgentConfigData | null }>({
-    queryKey: ['agent-config'],
+    queryKey: ['agent-config', user?.tenant_id ?? 'anonymous', user?.id ?? 'anonymous'],
     queryFn: () => api.get('agent/config'),
+    enabled: Boolean(user?.tenant_id && user?.id),
   });
 }
 
@@ -1379,7 +1398,7 @@ export function useAgentSession(id: string | null) {
 
 export function useCreateAgentSession() {
   const qc = useQueryClient();
-  return useMutation<{ data: AgentSessionFull }, Error, { context_type?: string; context_id?: string; context_name?: string }>({
+  return useMutation<{ data: AgentSessionFull }, Error, { context_type?: string; context_id?: string; context_name?: string; reuse_context?: boolean }>({
     mutationFn: (data) => api.post('agent/sessions', data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-sessions'] }),
   });

@@ -19,6 +19,7 @@ import { OpportunityDrawer } from '@/components/crm/OpportunityDrawer';
 import { UseCaseDrawer } from '@/components/crm/UseCaseDrawer';
 import { AccountDrawer } from '@/components/crm/AccountDrawer';
 import { AssignmentDrawer } from '@/components/crm/AssignmentDrawer';
+import { ActivityDrawer } from '@/components/crm/ActivityDrawer';
 import { WorkflowDrawer } from '@/components/crm/WorkflowDrawer';
 import { WorkflowEditor } from '@/components/crm/WorkflowEditor';
 import { SequenceEditor } from '@/components/crm/SequenceEditor';
@@ -140,6 +141,7 @@ function AppContent() {
     : drawerType === 'use-case' ? 'Use Case Details'
     : drawerType === 'account' ? 'Account Details'
     : drawerType === 'assignment' ? 'Assignment Details'
+    : drawerType === 'activity' ? 'Activity Details'
     : drawerType === 'workflow' ? 'Workflow Details'
     : drawerType === 'email' ? 'Email Details'
     : '';
@@ -160,6 +162,7 @@ function AppContent() {
         {drawerType === 'use-case' && <UseCaseDrawer />}
         {drawerType === 'account' && <AccountDrawer />}
         {drawerType === 'assignment' && <AssignmentDrawer />}
+        {drawerType === 'activity' && <ActivityDrawer />}
         {drawerType === 'workflow' && <WorkflowDrawer />}
         {drawerType === 'email' && <EmailDrawer />}
       </DrawerShell>
@@ -191,26 +194,26 @@ function AppContent() {
 
 export function App() {
   return (
-    <AgentSettingsProvider>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter basename="/app">
-          <ThemeApplier />
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/setup/:token" element={<SetupPage />} />
-            <Route
-              path="/*"
-              element={
-                <AuthGuard>
+    <TooltipProvider>
+      <Toaster />
+      <Sonner />
+      <BrowserRouter basename="/app">
+        <ThemeApplier />
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/setup/:token" element={<SetupPage />} />
+          <Route
+            path="/*"
+            element={
+              <AuthGuard>
+                <AgentSettingsProvider>
                   <AppContent />
-                </AuthGuard>
-              }
-            />
-          </Routes>
-        </BrowserRouter>
-      </TooltipProvider>
-    </AgentSettingsProvider>
+                </AgentSettingsProvider>
+              </AuthGuard>
+            }
+          />
+        </Routes>
+      </BrowserRouter>
+    </TooltipProvider>
   );
 }

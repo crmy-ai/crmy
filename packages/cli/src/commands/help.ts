@@ -4,27 +4,27 @@
 import { Command } from 'commander';
 
 const HELP_TEXT = `
-  CRMy — The agent-first open source CRM
+  CRMy — operational customer context for AI agents
 
   Usage: crmy <command> [options]
 
   Setup & Auth
-    init                Initialize crmy: configure database, run migrations, create user
+    init                Configure Postgres, run migrations, create owner, write config
     login               Sign in to a CRMy server (shortcut for crmy auth login)
     auth                Manage authentication (login, logout, whoami)
-    config              View and update local configuration
+    config              View local/global CRMy configuration with secrets redacted
     migrate             Run database migrations
 
   Server
-    server              Start the CRMy server
-    mcp                 Start the MCP stdio server for Claude Code
+    server              Start the CRMy API, Web UI, and HTTP MCP endpoint
+    mcp                 Start the local stdio MCP server for agent clients
 
-  CRM Data
+  Customer State
     contacts            Manage contacts (list, get, create, update, delete)
-    accounts            Manage accounts (list, get, create, update, delete)
+    accounts            Manage companies/accounts (list, get, create, update, delete)
     opps                Manage opportunities (list, get, create, update, delete)
     pipeline            View and manage the sales pipeline
-    notes               Manage notes on CRM objects
+    notes               Manage notes on customer records
     custom-fields       Manage custom field definitions
     search              Search across contacts, accounts, and opportunities
 
@@ -37,6 +37,10 @@ const HELP_TEXT = `
 
   Resources
     use-cases           Browse example use cases and templates
+    briefing            Get record context before taking action
+    seed-demo           Load demo customer data for a fast first run
+    reset-password      Reset a local user's password through Postgres
+    doctor              Check database, config, migrations, port, and secrets
 
   Options
     -V, --version       Output the version number
@@ -45,9 +49,10 @@ const HELP_TEXT = `
   Examples
     $ crmy init                     Set up a new CRMy instance
     $ crmy server                   Start the server on :3000
+    $ crmy doctor                   Check setup health
+    $ crmy briefing contact:<id>    Get customer context before action
     $ crmy contacts list            List all contacts
-    $ crmy opps create              Create a new opportunity
-    $ crmy mcp                      Start MCP server for Claude Code
+    $ crmy mcp                      Start stdio MCP for local agents
 
   Run crmy <command> --help for detailed usage of any command.
 `;

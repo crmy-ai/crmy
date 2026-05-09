@@ -144,7 +144,7 @@ Search activities.
 - **Output**: `{ activities, next_cursor, total }`
 
 ### activity_get_timeline
-Get paginated activity timeline for any CRM object.
+Get paginated activity timeline for any customer record.
 - **Input**: `subject_type` (required: contact|account|opportunity|use_case), `subject_id` (required), `limit`, `types`
 - **Output**: `{ activities, total }`
 
@@ -213,7 +213,7 @@ Update assignment fields.
 ## Note Tools
 
 ### note_create
-Add a threaded note to any CRM object.
+Add a threaded note to any customer record.
 - **Input**: `object_type` (required: contact|account|opportunity|activity|use_case), `object_id` (required), `body` (required), `parent_id`, `visibility` (internal|external), `mentions`, `pinned`
 - **Output**: `{ note }`
 
@@ -223,7 +223,7 @@ Get a note with its threaded replies.
 - **Output**: `{ note, replies }`
 
 ### note_list
-List notes for a CRM object. Pinned notes appear first.
+List notes for a customer record. Pinned notes appear first.
 - **Input**: `object_type` (required), `object_id` (required), `visibility`, `pinned`, `limit`, `cursor`
 - **Output**: `{ notes, next_cursor, total }`
 
@@ -368,12 +368,12 @@ List execution runs for a workflow.
 - **Input**: `workflow_id` (required), `status` (running|completed|failed), `limit`, `cursor`
 - **Output**: `{ runs, next_cursor, total }` — each run includes `action_logs` with per-action type, status, duration_ms, and error
 
-### workflow_run_replay ★ v0.7
+### workflow_run_replay ★ 0.7+
 Replay a failed or parked workflow run by creating a new direct run with an operator-supplied payload. The replay is explicit: CRMy does not silently reuse hidden side effects.
 - **Input**: `run_id` (required), `variables` (object), `reason` (required), `subject_type`, `subject_id`, `idempotency_key`
 - **Output**: `{ replay_of_run_id, workflow_id, workflow_name, replay, mutation }`
 
-### workflow_template_list ★ v0.7
+### workflow_template_list ★ 0.7+
 List available built-in GTM workflow templates. Templates are static (no DB) and can be used as a starting point for `workflow_create`. Use the `category` filter to narrow results.
 - **Input**: `category` (optional)
 - **Output**: `{ templates }` — array of template objects with name, description, trigger_event, trigger_filter, and actions
@@ -382,47 +382,47 @@ List available built-in GTM workflow templates. Templates are static (no DB) and
 
 These tools are admin/owner-only and are designed for enterprise durability, incident response, privacy workflows, and operator review.
 
-### ops_status_get ★ v0.7
+### ops_status_get ★ 0.7+
 Return tenant-scoped health for durable queues and async jobs.
 - **Input**: `include_samples`, `sample_limit`
 - **Output**: `{ generated_at, tenant_id, queues, attention_required }`
 
-### ops_job_recover ★ v0.7
+### ops_job_recover ★ 0.7+
 Retry, park, or mark failed a durable async job with an audit entry.
 - **Input**: `queue_name`, `job_id`, `action` (`retry`|`park`|`mark_failed`), `reason`
 - **Output**: `{ queue_name, job_id, action, previous_status, new_status, recovered, recovered_at }`
 
-### ops_data_quality_get ★ v0.7
+### ops_data_quality_get ★ 0.7+
 Run data-quality checks for malformed lifecycle/stage values, missing canonical subjects, orphaned actor links, missing search-index rows, and stuck context indexing work.
 - **Input**: `sample_limit`, `include_clean`
 - **Output**: `{ generated_at, checks, summary }`
 
-### ops_data_quality_repair ★ v0.7
+### ops_data_quality_repair ★ 0.7+
 Repair only deterministic, low-risk data-quality findings. Defaults to dry run.
 - **Input**: `check_name` (`activities_missing_canonical_subject`|`current_context_missing_search_index`|`stuck_context_outbox_processing`), `dry_run`, `limit`
 - **Output**: `{ check_name, dry_run, action, repaired_count, event_id? }`
 
-### ops_audit_get ★ v0.7
+### ops_audit_get ★ 0.7+
 Retrieve tenant-scoped audit events.
 - **Input**: `object_type`, `object_id`, `actor_id`, `event_type`, `since`, `limit`
 - **Output**: `{ audit_events, total }`
 
-### ops_privacy_export ★ v0.7
+### ops_privacy_export ★ 0.7+
 Export all directly attached subject data for privacy or legal review.
 - **Input**: `subject_type`, `subject_id`
 - **Output**: `{ exported_at, tenant_id, subject_type, subject_id, subject, activities, context_entries, assignments, events }`
 
-### ops_pii_redact ★ v0.7
+### ops_pii_redact ★ 0.7+
 Redact direct PII fields from a contact or account. Defaults to dry run.
 - **Input**: `subject_type` (`contact`|`account`), `subject_id`, `reason`, `dry_run`
 - **Output**: `{ subject_type, subject_id, dry_run, redacted_fields, event_id? }`
 
-### ops_privacy_delete ★ v0.7
-Delete a CRM subject for privacy compliance after review. Defaults to dry run and reports linked-row counts.
+### ops_privacy_delete ★ 0.7+
+Delete a customer record for privacy compliance after review. Defaults to dry run and reports linked-row counts.
 - **Input**: `subject_type`, `subject_id`, `reason`, `dry_run`
 - **Output**: `{ subject_type, subject_id, dry_run, deleted, affected, event_id? }`
 
-### ops_retention_apply ★ v0.7
+### ops_retention_apply ★ 0.7+
 Apply tenant retention cleanup to supported operational tables. Defaults to dry run.
 - **Input**: `older_than_days`, `targets` (`events`|`ops_recovery_log`|`context_outbox_complete`|`idempotency_keys`), `dry_run`
 - **Output**: `{ dry_run, older_than_days, results }`
@@ -462,7 +462,7 @@ Remove a webhook endpoint.
 ## Custom Field Tools
 
 ### custom_field_create
-Define a custom field for a CRM object type.
+Define a custom field for a customer record type.
 - **Input**: `object_type` (required: contact|account|opportunity|activity|use_case), `field_name` (required, snake_case), `field_type` (required: text|number|boolean|date|select|multi_select), `label` (required), `required`, `options` (for select types), `default_value`
 - **Output**: `{ custom_field }`
 
@@ -516,7 +516,7 @@ When `status = "ambiguous"`, surface the candidates to a human via `hitl_submit_
 ## Analytics Tools
 
 ### crm_search
-Search across all CRM entities.
+Search across all customer records.
 - **Input**: `query` (required), `limit`
 - **Output**: `{ contacts, accounts, opportunities }`
 
@@ -555,7 +555,7 @@ Approve or reject a request.
 ## Context Engine Tools
 
 ### context_add
-Store context/knowledge about a CRM object.
+Store context/knowledge about a customer record.
 - **Input**: `subject_type` (required), `subject_id` (required), `context_type` (required), `body` (required), `title`, `confidence` (0.0–1.0), `tags`, `valid_until`, `structured_data`, `source_activity_id`, `source`, `source_ref`
 - **Output**: `{ context_entry, event_id, validation_warnings? }`
 
@@ -585,12 +585,12 @@ Mark a context entry as reviewed (still accurate). Sets `reviewed_at = now()`.
 - **Input**: `id` (required), `extend_days` (optional — extend `valid_until` by N days)
 - **Output**: `{ context_entry }`
 
-### context_review_batch ★ v0.7
+### context_review_batch ★ 0.7+
 Mark up to 200 context entries as reviewed in a single call. Processes in parallel batches of 20 with `Promise.allSettled` — individual failures do not block others.
 - **Input**: `entry_ids` (required, array, max 200), `extend_days` (optional — extend `valid_until` by N days for all updated entries)
 - **Output**: `{ updated, not_found, extend_days, message }`
 
-### context_bulk_mark_stale ★ v0.7
+### context_bulk_mark_stale ★ 0.7+
 Invalidate up to 200 context entries in a single parameterized UPDATE. Sets `valid_until = now()` on all matching current entries. Optionally appends a reason tag to each entry's `tags` array.
 - **Input**: `entry_ids` (required, array, max 200), `reason` (optional — tag added to each invalidated entry, e.g. `"superseded-by-q2-research"`)
 - **Output**: `{ updated, not_found_or_already_stale, reason, message }`
@@ -601,7 +601,7 @@ List stale context entries where `valid_until` has passed but `is_current` is st
 - **Output**: `{ stale_entries, total }`
 
 ### context_diff
-Catch-up diff for a CRM subject — shows what changed since a given timestamp. Ideal for daily agent check-ins.
+Catch-up diff for a customer record — shows what changed since a given timestamp. Ideal for daily agent check-ins.
 - **Input**: `subject_type` (required), `subject_id` (required), `since` (required — ISO timestamp or relative: `"7d"`, `"24h"`, `"30m"`)
 - **Output**: `{ subject_type, subject_id, since, new_entries, superseded_entries, newly_stale, resolved_entries, summary: { new, superseded, newly_stale, resolved } }`
 
@@ -621,7 +621,7 @@ Trigger the stale context review loop for the current tenant on-demand. Normally
 - **Output**: `{ assignments_created }`
 
 ### briefing_get
-Get a unified briefing for any CRM object — assembles the record, related objects, activity timeline, open assignments, context entries, and staleness warnings in one call.
+Get a unified briefing for any customer record — assembles the record, related objects, activity timeline, open assignments, context entries, and staleness warnings in one call.
 - **Input**: `subject_type` (required), `subject_id` (required), `since`, `context_types`, `include_stale`, `format` (`"json"` | `"text"`), `context_radius` (`"direct"` | `"adjacent"` | `"account_wide"`, default `"direct"`), `token_budget`
 - **Output (json)**: `{ briefing: { record, related, activities, open_assignments, context, stale_warnings, adjacent_context?, token_estimate, truncated?, dropped_entries? } }`
 - **Output (text)**: `{ briefing_text }` — a formatted string ready for prompt injection
@@ -665,7 +665,7 @@ Query actor knowledge contributions. Two modes:
 ## Meta Tools
 
 ### schema_get
-Get the schema for a CRM object type.
+Get the schema for a customer record type.
 - **Input**: `object_type` (required: contact|account|opportunity|activity)
 - **Output**: `{ standard_fields, custom_fields_schema }`
 

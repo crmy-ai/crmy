@@ -74,6 +74,27 @@ export async function getSession(
   return rows[0] ?? null;
 }
 
+export async function getLatestSessionForContext(
+  db: DbPool,
+  tenantId: string,
+  userId: string,
+  contextType: string,
+  contextId: string,
+): Promise<AgentSession | null> {
+  const { rows } = await db.query(
+    `SELECT *
+     FROM agent_sessions
+     WHERE tenant_id = $1
+       AND user_id = $2
+       AND context_type = $3
+       AND context_id = $4
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    [tenantId, userId, contextType, contextId],
+  );
+  return rows[0] ?? null;
+}
+
 export async function createSession(
   db: DbPool,
   tenantId: string,

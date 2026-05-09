@@ -5,7 +5,7 @@ import { Command } from 'commander';
 import { getClient } from '../client.js';
 
 export function notesCommand(): Command {
-  const cmd = new Command('notes').description('Manage notes and comments on CRM objects');
+  const cmd = new Command('notes').description('Manage notes and comments on customer records');
 
   cmd.command('list <object_type> <object_id>')
     .description('List notes for an object (contact, account, opportunity, use_case)')

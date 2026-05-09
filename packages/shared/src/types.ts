@@ -83,6 +83,9 @@ export interface Opportunity {
   forecast_cat: 'pipeline' | 'best_case' | 'commit' | 'closed';
   description?: string;
   lost_reason?: string;
+  account_name?: string;
+  contact_name?: string;
+  contact_email?: string;
   custom_fields: Record<string, unknown>;
   created_by?: UUID;
   created_at: string;
@@ -231,6 +234,8 @@ export interface UseCase {
   expansion_potential?: number;
   health_score?: number;
   health_note?: string;
+  account_name?: string;
+  opportunity_name?: string;
   started_at?: string;
   target_prod_date?: string;
   sunset_date?: string;

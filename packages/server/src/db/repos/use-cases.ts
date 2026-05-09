@@ -198,7 +198,16 @@ export async function searchUseCases(
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
-    `SELECT u.* FROM use_cases u WHERE ${where} ORDER BY u.created_at DESC LIMIT $${idx}`,
+    `SELECT
+       u.*,
+       a.name AS account_name,
+       o.name AS opportunity_name
+     FROM use_cases u
+     LEFT JOIN accounts a ON a.id = u.account_id AND a.tenant_id = u.tenant_id
+     LEFT JOIN opportunities o ON o.id = u.opportunity_id AND o.tenant_id = u.tenant_id
+     WHERE ${where}
+     ORDER BY u.created_at DESC
+     LIMIT $${idx}`,
     params,
   );
 

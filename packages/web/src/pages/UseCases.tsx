@@ -298,6 +298,7 @@ export default function UseCases() {
                       <tr className="border-b border-border bg-surface-sunken/50">
                         <SortHeader label="Use Case" sortKey="name" />
                         <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Client</th>
+                        <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Opportunity</th>
                         <SortHeader label="Stage" sortKey="stage" />
                         <SortHeader label="ARR" sortKey="attributed_arr" />
                         <SortHeader label="Health" sortKey="health_score" />
@@ -313,11 +314,13 @@ export default function UseCases() {
                         const arr = (uc.attributed_arr ?? 0) as number;
                         const health = (uc.health_score ?? 0) as number;
                         const client = (uc.account_name ?? uc.client ?? '') as string;
+                        const opportunity = (uc.opportunity_name ?? uc.opportunity ?? '') as string;
                         return (
                           <tr key={uc.id as string} onClick={() => openDrawer('use-case', uc.id as string)}
                             className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer transition-colors group ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
                             <td className="px-4 py-3 font-display font-bold text-foreground">{uc.name as string}</td>
                             <td className="px-4 py-3 text-muted-foreground">{client || '—'}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{opportunity || '—'}</td>
                             <td className="px-4 py-3">
                               <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold"
                                 style={{ backgroundColor: config.color + '18', color: config.color }}>

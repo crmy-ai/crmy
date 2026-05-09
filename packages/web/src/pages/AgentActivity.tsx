@@ -27,6 +27,7 @@ import {
 } from '@/api/hooks';
 import { TopBar } from '@/components/layout/TopBar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
+import { CompactList, CompactListRow } from '@/components/crm/CompactList';
 import { headerDescription } from '@/lib/headerCopy';
 
 function formatDuration(ms: number | null): string {
@@ -93,9 +94,9 @@ function ActivityRow({ entry, tool }: { entry: ActivityLogEntry; tool?: AgentToo
   const eventId = eventIdFromMutation(mutation);
 
   return (
-    <div className="border border-border rounded-xl overflow-hidden bg-card">
+    <CompactListRow className="overflow-hidden">
       <button
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/30 transition-colors"
+        className="w-full flex items-center gap-3 px-2 py-2 text-left"
         onClick={() => setExpanded(v => !v)}
       >
         <span className="text-muted-foreground">
@@ -138,7 +139,7 @@ function ActivityRow({ entry, tool }: { entry: ActivityLogEntry; tool?: AgentToo
       </button>
 
       {expanded && (
-        <div className="border-t border-border bg-muted/20 px-4 py-3 space-y-3">
+        <div className="mx-2 mb-2 rounded-xl border border-border/70 bg-background/60 px-3 py-3 space-y-3">
           {tool && (
             <div className="rounded-lg border border-border bg-background p-3">
               <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -166,7 +167,7 @@ function ActivityRow({ entry, tool }: { entry: ActivityLogEntry; tool?: AgentToo
           )}
         </div>
       )}
-    </div>
+    </CompactListRow>
   );
 }
 
@@ -304,9 +305,11 @@ export default function AgentActivity() {
             </div>
           </div>
 
-          <div className="p-4 space-y-2">
+          <div className="p-4">
             {activityQ.isLoading ? (
-              Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-14 rounded-xl bg-muted animate-pulse" />)
+              <div className="space-y-2">
+                {Array.from({ length: 5 }).map((_, i) => <div key={i} className="h-14 rounded-xl bg-muted animate-pulse" />)}
+              </div>
             ) : activityQ.isError ? (
               <div className="text-center py-12 text-muted-foreground">
                 <AlertTriangle className="w-8 h-8 mx-auto mb-2 opacity-40" />
@@ -319,14 +322,14 @@ export default function AgentActivity() {
                 <p className="text-xs mt-1 opacity-70">Activity appears here as the agent uses tools in chat sessions.</p>
               </div>
             ) : (
-              <>
+              <CompactList className="space-y-1">
                 {entries.map(entry => <ActivityRow key={entry.id} entry={entry} tool={toolMap.get(entry.tool_name)} />)}
                 {activityQ.data?.next_cursor && (
                   <button className="w-full mt-2 py-2 text-sm text-muted-foreground hover:text-foreground border border-dashed border-border rounded-lg" onClick={() => setFilters(f => ({ ...f, cursor: activityQ.data?.next_cursor }))}>
                     Load more
                   </button>
                 )}
-              </>
+              </CompactList>
             )}
           </div>
         </section>

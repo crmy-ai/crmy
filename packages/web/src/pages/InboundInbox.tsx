@@ -3,6 +3,7 @@
 
 import { useState } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
+import { CompactList, CompactListRow } from '@/components/crm/CompactList';
 import { useInboundEmails, useContact } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { headerDescription } from '@/lib/headerCopy';
@@ -77,10 +78,10 @@ function InboundEmailCard({ email }: { email: InboundActivity }) {
     (email.detail && Object.keys(email.detail).length > 0);
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden hover:border-border/80 transition-colors">
+    <CompactListRow className="overflow-hidden">
       {/* Header */}
       <button
-        className="w-full flex items-start gap-3 px-4 py-3 text-left"
+        className="w-full flex items-start gap-3 px-2 py-2 text-left"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center shrink-0 mt-0.5">
@@ -115,7 +116,7 @@ function InboundEmailCard({ email }: { email: InboundActivity }) {
 
       {/* Expanded body */}
       {expanded && (
-        <div className="px-4 pb-4 border-t border-border/50 pt-3 space-y-3">
+        <div className="mx-2 mb-2 rounded-xl border border-border/70 bg-background/60 px-3 py-3 space-y-3">
           {email.body ? (
             <div className="rounded-lg bg-muted/30 border border-border px-3 py-2.5">
               <p className="text-xs text-muted-foreground font-semibold mb-1.5 uppercase tracking-wider">Email Body</p>
@@ -148,7 +149,7 @@ function InboundEmailCard({ email }: { email: InboundActivity }) {
           </div>
         </div>
       )}
-    </div>
+    </CompactListRow>
   );
 }
 
@@ -238,11 +239,11 @@ export default function InboundInboxPage() {
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <CompactList className="space-y-1">
             {filtered.map(email => (
               <InboundEmailCard key={email.id} email={email} />
             ))}
-          </div>
+          </CompactList>
         )}
       </div>
     </div>

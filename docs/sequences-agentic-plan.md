@@ -18,7 +18,7 @@ Evolve "Email Sequences" into a general-purpose, AI-powered **Sequences** system
 |---|---|
 | Apollo / Outreach / Instantly | Time-based email scheduler with merge fields. Static templates, same content to every contact. |
 | Clay | Enrichment as a step — LLM writes the email against a rich data profile at send time. |
-| Attio | Automations as first-class CRM objects — steps can change attributes, create tasks, or send messages interchangeably. |
+| Attio | Automations as first-class customer records — steps can change attributes, create tasks, or send messages interchangeably. |
 | **CRMy target** | Sequences as an agent coordination primitive: multi-channel, AI-generated at execution time, HITL-gated, reply-aware, goal-driven. |
 
 ---

@@ -3,14 +3,13 @@
 
 import { useState } from 'react';
 import { useOpportunity, useUpdateOpportunity, useDeleteOpportunity, useUsers, useCustomFields, useRescoreOpportunity, useAccount, useContact } from '@/api/hooks';
-import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
-import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge, CustomFieldsSection, DealHealthBadge } from './CrmWidgets';
-import { Sparkles, TrendingUp, Calendar, User, Pencil, ChevronLeft, Trash2, FileText, Building2 } from 'lucide-react';
+import { TrendingUp, Calendar, User, Pencil, ChevronLeft, Trash2, Building2 } from 'lucide-react';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
 import { ObjectActionBar } from './ObjectActionBar';
+import { DrawerSection } from './DrawerSection';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EntityCombobox } from '@/components/ui/entity-combobox';
@@ -253,9 +252,7 @@ function OpportunityEditForm({
 }
 
 export function OpportunityDrawer() {
-  const { drawerEntityId, openAIWithContext, closeDrawer, openDrawer } = useAppStore();
-  const { enabled: agentEnabled } = useAgentSettings();
-  const navigate = useNavigate();
+  const { drawerEntityId, closeDrawer, openDrawer } = useAppStore();
   const [editing, setEditing] = useState(false);
   const [briefing, setBriefing] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -364,24 +361,6 @@ export function OpportunityDrawer() {
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
           </button>
-          <button
-            onClick={() => setBriefing(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
-          >
-            <FileText className="w-3.5 h-3.5" /> Brief
-          </button>
-          {agentEnabled && (
-            <button
-              onClick={() => {
-                openAIWithContext({ type: 'opportunity', id: opportunity.id, name, detail: `$${(amount / 1000).toFixed(0)}K` });
-                closeDrawer();
-                navigate('/agent');
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-accent/30 bg-accent/5 text-accent text-sm font-semibold hover:bg-accent/10 transition-all ml-auto press-scale"
-            >
-              <Sparkles className="w-3.5 h-3.5" /> Chat
-            </button>
-          )}
         </div>
       </div>
 
@@ -405,9 +384,7 @@ export function OpportunityDrawer() {
         ))}
       </div>
 
-      {/* Details */}
-      <div className="p-4 mx-4 mt-2 space-y-3">
-        <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide">Details</h3>
+      <DrawerSection title="Details">
         {linkedAccount && (
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground flex items-center gap-1"><Building2 className="w-3 h-3" /> Company</span>
@@ -450,13 +427,13 @@ export function OpportunityDrawer() {
               <span className="text-sm text-foreground">{field.value}</span>
             </div>
           ))}
-        {opportunity.notes && (
-          <div>
-            <p className="text-xs text-muted-foreground mb-1">Notes</p>
-            <p className="text-sm text-foreground leading-relaxed">{opportunity.notes as string}</p>
-          </div>
-        )}
-      </div>
+      </DrawerSection>
+
+      {opportunity.notes && (
+        <DrawerSection title="Notes" defaultOpen={false}>
+          <p className="text-sm text-foreground leading-relaxed">{opportunity.notes as string}</p>
+        </DrawerSection>
+      )}
 
       {/* Custom Fields */}
       <CustomFieldsSection objectType="opportunity" values={(opportunity.custom_fields ?? {}) as Record<string, unknown>} />

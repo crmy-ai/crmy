@@ -42,7 +42,7 @@ function printReadyBox(port: number): void {
 
 export function serverCommand(): Command {
   return new Command('server')
-    .description('Start the crmy HTTP server')
+    .description('Start the CRMy API, Web UI, and HTTP MCP endpoint')
     .option('--port <port>', 'HTTP port', '3000')
     .action(async (opts) => {
       const version = getCLIVersion();

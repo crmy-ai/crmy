@@ -461,10 +461,10 @@ function buildSystemPrompt(
       '</workspace_context>',
       '',
       `When the user says "this ${type}", "the record", "it", or similar, they are referring to <record_name>${escapeXml(name)}</record_name> (ID: ${escapeXml(id)}).`,
-      `Your FIRST action must be to call \`briefing_get\` with subject_type: "${escapeXml(type)}" and subject_id: "${escapeXml(id)}".`,
-      `Use context_radius: "${type === 'contact' ? 'adjacent' : type === 'account' ? 'account_wide' : 'direct'}" to pull in related context.`,
-      `After receiving the briefing, respond with a 2–3 sentence summary of the most important current facts (status, last activity, anything notable) before addressing the user's specific request.`,
-      `Do not call ${escapeXml(type)}_get separately — briefing_get includes the full record snapshot plus activities, context entries, open assignments, and active sequences.`,
+      `Record metadata is already attached. Do not call \`briefing_get\` just because the conversation opened from this record.`,
+      `Call \`briefing_get\` with subject_type: "${escapeXml(type)}" and subject_id: "${escapeXml(id)}" when the user asks for a briefing, asks for a current summary, requests work that depends on full current context, or before a write action that needs the complete record state.`,
+      `When you call \`briefing_get\`, use context_radius: "${type === 'contact' ? 'adjacent' : type === 'account' ? 'account_wide' : 'direct'}" to pull in related context.`,
+      `For narrow lookups, use the relevant object read/search tool instead of a full briefing when it is sufficient.`,
     ].filter(Boolean);
     parts.push(ctxLines.join('\n'));
   }
@@ -476,7 +476,7 @@ function buildSystemPrompt(
 
   const capLines = ['# Capabilities'];
   capLines.push('**You CAN:**');
-  capLines.push('- Search, read, and summarise any CRM record');
+  capLines.push('- Search, read, and summarise typed revenue records');
   capLines.push('- Search workspace memory (context entries)');
   capLines.push('- Add and update context memory entries');
   if (canWrite)      capLines.push('- Create, update, and delete contacts, accounts, and opportunities');
@@ -498,12 +498,15 @@ function buildSystemPrompt(
   parts.push([
     '# Workflow',
     '**Simple lookups**: call the relevant tool → answer directly.',
+    '**Revenue tasks**: briefly state the goal, subject record, evidence you will use, and any action risk before tool-heavy work.',
     '**Write operations / complex tasks**:',
     '  1. Gather — call `briefing_get` and/or `context_search` to understand the current state',
     '  2. Plan — in one sentence, tell the user what you are about to do',
     '  3. Execute — call write tools in sequence',
-    '  4. Confirm — show what changed with the key new values',
-    'Never call a write tool on a record you have not fetched in this session.',
+    '  4. Confirm — show what changed with the key new values, audit trail, and suggested next action',
+    'Never call a write tool on a record you have not fetched in this session via `briefing_get` or the relevant object read tool.',
+    'When you learn useful customer context in conversation, propose it for review before treating it as saved memory unless you explicitly call a context write tool.',
+    'For risky work, prefer HITL approval tools and clearly explain what is waiting on a human decision.',
   ].join('\n'));
 
   // ── 4. Tool guide (grouped by entity) ────────────────────────────────────

@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
+import { CompactList, CompactListRow } from '@/components/crm/CompactList';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { STATUS_TONES } from '@/lib/entityColors';
 import { headerDescription } from '@/lib/headerCopy';
@@ -149,9 +151,9 @@ function EventRow({ event }: { event: CrmyEvent }) {
   const modelLabel = shortModel(event.actor_agent_model);
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
+    <CompactListRow className="overflow-hidden">
       <button
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-muted/20 transition-colors"
+        className="w-full flex items-center gap-3 px-2 py-2 text-left"
         onClick={() => (hasDiff || hasMetadata) && setExpanded(!expanded)}
       >
         {/* Actor block */}
@@ -207,7 +209,7 @@ function EventRow({ event }: { event: CrmyEvent }) {
 
       {/* Expanded detail */}
       {expanded && (
-        <div className="px-4 pb-4 border-t border-border/50 pt-3 space-y-3">
+        <div className="mx-2 mb-2 rounded-xl border border-border/70 bg-background/60 px-3 py-3 space-y-3">
           {/* Actor detail panel */}
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
             {actorName && (
@@ -256,7 +258,7 @@ function EventRow({ event }: { event: CrmyEvent }) {
           </p>
         </div>
       )}
-    </div>
+    </CompactListRow>
   );
 }
 
@@ -291,8 +293,16 @@ const sortOptions: SortOption[] = [
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function AuditLogPage() {
-  const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlObjectType = searchParams.get('object_type') ?? '';
+  const urlObjectId = searchParams.get('object_id') ?? '';
+  const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>(() => {
+    const initial: Record<string, string[]> = {};
+    if (urlObjectType) initial.object_type = [urlObjectType];
+    return initial;
+  });
   const [actorId, setActorId]       = useState('');
+  const [objectId, setObjectId]     = useState(urlObjectId);
   const [q, setQ]                   = useState('');
   const [sort, setSort]             = useState<{ key: string; dir: 'asc' | 'desc' } | null>({ key: 'created_at', dir: 'desc' });
   const [page, setPage]             = useState(1);
@@ -302,6 +312,7 @@ export default function AuditLogPage() {
 
   const { data, isLoading, refetch, isFetching } = useEvents({
     object_type: objectType || undefined,
+    object_id:    objectId   || undefined,
     event_type:  eventType  || undefined,
     actor_id:    actorId    || undefined,
     limit: 100,
@@ -342,6 +353,7 @@ export default function AuditLogPage() {
   })();
 
   const handleFilterChange = (key: string, values: string[]) => {
+    if (key === 'object_type') setObjectId('');
     setActiveFilters(prev => {
       const next = { ...prev };
       const value = values.at(-1);
@@ -351,13 +363,31 @@ export default function AuditLogPage() {
     });
   };
 
+  const clearAllFilters = () => {
+    setQ('');
+    setActorId('');
+    setObjectId('');
+    setActiveFilters({});
+    setSearchParams({});
+  };
+
   const handleSortChange = (key: string) => {
     setSort(prev => prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
   };
 
-  useEffect(() => { setPage(1); }, [objectType, eventType, actorId, q, sort]);
+  useEffect(() => {
+    setActiveFilters(prev => {
+      const next = { ...prev };
+      if (urlObjectType) next.object_type = [urlObjectType];
+      else delete next.object_type;
+      return next;
+    });
+    setObjectId(urlObjectId);
+  }, [urlObjectType, urlObjectId]);
+
+  useEffect(() => { setPage(1); }, [objectType, objectId, eventType, actorId, q, sort]);
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
-  const hasFilters = q || objectType || eventType || actorId;
+  const hasFilters = q || objectType || objectId || eventType || actorId;
 
   return (
     <div className="flex flex-col h-full">
@@ -384,7 +414,7 @@ export default function AuditLogPage() {
         filters={filterConfigs}
         activeFilters={activeFilters}
         onFilterChange={handleFilterChange}
-        onClearFilters={() => setActiveFilters({})}
+        onClearFilters={clearAllFilters}
         sortOptions={sortOptions}
         currentSort={sort}
         onSortChange={handleSortChange}
@@ -407,14 +437,36 @@ export default function AuditLogPage() {
         }
       />
 
-      {actorId && (
-        <div className="md:hidden px-4 pb-2">
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-muted text-xs text-foreground">
-            <span className="text-muted-foreground">Actor ID:</span> {actorId}
-            <button onClick={() => setActorId('')} className="ml-0.5 hover:text-destructive p-0.5">
-              <X className="w-3 h-3" />
-            </button>
-          </span>
+      {(objectId || actorId) && (
+        <div className="flex flex-wrap gap-2 px-4 pb-2 md:px-6">
+          {objectId && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-muted text-xs text-foreground">
+              <span className="text-muted-foreground">Object:</span>
+              {objectType || 'any'} · {objectId.slice(0, 8)}
+              <button
+                onClick={() => {
+                  setObjectId('');
+                  setActiveFilters(prev => {
+                    const next = { ...prev };
+                    delete next.object_type;
+                    return next;
+                  });
+                  setSearchParams({});
+                }}
+                className="ml-0.5 hover:text-destructive p-0.5"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
+          {actorId && (
+            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-muted text-xs text-foreground md:hidden">
+              <span className="text-muted-foreground">Actor ID:</span> {actorId}
+              <button onClick={() => setActorId('')} className="ml-0.5 hover:text-destructive p-0.5">
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
         </div>
       )}
 
@@ -440,7 +492,7 @@ export default function AuditLogPage() {
             </p>
             {hasFilters && (
               <button
-                onClick={() => { setQ(''); setActorId(''); setActiveFilters({}); }}
+                onClick={clearAllFilters}
                 className="mt-4 h-9 px-4 rounded-xl border border-border bg-card text-sm font-semibold text-foreground hover:border-primary/30 transition-all"
               >
                 Clear filters
@@ -448,7 +500,7 @@ export default function AuditLogPage() {
             )}
           </div>
         ) : (
-          <div className="space-y-2 pt-2">
+          <CompactList className="space-y-1">
             {paginated.map(event => (
               <EventRow key={event.id} event={event} />
             ))}
@@ -458,7 +510,7 @@ export default function AuditLogPage() {
                 Showing {events.length} of {data.total} events. Use filters to narrow results.
               </p>
             )}
-          </div>
+          </CompactList>
         )}
       </div>
     </div>

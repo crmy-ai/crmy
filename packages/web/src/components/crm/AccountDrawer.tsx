@@ -4,15 +4,14 @@
 import { useState } from 'react';
 import { useAccount, useUpdateAccount, useDeleteAccount, useUsers, useCustomFields } from '@/api/hooks';
 import { ContactAvatar } from './ContactAvatar';
-import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
-import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { Sparkles, Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
+import { Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
 import { DrawerTabBar, type DrawerView } from './DrawerTabBar';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
 import { ObjectActionBar } from './ObjectActionBar';
 import { CustomFieldsSection } from './CrmWidgets';
+import { DrawerSection } from './DrawerSection';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
 
@@ -204,9 +203,7 @@ function AccountEditForm({
 }
 
 export function AccountDrawer() {
-  const { drawerEntityId, openAIWithContext, closeDrawer, drawerBriefing } = useAppStore();
-  const { enabled: agentEnabled } = useAgentSettings();
-  const navigate = useNavigate();
+  const { drawerEntityId, closeDrawer, drawerBriefing } = useAppStore();
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
   const graphHref = drawerEntityId ? `/companies/${drawerEntityId}/graph` : undefined;
@@ -309,22 +306,10 @@ export function AccountDrawer() {
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
           </button>
-          {agentEnabled && (
-            <button
-              onClick={() => {
-                openAIWithContext({ type: 'account', id: account.id, name, detail: industry });
-                closeDrawer();
-                navigate('/agent');
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-accent/30 bg-accent/5 text-accent text-sm font-semibold hover:bg-accent/10 transition-all ml-auto press-scale"
-            >
-              <Sparkles className="w-3.5 h-3.5" /> Chat
-            </button>
-          )}
         </div>
       </div>
 
-      <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} />
+      <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} showBriefTab={false} />
       <ObjectActionBar
         context={{ type: 'account', id: account.id, name, detail: industry }}
         onBrief={() => setView('brief')}
@@ -345,9 +330,7 @@ export function AccountDrawer() {
         ))}
       </div>
 
-      {/* Details */}
-      <div className="p-4 mx-4 mt-2 space-y-3">
-        <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide">Details</h3>
+      <DrawerSection title="Details">
         {[
           { label: 'Industry', value: industry },
           { label: 'Website', value: website },
@@ -360,7 +343,7 @@ export function AccountDrawer() {
               <span className="text-sm text-foreground">{field.value}</span>
             </div>
           ))}
-      </div>
+      </DrawerSection>
 
       {/* Custom Fields */}
       <CustomFieldsSection objectType="account" values={(account.custom_fields ?? {}) as Record<string, unknown>} />
@@ -370,10 +353,9 @@ export function AccountDrawer() {
 
       {/* Description */}
       {account.description && (
-        <div className="p-4 mx-4 mt-2 mb-6">
-          <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide mb-2">About</h3>
+        <DrawerSection title="About" defaultOpen={false} className="mb-6" contentClassName="">
           <p className="text-sm text-foreground leading-relaxed">{account.description as string}</p>
-        </div>
+        </DrawerSection>
       )}
     </div>
   );

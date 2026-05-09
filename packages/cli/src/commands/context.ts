@@ -39,7 +39,7 @@ export function contextCommand(): Command {
     });
 
   cmd.command('add')
-    .description('Add context about a CRM object')
+    .description('Add context about a customer record')
     .action(async () => {
       const { default: inquirer } = await import('inquirer');
       const answers = await inquirer.prompt([

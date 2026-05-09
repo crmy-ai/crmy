@@ -332,6 +332,45 @@ export default function AgentSettings() {
         <p className="text-sm text-muted-foreground">Configure the model that powers in-app reasoning over your operational state layer.</p>
       </div>
 
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex items-start gap-3 mb-3">
+          <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+            <ActivitySquare className="w-4 h-4 text-primary" />
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Agent readiness</h3>
+            <p className="text-xs text-muted-foreground">Review model boundary, saved config, scopes, and approval posture before the agent acts.</p>
+          </div>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
+            <p className="text-xs text-muted-foreground">Saved config</p>
+            <p className="mt-1 flex items-center gap-1.5 text-sm font-medium text-foreground">
+              {config ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <XCircle className="w-3.5 h-3.5 text-destructive" />}
+              {config ? 'Loaded from workspace' : 'No saved settings'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
+            <p className="text-xs text-muted-foreground">Model boundary</p>
+            <p className="mt-1 text-sm font-medium text-foreground truncate">{providerDef.label} · {resolvedModel || 'No model selected'}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
+            <p className="text-xs text-muted-foreground">Action scopes</p>
+            <p className="mt-1 text-sm font-medium text-foreground">
+              {canWriteObjects ? 'Writes enabled' : 'Writes disabled'} · {canCreateAssignments ? 'Handoffs enabled' : 'Handoffs read-only'}
+            </p>
+          </div>
+          <div className="rounded-lg border border-border bg-background/50 px-3 py-2">
+            <p className="text-xs text-muted-foreground">Approval policy</p>
+            <p className="mt-1 flex items-center gap-1.5 text-sm font-medium text-foreground">
+              <TriangleAlert className="w-3.5 h-3.5 text-amber-500" />
+              Risky writes should use HITL rules
+            </p>
+            <Link to="/settings/hitl-rules" className="text-xs text-primary hover:underline">Review HITL rules</Link>
+          </div>
+        </div>
+      </div>
+
       {/* ── SECTION 1: Enable ────────────────────────────────────────────── */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">

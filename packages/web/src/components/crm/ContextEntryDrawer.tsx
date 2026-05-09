@@ -236,8 +236,12 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
       await reviewEntry.mutateAsync(entry.id);
       toast({ title: 'Marked as reviewed', description: 'Validity extended by 30 days.' });
       onClose();
-    } catch {
-      toast({ title: 'Failed to review', variant: 'destructive' });
+    } catch (err) {
+      toast({
+        title: 'Could not mark entry reviewed',
+        description: err instanceof Error ? err.message : 'Check your connection and try again.',
+        variant: 'destructive',
+      });
     }
   }
 
@@ -254,8 +258,12 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
       setSupersedeBody('');
       setSupersedeConf(null);
       onClose();
-    } catch {
-      toast({ title: 'Failed to supersede', variant: 'destructive' });
+    } catch (err) {
+      toast({
+        title: 'Could not supersede entry',
+        description: err instanceof Error ? err.message : 'Check the replacement text and try again.',
+        variant: 'destructive',
+      });
     }
   }
 
@@ -271,8 +279,12 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
       toast({ title: 'Entry forgotten', description: 'The belief has been invalidated. Audit record preserved.' });
       setForgetOpen(false);
       onClose();
-    } catch {
-      toast({ title: 'Failed to forget', variant: 'destructive' });
+    } catch (err) {
+      toast({
+        title: 'Could not forget entry',
+        description: err instanceof Error ? err.message : 'Check your connection and try again.',
+        variant: 'destructive',
+      });
     }
   }
 

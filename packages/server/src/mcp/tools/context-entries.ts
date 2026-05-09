@@ -172,7 +172,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_list',
       tier: 'core',
-      description: 'List context entries attached to a CRM object with flexible filters. Use subject_type and subject_id to scope to a specific record, context_type to filter by knowledge category (e.g. "objection", "preference"), authored_by to see what a specific actor has contributed, and is_current to exclude superseded entries. The structured_data_filter parameter supports typed JSONB queries for domain-specific searches like finding all open objections or critical deal risks. Returns entries sorted by recency.',
+      description: 'List context entries attached to a customer record with flexible filters. Use subject_type and subject_id to scope to a specific record, context_type to filter by knowledge category (e.g. "objection", "preference"), authored_by to see what a specific actor has contributed, and is_current to exclude superseded entries. The structured_data_filter parameter supports typed JSONB queries for domain-specific searches like finding all open objections or critical deal risks. Returns entries sorted by recency.',
       inputSchema: contextEntrySearch,
       handler: async (input: z.infer<typeof contextEntrySearch>, actor: ActorContext) => {
         const result = await contextRepo.searchContextEntries(db, actor.tenant_id, {
@@ -349,7 +349,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'briefing_get',
       tier: 'core',
-      description: 'Get a unified briefing for any CRM object — the single most important tool in CRMy. Call this before every agent action, not just the first one. It assembles the full record, related entities, recent activity timeline, open assignments, typed context entries, and stale warnings in one response. Set context_radius to "direct" for single-contact outreach, "adjacent" to include related accounts and opportunities, or "account_wide" for deal reviews that need the full picture. Set token_budget (integer, token count) to tell CRMy how much space you have — it packs the highest-priority context to fit. Check stale_warnings in the response before acting — they identify context entries past their valid_until date that should be reverified. Works on contacts, accounts, opportunities, and use_cases.',
+      description: 'Get a unified briefing for any customer record — the single most important tool in CRMy. Call this before every agent action that needs current state. It assembles the full record, related entities, recent activity timeline, open assignments, typed context entries, and stale warnings in one response. Set context_radius to "direct" for single-contact outreach, "adjacent" to include related accounts and opportunities, or "account_wide" for deal reviews that need the full picture. Set token_budget (integer, token count) to tell CRMy how much space you have — it packs the highest-priority context to fit. Check stale_warnings in the response before acting — they identify context entries past their valid_until date that should be reverified. Works on contacts, accounts, opportunities, and use_cases.',
       inputSchema: briefingGet,
       handler: async (input: z.infer<typeof briefingGet>, actor: ActorContext) => {
         const briefing = await assembleBriefing(
@@ -545,7 +545,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             subjects_resolved: [],
             entries_created: 0,
             low_confidence_skipped: skipped,
-            message: 'No CRM entities could be confidently identified in the document. Try adding contacts/accounts with matching names or aliases, or lower confidence_threshold.',
+            message: 'No customer records could be confidently identified in the document. Try adding contacts/accounts with matching names or aliases, or lower confidence_threshold.',
           };
         }
 

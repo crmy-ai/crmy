@@ -13,9 +13,9 @@ export function buildSpec() {
     openapi: '3.1.0',
     info: {
       title: 'CRMy API',
-      version: '0.5.10',
+      version: '0.7.2',
       description:
-        'The context backend for sales agents. MCP-native, PostgreSQL-backed, open source. ' +
+        'The operational customer context backend for AI agents. MCP-native, PostgreSQL-backed, open source. ' +
         'All endpoints require `Authorization: Bearer <jwt-or-api-key>` except `/auth/register` and `/auth/login`.',
       license: { name: 'Apache-2.0' },
     },
@@ -30,14 +30,14 @@ export function buildSpec() {
       { name: 'Activities', description: 'Logged interactions — calls, emails, meetings, tasks' },
       { name: 'Use Cases', description: 'Consumption-based workload tracking' },
       { name: 'Briefing', description: 'Single-call context assembly before any agent action' },
-      { name: 'Context', description: 'Typed, versioned knowledge attached to any CRM object' },
+      { name: 'Context', description: 'Typed, versioned knowledge attached to any customer record' },
       { name: 'Assignments', description: 'Structured handoffs between agents and humans' },
       { name: 'HITL', description: 'Human-in-the-loop approval workflows' },
       { name: 'Actors', description: 'First-class identity for humans and AI agents' },
       { name: 'Webhooks', description: 'Outbound event notifications with retry tracking' },
       { name: 'Emails', description: 'Email drafting with optional HITL approval' },
       { name: 'Custom Fields', description: 'Per-tenant field definitions for any object type' },
-      { name: 'Notes', description: 'Threaded notes on any CRM entity' },
+      { name: 'Notes', description: 'Threaded notes on any customer record' },
       { name: 'Workflows', description: 'Event-driven automation' },
       { name: 'Registries', description: 'Activity type and context type registries' },
       { name: 'Analytics', description: 'Pipeline summaries, forecasts, and use case reports' },

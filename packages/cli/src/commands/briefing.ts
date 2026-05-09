@@ -5,7 +5,7 @@ import { getClient } from '../client.js';
 
 export function briefingCommand(): Command {
   const cmd = new Command('briefing')
-    .description('Get a unified briefing for any CRM object — everything you need before taking action')
+    .description('Get a unified briefing for any customer record before taking action')
     .argument('<subject>', 'Subject as type:UUID (e.g. contact:550e8400-...)')
     .option('--format <fmt>', 'Output format (json or text)', 'text')
     .option('--since <duration>', 'Filter activities by duration (e.g. 7d, 24h)')

@@ -69,6 +69,7 @@ const sortOptions: SortOption[] = [
   { key: 'name', label: 'Opportunity Name' }, { key: 'amount', label: 'Amount' },
   { key: 'stage', label: 'Stage' }, { key: 'probability', label: 'Probability' },
   { key: 'deal_health_score', label: 'Health Score' },
+  { key: 'close_date', label: 'Close Date' },
   { key: 'created_at', label: 'Created' },
 ];
 
@@ -131,7 +132,7 @@ export default function Opportunities() {
       });
     }
     return result;
-  }, [allOpportunities, activeFilters, sort]);
+  }, [allOpportunities, activeFilters, sort, closeDate, customFrom, customTo]);
 
   useEffect(() => { setPage(1); }, [search, activeFilters, sort, closeDate, customFrom, customTo]);
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
@@ -311,29 +312,34 @@ export default function Opportunities() {
                     <thead>
                       <tr className="border-b border-border bg-surface-sunken/50">
                         <SortHeader label="Opportunity" sortKey="name" />
+                        <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Company</th>
                         <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Contact</th>
                         <SortHeader label="Amount" sortKey="amount" />
                         <SortHeader label="Stage" sortKey="stage" />
                         <SortHeader label="Probability" sortKey="probability" />
                         <SortHeader label="Health" sortKey="deal_health_score" />
-                        <SortHeader label="Created" sortKey="created_at" />
+                        <SortHeader label="Close Date" sortKey="close_date" />
                         {agentEnabled && <th className="px-2 py-3 w-8"></th>}
                       </tr>
                     </thead>
                     <tbody>
                       {paginated.map((d, i) => {
                         const contactName = (d.contact_name ?? d.contactName ?? '') as string;
+                        const accountName = (d.account_name ?? d.accountName ?? '') as string;
                         const amount = (d.amount as number) ?? 0;
                         return (
                           <tr key={d.id as string} onClick={() => openDrawer('opportunity', d.id as string)}
                             className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer transition-colors group ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
                             <td className="px-4 py-3 font-display font-bold text-foreground">{d.name as string}</td>
+                            <td className="px-4 py-3 text-muted-foreground">{accountName || '—'}</td>
                             <td className="px-4 py-3">
-                              {contactName && (
+                              {contactName ? (
                                 <div className="flex items-center gap-2">
                                   <ContactAvatar name={contactName} className="w-5 h-5 rounded-full text-[8px]" />
                                   <span className="text-muted-foreground">{contactName}</span>
                                 </div>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
                               )}
                             </td>
                             <td className="px-4 py-3 font-display font-bold text-foreground">
@@ -347,7 +353,7 @@ export default function Opportunities() {
                                 : <span className="text-muted-foreground text-xs">—</span>}
                             </td>
                             <td className="px-4 py-3 text-muted-foreground text-xs">
-                              {d.created_at ? new Date(d.created_at as string).toLocaleDateString() : '—'}
+                              {d.close_date ? new Date(d.close_date as string).toLocaleDateString() : '—'}
                             </td>
                             {agentEnabled && (
                               <td className="px-2 py-3">

@@ -1,6 +1,6 @@
 # CRMy User Guide
 
-Complete documentation for CRMy — the agent-first open source CRM.
+Complete documentation for CRMy — the operational customer context layer for AI agents.
 
 ---
 
@@ -61,15 +61,29 @@ npx @crmy/cli init
 ### Quick setup — Local mode
 
 ```bash
-# 1. Initialize (interactive — sets up DB, user, API key)
-npx @crmy/cli init
+# 1. Start Postgres with pgvector if you do not already have a database
+docker run --name crmy-postgres \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=crmy \
+  -p 5432:5432 \
+  -d pgvector/pgvector:pg16
 
-# 2. Start the server (REST API + MCP + Web UI at /app)
+# 2. Initialize non-interactively
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crmy
+export CRMY_ADMIN_EMAIL=admin@example.com
+export CRMY_ADMIN_PASSWORD=change-me-please-123
+npx @crmy/cli init --yes
+
+# 3. Check setup and start the server (REST API + MCP + Web UI at /app)
+npx @crmy/cli doctor
 npx @crmy/cli server
 
-# 3. Add to Claude Code as an MCP server
+# 4. Add to Claude Code as an MCP server
 claude mcp add crmy -- npx @crmy/cli mcp
 ```
+
+Prefer prompts? Run `npx @crmy/cli init` without `--yes`.
 
 ### Quick setup — Remote mode
 
@@ -198,7 +212,7 @@ CRMy supports multiple authentication methods across the CLI, Web UI, and API.
 
 #### Local mode (direct database)
 
-When you run `crmy init`, the CLI connects directly to PostgreSQL. An API key is generated and stored in `.crmy.json`. No server is needed — all commands run MCP tools in-process.
+When you run `crmy init`, the CLI connects directly to PostgreSQL. An API key is generated and stored in both `.crmy.json` and `~/.crmy/config.json`. No server is needed for local CLI/MCP commands because tools can run in-process against the configured database.
 
 #### Remote mode (REST API)
 
@@ -533,9 +547,9 @@ Tabbed interface:
 - **Webhooks**: add endpoint URL + event types, list existing, delete
 - **Custom Fields**: tabbed by object type (contact, account, opportunity, activity, use_case) — create field definitions, list, delete
 - **Actors**: manage registered actors (humans and agents) — see below
-- **Local AI Agent** (`/app/settings/agent`): configure the workspace agent
+- **Workspace Agent** (`/app/settings/model`): configure the workspace agent
 
-#### Local AI Agent settings (`/app/settings/agent`)
+#### Workspace Agent settings (`/app/settings/model`)
 
 Controls the agent that performs background intelligence tasks for your tenant.
 
@@ -550,7 +564,7 @@ Controls the agent that performs background intelligence tasks for your tenant.
 | Allow agent to create assignments | ✓ | Agent can create `stale_context_review` and task assignments |
 | Allow agent to log activities | ✓ | Agent can create activity records as provenance for extractions |
 | **Auto-extract context from activities** | ✓ | Automatically run the extraction pipeline on every new activity |
-| Allow agent to write CRM objects | ✗ | Agent can create/update contacts, accounts, opportunities (requires confirmation warning) |
+| Allow agent to write revenue objects | ✗ | Agent can create/update contacts, accounts, opportunities (requires confirmation warning) |
 
 The **Auto-extract context from activities** flag (`auto_extract_context`) controls whether newly created activities trigger the extraction pipeline. When disabled, activities are marked `skipped` and no context entries are written. This is useful when you want to control extraction cost or use `context_ingest_auto` explicitly instead.
 
@@ -773,7 +787,7 @@ GET    /api/v1/analytics/forecast?period=quarter
 
 ## Activities
 
-Activities are logged interactions: calls, emails, meetings, notes, and tasks. The activity model supports polymorphic subjects (any CRM object), structured `detail` payloads, `occurred_at` timestamps (for retroactive logging), and `outcome` tracking.
+Activities are logged interactions: calls, emails, meetings, notes, and tasks. The activity model supports polymorphic subjects (any customer record), structured `detail` payloads, `occurred_at` timestamps (for retroactive logging), and `outcome` tracking.
 
 ### Activity types
 
@@ -796,7 +810,7 @@ The `activity_type` field accepts any string — agents can use custom types wit
 | Field | Notes |
 |---|---|
 | `activity_type` | String from the type registry (or any custom string) |
-| `subject_type` / `subject_id` | Polymorphic attachment to any CRM object |
+| `subject_type` / `subject_id` | Polymorphic attachment to any customer record |
 | `occurred_at` | When the activity happened (may differ from `created_at` for retroactive logging) |
 | `detail` | JSONB — structured payload (call recording URL, email thread ID, etc.) |
 | `outcome` | String describing what resulted from this activity |
@@ -942,7 +956,7 @@ DELETE /api/v1/actors/:id          (admin/owner only)
 
 ## Assignments
 
-Assignments are the coordination layer — structured handoffs of work between agents and humans. An assignment says "this actor should do this thing about this CRM object by this time."
+Assignments are the coordination layer — structured handoffs of work between agents and humans. An assignment says "this actor should do this thing about this customer record by this time."
 
 ### Lifecycle
 
@@ -968,7 +982,7 @@ pending → accepted → in_progress → completed
 | Field | Description |
 |---|---|
 | `title` | Short description of what needs to be done |
-| `subject_type` / `subject_id` | The CRM object this assignment is about |
+| `subject_type` / `subject_id` | The customer record this assignment is about |
 | `assignee_actor_id` | Who should do it |
 | `assigner_actor_id` | Who created it |
 | `due_at` | Optional deadline |
@@ -1025,7 +1039,7 @@ POST   /api/v1/assignments/:id/cancel
 
 ## Context Engine
 
-The Context Engine is the memory and knowledge layer. Context entries are structured pieces of information attached to any CRM object — meeting transcripts, competitive intel, relationship maps, agent reasoning, decisions, and more.
+The Context Engine is the memory and knowledge layer. Context entries are structured pieces of information attached to any customer record — meeting transcripts, competitive intel, relationship maps, agent reasoning, decisions, and more.
 
 ### What makes it different from notes
 
@@ -1080,7 +1094,7 @@ Custom types default to weight 1.0, no decay.
 
 | Field | Description |
 |---|---|
-| `subject_type` / `subject_id` | Polymorphic attachment to any CRM object |
+| `subject_type` / `subject_id` | Polymorphic attachment to any customer record |
 | `context_type` | Type string from the context type registry |
 | `body` | The content (max size enforced by governor limit `context_body_max_chars`) |
 | `structured_data` | Optional JSONB payload for typed context (e.g., objection status, competitor details) |
@@ -1199,7 +1213,7 @@ This is the recommended tool for agents processing inbound content (emails, tran
 
 ### Auto-extract from activities
 
-When the **Local AI Agent** is configured and `auto_extract_context` is enabled (Settings → Local AI Agent → "Auto-extract context from activities"), CRMy runs the extraction pipeline automatically on every new activity. Extraction happens fire-and-forget — it does not slow down activity creation. Activities are processed immediately if the agent is configured; otherwise they are queued with `extraction_status = 'pending'` and processed by the background worker (runs every 60 seconds) once the agent becomes available.
+When the **Workspace Agent** is configured and `auto_extract_context` is enabled (Settings → Workspace Agent → "Auto-extract context from activities"), CRMy runs the extraction pipeline automatically on every new activity. Extraction happens fire-and-forget — it does not slow down activity creation. Activities are processed immediately if the agent is configured; otherwise they are queued with `extraction_status = 'pending'` and processed by the background worker (runs every 60 seconds) once the agent becomes available.
 
 Use `context_extract { activity_id }` to manually re-run extraction on any activity.
 
@@ -1273,7 +1287,7 @@ POST   /api/v1/context/ingest-file      { filename, data (base64), source_label 
 
 ## Briefings
 
-A briefing is a single API call that assembles everything an agent or human needs before engaging with a CRM object. It replaces the need to make 5–10 separate queries.
+A briefing is a single API call that assembles everything an agent or human needs before engaging with a customer record. It replaces the need to make 5–10 separate queries.
 
 ### What a briefing includes
 
@@ -1752,7 +1766,7 @@ GET    /api/v1/analytics/use-cases?group_by=stage
 
 ## Notes & Comments
 
-Threaded notes on any CRM entity. Supports internal vs external visibility, @mentions, and pinned notes.
+Threaded notes on any customer record. Supports internal vs external visibility, @mentions, and pinned notes.
 
 ### Object types
 
@@ -2614,7 +2628,7 @@ Base URL: `/api/v1`
 | GET | `/context/stale` | List stale entries |
 | GET | `/context/search` | Full-text search |
 | GET | `/context/semantic-search` | pgvector similarity search (`?q=`, `?subject_type=`, `?limit=`) |
-| POST | `/context/detect-subjects` | Detect CRM entities mentioned in text (`{ text }`) |
+| POST | `/context/detect-subjects` | Detect customer records mentioned in text (`{ text }`) |
 | POST | `/context/ingest` | Ingest context for a known subject (structured form) |
 | POST | `/context/ingest-file` | Extract text from file and ingest (`{ filename, data (base64), source_label }`) |
 

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-type DrawerType = 'contact' | 'opportunity' | 'use-case' | 'account' | 'assignment' | 'workflow' | 'email' | null;
+type DrawerType = 'contact' | 'opportunity' | 'use-case' | 'account' | 'assignment' | 'workflow' | 'email' | 'activity' | null;
 
 export interface AIContextEntity {
   type: 'contact' | 'opportunity' | 'use-case' | 'account';

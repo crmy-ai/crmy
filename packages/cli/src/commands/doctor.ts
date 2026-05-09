@@ -33,7 +33,7 @@ async function checkPort(port: number): Promise<boolean> {
 
 export function doctorCommand(): Command {
   return new Command('doctor')
-    .description('Check your CRMy setup for common issues')
+    .description('Check CRMy config, database, migrations, port, pgvector, and secrets')
     .option('--port <port>', 'Port to check availability for', '3000')
     .action(async (opts) => {
       console.log('\n  CRMy Doctor\n  ══════════════════════════════════════\n');
@@ -68,7 +68,7 @@ export function doctorCommand(): Command {
           failed++;
         }
       } else {
-        fail('No config file found', 'Run: crmy init');
+        fail('No config file found', 'Run: crmy init  (or set DATABASE_URL for direct database mode)');
         failed++;
       }
 
@@ -149,7 +149,7 @@ export function doctorCommand(): Command {
           failed++;
         }
       } else {
-        fail('No DATABASE_URL configured', 'Run: crmy init');
+        fail('No DATABASE_URL configured', 'Run: crmy init, or export DATABASE_URL=postgresql://user:password@host:5432/crmy');
         failed++;
       }
 

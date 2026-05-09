@@ -70,8 +70,8 @@ export default function Contacts() {
     if (activeFilters.lifecycle_stage?.length) result = result.filter(c => activeFilters.lifecycle_stage.includes(c.lifecycle_stage as string));
     if (sort) {
       result.sort((a, b) => {
-        const aVal = (a[sort.key] ?? '') as string | number;
-        const bVal = (b[sort.key] ?? '') as string | number;
+        const aVal = (sort.key === 'name' ? displayName(a) : a[sort.key] ?? '') as string | number;
+        const bVal = (sort.key === 'name' ? displayName(b) : b[sort.key] ?? '') as string | number;
         if (typeof aVal === 'number' && typeof bVal === 'number') return sort.dir === 'asc' ? aVal - bVal : bVal - aVal;
         return sort.dir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
       });
@@ -146,7 +146,9 @@ export default function Contacts() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-surface-sunken/50">
-                    <SortHeader label="Name" sortKey="name" />
+                    <SortHeader label="Contact" sortKey="name" />
+                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Company</th>
+                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Email</th>
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Phone</th>
                     <SortHeader label="Stage" sortKey="lifecycle_stage" />
                     <SortHeader label="Score" sortKey="lead_score" />
@@ -160,9 +162,11 @@ export default function Contacts() {
                       <td className="px-4 py-3">
                         <div>
                           <p className="font-display font-bold text-foreground">{displayName(c)}</p>
-                          {c.company_name && <p className="text-xs text-muted-foreground">{c.company_name as string}</p>}
+                          {c.title && <p className="text-xs text-muted-foreground">{c.title as string}</p>}
                         </div>
                       </td>
+                      <td className="px-4 py-3 text-muted-foreground">{(c.company_name as string) || '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{(c.email as string) || '—'}</td>
                       <td className="px-4 py-3 text-muted-foreground">{(c.phone as string) || '—'}</td>
                       <td className="px-4 py-3">{c.lifecycle_stage ? <StageBadge stage={c.lifecycle_stage as string} /> : '—'}</td>
                       <td className="px-4 py-3">

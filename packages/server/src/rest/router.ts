@@ -51,17 +51,29 @@ function p(req: Request, name: string): string {
   return typeof val === 'string' ? val : Array.isArray(val) ? val[0] : '';
 }
 
+function redactSensitive(value: string): string {
+  return value
+    .replace(/(postgres(?:ql)?:\/\/[^:\s]+):([^@\s]+)@/gi, '$1:***@')
+    .replace(/((?:password|token|secret|api[_-]?key)=)[^&\s]+/gi, '$1***');
+}
+
+function safeInternalDetail(err: unknown): string {
+  if (process.env.NODE_ENV === 'production') {
+    return 'An unexpected server error occurred. Check the server logs for details and try again.';
+  }
+  return redactSensitive(err instanceof Error ? err.message : 'Internal error');
+}
+
 function handleError(res: Response, err: unknown): void {
   if (err instanceof CrmyError) {
     res.status(err.status).json(err.toJSON());
     return;
   }
-  const message = err instanceof Error ? err.message : 'Internal error';
   res.status(500).json({
     type: 'https://crmy.ai/errors/internal',
     title: 'Internal Error',
     status: 500,
-    detail: message,
+    detail: safeInternalDetail(err),
   });
 }
 
@@ -341,6 +353,19 @@ export function apiRouter(db: DbPool): Router {
         cursor: qs(req.query.cursor),
       });
       res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/activities/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireScopes(actor, 'activities:read');
+      const activity = await activityRepo.getActivity(db, actor.tenant_id, p(req, 'id'));
+      if (!activity) {
+        res.status(404).json({ error: 'Activity not found' });
+        return;
+      }
+      res.json({ data: activity });
     } catch (err) { handleError(res, err); }
   });
 
@@ -2066,7 +2091,8 @@ export function apiRouter(db: DbPool): Router {
           type: 'https://crmy.ai/errors/connection_failed',
           title: 'Connection Failed',
           status: 400,
-          detail: err instanceof Error ? err.message : 'Failed to connect to database',
+          detail: 'Could not connect to Postgres. Check the host, port, database, username, password, SSL mode, and network access.',
+          hint: redactSensitive(err instanceof Error ? err.message : 'Database connection failed'),
         });
       }
     } catch (err) { handleError(res, err); }
@@ -2087,7 +2113,7 @@ export function apiRouter(db: DbPool): Router {
       }
       const configPath = path.join(process.cwd(), '.env.db');
       await fs.writeFile(configPath, `DATABASE_URL=${connection_string}\n`, 'utf-8');
-      res.json({ success: true, path: configPath, message: 'Saved to .env.db — restart the server to apply.' });
+      res.json({ success: true, config_file: '.env.db', message: 'Saved to .env.db — restart the server to apply.' });
     } catch (err) { handleError(res, err); }
   });
 

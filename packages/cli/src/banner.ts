@@ -54,5 +54,5 @@ export const ASCII_ART =
 
 export function printBanner(version: string): void {
   console.log(ASCII_ART);
-  console.log(`  CRMy  v${version}  \x1b[2m—\x1b[0m  Agent-first open source CRM\n`);
+  console.log(`  CRMy  v${version}  \x1b[2m—\x1b[0m  Operational customer context for AI agents\n`);
 }

@@ -1149,8 +1149,12 @@ function WebhooksSettings() {
       await createWebhook.mutateAsync({ url: newUrl.trim(), events: newEvents });
       resetCreate();
       toast({ title: 'Webhook created' });
-    } catch {
-      toast({ title: 'Error', description: 'Failed to create webhook.', variant: 'destructive' });
+    } catch (err) {
+      toast({
+        title: 'Could not create webhook',
+        description: err instanceof Error ? err.message : 'Check the endpoint URL and selected events, then try again.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -1166,8 +1170,12 @@ function WebhooksSettings() {
       await updateWebhook.mutateAsync({ id, data: { events: editEvents } });
       setEditingEventsId(null);
       toast({ title: 'Webhook updated' });
-    } catch {
-      toast({ title: 'Error', description: 'Failed to update webhook.', variant: 'destructive' });
+    } catch (err) {
+      toast({
+        title: 'Could not update webhook',
+        description: err instanceof Error ? err.message : 'Check the selected events and try again.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -1177,8 +1185,12 @@ function WebhooksSettings() {
       setDeleteId(null);
       if (expandedId === id) setExpandedId(null);
       toast({ title: 'Webhook deleted' });
-    } catch {
-      toast({ title: 'Error', description: 'Failed to delete webhook.', variant: 'destructive' });
+    } catch (err) {
+      toast({
+        title: 'Could not delete webhook',
+        description: err instanceof Error ? err.message : 'Refresh the list and try again.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -1501,8 +1513,12 @@ function CustomFieldsSettings() {
       setNewLabel(''); setNewType('text'); setNewRequired(false); setNewOptions('');
       setShowCreate(false);
       toast({ title: 'Custom field created' });
-    } catch {
-      toast({ title: 'Error', description: 'Failed to create field.', variant: 'destructive' });
+    } catch (err) {
+      toast({
+        title: 'Could not create custom field',
+        description: err instanceof Error ? err.message : 'Check the label, type, and options, then try again.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -1532,8 +1548,12 @@ function CustomFieldsSettings() {
       });
       setEditingId(null);
       toast({ title: 'Custom field updated' });
-    } catch {
-      toast({ title: 'Error', description: 'Failed to update field.', variant: 'destructive' });
+    } catch (err) {
+      toast({
+        title: 'Could not update custom field',
+        description: err instanceof Error ? err.message : 'Check the field settings and try again.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -1542,42 +1562,55 @@ function CustomFieldsSettings() {
       await deleteField.mutateAsync(id);
       setConfirmDeleteId(null);
       toast({ title: 'Custom field deleted' });
-    } catch {
-      toast({ title: 'Error', description: 'Failed to delete field.', variant: 'destructive' });
+    } catch (err) {
+      toast({
+        title: 'Could not delete custom field',
+        description: err instanceof Error ? err.message : 'Refresh the list and try again.',
+        variant: 'destructive',
+      });
     }
   };
 
   const inputCls = 'w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
+    <div className="space-y-4">
+      <div>
         <h2 className="font-display font-bold text-lg text-foreground">Custom Fields</h2>
-        <button onClick={() => { setShowCreate(true); setEditingId(null); setConfirmDeleteId(null); }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors">
-          <Plus className="w-3.5 h-3.5" /> New Field
-        </button>
+        <p className="text-sm text-muted-foreground mt-0.5">
+          Define custom fields per object type. Values are type-checked and required fields are enforced by the server.
+        </p>
       </div>
-      <p className="text-sm text-muted-foreground mb-5">
-        Define custom fields per object type. Values are type-checked and required fields are enforced by the server.
-      </p>
 
-      {/* Object type tabs */}
-      <div className="flex gap-1 mb-5 overflow-x-auto no-scrollbar bg-muted rounded-xl p-0.5">
-        {objectTypes.map((ot) => (
-          <button key={ot.key} onClick={() => { setActiveTab(ot.key); setShowCreate(false); setEditingId(null); setConfirmDeleteId(null); }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${activeTab === ot.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-            {ot.label}
-          </button>
-        ))}
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex gap-1 overflow-x-auto no-scrollbar bg-muted rounded-xl p-0.5 flex-1 min-w-[220px]">
+          {objectTypes.map((ot) => (
+            <button key={ot.key} onClick={() => { setActiveTab(ot.key); setShowCreate(false); setEditingId(null); setConfirmDeleteId(null); }}
+              className={`h-8 px-3 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${activeTab === ot.key ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+              {ot.label}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => { setShowCreate(true); setEditingId(null); setConfirmDeleteId(null); }}
+          disabled={showCreate}
+          className="h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale disabled:opacity-50">
+          <Plus className="w-4 h-4" /> New Field
+        </button>
       </div>
 
       {/* Create form */}
       {showCreate && (
-        <div className="mb-5 p-4 rounded-xl border border-border bg-muted/30 space-y-3 max-w-lg">
-          <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">New Field</p>
+        <div className="p-5 rounded-xl border border-border bg-card space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-foreground">Create new field</h3>
+            <button onClick={() => { setShowCreate(false); setNewLabel(''); setNewRequired(false); setNewOptions(''); }}
+              className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Label <span className="text-destructive">*</span></label>
+            <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Label <span className="text-destructive">*</span></label>
             <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="e.g. Preferred Language"
               className={inputCls} onKeyDown={e => e.key === 'Enter' && handleCreate()} />
             {newLabel.trim() && (
@@ -1585,7 +1618,7 @@ function CustomFieldsSettings() {
             )}
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Type</label>
+            <label className="text-xs font-mono text-muted-foreground uppercase tracking-wider">Type</label>
             <div className="flex flex-wrap gap-1.5">
               {FIELD_TYPE_OPTIONS.map(ft => (
                 <button key={ft.value} onClick={() => setNewType(ft.value)}
@@ -1605,7 +1638,7 @@ function CustomFieldsSettings() {
           <button
             type="button"
             onClick={() => setNewRequired(!newRequired)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+            className={`h-9 flex items-center gap-2 px-3 rounded-lg border text-sm font-semibold transition-all ${
               newRequired
                 ? 'bg-primary/10 border-primary/40 text-primary'
                 : 'bg-muted border-border text-muted-foreground hover:text-foreground'
@@ -1620,11 +1653,11 @@ function CustomFieldsSettings() {
           </button>
           <div className="flex gap-2 pt-1">
             <button onClick={handleCreate} disabled={!newLabel.trim() || createField.isPending}
-              className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
               {createField.isPending ? 'Creating…' : 'Create Field'}
             </button>
             <button onClick={() => { setShowCreate(false); setNewLabel(''); setNewRequired(false); setNewOptions(''); }}
-              className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
+              className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors">
               Cancel
             </button>
           </div>
@@ -1632,7 +1665,7 @@ function CustomFieldsSettings() {
       )}
 
       {/* Fields list */}
-      <div className="space-y-2 max-w-2xl">
+      <div className="space-y-2">
         {isLoading ? (
           <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-14 bg-muted/50 rounded-xl animate-pulse" />)}</div>
         ) : fields.length === 0 ? (
@@ -2499,7 +2532,11 @@ function DatabaseSettings() {
       setTestResult('idle');
       toast({ title: 'Database config saved', description: result.message });
     } catch (err) {
-      toast({ title: 'Error', description: err instanceof Error ? err.message : 'Failed to save', variant: 'destructive' });
+      toast({
+        title: 'Could not save database config',
+        description: err instanceof Error ? err.message : 'Test the connection again, then retry the save.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -2519,41 +2556,56 @@ function DatabaseSettings() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="mb-6">
+    <div className="space-y-4">
+      <div>
         <h2 className="font-display font-bold text-lg text-foreground">Database Connection</h2>
         <p className="text-sm text-muted-foreground mt-0.5">
           Connect CRMy to the Postgres database that stores operational state for agents. Changes are saved to <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">.env.db</code> and take effect after a server restart.
         </p>
       </div>
 
+      <div className="flex items-center gap-2 flex-wrap">
+        {!editing ? (
+          <button onClick={() => { setEditing(true); setSaveSuccess(''); setTestResult('idle'); }}
+            className="h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale">
+            <Database className="w-4 h-4" /> Edit Connection
+          </button>
+        ) : (
+          <span className="h-9 px-3 inline-flex items-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
+            Editing connection
+          </span>
+        )}
+        <span className={`h-9 inline-flex items-center px-3 rounded-xl border text-sm font-medium ${dbInfo?.pgvector_enabled ? 'border-success/30 bg-success/5 text-success' : 'border-amber-500/30 bg-amber-500/10 text-amber-700'}`}>
+          pgvector {dbInfo?.pgvector_enabled ? 'enabled' : 'not enabled'}
+        </span>
+      </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-5">
         <div className="space-y-4">
         {isLoading ? (
-          <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-10 bg-muted/50 rounded-lg animate-pulse" />)}</div>
+          <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-12 bg-muted/50 rounded-xl animate-pulse" />)}</div>
         ) : (
-          <div className="p-4 rounded-xl border border-border bg-card space-y-3">
+          <div className="p-5 rounded-xl border border-border bg-card space-y-4 shadow-sm">
             <div className="flex items-start justify-between gap-3 mb-2">
               <div>
-                <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Current Connection</p>
-                <p className="text-xs text-muted-foreground mt-1">Detected provider: {DB_PROVIDER_GUIDES[currentProvider].label}</p>
+                <h3 className="text-sm font-semibold text-foreground">Current connection</h3>
+                <p className="text-sm text-muted-foreground mt-0.5">Detected provider: {DB_PROVIDER_GUIDES[currentProvider].label}</p>
               </div>
-              <span className={`text-xs px-2 py-1 rounded-full border ${dbInfo?.pgvector_enabled ? 'border-success/30 bg-success/5 text-success' : 'border-amber-500/30 bg-amber-500/10 text-amber-700'}`}>
-                pgvector {dbInfo?.pgvector_enabled ? 'enabled' : 'not enabled'}
-              </span>
             </div>
-            {[
-              { label: 'Host', value: dbInfo?.host || '—' },
-              { label: 'Port', value: dbInfo?.port || '—' },
-              { label: 'Database', value: dbInfo?.database || '—' },
-              { label: 'User', value: dbInfo?.user || '—' },
-              { label: 'SSL', value: dbInfo?.ssl || 'default' },
-            ].map((row) => (
-              <div key={row.label} className="flex items-center gap-3">
-                <span className="text-xs font-medium text-muted-foreground w-20 flex-shrink-0">{row.label}</span>
-                <code className="text-sm font-mono text-foreground">{row.value}</code>
-              </div>
-            ))}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {[
+                { label: 'Host', value: dbInfo?.host || '—' },
+                { label: 'Port', value: dbInfo?.port || '—' },
+                { label: 'Database', value: dbInfo?.database || '—' },
+                { label: 'User', value: dbInfo?.user || '—' },
+                { label: 'SSL', value: dbInfo?.ssl || 'default' },
+              ].map((row) => (
+                <div key={row.label} className="rounded-lg border border-border bg-background px-3 py-2 min-w-0">
+                  <p className="text-xs font-medium text-muted-foreground">{row.label}</p>
+                  <code className="block text-sm font-mono text-foreground truncate mt-0.5">{row.value}</code>
+                </div>
+              ))}
+            </div>
             <div className="pt-3 mt-3 border-t border-border text-xs text-muted-foreground">
               pgvector powers semantic context search and embedding similarity. Without it, CRMy still works, but semantic search falls back to keyword search.
             </div>
@@ -2567,14 +2619,12 @@ function DatabaseSettings() {
           </div>
         )}
 
-        {!editing ? (
-          <button onClick={() => { setEditing(true); setSaveSuccess(''); setTestResult('idle'); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors">
-            <Database className="w-3.5 h-3.5" /> Edit Connection
-          </button>
-        ) : (
-          <div className="space-y-3 p-4 rounded-xl border border-border bg-muted/30">
-            <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">New Connection String</p>
+        {editing && (
+          <div className="space-y-4 p-5 rounded-xl border border-border bg-card shadow-sm">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">New connection string</h3>
+              <p className="text-sm text-muted-foreground mt-0.5">Paste a Postgres URL, test it, then save when the connection succeeds.</p>
+            </div>
             <input
               value={connStr}
               onChange={(e) => { setConnStr(e.target.value); setTestResult('idle'); setTestError(''); }}
@@ -2596,16 +2646,16 @@ function DatabaseSettings() {
             <div className="flex items-center gap-2 flex-wrap">
               <button onClick={handleTest}
                 disabled={!connStr.trim() || testConfig.isPending}
-                className="px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-foreground/30 disabled:opacity-40 transition-colors">
+                className="px-4 py-2 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:text-foreground hover:border-foreground/30 disabled:opacity-40 transition-colors">
                 {testConfig.isPending ? 'Testing...' : 'Test Connection'}
               </button>
               <button onClick={handleSave}
                 disabled={!connStr.trim() || testResult !== 'ok' || saveConfig.isPending}
-                className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
                 {saveConfig.isPending ? 'Saving...' : 'Save'}
               </button>
               <button onClick={() => { setEditing(false); setConnStr(''); setTestResult('idle'); setTestError(''); }}
-                className="px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80 transition-colors">
+                className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors">
                 Cancel
               </button>
             </div>
@@ -2615,14 +2665,17 @@ function DatabaseSettings() {
         </div>
 
         <aside className="space-y-4">
-          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-            <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Provider Setup</p>
+          <div className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Provider setup</h3>
+              <p className="text-sm text-muted-foreground mt-0.5">Choose your database host to see the right setup notes.</p>
+            </div>
             <div className="grid grid-cols-2 gap-2">
               {(Object.keys(DB_PROVIDER_GUIDES) as DbProviderId[]).map(id => (
                 <button
                   key={id}
                   onClick={() => setProvider(id)}
-                  className={`px-3 py-2 rounded-lg border text-xs text-left transition-colors ${provider === id ? 'border-primary bg-primary/5 text-primary' : 'border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}`}
+                  className={`h-9 px-3 rounded-lg border text-sm text-left transition-colors ${provider === id ? 'border-primary bg-primary/5 text-primary' : 'border-border text-muted-foreground hover:text-foreground hover:border-muted-foreground/40'}`}
                 >
                   {DB_PROVIDER_GUIDES[id].label}
                 </button>
@@ -2632,7 +2685,7 @@ function DatabaseSettings() {
               <p className="text-sm font-semibold text-foreground">{selectedGuide.fit}</p>
               <code className="block rounded-lg border border-border bg-background p-2 text-xs font-mono text-foreground overflow-x-auto whitespace-nowrap">{selectedGuide.placeholder}</code>
               <button onClick={() => { setConnStr(selectedGuide.placeholder); setEditing(true); setTestResult('idle'); }}
-                className="text-xs text-primary hover:underline">
+                className="h-8 px-3 inline-flex items-center rounded-lg border border-border text-sm font-medium text-primary hover:bg-primary/5 transition-colors">
                 Use as template
               </button>
               <ul className="space-y-1.5">
@@ -2649,10 +2702,10 @@ function DatabaseSettings() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+          <div className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
             <div>
-              <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider">Sample Data</p>
-              <p className="text-xs text-muted-foreground mt-1">If you skipped demo data during init, add a small sample account, contact, opportunity, use case, activity, context entry, and assignment.</p>
+              <h3 className="text-sm font-semibold text-foreground">Sample data</h3>
+              <p className="text-sm text-muted-foreground mt-0.5">If you skipped demo data during init, add a small sample account, contact, opportunity, use case, activity, context entry, and assignment.</p>
             </div>
             {sampleCounts && (
               <div className="grid grid-cols-2 gap-2 text-xs">
@@ -2671,7 +2724,7 @@ function DatabaseSettings() {
             )}
             {!showSeedConfirm ? (
               <button onClick={() => setShowSeedConfirm(true)}
-                className="w-full px-3 py-2 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">
+                className="w-full h-9 px-4 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">
                 Add Sample Data
               </button>
             ) : (
@@ -2682,16 +2735,16 @@ function DatabaseSettings() {
                 </div>
                 <div className="flex gap-2">
                   <button onClick={handleSeedSample} disabled={seedSample.isPending}
-                    className="flex-1 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40">
+                    className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40">
                     {seedSample.isPending ? 'Adding...' : 'Confirm'}
                   </button>
-                  <button onClick={() => setShowSeedConfirm(false)} className="flex-1 px-3 py-1.5 rounded-lg bg-muted text-muted-foreground text-xs font-semibold hover:bg-muted/80">
+                  <button onClick={() => setShowSeedConfirm(false)} className="flex-1 px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted">
                     Cancel
                   </button>
                 </div>
               </div>
             )}
-            <button onClick={() => copyCommand('crmy seed-demo')} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+            <button onClick={() => copyCommand('crmy seed-demo')} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
               <Copy className="w-3.5 h-3.5" /> Copy CLI alternative
             </button>
           </div>

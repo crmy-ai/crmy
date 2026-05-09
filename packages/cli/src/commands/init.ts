@@ -103,8 +103,8 @@ async function ensureDatabaseExists(
 
 export function initCommand(): Command {
   return new Command('init')
-    .description('Interactive setup wizard: database, migrations, admin account')
-    .option('-y, --yes', 'Accept defaults non-interactively (requires CRMY_ADMIN_EMAIL + CRMY_ADMIN_PASSWORD env vars)')
+    .description('Set up CRMy: database, migrations, owner account, API key, and sample data')
+    .option('-y, --yes', 'Use defaults non-interactively (requires CRMY_ADMIN_EMAIL + CRMY_ADMIN_PASSWORD; DATABASE_URL optional)')
     .action(async (opts) => {
       const yesMode = !!opts.yes;
       const { default: inquirer } = await import('inquirer');
@@ -116,7 +116,8 @@ export function initCommand(): Command {
       console.log('  This wizard will:\n');
       console.log('    Step 1 — Connect to your PostgreSQL database');
       console.log('    Step 2 — Create all CRMy tables (migrations)');
-      console.log('    Step 3 — Create your admin account\n');
+      console.log('    Step 3 — Create your owner account and local API key');
+      console.log('    Step 4 — Optionally seed demo data for a fast first run\n');
 
       // ── Detect existing config ──────────────────────────────────────────────
       const localConfigPath = path.join(process.cwd(), '.crmy.json');

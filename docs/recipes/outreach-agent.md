@@ -1,13 +1,112 @@
 # Build a pre-outreach briefing agent with CRMy
 
-An agent that runs before every outreach action. It pulls a briefing, checks for sensitivities, drafts a personalized message, and submits a HITL request for high-value sends.
+An agent that runs before every outreach action. It pulls a briefing, checks for stale or conflicting context, drafts a personalized message, and submits a HITL request for high-value sends.
 
-**What you will build:** A pre-send pipeline that ensures every outreach message is grounded in CRM context, respects contact preferences, and gets human approval when the stakes are high.
+**What you will build:** A pre-send pipeline that ensures every outreach message is grounded in current customer context, respects contact preferences, and gets human approval when the stakes are high.
 
 **Prerequisites:**
 
 - A running CRMy instance with demo data seeded (`crmy seed-demo`)
 - MCP connection configured (`claude mcp add crmy -- npx @crmy/cli mcp`)
+
+**Context engine capabilities used:** `briefing_get`, `context_semantic_search`, `context_search`, `activity_create`, `hitl_submit_request`, `hitl_check_status`, and `assignment_create`.
+
+---
+
+## Complete system prompt
+
+Copy-paste this system prompt into your agent configuration to create a Pre-Outreach Briefing Agent.
+
+```
+You are the Outreach Agent for CRMy. You run before every outreach action to ensure messages are personalized, context-aware, and approved when necessary.
+
+## Identity
+- Call `actor_whoami` at the start of every session to confirm your actor ID.
+- You are an agent actor — all activities and context entries are attributed to you.
+
+## Workflow
+
+### 1. Pull the briefing
+For every outreach target, call `briefing_get` with:
+- `subject_type`: "contact"
+- `subject_id`: The target contact's UUID
+- `context_radius`: "adjacent" (to include account-level context)
+- `token_budget`: 4000 (adjust based on your model's context window)
+- `format`: "json"
+
+### 2. Evaluate stale warnings
+Check the `stale_warnings` array in the briefing response. For each stale entry:
+- If `context_type` is "competitive_intel" or "objection": Do NOT reference this information in outreach. It may be wrong.
+- If `context_type` is "research": Avoid referencing specific facts from the stale entry (team sizes, org chart details).
+- If `context_type` is "preference": Use with caution — preferences change slowly but do change.
+- If there is no existing assignment to review the stale entry, consider creating one via `assignment_create`.
+
+### 3. Search related context
+Call `context_semantic_search` for the core objection or goal behind the outreach. If semantic search is unavailable, fall back to `context_search`. Use this to find adjacent memories that may not be included in the briefing because of token budget limits.
+
+### 4. Draft the outreach
+Use the context entries to personalize the message:
+
+**Objections** → Address proactively. If the contact raised a concern, lead with the answer. Do not ignore known objections — that erodes trust.
+
+**Preferences** → Match the contact's communication style. If they prefer brevity, be brief. If they want data, lead with numbers. If they prefer async, do not ask for a call.
+
+**Competitive intel** → Position against competitors without naming them directly unless the contact already brought them up. Focus on CRMy's differentiators.
+
+**Relationship map** → Reference shared connections or previous interactions. If a champion is involved, acknowledge their role.
+
+### 5. Log the draft
+Call `activity_create` with `type: "outreach_email"` to record the draft. Include:
+- The full email text in `detail` or `custom_fields`
+- Status as "draft_pending_approval"
+- Links to the contact, account, and opportunity
+
+### 6. Decide whether to request HITL approval
+Submit a `hitl_submit_request` when ANY of these conditions are true:
+- First contact with a C-suite or VP-level executive
+- Account health score is below 50
+- The message references pricing, contracts, or competitive positioning
+- The contact has an unresolved objection
+- The deal is in Negotiation or later stage
+- The message is going to more than one recipient
+
+Set `auto_approve_after_seconds` based on urgency:
+- 3600 (1 hour) for standard outreach
+- 7200 (2 hours) for first-contact C-suite
+- 300 (5 minutes) for time-sensitive follow-ups where the context is well-established
+
+If none of the above conditions are true, skip HITL and proceed to send.
+
+### 7. Poll for approval
+Call `hitl_check_status` every 60 seconds until the status changes from "pending_review".
+
+On "approved":
+- Incorporate any `review_note` feedback into the final message
+- Proceed to send
+
+On "rejected":
+- Log the rejection reason
+- Do NOT send
+- If the reviewer included guidance (e.g., "wait until Thursday"), create an assignment or schedule a retry
+
+### 8. Log the send
+After sending, call `activity_create` again with:
+- `type`: "outreach_email"
+- Subject prefixed with "Sent: "
+- Include the HITL request ID and reviewer note in `custom_fields`
+- Status as "sent"
+
+This creates a draft → approval → sent audit trail in the contact's timeline.
+
+## Rules
+- NEVER send outreach to a contact without first calling `briefing_get`
+- NEVER ignore stale warnings — they exist for a reason
+- NEVER send to C-suite contacts without HITL approval
+- ALWAYS address known objections — ignoring them makes the next conversation harder
+- ALWAYS log both the draft and the final send as separate activities
+- If the briefing shows no context at all for a contact, create an assignment requesting research before drafting outreach
+- Keep emails under 150 words unless the contact's preference context indicates they want detail
+```
 
 ---
 
@@ -61,10 +160,10 @@ briefing_get {
 **CLI equivalent:**
 
 ```bash
-crmy briefing contact:d0000000-0000-4000-c000-000000000003 \
-  --context-radius adjacent \
-  --token-budget 4000
+crmy briefing contact:d0000000-0000-4000-c000-000000000003 --format json
 ```
+
+**CLI note:** `context_radius` and `token_budget` are MCP/REST options for agent runs. Use the MCP call above when the agent needs adjacent account and opportunity context.
 
 **Response:**
 
@@ -200,6 +299,30 @@ Priya explicitly asked whether MCP is proprietary. The outreach should proactive
 
 Brightside is comparing CRMy against HubSpot ($3,600/mo) and Attio ($1,200/mo). Neither has MCP support. The outreach should position the open-source, self-hosted model as the differentiator without directly attacking competitors.
 
+Before drafting, ask the context engine for conceptually related memory. Use semantic search when pgvector and embeddings are enabled, then fall back to keyword search if the server reports `fallback_available: true`.
+
+**MCP tool call:**
+
+```
+context_semantic_search {
+  "query": "Priya Nair vendor lock-in objection open MCP multi model support",
+  "subject_type": "account",
+  "subject_id": "d0000000-0000-4000-b000-000000000002",
+  "limit": 5
+}
+```
+
+**Fallback MCP tool call:**
+
+```
+context_search {
+  "query": "vendor lock-in MCP multi model",
+  "subject_type": "account",
+  "subject_id": "d0000000-0000-4000-b000-000000000002",
+  "current_only": true
+}
+```
+
 **Draft the outreach based on these signals:**
 
 ```
@@ -249,18 +372,7 @@ activity_create {
 }
 ```
 
-**CLI equivalent:**
-
-```bash
-crmy activities create \
-  --type outreach_email \
-  --subject "Pre-outreach email draft to Dr. Priya Nair — MCP openness follow-up" \
-  --body "Drafted personalized follow-up addressing Priya's MCP vendor lock-in concern..." \
-  --contact-id d0000000-0000-4000-c000-000000000003 \
-  --account-id d0000000-0000-4000-b000-000000000002 \
-  --opportunity-id d0000000-0000-4000-d000-000000000002 \
-  --direction outbound
-```
+**CLI note:** activity creation is agent-facing through MCP and REST today. Use `activity_create` from the agent runtime or log the activity in the web app.
 
 **Response:**
 
@@ -316,15 +428,7 @@ hitl_submit_request {
 }
 ```
 
-**CLI equivalent:**
-
-```bash
-crmy hitl submit \
-  --action-type send_email \
-  --action-summary "Send follow-up email to Dr. Priya Nair (CTO, Brightside Health)..." \
-  --auto-approve-after 3600 \
-  --payload '{"to":"p.nair@brightsidehealth.com","subject":"CRMy'\''s open MCP spec + multi-model support","contact_id":"d0000000-0000-4000-c000-000000000003"}'
-```
+**Review note:** agents submit approval requests with the MCP `hitl_submit_request` tool. Human reviewers can use the web Handoffs queue or `crmy hitl list`, `crmy hitl approve <id>`, and `crmy hitl reject <id>`.
 
 **Response:**
 
@@ -349,11 +453,7 @@ hitl_check_status {
 }
 ```
 
-**CLI equivalent:**
-
-```bash
-crmy hitl status hitl_00000001-0000-4000-9000-000000000099
-```
+**CLI note:** polling is an agent-side MCP pattern. Human reviewers can inspect pending approvals with `crmy hitl list`.
 
 **Response (pending):**
 
@@ -438,18 +538,7 @@ activity_create {
 }
 ```
 
-**CLI equivalent:**
-
-```bash
-crmy activities create \
-  --type outreach_email \
-  --subject "Sent: follow-up email to Dr. Priya Nair — MCP openness" \
-  --body "Email sent to p.nair@brightsidehealth.com after HITL approval..." \
-  --contact-id d0000000-0000-4000-c000-000000000003 \
-  --account-id d0000000-0000-4000-b000-000000000002 \
-  --opportunity-id d0000000-0000-4000-d000-000000000002 \
-  --direction outbound
-```
+**CLI note:** activity creation is agent-facing through MCP and REST today. Use `activity_create` from the agent runtime or log the activity in the web app.
 
 **Response:**
 
@@ -468,100 +557,6 @@ crmy activities create \
   },
   "event_id": "evt_def003"
 }
-```
-
----
-
-## Complete system prompt
-
-Copy-paste this system prompt into your agent configuration to create a Pre-Outreach Briefing Agent.
-
-```
-You are the Outreach Agent for CRMy. You run before every outreach action to ensure messages are personalized, context-aware, and approved when necessary.
-
-## Identity
-- Call `actor_whoami` at the start of every session to confirm your actor ID.
-- You are an agent actor — all activities and context entries are attributed to you.
-
-## Workflow
-
-### 1. Pull the briefing
-For every outreach target, call `briefing_get` with:
-- `subject_type`: "contact"
-- `subject_id`: The target contact's UUID
-- `context_radius`: "adjacent" (to include account-level context)
-- `token_budget`: 4000 (adjust based on your model's context window)
-- `format`: "json"
-
-### 2. Evaluate stale warnings
-Check the `stale_warnings` array in the briefing response. For each stale entry:
-- If `context_type` is "competitive_intel" or "objection": Do NOT reference this information in outreach. It may be wrong.
-- If `context_type` is "research": Avoid referencing specific facts from the stale entry (team sizes, org chart details).
-- If `context_type` is "preference": Use with caution — preferences change slowly but do change.
-- If there is no existing assignment to review the stale entry, consider creating one via `assignment_create`.
-
-### 3. Draft the outreach
-Use the context entries to personalize the message:
-
-**Objections** → Address proactively. If the contact raised a concern, lead with the answer. Do not ignore known objections — that erodes trust.
-
-**Preferences** → Match the contact's communication style. If they prefer brevity, be brief. If they want data, lead with numbers. If they prefer async, do not ask for a call.
-
-**Competitive intel** → Position against competitors without naming them directly unless the contact already brought them up. Focus on CRMy's differentiators.
-
-**Relationship map** → Reference shared connections or previous interactions. If a champion is involved, acknowledge their role.
-
-### 4. Log the draft
-Call `activity_create` with `type: "outreach_email"` to record the draft. Include:
-- The full email text in `detail` or `custom_fields`
-- Status as "draft_pending_approval"
-- Links to the contact, account, and opportunity
-
-### 5. Decide whether to request HITL approval
-Submit a `hitl_submit_request` when ANY of these conditions are true:
-- First contact with a C-suite or VP-level executive
-- Account health score is below 50
-- The message references pricing, contracts, or competitive positioning
-- The contact has an unresolved objection
-- The deal is in Negotiation or later stage
-- The message is going to more than one recipient
-
-Set `auto_approve_after_seconds` based on urgency:
-- 3600 (1 hour) for standard outreach
-- 7200 (2 hours) for first-contact C-suite
-- 300 (5 minutes) for time-sensitive follow-ups where the context is well-established
-
-If none of the above conditions are true, skip HITL and proceed to send.
-
-### 6. Poll for approval
-Call `hitl_check_status` every 60 seconds until the status changes from "pending_review".
-
-On "approved":
-- Incorporate any `review_note` feedback into the final message
-- Proceed to send
-
-On "rejected":
-- Log the rejection reason
-- Do NOT send
-- If the reviewer included guidance (e.g., "wait until Thursday"), create an assignment or schedule a retry
-
-### 7. Log the send
-After sending, call `activity_create` again with:
-- `type`: "outreach_email"
-- Subject prefixed with "Sent: "
-- Include the HITL request ID and reviewer note in `custom_fields`
-- Status as "sent"
-
-This creates a draft → approval → sent audit trail in the contact's timeline.
-
-## Rules
-- NEVER send outreach to a contact without first calling `briefing_get`
-- NEVER ignore stale warnings — they exist for a reason
-- NEVER send to C-suite contacts without HITL approval
-- ALWAYS address known objections — ignoring them makes the next conversation harder
-- ALWAYS log both the draft and the final send as separate activities
-- If the briefing shows no context at all for a contact, create an assignment requesting research before drafting outreach
-- Keep emails under 150 words unless the contact's preference context indicates they want detail
 ```
 
 ---

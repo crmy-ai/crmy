@@ -62,6 +62,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
 import { ContextEntryDrawer } from '@/components/crm/ContextEntryDrawer';
+import { CompactList } from '@/components/crm/CompactList';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -941,7 +942,7 @@ export function ContextBrowser() {
             )}
           </motion.div>
         ) : (
-          <div className="space-y-2 pt-2">
+          <CompactList className="space-y-1">
             {filtered.map((entry: any, i: number) => {
               const expired = entry.valid_until ? isPast(new Date(entry.valid_until)) : false;
               return (
@@ -950,12 +951,12 @@ export function ContextBrowser() {
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.02 }}
-                  className={`group bg-card border rounded-xl p-4 transition-colors cursor-pointer hover:bg-muted/30 ${
+                  className={`group rounded-xl p-3 transition-colors cursor-pointer hover:bg-muted/40 ${
                     expired
-                      ? 'border-destructive/30'
+                      ? 'ring-1 ring-destructive/30'
                       : searchMode === 'semantic'
-                      ? 'border-border border-l-2 border-l-violet-500/50'
-                      : 'border-border'
+                      ? 'border-l-2 border-l-violet-500/60'
+                      : ''
                   }`}
                   onClick={() => openEntryDrawer(entry)}
                 >
@@ -1080,7 +1081,7 @@ export function ContextBrowser() {
                 </Button>
               </div>
             )}
-          </div>
+          </CompactList>
         )}
       </div>
 

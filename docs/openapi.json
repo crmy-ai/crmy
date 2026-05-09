@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CRMy API",
-    "version": "0.5.10",
-    "description": "The context backend for sales agents. MCP-native, PostgreSQL-backed, open source. All endpoints require `Authorization: Bearer <jwt-or-api-key>` except `/auth/register` and `/auth/login`.",
+    "version": "0.7.2",
+    "description": "The operational customer context backend for AI agents. MCP-native, PostgreSQL-backed, open source. All endpoints require `Authorization: Bearer <jwt-or-api-key>` except `/auth/register` and `/auth/login`.",
     "license": {
       "name": "Apache-2.0"
     }
@@ -12,6 +12,88 @@
     {
       "url": "/api/v1",
       "description": "Default (relative to server root)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Auth",
+      "description": "Authentication and API key management"
+    },
+    {
+      "name": "Contacts",
+      "description": "Contact records and lifecycle management"
+    },
+    {
+      "name": "Accounts",
+      "description": "Account records and hierarchies"
+    },
+    {
+      "name": "Opportunities",
+      "description": "Pipeline and deal records"
+    },
+    {
+      "name": "Activities",
+      "description": "Logged interactions — calls, emails, meetings, tasks"
+    },
+    {
+      "name": "Use Cases",
+      "description": "Consumption-based workload tracking"
+    },
+    {
+      "name": "Briefing",
+      "description": "Single-call context assembly before any agent action"
+    },
+    {
+      "name": "Context",
+      "description": "Typed, versioned knowledge attached to any customer record"
+    },
+    {
+      "name": "Assignments",
+      "description": "Structured handoffs between agents and humans"
+    },
+    {
+      "name": "HITL",
+      "description": "Human-in-the-loop approval workflows"
+    },
+    {
+      "name": "Actors",
+      "description": "First-class identity for humans and AI agents"
+    },
+    {
+      "name": "Webhooks",
+      "description": "Outbound event notifications with retry tracking"
+    },
+    {
+      "name": "Emails",
+      "description": "Email drafting with optional HITL approval"
+    },
+    {
+      "name": "Custom Fields",
+      "description": "Per-tenant field definitions for any object type"
+    },
+    {
+      "name": "Notes",
+      "description": "Threaded notes on any customer record"
+    },
+    {
+      "name": "Workflows",
+      "description": "Event-driven automation"
+    },
+    {
+      "name": "Registries",
+      "description": "Activity type and context type registries"
+    },
+    {
+      "name": "Analytics",
+      "description": "Pipeline summaries, forecasts, and use case reports"
+    },
+    {
+      "name": "Events",
+      "description": "Append-only audit log"
+    },
+    {
+      "name": "Search",
+      "description": "Cross-entity full-text search"
     }
   ],
   "components": {
@@ -662,6 +744,13 @@
             ],
             "default": "lead"
           },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
           "tags": {
             "type": "array",
             "items": {
@@ -676,6 +765,24 @@
           },
           "source": {
             "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "allow_duplicates": {
+            "type": "boolean",
+            "default": false,
+            "description": "Skip duplicate check and create unconditionally. Use only after presenting candidates to the user."
+          },
+          "if_exists": {
+            "type": "string",
+            "enum": [
+              "warn",
+              "return_existing"
+            ],
+            "default": "warn",
+            "description": "warn: return 409 with candidates when a duplicate is found. return_existing: silently return the best-matching existing record instead of creating."
           }
         },
         "required": [
@@ -730,6 +837,12 @@
           },
           "source": {
             "type": "string"
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           },
           "tags": {
             "type": "array",
@@ -797,6 +910,15 @@
           },
           "reason": {
             "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "expected_version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Optional optimistic concurrency guard. Pass the row_version from the last read to prevent overwriting newer state."
           }
         },
         "required": [
@@ -837,6 +959,13 @@
             "type": "string",
             "format": "uuid"
           },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
           "tags": {
             "type": "array",
             "items": {
@@ -848,6 +977,24 @@
             "type": "object",
             "additionalProperties": {},
             "default": {}
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "allow_duplicates": {
+            "type": "boolean",
+            "default": false,
+            "description": "Skip duplicate check and create unconditionally. Use only after presenting candidates to the user."
+          },
+          "if_exists": {
+            "type": "string",
+            "enum": [
+              "warn",
+              "return_existing"
+            ],
+            "default": "warn",
+            "description": "warn: return 409 with candidates when a duplicate is found. return_existing: silently return the best-matching existing record instead of creating."
           }
         },
         "required": [
@@ -906,6 +1053,12 @@
             ],
             "format": "uuid"
           },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "tags": {
             "type": "array",
             "items": {
@@ -961,6 +1114,15 @@
           },
           "rationale": {
             "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "expected_version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Optional optimistic concurrency guard. Pass the row_version from the last read to prevent overwriting newer state."
           }
         },
         "required": [
@@ -1013,6 +1175,24 @@
             "type": "object",
             "additionalProperties": {},
             "default": {}
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "allow_duplicates": {
+            "type": "boolean",
+            "default": false,
+            "description": "Skip duplicate check and create unconditionally. Use only after presenting candidates to the user."
+          },
+          "if_exists": {
+            "type": "string",
+            "enum": [
+              "warn",
+              "return_existing"
+            ],
+            "default": "warn",
+            "description": "warn: return 409 with candidates when a duplicate is found. return_existing: silently return the best-matching existing record instead of creating."
           }
         },
         "required": [
@@ -1163,6 +1343,15 @@
           },
           "lost_reason": {
             "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "expected_version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Optional optimistic concurrency guard. Pass the row_version from the last read to prevent overwriting newer state."
           }
         },
         "required": [
@@ -1179,7 +1368,21 @@
               "email",
               "meeting",
               "note",
-              "task"
+              "task",
+              "demo",
+              "proposal",
+              "research",
+              "handoff",
+              "status_update",
+              "outreach_email",
+              "outreach_call",
+              "outreach_linkedin",
+              "outreach_other",
+              "meeting_held",
+              "meeting_scheduled",
+              "note_added",
+              "research_completed",
+              "stage_change"
             ]
           },
           "subject": {
@@ -1198,6 +1401,10 @@
             "format": "uuid"
           },
           "opportunity_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "use_case_id": {
             "type": "string",
             "format": "uuid"
           },
@@ -1255,6 +1462,10 @@
           },
           "outcome": {
             "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -1284,6 +1495,71 @@
               "null"
             ]
           },
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "inbound",
+              "outbound"
+            ]
+          },
+          "performed_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "subject_type": {
+            "type": "string",
+            "enum": [
+              "contact",
+              "account",
+              "opportunity",
+              "use_case"
+            ]
+          },
+          "subject_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "related_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "contact",
+              "account",
+              "opportunity",
+              "use_case"
+            ]
+          },
+          "related_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "detail": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "occurred_at": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "custom_fields": {
             "type": "object",
             "additionalProperties": {}
@@ -1305,6 +1581,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "use_case_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "type": {
             "type": "string",
             "enum": [
@@ -1312,7 +1592,21 @@
               "email",
               "meeting",
               "note",
-              "task"
+              "task",
+              "demo",
+              "proposal",
+              "research",
+              "handoff",
+              "status_update",
+              "outreach_email",
+              "outreach_call",
+              "outreach_linkedin",
+              "outreach_other",
+              "meeting_held",
+              "meeting_scheduled",
+              "note_added",
+              "research_completed",
+              "stage_change"
             ]
           },
           "subject_type": {
@@ -1354,6 +1648,10 @@
           },
           "note": {
             "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         }
       },
@@ -1427,6 +1725,10 @@
             "type": "object",
             "additionalProperties": {},
             "default": {}
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -1588,6 +1890,15 @@
           },
           "note": {
             "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "expected_version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Optional optimistic concurrency guard. Pass the row_version from the last read to prevent overwriting newer state."
           }
         },
         "required": [
@@ -1604,6 +1915,15 @@
           },
           "rationale": {
             "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "expected_version": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "description": "Optional optimistic concurrency guard. Pass the row_version from the last read to prevent overwriting newer state."
           }
         },
         "required": [
@@ -1620,6 +1940,10 @@
           "role": {
             "type": "string",
             "default": "stakeholder"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -1641,6 +1965,35 @@
           "auto_approve_after_seconds": {
             "type": "integer",
             "minimum": 0
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "urgent"
+            ],
+            "description": "Request urgency — affects notification format and SLA. Default: normal"
+          },
+          "sla_minutes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Minutes before SLA breach triggers escalation. Default: 1440 (24h)"
+          },
+          "escalate_to_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Actor ID to escalate to if SLA breaches. Defaults to most senior active human."
+          },
+          "handoff_snapshot_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Agent handoff snapshot ID captured with agent_capture_handoff before submitting this review."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -1660,6 +2013,10 @@
           },
           "note": {
             "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -1704,6 +2061,10 @@
             "type": "object",
             "additionalProperties": {},
             "default": {}
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -1842,6 +2203,10 @@
             "type": "object",
             "additionalProperties": {},
             "default": {}
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -1862,6 +2227,14 @@
               "string",
               "null"
             ]
+          },
+          "assignment_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "assigned_to": {
+            "type": "string",
+            "format": "uuid"
           },
           "priority": {
             "type": "string",
@@ -1895,6 +2268,25 @@
               "string",
               "null"
             ]
+          },
+          "subject_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "contact",
+              "account",
+              "opportunity",
+              "use_case"
+            ]
+          },
+          "subject_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           },
           "metadata": {
             "type": "object",
@@ -1988,6 +2380,10 @@
           "completed_by_activity_id": {
             "type": "string",
             "format": "uuid"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         }
       },
@@ -2052,6 +2448,38 @@
           },
           "valid_until": {
             "type": "string"
+          },
+          "parent_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "internal",
+              "external"
+            ],
+            "default": "internal"
+          },
+          "mentions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
+          "pinned": {
+            "type": "boolean",
+            "default": false
+          },
+          "allow_similar": {
+            "type": "boolean",
+            "default": false,
+            "description": "Bypass context convergence warnings and create a separate current entry even when similar or conflicting current context exists. Prefer context_supersede unless the new entry is intentionally distinct."
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -2090,6 +2518,10 @@
               "pattern": "^[a-z0-9][a-z0-9-]*$"
             },
             "maxItems": 20
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -2131,6 +2563,10 @@
             "minimum": 1,
             "maximum": 100,
             "default": 20
+          },
+          "structured_data_filter": {
+            "type": "object",
+            "additionalProperties": {}
           }
         },
         "required": [
@@ -2165,6 +2601,20 @@
           },
           "query": {
             "type": "string"
+          },
+          "structured_data_filter": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "internal",
+              "external"
+            ]
+          },
+          "pinned": {
+            "type": "boolean"
           },
           "limit": {
             "type": "integer",
@@ -2224,6 +2674,19 @@
               "text"
             ],
             "default": "json"
+          },
+          "context_radius": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "adjacent",
+              "account_wide"
+            ],
+            "default": "direct"
+          },
+          "token_budget": {
+            "type": "integer",
+            "minimum": 100
           }
         }
       },
@@ -2243,6 +2706,10 @@
           },
           "description": {
             "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -2353,6 +2820,10 @@
           "require_approval": {
             "type": "boolean",
             "default": true
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -2436,7 +2907,11 @@
               "type": "string"
             }
           },
-          "default_value": {}
+          "default_value": {},
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
+          }
         },
         "required": [
           "object_type",
@@ -2473,118 +2948,6 @@
           }
         }
       },
-      "NoteCreate": {
-        "type": "object",
-        "properties": {
-          "object_type": {
-            "type": "string",
-            "enum": [
-              "contact",
-              "account",
-              "opportunity",
-              "activity",
-              "use_case"
-            ]
-          },
-          "object_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "parent_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "body": {
-            "type": "string",
-            "minLength": 1
-          },
-          "visibility": {
-            "type": "string",
-            "enum": [
-              "internal",
-              "external"
-            ],
-            "default": "internal"
-          },
-          "mentions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "default": []
-          },
-          "pinned": {
-            "type": "boolean",
-            "default": false
-          }
-        },
-        "required": [
-          "object_type",
-          "object_id",
-          "body"
-        ]
-      },
-      "NoteUpdate": {
-        "type": "object",
-        "properties": {
-          "body": {
-            "type": "string",
-            "minLength": 1
-          },
-          "visibility": {
-            "type": "string",
-            "enum": [
-              "internal",
-              "external"
-            ]
-          },
-          "pinned": {
-            "type": "boolean"
-          }
-        }
-      },
-      "NoteList": {
-        "type": "object",
-        "properties": {
-          "object_type": {
-            "type": "string",
-            "enum": [
-              "contact",
-              "account",
-              "opportunity",
-              "activity",
-              "use_case"
-            ]
-          },
-          "object_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "visibility": {
-            "type": "string",
-            "enum": [
-              "internal",
-              "external"
-            ]
-          },
-          "pinned": {
-            "type": "boolean"
-          },
-          "limit": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 100,
-            "default": 20
-          },
-          "cursor": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "object_type",
-          "object_id"
-        ]
-      },
       "WorkflowCreate": {
         "type": "object",
         "properties": {
@@ -2601,42 +2964,575 @@
           },
           "trigger_filter": {
             "type": "object",
-            "additionalProperties": {},
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "eq",
+                        "neq",
+                        "contains",
+                        "starts_with",
+                        "gt",
+                        "lt",
+                        "exists",
+                        "not_exists"
+                      ]
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "op"
+                  ]
+                },
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "default": {}
           },
           "actions": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "type": {
-                  "type": "string",
-                  "enum": [
-                    "send_notification",
-                    "update_field",
-                    "create_activity",
-                    "add_tag",
-                    "remove_tag",
-                    "assign_owner",
-                    "create_note",
-                    "webhook"
+              "anyOf": [
+                {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "send_notification"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Notification message body"
+                            },
+                            "channel_id": {
+                              "type": "string",
+                              "format": "uuid",
+                              "description": "Messaging channel UUID (uses tenant default if omitted)"
+                            },
+                            "recipient": {
+                              "type": "string",
+                              "description": "Recipient identifier (e.g. @user or #channel)"
+                            },
+                            "subject": {
+                              "type": "string",
+                              "description": "Optional subject/title"
+                            }
+                          },
+                          "required": [
+                            "message"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "send_email"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "to_address": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Recipient email address. Supports {{variables}}."
+                            },
+                            "subject": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Email subject line. Supports {{variables}}."
+                            },
+                            "body_text": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Plain-text email body. Supports {{variables}}."
+                            },
+                            "body_html": {
+                              "type": "string",
+                              "description": "Optional HTML email body. Supports {{variables}}."
+                            },
+                            "require_approval": {
+                              "type": "boolean",
+                              "default": true,
+                              "description": "If true, creates a HITL request before sending"
+                            },
+                            "contact_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "account_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "opportunity_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "to_address",
+                            "subject",
+                            "body_text"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "update_field"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "object_type": {
+                              "type": "string",
+                              "enum": [
+                                "contact",
+                                "account",
+                                "opportunity"
+                              ],
+                              "description": "Entity type to update (defaults to triggered entity type)"
+                            },
+                            "object_id": {
+                              "type": "string",
+                              "format": "uuid",
+                              "description": "Entity UUID (defaults to triggered entity ID)"
+                            },
+                            "field": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Field name to update, e.g. lifecycle_stage"
+                            },
+                            "value": {
+                              "description": "New field value"
+                            }
+                          },
+                          "required": [
+                            "field"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "create_activity"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Activity type, e.g. task, call, note"
+                            },
+                            "subject": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Activity subject. Supports {{variables}}."
+                            },
+                            "body": {
+                              "type": "string",
+                              "description": "Activity body/notes. Supports {{variables}}."
+                            },
+                            "contact_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "account_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "subject"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "add_tag"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "tag": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Tag to add, e.g. hot-lead"
+                            },
+                            "object_type": {
+                              "type": "string",
+                              "enum": [
+                                "contact",
+                                "account",
+                                "opportunity"
+                              ]
+                            },
+                            "object_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "tag"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "remove_tag"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "tag": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Tag to remove"
+                            },
+                            "object_type": {
+                              "type": "string",
+                              "enum": [
+                                "contact",
+                                "account",
+                                "opportunity"
+                              ]
+                            },
+                            "object_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "tag"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "assign_owner"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "owner_id": {
+                              "type": "string",
+                              "format": "uuid",
+                              "description": "UUID of the actor to assign as owner"
+                            },
+                            "object_type": {
+                              "type": "string",
+                              "enum": [
+                                "contact",
+                                "account",
+                                "opportunity"
+                              ]
+                            },
+                            "object_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "owner_id"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "webhook"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "url": {
+                              "type": "string",
+                              "format": "uri",
+                              "description": "HTTPS endpoint to POST to when this action fires"
+                            },
+                            "secret": {
+                              "type": "string",
+                              "description": "Optional shared secret for HMAC verification"
+                            }
+                          },
+                          "required": [
+                            "url"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "wait"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "seconds": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 300,
+                              "description": "Delay in seconds (max 300)"
+                            }
+                          },
+                          "required": [
+                            "seconds"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "enroll_in_sequence"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "sequence_id": {
+                              "type": "string",
+                              "format": "uuid",
+                              "description": "UUID of the sequence to enroll the contact into"
+                            },
+                            "contact_id": {
+                              "type": "string",
+                              "format": "uuid",
+                              "description": "Contact UUID override; auto-resolved from event subject if omitted"
+                            },
+                            "objective": {
+                              "type": "string",
+                              "maxLength": 500,
+                              "description": "Optional goal text for this enrollment"
+                            }
+                          },
+                          "required": [
+                            "sequence_id"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "hitl_checkpoint"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Review request title shown to the human reviewer. Supports {{variables}}."
+                            },
+                            "instructions": {
+                              "type": "string",
+                              "description": "Optional instructions for the reviewer — what to check or decide"
+                            },
+                            "priority": {
+                              "type": "string",
+                              "enum": [
+                                "normal",
+                                "high",
+                                "urgent"
+                              ],
+                              "default": "normal"
+                            }
+                          },
+                          "required": [
+                            "title"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    }
                   ]
                 },
-                "config": {
+                {
                   "type": "object",
-                  "additionalProperties": {}
+                  "properties": {
+                    "type": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "create_context_entry"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "create_note"
+                          ]
+                        }
+                      ]
+                    },
+                    "config": {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Context entry body. Supports {{variables}}."
+                        },
+                        "context_type": {
+                          "type": "string",
+                          "default": "note",
+                          "description": "Context type, e.g. note, insight"
+                        },
+                        "object_type": {
+                          "type": "string"
+                        },
+                        "object_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "visibility": {
+                          "type": "string",
+                          "enum": [
+                            "internal",
+                            "shared"
+                          ],
+                          "default": "internal"
+                        }
+                      },
+                      "required": [
+                        "body"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "config"
+                  ]
                 }
-              },
-              "required": [
-                "type",
-                "config"
               ]
             },
-            "minItems": 1
+            "minItems": 1,
+            "maxItems": 20
           },
           "is_active": {
             "type": "boolean",
             "default": true
+          },
+          "max_runs_per_hour": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Rate limit: maximum workflow runs allowed per hour"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -2664,39 +3560,571 @@
           },
           "trigger_filter": {
             "type": "object",
-            "additionalProperties": {}
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "eq",
+                        "neq",
+                        "contains",
+                        "starts_with",
+                        "gt",
+                        "lt",
+                        "exists",
+                        "not_exists"
+                      ]
+                    },
+                    "value": {}
+                  },
+                  "required": [
+                    "op"
+                  ]
+                },
+                {},
+                {
+                  "type": "null"
+                }
+              ]
+            }
           },
           "actions": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "type": {
-                  "type": "string",
-                  "enum": [
-                    "send_notification",
-                    "update_field",
-                    "create_activity",
-                    "add_tag",
-                    "remove_tag",
-                    "assign_owner",
-                    "create_note",
-                    "webhook"
+              "anyOf": [
+                {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "send_notification"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "message": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Notification message body"
+                            },
+                            "channel_id": {
+                              "type": "string",
+                              "format": "uuid",
+                              "description": "Messaging channel UUID (uses tenant default if omitted)"
+                            },
+                            "recipient": {
+                              "type": "string",
+                              "description": "Recipient identifier (e.g. @user or #channel)"
+                            },
+                            "subject": {
+                              "type": "string",
+                              "description": "Optional subject/title"
+                            }
+                          },
+                          "required": [
+                            "message"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "send_email"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "to_address": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Recipient email address. Supports {{variables}}."
+                            },
+                            "subject": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Email subject line. Supports {{variables}}."
+                            },
+                            "body_text": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Plain-text email body. Supports {{variables}}."
+                            },
+                            "body_html": {
+                              "type": "string",
+                              "description": "Optional HTML email body. Supports {{variables}}."
+                            },
+                            "require_approval": {
+                              "type": "boolean",
+                              "default": true,
+                              "description": "If true, creates a HITL request before sending"
+                            },
+                            "contact_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "account_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "opportunity_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "to_address",
+                            "subject",
+                            "body_text"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "update_field"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "object_type": {
+                              "type": "string",
+                              "enum": [
+                                "contact",
+                                "account",
+                                "opportunity"
+                              ],
+                              "description": "Entity type to update (defaults to triggered entity type)"
+                            },
+                            "object_id": {
+                              "type": "string",
+                              "format": "uuid",
+                              "description": "Entity UUID (defaults to triggered entity ID)"
+                            },
+                            "field": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Field name to update, e.g. lifecycle_stage"
+                            },
+                            "value": {
+                              "description": "New field value"
+                            }
+                          },
+                          "required": [
+                            "field"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "create_activity"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Activity type, e.g. task, call, note"
+                            },
+                            "subject": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Activity subject. Supports {{variables}}."
+                            },
+                            "body": {
+                              "type": "string",
+                              "description": "Activity body/notes. Supports {{variables}}."
+                            },
+                            "contact_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "account_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "subject"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "add_tag"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "tag": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Tag to add, e.g. hot-lead"
+                            },
+                            "object_type": {
+                              "type": "string",
+                              "enum": [
+                                "contact",
+                                "account",
+                                "opportunity"
+                              ]
+                            },
+                            "object_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "tag"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "remove_tag"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "tag": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Tag to remove"
+                            },
+                            "object_type": {
+                              "type": "string",
+                              "enum": [
+                                "contact",
+                                "account",
+                                "opportunity"
+                              ]
+                            },
+                            "object_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "tag"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "assign_owner"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "owner_id": {
+                              "type": "string",
+                              "format": "uuid",
+                              "description": "UUID of the actor to assign as owner"
+                            },
+                            "object_type": {
+                              "type": "string",
+                              "enum": [
+                                "contact",
+                                "account",
+                                "opportunity"
+                              ]
+                            },
+                            "object_id": {
+                              "type": "string",
+                              "format": "uuid"
+                            }
+                          },
+                          "required": [
+                            "owner_id"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "webhook"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "url": {
+                              "type": "string",
+                              "format": "uri",
+                              "description": "HTTPS endpoint to POST to when this action fires"
+                            },
+                            "secret": {
+                              "type": "string",
+                              "description": "Optional shared secret for HMAC verification"
+                            }
+                          },
+                          "required": [
+                            "url"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "wait"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "seconds": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 300,
+                              "description": "Delay in seconds (max 300)"
+                            }
+                          },
+                          "required": [
+                            "seconds"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "enroll_in_sequence"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "sequence_id": {
+                              "type": "string",
+                              "format": "uuid",
+                              "description": "UUID of the sequence to enroll the contact into"
+                            },
+                            "contact_id": {
+                              "type": "string",
+                              "format": "uuid",
+                              "description": "Contact UUID override; auto-resolved from event subject if omitted"
+                            },
+                            "objective": {
+                              "type": "string",
+                              "maxLength": 500,
+                              "description": "Optional goal text for this enrollment"
+                            }
+                          },
+                          "required": [
+                            "sequence_id"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "hitl_checkpoint"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Review request title shown to the human reviewer. Supports {{variables}}."
+                            },
+                            "instructions": {
+                              "type": "string",
+                              "description": "Optional instructions for the reviewer — what to check or decide"
+                            },
+                            "priority": {
+                              "type": "string",
+                              "enum": [
+                                "normal",
+                                "high",
+                                "urgent"
+                              ],
+                              "default": "normal"
+                            }
+                          },
+                          "required": [
+                            "title"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    }
                   ]
                 },
-                "config": {
+                {
                   "type": "object",
-                  "additionalProperties": {}
+                  "properties": {
+                    "type": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "create_context_entry"
+                          ]
+                        },
+                        {
+                          "type": "string",
+                          "enum": [
+                            "create_note"
+                          ]
+                        }
+                      ]
+                    },
+                    "config": {
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "type": "string",
+                          "minLength": 1,
+                          "description": "Context entry body. Supports {{variables}}."
+                        },
+                        "context_type": {
+                          "type": "string",
+                          "default": "note",
+                          "description": "Context type, e.g. note, insight"
+                        },
+                        "object_type": {
+                          "type": "string"
+                        },
+                        "object_id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "visibility": {
+                          "type": "string",
+                          "enum": [
+                            "internal",
+                            "shared"
+                          ],
+                          "default": "internal"
+                        }
+                      },
+                      "required": [
+                        "body"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "config"
+                  ]
                 }
-              },
-              "required": [
-                "type",
-                "config"
               ]
-            }
+            },
+            "minItems": 1,
+            "maxItems": 20
           },
           "is_active": {
             "type": "boolean"
+          },
+          "max_runs_per_hour": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "maximum": 1000
           }
         }
       },
@@ -2777,6 +4205,10 @@
               "lifecycle",
               "handoff"
             ]
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -2801,6 +4233,10 @@
           },
           "description": {
             "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         },
         "required": [
@@ -2809,90 +4245,15 @@
         ]
       }
     },
-    "parameters": {}
-  },
-  "tags": [
-    {
-      "name": "Auth",
-      "description": "Authentication and API key management"
-    },
-    {
-      "name": "Contacts",
-      "description": "Contact records and lifecycle management"
-    },
-    {
-      "name": "Accounts",
-      "description": "Account records and hierarchies"
-    },
-    {
-      "name": "Opportunities",
-      "description": "Pipeline and deal records"
-    },
-    {
-      "name": "Activities",
-      "description": "Logged interactions — calls, emails, meetings, tasks"
-    },
-    {
-      "name": "Use Cases",
-      "description": "Consumption-based workload tracking"
-    },
-    {
-      "name": "Briefing",
-      "description": "Single-call context assembly before any agent action"
-    },
-    {
-      "name": "Context",
-      "description": "Typed, versioned knowledge attached to any CRM object"
-    },
-    {
-      "name": "Assignments",
-      "description": "Structured handoffs between agents and humans"
-    },
-    {
-      "name": "HITL",
-      "description": "Human-in-the-loop approval workflows"
-    },
-    {
-      "name": "Actors",
-      "description": "First-class identity for humans and AI agents"
-    },
-    {
-      "name": "Webhooks",
-      "description": "Outbound event notifications with retry tracking"
-    },
-    {
-      "name": "Emails",
-      "description": "Email drafting with optional HITL approval"
-    },
-    {
-      "name": "Custom Fields",
-      "description": "Per-tenant field definitions for any object type"
-    },
-    {
-      "name": "Notes",
-      "description": "Threaded notes on any CRM entity"
-    },
-    {
-      "name": "Workflows",
-      "description": "Event-driven automation"
-    },
-    {
-      "name": "Registries",
-      "description": "Activity type and context type registries"
-    },
-    {
-      "name": "Analytics",
-      "description": "Pipeline summaries, forecasts, and use case reports"
-    },
-    {
-      "name": "Events",
-      "description": "Append-only audit log"
-    },
-    {
-      "name": "Search",
-      "description": "Cross-entity full-text search"
+    "parameters": {},
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "JWT from `/auth/login` or a `crmy_` prefixed API key from `/auth/api-keys`"
+      }
     }
-  ],
+  },
   "paths": {
     "/auth/register": {
       "post": {
@@ -4387,12 +5748,35 @@
           {
             "schema": {
               "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "use_case_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "enum": [
                 "call",
                 "email",
                 "meeting",
                 "note",
-                "task"
+                "task",
+                "demo",
+                "proposal",
+                "research",
+                "handoff",
+                "status_update",
+                "outreach_email",
+                "outreach_call",
+                "outreach_linkedin",
+                "outreach_other",
+                "meeting_held",
+                "meeting_scheduled",
+                "note_added",
+                "research_completed",
+                "stage_change"
               ]
             },
             "required": false,
@@ -6386,6 +7770,35 @@
           },
           {
             "schema": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "required": false,
+            "name": "structured_data_filter",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "internal",
+                "external"
+              ]
+            },
+            "required": false,
+            "name": "visibility",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "boolean"
+            },
+            "required": false,
+            "name": "pinned",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "integer",
               "minimum": 1,
               "maximum": 100,
@@ -6549,6 +7962,15 @@
             },
             "required": false,
             "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            "required": false,
+            "name": "structured_data_filter",
             "in": "query"
           }
         ],
@@ -6813,7 +8235,7 @@
         "tags": [
           "Briefing"
         ],
-        "summary": "Get a full briefing for a CRM object — record + activities + assignments + context + stale warnings",
+        "summary": "Get a full briefing for a customer record — record + activities + assignments + context + stale warnings",
         "security": [
           {
             "BearerAuth": []
@@ -6882,6 +8304,29 @@
             },
             "required": false,
             "name": "format",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "direct",
+                "adjacent",
+                "account_wide"
+              ],
+              "default": "direct"
+            },
+            "required": false,
+            "name": "context_radius",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 100
+            },
+            "required": false,
+            "name": "token_budget",
             "in": "query"
           }
         ],
@@ -7657,296 +9102,6 @@
           "Custom Fields"
         ],
         "summary": "Delete a custom field definition",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "description": "Record UUID"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SuccessResult"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/notes": {
-      "get": {
-        "tags": [
-          "Notes"
-        ],
-        "summary": "List notes for a CRM object (object_type and object_id required)",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "contact",
-                "account",
-                "opportunity",
-                "activity",
-                "use_case"
-              ]
-            },
-            "required": true,
-            "name": "object_type",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "required": true,
-            "name": "object_id",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string",
-              "enum": [
-                "internal",
-                "external"
-              ]
-            },
-            "required": false,
-            "name": "visibility",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "boolean"
-            },
-            "required": false,
-            "name": "pinned",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20
-            },
-            "required": false,
-            "name": "limit",
-            "in": "query"
-          },
-          {
-            "schema": {
-              "type": "string"
-            },
-            "required": false,
-            "name": "cursor",
-            "in": "query"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenericList"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
-          }
-        }
-      },
-      "post": {
-        "tags": [
-          "Notes"
-        ],
-        "summary": "Create a note",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NoteCreate"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenericObject"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/notes/{id}": {
-      "get": {
-        "tags": [
-          "Notes"
-        ],
-        "summary": "Get a note with threaded replies",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "description": "Record UUID"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenericObject"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "Notes"
-        ],
-        "summary": "Update a note",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "description": "Record UUID"
-            },
-            "required": true,
-            "name": "id",
-            "in": "path"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/NoteUpdate"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Success",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenericObject"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Not found",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "Notes"
-        ],
-        "summary": "Delete a note and its replies",
         "security": [
           {
             "BearerAuth": []
@@ -8872,7 +10027,7 @@
         "tags": [
           "Search"
         ],
-        "summary": "Cross-entity full-text search across contacts, accounts, and opportunities",
+        "summary": "Cross-entity full-text search across revenue objects, context, and handoffs",
         "security": [
           {
             "BearerAuth": []

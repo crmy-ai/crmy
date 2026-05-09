@@ -216,7 +216,7 @@ export function activityTools(db: DbPool): ToolDef[] {
     {
       name: 'activity_get_timeline',
       tier: 'core',
-      description: 'Get a chronological activity timeline for any CRM object (contact, account, opportunity, or use_case) via polymorphic subject_type and subject_id. Optionally filter by activity types to see only specific kinds of activities. Returns activities sorted by occurred_at descending with the total count for pagination.',
+      description: 'Get a chronological activity timeline for any customer record (contact, account, opportunity, or use_case) via polymorphic subject_type and subject_id. Optionally filter by activity types to see only specific kinds of activities. Returns activities sorted by occurred_at descending with the total count for pagination.',
       inputSchema: activityGetTimeline,
       handler: async (input: z.infer<typeof activityGetTimeline>, actor: ActorContext) => {
         const result = await activityRepo.getSubjectTimeline(

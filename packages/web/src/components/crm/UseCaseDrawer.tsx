@@ -4,15 +4,14 @@
 import { useState } from 'react';
 import { useUseCase, useUseCaseTimeline, useUpdateUseCase, useDeleteUseCase, useUsers, useCustomFields } from '@/api/hooks';
 import { EntityCombobox } from '@/components/ui/entity-combobox';
-import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '@/store/appStore';
-import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { Sparkles, Calendar, Bot, DollarSign, Pencil, ChevronLeft, Trash2, FileText } from 'lucide-react';
+import { Calendar, Bot, DollarSign, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
 import { ObjectActionBar } from './ObjectActionBar';
 import { CustomFieldsSection } from './CrmWidgets';
 import { ActivityTimeline } from './ActivityTimeline';
+import { DrawerSection } from './DrawerSection';
 import { useCaseStageConfig } from '@/lib/stageConfig';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -307,9 +306,7 @@ function UseCaseEditForm({
 }
 
 export function UseCaseDrawer() {
-  const { drawerEntityId, openAIWithContext, closeDrawer } = useAppStore();
-  const { enabled: agentEnabled } = useAgentSettings();
-  const navigate = useNavigate();
+  const { drawerEntityId, closeDrawer } = useAppStore();
   const [editing, setEditing] = useState(false);
   const [briefing, setBriefing] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -387,24 +384,6 @@ export function UseCaseDrawer() {
           >
             <Pencil className="w-3.5 h-3.5" /> Edit
           </button>
-          <button
-            onClick={() => setBriefing(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
-          >
-            <FileText className="w-3.5 h-3.5" /> Brief
-          </button>
-          {agentEnabled && (
-            <button
-              onClick={() => {
-                openAIWithContext({ type: 'use-case', id: useCase.id, name, detail: stage });
-                closeDrawer();
-                navigate('/agent');
-              }}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-accent/30 bg-accent/5 text-accent text-sm font-semibold hover:bg-accent/10 transition-all ml-auto press-scale"
-            >
-              <Sparkles className="w-3.5 h-3.5" /> Chat
-            </button>
-          )}
         </div>
       </div>
 
@@ -428,9 +407,7 @@ export function UseCaseDrawer() {
         ))}
       </div>
 
-      {/* Details */}
-      <div className="p-4 mx-4 mt-2 space-y-3">
-        <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide">Details</h3>
+      <DrawerSection title="Details">
         {[
           { label: 'Stage', value: useCaseStageConfig[stage]?.label ?? stage },
           { label: 'Health Score', value: healthScore ? String(healthScore) : undefined },
@@ -444,7 +421,7 @@ export function UseCaseDrawer() {
               <span className="text-sm text-foreground">{field.value}</span>
             </div>
           ))}
-      </div>
+      </DrawerSection>
 
       {/* Custom Fields */}
       <CustomFieldsSection objectType="use_case" values={(useCase.custom_fields ?? {}) as Record<string, unknown>} />
@@ -454,11 +431,10 @@ export function UseCaseDrawer() {
 
       {/* Timeline */}
       {timeline.length > 0 && (
-        <div className="p-4 mx-4 mt-2 mb-6">
-          <h3 className="text-xs font-display font-bold text-muted-foreground uppercase tracking-wide mb-3">Timeline</h3>
+        <DrawerSection title="Timeline" count={timeline.length} defaultOpen={false} className="mb-6" contentClassName="">
           {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
           <ActivityTimeline activities={timeline as any[]} />
-        </div>
+        </DrawerSection>
       )}
     </div>
   );

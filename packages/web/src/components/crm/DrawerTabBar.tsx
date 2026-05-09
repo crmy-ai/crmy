@@ -11,16 +11,19 @@ export function DrawerTabBar({
   view,
   onChange,
   graphHref,
+  showBriefTab = true,
 }: {
   view: DrawerView;
   onChange: (v: DrawerView) => void;
   graphHref?: string;
+  showBriefTab?: boolean;
 }) {
   const closeDrawer = useAppStore(s => s.closeDrawer);
-  const tabs: { key: DrawerView; label: string; icon: React.ElementType }[] = [
+  const allTabs: { key: DrawerView; label: string; icon: React.ElementType }[] = [
     { key: 'detail', label: 'Detail', icon: User },
     { key: 'brief',  label: 'Brief',  icon: FileText },
   ];
+  const tabs = allTabs.filter(tab => showBriefTab || tab.key !== 'brief');
 
   return (
     <div className="flex items-center gap-0.5 px-5 py-2 border-b border-border bg-muted/30">

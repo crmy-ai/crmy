@@ -64,7 +64,7 @@ const program = new Command();
 
 program
   .name('crmy')
-  .description('CRMy — The agent-first open source CRM')
+  .description('CRMy — operational customer context for AI agents')
   .version(getCLIVersion());
 
 program.addCommand(authCommand());

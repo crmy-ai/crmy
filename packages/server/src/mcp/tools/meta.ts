@@ -354,7 +354,7 @@ export function metaTools(db: DbPool): ToolDef[] {
     {
       name: 'schema_get',
       tier: 'admin',
-      description: 'Get the full schema for a CRM object type including standard fields and any custom fields defined by the tenant. Agents should call this on first connect to understand the data model — it returns field names, types, required constraints, and available options for enum fields. Pass object_type as "contact", "account", "opportunity", "activity", or "use_case".',
+      description: 'Get the full schema for a typed revenue object including standard fields and any custom fields defined by the tenant. Agents should call this on first connect to understand the data model — it returns field names, types, required constraints, and available options for enum fields. Pass object_type as "contact", "account", "opportunity", "activity", or "use_case".',
       inputSchema: schemaGet,
       handler: async (input: z.infer<typeof schemaGet>, _actor: ActorContext) => {
         return {

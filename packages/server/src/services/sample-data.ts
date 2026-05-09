@@ -76,7 +76,7 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
   );
   await db.query(
     `INSERT INTO context_entries (id, tenant_id, subject_type, subject_id, context_type, authored_by, title, body, confidence, source, tags)
-     VALUES ($1, $2, 'account', $3, 'summary', $4, 'Agent context rollout priority', 'Northstar Labs is evaluating CRMy as the durable customer context layer for revenue agents. The main evaluation criteria are typed objects, persistent context, scoped tools, human handoffs, and retry-safe writes.', 0.92, 'sample_data', $5)
+     VALUES ($1, $2, 'account', $3, 'summary', $4, 'Agent context rollout priority', 'Northstar Labs is evaluating CRMy as the operational customer context layer for revenue agents. The main evaluation criteria are typed objects, persistent context, scoped tools, human handoffs, and retry-safe writes.', 0.92, 'sample_data', $5)
      ON CONFLICT (id) DO NOTHING`,
     [IDS.CONTEXT, tenantId, IDS.ACCOUNT, IDS.ACTOR_AGENT, JSON.stringify(['sample', 'agent-context', 'evaluation'])],
   );

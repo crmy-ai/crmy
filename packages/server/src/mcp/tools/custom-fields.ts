@@ -17,7 +17,7 @@ export function customFieldTools(db: DbPool): ToolDef[] {
     {
       name: 'custom_field_create',
       tier: 'admin',
-      description: 'Define a new custom field for a CRM object type (contact, account, opportunity, activity, or use_case). Specify the field name, label, data type, whether it is required, and any enum options. Custom fields appear in all API responses and can be used in search filters.',
+      description: 'Define a new custom field for a typed revenue object (contact, account, opportunity, activity, or use_case). Specify the field name, label, data type, whether it is required, and any enum options. Custom fields appear in all API responses and can be used in search filters.',
       inputSchema: customFieldCreate,
       handler: async (input: z.infer<typeof customFieldCreate>, actor: ActorContext) => {
         return runToolOperation(db, actor, 'custom_field_create', input, async () => {
@@ -113,7 +113,7 @@ export function customFieldTools(db: DbPool): ToolDef[] {
     {
       name: 'custom_field_list',
       tier: 'admin',
-      description: 'List all custom field definitions for a specific object type. Returns field names, types, labels, required constraints, and options. Use this alongside schema_get to understand the complete data model for a CRM entity.',
+      description: 'List all custom field definitions for a specific object type. Returns field names, types, labels, required constraints, and options. Use this alongside schema_get to understand the complete data model for a customer record.',
       inputSchema: customFieldList,
       handler: async (input: z.infer<typeof customFieldList>, actor: ActorContext) => {
         const fields = await cfRepo.listCustomFields(db, actor.tenant_id, input.object_type);

@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { useNavigate, Navigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card';
@@ -29,6 +30,7 @@ function isValidPassword(password: string) {
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { darkVariant } = useAppStore();
   const isCharcoal = darkVariant === 'charcoal';
 
@@ -98,6 +100,7 @@ export function LoginPage() {
           : await auth.register({ email, password, name, tenant_name: tenantName });
       setToken(result.token);
       setUser(result.user);
+      await queryClient.invalidateQueries({ queryKey: ['agent-config'] });
       navigate('/');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Authentication failed');

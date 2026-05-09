@@ -5,6 +5,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
+import { CompactList } from '@/components/crm/CompactList';
 import { useEmails, useCreateEmail, useInboundEmails, useContact } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { motion } from 'framer-motion';
@@ -94,10 +95,10 @@ function InboundRow({ email }: { email: any }) {
     <motion.div
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-card border border-border rounded-xl overflow-hidden cursor-pointer hover:border-primary/30 transition-colors"
+      className="rounded-xl overflow-hidden cursor-pointer hover:bg-muted/40 transition-colors"
       onClick={() => setExpanded(!expanded)}
     >
-      <div className="flex items-center gap-3 p-4">
+      <div className="flex items-center gap-3 px-2 py-2">
         <ArrowDownLeft className="w-4 h-4 flex-shrink-0 text-blue-500" />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-0.5">
@@ -115,7 +116,7 @@ function InboundRow({ email }: { email: any }) {
         </div>
       </div>
       {expanded && (
-        <div className="px-4 pb-4 border-t border-border/50 pt-3 space-y-2">
+        <div className="mx-2 mb-2 rounded-xl border border-border/70 bg-background/60 px-3 py-3 space-y-2">
           {email.body ? (
             <div className="rounded-lg bg-muted/30 border border-border px-3 py-2.5">
               <pre className="text-sm text-foreground whitespace-pre-wrap font-sans leading-relaxed">{email.body}</pre>
@@ -204,8 +205,12 @@ export default function EmailsPage() {
       setComposeTo(''); setComposeSubject(''); setComposeBody('');
       setComposeOpen(false);
       toast({ title: status === 'draft' ? 'Draft saved' : 'Submitted for approval' });
-    } catch {
-      toast({ title: 'Error', description: 'Failed to create email.', variant: 'destructive' });
+    } catch (err) {
+      toast({
+        title: 'Could not create email',
+        description: err instanceof Error ? err.message : 'Check the recipient, subject, and email settings, then try again.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -315,7 +320,7 @@ export default function EmailsPage() {
             </p>
           </motion.div>
         ) : view === 'outbound' ? (
-          <div className="space-y-2">
+          <CompactList className="space-y-1">
 	            {paginated.map((email: any, i: number) => {
               const cfg = STATUS_CONFIG[email.status] ?? STATUS_CONFIG.draft;
               const Icon = cfg.icon;
@@ -325,7 +330,7 @@ export default function EmailsPage() {
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.02 }}
-                  className="flex items-center gap-3 p-4 bg-card border border-border rounded-xl cursor-pointer hover:border-primary/30 transition-colors"
+                  className="flex items-center gap-3 rounded-xl px-2 py-2 cursor-pointer hover:bg-muted/40 transition-colors"
                   onClick={() => openDrawer('email', email.id)}
                 >
                   <Icon className="w-4 h-4 flex-shrink-0 text-muted-foreground" />
@@ -341,16 +346,16 @@ export default function EmailsPage() {
                   </div>
                 </motion.div>
               );
-            })}
+	            })}
 	            <PaginationBar page={page} pageSize={pageSize} total={filteredOutbound.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
-	          </div>
+	          </CompactList>
 	        ) : (
-	          <div className="space-y-2">
+	          <CompactList className="space-y-1">
 	            {paginated.map((email: any) => (
 	              <InboundRow key={email.id} email={email} />
 	            ))}
 	            <PaginationBar page={page} pageSize={pageSize} total={filteredInbound.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
-	          </div>
+	          </CompactList>
 	        )}
       </div>
 

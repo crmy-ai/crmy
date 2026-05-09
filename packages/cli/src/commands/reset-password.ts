@@ -8,7 +8,7 @@ import { createSpinner } from '../spinner.js';
 
 export function resetPasswordCommand(): Command {
   return new Command('reset-password')
-    .description('Reset a CRMy user password directly in the database')
+    .description('Reset a local CRMy user password directly in PostgreSQL')
     .option('-e, --email <email>', 'Email address of the user to update')
     .option('-p, --password <password>', 'New password (min 12 characters)')
     .action(async (opts) => {
@@ -19,7 +19,8 @@ export function resetPasswordCommand(): Command {
       if (!databaseUrl) {
         console.error(
           '\n  Error: No database URL found.\n\n' +
-          '  Either run `crmy init` first or set DATABASE_URL in your environment.\n',
+          '  Run `crmy init` first, or set DATABASE_URL in your environment:\n' +
+          '    export DATABASE_URL=postgresql://user:password@host:5432/crmy\n',
         );
         process.exit(1);
       }
@@ -56,7 +57,7 @@ export function resetPasswordCommand(): Command {
           {
             type: 'password',
             name: 'confirm',
-            message: 'Confirm new password:',
+            message: 'Re-enter new password:',
             mask: '*',
             validate: (v: string) =>
               v === answer.password ? true : 'Passwords do not match',
@@ -106,6 +107,9 @@ export function resetPasswordCommand(): Command {
           .map(u => `${u.name ?? u.email} (${u.role})`)
           .join(', ');
         spinner.succeed(`Password reset for ${names}${userRes.rows.length > 1 ? ` — ${userRes.rows.length} accounts updated` : ''}`);
+        if (userRes.rows.length > 1) {
+          console.log('  Note: multiple tenants had a user with this email, so every matching local account was updated.');
+        }
         console.log('');
       } catch (err) {
         spinner.fail('Failed to reset password');

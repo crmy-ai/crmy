@@ -8,6 +8,7 @@ import { OnboardingEmptyState } from '@/components/crm/OnboardingEmptyState';
 import { useActivities, useActivityTypes } from '@/api/hooks';
 import { ActivityFeed } from '@/components/crm/CrmWidgets';
 import { PaginationBar } from '@/components/crm/PaginationBar';
+import { CompactList } from '@/components/crm/CompactList';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -192,6 +193,19 @@ export default function Activities() {
 
   useEffect(() => { setPage(1); }, [search, activeFilters, sort, timeRange, customFrom, customTo]);
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const hasExplicitFilters =
+    search.trim().length > 0 ||
+    Object.values(activeFilters).some(values => values.length > 0) ||
+    timeRange !== 'this_week' ||
+    Boolean(customFrom || customTo);
+
+  const resetActivityFilters = () => {
+    setSearch('');
+    setActiveFilters({});
+    setTimeRange('this_week');
+    setCustomFrom('');
+    setCustomTo('');
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -264,19 +278,29 @@ export default function Activities() {
               primary={{ label: 'Log Activity', onClick: () => openQuickAdd('activity') }}
             />
           ) : (
-            <OnboardingEmptyState
-              icon={ActivityIcon}
-              title="No activities match"
-              description="Adjust filters or time range to find the activity you need."
-              primary={{ label: 'Clear filters', onClick: () => { setSearch(''); setActiveFilters({}); setTimeRange('this_week'); } }}
-              showSampleData={false}
-            />
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
+                <ActivityIcon className="w-7 h-7 text-muted-foreground/70" />
+              </div>
+              <h2 className="text-base font-display font-semibold text-foreground mb-1">No activities match</h2>
+              <p className="text-sm text-muted-foreground max-w-md">
+                Adjust search, filters, or time range to find the activity you need.
+              </p>
+              {hasExplicitFilters && (
+                <button
+                  onClick={resetActivityFilters}
+                  className="mt-4 text-sm font-medium text-muted-foreground hover:text-foreground underline-offset-4 hover:underline transition-colors"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
           )
         ) : (
-          <div className="bg-card border border-border rounded-2xl p-4 shadow-sm">
+          <CompactList className="p-4">
             <ActivityFeed activities={paginated} />
             <PaginationBar page={page} pageSize={PAGE_SIZE} total={filtered.length} onPageChange={setPage} />
-          </div>
+          </CompactList>
         )}
       </div>
     </div>

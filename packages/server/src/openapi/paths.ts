@@ -604,7 +604,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'get', path: '/briefing/{subject_type}/{subject_id}',
   tags: ['Briefing'],
-  summary: 'Get a full briefing for a CRM object — record + activities + assignments + context + stale warnings',
+  summary: 'Get a full briefing for a customer record — record + activities + assignments + context + stale warnings',
   security: bearer,
   request: {
     params: z.object({ subject_type: S.subjectType, subject_id: S.uuid }),

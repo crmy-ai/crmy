@@ -5,7 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { X, Send, Sparkles, Check, FileText, Pencil, ChevronLeft } from 'lucide-react';
-import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useCreateAssignment, useActors } from '@/api/hooks';
+import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useCreateAssignment, useActors, useExtractRecordDraft } from '@/api/hooks';
 import { EntityCombobox } from '@/components/ui/entity-combobox';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker, DateTimePicker } from '@/components/ui/date-picker';
@@ -33,13 +33,176 @@ const typeGreetings: Record<string, string> = {
 
 type Message = { role: 'user' | 'assistant'; content: string };
 
+const MONTH_INDEX: Record<string, number> = {
+  january: 0, jan: 0,
+  february: 1, feb: 1,
+  march: 2, mar: 2,
+  april: 3, apr: 3,
+  may: 4,
+  june: 5, jun: 5,
+  july: 6, jul: 6,
+  august: 7, aug: 7,
+  september: 8, sept: 8, sep: 8,
+  october: 9, oct: 9,
+  november: 10, nov: 10,
+  december: 11, dec: 11,
+};
+
+function cleanExtractedName(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const cleaned = value
+    .replace(/\s+(?:who|that|which|wants?|needs?|asked|said|has|had|is|was|for|about|on)\b.*$/i, '')
+    .replace(/[.,;:!?]+$/g, '')
+    .trim();
+  return cleaned || undefined;
+}
+
+function extractCompanyName(text: string): string | undefined {
+  const companyMatch =
+    text.match(/\b(?:works at|company is|company|from|at)\s+([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,5})/i);
+  return cleanExtractedName(companyMatch?.[1]);
+}
+
+function extractPersonAndCompany(text: string): { personName?: string; companyName?: string } {
+  const personMatch = text.match(/\b(?:with|spoke with|met with|called|emailed)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s+(?:from|at)\s+([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,5}))?/i);
+  return {
+    personName: cleanExtractedName(personMatch?.[1]),
+    companyName: cleanExtractedName(personMatch?.[2]) ?? extractCompanyName(text),
+  };
+}
+
+function extractMentionedDate(text: string): { label: string; isoDate?: string } | undefined {
+  const dateMatch = text.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,\s*(\d{4}))?\b/i);
+  if (!dateMatch) return undefined;
+  const month = MONTH_INDEX[dateMatch[1].toLowerCase().replace('.', '')];
+  const day = Number(dateMatch[2]);
+  if (!Number.isFinite(month) || !Number.isFinite(day)) return { label: dateMatch[0] };
+
+  const now = new Date();
+  let year = dateMatch[3] ? Number(dateMatch[3]) : now.getFullYear();
+  let date = new Date(year, month, day);
+  if (!dateMatch[3] && date.getTime() < new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) {
+    year += 1;
+    date = new Date(year, month, day);
+  }
+  const isoDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  return { label: dateMatch[0], isoDate };
+}
+
+function sentenceParts(text: string): string[] {
+  return text
+    .split(/[.!?]\s+/)
+    .map(part => part.trim().replace(/[.!?]+$/g, ''))
+    .filter(Boolean);
+}
+
+function titleCase(value: string): string {
+  return value.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function splitContactName(name: string): { first_name: string; last_name?: string } {
+  const parts = name.trim().split(/\s+/);
+  return {
+    first_name: parts[0] ?? name,
+    last_name: parts.slice(1).join(' ') || undefined,
+  };
+}
+
+function parseActivityFields(text: string): Record<string, unknown> {
+  const lower = text.toLowerCase();
+  const fields: Record<string, unknown> = {};
+  const types = ['call', 'email', 'meeting', 'note', 'task', 'demo', 'proposal', 'research', 'handoff', 'status_update'];
+  const foundType = types.find(t => lower.includes(t.replace('_', ' ')) || lower.includes(t)) ?? 'note';
+  const { personName, companyName } = extractPersonAndCompany(text);
+  const mentionedDate = extractMentionedDate(text);
+  const parts = sentenceParts(text);
+  const notes = parts.length > 1 ? parts.slice(1).join('. ') : text;
+
+  fields.type = foundType;
+  if (personName) {
+    fields.subject = `${titleCase(foundType)} with ${personName}${companyName ? ` from ${companyName}` : ''}`;
+  } else if (companyName) {
+    fields.subject = `${titleCase(foundType)} with ${companyName}`;
+  } else {
+    fields.subject = parts[0] || `${titleCase(foundType)} activity`;
+  }
+  fields.body = notes;
+
+  const outcomes = ['connected', 'voicemail', 'positive', 'negative', 'neutral', 'no show', 'no_show', 'follow up needed', 'follow_up_needed'];
+  const foundOutcome = outcomes.find(o => lower.includes(o));
+  if (foundOutcome) fields.outcome = foundOutcome.replace(/ /g, '_');
+  else if (/\b(wants?|requested|asked for|needs?)\b.*\b(demo|follow.?up|meeting|proposal)\b/.test(lower)) fields.outcome = 'follow_up_needed';
+
+  if (lower.includes('yesterday')) fields.occurred_at = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  else if (lower.includes('today')) fields.occurred_at = new Date().toISOString();
+
+  const detail: Record<string, unknown> = {};
+  if (personName) detail.contact_name = personName;
+  if (companyName) detail.company_name = companyName;
+  if (mentionedDate) {
+    detail.mentioned_date = mentionedDate.isoDate ?? mentionedDate.label;
+    if (/\bdemo\b/.test(lower)) detail.next_step = 'demo';
+  }
+  if (Object.keys(detail).length > 0) fields.detail = detail;
+
+  return fields;
+}
+
+function formatFieldName(key: string): string {
+  const labels: Record<string, string> = {
+    body: 'notes',
+    company_name: 'company',
+    first_name: 'first name',
+    last_name: 'last name',
+    occurred_at: 'occurred at',
+  };
+  return labels[key] ?? key.replace(/_/g, ' ');
+}
+
+function formatFieldValue(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([k, v]) => `${formatFieldName(k)}: ${String(v)}`)
+      .join(', ');
+  }
+  return String(value);
+}
+
+function missingRequiredDraftFields(type: string, fields: Record<string, unknown>): string[] {
+  if (type === 'contact') return fields.first_name ? [] : ['first name'];
+  if (type === 'account') return fields.name ? [] : ['company name'];
+  if (type === 'opportunity') return fields.name ? [] : ['opportunity name'];
+  if (type === 'activity') return fields.type && fields.subject ? [] : ['type', 'subject'].filter(key => !fields[key]);
+  if (type === 'use-case') {
+    const missing: string[] = [];
+    if (!fields.name) missing.push('use case name');
+    if (!fields.account_id) missing.push('client');
+    return missing;
+  }
+  if (type === 'assignment') {
+    const missing: string[] = [];
+    if (!fields.title) missing.push('title');
+    if (!fields.assignment_type) missing.push('type');
+    if (!fields.assigned_to) missing.push('assignee');
+    return missing;
+  }
+  return [];
+}
+
 function parseFieldsFromText(text: string, type: string): Record<string, unknown> {
   const lower = text.toLowerCase();
   const fields: Record<string, unknown> = {};
 
+  if (type === 'activity') return parseActivityFields(text);
+
   // Extract name (first sentence or "name is X" pattern)
   const nameMatch = text.match(/(?:name(?:\s+is)?|called|named)\s+([A-Z][^\.,\n]+)/i) || text.match(/^([A-Z][a-z]+ [A-Z][a-z]+)/);
-  if (nameMatch) fields.name = nameMatch[1].trim();
+  if (nameMatch) {
+    const name = cleanExtractedName(nameMatch[1]) ?? nameMatch[1].trim();
+    if (type === 'contact') Object.assign(fields, splitContactName(name));
+    else fields.name = name;
+  }
 
   // Extract email
   const emailMatch = text.match(/[\w.-]+@[\w.-]+\.\w+/);
@@ -49,9 +212,15 @@ function parseFieldsFromText(text: string, type: string): Record<string, unknown
   const phoneMatch = text.match(/\+?[\d\s\-().]{10,}/);
   if (phoneMatch) fields.phone = phoneMatch[0].trim();
 
-  // Extract company
-  const companyMatch = text.match(/(?:at|from|company|works at|with)\s+([A-Z][^\.,\n]+)/i);
-  if (companyMatch) fields.company = companyMatch[1].trim();
+  const companyName = extractCompanyName(text);
+  if (companyName) {
+    if (type === 'contact') fields.company_name = companyName;
+    else if (type === 'account' && !fields.name) fields.name = companyName;
+  }
+
+  if (type === 'account' && !fields.name) {
+    fields.name = cleanExtractedName(sentenceParts(text)[0]) ?? text.trim();
+  }
 
   if (type === 'opportunity') {
     const amountMatch = text.match(/\$?([\d,]+(?:\.\d+)?)\s*[kKmM]?/);
@@ -62,17 +231,6 @@ function parseFieldsFromText(text: string, type: string): Record<string, unknown
       fields.amount = Math.round(amount);
     }
     fields.stage = 'prospecting';
-  }
-
-  if (type === 'activity') {
-    const types = ['call', 'email', 'meeting', 'note', 'task', 'demo', 'proposal', 'research', 'handoff', 'status_update'];
-    const foundType = types.find(t => lower.includes(t.replace('_', ' ')) || lower.includes(t));
-    fields.type = foundType ?? 'note';
-    fields.description = text;
-    // Extract outcome keywords
-    const outcomes = ['connected', 'voicemail', 'positive', 'negative', 'neutral', 'no show', 'no_show', 'follow up needed', 'follow_up_needed'];
-    const foundOutcome = outcomes.find(o => lower.includes(o));
-    if (foundOutcome) fields.outcome = foundOutcome.replace(/ /g, '_');
   }
 
   if (type === 'use-case') {
@@ -107,6 +265,7 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
     { role: 'assistant', content: typeGreetings[type] ?? typeGreetings.contact },
   ]);
   const [input, setInput] = useState('');
+  const [isExtracting, setIsExtracting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [extractedFields, setExtractedFields] = useState<Record<string, unknown> | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -116,6 +275,7 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
   const { openDrawer, closeQuickAdd } = useAppStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const { enabled: agentEnabled, connectivity, config } = useAgentSettings();
 
   const createContact = useCreateContact();
   const createAccount = useCreateAccount();
@@ -123,6 +283,11 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
   const createUseCase = useCreateUseCase();
   const createActivity = useCreateActivity();
   const createAssignment = useCreateAssignment();
+  const extractRecordDraft = useExtractRecordDraft();
+  const canUseAgentExtraction = agentEnabled && Boolean(config?.model && config?.base_url) && connectivity !== 'offline';
+  const extractionModeDetail = connectivity === 'unknown'
+    ? 'Using the saved Workspace Agent config. If the model cannot be reached, this will switch to the form.'
+    : 'Your local or configured model drafts fields before you confirm.';
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -132,36 +297,68 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
     inputRef.current?.focus();
   }, []);
 
-  const handleSend = () => {
-    if (!input.trim() || isSubmitting) return;
+  const handleSend = async () => {
+    if (!input.trim() || isSubmitting || isExtracting) return;
     const userText = input.trim();
     setInput('');
 
     setMessages(prev => [...prev, { role: 'user', content: userText }]);
 
-    // Parse fields from message
-    const fields = parseFieldsFromText(userText, type);
-    setExtractedFields(prev => ({ ...(prev ?? {}), ...fields }));
+    let fields: Record<string, unknown>;
+    let extractionSource = 'Workspace Agent';
+    if (canUseAgentExtraction) {
+      setIsExtracting(true);
+      try {
+        const result = await extractRecordDraft.mutateAsync({ text: userText, object_type: type });
+        fields = result.data;
+        extractionSource = 'Workspace Agent';
+      } catch (err) {
+        console.warn('[quick-add] agent extraction failed, opening form:', err);
+        toast({
+          title: 'Workspace Agent unavailable',
+          description: 'Use the form to create this record. The quick parser is intentionally not used for record creation.',
+          variant: 'destructive',
+        });
+        setMessages(prev => [
+          ...prev,
+          { role: 'assistant', content: 'I could not reach the Workspace Agent, so I opened the form. That is safer than guessing fields with the quick parser.' },
+        ]);
+        setShowForm(true);
+        setIsExtracting(false);
+        return;
+      } finally {
+        setIsExtracting(false);
+      }
+    } else {
+      setShowForm(true);
+      return;
+    }
+
+    const mergedFields = { ...(extractedFields ?? {}), ...fields };
+    setExtractedFields(mergedFields);
+    const missing = missingRequiredDraftFields(type, mergedFields);
 
     // Generate assistant confirmation
-    const fieldsList = Object.entries({ ...(extractedFields ?? {}), ...fields })
+    const fieldsList = Object.entries(mergedFields)
       .filter(([, v]) => v !== undefined && v !== '')
-      .map(([k, v]) => `• **${k}**: ${v}`)
+      .map(([k, v]) => `• **${formatFieldName(k)}**: ${formatFieldValue(v)}`)
       .join('\n');
 
     setMessages(prev => [
       ...prev,
       {
         role: 'assistant',
-        content: fieldsList
-          ? `Got it! Here's what I'll create:\n\n${fieldsList}\n\nDoes this look right? Reply "yes" to confirm or add more details.`
+        content: missing.length > 0
+          ? `I drafted this with ${extractionSource}:\n\n${fieldsList || 'No reliable fields yet.'}\n\nI still need ${missing.join(', ')}. Add that here, or use the form for fields that require selecting an existing record.`
+          : fieldsList
+          ? `Got it — I drafted this with ${extractionSource}:\n\n${fieldsList}\n\nDoes this look right? Reply "yes" to confirm or add more details.`
           : "Thanks! Can you share more details like name, email, or any other relevant information?",
       },
     ]);
   };
 
   const handleConfirm = async (fields = extractedFields, allowDuplicates = false) => {
-    if (!fields || isSubmitting) return;
+    if (!fields || isSubmitting || isExtracting) return;
     setIsSubmitting(true);
 
     try {
@@ -260,9 +457,20 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
       </div>
 
       {showForm ? (
-        <ManualForm type={type} onClose={onClose} onBack={() => setShowForm(false)} backLabel="Back to AI chat" />
+        <ManualForm type={type} onClose={onClose} onBack={() => setShowForm(false)} backLabel="Back to guided add" />
       ) : (
       <>
+      {canUseAgentExtraction && (
+        <div className="border-b border-border px-4 py-2.5">
+          <div className="flex items-start gap-2 rounded-xl border border-violet-500/25 bg-violet-500/8 px-3 py-2 text-violet-300">
+            <Sparkles className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-violet-400" />
+            <div className="min-w-0">
+              <p className="text-xs font-semibold">Workspace Agent extraction</p>
+              <p className="mt-0.5 text-xs opacity-80">{extractionModeDetail}</p>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
         {messages.map((msg, i) => (
@@ -292,7 +500,7 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
         <div className="px-4 pb-2">
           <button
             onClick={() => handleConfirm()}
-            disabled={isSubmitting}
+            disabled={isSubmitting || isExtracting}
             className="w-full py-2.5 rounded-xl bg-success text-success-foreground text-sm font-semibold hover:bg-success/90 transition-colors disabled:opacity-50"
           >
             {isSubmitting ? 'Creating...' : `Confirm & Create ${typeLabels[type]}`}
@@ -320,10 +528,10 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
               handleSend();
             }
           }}
-          disabled={!input.trim() || isSubmitting}
+          disabled={!input.trim() || isSubmitting || isExtracting}
           className="p-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
         >
-          <Send className="w-4 h-4" />
+          {isExtracting ? <Sparkles className="w-4 h-4 animate-pulse" /> : <Send className="w-4 h-4" />}
         </button>
       </div>
       </>
@@ -705,15 +913,21 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
 
 export function QuickAddDrawer() {
   const { quickAddType, closeQuickAdd } = useAppStore();
-  const { enabled: agentEnabled } = useAgentSettings();
+  const { enabled: agentEnabled, config, connectivity, loading } = useAgentSettings();
 
   if (!quickAddType) return null;
+  const agentReady = agentEnabled && Boolean(config?.model && config?.base_url) && connectivity !== 'offline';
 
   return (
     <>
       <div className="fixed inset-0 bg-background/60 backdrop-blur-sm z-[80]" onClick={closeQuickAdd} />
       <div className="fixed right-0 top-0 h-full w-full max-w-md bg-card border-l border-border z-[90] shadow-2xl flex flex-col animate-slide-in-right">
-        {agentEnabled
+        {loading ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+            <Sparkles className="h-5 w-5 animate-pulse text-violet-400" />
+            <p className="text-sm text-muted-foreground">Checking Workspace Agent settings…</p>
+          </div>
+        ) : agentReady
           ? <ChatAddPanel type={quickAddType} onClose={closeQuickAdd} />
           : <ManualForm type={quickAddType} onClose={closeQuickAdd} onBack={closeQuickAdd} />
         }

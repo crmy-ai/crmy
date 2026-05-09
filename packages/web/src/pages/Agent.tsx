@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { TopBar } from '@/components/layout/TopBar';
 import { AgentStatusDot } from '@/components/crm/CrmWidgets';
 import { useAppStore, type AIContextEntity } from '@/store/appStore';
@@ -10,6 +11,7 @@ import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import {
   useAgentSessions,
   useCreateAgentSession,
+  useCreateContextEntry,
   useDeleteAgentSession,
   useRenameAgentSession,
   type AgentSessionSummary,
@@ -17,7 +19,9 @@ import {
 import {
   Send, Bot, X, User, Briefcase, Building, Layers, Clock, Loader2, Wrench,
   ChevronDown, ChevronRight, Pencil, Trash2, Check, MessageSquare,
-  Brain, Eye, EyeOff, RotateCcw, WifiOff,
+  Brain, Eye, EyeOff, RotateCcw, WifiOff, ClipboardList, ShieldCheck,
+  ShieldAlert, Database, CheckCircle2, Circle, AlertTriangle, FileCheck2,
+  GitPullRequestArrow,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -26,8 +30,10 @@ import {
   type DisplayMessage, type RenderItem, type ToolGroupItem, type ToolGroupStep,
 } from '@/lib/agentStream';
 import { AgentMarkdown } from '@/components/ui/agent-markdown';
+import { ENTITY_COLORS } from '@/lib/entityColors';
 
 const agentDescription = 'Private workspace reasoning over typed revenue objects, customer context, and scoped CRMy tools.';
+const agentIconClassName = ENTITY_COLORS.agents.text;
 
 const typeIcons: Record<string, typeof User> = {
   contact: User, opportunity: Briefcase, 'use-case': Layers, account: Building,
@@ -60,17 +66,221 @@ function rawMsgsToDisplay(rawMsgs: RawMsg[]): DisplayMessage[] {
   return display;
 }
 
+function deriveSessionLabel(message: string): string {
+  const label = message
+    .replace(/^\s*(please|can you|could you|would you|help me|i need you to|let'?s)\s+/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!label) return 'New conversation';
+  return label.length > 60 ? `${label.slice(0, 57).trimEnd()}...` : label;
+}
+
+type AgentTaskStatus = 'running' | 'waiting_approval' | 'failed' | 'complete';
+type AgentTaskRisk = 'low' | 'medium' | 'high';
+type AgentTaskStepStatus = 'pending' | 'running' | 'complete' | 'failed';
+
+type AgentTaskStep = {
+  id: string;
+  label: string;
+  status: AgentTaskStepStatus;
+  toolName?: string;
+};
+
+type AgentTaskState = {
+  id: string;
+  goal: string;
+  subject?: AIContextEntity | null;
+  status: AgentTaskStatus;
+  risk: AgentTaskRisk;
+  steps: AgentTaskStep[];
+  changedRecords: string[];
+  startedAt: number;
+  completedAt?: number;
+  nextAction?: string;
+};
+
+type MemoryProposal = {
+  id: string;
+  title: string;
+  body: string;
+  status: 'pending' | 'saving' | 'approved' | 'discarded' | 'temporary' | 'error';
+  error?: string;
+};
+
+type WorkflowCommand = {
+  label: string;
+  prompt: string;
+};
+
+function normalizeSubjectType(type?: string | null): string | undefined {
+  if (!type) return undefined;
+  return type === 'use-case' ? 'use_case' : type;
+}
+
+function isNonTrivialTask(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (text.length > 90) return true;
+  return /(brief|review|risk|next best|meeting|follow.?up|handoff|stale|quality|create|update|log|add|prepare|analy[sz]e|summari[sz]e|draft|send|advance|approve|reject|compare|plan|investigate)/.test(lower);
+}
+
+function classifyRisk(text: string, canWrite?: boolean): AgentTaskRisk {
+  const lower = text.toLowerCase();
+  if (/(delete|send|bulk|approve|reject|proposal|pricing|contract|executive|owner|password|permission)/.test(lower)) {
+    return 'high';
+  }
+  if (canWrite || /(create|update|log|add|advance|handoff|assign|enroll|write|change)/.test(lower)) {
+    return 'medium';
+  }
+  return 'low';
+}
+
+function createAgentTask(goal: string, subject: AIContextEntity | null, canWrite?: boolean): AgentTaskState | null {
+  if (!isNonTrivialTask(goal)) return null;
+  return {
+    id: `task-${Date.now()}`,
+    goal,
+    subject,
+    status: 'running',
+    risk: classifyRisk(goal, canWrite),
+    startedAt: Date.now(),
+    changedRecords: [],
+    steps: [
+      { id: 'understand', label: 'Clarify goal and subject', status: 'complete' },
+      { id: 'context', label: 'Gather customer context', status: subject ? 'pending' : 'complete' },
+      { id: 'tools', label: 'Use scoped tools if needed', status: 'pending' },
+      { id: 'review', label: 'Review safety, audit, and next action', status: 'pending' },
+    ],
+  };
+}
+
+function toolStepId(toolName: string): string {
+  if (/briefing|context|search|semantic|list|get|read|activity/.test(toolName)) return 'context';
+  if (/hitl|handoff|approval|assignment/.test(toolName)) return 'review';
+  return 'tools';
+}
+
+function updateStepStatus(steps: AgentTaskStep[], stepId: string, status: AgentTaskStepStatus, toolName?: string): AgentTaskStep[] {
+  return steps.map(step => {
+    if (step.id !== stepId) return step;
+    if (step.status === 'failed') return step;
+    if (step.status === 'complete' && status === 'running') return step;
+    return { ...step, status, toolName: toolName ?? step.toolName };
+  });
+}
+
+function updateTaskForToolStatus(task: AgentTaskState | null, toolName: string): AgentTaskState | null {
+  if (!task || task.status === 'failed' || task.status === 'complete') return task;
+  const waiting = /hitl|approval/.test(toolName);
+  return {
+    ...task,
+    status: waiting ? 'waiting_approval' : 'running',
+    steps: updateStepStatus(task.steps, toolStepId(toolName), 'running', toolName),
+  };
+}
+
+function summarizeChangedRecord(toolName: string, result: unknown): string | null {
+  if (!/(create|update|delete|log|add|advance|approve|reject|complete|assign|handoff|supersede|resolve)/.test(toolName)) return null;
+  if (!result || typeof result !== 'object') return toolName.replace(/_/g, ' ');
+  const data = (result as Record<string, unknown>).data;
+  const body = data && typeof data === 'object' ? data as Record<string, unknown> : result as Record<string, unknown>;
+  const name = body.name ?? body.title ?? body.subject ?? body.id;
+  return name ? `${toolName.replace(/_/g, ' ')}: ${String(name)}` : toolName.replace(/_/g, ' ');
+}
+
+function updateTaskForToolResult(task: AgentTaskState | null, toolName: string, isError: boolean, result: unknown): AgentTaskState | null {
+  if (!task || task.status === 'complete') return task;
+  const stepId = toolStepId(toolName);
+  const changed = !isError ? summarizeChangedRecord(toolName, result) : null;
+  return {
+    ...task,
+    status: isError ? 'failed' : (/hitl|approval/.test(toolName) ? 'waiting_approval' : 'running'),
+    steps: updateStepStatus(task.steps, stepId, isError ? 'failed' : 'complete', toolName),
+    changedRecords: changed && !task.changedRecords.includes(changed)
+      ? [...task.changedRecords, changed].slice(-5)
+      : task.changedRecords,
+  };
+}
+
+function completeTask(task: AgentTaskState | null): AgentTaskState | null {
+  if (!task || task.status === 'failed' || task.status === 'waiting_approval') return task;
+  return {
+    ...task,
+    status: 'complete',
+    completedAt: Date.now(),
+    nextAction: task.changedRecords.length > 0 ? 'Review audit trail' : 'Save useful context or choose a next workflow',
+    steps: task.steps.map(step => ({ ...step, status: step.status === 'pending' || step.status === 'running' ? 'complete' : step.status })),
+  };
+}
+
+function getWorkflowCommands(subject: AIContextEntity | null): WorkflowCommand[] {
+  const target = subject ? `this ${typeLabels[subject.type].toLowerCase()} (${subject.name})` : 'the selected customer record';
+  return [
+    { label: '/account brief', prompt: `Get a briefing for ${target}. Include current context, recent activity, risks, and recommended next action.` },
+    { label: '/deal review', prompt: `Review the deal context for ${target}. Summarize stage fit, blockers, health, probability, and next steps.` },
+    { label: '/renewal risk', prompt: `Assess renewal risk for ${target}. Look for stale context, missing activity, objections, and handoff needs.` },
+    { label: '/next best action', prompt: `Recommend the next best action for ${target}. Explain the evidence and whether a handoff or write needs approval.` },
+    { label: '/meeting prep', prompt: `Prepare meeting notes for ${target}. Include what changed, open questions, and suggested agenda.` },
+    { label: '/follow-up summary', prompt: `Draft a follow-up summary for ${target}. Ground it in known context and call out assumptions.` },
+    { label: '/handoff prep', prompt: `Prepare a human handoff for ${target}. Include urgency, owner, reasoning, and context the reviewer needs.` },
+    { label: '/stale context review', prompt: `Review stale or weak context for ${target}. Suggest what should be refreshed before action.` },
+    { label: '/data quality scan', prompt: `Scan data quality for ${target}. Identify missing relationships, weak fields, and conflicts that could affect agent work.` },
+  ];
+}
+
+function buildMemoryProposal(assistantText: string): MemoryProposal | null {
+  const body = assistantText.replace(/\s+/g, ' ').trim();
+  if (body.length < 120) return null;
+  return {
+    id: `memory-${Date.now()}`,
+    title: 'Agent conversation insight',
+    body: body.length > 700 ? `${body.slice(0, 697).trimEnd()}...` : body,
+    status: 'pending',
+  };
+}
+
+function extractToolNames(messages: DisplayMessage[]): string[] {
+  return messages.flatMap((message) => {
+    if (message.kind === 'tool_status' || message.kind === 'tool_call' || message.kind === 'tool_result') return [message.name];
+    return [];
+  });
+}
+
+function buildContextEvidence(messages: DisplayMessage[], subject: AIContextEntity | null) {
+  const toolNames = extractToolNames(messages);
+  if (!subject && toolNames.length === 0) return null;
+  const uniqueTools = Array.from(new Set(toolNames));
+  const usedBriefing = uniqueTools.some(name => name.includes('briefing'));
+  const usedMemory = uniqueTools.some(name => name.includes('context') || name.includes('semantic'));
+  const usedActivity = uniqueTools.some(name => name.includes('activity'));
+  const usedHandoff = uniqueTools.some(name => name.includes('handoff') || name.includes('hitl') || name.includes('assignment'));
+  return {
+    subject,
+    uniqueTools,
+    usedBriefing,
+    usedMemory,
+    usedActivity,
+    usedHandoff,
+    warnings: [
+      subject && !usedBriefing && !usedMemory ? 'Only record metadata is attached so far.' : null,
+      uniqueTools.some(name => name.includes('stale')) ? 'Stale context was checked.' : null,
+      uniqueTools.some(name => name.includes('contradiction')) ? 'Contradiction review was checked.' : null,
+    ].filter(Boolean) as string[],
+  };
+}
+
 // ── Session item with rename/delete ─────────────────────────────────────────
 
 function SessionItem({
   session,
   isActive,
+  taskStatus,
   onSelect,
   onRenamed,
   onDeleted,
 }: {
   session: AgentSessionSummary;
   isActive: boolean;
+  taskStatus?: AgentTaskStatus;
   onSelect: () => void;
   onRenamed: () => void;
   onDeleted: () => void;
@@ -144,6 +354,16 @@ function SessionItem({
             {typeLabels[session.context_type ?? ''] ?? session.context_type} · {session.context_name}
           </span>
         )}
+        {taskStatus && (
+          <span className={`inline-flex mt-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+            taskStatus === 'complete' ? 'bg-emerald-500/10 text-emerald-600' :
+            taskStatus === 'failed' ? 'bg-destructive/10 text-destructive' :
+            taskStatus === 'waiting_approval' ? 'bg-amber-500/10 text-amber-600' :
+            'bg-primary/10 text-primary'
+          }`}>
+            {taskStatus === 'waiting_approval' ? 'Waiting approval' : taskStatus}
+          </span>
+        )}
       </div>
       {!editing && (
         <div className={`flex items-center gap-1 transition-opacity flex-shrink-0 ${confirmDelete ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
@@ -170,6 +390,7 @@ function SessionItem({
 // ── Component ───────────────────────────────────────────────────────────────
 
 export default function Agent() {
+  const queryClient = useQueryClient();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -179,9 +400,12 @@ export default function Agent() {
   const abortRef = useRef<AbortController | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const didRestoreRef = useRef(false);
+  const launchContextRef = useRef<string | null>(null);
 
   // Track the last message the user sent so we can retry it after errors.
   const [lastSentMessage, setLastSentMessage] = useState('');
+  const [task, setTask] = useState<AgentTaskState | null>(null);
+  const [memoryProposals, setMemoryProposals] = useState<MemoryProposal[]>([]);
   // True when we've sent a message but haven't received the agent's response yet —
   // covers both the live-streaming window and the "navigated away mid-turn" case.
   const [isSessionPending, setIsSessionPending] = useState(false);
@@ -198,9 +422,11 @@ export default function Agent() {
   });
 
   const { aiContext } = useAppStore();
-  const { enabled, loading: configLoading, connectivity } = useAgentSettings();
+  const { enabled, loading: configLoading, connectivity, config } = useAgentSettings();
   const { data: sessionsData, refetch: refetchSessions } = useAgentSessions();
   const createSession = useCreateAgentSession();
+  const renameSession = useRenameAgentSession();
+  const createContextEntry = useCreateContextEntry();
 
   const sessions: AgentSessionSummary[] = sessionsData?.data ?? [];
 
@@ -218,107 +444,17 @@ export default function Agent() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Auto-greet: when entity context is injected, fire a real briefing_get turn
-  // instead of showing a hardcoded greeting.
-  const autoGreet = useCallback(async (ctx: AIContextEntity) => {
-    const abort = new AbortController();
-    abortRef.current = abort;
-    setStreaming(true);
-    setMessages([]);
-
-    try {
-      const session = await createSession.mutateAsync({
-        context_type: ctx.type,
-        context_id: ctx.id,
-        context_name: ctx.name,
-      });
-      const sessionId = session.data.id;
-      setActiveSessionId(sessionId);
-
-      let assistantText = '';
-      await streamChat(
-        sessionId,
-        SYSTEM_INIT_PREFIX,
-        (event) => {
-          switch (event.type) {
-            case 'delta': {
-              assistantText += event.content;
-              const snapshot = assistantText;
-              setMessages(prev => {
-                const last = prev[prev.length - 1];
-                if (last?.kind === 'assistant') return [...prev.slice(0, -1), { kind: 'assistant', content: snapshot }];
-                return [...prev, { kind: 'assistant', content: snapshot }];
-              });
-              break;
-            }
-            case 'thinking':
-              setMessages(prev => {
-                const last = prev[prev.length - 1];
-                if (last?.kind === 'thinking' && last.turn_id === event.turn_id) {
-                  return [...prev.slice(0, -1), { ...last, content: last.content + event.content }];
-                }
-                return [...prev, { kind: 'thinking', content: event.content, turn_id: event.turn_id }];
-              });
-              break;
-            case 'tool_status':
-              setMessages(prev => {
-                const existing = prev.findIndex(m => m.kind === 'tool_status' && m.id === event.id);
-                const msg: DisplayMessage = { kind: 'tool_status', id: event.id, name: event.name, status: event.status, turn_id: event.turn_id };
-                if (existing >= 0) { const u = [...prev]; u[existing] = msg; return u; }
-                return [...prev, msg];
-              });
-              break;
-            case 'tool_call':
-              setMessages(prev => [...prev, { kind: 'tool_call', id: event.id, name: event.name, arguments: event.arguments, turn_id: event.turn_id }]);
-              break;
-            case 'tool_result':
-              setMessages(prev => {
-                const updated = prev.map(m =>
-                  m.kind === 'tool_status' && m.id === event.id
-                    ? { ...m, status: event.is_error ? `Error from ${m.name.replace(/_/g, ' ')}` : m.status.replace('…', ' ✓') }
-                    : m
-                );
-                return [...updated, { kind: 'tool_result' as const, id: event.id, name: event.name, is_error: event.is_error, result: event.result, turn_id: event.turn_id }];
-              });
-              break;
-            case 'done':
-              refetchSessions();
-              break;
-          }
-        },
-        abort.signal,
-        { auto_greet: true },
-      );
-    } catch (err) {
-      if ((err as Error).name !== 'AbortError') {
-        setMessages([{ kind: 'error', message: (err as Error).message }]);
-      }
-    } finally {
-      setStreaming(false);
-      abortRef.current = null;
-    }
-  }, [createSession, refetchSessions]);
-
-  // Handle entity context from record pages (openAIWithContext)
-  useEffect(() => {
-    if (aiContext) {
-      setEntityContext(aiContext);
-      setInput('');
-      setActiveSessionId(null);
-      useAppStore.setState({ aiContext: null });
-      autoGreet(aiContext);
-    }
-  }, [aiContext, autoGreet]);
-
   // Load existing session (also detects in-progress turns so polling can recover them)
-  const loadSession = useCallback(async (session: AgentSessionSummary) => {
+  const loadSession = useCallback(async (session: AgentSessionSummary, contextOverride?: AIContextEntity | null) => {
     setActiveSessionId(session.id);
     setIsSessionPending(false);
-    setEntityContext(session.context_type ? {
+    setTask(null);
+    setMemoryProposals([]);
+    setEntityContext(contextOverride ?? (session.context_type ? {
       type: session.context_type as AIContextEntity['type'],
       id: session.context_id ?? '',
       name: session.context_name ?? '',
-    } : null);
+    } : null));
 
     const token = localStorage.getItem('crmy_token');
     try {
@@ -342,6 +478,44 @@ export default function Agent() {
     } catch { /* ignore */ }
   }, []);
 
+  const openRecordSession = useCallback(async (ctx: AIContextEntity) => {
+    const launchKey = `${ctx.type}:${ctx.id}`;
+    if (launchContextRef.current === launchKey) return;
+    launchContextRef.current = launchKey;
+
+    setEntityContext(ctx);
+    setInput('');
+    setMessages([]);
+    setActiveSessionId(null);
+    setIsSessionPending(false);
+    setLastSentMessage('');
+    setTask(null);
+    setMemoryProposals([]);
+
+    try {
+      const session = await createSession.mutateAsync({
+        context_type: ctx.type,
+        context_id: ctx.id,
+        context_name: ctx.name,
+        reuse_context: true,
+      });
+      await loadSession(session.data, ctx);
+      refetchSessions();
+    } catch (err) {
+      setMessages([{ kind: 'error', message: (err as Error).message }]);
+    } finally {
+      launchContextRef.current = null;
+    }
+  }, [createSession, loadSession, refetchSessions]);
+
+  // Handle entity context from record pages (openAIWithContext)
+  useEffect(() => {
+    if (aiContext) {
+      useAppStore.setState({ aiContext: null });
+      openRecordSession(aiContext);
+    }
+  }, [aiContext, openRecordSession]);
+
   const startNewChat = useCallback(() => {
     setActiveSessionId(null);
     setMessages([]);
@@ -349,6 +523,8 @@ export default function Agent() {
     setInput('');
     setIsSessionPending(false);
     setLastSentMessage('');
+    setTask(null);
+    setMemoryProposals([]);
   }, []);
 
   const sendMessage = useCallback(async (overrideText?: string) => {
@@ -358,6 +534,8 @@ export default function Agent() {
 
     setLastSentMessage(text);
     setIsSessionPending(true);
+    const nextTask = createAgentTask(text, entityContext, config?.can_write_objects);
+    if (nextTask) setTask(nextTask);
 
     // Add user message immediately (skip if retrying — user message already shown)
     if (overrideText === undefined) {
@@ -384,11 +562,27 @@ export default function Agent() {
           context_type: entityContext?.type,
           context_id: entityContext?.id,
           context_name: entityContext?.name,
+          reuse_context: Boolean(entityContext?.type && entityContext?.id),
         });
         sessionId = session.data.id;
         setActiveSessionId(sessionId);
       }
       resolvedSessionId = sessionId;
+
+      const currentSession = sessions.find((session) => session.id === sessionId);
+      if (!currentSession?.label) {
+        const nextLabel = deriveSessionLabel(text);
+        queryClient.setQueryData<{ data: AgentSessionSummary[] }>(['agent-sessions'], (old) => {
+          if (!old?.data) return old;
+          return {
+            ...old,
+            data: old.data.map((session) => (
+              session.id === sessionId ? { ...session, label: nextLabel } : session
+            )),
+          };
+        });
+        renameSession.mutate({ id: sessionId, label: nextLabel });
+      }
 
       // Streaming accumulator for assistant text.
       // Reset to '' each time a tool_status arrives so the post-tool response
@@ -416,6 +610,7 @@ export default function Agent() {
           }
 
           case 'tool_status':
+            setTask(prev => updateTaskForToolStatus(prev, event.name));
             // Reset accumulator so the next delta starts a fresh assistant bubble
             // after the tool call, rather than appending to any pre-tool text.
             assistantText = '';
@@ -460,6 +655,7 @@ export default function Agent() {
             break;
 
           case 'tool_result':
+            setTask(prev => updateTaskForToolResult(prev, event.name, event.is_error, event.result));
             // Update status text AND store result so groupToolMessages can show it in expanded view
             setMessages(prev => {
               const updated = prev.map(m =>
@@ -472,16 +668,24 @@ export default function Agent() {
             break;
 
           case 'error':
+            setTask(prev => prev ? { ...prev, status: 'failed', nextAction: 'Retry the request or inspect the failed tool output.' } : prev);
             setMessages(prev => [...prev, { kind: 'error', message: event.message }]);
             break;
 
           case 'done':
             receivedDone = true;
             setIsSessionPending(false);
+            setTask(prev => completeTask(prev));
+            if (entityContext && nextTask) {
+              const proposal = buildMemoryProposal(assistantText);
+              if (proposal) {
+                setMemoryProposals(prev => [proposal, ...prev].slice(0, 3));
+              }
+            }
             refetchSessions();
             break;
         }
-      }, abort.signal);
+      }, abort.signal, entityContext?.detail ? { context_detail: entityContext.detail } : undefined);
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
         // User deliberately stopped — clear pending, no error bubble.
@@ -489,6 +693,7 @@ export default function Agent() {
       } else {
         // Network / server error. Keep isSessionPending=true so polling can
         // recover if the server finishes the turn after disconnect.
+        setTask(prev => prev ? { ...prev, status: 'failed', nextAction: 'Retry after the connection recovers.' } : prev);
         setMessages(prev => [...prev, { kind: 'error', message: (err as Error).message }]);
       }
     } finally {
@@ -512,7 +717,7 @@ export default function Agent() {
           .catch(() => { /* ignore */ });
       }
     }
-  }, [input, streaming, activeSessionId, entityContext, createSession, refetchSessions]);
+  }, [input, streaming, activeSessionId, entityContext, config?.can_write_objects, createSession, refetchSessions, sessions, queryClient, renameSession]);
 
   // Retry the last sent message: strip error bubbles and re-send.
   const retryLast = useCallback(() => {
@@ -520,6 +725,37 @@ export default function Agent() {
     setMessages(prev => prev.filter(m => m.kind !== 'error'));
     sendMessage(lastSentMessage);
   }, [lastSentMessage, streaming, sendMessage]);
+
+  const approveMemoryProposal = useCallback(async (proposal: MemoryProposal) => {
+    if (!entityContext) return;
+    setMemoryProposals(prev => prev.map(item => (
+      item.id === proposal.id ? { ...item, status: 'saving' } : item
+    )));
+    try {
+      await createContextEntry.mutateAsync({
+        subject_type: normalizeSubjectType(entityContext.type),
+        subject_id: entityContext.id,
+        context_type: 'summary',
+        title: proposal.title,
+        body: proposal.body,
+        source: 'workspace_agent',
+        metadata: { reviewed_from_chat: true },
+      });
+      setMemoryProposals(prev => prev.map(item => (
+        item.id === proposal.id ? { ...item, status: 'approved' } : item
+      )));
+    } catch (err) {
+      setMemoryProposals(prev => prev.map(item => (
+        item.id === proposal.id
+          ? { ...item, status: 'error', error: (err as Error).message }
+          : item
+      )));
+    }
+  }, [createContextEntry, entityContext]);
+
+  const updateMemoryProposal = useCallback((id: string, patch: Partial<MemoryProposal>) => {
+    setMemoryProposals(prev => prev.map(item => item.id === id ? { ...item, ...patch } : item));
+  }, []);
 
   // Auto-restore the last active session when the sessions list first loads.
   useEffect(() => {
@@ -565,6 +801,8 @@ export default function Agent() {
   }, [isSessionPending, streaming, activeSessionId, refetchSessions]);
 
   const suggestions = getSuggestions(entityContext?.type ?? null, entityContext?.name ?? null);
+  const workflowCommands = getWorkflowCommands(entityContext);
+  const contextEvidence = buildContextEvidence(messages, entityContext);
 
   const IconComponent = entityContext ? typeIcons[entityContext.type] : null;
 
@@ -577,7 +815,7 @@ export default function Agent() {
   if (configLoading) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="Workspace Agent" icon={Bot} iconClassName="text-primary" description={agentDescription} />
+        <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription} />
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/40" />
         </div>
@@ -589,7 +827,7 @@ export default function Agent() {
   if (!enabled) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="Workspace Agent" icon={Bot} iconClassName="text-primary" description={agentDescription} />
+        <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription} />
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center max-w-md space-y-3">
             <Bot className="w-12 h-12 mx-auto text-muted-foreground/40" />
@@ -611,7 +849,7 @@ export default function Agent() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Workspace Agent" icon={Bot} iconClassName="text-primary" description={agentDescription} />
+      <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription} />
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
 
         {/* ── Chat panel ── */}
@@ -684,6 +922,14 @@ export default function Agent() {
             )}
           </AnimatePresence>
 
+          <AgentTrustBar
+            provider={config?.provider}
+            model={config?.model}
+            canWrite={config?.can_write_objects}
+            canHandoff={config?.can_create_assignments}
+            autoExtract={config?.auto_extract_context}
+          />
+
           {/* Pending-session banner — shown when the agent is working in the background */}
           <AnimatePresence>
             {isSessionPending && !streaming && (
@@ -713,10 +959,39 @@ export default function Agent() {
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3 pb-24 md:pb-4">
+            {task && (
+              <AgentTaskCard
+                task={task}
+                onRetry={retryLast}
+                onStop={() => abortRef.current?.abort()}
+              />
+            )}
+            {contextEvidence && (messages.length > 0 || task) && (
+              <ContextUsedPanel evidence={contextEvidence} />
+            )}
+            {memoryProposals.length > 0 && entityContext && (
+              <MemoryReviewPanel
+                proposals={memoryProposals}
+                onApprove={approveMemoryProposal}
+                onUpdate={updateMemoryProposal}
+              />
+            )}
             {messages.length === 0 && (
               <div className="text-center py-12 text-muted-foreground">
-                <Bot className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                <p className="text-sm">Ask about customer context, revenue objects, handoffs, or safe next actions.</p>
+                {entityContext && IconComponent ? (
+                  <>
+                    <div className="w-10 h-10 mx-auto mb-3 rounded-xl bg-accent/10 flex items-center justify-center">
+                      <IconComponent className="w-5 h-5 text-accent" />
+                    </div>
+                    <p className="text-sm font-medium text-foreground">Record context attached.</p>
+                    <p className="text-sm mt-1">Ask about this record or get a briefing when you need full current context.</p>
+                  </>
+                ) : (
+                  <>
+                    <Bot className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                    <p className="text-sm">Ask about customer context, revenue objects, handoffs, or safe next actions.</p>
+                  </>
+                )}
               </div>
             )}
             {groupToolMessages(messages).map((item, i) => (
@@ -730,7 +1005,8 @@ export default function Agent() {
 
           {/* Suggestions */}
           {messages.length === 0 && (
-            <div className="px-4 flex gap-2 flex-wrap">
+            <div className="px-4 space-y-3">
+              <div className="flex gap-2 flex-wrap">
               {suggestions.map((s) => (
                 <button
                   key={s}
@@ -740,6 +1016,18 @@ export default function Agent() {
                   {s}
                 </button>
               ))}
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {workflowCommands.slice(0, entityContext ? 9 : 5).map((command) => (
+                  <button
+                    key={command.label}
+                    onClick={() => setInput(command.prompt)}
+                    className="px-3 py-1.5 rounded-lg text-xs bg-muted/60 border border-border text-foreground hover:bg-accent/10 hover:border-accent/30 transition-colors"
+                  >
+                    {command.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 
@@ -790,6 +1078,7 @@ export default function Agent() {
                   key={session.id}
                   session={session}
                   isActive={activeSessionId === session.id}
+                  taskStatus={activeSessionId === session.id ? task?.status : undefined}
                   onSelect={() => loadSession(session)}
                   onRenamed={() => refetchSessions()}
                   onDeleted={() => {
@@ -802,6 +1091,255 @@ export default function Agent() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function AgentTrustBar({
+  provider,
+  model,
+  canWrite,
+  canHandoff,
+  autoExtract,
+}: {
+  provider?: string;
+  model?: string;
+  canWrite?: boolean;
+  canHandoff?: boolean;
+  autoExtract?: boolean;
+}) {
+  return (
+    <div className="px-4 py-2 border-b border-border bg-card/60">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
+          <ShieldCheck className="w-3 h-3 text-primary" />
+          {provider && model ? `${provider} · ${model}` : 'Model boundary configured'}
+        </span>
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 ${
+          canWrite ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'bg-muted text-muted-foreground'
+        }`}>
+          {canWrite ? <ShieldAlert className="w-3 h-3" /> : <ShieldCheck className="w-3 h-3" />}
+          {canWrite ? 'Writes visible and scoped' : 'Writes disabled'}
+        </span>
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 ${
+          canHandoff ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
+        }`}>
+          <GitPullRequestArrow className="w-3 h-3" />
+          {canHandoff ? 'Handoffs enabled' : 'Handoffs read-only'}
+        </span>
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 ${
+          autoExtract ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-muted-foreground'
+        }`}>
+          <Database className="w-3 h-3" />
+          {autoExtract ? 'Memory review available' : 'Memory extraction off'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function AgentTaskCard({
+  task,
+  onRetry,
+  onStop,
+}: {
+  task: AgentTaskState;
+  onRetry: () => void;
+  onStop: () => void;
+}) {
+  const statusTone =
+    task.status === 'complete' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' :
+    task.status === 'failed' ? 'bg-destructive/10 text-destructive' :
+    task.status === 'waiting_approval' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' :
+    'bg-primary/10 text-primary';
+  const riskTone =
+    task.risk === 'high' ? 'bg-destructive/10 text-destructive' :
+    task.risk === 'medium' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' :
+    'bg-muted text-muted-foreground';
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-border flex items-start gap-3">
+        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+          <ClipboardList className="w-4 h-4 text-primary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-foreground">Agent task</p>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusTone}`}>
+              {task.status === 'waiting_approval' ? 'waiting approval' : task.status}
+            </span>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${riskTone}`}>
+              {task.risk} risk
+            </span>
+          </div>
+          <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{task.goal}</p>
+          {task.subject && (
+            <p className="text-xs text-muted-foreground/70 mt-1">
+              Subject: {typeLabels[task.subject.type]} · {task.subject.name}
+            </p>
+          )}
+        </div>
+        {task.status === 'running' && (
+          <button onClick={onStop} className="text-xs rounded-lg px-2 py-1 bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors">
+            Stop
+          </button>
+        )}
+        {task.status === 'failed' && (
+          <button onClick={onRetry} className="text-xs rounded-lg px-2 py-1 bg-primary/10 text-primary hover:bg-primary/20 transition-colors">
+            Retry
+          </button>
+        )}
+      </div>
+      <div className="px-4 py-3 space-y-2">
+        {task.steps.map(step => (
+          <div key={step.id} className="flex items-center gap-2 text-sm">
+            {step.status === 'complete' ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> :
+              step.status === 'failed' ? <AlertTriangle className="w-4 h-4 text-destructive" /> :
+              step.status === 'running' ? <Loader2 className="w-4 h-4 text-primary animate-spin" /> :
+              <Circle className="w-4 h-4 text-muted-foreground/40" />}
+            <span className={step.status === 'pending' ? 'text-muted-foreground' : 'text-foreground'}>{step.label}</span>
+            {step.toolName && <code className="ml-auto text-[11px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">{step.toolName}</code>}
+          </div>
+        ))}
+        {task.changedRecords.length > 0 && (
+          <div className="pt-2 border-t border-border">
+            <p className="text-xs font-semibold text-foreground mb-1">Changed records</p>
+            <div className="flex flex-wrap gap-1.5">
+              {task.changedRecords.map(record => (
+                <span key={record} className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-300">{record}</span>
+              ))}
+            </div>
+          </div>
+        )}
+        {task.status === 'waiting_approval' && (
+          <Link to="/handoffs" className="inline-flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 hover:underline">
+            <GitPullRequestArrow className="w-3 h-3" />
+            Review pending handoffs
+          </Link>
+        )}
+        {task.nextAction && (
+          <p className="text-xs text-muted-foreground pt-1">Next: {task.nextAction}</p>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+function ContextUsedPanel({ evidence }: { evidence: NonNullable<ReturnType<typeof buildContextEvidence>> }) {
+  const subject = evidence.subject;
+  return (
+    <div className="rounded-xl border border-border bg-card/80 px-4 py-3">
+      <div className="flex items-center gap-2 mb-2">
+        <FileCheck2 className="w-4 h-4 text-primary" />
+        <p className="text-sm font-semibold text-foreground">Context used</p>
+      </div>
+      <div className="flex flex-wrap gap-2 text-xs">
+        {subject && (
+          <span className="rounded-full bg-accent/10 text-accent px-2.5 py-1">
+            {typeLabels[subject.type]} · {subject.name}
+          </span>
+        )}
+        <span className={`rounded-full px-2.5 py-1 ${evidence.usedBriefing ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-muted-foreground'}`}>
+          Briefing {evidence.usedBriefing ? 'used' : 'not run'}
+        </span>
+        <span className={`rounded-full px-2.5 py-1 ${evidence.usedMemory ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-muted-foreground'}`}>
+          Memory {evidence.usedMemory ? 'queried' : 'not queried'}
+        </span>
+        <span className={`rounded-full px-2.5 py-1 ${evidence.usedActivity ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>
+          Activities {evidence.usedActivity ? 'checked' : 'not checked'}
+        </span>
+        <span className={`rounded-full px-2.5 py-1 ${evidence.usedHandoff ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'bg-muted text-muted-foreground'}`}>
+          Handoffs {evidence.usedHandoff ? 'involved' : 'not involved'}
+        </span>
+      </div>
+      {evidence.warnings.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {evidence.warnings.map(warning => (
+            <p key={warning} className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="w-3 h-3" />
+              {warning}
+            </p>
+          ))}
+        </div>
+      )}
+      <div className="mt-2 flex flex-wrap gap-3 text-xs">
+        <Link to="/context" className="text-primary hover:underline">Memory Browser</Link>
+        {subject && (
+          <Link to={`/audit-log?object_type=${normalizeSubjectType(subject.type)}&object_id=${encodeURIComponent(subject.id)}`} className="text-primary hover:underline">
+            Audit history
+          </Link>
+        )}
+        <Link to="/handoffs" className="text-primary hover:underline">Handoffs</Link>
+      </div>
+    </div>
+  );
+}
+
+function MemoryReviewPanel({
+  proposals,
+  onApprove,
+  onUpdate,
+}: {
+  proposals: MemoryProposal[];
+  onApprove: (proposal: MemoryProposal) => void;
+  onUpdate: (id: string, patch: Partial<MemoryProposal>) => void;
+}) {
+  const visible = proposals.filter(proposal => proposal.status !== 'discarded');
+  if (visible.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-border bg-card/80 px-4 py-3 space-y-3">
+      <div className="flex items-start gap-2">
+        <Database className="w-4 h-4 text-primary mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-foreground">Memory review</p>
+          <p className="text-xs text-muted-foreground">Approve useful conversation context before it becomes workspace memory.</p>
+        </div>
+      </div>
+      {visible.map(proposal => (
+        <div key={proposal.id} className="rounded-lg border border-border bg-background/50 p-3 space-y-2">
+          <input
+            value={proposal.title}
+            onChange={(e) => onUpdate(proposal.id, { title: e.target.value })}
+            disabled={proposal.status === 'approved' || proposal.status === 'saving'}
+            className="w-full bg-transparent text-sm font-medium text-foreground outline-none border-b border-border pb-1 disabled:opacity-70"
+          />
+          <textarea
+            value={proposal.body}
+            onChange={(e) => onUpdate(proposal.id, { body: e.target.value })}
+            disabled={proposal.status === 'approved' || proposal.status === 'saving'}
+            rows={3}
+            className="w-full resize-none rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground outline-none focus:border-primary/40 disabled:opacity-70"
+          />
+          {proposal.error && <p className="text-xs text-destructive">{proposal.error}</p>}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => onApprove(proposal)}
+              disabled={proposal.status === 'approved' || proposal.status === 'saving'}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-60 transition-colors"
+            >
+              {proposal.status === 'saving' ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+              {proposal.status === 'approved' ? 'Saved' : 'Approve memory'}
+            </button>
+            <button
+              onClick={() => onUpdate(proposal.id, { status: 'temporary' })}
+              disabled={proposal.status === 'approved' || proposal.status === 'saving'}
+              className="rounded-lg bg-muted px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-60"
+            >
+              Temporary
+            </button>
+            <button
+              onClick={() => onUpdate(proposal.id, { status: 'discarded' })}
+              disabled={proposal.status === 'approved' || proposal.status === 'saving'}
+              className="rounded-lg bg-muted px-2.5 py-1.5 text-xs text-muted-foreground hover:text-destructive transition-colors disabled:opacity-60"
+            >
+              Discard
+            </button>
+            {proposal.status === 'temporary' && <span className="text-xs text-muted-foreground">Kept in chat only.</span>}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1015,7 +1553,7 @@ function MessageBubble({ item, index, verbose, onRetry }: { item: RenderItem; in
       <div
         className={`max-w-[75%] rounded-2xl px-4 py-3 text-sm
           ${isUser
-            ? 'whitespace-pre-wrap bg-gradient-to-br from-primary to-primary/80 text-primary-foreground rounded-br-md'
+            ? 'whitespace-pre-wrap bg-gradient-to-br from-[#6366f1] via-[#7c3aed] to-[#a855f7] text-white rounded-br-md shadow-sm shadow-[#6366f1]/20'
             : 'bg-card border border-border text-foreground rounded-bl-md shadow-sm'
           }`}
       >

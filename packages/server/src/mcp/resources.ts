@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * MCP Resources — exposes CRM entities as subscribable MCP resources.
+ * MCP Resources — exposes customer records as subscribable MCP resources.
  *
  * Resource URIs:
  *   crmy://entities                 — list of supported entity types
@@ -47,7 +47,7 @@ export function registerResources(server: McpServer, db: DbPool, getActor: () =>
   server.resource(
     'crmy-entities',
     'crmy://entities',
-    { description: 'List of CRM entity types accessible as resources' },
+    { description: 'List of customer record types accessible as resources' },
     async (uri) => ({
       contents: [
         {
@@ -76,7 +76,7 @@ export function registerResources(server: McpServer, db: DbPool, getActor: () =>
       new ResourceTemplate(`crmy://${type}/{id}`, {
         list: undefined, // listing not supported — entities are fetched by ID
       }),
-      { description: `Full CRM briefing for a ${type}: subject record, relations, activity timeline, assignments, and context entries.` },
+      { description: `Full customer briefing for a ${type}: subject record, relations, activity timeline, assignments, and context entries.` },
       async (uri, variables) => {
         const actor = getActor();
         const id = Array.isArray(variables.id) ? variables.id[0] : variables.id;

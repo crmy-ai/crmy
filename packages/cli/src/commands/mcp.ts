@@ -6,9 +6,15 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { loadConfigFile } from '../config.js';
 import type { ActorContext } from '@crmy/shared';
 
+function redactSensitive(value: string): string {
+  return value
+    .replace(/(postgres(?:ql)?:\/\/[^:\s]+):([^@\s]+)@/gi, '$1:***@')
+    .replace(/((?:password|token|secret|api[_-]?key)=)[^&\s]+/gi, '$1***');
+}
+
 export function mcpCommand(): Command {
   return new Command('mcp')
-    .description('Start stdio MCP server (for Claude Code)')
+    .description('Start the local stdio MCP server for agents and IDEs')
     .option('--config <path>', 'Explicit path to a .crmy.json config file')
     .action(async (opts) => {
       // IMPORTANT: stdout is the MCP protocol pipe — all diagnostic output MUST
@@ -21,10 +27,12 @@ export function mcpCommand(): Command {
       if (!databaseUrl) {
         process.stderr.write(
           '[crmy mcp] No database URL found.\n' +
-          '  Run `npx @crmy/cli init` first, or pass --config <path>.\n' +
+          '  Run `npx @crmy/cli init` first, pass --config <path>, or set DATABASE_URL.\n' +
           '  Config lookup order:\n' +
-          '    1. process.cwd()/.crmy.json\n' +
-          '    2. ~/.crmy/config.json  (written by init)\n',
+          '    1. --config <path>\n' +
+          '    2. process.cwd()/.crmy.json\n' +
+          '    3. ~/.crmy/config.json  (written by init)\n' +
+          '    4. DATABASE_URL environment variable\n',
         );
         process.exit(1);
       }
@@ -38,7 +46,9 @@ export function mcpCommand(): Command {
         db = await initPool(databaseUrl);
       } catch (err) {
         process.stderr.write(
-          `[crmy mcp] Failed to connect to database: ${(err as Error).message}\n`,
+          `[crmy mcp] Failed to connect to database: ${redactSensitive((err as Error).message)}\n` +
+          '  Check that PostgreSQL is running and the configured DATABASE_URL is reachable.\n' +
+          '  Run `npx @crmy/cli doctor` for a guided setup check.\n',
         );
         process.exit(1);
       }
@@ -92,7 +102,7 @@ export function mcpCommand(): Command {
       if (!actor.tenant_id) {
         process.stderr.write(
           '[crmy mcp] No tenant found in database.\n' +
-          '  Run `npx @crmy/cli init` to set up the database.\n',
+          '  Run `npx @crmy/cli init` to create the first tenant and owner account.\n',
         );
         process.exit(1);
       }

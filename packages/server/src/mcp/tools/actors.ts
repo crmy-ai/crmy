@@ -124,7 +124,7 @@ export function actorTools(db: DbPool): ToolDef[] {
     {
       name: 'actor_expertise',
       tier: 'core',
-      description: 'Find the actor (human or agent) with the most knowledge about a CRM entity, or see what a specific actor knows. Two modes: pass actor_id alone to get the subjects this actor has contributed context to (useful for routing review requests to the right person), or pass subject_type + subject_id to get actors ranked by contribution count for that entity (useful for finding who to ask about an account or opportunity). At least one of actor_id or (subject_type + subject_id) must be provided. Returns contribution counts, context types, and recency.',
+      description: 'Find the actor (human or agent) with the most knowledge about a customer record, or see what a specific actor knows. Two modes: pass actor_id alone to get the subjects this actor has contributed context to (useful for routing review requests to the right person), or pass subject_type + subject_id to get actors ranked by contribution count for that record (useful for finding who to ask about an account or opportunity). At least one of actor_id or (subject_type + subject_id) must be provided. Returns contribution counts, context types, and recency.',
       inputSchema: actorExpertise,
       handler: async (input: z.infer<typeof actorExpertise>, actor: ActorContext) => {
         if (!input.actor_id && !(input.subject_type && input.subject_id)) {

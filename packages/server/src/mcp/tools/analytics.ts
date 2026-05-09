@@ -15,7 +15,7 @@ export function analyticsTools(db: DbPool): ToolDef[] {
     {
       name: 'crm_search',
       tier: 'core',
-      description: 'Search across all CRM entities — contacts, accounts, and opportunities — with a single query string. Returns results grouped by entity type, ranked by relevance. Use this for broad discovery when you do not know which entity type holds the information you need.',
+      description: 'Search across all customer records — contacts, accounts, and opportunities — with a single query string. Returns results grouped by entity type, ranked by relevance. Use this for broad discovery when you do not know which entity type holds the information you need.',
       inputSchema: crmSearch,
       handler: async (input: z.infer<typeof crmSearch>, actor: ActorContext) => {
         return searchRepo.crmSearch(db, actor.tenant_id, input.query, input.limit ?? 10);

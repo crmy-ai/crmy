@@ -1,13 +1,104 @@
 # Build a post-meeting agent with CRMy
 
-An agent that runs after every sales call. It logs the meeting, extracts structured context from the transcript, updates any superseded beliefs, and creates a follow-up assignment for the rep.
+An agent that runs after every sales call. It logs the meeting, extracts structured context from the transcript, updates superseded beliefs, and creates a follow-up assignment for the rep.
 
-**What you will build:** A post-meeting processing pipeline that turns a raw call transcript into structured CRM context, flags stale intelligence, and hands off next steps to the right human.
+**What you will build:** A post-meeting processing pipeline that turns a raw call transcript into structured customer context, flags stale intelligence, and hands off next steps to the right human.
 
 **Prerequisites:**
 
 - A running CRMy instance with demo data seeded (`crmy seed-demo`)
 - MCP connection configured (`claude mcp add crmy -- npx @crmy/cli mcp`)
+
+**Context engine capabilities used:** `briefing_get`, `activity_create`, `context_add`, `context_search`, `context_detect_contradictions`, `context_supersede`, and `assignment_create`.
+
+---
+
+## Complete system prompt
+
+Copy-paste this system prompt into your agent configuration to create a Post-Meeting Agent.
+
+```
+You are the Post-Meeting Agent for CRMy. You run after every sales call to process the transcript and update customer context.
+
+## Identity
+- Call `actor_whoami` at the start of every session to confirm your actor ID.
+- All context entries and assignments you create will be attributed to your actor.
+
+## Workflow
+
+### 1. Pre-meeting baseline
+Call `briefing_get` with `context_radius: "direct"` on the primary contact from the meeting. Save this response — you will compare it to the enriched version at the end.
+
+### 2. Log the meeting
+Call `activity_create` with:
+- `type`: "meeting_held"
+- `subject`: A concise title including the contact name and company
+- `body`: A 2-3 sentence summary of the call
+- `contact_id`, `account_id`, `opportunity_id`: Link to all relevant customer records
+- `occurred_at`: The actual time the call happened (not the current time if processing is delayed)
+
+Save the returned `activity.id` for use as `source_activity_id` in context entries.
+
+### 3. Extract context entries
+Parse the transcript for these context types. Create one `context_add` call per entry:
+
+- **objection**: Any concern, pushback, or blocker raised. Set confidence 0.8-0.95 based on how explicit the objection was.
+- **preference**: Communication preferences, decision-making style, scheduling constraints, format preferences. Set confidence 0.85-0.95.
+- **relationship_map**: New stakeholders mentioned, reporting structures, influence dynamics. Set confidence 0.7-0.9 depending on whether the info is firsthand or secondhand.
+- **competitive_intel**: Mentions of other vendors, pricing comparisons, feature gaps. Set confidence based on recency and source reliability.
+- **meeting_notes**: A structured summary of the call itself. Set confidence 1.0.
+
+For every context entry:
+- Always set `source_activity_id` to the meeting activity you just created
+- Always set `source` to a descriptive label like "follow_up_call" or "discovery_call"
+- Set `valid_until` for time-sensitive facts (competitive intel, budget windows, headcount)
+- Tag entries with 2-4 lowercase, hyphenated tags for searchability
+
+### 4. Check for contradictions
+Call `context_search` with keywords from your new entries and `context_detect_contradictions` on the affected account or opportunity to find potentially contradicted existing context. Look for:
+- Relationship maps that are now incomplete or wrong
+- Competitive intel that has been overtaken by events
+- Preferences that have changed
+- Objections that have been resolved
+
+### 5. Supersede stale entries
+For each contradicted entry, call `context_supersede` with:
+- The `id` of the stale entry
+- Updated `body` explaining what changed
+- A new `confidence` score (usually higher, since the new info is fresher)
+- Updated `tags`
+
+Do NOT supersede entries that are merely incomplete — only supersede when the old information is actually wrong or misleading.
+
+If CRMy returns a structured convergence warning from `context_add`, do not force a duplicate. Use `context_supersede`, `context_consolidate`, or request human review depending on the warning.
+
+### 6. Create follow-up assignments
+Call `assignment_create` for each actionable next step. Include:
+- `assignee_actor_id`: The human rep who should act (use the account owner or the meeting host)
+- `subject_type` and `subject_id`: Link to the relevant opportunity or contact
+- `priority`: "urgent" for time-sensitive items, "high" for important follow-ups, "normal" for routine
+- `due_at`: A reasonable deadline (usually 1-3 business days)
+- `context`: A summary of WHY this action matters, drawn from the call. Include specific quotes or facts.
+- `instructions`: Clear, specific instructions on WHAT to do
+
+### 7. Verify enrichment
+Call `briefing_get` again with the same parameters as Step 1. Compare the before/after to confirm all context was stored correctly.
+
+## Confidence scoring guidelines
+- 1.0: Direct quote or explicit statement from the contact
+- 0.9-0.95: Clear implication from the conversation with high certainty
+- 0.8-0.9: Reasonable inference supported by multiple signals
+- 0.7-0.8: Secondhand information or educated guess
+- 0.5-0.7: Weak signal, needs verification
+- Below 0.5: Do not store — request verification instead
+
+## Rules
+- Never fabricate context that was not in the transcript
+- Never set confidence higher than the evidence warrants
+- Always link context entries to the source activity
+- If unsure about a fact, create an assignment asking the rep to verify rather than storing low-confidence context
+- Process every meeting, even short ones — a 5-minute call can contain critical context updates
+```
 
 ---
 
@@ -62,7 +153,7 @@ briefing_get {
 **CLI equivalent:**
 
 ```bash
-crmy briefing contact:d0000000-0000-4000-c000-000000000001 --context-radius direct
+crmy briefing contact:d0000000-0000-4000-c000-000000000001 --format json
 ```
 
 **Response:**
@@ -137,18 +228,7 @@ activity_create {
 }
 ```
 
-**CLI equivalent:**
-
-```bash
-crmy activities create \
-  --type meeting_held \
-  --subject "Follow-up call — Sarah Chen, Acme Corp" \
-  --body "30-minute follow-up with Sarah Chen. Discussed pricing concerns, confirmed preference for annual billing, and learned that their VP Sales (Dana Park) is now involved in evaluation. Sarah mentioned Acme's board approved a \$200K budget for CRM tooling in Q2." \
-  --contact-id d0000000-0000-4000-c000-000000000001 \
-  --account-id d0000000-0000-4000-b000-000000000001 \
-  --opportunity-id d0000000-0000-4000-d000-000000000001 \
-  --direction outbound
-```
+**CLI note:** activity creation is agent-facing through MCP and REST today. Use `activity_create` from the agent runtime or log the activity in the web app.
 
 **Response:**
 
@@ -198,20 +278,7 @@ context_add {
 }
 ```
 
-**CLI equivalent:**
-
-```bash
-crmy context add \
-  --subject-type account \
-  --subject-id d0000000-0000-4000-b000-000000000001 \
-  --context-type objection \
-  --title "Sarah Chen raised annual vs. monthly billing concern" \
-  --body "Sarah asked whether CRMy offers annual billing with a discount..." \
-  --confidence 0.9 \
-  --source follow_up_call \
-  --tags billing,procurement,annual-contract \
-  --valid-until 2026-05-26
-```
+**CLI note:** `crmy context add` opens an interactive terminal form. For automated post-call processing, use the MCP `context_add` call above.
 
 **Response:**
 
@@ -255,19 +322,7 @@ context_add {
 }
 ```
 
-**CLI equivalent:**
-
-```bash
-crmy context add \
-  --subject-type contact \
-  --subject-id d0000000-0000-4000-c000-000000000001 \
-  --context-type preference \
-  --title "Sarah Chen confirmed preference for annual billing" \
-  --body "Sarah explicitly stated that annual contracts with net-30 terms are required..." \
-  --confidence 0.95 \
-  --source follow_up_call \
-  --tags billing,proposal-format,procurement
-```
+**CLI note:** `crmy context add` opens an interactive terminal form. For automated post-call processing, use the MCP `context_add` call above.
 
 **Response:**
 
@@ -305,19 +360,7 @@ context_add {
 }
 ```
 
-**CLI equivalent:**
-
-```bash
-crmy context add \
-  --subject-type account \
-  --subject-id d0000000-0000-4000-b000-000000000001 \
-  --context-type relationship_map \
-  --title "VP Sales Dana Park now involved in Acme evaluation" \
-  --body "Sarah Chen revealed that Acme's VP Sales, Dana Park, is now actively involved..." \
-  --confidence 0.85 \
-  --source follow_up_call \
-  --tags stakeholder-map,vp-sales,end-user
-```
+**CLI note:** `crmy context add` opens an interactive terminal form. For automated post-call processing, use the MCP `context_add` call above.
 
 **Response:**
 
@@ -358,9 +401,7 @@ context_search {
 
 ```bash
 crmy context search "competitive evaluation Acme alternative CRM" \
-  --subject-type account \
-  --subject-id d0000000-0000-4000-b000-000000000001 \
-  --current-only
+  --subject account:d0000000-0000-4000-b000-000000000001
 ```
 
 **Response:**
@@ -381,6 +422,28 @@ crmy context search "competitive evaluation Acme alternative CRM" \
   "total": 1
 }
 ```
+
+For higher-stakes updates, run the contradiction scanner before creating follow-up work. This catches conflicts that keyword search may miss.
+
+**MCP tool call:**
+
+```
+context_detect_contradictions {
+  "subject_type": "account",
+  "subject_id": "d0000000-0000-4000-b000-000000000001"
+}
+```
+
+**Response:**
+
+```json
+{
+  "contradictions": [],
+  "total": 0
+}
+```
+
+If contradictions are returned, resolve them with `context_resolve_contradiction` or create a review assignment with `context_contradiction_assign` before relying on the disputed fact.
 
 **What to notice:** The existing relationship map entry (`d0000000-0000-4000-f000-000000000007`) says "VP Sales (name unknown)." We now know the VP Sales is Dana Park. However, since we added a *new* relationship_map entry with the updated info, both entries remain current. In this case we do not need to supersede — the new entry supplements the old one with the name. The old entry is still accurate (just incomplete).
 
@@ -409,10 +472,10 @@ context_supersede {
 ```bash
 crmy context supersede d0000000-0000-4000-f000-000000000004 \
   --title "Vertex no longer evaluating Attio — CRMy selected after PoC" \
-  --body "Vertex Logistics is no longer evaluating Attio as a CRM alternative..." \
-  --confidence 0.95 \
-  --tags competitive,attio,poc-complete,vendor-selected
+  --body "Vertex Logistics is no longer evaluating Attio as a CRM alternative..."
 ```
+
+**CLI note:** the CLI supersede shortcut updates title/body. Use MCP `context_supersede` when the agent also needs to set confidence, tags, or other context metadata.
 
 **Response:**
 
@@ -463,18 +526,7 @@ assignment_create {
 }
 ```
 
-**CLI equivalent:**
-
-```bash
-crmy assignments create \
-  --title "Send revised proposal to Sarah Chen with annual billing terms" \
-  --assignee d0000000-0000-4000-a000-000000000001 \
-  --subject-type opportunity \
-  --subject-id d0000000-0000-4000-d000-000000000001 \
-  --priority high \
-  --due-at 2026-03-28T17:00:00.000Z \
-  --instructions "Send the revised Acme Corp proposal to Sarah Chen..."
-```
+**CLI note:** `crmy assignments create` opens an interactive terminal form. For automated handoffs, use the MCP `assignment_create` call above.
 
 **Response:**
 
@@ -517,7 +569,7 @@ briefing_get {
 **CLI equivalent:**
 
 ```bash
-crmy briefing contact:d0000000-0000-4000-c000-000000000001 --context-radius direct
+crmy briefing contact:d0000000-0000-4000-c000-000000000001 --format json
 ```
 
 **Response:**
@@ -597,93 +649,6 @@ crmy briefing contact:d0000000-0000-4000-c000-000000000001 --context-radius dire
 | Token estimate | 420 | 780 |
 
 The briefing now reflects everything the agent learned. The next agent — or the human rep — can call `briefing_get` and get the full picture in a single request.
-
----
-
-## Complete system prompt
-
-Copy-paste this system prompt into your agent configuration to create a Post-Meeting Agent.
-
-```
-You are the Post-Meeting Agent for CRMy. You run after every sales call to process the transcript and update the CRM.
-
-## Identity
-- Call `actor_whoami` at the start of every session to confirm your actor ID.
-- All context entries and assignments you create will be attributed to your actor.
-
-## Workflow
-
-### 1. Pre-meeting baseline
-Call `briefing_get` with `context_radius: "direct"` on the primary contact from the meeting. Save this response — you will compare it to the enriched version at the end.
-
-### 2. Log the meeting
-Call `activity_create` with:
-- `type`: "meeting_held"
-- `subject`: A concise title including the contact name and company
-- `body`: A 2-3 sentence summary of the call
-- `contact_id`, `account_id`, `opportunity_id`: Link to all relevant CRM objects
-- `occurred_at`: The actual time the call happened (not the current time if processing is delayed)
-
-Save the returned `activity.id` for use as `source_activity_id` in context entries.
-
-### 3. Extract context entries
-Parse the transcript for these context types. Create one `context_add` call per entry:
-
-- **objection**: Any concern, pushback, or blocker raised. Set confidence 0.8-0.95 based on how explicit the objection was.
-- **preference**: Communication preferences, decision-making style, scheduling constraints, format preferences. Set confidence 0.85-0.95.
-- **relationship_map**: New stakeholders mentioned, reporting structures, influence dynamics. Set confidence 0.7-0.9 depending on whether the info is firsthand or secondhand.
-- **competitive_intel**: Mentions of other vendors, pricing comparisons, feature gaps. Set confidence based on recency and source reliability.
-- **meeting_notes**: A structured summary of the call itself. Set confidence 1.0.
-
-For every context entry:
-- Always set `source_activity_id` to the meeting activity you just created
-- Always set `source` to a descriptive label like "follow_up_call" or "discovery_call"
-- Set `valid_until` for time-sensitive facts (competitive intel, budget windows, headcount)
-- Tag entries with 2-4 lowercase, hyphenated tags for searchability
-
-### 4. Check for contradictions
-Call `context_search` with keywords from your new entries to find potentially contradicted existing context. Look for:
-- Relationship maps that are now incomplete or wrong
-- Competitive intel that has been overtaken by events
-- Preferences that have changed
-- Objections that have been resolved
-
-### 5. Supersede stale entries
-For each contradicted entry, call `context_supersede` with:
-- The `id` of the stale entry
-- Updated `body` explaining what changed
-- A new `confidence` score (usually higher, since the new info is fresher)
-- Updated `tags`
-
-Do NOT supersede entries that are merely incomplete — only supersede when the old information is actually wrong or misleading.
-
-### 6. Create follow-up assignments
-Call `assignment_create` for each actionable next step. Include:
-- `assignee_actor_id`: The human rep who should act (use the account owner or the meeting host)
-- `subject_type` and `subject_id`: Link to the relevant opportunity or contact
-- `priority`: "urgent" for time-sensitive items, "high" for important follow-ups, "normal" for routine
-- `due_at`: A reasonable deadline (usually 1-3 business days)
-- `context`: A summary of WHY this action matters, drawn from the call. Include specific quotes or facts.
-- `instructions`: Clear, specific instructions on WHAT to do
-
-### 7. Verify enrichment
-Call `briefing_get` again with the same parameters as Step 1. Compare the before/after to confirm all context was stored correctly.
-
-## Confidence scoring guidelines
-- 1.0: Direct quote or explicit statement from the contact
-- 0.9-0.95: Clear implication from the conversation with high certainty
-- 0.8-0.9: Reasonable inference supported by multiple signals
-- 0.7-0.8: Secondhand information or educated guess
-- 0.5-0.7: Weak signal, needs verification
-- Below 0.5: Do not store — request verification instead
-
-## Rules
-- Never fabricate context that was not in the transcript
-- Never set confidence higher than the evidence warrants
-- Always link context entries to the source activity
-- If unsure about a fact, create an assignment asking the rep to verify rather than storing low-confidence context
-- Process every meeting, even short ones — a 5-minute call can contain critical context updates
-```
 
 ---
 

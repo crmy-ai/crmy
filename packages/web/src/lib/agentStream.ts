@@ -64,7 +64,7 @@ export async function streamChat(
   message: string,
   onEvent: (event: SSEEvent) => void,
   signal?: AbortSignal,
-  opts?: { auto_greet?: boolean },
+  opts?: { auto_greet?: boolean; context_detail?: string },
 ): Promise<void> {
   const token = localStorage.getItem('crmy_token');
   const res = await fetch(`/api/v1/agent/sessions/${sessionId}/chat`, {
@@ -73,7 +73,11 @@ export async function streamChat(
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ message, ...(opts?.auto_greet ? { auto_greet: true } : {}) }),
+    body: JSON.stringify({
+      message,
+      ...(opts?.auto_greet ? { auto_greet: true } : {}),
+      ...(opts?.context_detail ? { context_detail: opts.context_detail } : {}),
+    }),
     signal,
   });
 
@@ -176,12 +180,13 @@ export function getSuggestions(entityType: string | null, entityName: string | n
     'Create a contact',
     'My open assignments',
   ];
+  const label = entityType === 'use-case' ? 'use case' : entityType;
   const n = entityName;
   switch (entityType) {
-    case 'contact':     return [`Log a call with ${n}`, 'Draft a follow-up email', 'Update lifecycle stage', 'Check active sequences'];
-    case 'account':     return [`Account health for ${n}`, 'Open opportunities', 'List use cases', 'Recent activities'];
-    case 'opportunity': return ['Advance to next stage', 'Log a touchpoint', 'Summarize deal history', 'Assign a follow-up'];
-    case 'use-case':    return ['Update health score', 'Recent activities', 'Log a check-in', 'List linked contacts'];
+    case 'contact':     return [`Get a briefing for this ${label}`, `Log a call with ${n}`, 'Draft a follow-up email', 'Update lifecycle stage'];
+    case 'account':     return [`Get a briefing for this ${label}`, `Account health for ${n}`, 'Open opportunities', 'List use cases'];
+    case 'opportunity': return [`Get a briefing for this ${label}`, 'Advance to next stage', 'Log a touchpoint', 'Summarize deal history'];
+    case 'use-case':    return [`Get a briefing for this ${label}`, 'Update health score', 'Recent activities', 'Log a check-in'];
     default:            return ['Summarize my pipeline', 'Deals needing attention', 'Create a contact', 'My open assignments'];
   }
 }

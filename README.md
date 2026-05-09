@@ -1,6 +1,6 @@
 # CRMy
 
-Durable customer context for AI agents.
+Operational customer context for AI agents.
 
 CRMy is a local-first operational state layer that gives agents typed revenue objects, persistent context, scoped tools, and retry-safe writes through MCP, REST, and CLI.
 
@@ -76,6 +76,8 @@ What `init --yes` does:
 4. Creates the first owner account.
 5. Writes `.crmy.json` with a local API key.
 6. Seeds demo data so the examples below work immediately.
+
+CRMy writes config to both `.crmy.json` in the current project and `~/.crmy/config.json`, so `crmy mcp` works even when an agent launches it from another directory. If setup ever feels off, run `npx @crmy/cli doctor` for a guided check.
 
 Prefer interactive setup? Run:
 
@@ -215,7 +217,7 @@ Works on contacts, companies, opportunities, and use cases.
 
 ### Human-in-the-loop handoffs
 
-CRMy gives agents a durable escalation path when automation should stop and a human should step in.
+CRMy gives agents a clear escalation path when automation should stop and a human should step in.
 
 Agents can create assignments, submit HITL approval requests, capture handoff snapshots, route work to humans or specialist agents, and later resume from the same customer context. That matters for enterprise workflows where approvals, exception handling, and auditability are part of the product experience rather than afterthoughts.
 
@@ -230,9 +232,9 @@ Four primitives that form the agent's shared workspace:
 | **Actors** | First-class identity for humans and AI agents. Every action is attributed to an actor. Agents self-register — no admin setup. Query `actor_expertise` to route reviews to the person who knows most about a company. |
 | **Activities** | Everything that happened — calls, emails, meetings. Structured `detail` payloads, polymorphic subjects, retroactive `occurred_at` timestamps, and auto-extraction into context entries. Bulk-ingest raw documents with `context_ingest`. |
 | **Assignments** | Structured handoffs. Agents create assignments for humans; humans create assignments for agents. Stateful lifecycle: `pending → accepted → in_progress → completed`. Stale context entries automatically generate review assignments, and handoff snapshots preserve context for the next actor. |
-| **Context Entries** | The memory layer. Typed, tagged, versioned knowledge attached to any CRM object. Priority weights and confidence half-life decay ensure the most important, fresh context surfaces first. `context_radius` expands briefings to adjacent entities. Token-budget-aware packing fits context into any LLM context window. |
+| **Context Entries** | The memory layer. Typed, tagged, versioned knowledge attached to any customer record. Priority weights and confidence half-life decay ensure the most important, fresh context surfaces first. `context_radius` expands briefings to adjacent entities. Token-budget-aware packing fits context into any LLM context window. |
 
-### Semantic search (optional, v0.6+)
+### Semantic search (optional)
 
 Enable pgvector for natural-language search across all context entries:
 
@@ -288,7 +290,7 @@ context_semantic_search query="deals at risk due to competitor pressure"
 | Operations | `ops_status_get`, `ops_job_recover`, `ops_data_quality_get`, `ops_data_quality_repair`, `ops_audit_get`, `ops_privacy_export`, `ops_pii_redact`, `ops_privacy_delete`, `ops_retention_apply` ★ |
 | Meta | `schema_get`, `entity_resolve`, `guide_search` |
 
-★ New in v0.7
+★ Added in the 0.7 release line
 
 ---
 
@@ -355,7 +357,7 @@ Assignments
 
 Context
   crmy context list [--subject-type <t>] [--subject-id <id>]
-  crmy context add                       Add context about a CRM object
+  crmy context add                       Add context about a customer record
   crmy context get <id>                  Get context entry
   crmy context supersede <id>            Supersede with updated content
   crmy context search <query>            Full-text search across context
@@ -406,15 +408,15 @@ Other
 
 ## Web UI
 
-Available at `/app` when the server is running. The web UI provides full CRUD for all CRM entities and agent management.
+Available at `/app` when the server is running. The web UI provides full CRUD for typed revenue objects, context governance, handoffs, actors, and agent settings.
 
 **Sidebar navigation:**
 
 | Section | Pages |
 |---------|-------|
 | **Agent Hub** | Memory Hub (dashboard), Approvals (HITL), Agents, Context, Workflows, Handoffs (assignments) |
-| **CRM Data** | Contacts, Companies, Opportunities, Use Cases, Activities, Emails |
-| **System** | Settings (Profile, Appearance, API Keys, Webhooks, Custom Fields, Actors, Registries, Local AI Agent, Database) |
+| **Customer State** | Contacts, Companies, Opportunities, Use Cases, Activities, Emails |
+| **System** | Settings (Profile, Appearance, API Keys, Webhooks, Custom Fields, Actors, Registries, Workspace Agent, Database) |
 
 **Key features:**
 - **Memory Hub** — pipeline stats, recent activity feed, context overview with Knowledge tab for cross-entity context browsing
@@ -429,7 +431,7 @@ Available at `/app` when the server is running. The web UI provides full CRUD fo
 - **Emails** — compose, view, and track outbound emails with approval flow
 - **Settings → Registries** — manage custom context types and activity types
 - **Settings → Actors** — view and configure registered agents
-- **Settings → Local AI Agent** — enable auto-extraction of context from activities; configure provider, model, and capability flags
+- **Settings → Workspace Agent** — enable auto-extraction of context from activities; configure provider, model, and capability flags
 - **Command palette** — `⌘K` for cross-entity search, quick navigation, and automation shortcuts (New Trigger, New Sequence, Go to Automations)
 
 **First-run setup (Docker):** There are no default credentials. After `docker compose up`, create your first admin account using one of these methods:
@@ -451,7 +453,7 @@ curl -X POST http://localhost:3000/auth/register \
 
 ## REST API
 
-Core CRM objects, context, assignments, workflows, webhooks, email, actors, and admin surfaces have REST endpoints at `/api/v1/*`. MCP remains the complete agent-facing tool surface; use REST for integrations that cannot run MCP or for custom web tooling.
+Typed revenue objects, context, assignments, workflows, webhooks, email, actors, and admin surfaces have REST endpoints at `/api/v1/*`. MCP remains the complete agent-facing tool surface; use REST for integrations that cannot run MCP or for custom web tooling.
 
 Server URLs when running:
 
@@ -636,15 +638,27 @@ claude mcp add crmy -- npx @crmy/cli mcp
 
 Step-by-step guides for building agents on CRMy, each with MCP tool calls, CLI equivalents, realistic response shapes, and a copy-paste system prompt:
 
-- [**Post-Meeting Agent**](docs/recipes/post-meeting-agent.md) — Process call transcripts into structured CRM context
+- [**Post-Meeting Agent**](docs/recipes/post-meeting-agent.md) — Process call transcripts into structured customer context
 - [**Outreach Agent**](docs/recipes/outreach-agent.md) — Briefing-driven outreach with HITL approval flow
-- [**Pipeline Review Agent**](docs/recipes/pipeline-review-agent.md) — Weekly pipeline forecast and at-risk deal identification
+- [**Pipeline Review Agent**](docs/recipes/pipeline-review-agent.md) — Weekly pipeline forecast, stale context review, and at-risk deal identification
+- [**Renewal Risk Agent**](docs/recipes/renewal-risk-agent.md) — Account-wide risk review with semantic memory search and HITL escalation
+- [**Context Governance Agent**](docs/recipes/context-governance-agent.md) — Stale review, contradiction detection, and context consolidation
 
 ---
 
-## What's new in v0.7
+## What's in 0.7.2
 
-### Enterprise durability for agent state
+0.7.2 is a pre-launch release-candidate cleanup focused on faster setup, clearer CLI/MCP guidance, stronger app polish, and current release metadata.
+
+- **Faster first run** — npm-first quickstart, clearer `init --yes`, `doctor`, server, sample data, and password-reset paths.
+- **Workspace Agent polish** — record-scoped sessions, no automatic briefing call on open, task cards, workflow command chips, context-used indicators, and memory review from chat.
+- **Object workflow polish** — consistent table relationship fields, compact drawer actions, object-specific audit links, and collapsible drawer sections.
+- **Settings clarity** — Actors management, database guidance, model readiness, and local workspace agent copy explain why each setup step matters.
+- **Release accuracy** — package versions, OpenAPI metadata, generated docs, and npm packaging checks are aligned for 0.7.2.
+
+## Historical release notes
+
+### v0.7 enterprise durability for agent state
 
 CRMy's local-first context layer now has the safety rails expected for repeated enterprise agent runs:
 
@@ -657,7 +671,7 @@ CRMy's local-first context layer now has the safety rails expected for repeated 
 - **Operator controls** — `ops_status_get`, `ops_job_recover`, data-quality checks/repairs, audit retrieval, privacy export/redaction/delete, and retention cleanup.
 - **CI durability workflow** — `.github/workflows/enterprise-durability.yml` runs unit durability checks and migrated-Postgres integration tests.
 
-### Enterprise-grade context & memory
+### v0.7 enterprise-grade context & memory
 
 The extraction pipeline, briefing service, and semantic search layer have been hardened for production multi-agent deployments:
 
@@ -697,11 +711,11 @@ context_bulk_mark_stale { entry_ids: [...200], reason: "outdated" }
 
 ---
 
-## What's new in v0.7
+### v0.7 context import and Memory Graph
 
-### Context import — zero-friction ingestion
+#### Context import — zero-friction ingestion
 
-Context is the core value of CRMy. v0.7 makes adding it effortless:
+Context is the core value of CRMy. The 0.7 release line made adding it easier:
 
 - **Auto-subject detection** — paste any text and CRMy automatically identifies which contacts and accounts are mentioned, using the 6-tier entity resolution service. No manual subject selection required.
 - **File upload** — drag and drop PDF, DOCX, TXT, or Markdown files. Text is extracted server-side (`pdf-parse` + `mammoth`) and subjects are detected automatically from the content.
@@ -717,9 +731,9 @@ context_ingest_auto {
 → { subjects_resolved: [...], entries_created: 3 }
 ```
 
-- **Auto-extract from activities** — configurable in Settings → Local AI Agent (`auto_extract_context` toggle). When enabled, the extraction pipeline runs automatically on every new activity.
+- **Auto-extract from activities** — configurable in Settings → Workspace Agent (`auto_extract_context` toggle). When enabled, the extraction pipeline runs automatically on every new activity.
 
-### Memory Graph — full redesign
+#### Memory Graph — full redesign
 
 The entity memory graph (`/contacts/:id/graph`, `/companies/:id/graph`) is now an Obsidian-style dark canvas visualization:
 
@@ -729,7 +743,7 @@ The entity memory graph (`/contacts/:id/graph`, `/companies/:id/graph`) is now a
 - **Node detail Sheet**: clicking any node opens a full-width slide-in drawer with complete entry details — readable font sizes, full body text, tags, confidence indicators
 - **MiniMap**: functional top-right minimap showing colored nodes for orientation
 
-### UI simplifications
+#### UI simplifications
 
 - **Companies list**: removed the initials circle avatar — companies are organizations, not people
 - **Context page**: keyword/semantic search toggle moved inline with the search bar
@@ -740,9 +754,8 @@ The entity memory graph (`/contacts/:id/graph`, `/companies/:id/graph`) is now a
 
 ---
 
-## What's new in v0.6
+### v0.6 developer experience
 
-### Developer experience
 - **`crmy init` wizard** — auto-creates database, offers pgvector opt-in, seeds demo data, shows API key
 - **`crmy init --yes`** — fully non-interactive setup for CI/Docker
 - **`crmy doctor`** — 8-point diagnostic (Node version, DB, migrations, users, pgvector, port, JWT)

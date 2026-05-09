@@ -167,6 +167,7 @@ export interface ActivityItem {
   contact_id?: string;
   account_id?: string;
   opportunity_id?: string;
+  use_case_id?: string;
 }
 
 interface ActivityFeedProps {
@@ -225,15 +226,10 @@ export function ActivityFeed({ limit, activities: propActivities, filterWindow }
         const ts = a.occurred_at ?? a.created_at ?? a.timestamp ?? '';
         const contactId = a.contact_id;
         const hasSubjectLink = a.subject_type && a.subject_id;
-        const isClickable = hasSubjectLink || contactId;
+        const isClickable = true;
 
         const handleClick = () => {
-          if (hasSubjectLink) {
-            const drawerType = SUBJECT_TYPE_DRAWER[a.subject_type!];
-            if (drawerType) openDrawer(drawerType, a.subject_id!);
-          } else if (contactId) {
-            openDrawer('contact', contactId);
-          }
+          openDrawer('activity', a.id);
         };
 
         // Build metadata segments
@@ -246,7 +242,7 @@ export function ActivityFeed({ limit, activities: propActivities, filterWindow }
           <div
             key={a.id}
             className={`flex gap-3 py-2 ${isClickable ? 'cursor-pointer hover:bg-muted/40 rounded-xl px-2 -mx-2 transition-colors' : ''}`}
-            onClick={isClickable ? handleClick : undefined}
+            onClick={handleClick}
           >
             <div className="w-7 h-7 rounded-xl bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0 mt-0.5">
               {activityIcon(a.type)}
@@ -260,9 +256,17 @@ export function ActivityFeed({ limit, activities: propActivities, filterWindow }
               </div>
               <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                 {hasSubjectLink && (
-                  <span className="inline-flex items-center gap-0.5 text-xs font-medium text-primary/80 bg-primary/8 px-1.5 py-0.5 rounded">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      const drawerType = SUBJECT_TYPE_DRAWER[a.subject_type!];
+                      if (drawerType) openDrawer(drawerType, a.subject_id!);
+                    }}
+                    className="inline-flex items-center gap-0.5 text-xs font-medium text-primary/80 bg-primary/8 px-1.5 py-0.5 rounded hover:bg-primary/15 transition-colors"
+                  >
                     {SUBJECT_TYPE_LABELS[a.subject_type!] ?? a.subject_type}
-                  </span>
+                  </button>
                 )}
                 {a.performer_name && (
                   <span className="inline-flex items-center gap-0.5 text-xs text-muted-foreground">

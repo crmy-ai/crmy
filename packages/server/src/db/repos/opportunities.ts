@@ -140,7 +140,17 @@ export async function searchOpportunities(
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
-    `SELECT o.* FROM opportunities o WHERE ${where} ORDER BY o.created_at DESC LIMIT $${idx}`,
+    `SELECT
+       o.*,
+       a.name AS account_name,
+       NULLIF(trim(concat_ws(' ', c.first_name, c.last_name)), '') AS contact_name,
+       c.email AS contact_email
+     FROM opportunities o
+     LEFT JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
+     LEFT JOIN contacts c ON c.id = o.contact_id AND c.tenant_id = o.tenant_id
+     WHERE ${where}
+     ORDER BY o.created_at DESC
+     LIMIT $${idx}`,
     params,
   );
 
