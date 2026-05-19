@@ -21,7 +21,7 @@ function getServerVersion(): string {
 import type { ActorContext } from '@crmy/shared';
 import { CrmyError } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
-import { enforceToolScopes } from '../auth/scopes.js';
+import { actorHasScope, enforceToolScopes, getToolScopeRequirements } from '../auth/scopes.js';
 import { registerResources } from './resources.js';
 import { contactTools } from './tools/contacts.js';
 import { accountTools } from './tools/accounts.js';
@@ -45,6 +45,7 @@ import { messagingTools } from './tools/messaging.js';
 import { emailSequenceTools } from './tools/email-sequences.js';
 import { compoundTools } from './tools/compound.js';
 import { agentHandoffTools } from './tools/agent-handoff.js';
+import { systemsOfRecordTools } from './tools/systems-of-record.js';
 
 export interface ToolDef {
   name: string;
@@ -92,6 +93,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...registryTools(db),
     ...webhookTools(db),
     ...workflowTools(db),
+    ...systemsOfRecordTools(db),
     ...customFieldTools(db),
     ...metaTools(db),
     // 9. Messaging channels
@@ -118,12 +120,39 @@ export function getToolsForActor(db: DbPool, actor: ActorContext): ToolDef[] {
     || actor.scopes.includes('read');
 
   return all.filter(t => {
+    const requiredScopes = getToolScopeRequirements(t.name);
+    const scopeVisible = requiredScopes.every(scope => actorHasScope(actor, scope));
+    if (!scopeVisible) return false;
+    if (isWritebackExecutionTool(t.name) && !hasAnyObjectWriteScope(actor)) return false;
+
     if (t.tier === 'core') return true;
     if (t.tier === 'extended') return hasExtended || isAdmin;
     if (t.tier === 'analytics') return hasAnalytics || isAdmin;
     if (t.tier === 'admin') return isAdmin;
     return false;
   });
+}
+
+function isWritebackExecutionTool(toolName: string): boolean {
+  return [
+    'sor_writeback_preview',
+    'sor_writeback_request',
+    'sor_writeback_review',
+    'sor_writeback_execute',
+  ].includes(toolName);
+}
+
+function hasAnyObjectWriteScope(actor: ActorContext): boolean {
+  return [
+    'contacts:write',
+    'accounts:write',
+    'opportunities:write',
+    'activities:write',
+    'use_cases:write',
+    'context:write',
+    'write',
+    '*',
+  ].some(scope => actorHasScope(actor, scope));
 }
 
 export function createMcpServer(db: DbPool, actor: ActorContext, getActor: () => ActorContext): McpServer {

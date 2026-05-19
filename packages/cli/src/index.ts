@@ -59,6 +59,7 @@ import { helpCommand } from './commands/help.js';
 import { seedDemoCommand } from './commands/seed-demo.js';
 import { resetPasswordCommand } from './commands/reset-password.js';
 import { doctorCommand } from './commands/doctor.js';
+import { systemsCommand } from './commands/systems.js';
 
 const program = new Command();
 
@@ -95,6 +96,7 @@ program.addCommand(briefingCommand());
 program.addCommand(seedDemoCommand());
 program.addCommand(resetPasswordCommand());
 program.addCommand(doctorCommand());
+program.addCommand(systemsCommand());
 program.addCommand(helpCommand());
 
 // Top-level `crmy login` shortcut (delegates to `crmy auth login`)

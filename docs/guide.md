@@ -32,10 +32,12 @@ Complete documentation for CRMy — the operational customer context layer for A
 24. [Custom Fields](#custom-fields)
 25. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
 26. [Analytics & Reporting](#analytics--reporting)
-27. [Plugins](#plugins)
-28. [MCP Tools Reference](#mcp-tools-reference)
-29. [REST API Reference](#rest-api-reference)
-30. [Database & Migrations](#database--migrations)
+27. [Systems of Record](#systems-of-record)
+28. [Roadmap](#roadmap)
+29. [Plugins](#plugins)
+30. [MCP Tools Reference](#mcp-tools-reference)
+31. [REST API Reference](#rest-api-reference)
+32. [Database & Migrations](#database--migrations)
 
 ---
 
@@ -319,6 +321,8 @@ API keys can be created with a restricted set of scopes to limit what the key is
 - `write` — grants write access to all resources
 - `*` — full access (read + write everything)
 
+Systems-of-record scopes are intentionally excluded from the `read` and `write` shortcuts. Connector setup, sync, mapping, conflicts, and external writebacks must be granted with explicit `systems:read`, `systems:write`, or `systems:admin` scopes, or with `*`.
+
 **Available resource scopes:**
 
 | Scope | Grants access to |
@@ -329,6 +333,9 @@ API keys can be created with a restricted set of scopes to limit what the key is
 | `activities:read` / `activities:write` | Activities, notes, emails |
 | `assignments:read` / `assignments:write` | Assignment lifecycle |
 | `context:read` / `context:write` | Context entries and briefings |
+| `systems:read` | List systems, mappings, sync runs, conflicts, and writebacks |
+| `systems:write` | Run syncs, resolve conflicts, preview/request/review/execute governed writebacks |
+| `systems:admin` | Create, update, test, delete systems and manage mappings |
 | `read` | All `:read` scopes (wildcard) |
 | `write` | All `:write` scopes (wildcard) |
 | `*` | Everything |
@@ -336,7 +343,7 @@ API keys can be created with a restricted set of scopes to limit what the key is
 **How scopes are enforced:**
 
 - JWT tokens (human login) bypass scope enforcement and always have full access.
-- API key requests have their scopes checked against `TOOL_SCOPES` before any tool handler runs.
+- MCP sessions filter the tool manifest before an agent sees it, then API key requests have their scopes checked against `TOOL_SCOPES` again before any tool handler runs.
 - If a required scope is missing, the server returns HTTP 403 with a message identifying exactly which scope was needed.
 
 See the [Scope Enforcement](#scope-enforcement) section for the complete reference.
@@ -607,7 +614,9 @@ The Actors tab in Settings provides a full view of every registered identity in 
 
 ### MCP-First Architecture
 
-All CRM operations are defined as **MCP tools**. The REST API and CLI are thin wrappers that call the same tool handlers. This means any AI agent that speaks MCP has full CRM access.
+All customer-context operations are defined as **MCP tools**. The REST API and CLI are thin wrappers that call the same tool handlers. This does not mean every agent should see every tool. CRMy keeps the catalog complete for power users and operators, then filters the visible MCP manifest by actor role and scopes so agents receive the smallest useful tool surface.
+
+Use high-level tools for most revenue agents: `briefing_get`, `entity_resolve`, `crm_search`, `context_add`, `activity_create`, compound actions, assignments, and HITL. Reserve setup, mapping, operations, workflow administration, and systems-of-record tools for operator agents or human admins with explicit scopes.
 
 **Four ways to interact:**
 
@@ -1598,8 +1607,9 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 
 | Actor has | Grants |
 |---|---|
-| `read` | All scopes ending in `:read` |
-| `write` | All scopes ending in `:write` |
+| `read` | All non-systems scopes ending in `:read` |
+| `write` | All non-systems scopes ending in `:write` |
+| `systems:read` / `systems:write` / `systems:admin` | Explicit systems-of-record access |
 | `*` | Everything |
 | `contacts:read` | Only `contacts:read` |
 
@@ -2382,6 +2392,76 @@ GET    /api/v1/analytics/pipeline?owner_id=...&group_by=stage
 GET    /api/v1/analytics/forecast?period=quarter
 GET    /api/v1/search?q=acme&limit=10
 ```
+
+---
+
+## Systems of Record
+
+Systems of Record connect CRMy to the enterprise sources that already hold customer state. In 0.8, the connector framework supports HubSpot, Salesforce, Databricks, and Snowflake through one governed model.
+
+Use **Settings → Systems of Record** to:
+
+- Create encrypted connections. HubSpot uses OAuth app credentials by default: App ID, Client ID, Client Secret, Sample install URL, and CRMy's generated callback URL.
+- Salesforce supports encrypted OAuth refresh credentials with `instance_url`, `refresh_token`, `client_id`, and `client_secret`, so CRMy can refresh tokens before sync or writeback.
+- Databricks and Snowflake use credential JSON for host/account and token metadata. Warehouse writeback remains restricted to configured mappings and SQL templates.
+- Test credentials and health.
+- Discover schema and map external objects, tables, or views into CRMy contacts, companies, opportunities, activities, use cases, and context entries.
+- Run syncs and inspect run status.
+- Review source/local conflicts.
+- Preview and request governed external writebacks.
+
+Use **Reliability** to monitor connector status, latest sync runs, open conflicts, and pending writebacks alongside queues and data-quality checks.
+
+CLI:
+
+```bash
+crmy systems list
+crmy systems test <system-id>
+crmy systems discover <system-id> --object contacts
+crmy systems mappings --system <system-id>
+crmy systems upsert-mapping --system <system-id> --object-type contact --external-object contacts --field-mapping '{"email":"email","first_name":"firstname"}' --writable-fields email,firstname --writeback-mode mapped_upsert
+crmy systems sync <system-id>
+crmy systems conflicts
+crmy systems resolve-conflict <conflict-id> --resolution resolved_external
+crmy systems writebacks
+crmy systems preview-writeback <system-id> --object-type contact --external-object contacts --operation update --mode mapped_upsert --payload '{"email":"a@example.com"}'
+crmy systems request-writeback <system-id> --object-type contact --external-object contacts --operation update --mode mapped_upsert --payload @payload.json
+crmy systems review-writeback <writeback-id> --decision approved
+crmy systems execute-writeback <writeback-id>
+```
+
+MCP tools use the `sor_` prefix, including `sor_system_list`, `sor_mapping_upsert`, `sor_mapping_delete`, `sor_sync_run`, `sor_conflict_list`, `sor_writeback_request`, `sor_writeback_review`, and `sor_writeback_execute`.
+
+Security notes:
+
+- Connector credentials are stored as AES-256-GCM encrypted envelopes.
+- Set `CRMY_ENCRYPTION_KEY` in production before storing connector secrets.
+- REST, MCP, and CLI responses redact credential fields.
+- External writes require configured mappings and writeback modes. Arbitrary agent-generated SQL writes are not allowed.
+- Sync respects mapping source authority. External-authoritative mappings can update CRMy directly; CRMy-authoritative, read-only, and approval-required mappings create conflicts instead of overwriting existing records. Bidirectional mappings update only when CRMy has not diverged from the last synced value.
+- Databricks and Snowflake writeback previews block requests unless the mapping has an admin-defined `writeback_config.sql_template` and the payload only uses configured writable fields. Add `writeback_config.parameter_order` when SQL parameters must bind in a specific order.
+- `context_entry` mappings are reserved in 0.8. They create reviewable sync conflicts until connector/system author actors are available, rather than silently writing memory.
+
+Automation notes:
+
+- Sync changes emit normal CRMy events with source metadata.
+- Every sync run also emits `system_sync.completed` or `system_sync.failed`, so direct UI, CLI, REST, and MCP syncs can trigger Workflows just like object updates.
+- Workflow filters can match metadata such as `origin`, `system_id`, `system_type`, `changed_fields`, `confidence`, and `conflict_state`.
+- Workflow external writeback actions must provide an explicit payload JSON object. CRMy will not infer payload fields from the rest of the action config.
+- Workflow-created writebacks include deterministic idempotency keys unless you provide one, so replayed events do not create duplicate external writes.
+- Sync-originated events do not write back to the same source unless a mapping explicitly allows it.
+- Replay sync events are recorded for audit and connector recovery, but Workflows skip `metadata.sync_mode = replay` by default so historical data does not re-run automations.
+- Sequence enrollment actions can resolve contacts from external-origin event subjects, linked contact IDs, or connector metadata.
+
+---
+
+## Roadmap
+
+CRMy's 0.8-1.0 roadmap focuses on becoming the enterprise context and execution layer between AI agents and revenue systems of record.
+
+The 0.8 direction expands CRMy beyond CRM-adjacent storage into a governed systems-of-record overlay across Salesforce, HubSpot, Databricks, and Snowflake. HubSpot is the first certified connector path; Salesforce, Databricks, and Snowflake share the same governed framework and should receive live-environment certification before production rollout. Connector and warehouse changes should emit normal CRMy events so existing Workflows, Sequences, HITL approvals, audit, and context extraction continue to operate through the same event bus.
+
+Read the full roadmap: [CRMy 0.8-1.0 Roadmap: Enterprise Systems-Of-Record Overlay](roadmap-0.8-1.0.md).
 
 ---
 

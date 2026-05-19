@@ -58,9 +58,11 @@ export async function runMigrations(
     await db.query('BEGIN');
     try {
       await db.query(upSql);
-      await db.query('INSERT INTO _migrations (name) VALUES ($1)', [file]);
+      const recorded = await db.query('INSERT INTO _migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [file]);
       await db.query('COMMIT');
-      ran.push(file);
+      if ((recorded.rowCount ?? 0) > 0) {
+        ran.push(file);
+      }
     } catch (err) {
       await db.query('ROLLBACK');
       throw new Error(`Migration ${file} failed: ${(err as Error).message}`);

@@ -39,6 +39,18 @@ export const TRIGGER_EVENTS = [
   // HITL / Handoffs
   { value: 'hitl.submitted',             label: 'HITL request submitted',     group: 'Handoffs'      },
   { value: 'hitl.resolved',              label: 'HITL request resolved',      group: 'Handoffs'      },
+  // Systems of Record
+  { value: 'system_of_record.created',   label: 'System of record created',   group: 'Systems'       },
+  { value: 'system_of_record.updated',   label: 'System of record updated',   group: 'Systems'       },
+  { value: 'system_sync.completed',      label: 'System sync completed',      group: 'Systems'       },
+  { value: 'system_sync.failed',         label: 'System sync failed',         group: 'Systems'       },
+  { value: 'sync_conflict.resolved',      label: 'Sync conflict resolved',     group: 'Systems'       },
+  { value: 'system_writeback.requested', label: 'External writeback requested', group: 'Systems'     },
+  { value: 'system_writeback.approved',  label: 'External writeback approved', group: 'Systems'       },
+  { value: 'system_writeback.rejected',  label: 'External writeback rejected', group: 'Systems'       },
+  { value: 'system_writeback.completed', label: 'External writeback completed', group: 'Systems'      },
+  { value: 'system_writeback.failed',    label: 'External writeback failed',   group: 'Systems'       },
+  { value: 'workflow.action.run_system_sync', label: 'Workflow system sync completed', group: 'Systems' },
 ] as const;
 
 export type TriggerEventValue = typeof TRIGGER_EVENTS[number]['value'];
@@ -54,7 +66,7 @@ export interface ActionConfigField {
   label:       string;
   placeholder: string;
   required:    boolean;
-  type?:       'text' | 'boolean' | 'textarea' | 'number' | 'sequence_picker';
+  type?:       'text' | 'boolean' | 'textarea' | 'number' | 'sequence_picker' | 'system_picker' | 'mapping_picker';
   hint?:       string;
 }
 
@@ -187,6 +199,60 @@ export const ACTION_TYPES: ActionTypeDef[] = [
       { key: 'contact_id',  label: 'Contact ID (override)', placeholder: 'Leave blank to use {{contact.id}}', required: false, type: 'text', hint: 'Auto-resolved from event subject if blank' },
     ],
   },
+  // ── Systems of Record ─────────────────────────────────────────────────────
+  {
+    value: 'request_external_writeback',
+    label: 'Request external writeback',
+    description: 'Create a governed writeback request for Salesforce, HubSpot, Databricks, or Snowflake.',
+    group: 'Systems',
+    supportsVariables: true,
+    hitlCapable: true,
+    configFields: [
+      { key: 'system_id', label: 'System', placeholder: 'Select a system', required: true, type: 'system_picker' },
+      { key: 'mapping_id', label: 'Mapping', placeholder: 'Optional mapping', required: false, type: 'mapping_picker' },
+      { key: 'object_type', label: 'Object type', placeholder: 'contact, account, opportunity, activity', required: true, type: 'text' },
+      { key: 'external_object', label: 'External object', placeholder: 'contacts, companies, deals, table name', required: true, type: 'text' },
+      { key: 'operation', label: 'Operation', placeholder: 'upsert, update, append_event', required: true, type: 'text' },
+      { key: 'writeback_mode', label: 'Writeback mode', placeholder: 'mapped_upsert, append_event, stored_procedure', required: true, type: 'text' },
+      { key: 'payload', label: 'Payload', placeholder: '{"field":"value"} — supports {{variables}}', required: true, type: 'textarea', hint: 'JSON object or templated payload' },
+      { key: 'require_approval', label: 'Require human approval', placeholder: '', required: false, type: 'boolean' },
+    ],
+  },
+  {
+    value: 'run_system_sync',
+    label: 'Run system sync',
+    description: 'Start a governed sync for a configured system of record.',
+    group: 'Systems',
+    configFields: [
+      { key: 'system_id', label: 'System', placeholder: 'Select a system', required: true, type: 'system_picker' },
+      { key: 'mapping_id', label: 'Mapping', placeholder: 'Optional mapping', required: false, type: 'mapping_picker' },
+      { key: 'mode', label: 'Mode', placeholder: 'incremental or full', required: false, type: 'text' },
+    ],
+  },
+  {
+    value: 'create_sync_conflict_review',
+    label: 'Create sync conflict review',
+    description: 'Route a source/local conflict to a human reviewer.',
+    group: 'Systems',
+    configFields: [
+      { key: 'title', label: 'Review title', placeholder: 'Review sync conflict for {{subject.name}}', required: true, type: 'text', hint: 'Supports {{variables}}' },
+      { key: 'instructions', label: 'Instructions', placeholder: 'What should the reviewer decide?', required: false, type: 'textarea' },
+      { key: 'priority', label: 'Priority', placeholder: 'normal, high, urgent', required: false, type: 'text' },
+    ],
+  },
+  {
+    value: 'create_context_from_external_change',
+    label: 'Create context from external change',
+    description: 'Save a governed context entry when an external system updates a customer record.',
+    group: 'Systems',
+    supportsVariables: true,
+    configFields: [
+      { key: 'subject_type', label: 'Subject type', placeholder: 'contact, account, opportunity, use_case', required: true, type: 'text' },
+      { key: 'subject_id', label: 'Subject ID', placeholder: '{{id}}', required: true, type: 'text', hint: 'Supports {{variables}}' },
+      { key: 'context_type', label: 'Context type', placeholder: 'external_update', required: false, type: 'text' },
+      { key: 'body', label: 'Body', placeholder: 'What changed? Supports {{variables}}.', required: true, type: 'textarea', hint: 'Supports {{variables}}' },
+    ],
+  },
   // ── Developer ─────────────────────────────────────────────────────────────
   {
     value: 'webhook',
@@ -221,7 +287,7 @@ export const ACTION_TYPES: ActionTypeDef[] = [
 ];
 
 /** Unique action groups in display order */
-export const ACTION_GROUPS = ['Human', 'Outreach', 'State', 'Sequences', 'Developer'] as const;
+export const ACTION_GROUPS = ['Human', 'Outreach', 'State', 'Sequences', 'Systems', 'Developer'] as const;
 export type ActionGroup = typeof ACTION_GROUPS[number];
 
 /** Action types shown to users when creating a new workflow (hide deprecated aliases) */
@@ -253,6 +319,52 @@ export interface FilterCondition {
   field: string;
   op: FilterOperator;
   value: string;
+}
+
+export interface FilterFieldSuggestion {
+  field: string;
+  label: string;
+  hint?: string;
+  group: string;
+}
+
+const COMMON_FILTER_FIELDS: FilterFieldSuggestion[] = [
+  { field: 'event_type', label: 'Event type', group: 'Event' },
+  { field: 'object_type', label: 'Object type', group: 'Event' },
+  { field: 'object_id', label: 'Object ID', group: 'Event' },
+];
+
+const EXTERNAL_METADATA_FILTER_FIELDS: FilterFieldSuggestion[] = [
+  { field: 'metadata.origin', label: 'Origin', hint: 'crm_sync, warehouse_sync, workflow, sequence', group: 'Source' },
+  { field: 'metadata.system_id', label: 'System ID', group: 'Source' },
+  { field: 'metadata.system_type', label: 'System type', hint: 'hubspot, salesforce, databricks, snowflake', group: 'Source' },
+  { field: 'metadata.external_record_id', label: 'External record ID', group: 'Source' },
+  { field: 'metadata.sync_run_id', label: 'Sync run ID', group: 'Source' },
+  { field: 'metadata.sync_mode', label: 'Sync mode', hint: 'test, full, incremental, replay', group: 'Source' },
+  { field: 'metadata.changed_fields', label: 'Changed fields', hint: 'Use contains with a field name', group: 'Source' },
+  { field: 'metadata.conflict_state', label: 'Conflict state', hint: 'none, open, resolved, unknown', group: 'Source' },
+  { field: 'metadata.confidence', label: 'Confidence', hint: '0 to 1', group: 'Source' },
+];
+
+const SUBJECT_FILTER_FIELDS: FilterFieldSuggestion[] = [
+  { field: 'id', label: 'Record ID', group: 'Record' },
+  { field: 'name', label: 'Name', group: 'Record' },
+  { field: 'email', label: 'Email', group: 'Record' },
+  { field: 'stage', label: 'Stage', group: 'Record' },
+  { field: 'lifecycle_stage', label: 'Lifecycle stage', group: 'Record' },
+  { field: 'account_id', label: 'Account ID', group: 'Record' },
+  { field: 'contact_id', label: 'Contact ID', group: 'Record' },
+];
+
+export function getFilterFieldSuggestions(triggerEvent: string): FilterFieldSuggestion[] {
+  const fields = [...COMMON_FILTER_FIELDS, ...SUBJECT_FILTER_FIELDS];
+  const isExternalAware = triggerEvent.startsWith('system_') ||
+    triggerEvent.startsWith('sync_') ||
+    triggerEvent.startsWith('workflow.action.run_system_sync') ||
+    ['contact.', 'account.', 'opportunity.', 'activity.', 'use_case.'].some(prefix => triggerEvent.startsWith(prefix));
+
+  if (isExternalAware) fields.push(...EXTERNAL_METADATA_FILTER_FIELDS);
+  return fields;
 }
 
 /** Convert UI filter conditions array to the JSONB filter object stored in DB */
@@ -309,38 +421,95 @@ export const VARIABLE_SUGGESTIONS: VariableSuggestion[] = [
   // Event generic
   { path: 'event.id',                label: 'Entity ID',        group: 'Event' },
   { path: 'event.type',              label: 'Event type',       group: 'Event' },
+  { path: 'metadata.origin',         label: 'Origin',           group: 'Source' },
+  { path: 'metadata.system_type',    label: 'System type',      group: 'Source' },
+  { path: 'metadata.system_id',      label: 'System ID',        group: 'Source' },
+  { path: 'metadata.changed_fields', label: 'Changed fields',   group: 'Source' },
+  { path: 'metadata.sync_mode',      label: 'Sync mode',        group: 'Source' },
+  { path: 'external.record_id',      label: 'External record ID', group: 'Source' },
 ];
 
 /** Get variable suggestions relevant to a given trigger event */
 export function getSuggestionsForTrigger(triggerEvent: string): VariableSuggestion[] {
   if (triggerEvent.startsWith('contact.')) {
-    return VARIABLE_SUGGESTIONS.filter(v => ['Contact', 'Event'].includes(v.group));
+    return VARIABLE_SUGGESTIONS.filter(v => ['Contact', 'Event', 'Source'].includes(v.group));
   }
   if (triggerEvent.startsWith('account.')) {
-    return VARIABLE_SUGGESTIONS.filter(v => ['Account', 'Event'].includes(v.group));
+    return VARIABLE_SUGGESTIONS.filter(v => ['Account', 'Event', 'Source'].includes(v.group));
   }
   if (triggerEvent.startsWith('opportunity.')) {
-    return VARIABLE_SUGGESTIONS.filter(v => ['Opportunity', 'Event'].includes(v.group));
+    return VARIABLE_SUGGESTIONS.filter(v => ['Opportunity', 'Event', 'Source'].includes(v.group));
   }
   return VARIABLE_SUGGESTIONS;
 }
 
 /** Sample payload skeleton for the test panel, keyed by trigger event prefix */
 export function getSamplePayload(triggerEvent: string): Record<string, unknown> {
+  const metadata = {
+    origin: 'crm_sync',
+    system_id: '<system-uuid>',
+    system_type: 'hubspot',
+    external_record_id: '<external-id>',
+    sync_run_id: '<sync-run-uuid>',
+    sync_mode: 'incremental',
+    changed_fields: ['email', 'lifecycle_stage'],
+    confidence: 1,
+    conflict_state: 'none',
+  };
   if (triggerEvent.startsWith('contact.')) {
-    return { id: '<contact-uuid>', first_name: 'Alice', last_name: 'Smith', email: 'alice@example.com', lifecycle_stage: 'lead' };
+    return { id: '<contact-uuid>', first_name: 'Alice', last_name: 'Smith', email: 'alice@example.com', lifecycle_stage: 'lead', event_type: triggerEvent, object_type: 'contact', object_id: '<contact-uuid>', metadata };
   }
   if (triggerEvent.startsWith('account.')) {
-    return { id: '<account-uuid>', name: 'Acme Corp', domain: 'acme.com', industry: 'Technology' };
+    return { id: '<account-uuid>', name: 'Acme Corp', domain: 'acme.com', industry: 'Technology', event_type: triggerEvent, object_type: 'account', object_id: '<account-uuid>', metadata };
   }
   if (triggerEvent.startsWith('opportunity.')) {
-    return { id: '<opportunity-uuid>', name: 'Q1 Deal', stage: 'discovery', amount: 50000 };
+    return { id: '<opportunity-uuid>', name: 'Q1 Deal', stage: 'qualification', amount: 50000, contact_id: '<contact-uuid>', event_type: triggerEvent, object_type: 'opportunity', object_id: '<opportunity-uuid>', metadata };
   }
   if (triggerEvent.startsWith('activity.')) {
-    return { id: '<activity-uuid>', type: 'call', subject: 'Discovery call', outcome: 'positive' };
+    return { id: '<activity-uuid>', type: 'call', subject: 'Discovery call', outcome: 'positive', contact_id: '<contact-uuid>', event_type: triggerEvent, object_type: 'activity', object_id: '<activity-uuid>', metadata };
   }
   if (triggerEvent.startsWith('assignment.')) {
     return { id: '<assignment-uuid>', title: 'Follow up with Alice', status: 'pending' };
+  }
+  if (triggerEvent.startsWith('system_writeback.')) {
+    return {
+      id: '<writeback-uuid>',
+      status: triggerEvent.endsWith('.failed') ? 'failed' : 'completed',
+      system_id: '<system-uuid>',
+      object_type: 'contact',
+      object_id: '<contact-uuid>',
+      external_object: 'contacts',
+      external_record_id: '<external-id>',
+      payload: { lifecycle_stage: 'customer' },
+      event_type: triggerEvent,
+      metadata: { ...metadata, origin: 'workflow' },
+    };
+  }
+  if (triggerEvent.startsWith('sync_conflict.')) {
+    return {
+      id: '<conflict-uuid>',
+      conflict_id: '<conflict-uuid>',
+      system_id: '<system-uuid>',
+      object_type: 'contact',
+      object_id: '<contact-uuid>',
+      resolution: 'resolved_external',
+      event_type: triggerEvent,
+      metadata: { ...metadata, conflict_state: 'resolved' },
+    };
+  }
+  if (triggerEvent.startsWith('system_sync.') || triggerEvent === 'workflow.action.run_system_sync') {
+    return {
+      id: '<sync-run-uuid>',
+      system_id: '<system-uuid>',
+      status: triggerEvent.endsWith('.failed') ? 'failed' : 'completed',
+      records_seen: 42,
+      records_updated: 5,
+      error: triggerEvent.endsWith('.failed') ? 'Connection timed out' : undefined,
+      event_type: triggerEvent,
+      object_type: 'external_sync_run',
+      object_id: '<sync-run-uuid>',
+      metadata: { ...metadata, origin: triggerEvent === 'workflow.action.run_system_sync' ? 'workflow' : metadata.origin },
+    };
   }
   return { id: '<entity-uuid>' };
 }

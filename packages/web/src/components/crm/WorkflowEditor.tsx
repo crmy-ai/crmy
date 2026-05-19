@@ -19,9 +19,10 @@
 import { useState, useCallback } from 'react';
 import {
   useCreateWorkflow, useUpdateWorkflow, useTestWorkflow, useSequences, useWorkflow,
+  useSystemsOfRecord, useSystemMappings,
 } from '@/api/hooks';
 import {
-  Dialog, DialogContent,
+  Dialog, DialogContent, DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -178,6 +179,7 @@ function TriggerPanel({
           <WorkflowFilterBuilder
             conditions={conditions}
             onChange={onConditionsChange}
+            triggerEvent={trigger}
           />
         </div>
       )}
@@ -279,6 +281,14 @@ function ActionCard({
   const { data: seqData } = useSequences({ is_active: true }) as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sequences: any[] = seqData?.data ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: systemsData } = useSystemsOfRecord({ limit: 100 }) as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: mappingsData } = useSystemMappings({ limit: 100, is_active: true }) as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const systems: any[] = systemsData?.data ?? [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mappings: any[] = (mappingsData?.data ?? []).filter((m: any) => !action.config.system_id || m.system_id === action.config.system_id);
 
   function set(key: string, val: string) {
     onChange({ ...action, config: { ...action.config, [key]: val } });
@@ -403,6 +413,80 @@ function ActionCard({
                     {sel.steps?.length ?? 0} step{sel.steps?.length !== 1 ? 's' : ''}
                   </p>
                 )}
+              </div>
+            );
+          }
+
+          // System-of-record picker
+          if (field.type === 'system_picker') {
+            const selected = systems.find(s => s.id === val);
+            return (
+              <div key={field.key}>
+                <label className={labelCls}>
+                  {field.label}{field.required && <span className="text-destructive ml-0.5">*</span>}
+                </label>
+                <select
+                  value={val}
+                  onChange={e => {
+                    const nextSystemId = e.target.value;
+                    const patch: Record<string, string> = { ...action.config, [field.key]: nextSystemId };
+                    if (action.config.mapping_id && !mappingsData?.data?.some((m: any) => m.id === action.config.mapping_id && m.system_id === nextSystemId)) {
+                      delete patch.mapping_id;
+                    }
+                    onChange({ ...action, config: patch });
+                  }}
+                  className={smFieldCls}
+                >
+                  <option value="">{systems.length === 0 ? 'No systems configured' : 'Select a system…'}</option>
+                  {systems.map(system => (
+                    <option key={system.id} value={system.id}>
+                      {system.name} ({system.system_type})
+                    </option>
+                  ))}
+                </select>
+                {selected && (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {selected.status ?? 'configured'} • {selected.has_credentials ? 'credentials stored' : 'credentials needed'}
+                  </p>
+                )}
+                {systems.length === 0 && (
+                  <p className="text-xs text-muted-foreground mt-0.5">Create a connection in Settings → Systems of Record first.</p>
+                )}
+              </div>
+            );
+          }
+
+          // System mapping picker
+          if (field.type === 'mapping_picker') {
+            const selected = mappings.find(m => m.id === val);
+            return (
+              <div key={field.key}>
+                <label className={labelCls}>
+                  {field.label}{field.required && <span className="text-destructive ml-0.5">*</span>}
+                </label>
+                <select
+                  value={val}
+                  onChange={e => set(field.key, e.target.value)}
+                  className={smFieldCls}
+                >
+                  <option value="">
+                    {action.config.system_id
+                      ? mappings.length === 0 ? 'No active mappings for this system' : 'Use default mapping…'
+                      : 'Select a system first'}
+                  </option>
+                  {mappings.map(mapping => (
+                    <option key={mapping.id} value={mapping.id}>
+                      {mapping.object_type?.replace('_', ' ')} → {mapping.external_object}
+                    </option>
+                  ))}
+                </select>
+                {selected ? (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {selected.writeback_mode ?? 'read mapping'} • {selected.source_authority ?? 'external'} authority
+                  </p>
+                ) : field.hint ? (
+                  <p className="text-xs text-muted-foreground mt-0.5">{field.hint}</p>
+                ) : null}
               </div>
             );
           }
@@ -841,6 +925,9 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
       }}
     >
       <DialogContent className="max-w-none p-0 gap-0 w-[min(95vw,1440px)] h-[min(90vh,920px)] flex flex-col overflow-hidden rounded-2xl [&>button]:hidden">
+        <DialogTitle className="sr-only">
+          {workflow ? 'Edit automation' : 'Create automation'}
+        </DialogTitle>
 
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border bg-background/95 backdrop-blur shrink-0">

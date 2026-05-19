@@ -19,6 +19,11 @@ export const activityType = z.enum([
 export const direction = z.enum(['inbound', 'outbound']);
 export const userRole = z.enum(['owner', 'admin', 'member']);
 export const subjectType = z.enum(['contact', 'account', 'opportunity', 'use_case']);
+export const systemOfRecordType = z.enum(['hubspot', 'salesforce', 'databricks', 'snowflake']);
+export const externalOrigin = z.enum(['crmy', 'crm_sync', 'warehouse_sync', 'agent', 'workflow', 'sequence']);
+export const writebackMode = z.enum(['append_event', 'mapped_upsert', 'stored_procedure']);
+export const sourceAuthority = z.enum(['crmy', 'external', 'bidirectional', 'read_only', 'approval_required']);
+export const externalObjectType = z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case', 'context_entry']);
 
 const tags = z.array(z.string()).default([]);
 const customFields = z.record(z.unknown()).default({});
@@ -372,6 +377,159 @@ export const tenantGetStats = z.object({});
 export const guideSearch = z.object({
   query: z.string().min(1).describe('Search query — a topic, feature name, or question about CRMy (e.g. "context engine", "how do assignments work", "webhooks")'),
   section: z.string().optional().describe('Optional exact section name to retrieve (e.g. "Contacts", "Briefings", "HITL (Human-in-the-Loop)")'),
+});
+
+// -- Systems-of-record schemas --
+
+const credentialEnvelope = z.record(z.unknown()).optional()
+  .describe('Plain credentials accepted on create/update only. Responses always redact credentials.');
+
+export const sorSystemCreate = z.object({
+  name: z.string().min(1),
+  system_type: systemOfRecordType,
+  auth_type: z.string().min(1),
+  credentials: credentialEnvelope,
+  config: z.record(z.unknown()).default({}),
+  sync_settings: z.record(z.unknown()).default({}),
+  idempotency_key: idempotencyKey,
+});
+
+export const sorSystemUpdate = z.object({
+  id: uuid,
+  idempotency_key: idempotencyKey,
+  patch: z.object({
+    name: z.string().min(1).optional(),
+    auth_type: z.string().min(1).optional(),
+    credentials: credentialEnvelope,
+    config: z.record(z.unknown()).optional(),
+    sync_settings: z.record(z.unknown()).optional(),
+    status: z.enum(['disconnected', 'connected', 'error', 'paused']).optional(),
+    last_error: z.string().nullable().optional(),
+  }),
+});
+
+export const sorSystemGet = z.object({ id: uuid });
+export const sorSystemDelete = z.object({ id: uuid, idempotency_key: idempotencyKey });
+export const sorSystemList = z.object({
+  system_type: systemOfRecordType.optional(),
+  status: z.enum(['disconnected', 'connected', 'error', 'paused']).optional(),
+  limit,
+  cursor,
+});
+
+export const sorSystemTest = z.object({ id: uuid });
+export const sorDiscover = z.object({
+  system_id: uuid,
+  object_name: z.string().optional(),
+});
+
+export const sorMappingUpsert = z.object({
+  id: uuid.optional(),
+  system_id: uuid.describe('System connection that owns this mapping.'),
+  object_type: externalObjectType.describe('CRMy typed object that external records sync into. In 0.8, contact/account/opportunity/activity sync directly; use_case and context_entry mappings create reviewable conflicts until their typed adapters are available.'),
+  external_object: z.string().min(1)
+    .describe('External CRM object, warehouse table, view, or approved stored procedure target.'),
+  external_id_field: z.string().min(1).default('id')
+    .describe('External field used as the stable source record identifier.'),
+  watermark_field: z.string().optional()
+    .describe('Optional external updated-at or cursor field for incremental sync.'),
+  field_mapping: z.record(z.string()).default({})
+    .describe('Map CRMy field names to external field names. Example: {"email":"properties.email"}.'),
+  readable_fields: z.array(z.string()).default([])
+    .describe('External fields allowed to be read during sync. Empty means the adapter default is used.'),
+  writable_fields: z.array(z.string()).default([])
+    .describe('External fields allowed for governed writeback. Empty means read-only writeback policy.'),
+  source_authority: sourceAuthority.default('external')
+    .describe('Conflict policy for this mapping. External can update CRMy directly; CRMy/read-only/approval-required create conflicts instead of overwriting; bidirectional updates only when CRMy has not diverged from the last synced value.'),
+  writeback_mode: writebackMode.optional()
+    .describe('Approved external write mode. Warehouses only allow append_event, mapped_upsert, or stored_procedure.'),
+  writeback_config: z.record(z.unknown()).default({})
+    .describe('Admin-defined writeback settings such as sql_template, table name, procedure name, or parameter_order.'),
+  allow_source_loop: z.boolean().default(false)
+    .describe('Allow sync-originated events to write back to the same source. Disabled by default to prevent loops.'),
+  is_active: z.boolean().default(true)
+    .describe('Disable to pause this mapping without deleting sync history.'),
+  idempotency_key: idempotencyKey,
+});
+
+export const sorMappingList = z.object({
+  system_id: uuid.optional(),
+  object_type: externalObjectType.optional(),
+  is_active: z.boolean().optional(),
+  limit,
+  cursor,
+});
+
+export const sorMappingDelete = z.object({
+  id: uuid.describe('Mapping id to delete.'),
+  idempotency_key: idempotencyKey,
+});
+
+export const sorSyncRun = z.object({
+  system_id: uuid,
+  mapping_id: uuid.optional(),
+  mode: z.enum(['test', 'full', 'incremental', 'replay']).default('incremental'),
+  replay_of_run_id: uuid.optional(),
+  idempotency_key: idempotencyKey,
+});
+
+export const sorSyncStatus = z.object({
+  system_id: uuid.optional(),
+  status: z.enum(['running', 'completed', 'failed', 'cancelled']).optional(),
+  limit,
+  cursor,
+});
+
+export const sorConflictList = z.object({
+  system_id: uuid.optional(),
+  status: z.enum(['open', 'resolved_local', 'resolved_external', 'ignored']).optional(),
+  object_type: z.string().optional(),
+  object_id: uuid.optional(),
+  limit,
+  cursor,
+});
+
+export const sorConflictResolve = z.object({
+  id: uuid,
+  resolution: z.enum(['resolved_local', 'resolved_external', 'ignored']),
+  note: z.string().optional(),
+  idempotency_key: idempotencyKey,
+});
+
+export const sorWritebackPreview = z.object({
+  system_id: uuid,
+  mapping_id: uuid.optional(),
+  object_type: z.string().min(1),
+  object_id: uuid.optional(),
+  external_object: z.string().min(1),
+  external_record_id: z.string().optional(),
+  operation: z.enum(['create', 'update', 'upsert', 'append_event', 'stored_procedure']),
+  writeback_mode: writebackMode,
+  payload: z.record(z.unknown()),
+});
+
+export const sorWritebackRequest = sorWritebackPreview.extend({
+  require_approval: z.boolean().default(true),
+  idempotency_key: idempotencyKey,
+});
+
+export const sorWritebackExecute = z.object({
+  id: uuid,
+  idempotency_key: idempotencyKey,
+});
+
+export const sorWritebackReview = z.object({
+  id: uuid,
+  decision: z.enum(['approved', 'rejected']),
+  note: z.string().optional(),
+  idempotency_key: idempotencyKey,
+});
+
+export const sorWritebackStatus = z.object({
+  system_id: uuid.optional(),
+  status: z.enum(['pending', 'approval_required', 'approved', 'executing', 'completed', 'failed', 'rejected', 'cancelled']).optional(),
+  limit,
+  cursor,
 });
 
 // -- Auth schemas --

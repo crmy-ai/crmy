@@ -417,6 +417,7 @@ export function WorkflowDrawer() {
               <WorkflowFilterBuilder
                 conditions={filterToConditions(wf.trigger_filter as Record<string, unknown>)}
                 onChange={() => {}}
+                triggerEvent={wf.trigger_event ?? ''}
                 disabled
               />
             </div>

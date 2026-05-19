@@ -918,6 +918,30 @@ export async function handleSequenceReply(
 
 // ── Goal-event detection ───────────────────────────────────────────────────────
 
+export function resolveSequenceGoalContactId(event: {
+  objectType?: string;
+  objectId?: UUID;
+  afterData?: unknown;
+  metadata?: Record<string, unknown>;
+}): UUID | undefined {
+  const afterData = (event.afterData && typeof event.afterData === 'object')
+    ? event.afterData as Record<string, unknown>
+    : {};
+  const metadata = (event.metadata && typeof event.metadata === 'object') ? event.metadata : {};
+  const contact = afterData.contact && typeof afterData.contact === 'object'
+    ? afterData.contact as Record<string, unknown>
+    : {};
+
+  if (typeof afterData.contact_id === 'string') return afterData.contact_id as UUID;
+  if (typeof contact.id === 'string') return contact.id as UUID;
+  if (typeof metadata.contact_id === 'string') return metadata.contact_id as UUID;
+  if (event.objectType === 'contact' && typeof afterData.id === 'string') return afterData.id as UUID;
+  if (event.objectType === 'contact' && typeof event.objectId === 'string') return event.objectId as UUID;
+  if (afterData.object_type === 'contact' && typeof afterData.object_id === 'string') return afterData.object_id as UUID;
+  if (afterData.subject_type === 'contact' && typeof afterData.subject_id === 'string') return afterData.subject_id as UUID;
+  return undefined;
+}
+
 /**
  * Called from the event bus listener in index.ts for every CRM event.
  * Checks if any active enrollments in sequences with a matching goal_event should be completed.

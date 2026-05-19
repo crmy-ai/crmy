@@ -12,6 +12,8 @@
  *   {{contact.*}}     — payload.contact fields (if present)
  *   {{account.*}}     — payload.account fields (if present)
  *   {{opportunity.*}} — payload.opportunity fields (if present)
+ *   {{metadata.*}}    — event metadata such as origin/system_type/changed_fields
+ *   {{external.*}}    — shorthand for external system identifiers
  *
  * Unknown paths resolve to empty string — never throws.
  */
@@ -49,12 +51,25 @@ export function resolveConfig(
  */
 export function buildVariableContext(payload: unknown): Record<string, unknown> {
   const p = (payload ?? {}) as Record<string, unknown>;
+  const metadata = (p.metadata && typeof p.metadata === 'object')
+    ? p.metadata as Record<string, unknown>
+    : {};
   return {
     event: p,
     subject: p,
     contact: (p.contact ?? {}) as Record<string, unknown>,
     account: (p.account ?? {}) as Record<string, unknown>,
     opportunity: (p.opportunity ?? {}) as Record<string, unknown>,
+    metadata,
+    external: {
+      system_id: metadata.system_id ?? p.system_id,
+      system_type: metadata.system_type ?? p.system_type,
+      origin: metadata.origin ?? p.origin,
+      record_id: metadata.external_record_id ?? p.external_record_id,
+      sync_run_id: metadata.sync_run_id ?? p.sync_run_id,
+      changed_fields: metadata.changed_fields ?? p.changed_fields,
+      conflict_state: metadata.conflict_state ?? p.conflict_state,
+    },
   };
 }
 

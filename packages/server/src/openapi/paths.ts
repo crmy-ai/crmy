@@ -888,6 +888,179 @@ registry.registerPath({
   responses: { 200: ok(SuccessResult), 404: err404 },
 });
 
+// -- Systems of Record --
+
+registry.registerPath({
+  method: 'get', path: '/systems-of-record',
+  tags: ['Systems of Record'],
+  summary: 'List configured systems of record',
+  security: bearer,
+  request: { query: S.sorSystemList },
+  responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/systems-of-record',
+  tags: ['Systems of Record'],
+  summary: 'Create a governed system connection with encrypted credentials',
+  security: bearer,
+  request: { body: jsonBody(S.sorSystemCreate) },
+  responses: { 201: created(GenericObject), 400: err400, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/systems-of-record/{id}',
+  tags: ['Systems of Record'],
+  summary: 'Get one system of record',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/systems-of-record/{id}',
+  tags: ['Systems of Record'],
+  summary: 'Update a system connection or encrypted credentials',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(S.sorSystemUpdate.shape.patch) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'delete', path: '/systems-of-record/{id}',
+  tags: ['Systems of Record'],
+  summary: 'Delete a system connection and related sync metadata',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(SuccessResult), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/systems-of-record/{id}/test',
+  tags: ['Systems of Record'],
+  summary: 'Test a system connection',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/systems-of-record/{id}/discover',
+  tags: ['Systems of Record'],
+  summary: 'Discover external objects or fields',
+  security: bearer,
+  request: { params: idParam, query: z.object({ object_name: z.string().optional() }) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/systems-of-record/mappings/list',
+  tags: ['Systems of Record'],
+  summary: 'List object mappings',
+  security: bearer,
+  request: { query: S.sorMappingList },
+  responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/systems-of-record/mappings',
+  tags: ['Systems of Record'],
+  summary: 'Create or update an object mapping',
+  security: bearer,
+  request: { body: jsonBody(S.sorMappingUpsert) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'delete', path: '/systems-of-record/mappings/{id}',
+  tags: ['Systems of Record'],
+  summary: 'Delete an object mapping',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(SuccessResult), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/systems-of-record/{id}/sync',
+  tags: ['Systems of Record'],
+  summary: 'Run a system sync that emits normal CRMy events',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(S.sorSyncRun.omit({ system_id: true })) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/systems-of-record/sync-runs/list',
+  tags: ['Systems of Record'],
+  summary: 'List sync runs',
+  security: bearer,
+  request: { query: S.sorSyncStatus },
+  responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/systems-of-record/conflicts/list',
+  tags: ['Systems of Record'],
+  summary: 'List sync conflicts',
+  security: bearer,
+  request: { query: S.sorConflictList },
+  responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/systems-of-record/conflicts/{id}/resolve',
+  tags: ['Systems of Record'],
+  summary: 'Resolve a sync conflict',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(S.sorConflictResolve.omit({ id: true })) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/systems-of-record/writebacks/preview',
+  tags: ['Systems of Record'],
+  summary: 'Preview a governed external writeback',
+  security: bearer,
+  request: { body: jsonBody(S.sorWritebackPreview) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/systems-of-record/writebacks',
+  tags: ['Systems of Record'],
+  summary: 'Request a governed external writeback',
+  security: bearer,
+  request: { body: jsonBody(S.sorWritebackRequest) },
+  responses: { 201: created(GenericObject), 400: err400, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/systems-of-record/writebacks/{id}/review',
+  tags: ['Systems of Record'],
+  summary: 'Approve or reject a governed external writeback',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(S.sorWritebackReview.omit({ id: true })) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/systems-of-record/writebacks/{id}/execute',
+  tags: ['Systems of Record'],
+  summary: 'Execute an approved external writeback',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/systems-of-record/writebacks/list',
+  tags: ['Systems of Record'],
+  summary: 'List external writeback requests',
+  security: bearer,
+  request: { query: S.sorWritebackStatus },
+  responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
 // -- Events --
 
 registry.registerPath({

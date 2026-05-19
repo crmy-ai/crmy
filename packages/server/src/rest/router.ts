@@ -1342,6 +1342,211 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  // --- Systems of Record ---
+  router.get('/systems-of-record', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_system_list');
+      const result = await handler({
+        system_type: qs(req.query.system_type),
+        status: qs(req.query.status),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      const r = result as { systems: unknown[]; next_cursor?: string; total: number };
+      res.json({ data: r.systems, next_cursor: r.next_cursor, total: r.total });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/systems-of-record', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_system_create');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/systems-of-record/:id([0-9a-fA-F-]{36})', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_system_get');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/systems-of-record/:id([0-9a-fA-F-]{36})', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_system_update');
+      const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/systems-of-record/:id([0-9a-fA-F-]{36})', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_system_delete');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/systems-of-record/:id([0-9a-fA-F-]{36})/test', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_system_test');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/systems-of-record/:id([0-9a-fA-F-]{36})/discover', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_discover');
+      const result = await handler({ system_id: p(req, 'id'), object_name: qs(req.query.object_name) }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/systems-of-record/mappings/list', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_mapping_list');
+      const result = await handler({
+        system_id: qs(req.query.system_id),
+        object_type: qs(req.query.object_type),
+        is_active: req.query.is_active !== undefined ? req.query.is_active === 'true' : undefined,
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      const r = result as { mappings: unknown[]; next_cursor?: string; total: number };
+      res.json({ data: r.mappings, next_cursor: r.next_cursor, total: r.total });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/systems-of-record/mappings', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_mapping_upsert');
+      const result = await handler(req.body, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/systems-of-record/mappings/:id([0-9a-fA-F-]{36})', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_mapping_delete');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/systems-of-record/:id([0-9a-fA-F-]{36})/sync', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_sync_run');
+      const result = await handler({ system_id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/systems-of-record/sync-runs/list', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_sync_status');
+      const result = await handler({
+        system_id: qs(req.query.system_id),
+        status: qs(req.query.status),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      const r = result as { runs: unknown[]; next_cursor?: string; total: number };
+      res.json({ data: r.runs, next_cursor: r.next_cursor, total: r.total });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/systems-of-record/conflicts/list', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_conflict_list');
+      const result = await handler({
+        system_id: qs(req.query.system_id),
+        status: qs(req.query.status),
+        object_type: qs(req.query.object_type),
+        object_id: qs(req.query.object_id),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      const r = result as { conflicts: unknown[]; next_cursor?: string; total: number };
+      res.json({ data: r.conflicts, next_cursor: r.next_cursor, total: r.total });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/systems-of-record/conflicts/:id/resolve', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_conflict_resolve');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/systems-of-record/writebacks/preview', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_writeback_preview');
+      const result = await handler(req.body, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/systems-of-record/writebacks', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_writeback_request');
+      const result = await handler(req.body, actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/systems-of-record/writebacks/:id/review', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_writeback_review');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/systems-of-record/writebacks/:id/execute', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_writeback_execute');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/systems-of-record/writebacks/list', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sor_writeback_status');
+      const result = await handler({
+        system_id: qs(req.query.system_id),
+        status: qs(req.query.status),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      const r = result as { writebacks: unknown[]; next_cursor?: string; total: number };
+      res.json({ data: r.writebacks, next_cursor: r.next_cursor, total: r.total });
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Actors ---
   router.get('/actors', async (req: Request, res: Response) => {
     try {

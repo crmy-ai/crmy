@@ -240,6 +240,7 @@ export async function updateActivity(
     'subject', 'body', 'status', 'due_at', 'completed_at', 'custom_fields',
     'direction', 'performed_by', 'subject_type', 'subject_id', 'related_type',
     'related_id', 'detail', 'occurred_at', 'outcome',
+    'contact_id', 'account_id', 'opportunity_id', 'use_case_id', 'owner_id',
   ];
 
   const sets: string[] = ['updated_at = now()'];

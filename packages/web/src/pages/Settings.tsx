@@ -1,10 +1,10 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Zap, ListOrdered, GitBranch, Info, Globe, Terminal, Server, AlertTriangle } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Zap, ListOrdered, GitBranch, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -12,7 +12,8 @@ import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
-import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useWorkflows, useSequences, useSequenceEnrollments } from '@/api/hooks';
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useWorkflows, useSequences, useSequenceEnrollments, useSystemsOfRecord, useCreateSystemOfRecord, useUpdateSystemOfRecord, useDeleteSystemOfRecord, useTestSystemOfRecord, useRunSystemSync, useDiscoverSystemOfRecord, useSystemMappings, useUpsertSystemMapping, useDeleteSystemMapping, useSystemSyncRuns, useSystemConflicts, useResolveSystemConflict, useSystemWritebacks, usePreviewSystemWriteback, useRequestSystemWriteback, useExecuteSystemWriteback, useReviewSystemWriteback } from '@/api/hooks';
+import type { SystemMapping, SystemOfRecord } from '@/api/hooks';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import AgentSettings from '@/pages/AgentSettings';
 import ActorsSettings from '@/components/settings/ActorsSettings';
@@ -33,6 +34,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: ShieldCheck, label: 'HITL Rules', path: '/settings/hitl-rules',  roles: ['admin', 'owner'] },
   { icon: Sparkles,   label: 'Model Settings', path: '/settings/model',     roles: ['admin', 'owner'] },
   { icon: Zap,        label: 'Automations',   path: '/settings/automations',  roles: ['admin', 'owner'] },
+  { icon: Server,     label: 'Systems of Record', path: '/settings/systems', roles: ['admin', 'owner'] },
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
 ];
 
@@ -2404,6 +2406,2037 @@ function AutomationSettings() {
   );
 }
 
+function SystemsOfRecordSettings() {
+  const location = useLocation();
+  const { data: systemsData, isLoading: systemsLoading } = useSystemsOfRecord({ limit: 50 });
+  const { data: mappingsData } = useSystemMappings({ limit: 100 });
+  const { data: runsData } = useSystemSyncRuns({ limit: 20 });
+  const { data: conflictsData } = useSystemConflicts({ limit: 20 });
+  const { data: writebacksData } = useSystemWritebacks({ limit: 20 });
+  const createSystem = useCreateSystemOfRecord();
+  const updateSystem = useUpdateSystemOfRecord();
+  const deleteSystem = useDeleteSystemOfRecord();
+  const testSystem = useTestSystemOfRecord();
+  const runSync = useRunSystemSync();
+  const upsertMapping = useUpsertSystemMapping();
+  const deleteMapping = useDeleteSystemMapping();
+  const resolveConflict = useResolveSystemConflict();
+  const previewWriteback = usePreviewSystemWriteback();
+  const requestWriteback = useRequestSystemWriteback();
+  const executeWriteback = useExecuteSystemWriteback();
+  const reviewWriteback = useReviewSystemWriteback();
+
+  const [tab, setTab] = useState<'connections' | 'mappings' | 'runs' | 'conflicts' | 'writebacks'>('connections');
+  const [showCreate, setShowCreate] = useState(false);
+  const [name, setName] = useState('');
+  const [systemType, setSystemType] = useState('');
+  const [authType, setAuthType] = useState('');
+  const [credentialInput, setCredentialInput] = useState('');
+  const [hubSpotAppId, setHubSpotAppId] = useState('');
+  const [hubSpotClientId, setHubSpotClientId] = useState('');
+  const [hubSpotClientSecret, setHubSpotClientSecret] = useState('');
+  const [hubSpotInstallUrl, setHubSpotInstallUrl] = useState('');
+  const [configInput, setConfigInput] = useState('{}');
+  const [syncInput, setSyncInput] = useState('{"default_limit":100}');
+  const [editingSystemId, setEditingSystemId] = useState('');
+  const [editName, setEditName] = useState('');
+  const [editAuthType, setEditAuthType] = useState('oauth_app');
+  const [editCredentialInput, setEditCredentialInput] = useState('');
+  const [editHubSpotAppId, setEditHubSpotAppId] = useState('');
+  const [editHubSpotClientId, setEditHubSpotClientId] = useState('');
+  const [editHubSpotClientSecret, setEditHubSpotClientSecret] = useState('');
+  const [editHubSpotInstallUrl, setEditHubSpotInstallUrl] = useState('');
+  const [editHubSpotRedirectOrCode, setEditHubSpotRedirectOrCode] = useState('');
+  const [editConfigInput, setEditConfigInput] = useState('{}');
+  const [editSyncInput, setEditSyncInput] = useState('{}');
+
+  const [mappingSystemId, setMappingSystemId] = useState('');
+  const [mappingObjectType, setMappingObjectType] = useState('contact');
+  const [mappingExternalObject, setMappingExternalObject] = useState('contacts');
+  const [mappingIdField, setMappingIdField] = useState('id');
+  const [mappingWatermarkField, setMappingWatermarkField] = useState('updatedAt');
+  const [mappingFieldJson, setMappingFieldJson] = useState('{\n  "email": "email",\n  "first_name": "firstname",\n  "last_name": "lastname"\n}');
+  const [mappingCrmyField, setMappingCrmyField] = useState('email');
+  const [mappingExternalField, setMappingExternalField] = useState('');
+  const [mappingReadableFields, setMappingReadableFields] = useState('');
+  const [mappingWritableFields, setMappingWritableFields] = useState('');
+  const [mappingSourceAuthority, setMappingSourceAuthority] = useState('external');
+  const [mappingWritebackMode, setMappingWritebackMode] = useState('');
+  const [mappingWritebackConfigJson, setMappingWritebackConfigJson] = useState('{}');
+  const [mappingAllowSourceLoop, setMappingAllowSourceLoop] = useState(false);
+  const [mappingIsActive, setMappingIsActive] = useState(true);
+  const [editingMappingId, setEditingMappingId] = useState('');
+  const [confirmDeleteMappingId, setConfirmDeleteMappingId] = useState('');
+  const [discoveryMode, setDiscoveryMode] = useState<'objects' | 'fields' | ''>('');
+  const [discoveryObjectName, setDiscoveryObjectName] = useState('');
+  const [writebackSystemId, setWritebackSystemId] = useState('');
+  const [writebackMappingId, setWritebackMappingId] = useState('');
+  const [writebackObjectType, setWritebackObjectType] = useState('contact');
+  const [writebackObjectId, setWritebackObjectId] = useState('');
+  const [writebackExternalObject, setWritebackExternalObject] = useState('contacts');
+  const [writebackExternalRecordId, setWritebackExternalRecordId] = useState('');
+  const [writebackOperation, setWritebackOperation] = useState('update');
+  const [writebackMode, setWritebackMode] = useState('mapped_upsert');
+  const [writebackRequireApproval, setWritebackRequireApproval] = useState(true);
+  const [writebackPayloadJson, setWritebackPayloadJson] = useState('{\n  "email": "customer@example.com"\n}');
+  const [writebackPreview, setWritebackPreview] = useState<Record<string, unknown> | null>(null);
+  const processedHubSpotOAuthCode = useRef('');
+
+  const systems = systemsData?.data ?? [];
+  const mappings = mappingsData?.data ?? [];
+  const runs = (runsData?.data ?? []) as Array<Record<string, unknown>>;
+  const conflicts = (conflictsData?.data ?? []) as Array<Record<string, unknown>>;
+  const writebacks = (writebacksData?.data ?? []) as Array<Record<string, unknown>>;
+  const discovery = useDiscoverSystemOfRecord(
+    discoveryMode ? mappingSystemId : undefined,
+    discoveryMode === 'fields' ? discoveryObjectName : undefined,
+  );
+  const discoveryItems = Array.isArray((discovery.data as { data?: unknown[] } | undefined)?.data)
+    ? (discovery.data as { data: Array<Record<string, unknown>> }).data
+    : [];
+  const mappingFieldOptions = useMemo(() => {
+    const common = [
+      { value: 'external_id', label: 'External ID' },
+      { value: 'name', label: 'Name' },
+    ];
+    const byObject: Record<string, Array<{ value: string; label: string }>> = {
+      contact: [
+        { value: 'first_name', label: 'First name' },
+        { value: 'last_name', label: 'Last name' },
+        { value: 'email', label: 'Email' },
+        { value: 'phone', label: 'Phone' },
+        { value: 'title', label: 'Title' },
+        { value: 'company_name', label: 'Company name' },
+        { value: 'lifecycle_stage', label: 'Lifecycle stage' },
+        { value: 'lead_score', label: 'Lead score' },
+      ],
+      account: [
+        { value: 'name', label: 'Company name' },
+        { value: 'domain', label: 'Domain' },
+        { value: 'industry', label: 'Industry' },
+        { value: 'annual_revenue', label: 'Annual revenue' },
+        { value: 'employee_count', label: 'Employee count' },
+        { value: 'health_score', label: 'Health score' },
+      ],
+      opportunity: [
+        { value: 'name', label: 'Opportunity name' },
+        { value: 'amount', label: 'Amount' },
+        { value: 'stage', label: 'Stage' },
+        { value: 'probability', label: 'Probability' },
+        { value: 'close_date', label: 'Close date' },
+        { value: 'health_score', label: 'Health score' },
+      ],
+      activity: [
+        { value: 'type', label: 'Activity type' },
+        { value: 'description', label: 'Description' },
+        { value: 'occurred_at', label: 'Occurred at' },
+        { value: 'actor_name', label: 'Actor name' },
+      ],
+      context_entry: [
+        { value: 'content', label: 'Content' },
+        { value: 'source', label: 'Source' },
+        { value: 'confidence', label: 'Confidence' },
+        { value: 'expires_at', label: 'Expires at' },
+      ],
+    };
+    return byObject[mappingObjectType] ?? common;
+  }, [mappingObjectType]);
+
+  useEffect(() => {
+    if (!mappingSystemId && systems[0]?.id) setMappingSystemId(systems[0].id);
+  }, [mappingSystemId, systems]);
+
+  useEffect(() => {
+    if (!writebackSystemId && systems[0]?.id) setWritebackSystemId(systems[0].id);
+  }, [writebackSystemId, systems]);
+
+  useEffect(() => {
+    setDiscoveryMode('');
+    setDiscoveryObjectName('');
+  }, [mappingSystemId]);
+
+  useEffect(() => {
+    setMappingCrmyField(mappingFieldOptions[0]?.value ?? 'name');
+  }, [mappingFieldOptions]);
+
+  const writebackMappings = useMemo(
+    () => mappings.filter(mapping => !writebackSystemId || mapping.system_id === writebackSystemId),
+    [mappings, writebackSystemId],
+  );
+
+  const hubSpotRedirectOrigin = typeof window !== 'undefined'
+    ? ['127.0.0.1', '::1'].includes(window.location.hostname)
+      ? `${window.location.protocol}//localhost${window.location.port ? `:${window.location.port}` : ''}`
+      : window.location.origin
+    : '';
+  const recommendedHubSpotRedirectUri = hubSpotRedirectOrigin
+    ? `${hubSpotRedirectOrigin}/app/settings/systems/oauth/hubspot/callback`
+    : '/app/settings/systems/oauth/hubspot/callback';
+  const currentOriginMatchesHubSpotRedirect = typeof window === 'undefined'
+    || window.location.origin === hubSpotRedirectOrigin;
+
+  const parseJson = (label: string, value: string) => {
+    try {
+      return value.trim() ? JSON.parse(value) as Record<string, unknown> : {};
+    } catch {
+      throw new Error(`${label} must be valid JSON.`);
+    }
+  };
+  const parseCsvList = (value: string) =>
+    value.split(',').map(item => item.trim()).filter(Boolean);
+  const csvList = (value?: string[]) => (value ?? []).join(', ');
+
+  const systemLabel = (type: string) => {
+    if (type === 'hubspot') return 'HubSpot';
+    if (type === 'salesforce') return 'Salesforce';
+    if (type === 'databricks') return 'Databricks';
+    if (type === 'snowflake') return 'Snowflake';
+    return 'System';
+  };
+
+  const credentialPlaceholder = (type: string) => {
+    if (type === 'salesforce') {
+      return '{\n  "instance_url": "https://your-domain.my.salesforce.com",\n  "refresh_token": "...",\n  "client_id": "...",\n  "client_secret": "..."\n}';
+    }
+    if (type === 'databricks') {
+      return '{\n  "host": "https://adb-...cloud.databricks.com",\n  "token": "...",\n  "warehouse_id": "..."\n}';
+    }
+    if (type === 'snowflake') {
+      return '{\n  "account_url": "https://org-account.snowflakecomputing.com",\n  "token": "..."\n}';
+    }
+    return '{\n  "token": "..."\n}';
+  };
+
+  const isHubSpotOAuthIncomplete = (value?: unknown) =>
+    typeof value === 'string' && /hubspot oauth install is not complete|sample install url|test url|install code/i.test(value);
+
+  const hubSpotOAuthConfig = (system?: SystemOfRecord): Record<string, unknown> => {
+    const raw = system?.config?.hubspot_oauth;
+    return raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+  };
+
+  const mergeHubSpotOAuthConfig = (base: Record<string, unknown>, values: Record<string, string>) => {
+    const existing = base.hubspot_oauth && typeof base.hubspot_oauth === 'object'
+      ? base.hubspot_oauth as Record<string, unknown>
+      : {};
+    const next = { ...existing };
+    for (const [key, value] of Object.entries(values)) {
+      if (value.trim()) next[key] = value.trim();
+    }
+    return Object.keys(next).length ? { ...base, hubspot_oauth: next } : base;
+  };
+
+  const hubSpotInstallHref = (system: SystemOfRecord) => {
+    const raw = hubSpotOAuthConfig(system).sample_install_url;
+    if (typeof raw !== 'string' || !raw.trim()) return '';
+    try {
+      const url = new URL(raw);
+      url.searchParams.set('redirect_uri', recommendedHubSpotRedirectUri);
+      url.searchParams.set('state', system.id);
+      return url.toString();
+    } catch {
+      return raw;
+    }
+  };
+
+  const copyToClipboard = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast({ title: `${label} copied` });
+    } catch {
+      toast({ title: `Could not copy ${label.toLowerCase()}`, description: value, variant: 'destructive' });
+    }
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const code = params.get('code');
+    const error = params.get('error');
+    const state = params.get('state');
+    if (error) {
+      const key = `error:${error}`;
+      if (processedHubSpotOAuthCode.current !== key) {
+        processedHubSpotOAuthCode.current = key;
+        toast({
+          title: 'HubSpot install was not completed',
+          description: params.get('error_description') || error,
+          variant: 'destructive',
+        });
+      }
+      return;
+    }
+    if (!code || systems.length === 0) return;
+    const callbackKey = `${state ?? 'unknown'}:${code}`;
+    if (processedHubSpotOAuthCode.current === callbackKey) return;
+
+    const candidates = systems.filter(system => system.system_type === 'hubspot' && system.auth_type === 'oauth_app');
+    const target = candidates.find(system => system.id === state)
+      ?? candidates.find(system => isHubSpotOAuthIncomplete(system.last_error))
+      ?? (candidates.length === 1 ? candidates[0] : undefined);
+
+    if (!target) {
+      processedHubSpotOAuthCode.current = callbackKey;
+      toast({
+        title: 'Could not match HubSpot callback',
+        description: 'Open the HubSpot connection, choose Edit, and paste the redirected browser URL to finish OAuth.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    processedHubSpotOAuthCode.current = callbackKey;
+    const callbackUrl = `${window.location.origin}${location.pathname}${location.search}`;
+    updateSystem.mutateAsync({
+      id: target.id,
+      patch: {
+        auth_type: 'oauth_app',
+        credentials: { authorization_code_or_redirect_url: callbackUrl },
+        status: 'disconnected',
+      },
+    }).then(() => testSystem.mutateAsync(target.id)).then(result => {
+      const response = result as { ok?: boolean; message?: string };
+      if (response.ok === false) {
+        toast({
+          title: 'HubSpot OAuth saved, validation failed',
+          description: response.message ?? 'Review scopes and try the connection test again.',
+          variant: 'destructive',
+        });
+        return;
+      }
+      toast({ title: 'HubSpot connection verified', description: response.message ?? 'CRMy exchanged the install code and validated HubSpot CRM access.' });
+      window.history.replaceState(null, '', '/app/settings/systems');
+    }).catch(err => {
+      toast({
+        title: 'Could not finish HubSpot OAuth',
+        description: err instanceof Error ? err.message : 'Paste the redirected browser URL in the connection edit panel.',
+        variant: 'destructive',
+      });
+    });
+  }, [location.pathname, location.search, systems, updateSystem]);
+
+  const credentialsFromInput = () => {
+    if (systemType === 'hubspot' && authType === 'oauth_app') {
+      return {
+        app_id: hubSpotAppId.trim(),
+        client_id: hubSpotClientId.trim(),
+        client_secret: hubSpotClientSecret.trim(),
+        sample_install_url: hubSpotInstallUrl.trim(),
+        redirect_uri: recommendedHubSpotRedirectUri,
+      };
+    }
+
+    const trimmed = credentialInput.trim();
+    if (!trimmed) return {};
+    if (trimmed.startsWith('{')) return parseJson('Credentials', trimmed);
+    if (systemType === 'hubspot') return { access_token: trimmed };
+    throw new Error(`${systemLabel(systemType)} credentials must be entered as JSON so CRMy has the host/account, auth token, and required connection metadata.`);
+  };
+
+  const handleCreateSystem = async () => {
+    try {
+      if (!systemType) {
+        throw new Error('Choose the system of record you want to connect.');
+      }
+      if (systemType === 'hubspot' && authType === 'private_app_token' && !credentialInput.trim()) {
+        throw new Error('Paste a HubSpot private app access token, or switch the HubSpot auth path to OAuth app credentials.');
+      }
+      if (systemType === 'hubspot' && authType === 'oauth_app') {
+        if (!hubSpotAppId.trim() || !hubSpotClientId.trim() || !hubSpotClientSecret.trim()) {
+          throw new Error('Enter the HubSpot App ID, Client ID, and Client Secret. The Sample install URL is optional but recommended.');
+        }
+      }
+      if (systemType !== 'hubspot' && !credentialInput.trim()) {
+        throw new Error(`Enter ${systemLabel(systemType)} credentials JSON before creating the connection.`);
+      }
+      await createSystem.mutateAsync({
+        name: name.trim(),
+        system_type: systemType,
+        auth_type: authType,
+        credentials: credentialsFromInput(),
+        config: systemType === 'hubspot' && authType === 'oauth_app'
+          ? mergeHubSpotOAuthConfig(parseJson('Config', configInput), {
+            app_id: hubSpotAppId,
+            client_id: hubSpotClientId,
+            sample_install_url: hubSpotInstallUrl,
+            redirect_uri: recommendedHubSpotRedirectUri,
+          })
+          : parseJson('Config', configInput),
+        sync_settings: parseJson('Sync settings', syncInput),
+      });
+      setShowCreate(false);
+      setName('');
+      setCredentialInput('');
+      setHubSpotAppId('');
+      setHubSpotClientId('');
+      setHubSpotClientSecret('');
+      setHubSpotInstallUrl('');
+      toast({
+        title: authType === 'oauth_app' ? 'HubSpot OAuth app saved' : 'System connected',
+        description: authType === 'oauth_app'
+          ? 'OAuth app credentials were encrypted. Next, open the Sample install URL/Test URL and finish OAuth from this connection.'
+          : 'Credentials were encrypted before storage.',
+      });
+    } catch (err) {
+      toast({ title: 'Could not create system', description: err instanceof Error ? err.message : 'Check the connection fields and try again.', variant: 'destructive' });
+    }
+  };
+
+  const handleUpsertMapping = async () => {
+    try {
+      await upsertMapping.mutateAsync({
+        ...(editingMappingId ? { id: editingMappingId } : {}),
+        system_id: mappingSystemId,
+        object_type: mappingObjectType,
+        external_object: mappingExternalObject,
+        external_id_field: mappingIdField,
+        watermark_field: mappingWatermarkField || undefined,
+        field_mapping: parseJson('Field mapping', mappingFieldJson),
+        readable_fields: parseCsvList(mappingReadableFields),
+        writable_fields: parseCsvList(mappingWritableFields),
+        source_authority: mappingSourceAuthority,
+        writeback_mode: mappingWritebackMode || undefined,
+        writeback_config: parseJson('Writeback config', mappingWritebackConfigJson),
+        allow_source_loop: mappingAllowSourceLoop,
+        is_active: mappingIsActive,
+      });
+      setEditingMappingId('');
+      toast({ title: editingMappingId ? 'Mapping updated' : 'Mapping saved', description: 'Future sync runs will use this mapping.' });
+    } catch (err) {
+      toast({ title: 'Could not save mapping', description: err instanceof Error ? err.message : 'Review the mapping and try again.', variant: 'destructive' });
+    }
+  };
+
+  const resetMappingForm = () => {
+    setEditingMappingId('');
+    setMappingObjectType('contact');
+    setMappingExternalObject('contacts');
+    setMappingIdField('id');
+    setMappingWatermarkField('updatedAt');
+    setMappingFieldJson('{\n  "email": "email",\n  "first_name": "firstname",\n  "last_name": "lastname"\n}');
+    setMappingCrmyField('email');
+    setMappingExternalField('');
+    setMappingReadableFields('');
+    setMappingWritableFields('');
+    setMappingSourceAuthority('external');
+    setMappingWritebackMode('');
+    setMappingWritebackConfigJson('{}');
+    setMappingAllowSourceLoop(false);
+    setMappingIsActive(true);
+    setDiscoveryMode('');
+    setDiscoveryObjectName('');
+  };
+
+  const discoverExternalObjects = () => {
+    if (!mappingSystemId) {
+      toast({ title: 'Choose a connection first', description: 'Select a system of record before discovering schema.', variant: 'destructive' });
+      return;
+    }
+    setDiscoveryObjectName('');
+    setDiscoveryMode('objects');
+  };
+
+  const discoverExternalFields = () => {
+    if (!mappingSystemId) {
+      toast({ title: 'Choose a connection first', description: 'Select a system of record before discovering fields.', variant: 'destructive' });
+      return;
+    }
+    if (!mappingExternalObject.trim()) {
+      toast({ title: 'Enter an external object', description: 'Choose or type the external object/table before discovering fields.', variant: 'destructive' });
+      return;
+    }
+    setDiscoveryObjectName(mappingExternalObject.trim());
+    setDiscoveryMode('fields');
+  };
+
+  const addFieldMapping = (externalField = mappingExternalField.trim()) => {
+    const crmyField = mappingCrmyField.trim();
+    if (!crmyField || !externalField.trim()) {
+      toast({
+        title: 'Choose both fields',
+        description: 'Select a CRMy field and enter or choose the external field to map.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    try {
+      const current = parseJson('Field mapping', mappingFieldJson);
+      const next = { ...current, [crmyField]: externalField.trim() };
+      setMappingFieldJson(JSON.stringify(next, null, 2));
+      setMappingExternalField('');
+      toast({ title: 'Field added to mapping', description: `${crmyField} now maps to ${externalField.trim()}.` });
+    } catch (err) {
+      toast({
+        title: 'Could not update field mapping',
+        description: err instanceof Error ? err.message : 'Fix the mapping JSON and try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const startEditMapping = (mapping: SystemMapping) => {
+    setEditingMappingId(mapping.id);
+    setConfirmDeleteMappingId('');
+    setMappingSystemId(mapping.system_id);
+    setMappingObjectType(mapping.object_type);
+    setMappingExternalObject(mapping.external_object);
+    setMappingIdField(mapping.external_id_field || 'id');
+    setMappingWatermarkField(mapping.watermark_field || '');
+    setMappingFieldJson(JSON.stringify(mapping.field_mapping ?? {}, null, 2));
+    const firstMappedField = Object.keys(mapping.field_mapping ?? {})[0];
+    setMappingCrmyField(firstMappedField || 'name');
+    setMappingExternalField('');
+    setMappingReadableFields(csvList(mapping.readable_fields));
+    setMappingWritableFields(csvList(mapping.writable_fields));
+    setMappingSourceAuthority(mapping.source_authority || 'external');
+    setMappingWritebackMode(mapping.writeback_mode || '');
+    setMappingWritebackConfigJson(JSON.stringify(mapping.writeback_config ?? {}, null, 2));
+    setMappingAllowSourceLoop(Boolean(mapping.allow_source_loop));
+    setMappingIsActive(mapping.is_active !== false);
+  };
+
+  const handleDeleteMapping = async (mapping: SystemMapping) => {
+    try {
+      await deleteMapping.mutateAsync(mapping.id);
+      if (editingMappingId === mapping.id) resetMappingForm();
+      setConfirmDeleteMappingId('');
+      toast({ title: 'Mapping deleted', description: `${mapping.object_type.replace('_', ' ')} mapping was removed.` });
+    } catch (err) {
+      toast({ title: 'Could not delete mapping', description: err instanceof Error ? err.message : 'Try again or check permissions.', variant: 'destructive' });
+    }
+  };
+
+  const handleResolveConflict = async (id: string, resolution: 'resolved_external' | 'resolved_local' | 'ignored') => {
+    try {
+      await resolveConflict.mutateAsync({
+        id,
+        resolution,
+        note: resolution === 'resolved_external'
+          ? 'Applied external value from Systems of Record settings'
+          : resolution === 'resolved_local'
+            ? 'Kept CRMy value from Systems of Record settings'
+            : 'Ignored from Systems of Record settings',
+      });
+      toast({
+        title: resolution === 'resolved_external' ? 'External value applied' : resolution === 'resolved_local' ? 'Local value kept' : 'Conflict ignored',
+        description: resolution === 'resolved_external'
+          ? 'CRMy updated the linked record where the conflict was safely actionable.'
+          : 'The conflict was closed without changing the CRMy record.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Could not resolve conflict',
+        description: err instanceof Error ? err.message : 'Review the conflict details and try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleReviewWriteback = async (id: string, decision: 'approved' | 'rejected') => {
+    try {
+      await reviewWriteback.mutateAsync({
+        id,
+        decision,
+        note: decision === 'approved' ? 'Approved from Systems of Record settings' : 'Rejected from Systems of Record settings',
+      });
+      toast({
+        title: decision === 'approved' ? 'Writeback approved' : 'Writeback rejected',
+        description: decision === 'approved'
+          ? 'The request can now be executed through its configured connector.'
+          : 'The request was closed without writing to the external system.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Could not review writeback',
+        description: err instanceof Error ? err.message : 'Review the writeback and try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const applyWritebackMapping = (mappingId: string) => {
+    setWritebackMappingId(mappingId);
+    setWritebackPreview(null);
+    const mapping = mappings.find(item => item.id === mappingId);
+    if (!mapping) return;
+    setWritebackSystemId(mapping.system_id);
+    setWritebackObjectType(mapping.object_type);
+    setWritebackExternalObject(mapping.external_object);
+    setWritebackMode(mapping.writeback_mode || 'mapped_upsert');
+  };
+
+  const buildWritebackInput = () => {
+    if (!writebackSystemId) throw new Error('Choose a system of record first.');
+    if (!writebackExternalObject.trim()) throw new Error('Enter the external object or table.');
+    const payload = parseJson('Writeback payload', writebackPayloadJson);
+    return {
+      system_id: writebackSystemId,
+      mapping_id: writebackMappingId || undefined,
+      object_type: writebackObjectType,
+      object_id: writebackObjectId.trim() || undefined,
+      external_object: writebackExternalObject.trim(),
+      external_record_id: writebackExternalRecordId.trim() || undefined,
+      operation: writebackOperation,
+      writeback_mode: writebackMode,
+      payload,
+    };
+  };
+
+  const handlePreviewWriteback = async () => {
+    try {
+      const result = await previewWriteback.mutateAsync(buildWritebackInput());
+      const preview = (result as { preview?: Record<string, unknown> }).preview ?? result as Record<string, unknown>;
+      setWritebackPreview(preview);
+      const allowed = preview.allowed !== false;
+      toast({
+        title: allowed ? 'Writeback preview ready' : 'Writeback blocked by policy',
+        description: allowed
+          ? 'Review the diff and approval requirement before creating a request.'
+          : 'Fix the payload or mapping before requesting this writeback.',
+        variant: allowed ? undefined : 'destructive',
+      });
+    } catch (err) {
+      toast({
+        title: 'Could not preview writeback',
+        description: err instanceof Error ? err.message : 'Review the payload and mapping.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleRequestWriteback = async () => {
+    try {
+      const input = { ...buildWritebackInput(), require_approval: writebackRequireApproval };
+      const result = await requestWriteback.mutateAsync(input);
+      const writeback = (result as { writeback?: Record<string, unknown> }).writeback;
+      setWritebackPreview((writeback?.preview as Record<string, unknown> | undefined) ?? writebackPreview);
+      toast({
+        title: 'Writeback request created',
+        description: writeback?.status === 'approved'
+          ? 'Policy allowed this request. It is ready to execute.'
+          : 'The request is waiting for review before external execution.',
+      });
+    } catch (err) {
+      toast({
+        title: 'Could not request writeback',
+        description: err instanceof Error ? err.message : 'Preview the request and try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const hubSpotPresetMappings = (systemId: string) => [
+    {
+      system_id: systemId,
+      object_type: 'contact',
+      external_object: 'contacts',
+      external_id_field: 'id',
+      watermark_field: 'hs_lastmodifieddate',
+      field_mapping: {
+        first_name: 'firstname',
+        last_name: 'lastname',
+        email: 'email',
+        phone: 'phone',
+        title: 'jobtitle',
+        company_name: 'company',
+        lifecycle_stage: 'lifecyclestage',
+      },
+      readable_fields: ['hs_lastmodifieddate'],
+      writable_fields: ['firstname', 'lastname', 'email', 'phone', 'jobtitle', 'company', 'lifecyclestage'],
+      source_authority: 'external',
+      writeback_mode: 'mapped_upsert',
+    },
+    {
+      system_id: systemId,
+      object_type: 'account',
+      external_object: 'companies',
+      external_id_field: 'id',
+      watermark_field: 'hs_lastmodifieddate',
+      field_mapping: {
+        name: 'name',
+        domain: 'domain',
+        industry: 'industry',
+        employee_count: 'numberofemployees',
+        annual_revenue: 'annualrevenue',
+        website: 'website',
+      },
+      readable_fields: ['hs_lastmodifieddate'],
+      writable_fields: ['name', 'domain', 'industry', 'numberofemployees', 'annualrevenue', 'website'],
+      source_authority: 'external',
+      writeback_mode: 'mapped_upsert',
+    },
+    {
+      system_id: systemId,
+      object_type: 'opportunity',
+      external_object: 'deals',
+      external_id_field: 'id',
+      watermark_field: 'hs_lastmodifieddate',
+      field_mapping: {
+        name: 'dealname',
+        amount: 'amount',
+        stage: 'dealstage',
+        close_date: 'closedate',
+      },
+      readable_fields: ['pipeline', 'dealtype', 'hs_lastmodifieddate'],
+      writable_fields: ['dealname', 'amount', 'dealstage', 'closedate'],
+      source_authority: 'external',
+      writeback_mode: 'mapped_upsert',
+    },
+    {
+      system_id: systemId,
+      object_type: 'activity',
+      external_object: 'notes',
+      external_id_field: 'id',
+      watermark_field: 'hs_lastmodifieddate',
+      field_mapping: {
+        subject: 'hs_note_body',
+        body: 'hs_note_body',
+      },
+      readable_fields: ['hs_timestamp', 'hs_lastmodifieddate'],
+      writable_fields: ['hs_note_body', 'hs_timestamp'],
+      source_authority: 'external',
+      writeback_mode: 'append_event',
+    },
+  ];
+
+  const handleApplyHubSpotPresets = async (systemId: string) => {
+    try {
+      for (const preset of hubSpotPresetMappings(systemId)) {
+        await upsertMapping.mutateAsync(preset);
+      }
+      setTab('mappings');
+      toast({ title: 'HubSpot mappings added', description: 'Contacts, companies, deals, and notes are ready to sync.' });
+    } catch (err) {
+      toast({ title: 'Could not apply presets', description: err instanceof Error ? err.message : 'Review the connection and try again.', variant: 'destructive' });
+    }
+  };
+
+  const statusClass = (status?: string) => {
+    if (status === 'connected' || status === 'completed' || status === 'resolved' || status === 'approved') return 'bg-success/10 text-success border-success/30';
+    if (status === 'error' || status === 'failed' || status === 'rejected') return 'bg-destructive/10 text-destructive border-destructive/30';
+    if (status === 'running' || status === 'approval_required' || status === 'pending') return 'bg-warning/10 text-warning border-warning/30';
+    return 'bg-muted text-muted-foreground border-border';
+  };
+
+  const syncRunSummary = (run: Record<string, unknown>) => [
+    `Seen ${String(run.records_seen ?? 0)}`,
+    `Created ${String(run.records_created ?? 0)}`,
+    `Updated ${String(run.records_updated ?? 0)}`,
+    Number(run.conflicts_created ?? 0) > 0 ? `Conflicts ${String(run.conflicts_created)}` : '',
+    Number(run.records_skipped ?? 0) > 0 ? `Skipped ${String(run.records_skipped)}` : '',
+  ].filter(Boolean).join(' • ');
+
+  const systemHealth = (system: SystemOfRecord) => system.health && typeof system.health === 'object' ? system.health : {};
+
+  const systemActionState = (system: SystemOfRecord, mappedCount: number) => {
+    const health = systemHealth(system);
+    const hubSpotNeedsInstall = system.system_type === 'hubspot'
+      && system.auth_type === 'oauth_app'
+      && system.status !== 'connected'
+      && (system.status !== 'error' || isHubSpotOAuthIncomplete(system.last_error));
+    if (hubSpotNeedsInstall) {
+      return {
+        tone: 'warning',
+        title: 'Finish OAuth install',
+        description: 'Install the HubSpot app from this connection so CRMy can exchange the code and validate access.',
+      };
+    }
+    if (system.status === 'error') {
+      return {
+        tone: 'destructive',
+        title: 'Connection needs attention',
+        description: system.last_error || 'Test the connection to see the exact recovery step.',
+      };
+    }
+    if (system.status !== 'connected') {
+      return {
+        tone: 'muted',
+        title: 'Test connection',
+        description: 'Validate credentials before running sync or writeback.',
+      };
+    }
+    if (mappedCount === 0) {
+      return {
+        tone: 'warning',
+        title: 'Add mappings',
+        description: 'Choose which external objects should become CRMy records before syncing.',
+      };
+    }
+    return {
+      tone: 'success',
+      title: 'Ready to sync',
+      description: typeof health.message === 'string' ? health.message : 'Connection and mappings are ready.',
+    };
+  };
+
+  const actionStateClass = (tone: string) => {
+    if (tone === 'success') return 'border-success/30 bg-success/10 text-success';
+    if (tone === 'destructive') return 'border-destructive/30 bg-destructive/10 text-destructive';
+    if (tone === 'warning') return 'border-warning/30 bg-warning/10 text-warning';
+    return 'border-border bg-muted/50 text-muted-foreground';
+  };
+
+  const tokenHealthLabel = (system: SystemOfRecord) => {
+    const expiresAt = systemHealth(system).token_expires_at;
+    if (typeof expiresAt !== 'string') return null;
+    const ms = new Date(expiresAt).getTime() - Date.now();
+    if (!Number.isFinite(ms)) return null;
+    if (ms <= 0) return 'OAuth token refresh due';
+    const minutes = Math.round(ms / 60000);
+    if (minutes < 90) return `OAuth token refreshes soon (${minutes} min)`;
+    return `OAuth token valid until ${fmtDate(expiresAt)}`;
+  };
+
+  const fmtDate = (value?: unknown) => typeof value === 'string' ? new Date(value).toLocaleString() : '—';
+  const asObject = (value: unknown): Record<string, unknown> =>
+    value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const writebackReceipt = (writeback: Record<string, unknown>) => asObject(writeback.execution_result);
+  const writebackReference = (writeback: Record<string, unknown>) => asObject(writebackReceipt(writeback).reference);
+  const runSystemSyncFor = (system: SystemOfRecord, mappedCount: number) => {
+    if (system.status !== 'connected') {
+      toast({
+        title: 'Test connection first',
+        description: 'CRMy needs a verified connection before it can sync records safely.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (mappedCount === 0) {
+      setTab('mappings');
+      setMappingSystemId(system.id);
+      toast({
+        title: 'Add a mapping before syncing',
+        description: 'Mappings tell CRMy which external records become typed revenue objects.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    runSync.mutate(
+      { id: system.id, mode: 'incremental' },
+      {
+        onSuccess: result => {
+          const run = result as Record<string, unknown>;
+          toast({
+            title: run.status === 'failed' ? 'Sync failed' : 'Sync completed',
+            description: run.status === 'failed'
+              ? String(run.error ?? 'Open Sync Runs for the latest error.')
+              : syncRunSummary(run),
+            variant: run.status === 'failed' ? 'destructive' : undefined,
+          });
+          setTab('runs');
+        },
+        onError: err => toast({
+          title: 'Sync failed',
+          description: err instanceof Error ? err.message : 'Check mappings and try again.',
+          variant: 'destructive',
+        }),
+      },
+    );
+  };
+  const cardCls = 'rounded-xl border border-border bg-card p-4';
+  const inputCls = 'h-10 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring transition-colors';
+  const textAreaCls = 'w-full min-h-24 px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring font-mono';
+
+  const tabs = [
+    { key: 'connections', label: 'Connections', count: systems.length },
+    { key: 'mappings', label: 'Mappings', count: mappings.length },
+    { key: 'runs', label: 'Sync Runs', count: runs.length },
+    { key: 'conflicts', label: 'Conflicts', count: conflicts.length },
+    { key: 'writebacks', label: 'Writebacks', count: writebacks.length },
+  ] as const;
+
+  const hubSpotScopes = [
+    'crm.objects.contacts.read',
+    'crm.objects.contacts.write',
+    'crm.objects.companies.read',
+    'crm.objects.companies.write',
+    'crm.objects.deals.read',
+    'crm.objects.deals.write',
+    'crm.schemas.contacts.read',
+    'crm.schemas.companies.read',
+    'crm.schemas.deals.read',
+  ];
+
+  const handleSystemTypeChange = (nextType: string) => {
+    setSystemType(nextType);
+    setAuthType(nextType === 'hubspot' ? 'oauth_app' : nextType === 'salesforce' ? 'oauth' : nextType ? 'token' : '');
+    setCredentialInput('');
+    setHubSpotAppId('');
+    setHubSpotClientId('');
+    setHubSpotClientSecret('');
+    setHubSpotInstallUrl('');
+  };
+
+  const startEditSystem = (system: SystemOfRecord) => {
+    setEditingSystemId(system.id);
+    setEditName(system.name);
+    setEditAuthType(system.auth_type || (system.system_type === 'hubspot' ? 'oauth_app' : 'token'));
+    setEditCredentialInput('');
+    setEditHubSpotAppId('');
+    setEditHubSpotClientId('');
+    setEditHubSpotClientSecret('');
+    setEditHubSpotInstallUrl('');
+    setEditHubSpotRedirectOrCode('');
+    const oauthConfig = hubSpotOAuthConfig(system);
+    setEditHubSpotAppId(typeof oauthConfig.app_id === 'string' ? oauthConfig.app_id : '');
+    setEditHubSpotClientId(typeof oauthConfig.client_id === 'string' ? oauthConfig.client_id : '');
+    setEditHubSpotInstallUrl(typeof oauthConfig.sample_install_url === 'string' ? oauthConfig.sample_install_url : '');
+    setEditConfigInput(JSON.stringify(system.config ?? {}, null, 2));
+    setEditSyncInput(JSON.stringify(system.sync_settings ?? {}, null, 2));
+  };
+
+  const cancelEditSystem = () => {
+    setEditingSystemId('');
+    setEditName('');
+    setEditCredentialInput('');
+    setEditHubSpotAppId('');
+    setEditHubSpotClientId('');
+    setEditHubSpotClientSecret('');
+    setEditHubSpotInstallUrl('');
+    setEditHubSpotRedirectOrCode('');
+  };
+
+  const editCredentialsFromInput = (system: SystemOfRecord): Record<string, unknown> | undefined => {
+    if (system.system_type === 'hubspot' && editAuthType === 'oauth_app') {
+      const hasOauthInput = Boolean(
+        editHubSpotAppId.trim()
+        || editHubSpotClientId.trim()
+        || editHubSpotClientSecret.trim()
+        || editHubSpotInstallUrl.trim()
+        || editHubSpotRedirectOrCode.trim(),
+      );
+      if (!hasOauthInput) {
+        if (system.auth_type !== editAuthType || !system.has_credentials) {
+          throw new Error('Enter the HubSpot App ID, Client ID, and Client Secret to switch this connection to OAuth app credentials.');
+        }
+        return undefined;
+      }
+      if (!system.has_credentials && (!editHubSpotAppId.trim() || !editHubSpotClientId.trim() || !editHubSpotClientSecret.trim())) {
+        throw new Error('Enter the HubSpot App ID, Client ID, and Client Secret to save OAuth credentials.');
+      }
+      const credentials: Record<string, unknown> = {};
+      if (editHubSpotAppId.trim()) credentials.app_id = editHubSpotAppId.trim();
+      if (editHubSpotClientId.trim()) credentials.client_id = editHubSpotClientId.trim();
+      if (editHubSpotClientSecret.trim()) credentials.client_secret = editHubSpotClientSecret.trim();
+      if (editHubSpotInstallUrl.trim()) credentials.sample_install_url = editHubSpotInstallUrl.trim();
+      credentials.redirect_uri = recommendedHubSpotRedirectUri;
+      if (editHubSpotRedirectOrCode.trim()) credentials.authorization_code_or_redirect_url = editHubSpotRedirectOrCode.trim();
+      return credentials;
+    }
+
+    const trimmed = editCredentialInput.trim();
+    if (!trimmed) {
+      if (system.auth_type !== editAuthType || !system.has_credentials) {
+        throw new Error(system.system_type === 'hubspot'
+          ? 'Paste a HubSpot private app access token to switch this connection to live sync.'
+          : `Paste ${systemLabel(system.system_type)} credentials JSON before changing this connection auth type.`);
+      }
+      return undefined;
+    }
+    if (trimmed.startsWith('{')) return parseJson('Credentials', trimmed);
+    if (system.system_type === 'hubspot') return { access_token: trimmed };
+    throw new Error(`${systemLabel(system.system_type)} credentials must be entered as JSON so CRMy has the host/account, auth token, and required connection metadata.`);
+  };
+
+  const handleUpdateSystem = async (system: SystemOfRecord) => {
+    try {
+      const credentials = editCredentialsFromInput(system);
+      const patch: Record<string, unknown> = {
+        name: editName.trim(),
+        auth_type: editAuthType,
+        config: system.system_type === 'hubspot' && editAuthType === 'oauth_app'
+          ? mergeHubSpotOAuthConfig(parseJson('Config', editConfigInput), {
+            app_id: editHubSpotAppId,
+            client_id: editHubSpotClientId,
+            sample_install_url: editHubSpotInstallUrl,
+            redirect_uri: recommendedHubSpotRedirectUri,
+          })
+          : parseJson('Config', editConfigInput),
+        sync_settings: parseJson('Sync settings', editSyncInput),
+        status: 'disconnected',
+      };
+      if (credentials !== undefined) patch.credentials = credentials;
+      await updateSystem.mutateAsync({ id: system.id, patch });
+      cancelEditSystem();
+      if (credentials && system.system_type === 'hubspot' && editAuthType === 'oauth_app' && editHubSpotRedirectOrCode.trim()) {
+        const result = await testSystem.mutateAsync(system.id);
+        const response = result as { ok?: boolean; message?: string };
+        if (response.ok === false) {
+          toast({
+            title: 'HubSpot OAuth saved, validation failed',
+            description: response.message ?? 'Review scopes and try again.',
+            variant: 'destructive',
+          });
+          return;
+        }
+        toast({ title: 'HubSpot connection verified', description: response.message ?? 'CRMy exchanged the install code and validated HubSpot CRM access.' });
+        return;
+      }
+      toast({
+        title: 'Connection updated',
+        description: credentials ? 'Credentials were encrypted before storage. Run Test when you are ready.' : 'Settings were updated. Existing encrypted credentials were kept.',
+      });
+    } catch (err) {
+      toast({ title: 'Could not update connection', description: err instanceof Error ? err.message : 'Review the connection fields and try again.', variant: 'destructive' });
+    }
+  };
+
+  const renderAuthTypeField = () => {
+    if (!systemType) return null;
+    if (systemType === 'hubspot') {
+      return (
+        <select value={authType} onChange={e => setAuthType(e.target.value)} className={inputCls}>
+          <option value="oauth_app">HubSpot OAuth app (recommended)</option>
+          <option value="private_app_token">Private app token (advanced)</option>
+        </select>
+      );
+    }
+
+    return (
+      <input value={authType} onChange={e => setAuthType(e.target.value)} placeholder="Auth type" className={inputCls} />
+    );
+  };
+
+  const renderEditAuthTypeField = (system: SystemOfRecord) => {
+    if (system.system_type === 'hubspot') {
+      return (
+        <select value={editAuthType} onChange={e => setEditAuthType(e.target.value)} className={inputCls}>
+          <option value="oauth_app">HubSpot OAuth app (recommended)</option>
+          <option value="private_app_token">Private app token (advanced)</option>
+        </select>
+      );
+    }
+
+    return (
+      <input value={editAuthType} onChange={e => setEditAuthType(e.target.value)} placeholder="Auth type" className={inputCls} />
+    );
+  };
+
+  const renderEditCredentialFields = (system: SystemOfRecord) => {
+    if (system.system_type === 'hubspot' && editAuthType === 'oauth_app') {
+      return (
+        <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="md:col-span-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Copy from HubSpot Auth settings</p>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">App ID</label>
+            <input value={editHubSpotAppId} onChange={e => setEditHubSpotAppId(e.target.value)} placeholder={system.has_credentials ? 'Leave blank to keep existing' : 'HubSpot App ID'} className={`${inputCls} w-full mt-1`} />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Client ID</label>
+            <input value={editHubSpotClientId} onChange={e => setEditHubSpotClientId(e.target.value)} placeholder={system.has_credentials ? 'Leave blank to keep existing' : 'OAuth Client ID'} className={`${inputCls} w-full mt-1`} />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Client Secret</label>
+            <input value={editHubSpotClientSecret} onChange={e => setEditHubSpotClientSecret(e.target.value)} placeholder={system.has_credentials ? 'Leave blank to keep existing' : 'OAuth Client Secret'} className={`${inputCls} w-full mt-1`} type="password" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sample install URL / Test URL</label>
+            <input value={editHubSpotInstallUrl} onChange={e => setEditHubSpotInstallUrl(e.target.value)} placeholder={system.has_credentials ? 'Leave blank to keep existing' : 'https://app.hubspot.com/oauth/authorize?...'} className={`${inputCls} w-full mt-1`} />
+          </div>
+          <div className="md:col-span-2">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">OAuth callback URL</label>
+            <div className="mt-2 flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+              <code className="text-xs text-foreground flex-1 overflow-x-auto">{recommendedHubSpotRedirectUri}</code>
+              <button
+                type="button"
+                onClick={() => copyToClipboard(recommendedHubSpotRedirectUri, 'OAuth callback URL')}
+                className="h-7 px-2 rounded-md border border-border text-xs font-semibold hover:bg-muted inline-flex items-center gap-1.5"
+              >
+                <Copy className="w-3 h-3" /> Copy
+              </button>
+            </div>
+          </div>
+          <div className="md:col-span-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Finish OAuth after install</p>
+            <label className="sr-only">URL after HubSpot redirects back</label>
+            <input
+              value={editHubSpotRedirectOrCode}
+              onChange={e => setEditHubSpotRedirectOrCode(e.target.value)}
+              placeholder="After clicking the Sample install URL, paste the browser URL HubSpot sends you back to"
+              className={`${inputCls} w-full mt-1`}
+            />
+            <p className="text-xs text-muted-foreground mt-1">This fallback value is not shown on the HubSpot Auth settings screen. It appears only after you approve the app install.</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="md:col-span-2">
+        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Credentials JSON</label>
+        <textarea
+          value={editCredentialInput}
+          onChange={e => setEditCredentialInput(e.target.value)}
+          placeholder={system.has_credentials ? 'Leave blank to keep existing encrypted credentials' : credentialPlaceholder(system.system_type)}
+          className={`${textAreaCls} mt-1`}
+        />
+      </div>
+    );
+  };
+
+  const renderCredentialFields = () => {
+    if (!systemType) return null;
+    if (systemType === 'hubspot' && authType === 'oauth_app') {
+      return (
+        <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="md:col-span-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Copy from HubSpot Auth settings</p>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">App ID</label>
+            <input value={hubSpotAppId} onChange={e => setHubSpotAppId(e.target.value)} placeholder="HubSpot App ID" className={`${inputCls} w-full mt-1`} />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Client ID</label>
+            <input value={hubSpotClientId} onChange={e => setHubSpotClientId(e.target.value)} placeholder="OAuth Client ID" className={`${inputCls} w-full mt-1`} />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Client Secret</label>
+            <input value={hubSpotClientSecret} onChange={e => setHubSpotClientSecret(e.target.value)} placeholder="OAuth Client Secret" className={`${inputCls} w-full mt-1`} type="password" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sample install URL / Test URL</label>
+            <input value={hubSpotInstallUrl} onChange={e => setHubSpotInstallUrl(e.target.value)} placeholder="https://app.hubspot.com/oauth/authorize?..." className={`${inputCls} w-full mt-1`} />
+          </div>
+          <div className="md:col-span-2">
+            <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">OAuth callback URL</label>
+            <div className="mt-2 flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+              <code className="text-xs text-foreground flex-1 overflow-x-auto">{recommendedHubSpotRedirectUri}</code>
+              <button
+                type="button"
+                onClick={() => copyToClipboard(recommendedHubSpotRedirectUri, 'OAuth callback URL')}
+                className="h-7 px-2 rounded-md border border-border text-xs font-semibold hover:bg-muted inline-flex items-center gap-1.5"
+              >
+                <Copy className="w-3 h-3" /> Copy
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Use this exact callback URL in HubSpot. It returns to Systems of Record after CRMy verifies the install.</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="md:col-span-2">
+        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Credentials JSON</label>
+        <textarea
+          value={credentialInput}
+          onChange={e => setCredentialInput(e.target.value)}
+          placeholder={systemType === 'hubspot' ? 'HubSpot private app access token' : credentialPlaceholder(systemType)}
+          className={`${textAreaCls} mt-1`}
+        />
+      </div>
+    );
+  };
+
+  const HubSpotGuide = () => (
+    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
+      <div className="flex items-start gap-3">
+        <span className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+          <Info className="w-4 h-4" />
+        </span>
+        <div>
+          <p className="text-sm font-semibold text-foreground">HubSpot OAuth setup</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Start by copying the fields HubSpot shows on this Auth settings page. After saving, open the Sample install URL/Test URL, approve access, then finish OAuth from the connection card.
+          </p>
+        </div>
+      </div>
+      {!currentOriginMatchesHubSpotRedirect && (
+        <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-foreground">Use localhost for HubSpot OAuth</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              HubSpot local OAuth supports <span className="font-medium text-foreground">localhost</span>. You are viewing CRMy on {typeof window !== 'undefined' ? window.location.origin : 'this origin'}, so open Systems of Record on the localhost URL before installing.
+            </p>
+            <a href={`${hubSpotRedirectOrigin}/app/settings/systems`} className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline mt-2">
+              Open localhost Settings <Globe className="w-3 h-3" />
+            </a>
+          </div>
+        </div>
+      )}
+      <div className="grid grid-cols-1 gap-3">
+        <div className="rounded-lg border border-border bg-background p-3">
+          <p className="text-sm font-semibold text-foreground">OAuth app credentials: app setup</p>
+          <p className="text-sm text-muted-foreground mt-2">
+            Copy the App ID, Client ID, Client Secret, Sample install URL, and Redirect URL from this HubSpot screen. HubSpot does not show the install code here; it appears only after you approve the install URL.
+          </p>
+          <p className="text-xs text-muted-foreground mt-2">
+            For local CRMy, set HubSpot's Redirect URL to <code className="px-1.5 py-0.5 rounded bg-muted text-foreground">{recommendedHubSpotRedirectUri}</code> so CRMy can finish OAuth automatically.
+          </p>
+          <p className="text-xs text-muted-foreground mt-2">
+            Do not paste the Client Secret into the private app token field; it is not an access token.
+          </p>
+        </div>
+      </div>
+      <div>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Recommended scopes</p>
+        <div className="flex flex-wrap gap-1.5">
+          {hubSpotScopes.map(scope => (
+            <code key={scope} className="px-2 py-1 rounded-md border border-border bg-background text-xs text-foreground">{scope}</code>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground mt-2">
+          Add note scopes too if they appear in your HubSpot portal and you want CRMy to sync notes as activities.
+        </p>
+      </div>
+      <a
+        href="https://developers.hubspot.com/docs/apps/developer-platform/build-apps/authentication/oauth"
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
+      >
+        HubSpot OAuth docs <Globe className="w-3 h-3" />
+      </a>
+    </div>
+  );
+
+  const ConnectorGuide = () => {
+    if (systemType === 'hubspot') return null;
+    const guide: Record<string, { title: string; body: string; bullets: string[] }> = {
+      salesforce: {
+        title: 'Salesforce OAuth credentials',
+        body: 'Use a connected app with refresh token access. CRMy refreshes the encrypted access token before sync, discovery, and writeback operations.',
+        bullets: [
+          'Required: instance_url plus either access_token, or refresh_token with client_id and client_secret.',
+          'Recommended: refresh_token, client_id, and client_secret so long-running sync does not expire.',
+          'Use your My Domain URL for instance_url, not the setup page URL.',
+        ],
+      },
+      databricks: {
+        title: 'Databricks SQL Warehouse credentials',
+        body: 'Use a personal access token or service credential with access to the selected SQL warehouse.',
+        bullets: [
+          'Required: host, token, and warehouse_id.',
+          'Mappings should point to approved tables or views.',
+          'Writebacks require admin-defined SQL templates; agents cannot generate arbitrary SQL writes.',
+        ],
+      },
+      snowflake: {
+        title: 'Snowflake SQL API credentials',
+        body: 'Use a scoped SQL API token and configure warehouse/database/schema in connection config.',
+        bullets: [
+          'Required credentials: account_url and token.',
+          'Recommended config: warehouse, database, schema, and role.',
+          'Writebacks require admin-defined SQL templates; agents cannot generate arbitrary SQL writes.',
+        ],
+      },
+    };
+    const current = guide[systemType];
+    if (!current) return null;
+    return (
+      <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+        <div className="flex items-start gap-3">
+          <span className="w-9 h-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <Info className="w-4 h-4" />
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-foreground">{current.title}</p>
+            <p className="text-sm text-muted-foreground mt-0.5">{current.body}</p>
+            <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
+              {current.bullets.map(item => <li key={item}>• {item}</li>)}
+            </ul>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="font-display font-bold text-lg text-foreground">Systems of Record</h2>
+          <p className="text-sm text-muted-foreground mt-0.5">Connect CRMy to the systems that store customer data, then control sync, mappings, and governed writeback.</p>
+        </div>
+        <button
+          onClick={() => setShowCreate(v => !v)}
+          className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" /> New Connection
+        </button>
+      </div>
+
+      {showCreate && (
+        <div className={`${cardCls} space-y-4`}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Connection name" className={inputCls} />
+            <select value={systemType} onChange={e => handleSystemTypeChange(e.target.value)} className={inputCls}>
+              <option value="">Choose system type</option>
+              <option value="hubspot">HubSpot</option>
+              <option value="salesforce">Salesforce</option>
+              <option value="databricks">Databricks</option>
+              <option value="snowflake">Snowflake</option>
+            </select>
+            {renderAuthTypeField()}
+            {renderCredentialFields()}
+          </div>
+          {!systemType && (
+            <div className="rounded-xl border border-border bg-muted/30 p-4">
+              <p className="text-sm font-semibold text-foreground">Choose the source system first</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                CRMy supports CRM and warehouse sources through the same governed setup flow: connect, test, map, sync, then enable writeback only when needed.
+              </p>
+            </div>
+          )}
+          {systemType && (
+            <details className="rounded-xl border border-border bg-muted/20">
+              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-foreground flex items-center justify-between gap-3">
+                Setup guide for {systemLabel(systemType)}
+                <ChevronDown className="w-4 h-4 text-muted-foreground" />
+              </summary>
+              <div className="px-4 pb-4">
+                {systemType === 'hubspot' ? <HubSpotGuide /> : <ConnectorGuide />}
+              </div>
+            </details>
+          )}
+          <details className="rounded-xl border border-border bg-muted/20">
+            <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-foreground flex items-center justify-between gap-3">
+              Advanced connection settings
+              <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            </summary>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 px-4 pb-4">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Config JSON</label>
+                <textarea value={configInput} onChange={e => setConfigInput(e.target.value)} className={textAreaCls} />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sync Settings JSON</label>
+                <textarea value={syncInput} onChange={e => setSyncInput(e.target.value)} className={textAreaCls} />
+              </div>
+            </div>
+          </details>
+          <div className="flex justify-end gap-2 mt-3">
+            <button onClick={() => setShowCreate(false)} className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
+            <button onClick={handleCreateSystem} disabled={!name.trim() || !systemType || createSystem.isPending} className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+              {createSystem.isPending ? 'Saving...' : systemType === 'hubspot' && authType === 'oauth_app' ? 'Save OAuth App' : 'Create Connection'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-1 border-b border-border">
+        {tabs.map(item => (
+          <button
+            key={item.key}
+            onClick={() => setTab(item.key)}
+            className={`px-3 py-2 text-sm font-semibold border-b-2 transition-colors ${tab === item.key ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+          >
+            {item.label} <span className="text-xs opacity-70">{item.count}</span>
+          </button>
+        ))}
+      </div>
+
+      {tab === 'connections' && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+          {systemsLoading ? <div className="h-28 rounded-xl bg-muted/50 animate-pulse" /> : systems.length === 0 ? (
+            <div className={`${cardCls} xl:col-span-2 text-center py-10`}>
+              <Server className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
+              <p className="text-sm font-semibold text-foreground">No systems connected</p>
+              <p className="text-sm text-muted-foreground mt-1">Connect the system that currently owns or stores your customer data. CRMy uses one governed mapping model across CRMs and warehouses.</p>
+              <button
+                onClick={() => setShowCreate(true)}
+                className="mt-4 h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 inline-flex items-center gap-2 mx-auto"
+              >
+                <Plus className="w-4 h-4" /> Add Connection
+              </button>
+            </div>
+          ) : systems.map(system => {
+            const mappedCount = mappings.filter(m => m.system_id === system.id).length;
+            const conflictCount = conflicts.filter(c => c.system_id === system.id && c.status === 'open').length;
+            const writebackCount = writebacks.filter(w => w.system_id === system.id && w.status === 'approval_required').length;
+            const installUrl = hubSpotInstallHref(system);
+            const actionState = systemActionState(system, mappedCount);
+            const oauthIncomplete = system.system_type === 'hubspot'
+              && system.auth_type === 'oauth_app'
+              && system.status !== 'connected'
+              && (system.status !== 'error' || isHubSpotOAuthIncomplete(system.last_error));
+            const tokenLabel = tokenHealthLabel(system);
+            return (
+              <div key={system.id} className={cardCls}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <span className="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0"><Server className="w-5 h-5" /></span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">{system.name}</p>
+                      <p className="text-xs text-muted-foreground capitalize">{system.system_type} • {system.auth_type}</p>
+                    </div>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded-full border ${statusClass(system.status)}`}>{system.status}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mt-4 text-center">
+                  <div className="rounded-lg bg-muted/50 p-2"><p className="text-sm font-semibold">{mappedCount}</p><p className="text-xs text-muted-foreground">Mappings</p></div>
+                  <div className="rounded-lg bg-muted/50 p-2"><p className="text-sm font-semibold">{conflictCount}</p><p className="text-xs text-muted-foreground">Conflicts</p></div>
+                  <div className="rounded-lg bg-muted/50 p-2"><p className="text-sm font-semibold">{writebackCount}</p><p className="text-xs text-muted-foreground">Writebacks</p></div>
+                </div>
+                <div className={`mt-3 rounded-xl border p-3 ${actionStateClass(actionState.tone)}`}>
+                  <div className="flex items-start gap-2">
+                    {actionState.tone === 'success'
+                      ? <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                      : <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />}
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground">{actionState.title}</p>
+                      <p className="text-sm text-muted-foreground mt-0.5">{actionState.description}</p>
+                      {tokenLabel && <p className="text-xs text-muted-foreground mt-1">{tokenLabel}</p>}
+                    </div>
+                  </div>
+                </div>
+                {oauthIncomplete && (
+                  <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 p-3">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground">Finish HubSpot OAuth</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          HubSpot app credentials are saved. Open the install flow, approve access, and CRMy will finish the connection when HubSpot redirects back here.
+                        </p>
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {installUrl && (
+                            <a
+                              href={installUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 inline-flex items-center gap-1.5"
+                            >
+                              Open HubSpot Install <Globe className="w-3 h-3" />
+                            </a>
+                          )}
+                          <button
+                            onClick={() => startEditSystem(system)}
+                            className="h-8 px-3 rounded-lg border border-border bg-card text-xs font-semibold hover:bg-muted"
+                          >
+                            Manual Finish
+                          </button>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2">
+                          Manual finish is only needed if the browser blocks the redirect or you installed from a different CRMy URL.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground mt-3">Last sync: {system.last_sync_at ? fmtDate(system.last_sync_at) : 'Never'}</p>
+                {editingSystemId === system.id && (
+                  <div className="mt-4 rounded-xl border border-border bg-muted/20 p-3 space-y-3">
+                    <div className="flex items-start gap-2">
+                      <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+                      <p className="text-sm text-muted-foreground">
+                        Update the connection name, auth path, or encrypted credentials. Blank credential fields keep the existing secret.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <input value={editName} onChange={e => setEditName(e.target.value)} placeholder="Connection name" className={inputCls} />
+                      {renderEditAuthTypeField(system)}
+                      {renderEditCredentialFields(system)}
+                    </div>
+                    <details className="rounded-xl border border-border bg-background/70">
+                      <summary className="cursor-pointer list-none px-3 py-2 text-sm font-semibold text-foreground flex items-center justify-between gap-3">
+                        Advanced connection settings
+                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                      </summary>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 px-3 pb-3">
+                        <div>
+                          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Config JSON</label>
+                          <textarea value={editConfigInput} onChange={e => setEditConfigInput(e.target.value)} className={textAreaCls} />
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sync Settings JSON</label>
+                          <textarea value={editSyncInput} onChange={e => setEditSyncInput(e.target.value)} className={textAreaCls} />
+                        </div>
+                      </div>
+                    </details>
+                    <div className="flex justify-end gap-2">
+                      <button onClick={cancelEditSystem} className="h-8 px-3 rounded-lg border border-border text-xs font-semibold hover:bg-muted">Cancel</button>
+                      <button
+                        onClick={() => handleUpdateSystem(system)}
+                        disabled={!editName.trim() || updateSystem.isPending}
+                        className="h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40"
+                      >
+                        {updateSystem.isPending ? 'Saving...' : 'Save Changes'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2 mt-4">
+                  <button onClick={() => startEditSystem(system)} className="h-8 px-3 rounded-lg border border-border text-xs font-semibold hover:bg-muted">Edit</button>
+                  <button
+                    onClick={() => testSystem.mutate(system.id, {
+                      onSuccess: result => {
+                        const response = result as { ok?: boolean; message?: string };
+                        if (response.ok === false) {
+                          if (isHubSpotOAuthIncomplete(response.message)) startEditSystem(system);
+                          toast({
+                            title: 'Test needs attention',
+                            description: response.message ?? 'Check credentials and try again.',
+                            variant: 'destructive',
+                          });
+                          return;
+                        }
+                        toast({ title: 'Connection verified', description: response.message ?? 'CRMy validated access to the external system.' });
+                      },
+                      onError: err => toast({ title: 'Test failed', description: err instanceof Error ? err.message : 'Check credentials and try again.', variant: 'destructive' }),
+                    })}
+                    className="h-8 px-3 rounded-lg border border-border text-xs font-semibold hover:bg-muted"
+                  >
+                    Test
+                  </button>
+                  <button
+                    onClick={() => runSystemSyncFor(system, mappedCount)}
+                    disabled={runSync.isPending}
+                    title={system.status !== 'connected' ? 'Test the connection before syncing.' : mappedCount === 0 ? 'Add a mapping before syncing.' : 'Run incremental sync.'}
+                    className="h-8 px-3 rounded-lg border border-border text-xs font-semibold hover:bg-muted disabled:opacity-40"
+                  >
+                    {runSync.isPending ? 'Syncing...' : 'Run Sync'}
+                  </button>
+                  {system.system_type === 'hubspot' && (
+                    <button onClick={() => handleApplyHubSpotPresets(system.id)} className="h-8 px-3 rounded-lg border border-border text-xs font-semibold hover:bg-muted">Apply Presets</button>
+                  )}
+                  <button onClick={() => deleteSystem.mutate(system.id, { onSuccess: () => toast({ title: 'Connection deleted' }) })} className="h-8 px-3 rounded-lg border border-destructive/30 text-xs font-semibold text-destructive hover:bg-destructive/10 ml-auto">Delete</button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'mappings' && (
+        <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-4">
+          <div className={cardCls}>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <h3 className="text-sm font-semibold text-foreground">{editingMappingId ? 'Edit Mapping' : 'Create Mapping'}</h3>
+              {editingMappingId && (
+                <button onClick={resetMappingForm} className="h-7 px-2 rounded-md border border-border text-xs font-semibold hover:bg-muted">
+                  New Mapping
+                </button>
+              )}
+            </div>
+            <div className="space-y-3">
+              <select value={mappingSystemId} onChange={e => setMappingSystemId(e.target.value)} className={`${inputCls} w-full`}>
+                {systems.map(system => <option key={system.id} value={system.id}>{system.name}</option>)}
+              </select>
+              {systems.find(system => system.id === mappingSystemId)?.system_type === 'hubspot' && (
+                <button
+                  onClick={() => handleApplyHubSpotPresets(mappingSystemId)}
+                  className="w-full h-9 rounded-lg border border-primary/30 bg-primary/5 text-primary text-sm font-semibold hover:bg-primary/10 transition-colors"
+                >
+                  Apply HubSpot Default Mappings
+                </button>
+              )}
+              <div className="grid grid-cols-2 gap-2">
+                <select value={mappingObjectType} onChange={e => setMappingObjectType(e.target.value)} className={inputCls}>
+                  <option value="contact">Contact</option>
+                  <option value="account">Account</option>
+                  <option value="opportunity">Opportunity</option>
+                  <option value="activity">Activity</option>
+                  <option value="use_case">Use Case (conflict review only)</option>
+                </select>
+                <input value={mappingExternalObject} onChange={e => setMappingExternalObject(e.target.value)} placeholder="External object" className={inputCls} />
+              </div>
+              {mappingObjectType === 'use_case' && (
+                <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+                  Use Case mappings are visible for review and conflict tracking in 0.8. Direct sync into Use Cases needs a follow-up typed-object adapter.
+                </div>
+              )}
+              <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Discover schema</p>
+                    <p className="text-sm text-muted-foreground mt-0.5">Use the live connection to choose external objects and field names.</p>
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button onClick={discoverExternalObjects} className="h-8 px-2 rounded-lg border border-border text-xs font-semibold hover:bg-background">Objects</button>
+                    <button onClick={discoverExternalFields} className="h-8 px-2 rounded-lg border border-border text-xs font-semibold hover:bg-background">Fields</button>
+                  </div>
+                </div>
+                {discoveryMode && (
+                  <div className="rounded-lg border border-border bg-background p-2">
+                    {discovery.isFetching ? (
+                      <p className="text-sm text-muted-foreground">Discovering {discoveryMode}...</p>
+                    ) : discovery.error ? (
+                      <p className="text-sm text-destructive">{discovery.error instanceof Error ? discovery.error.message : 'Could not discover schema. Test the connection and try again.'}</p>
+                    ) : discoveryItems.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No {discoveryMode} returned for this connection.</p>
+                    ) : (
+                      <div className="max-h-48 overflow-y-auto space-y-1">
+                        {discoveryItems.slice(0, 50).map((item, index) => {
+                          const itemName = String(item.name ?? '');
+                          const itemLabel = String(item.label ?? item.name ?? '');
+                          return (
+                            <div key={`${itemName}-${index}`} className="flex items-center justify-between gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60">
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-foreground truncate">{itemLabel}</p>
+                                <p className="text-xs text-muted-foreground truncate">{itemName}{item.type ? ` • ${String(item.type)}` : ''}</p>
+                              </div>
+                              {discoveryMode === 'objects' ? (
+                                <button onClick={() => { setMappingExternalObject(itemName); setDiscoveryMode(''); }} className="h-7 px-2 rounded-md border border-border text-xs font-semibold hover:bg-background">Use</button>
+                              ) : (
+                                <div className="flex items-center gap-1">
+                                  <button onClick={() => setMappingExternalField(itemName)} className="h-7 px-2 rounded-md border border-border text-xs font-semibold hover:bg-background">Use</button>
+                                  <button onClick={() => setMappingIdField(itemName)} className="h-7 px-2 rounded-md border border-border text-xs font-semibold hover:bg-background">ID</button>
+                                  <button onClick={() => setMappingWatermarkField(itemName)} className="h-7 px-2 rounded-md border border-border text-xs font-semibold hover:bg-background">Watermark</button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <input value={mappingIdField} onChange={e => setMappingIdField(e.target.value)} placeholder="External ID field" className={inputCls} />
+                <input value={mappingWatermarkField} onChange={e => setMappingWatermarkField(e.target.value)} placeholder="Watermark field" className={inputCls} />
+              </div>
+              <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-2">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Add field mapping</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Map a CRMy field to the external field name. The JSON stays editable below.</p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2">
+                  <select value={mappingCrmyField} onChange={e => setMappingCrmyField(e.target.value)} className={inputCls}>
+                    {mappingFieldOptions.map(field => (
+                      <option key={field.value} value={field.value}>{field.label}</option>
+                    ))}
+                  </select>
+                  <input
+                    value={mappingExternalField}
+                    onChange={e => setMappingExternalField(e.target.value)}
+                    placeholder="External field name"
+                    className={inputCls}
+                  />
+                  <button
+                    onClick={() => addFieldMapping()}
+                    className="h-10 px-3 rounded-lg border border-border text-sm font-semibold hover:bg-background"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+              <textarea value={mappingFieldJson} onChange={e => setMappingFieldJson(e.target.value)} className={textAreaCls} />
+              <details className="rounded-xl border border-border bg-muted/20">
+                <summary className="cursor-pointer list-none px-3 py-2 text-sm font-semibold text-foreground flex items-center justify-between gap-3">
+                  Advanced mapping policy
+                  <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                </summary>
+                <div className="space-y-3 px-3 pb-3">
+                  <p className="text-sm text-muted-foreground">
+                    Use these controls for scoped reads, governed writeback, conflict authority, and loop prevention. External authority can update CRMy directly; CRMy, read-only, and approval-required authority create conflicts instead of overwriting existing records.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Readable fields</label>
+                      <input
+                        value={mappingReadableFields}
+                        onChange={e => setMappingReadableFields(e.target.value)}
+                        placeholder="Comma-separated external fields"
+                        className={`${inputCls} w-full mt-1`}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Writable fields</label>
+                      <input
+                        value={mappingWritableFields}
+                        onChange={e => setMappingWritableFields(e.target.value)}
+                        placeholder="Fields agents/workflows may write"
+                        className={`${inputCls} w-full mt-1`}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <select value={mappingSourceAuthority} onChange={e => setMappingSourceAuthority(e.target.value)} className={`${inputCls} w-full`}>
+                      <option value="external">External source wins</option>
+                      <option value="crmy">CRMy source wins</option>
+                      <option value="bidirectional">Bidirectional</option>
+                      <option value="read_only">Read only</option>
+                      <option value="approval_required">Approval required</option>
+                    </select>
+                    <select value={mappingWritebackMode} onChange={e => setMappingWritebackMode(e.target.value)} className={`${inputCls} w-full`}>
+                      <option value="">No writeback</option>
+                      <option value="append_event">Append-only event</option>
+                      <option value="mapped_upsert">Mapped upsert</option>
+                      <option value="stored_procedure">Stored procedure</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Writeback config JSON</label>
+                    <textarea
+                      value={mappingWritebackConfigJson}
+                      onChange={e => setMappingWritebackConfigJson(e.target.value)}
+                      placeholder='{"sql_template":"CALL update_customer(?, ?)","parameter_order":["account_id","health_score"]}'
+                      className={`${textAreaCls} mt-1`}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <label className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={mappingIsActive}
+                        onChange={e => setMappingIsActive(e.target.checked)}
+                        className="h-4 w-4 rounded border-border"
+                      />
+                      Mapping active
+                    </label>
+                    <label className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={mappingAllowSourceLoop}
+                        onChange={e => setMappingAllowSourceLoop(e.target.checked)}
+                        className="h-4 w-4 rounded border-border"
+                      />
+                      Allow source-loop writebacks
+                    </label>
+                  </div>
+                </div>
+              </details>
+              <button onClick={handleUpsertMapping} disabled={!mappingSystemId || upsertMapping.isPending} className="w-full h-9 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40">{editingMappingId ? 'Save Changes' : 'Save Mapping'}</button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {mappings.length === 0 ? (
+              <div className={`${cardCls} text-center py-10`}>
+                <Database className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
+                <p className="text-sm font-semibold text-foreground">No mappings yet</p>
+                <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+                  Mappings are the contract between an external object and a typed CRMy record. Add one before running sync.
+                </p>
+                {systems.find(system => system.id === mappingSystemId)?.system_type === 'hubspot' ? (
+                  <button
+                    onClick={() => handleApplyHubSpotPresets(mappingSystemId)}
+                    disabled={!mappingSystemId || upsertMapping.isPending}
+                    className="mt-4 h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40"
+                  >
+                    Apply HubSpot Defaults
+                  </button>
+                ) : (
+                  <button
+                    onClick={discoverExternalObjects}
+                    disabled={!mappingSystemId}
+                    className="mt-4 h-9 px-3 rounded-lg border border-border text-sm font-semibold hover:bg-muted disabled:opacity-40"
+                  >
+                    Discover Objects
+                  </button>
+                )}
+              </div>
+            ) : mappings.map(mapping => {
+              const hasWritableFields = (mapping.writable_fields ?? []).length > 0;
+              const hasWritebackConfig = mapping.writeback_config && Object.keys(mapping.writeback_config).length > 0;
+              return (
+              <div key={mapping.id} className={`${cardCls} flex items-center justify-between gap-3`}>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground capitalize">{mapping.object_type.replace('_', ' ')}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {systems.find(s => s.id === mapping.system_id)?.name ?? mapping.system_id} • {mapping.external_object}
+                    {mapping.last_sync_at ? ` • Last sync ${fmtDate(mapping.last_sync_at)}` : ''}
+                    {mapping.sync_watermark ? ` • Watermark ${mapping.sync_watermark}` : ''}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <span className="rounded-md border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                      {(mapping.source_authority ?? 'external').replace('_', ' ')}
+                    </span>
+                    {mapping.writeback_mode ? (
+                      <span className={`rounded-md border px-2 py-0.5 text-xs ${hasWritableFields ? 'border-success/30 bg-success/10 text-success' : 'border-warning/30 bg-warning/10 text-warning'}`}>
+                        {mapping.writeback_mode} • {(mapping.writable_fields ?? []).length} writable
+                      </span>
+                    ) : (
+                      <span className="rounded-md border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">read only</span>
+                    )}
+                    {mapping.writeback_mode === 'stored_procedure' || systems.find(s => s.id === mapping.system_id)?.system_type === 'databricks' || systems.find(s => s.id === mapping.system_id)?.system_type === 'snowflake' ? (
+                      <span className={`rounded-md border px-2 py-0.5 text-xs ${hasWritebackConfig ? 'border-success/30 bg-success/10 text-success' : 'border-warning/30 bg-warning/10 text-warning'}`}>
+                        {hasWritebackConfig ? 'writeback config set' : 'writeback config needed'}
+                      </span>
+                    ) : null}
+                    {mapping.allow_source_loop && (
+                      <span className="rounded-md border border-warning/30 bg-warning/10 px-2 py-0.5 text-xs text-warning">source loop allowed</span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`text-xs px-2 py-0.5 rounded-full border ${mapping.is_active ? statusClass('completed') : statusClass('inactive')}`}>{mapping.is_active ? 'active' : 'inactive'}</span>
+                  {confirmDeleteMappingId === mapping.id ? (
+                    <>
+                      <button onClick={() => handleDeleteMapping(mapping)} disabled={deleteMapping.isPending} className="h-8 px-2 rounded-lg border border-destructive/30 text-xs font-semibold text-destructive hover:bg-destructive/10 disabled:opacity-40">Confirm</button>
+                      <button onClick={() => setConfirmDeleteMappingId('')} className="h-8 px-2 rounded-lg border border-border text-xs font-semibold hover:bg-muted">Cancel</button>
+                    </>
+                  ) : (
+                    <>
+                      <button onClick={() => startEditMapping(mapping)} className="h-8 px-2 rounded-lg border border-border text-xs font-semibold hover:bg-muted">Edit</button>
+                      <button onClick={() => setConfirmDeleteMappingId(mapping.id)} className="h-8 px-2 rounded-lg border border-destructive/30 text-xs font-semibold text-destructive hover:bg-destructive/10">Delete</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+            })}
+          </div>
+        </div>
+      )}
+
+      {tab === 'runs' && (
+        <div className="space-y-2">
+          {runs.length === 0 ? (
+            <div className={`${cardCls} text-center py-10`}>
+              <RefreshCw className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
+              <p className="text-sm font-semibold text-foreground">No sync runs yet</p>
+              <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+                Test a connection, add mappings, then run sync to bring external customer records into CRMy.
+              </p>
+              <button
+                onClick={() => setTab(systems.length === 0 ? 'connections' : mappings.length === 0 ? 'mappings' : 'connections')}
+                className="mt-4 h-9 px-3 rounded-lg border border-border text-sm font-semibold hover:bg-muted"
+              >
+                {systems.length === 0 ? 'Add Connection' : mappings.length === 0 ? 'Add Mapping' : 'Choose Connection'}
+              </button>
+            </div>
+          ) : runs.map(run => (
+            <div key={String(run.id)} className={`${cardCls} flex items-center justify-between gap-3`}>
+              <div>
+                <p className="text-sm font-semibold text-foreground">{systems.find(s => s.id === run.system_id)?.name ?? String(run.system_id)}</p>
+                <p className="text-xs text-muted-foreground">
+                  {syncRunSummary(run)}
+                  {' '}• {fmtDate(run.started_at)}
+                </p>
+                {run.error ? <p className="text-xs text-destructive mt-1">{String(run.error)}</p> : null}
+              </div>
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${statusClass(String(run.status ?? ''))}`}>{String(run.status ?? 'unknown')}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'conflicts' && (
+        <div className="space-y-2">
+          {conflicts.length === 0 ? (
+            <div className={`${cardCls} text-center py-10`}>
+              <CheckCircle2 className="w-8 h-8 text-success/70 mx-auto mb-3" />
+              <p className="text-sm font-semibold text-foreground">No open sync conflicts</p>
+              <p className="text-sm text-muted-foreground mt-1">When source and CRMy values disagree, conflicts appear here for review.</p>
+            </div>
+          ) : conflicts.map(conflict => (
+            <div key={String(conflict.id)} className={cardCls}>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{String(conflict.object_type)} • {String(conflict.field_name)}</p>
+                  <p className="text-xs text-muted-foreground">{String(conflict.external_object)} / {String(conflict.external_record_id)}</p>
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full border ${statusClass(String(conflict.status ?? ''))}`}>{String(conflict.status)}</span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3">
+                <code className="rounded-lg bg-muted/50 p-2 text-xs overflow-x-auto">Local: {JSON.stringify(conflict.local_value)}</code>
+                <code className="rounded-lg bg-muted/50 p-2 text-xs overflow-x-auto">External: {JSON.stringify(conflict.external_value)}</code>
+              </div>
+              {conflict.status === 'open' && (
+                <div className="flex gap-2 mt-3">
+                  <button onClick={() => handleResolveConflict(String(conflict.id), 'resolved_external')} disabled={resolveConflict.isPending} className="h-8 px-3 rounded-lg border border-border text-xs font-semibold hover:bg-muted disabled:opacity-50">Use External</button>
+                  <button onClick={() => handleResolveConflict(String(conflict.id), 'resolved_local')} disabled={resolveConflict.isPending} className="h-8 px-3 rounded-lg border border-border text-xs font-semibold hover:bg-muted disabled:opacity-50">Keep Local</button>
+                  <button onClick={() => handleResolveConflict(String(conflict.id), 'ignored')} disabled={resolveConflict.isPending} className="h-8 px-3 rounded-lg border border-border text-xs font-semibold hover:bg-muted disabled:opacity-50">Ignore</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'writebacks' && (
+        <div className="space-y-4">
+          <div className={`${cardCls} grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4`}>
+            <div className="space-y-3">
+              <div>
+                <p className="text-sm font-semibold text-foreground">New governed writeback</p>
+                <p className="text-sm text-muted-foreground mt-0.5">Preview policy, diff, and approval needs before writing to an external system.</p>
+              </div>
+              <select value={writebackSystemId} onChange={e => { setWritebackSystemId(e.target.value); setWritebackMappingId(''); setWritebackPreview(null); }} className={`${inputCls} w-full`}>
+                <option value="">Select system</option>
+                {systems.map(system => <option key={system.id} value={system.id}>{system.name} ({system.system_type})</option>)}
+              </select>
+              <select value={writebackMappingId} onChange={e => applyWritebackMapping(e.target.value)} className={`${inputCls} w-full`}>
+                <option value="">{writebackSystemId ? 'Select mapping' : 'Select system first'}</option>
+                {writebackMappings.map(mapping => (
+                  <option key={mapping.id} value={mapping.id}>
+                    {mapping.object_type.replace('_', ' ')} → {mapping.external_object}
+                  </option>
+                ))}
+              </select>
+              <div className="grid grid-cols-2 gap-2">
+                <select value={writebackObjectType} onChange={e => { setWritebackObjectType(e.target.value); setWritebackPreview(null); }} className={inputCls}>
+                  <option value="contact">Contact</option>
+                  <option value="account">Account</option>
+                  <option value="opportunity">Opportunity</option>
+                  <option value="activity">Activity</option>
+                  <option value="use_case">Use Case</option>
+                  <option value="context_entry">Context Entry</option>
+                </select>
+                <input value={writebackExternalObject} onChange={e => { setWritebackExternalObject(e.target.value); setWritebackPreview(null); }} placeholder="External object" className={inputCls} />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <select value={writebackOperation} onChange={e => { setWritebackOperation(e.target.value); setWritebackPreview(null); }} className={inputCls}>
+                  <option value="create">Create</option>
+                  <option value="update">Update</option>
+                  <option value="upsert">Upsert</option>
+                  <option value="append_event">Append event</option>
+                  <option value="stored_procedure">Stored procedure</option>
+                </select>
+                <select value={writebackMode} onChange={e => { setWritebackMode(e.target.value); setWritebackPreview(null); }} className={inputCls}>
+                  <option value="mapped_upsert">Mapped upsert</option>
+                  <option value="append_event">Append-only event</option>
+                  <option value="stored_procedure">Stored procedure</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <input value={writebackObjectId} onChange={e => setWritebackObjectId(e.target.value)} placeholder="CRMy object ID (optional)" className={inputCls} />
+                <input value={writebackExternalRecordId} onChange={e => setWritebackExternalRecordId(e.target.value)} placeholder="External record ID (optional)" className={inputCls} />
+              </div>
+              <label className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={writebackRequireApproval}
+                  onChange={e => setWritebackRequireApproval(e.target.checked)}
+                  className="h-4 w-4 rounded border-border"
+                />
+                Request human approval before execution
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={handlePreviewWriteback} disabled={previewWriteback.isPending || !writebackSystemId} className="h-9 rounded-lg border border-border text-sm font-semibold hover:bg-muted disabled:opacity-40">
+                  {previewWriteback.isPending ? 'Previewing...' : 'Preview'}
+                </button>
+                <button onClick={handleRequestWriteback} disabled={requestWriteback.isPending || !writebackSystemId} className="h-9 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40">
+                  {requestWriteback.isPending ? 'Requesting...' : 'Request'}
+                </button>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Payload</p>
+                <textarea value={writebackPayloadJson} onChange={e => { setWritebackPayloadJson(e.target.value); setWritebackPreview(null); }} className={`${textAreaCls} min-h-48`} />
+              </div>
+              {writebackPreview ? (
+                <div className={`rounded-xl border p-3 ${writebackPreview.allowed === false ? 'border-destructive/30 bg-destructive/5' : 'border-border bg-muted/20'}`}>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <p className="text-sm font-semibold text-foreground">Preview result</p>
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${writebackPreview.allowed === false ? statusClass('failed') : statusClass('completed')}`}>
+                      {writebackPreview.allowed === false ? 'blocked' : 'allowed'}
+                    </span>
+                  </div>
+                  <code className="block text-xs text-foreground whitespace-pre-wrap break-words">{JSON.stringify(writebackPreview, null, 2)}</code>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+                  Preview shows whether the mapping allows this payload, which fields will change, and whether approval is required.
+                </div>
+              )}
+            </div>
+          </div>
+          {writebacks.length === 0 ? (
+            <div className={`${cardCls} text-center py-10`}>
+              <ShieldCheck className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
+              <p className="text-sm font-semibold text-foreground">No external writebacks requested</p>
+              <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+                Preview first, then request approval before CRMy writes back to a CRM or warehouse.
+              </p>
+            </div>
+          ) : writebacks.map(writeback => (
+            <div key={String(writeback.id)} className={cardCls}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">{String(writeback.operation)} {String(writeback.object_type)} to {systems.find(s => s.id === writeback.system_id)?.name ?? String(writeback.system_id)}</p>
+                  <p className="text-xs text-muted-foreground">{String(writeback.writeback_mode)} • {fmtDate(writeback.created_at)}{writeback.hitl_request_id ? ` • HITL ${String(writeback.hitl_request_id).slice(0, 8)}` : ''}</p>
+                </div>
+                <span className={`text-xs px-2 py-0.5 rounded-full border ${statusClass(String(writeback.status ?? ''))}`}>{String(writeback.status)}</span>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 mt-3">
+                <div className="rounded-lg bg-muted/50 p-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Policy</p>
+                  <code className="block text-xs text-foreground whitespace-pre-wrap break-words">{JSON.stringify(writeback.policy_result ?? {}, null, 2)}</code>
+                </div>
+                <div className="rounded-lg bg-muted/50 p-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Preview</p>
+                  <code className="block text-xs text-foreground whitespace-pre-wrap break-words">{JSON.stringify(writeback.preview ?? {}, null, 2)}</code>
+                </div>
+                <div className="rounded-lg bg-muted/50 p-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Payload</p>
+                  <code className="block text-xs text-foreground whitespace-pre-wrap break-words">{JSON.stringify(writeback.payload ?? {}, null, 2)}</code>
+                </div>
+              </div>
+              {Boolean(writeback.execution_result && Object.keys(writeback.execution_result as Record<string, unknown>).length > 0) && (
+                <div className="rounded-xl border border-border bg-muted/30 p-3 mt-3">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Execution receipt</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {String(writebackReceipt(writeback).operation ?? writeback.operation)} • {String(writebackReceipt(writeback).external_object ?? writeback.external_object)}
+                        {writebackReceipt(writeback).executed_at ? ` • ${fmtDate(writebackReceipt(writeback).executed_at)}` : ''}
+                      </p>
+                    </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full border ${writebackReceipt(writeback).ok === false ? statusClass('failed') : statusClass('completed')}`}>
+                      {writebackReceipt(writeback).ok === false ? 'failed' : 'completed'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 mt-3">
+                    <div className="rounded-lg bg-background/80 p-2">
+                      <p className="text-xs text-muted-foreground">External ID</p>
+                      <p className="text-sm font-mono text-foreground truncate">{String(writebackReceipt(writeback).external_record_id ?? writeback.external_record_id ?? '—')}</p>
+                    </div>
+                    <div className="rounded-lg bg-background/80 p-2">
+                      <p className="text-xs text-muted-foreground">Sync run</p>
+                      <p className="text-sm font-mono text-foreground truncate">{String(writebackReceipt(writeback).sync_run_id ?? '—')}</p>
+                    </div>
+                    <div className="rounded-lg bg-background/80 p-2">
+                      <p className="text-xs text-muted-foreground">Reference</p>
+                      <p className="text-sm text-foreground truncate">
+                        {writebackReference(writeback).updated === false
+                          ? String(writebackReference(writeback).warning ?? 'Not updated')
+                          : String(writebackReference(writeback).action ?? 'updated')}
+                      </p>
+                    </div>
+                  </div>
+                  {Boolean(writebackReceipt(writeback).error) && (
+                    <p className="mt-3 rounded-lg border border-destructive/25 bg-destructive/5 p-2 text-xs text-destructive">
+                      {String(writebackReceipt(writeback).error)}
+                    </p>
+                  )}
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-muted-foreground hover:text-foreground">View receipt JSON</summary>
+                    <code className="block text-xs text-foreground whitespace-pre-wrap break-words mt-2">{JSON.stringify(writeback.execution_result, null, 2)}</code>
+                  </details>
+                </div>
+              )}
+              <div className="flex flex-wrap justify-end gap-2 mt-3">
+                {writeback.status === 'approval_required' && (
+                  <>
+                    <button onClick={() => handleReviewWriteback(String(writeback.id), 'approved')} disabled={reviewWriteback.isPending} className="h-8 px-3 rounded-lg border border-border text-xs font-semibold hover:bg-muted disabled:opacity-50">Approve</button>
+                    <button onClick={() => handleReviewWriteback(String(writeback.id), 'rejected')} disabled={reviewWriteback.isPending} className="h-8 px-3 rounded-lg border border-destructive/30 text-xs font-semibold text-destructive hover:bg-destructive/10 disabled:opacity-50">Reject</button>
+                  </>
+                )}
+                {(writeback.status === 'approved' || writeback.status === 'pending') && (
+                  <button
+                    onClick={() => executeWriteback.mutate(String(writeback.id), {
+                      onSuccess: () => toast({ title: 'Writeback executed', description: 'The external system accepted the governed write.' }),
+                      onError: err => toast({ title: 'Writeback failed', description: err instanceof Error ? err.message : 'Review the request and try again.', variant: 'destructive' }),
+                    })}
+                    className="h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90"
+                  >
+                    Execute
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="rounded-xl border border-border bg-card p-4 flex items-start gap-3">
+        <ShieldCheck className="w-5 h-5 text-primary shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-foreground">Governed by default</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Secrets are encrypted, external writes require configured mappings, and sync changes emit normal CRMy events for Automations, Sequences, HITL, audit, and context extraction.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type DbProviderId = 'local' | 'neon' | 'lakebase' | 'supabase' | 'rds';
 
 const DB_PROVIDER_GUIDES: Record<DbProviderId, {
@@ -3033,6 +5066,8 @@ export default function Settings() {
             <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
             <Route path="model" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
             <Route path="automations" element={<RequireRole roles={['admin', 'owner']}><AutomationSettings /></RequireRole>} />
+            <Route path="systems" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
+            <Route path="systems/oauth/hubspot/callback" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
             <Route path="database" element={<RequireRole roles={['admin', 'owner']}><DatabaseSettings /></RequireRole>} />
           </Routes>
         </div>

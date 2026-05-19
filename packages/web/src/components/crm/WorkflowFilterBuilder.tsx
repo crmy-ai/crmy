@@ -3,19 +3,20 @@
 
 import { Plus, X } from 'lucide-react';
 import {
-  FILTER_OPERATORS, type FilterCondition, type FilterOperator,
+  FILTER_OPERATORS, getFilterFieldSuggestions, type FilterCondition, type FilterOperator,
 } from '@/lib/workflowConstants';
 
 interface Props {
   conditions: FilterCondition[];
   onChange: (conditions: FilterCondition[]) => void;
   disabled?: boolean;
+  triggerEvent?: string;
 }
 
 const inputCls = 'h-7 px-2 rounded border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const selectCls = 'h-7 px-1.5 rounded border border-border bg-background text-xs text-foreground outline-none focus:ring-1 focus:ring-ring cursor-pointer';
 
-export function WorkflowFilterBuilder({ conditions, onChange, disabled }: Props) {
+export function WorkflowFilterBuilder({ conditions, onChange, disabled, triggerEvent = '' }: Props) {
   function addCondition() {
     onChange([...conditions, { field: '', op: 'eq', value: '' }]);
   }
@@ -29,9 +30,18 @@ export function WorkflowFilterBuilder({ conditions, onChange, disabled }: Props)
   }
 
   const noValueOps: FilterOperator[] = ['exists', 'not_exists'];
+  const suggestions = getFilterFieldSuggestions(triggerEvent);
+  const datalistId = `workflow-filter-fields-${triggerEvent || 'generic'}`.replace(/[^a-zA-Z0-9_-]/g, '-');
 
   return (
     <div className="space-y-2">
+      {!disabled && suggestions.length > 0 && (
+        <datalist id={datalistId}>
+          {suggestions.map(s => (
+            <option key={s.field} value={s.field} label={`${s.group}: ${s.label}`} />
+          ))}
+        </datalist>
+      )}
       {conditions.length === 0 ? (
         <p className="text-xs text-muted-foreground italic">
           No conditions — workflow runs for all matching events
@@ -45,7 +55,9 @@ export function WorkflowFilterBuilder({ conditions, onChange, disabled }: Props)
                 onChange={e => updateCondition(idx, { field: e.target.value })}
                 placeholder="Field name"
                 disabled={disabled}
+                list={!disabled ? datalistId : undefined}
                 className={`${inputCls} w-32`}
+                title={suggestions.find(s => s.field === cond.field)?.hint}
               />
               <select
                 value={cond.op}

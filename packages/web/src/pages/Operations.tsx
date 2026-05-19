@@ -3,7 +3,7 @@
 
 import { useMemo, useState } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
-import { useOpsDataQuality, useOpsStatus } from '@/api/hooks';
+import { useOpsDataQuality, useOpsStatus, useSystemConflicts, useSystemSyncRuns, useSystemsOfRecord, useSystemWritebacks } from '@/api/hooks';
 import { countLabel } from '@/lib/headerCopy';
 import {
   AlertTriangle,
@@ -14,6 +14,7 @@ import {
   Database,
   Loader2,
   RefreshCw,
+  Server,
 } from 'lucide-react';
 
 function statusClass(counts: Record<string, number>, available: boolean) {
@@ -73,6 +74,63 @@ function severityClass(severity?: string) {
   if (severity === 'critical') return 'border-destructive/30 bg-destructive/10 text-destructive';
   if (severity === 'warning') return 'border-warning/30 bg-warning/10 text-warning';
   return 'border-border bg-muted text-muted-foreground';
+}
+
+function systemHealthClass(status?: string, issues = 0) {
+  if (status === 'error' || issues > 0) return 'border-warning/40 bg-warning/5';
+  if (status === 'connected') return 'border-success/30 bg-success/5';
+  return 'border-border bg-card';
+}
+
+function SystemOfRecordCard({
+  system,
+  latestRun,
+  openConflicts,
+  pendingWritebacks,
+}: {
+  system: any;
+  latestRun?: any;
+  openConflicts: number;
+  pendingWritebacks: number;
+}) {
+  const issueCount = openConflicts + pendingWritebacks + (latestRun?.status === 'failed' ? 1 : 0);
+  const healthy = system.status === 'connected' && issueCount === 0;
+  return (
+    <div className={`rounded-xl border p-4 ${systemHealthClass(system.status, issueCount)}`}>
+      <div className="flex items-start gap-3">
+        <div className={`mt-0.5 rounded-lg p-2 ${healthy ? 'bg-success/15 text-success' : 'bg-primary/10 text-primary'}`}>
+          {healthy ? <CheckCircle2 className="w-4 h-4" /> : <Server className="w-4 h-4" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-foreground truncate">{system.name}</p>
+            <span className="rounded-md border border-border bg-background px-1.5 py-0.5 text-xs capitalize text-muted-foreground">
+              {system.system_type}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Status {system.status ?? 'unknown'}
+            {system.last_sync_at ? ` • Last sync ${new Date(system.last_sync_at).toLocaleString()}` : ' • Not synced yet'}
+          </p>
+          {latestRun?.error && <p className="mt-1 text-xs text-destructive line-clamp-2">{latestRun.error}</p>}
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+        <div className="rounded-lg bg-background/70 p-2">
+          <p className="text-sm font-semibold text-foreground">{latestRun?.status ?? 'none'}</p>
+          <p className="text-xs text-muted-foreground">Latest run</p>
+        </div>
+        <div className="rounded-lg bg-background/70 p-2">
+          <p className={`text-sm font-semibold ${openConflicts > 0 ? 'text-warning' : 'text-foreground'}`}>{openConflicts}</p>
+          <p className="text-xs text-muted-foreground">Conflicts</p>
+        </div>
+        <div className="rounded-lg bg-background/70 p-2">
+          <p className={`text-sm font-semibold ${pendingWritebacks > 0 ? 'text-warning' : 'text-foreground'}`}>{pendingWritebacks}</p>
+          <p className="text-xs text-muted-foreground">Writebacks</p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function QueueCard({ queue }: { queue: any }) {
@@ -235,9 +293,17 @@ function DataQualitySummary({ checks }: { checks: any[] }) {
 export default function OperationsPage() {
   const statusQ = useOpsStatus({ sample_limit: 3, include_samples: true }) as any;
   const qualityQ = useOpsDataQuality({ sample_limit: 5, include_clean: false }) as any;
+  const systemsQ = useSystemsOfRecord({ limit: 50 }) as any;
+  const syncRunsQ = useSystemSyncRuns({ limit: 50 }) as any;
+  const conflictsQ = useSystemConflicts({ status: 'open', limit: 50 }) as any;
+  const writebacksQ = useSystemWritebacks({ status: 'approval_required', limit: 50 }) as any;
   const queues: any[] = statusQ.data?.queues ?? [];
   const attention: any[] = statusQ.data?.attention_required ?? [];
   const checks: any[] = qualityQ.data?.checks ?? [];
+  const systems: any[] = systemsQ.data?.data ?? [];
+  const syncRuns: any[] = syncRunsQ.data?.data ?? [];
+  const conflicts: any[] = conflictsQ.data?.data ?? [];
+  const writebacks: any[] = writebacksQ.data?.data ?? [];
 
   const queueSummary = useMemo(() => {
     const unavailable = queues.filter(q => q.available === false).length;
@@ -252,6 +318,14 @@ export default function OperationsPage() {
   const isError = statusQ.isError || qualityQ.isError;
   const error = statusQ.error ?? qualityQ.error;
   const errorMessage = error instanceof Error ? error.message : 'Check the server logs and try again.';
+  const latestRunBySystem = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const run of syncRuns) {
+      const systemId = String(run.system_id ?? '');
+      if (systemId && !map.has(systemId)) map.set(systemId, run);
+    }
+    return map;
+  }, [syncRuns]);
 
   return (
     <div className="flex flex-col h-full">
@@ -259,7 +333,7 @@ export default function OperationsPage() {
         title="Reliability"
         icon={Database}
         iconClassName="text-[#a78bfa]"
-        description={`Review queues and data quality • ${countLabel(queues.length, 'queue')} • ${countLabel(checks.length, 'check')}`}
+        description={`Review queues, system sync, and data quality • ${countLabel(queues.length, 'queue')} • ${countLabel(systems.length, 'system')} • ${countLabel(checks.length, 'check')}`}
       >
         <button
           onClick={() => { statusQ.refetch(); qualityQ.refetch(); }}
@@ -297,6 +371,45 @@ export default function OperationsPage() {
                 </p>
               </div>
             </div>
+
+            <section>
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-display font-bold text-foreground">Systems of Record</h2>
+                {systemsQ.isError ? (
+                  <span className="text-xs text-warning">Requires systems access</span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">
+                    {systems.length} connected system{systems.length === 1 ? '' : 's'}
+                  </span>
+                )}
+              </div>
+              {systemsQ.isLoading ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <div className="h-32 rounded-xl bg-muted/50 animate-pulse" />
+                  <div className="h-32 rounded-xl bg-muted/50 animate-pulse" />
+                </div>
+              ) : systemsQ.isError ? (
+                <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 text-sm text-muted-foreground">
+                  Systems of Record health is available to actors with <span className="font-mono text-foreground">systems:read</span> access.
+                </div>
+              ) : systems.length === 0 ? (
+                <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+                  No systems connected yet. Add one in Settings to monitor sync health here.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {systems.map(system => (
+                    <SystemOfRecordCard
+                      key={system.id}
+                      system={system}
+                      latestRun={latestRunBySystem.get(system.id)}
+                      openConflicts={conflicts.filter(conflict => conflict.system_id === system.id).length}
+                      pendingWritebacks={writebacks.filter(writeback => writeback.system_id === system.id).length}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
 
             <section>
               <div className="mb-3 flex items-center justify-between">

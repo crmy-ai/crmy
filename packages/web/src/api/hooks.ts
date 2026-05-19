@@ -1553,3 +1553,183 @@ export function useDeleteMessagingChannel(id: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['messaging-channels'] }),
   });
 }
+
+// ── Systems Of Record ───────────────────────────────────────────────────────
+
+export type SystemOfRecordType = 'hubspot' | 'salesforce' | 'databricks' | 'snowflake';
+
+export interface SystemOfRecord {
+  id: string;
+  name: string;
+  system_type: SystemOfRecordType;
+  auth_type: string;
+  status: string;
+  health?: Record<string, unknown>;
+  config?: Record<string, unknown>;
+  sync_settings?: Record<string, unknown>;
+  has_credentials?: boolean;
+  last_error?: string | null;
+  last_sync_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SystemMapping {
+  id: string;
+  system_id: string;
+  object_type: string;
+  external_object: string;
+  external_id_field: string;
+  watermark_field?: string | null;
+  field_mapping?: Record<string, string>;
+  readable_fields?: string[];
+  writable_fields?: string[];
+  source_authority?: string;
+  writeback_mode?: string | null;
+  writeback_config?: Record<string, unknown>;
+  allow_source_loop?: boolean;
+  is_active: boolean;
+  sync_cursor?: string | null;
+  sync_watermark?: string | null;
+  last_sync_at?: string | null;
+  last_sync_run_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function useSystemsOfRecord(params?: { system_type?: string; status?: string; limit?: number; cursor?: string }) {
+  return useList<SystemOfRecord>('systems-of-record', 'systems-of-record', params);
+}
+
+export function useCreateSystemOfRecord() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('systems-of-record', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['systems-of-record'] }),
+  });
+}
+
+export function useUpdateSystemOfRecord() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Record<string, unknown> }) => api.patch(`systems-of-record/${id}`, patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['systems-of-record'] }),
+  });
+}
+
+export function useDeleteSystemOfRecord() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`systems-of-record/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['systems-of-record'] });
+      qc.invalidateQueries({ queryKey: ['systems-of-record-mappings'] });
+    },
+  });
+}
+
+export function useTestSystemOfRecord() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`systems-of-record/${id}/test`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['systems-of-record'] }),
+  });
+}
+
+export function useDiscoverSystemOfRecord(systemId?: string, objectName?: string) {
+  return useQuery({
+    queryKey: ['systems-of-record-discover', systemId, objectName],
+    queryFn: () => api.get(`systems-of-record/${systemId}/discover${objectName ? `?object_name=${encodeURIComponent(objectName)}` : ''}`),
+    enabled: !!systemId,
+  });
+}
+
+export function useSystemMappings(params?: { system_id?: string; object_type?: string; is_active?: boolean; limit?: number; cursor?: string }) {
+  return useList<SystemMapping>('systems-of-record-mappings', 'systems-of-record/mappings/list', params);
+}
+
+export function useUpsertSystemMapping() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('systems-of-record/mappings', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['systems-of-record-mappings'] });
+      qc.invalidateQueries({ queryKey: ['systems-of-record'] });
+    },
+  });
+}
+
+export function useDeleteSystemMapping() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`systems-of-record/mappings/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['systems-of-record-mappings'] });
+      qc.invalidateQueries({ queryKey: ['systems-of-record'] });
+    },
+  });
+}
+
+export function useRunSystemSync() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, mode, mapping_id }: { id: string; mode?: string; mapping_id?: string }) =>
+      api.post(`systems-of-record/${id}/sync`, { mode: mode ?? 'incremental', mapping_id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['systems-of-record'] });
+      qc.invalidateQueries({ queryKey: ['systems-of-record-sync-runs'] });
+    },
+  });
+}
+
+export function useSystemSyncRuns(params?: { system_id?: string; status?: string; limit?: number; cursor?: string }) {
+  return useList<Record<string, unknown>>('systems-of-record-sync-runs', 'systems-of-record/sync-runs/list', params);
+}
+
+export function useSystemConflicts(params?: { system_id?: string; status?: string; object_type?: string; object_id?: string; limit?: number; cursor?: string }) {
+  return useList<Record<string, unknown>>('systems-of-record-conflicts', 'systems-of-record/conflicts/list', params);
+}
+
+export function useResolveSystemConflict() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, resolution, note }: { id: string; resolution: string; note?: string }) =>
+      api.post(`systems-of-record/conflicts/${id}/resolve`, { resolution, note }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['systems-of-record-conflicts'] }),
+  });
+}
+
+export function useSystemWritebacks(params?: { system_id?: string; status?: string; limit?: number; cursor?: string }) {
+  return useList<Record<string, unknown>>('systems-of-record-writebacks', 'systems-of-record/writebacks/list', params);
+}
+
+export function usePreviewSystemWriteback() {
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('systems-of-record/writebacks/preview', data),
+  });
+}
+
+export function useRequestSystemWriteback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('systems-of-record/writebacks', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['systems-of-record-writebacks'] }),
+  });
+}
+
+export function useExecuteSystemWriteback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`systems-of-record/writebacks/${id}/execute`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['systems-of-record-writebacks'] }),
+  });
+}
+
+export function useReviewSystemWriteback() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, decision, note }: { id: string; decision: 'approved' | 'rejected'; note?: string }) =>
+      api.post(`systems-of-record/writebacks/${id}/review`, { decision, note }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['systems-of-record-writebacks'] }),
+  });
+}

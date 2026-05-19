@@ -17,7 +17,7 @@
 
 import { useState, useCallback } from 'react';
 import { useSequence, useCreateSequence, useUpdateSequence } from '@/api/hooks';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -316,6 +316,9 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
       }}
     >
       <DialogContent className="max-w-none p-0 gap-0 w-[min(95vw,1440px)] h-[min(90vh,920px)] flex flex-col overflow-hidden rounded-2xl [&>button]:hidden">
+        <DialogTitle className="sr-only">
+          {sequence ? 'Edit sequence' : 'Create sequence'}
+        </DialogTitle>
 
         {/* ── Header ───────────────────────────────────────────────────── */}
         <div className="flex items-center gap-3 px-5 py-3.5 border-b border-border bg-background/95 backdrop-blur shrink-0">

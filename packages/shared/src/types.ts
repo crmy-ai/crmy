@@ -207,6 +207,131 @@ export interface OperationResult<T> {
   event_id: number;
 }
 
+// -- v0.8 systems-of-record overlay --
+
+export type SystemOfRecordType = 'hubspot' | 'salesforce' | 'databricks' | 'snowflake';
+export type ExternalOrigin = 'crmy' | 'crm_sync' | 'warehouse_sync' | 'agent' | 'workflow' | 'sequence';
+export type WritebackMode = 'append_event' | 'mapped_upsert' | 'stored_procedure';
+export type SourceAuthority = 'crmy' | 'external' | 'bidirectional' | 'read_only' | 'approval_required';
+
+export interface ExternalEventMetadata {
+  origin: ExternalOrigin;
+  system_id?: UUID;
+  system_type?: SystemOfRecordType;
+  external_record_id?: string;
+  sync_run_id?: UUID;
+  changed_fields?: string[];
+  confidence?: number;
+  conflict_state?: 'none' | 'open' | 'resolved' | 'unknown';
+}
+
+export interface ExternalSystem {
+  id: UUID;
+  tenant_id: UUID;
+  name: string;
+  system_type: SystemOfRecordType;
+  auth_type: string;
+  status: 'disconnected' | 'connected' | 'error' | 'paused';
+  config: Record<string, unknown>;
+  sync_settings: Record<string, unknown>;
+  health: Record<string, unknown>;
+  has_credentials?: boolean;
+  last_sync_at?: string;
+  last_error?: string;
+  created_by?: UUID;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExternalObjectMapping {
+  id: UUID;
+  tenant_id: UUID;
+  system_id: UUID;
+  object_type: 'contact' | 'account' | 'opportunity' | 'activity' | 'use_case' | 'context_entry';
+  external_object: string;
+  external_id_field: string;
+  watermark_field?: string;
+  field_mapping: Record<string, string>;
+  readable_fields: string[];
+  writable_fields: string[];
+  source_authority: SourceAuthority;
+  writeback_mode?: WritebackMode;
+  writeback_config: Record<string, unknown>;
+  allow_source_loop: boolean;
+  is_active: boolean;
+  sync_cursor?: string;
+  sync_watermark?: string;
+  last_sync_at?: string;
+  last_sync_run_id?: UUID;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExternalSyncRun {
+  id: UUID;
+  tenant_id: UUID;
+  system_id: UUID;
+  mapping_id?: UUID;
+  mode: 'test' | 'full' | 'incremental' | 'replay' | 'writeback';
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  cursor_value?: string;
+  watermark_value?: string;
+  records_seen: number;
+  records_created: number;
+  records_updated: number;
+  records_skipped: number;
+  conflicts_created: number;
+  error?: string;
+  replay_of_run_id?: UUID;
+  metadata: Record<string, unknown>;
+  started_at: string;
+  completed_at?: string;
+}
+
+export interface ExternalSyncConflict {
+  id: UUID;
+  tenant_id: UUID;
+  system_id: UUID;
+  mapping_id?: UUID;
+  sync_run_id?: UUID;
+  object_type: string;
+  object_id?: UUID;
+  external_object: string;
+  external_record_id: string;
+  field_name: string;
+  local_value?: unknown;
+  external_value?: unknown;
+  status: 'open' | 'resolved_local' | 'resolved_external' | 'ignored';
+  resolution_note?: string;
+  resolved_by?: string;
+  resolved_at?: string;
+  created_at: string;
+}
+
+export interface ExternalWritebackRequest {
+  id: UUID;
+  tenant_id: UUID;
+  system_id: UUID;
+  mapping_id?: UUID;
+  object_type: string;
+  object_id?: UUID;
+  external_object: string;
+  external_record_id?: string;
+  operation: 'create' | 'update' | 'upsert' | 'append_event' | 'stored_procedure';
+  writeback_mode: WritebackMode;
+  preview: Record<string, unknown>;
+  payload: Record<string, unknown>;
+  policy_result: Record<string, unknown>;
+  status: 'pending' | 'approval_required' | 'approved' | 'executing' | 'completed' | 'failed' | 'rejected' | 'cancelled';
+  hitl_request_id?: UUID;
+  idempotency_key?: string;
+  execution_result: Record<string, unknown>;
+  requested_by?: string;
+  executed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // -- v0.2 types --
 
 export type UseCaseStage =

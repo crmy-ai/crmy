@@ -662,6 +662,109 @@ Query actor knowledge contributions. Two modes:
 - **Output (by_actor)**: `{ mode: "by_actor", actor_id, total_entries, subjects, top_context_types }`
 - **Output (by_subject)**: `{ mode: "by_subject", subject_type, subject_id, experts }`
 
+## Systems of Record Tools
+
+These tools are intentionally operator-facing. They are visible in an MCP session only when the actor has explicit systems scopes. Generic `read` and `write` shortcuts do not grant systems-of-record access. Governed external writeback tools also require the relevant object write scope, such as `contacts:write` or `opportunities:write`, before CRMy will preview, review, or execute a write.
+
+HubSpot is the first certified 0.8 connector path. Salesforce, Databricks, and Snowflake use the same governed interfaces, but should be live-tested in the target environment before production rollout. `context_entry` mappings are reserved for the connector-author workflow and currently produce reviewable sync conflicts instead of silently creating memory.
+
+### sor_system_create
+Create a governed external system connection for HubSpot, Salesforce, Databricks, or Snowflake. Credentials are encrypted and redacted.
+- **Input**: `name` (required), `system_type` (required), `auth_type` (required), `credentials`, `config`, `sync_settings`
+- **Output**: `{ system, event_id, mutation }`
+
+### sor_system_list
+List configured systems of record with health and credential status.
+- **Input**: `system_type`, `status`, `limit`, `cursor`
+- **Output**: `{ systems, next_cursor, total }`
+
+### sor_system_get
+Get one system connection with redacted configuration.
+- **Input**: `id` (required)
+- **Output**: `{ system }`
+
+### sor_system_update
+Update a connection, including encrypted credentials, sync settings, or status.
+- **Input**: `id` (required), `patch`
+- **Output**: `{ system, event_id, mutation }`
+
+### sor_system_delete
+Delete a connection and related mapping/sync metadata.
+- **Input**: `id` (required)
+- **Output**: `{ deleted, event_id }`
+
+### sor_system_test
+Validate credentials and test connectivity.
+- **Input**: `id` (required)
+- **Output**: `{ result }`
+
+### sor_discover
+Discover available objects or fields from a configured source.
+- **Input**: `system_id` (required), `object_name`
+- **Output**: `{ data }`
+
+### sor_mapping_upsert
+Create or update a mapping from an external object/table to a typed CRMy object.
+- **Input**: `system_id` (required), `object_type` (required), `external_object` (required), `external_id_field`, `watermark_field`, `field_mapping`, `readable_fields`, `writable_fields`, `source_authority`, `writeback_mode`, `writeback_config`, `allow_source_loop`, `is_active`
+- **Authority behavior**: `external` can update CRMy directly; `crmy`, `read_only`, and `approval_required` create conflicts instead of overwriting existing records; `bidirectional` updates only when CRMy has not diverged from the last synced value.
+- **Output**: `{ mapping, event_id, mutation }`
+
+### sor_mapping_list
+List mappings for systems of record.
+- **Input**: `system_id`, `object_type`, `is_active`, `limit`, `cursor`
+- **Output**: `{ mappings, next_cursor, total }`
+
+### sor_mapping_delete
+Delete a mapping when it should no longer sync or govern writebacks.
+- **Input**: `id` (required), `idempotency_key`
+- **Output**: `{ deleted, event_id }`
+
+### sor_sync_run
+Run a sync. Synced changes emit normal CRMy events with source metadata for Automations, Sequences, audit, and context extraction.
+- **Input**: `system_id` (required), `mapping_id`, `mode`
+- **Output**: `{ run }`
+
+### sor_sync_status
+List recent sync runs and status counts.
+- **Input**: `system_id`, `status`, `limit`, `cursor`
+- **Output**: `{ runs, next_cursor, total }`
+
+### sor_conflict_list
+List source/local conflicts.
+- **Input**: `system_id`, `status`, `object_type`, `object_id`, `limit`, `cursor`
+- **Output**: `{ conflicts, next_cursor, total }`
+
+### sor_conflict_resolve
+Resolve a conflict by choosing local, choosing external, or ignoring it.
+- **Input**: `id` (required), `resolution` (required), `note`
+- **Output**: `{ conflict, applied, event_id }`
+
+### sor_writeback_preview
+Preview an external writeback before creating a request.
+- **Input**: `system_id` (required), `mapping_id`, `object_type` (required), `external_object` (required), `external_record_id`, `operation` (required), `writeback_mode` (required), `payload`
+- **Output**: `{ preview }`
+
+### sor_writeback_request
+Create a governed external writeback request. High-risk writes enter approval-required status.
+- **Input**: `system_id` (required), `mapping_id`, `object_type` (required), `object_id`, `external_object` (required), `external_record_id`, `operation` (required), `writeback_mode` (required), `payload`, `require_approval`, `idempotency_key`
+- **Output**: `{ writeback, event_id, mutation }`
+- **Safety**: idempotency keys can be reused only for the same payload and target. Blocked policy results become rejected requests instead of approval tasks.
+
+### sor_writeback_review
+Approve or reject a governed external writeback request before execution. Approvals can also happen through the Handoffs queue when a linked HITL request exists.
+- **Input**: `id` (required), `decision` (`approved` or `rejected`), `note`, `idempotency_key`
+- **Output**: `{ writeback, event_id }`
+
+### sor_writeback_execute
+Execute an approved governed external writeback through its configured connector adapter.
+- **Input**: `id` (required), `idempotency_key`
+- **Output**: `{ writeback, event_id, mutation }`
+
+### sor_writeback_status
+List external writeback requests.
+- **Input**: `system_id`, `status`, `limit`, `cursor`
+- **Output**: `{ writebacks, next_cursor, total }`
+
 ## Meta Tools
 
 ### schema_get

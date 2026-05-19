@@ -13,7 +13,7 @@ export function buildSpec() {
     openapi: '3.1.0',
     info: {
       title: 'CRMy API',
-      version: '0.7.2',
+      version: '0.8.0',
       description:
         'The operational customer context backend for AI agents. MCP-native, PostgreSQL-backed, open source. ' +
         'All endpoints require `Authorization: Bearer <jwt-or-api-key>` except `/auth/register` and `/auth/login`.',
@@ -39,6 +39,7 @@ export function buildSpec() {
       { name: 'Custom Fields', description: 'Per-tenant field definitions for any object type' },
       { name: 'Notes', description: 'Threaded notes on any customer record' },
       { name: 'Workflows', description: 'Event-driven automation' },
+      { name: 'Systems of Record', description: 'Governed CRM and warehouse connections, sync, conflicts, and writebacks' },
       { name: 'Registries', description: 'Activity type and context type registries' },
       { name: 'Analytics', description: 'Pipeline summaries, forecasts, and use case reports' },
       { name: 'Events', description: 'Append-only audit log' },

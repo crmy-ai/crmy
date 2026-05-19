@@ -162,6 +162,27 @@ const TOOL_SCOPES: Record<string, string[]> = {
   workflow_run_replay: ['workflows:write'],
   workflow_template_list: ['workflows:read'],
 
+  // ── Systems of Record ──
+  sor_system_create: ['systems:admin'],
+  sor_system_update: ['systems:admin'],
+  sor_system_delete: ['systems:admin'],
+  sor_system_list: ['systems:read'],
+  sor_system_get: ['systems:read'],
+  sor_system_test: ['systems:admin'],
+  sor_discover: ['systems:read'],
+  sor_mapping_upsert: ['systems:admin'],
+  sor_mapping_delete: ['systems:admin'],
+  sor_mapping_list: ['systems:read'],
+  sor_sync_run: ['systems:write'],
+  sor_sync_status: ['systems:read'],
+  sor_conflict_list: ['systems:read'],
+  sor_conflict_resolve: ['systems:write'],
+  sor_writeback_preview: ['systems:write'],
+  sor_writeback_request: ['systems:write'],
+  sor_writeback_review: ['systems:write'],
+  sor_writeback_execute: ['systems:write'],
+  sor_writeback_status: ['systems:read'],
+
   // ── Registries ──
   activity_type_list: ['read'],
   context_type_list: ['read'],
@@ -227,7 +248,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
  * Check if an actor has the required scope. General 'read' grants all *:read,
  * and general 'write' grants all *:write.
  */
-function actorHasScope(actor: ActorContext, requiredScope: string): boolean {
+export function actorHasScope(actor: ActorContext, requiredScope: string): boolean {
   const scopes = actor.scopes;
   // No scopes defined = verified JWT user (full access). Constructed actors,
   // anonymous actors, and API-key actors must carry explicit scopes.
@@ -240,10 +261,16 @@ function actorHasScope(actor: ActorContext, requiredScope: string): boolean {
 
   // Direct match
   if (scopes.includes(requiredScope)) return true;
+  if (scopes.includes('*')) return true;
 
-  // General wildcard: 'read' covers any ':read', 'write' covers any ':write'
-  if (requiredScope.endsWith(':read') && scopes.includes('read')) return true;
-  if (requiredScope.endsWith(':write') && scopes.includes('write')) return true;
+  // General wildcard: 'read' covers normal ':read' scopes and 'write'
+  // covers normal ':write' scopes. Systems-of-record scopes are excluded
+  // because connector credentials, mappings, sync, and external writebacks
+  // should be granted explicitly to integration/operator actors.
+  if (!requiredScope.startsWith('systems:')) {
+    if (requiredScope.endsWith(':read') && scopes.includes('read')) return true;
+    if (requiredScope.endsWith(':write') && scopes.includes('write')) return true;
+  }
 
   return false;
 }

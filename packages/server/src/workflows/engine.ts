@@ -8,6 +8,7 @@ import type { WorkflowRow } from '../db/repos/workflows.js';
 import * as hitlRepo from '../db/repos/hitl.js';
 import { emitEvent } from '../events/emitter.js';
 import { interpolate, buildVariableContext, resolveConfig } from './variables.js';
+import { resolveSequenceGoalContactId } from '../services/sequence-executor.js';
 
 /** How many consecutive failures trigger a Handoffs alert (configurable via env) */
 const FAILURE_ALERT_THRESHOLD = Number(process.env.WORKFLOW_FAILURE_ALERT_THRESHOLD ?? 3);
@@ -52,6 +53,13 @@ export function createWorkflowEngine(db: DbPool): WorkflowEngine {
     async processEvent(tenantId, eventType, eventId, payload) {
       // Prevent recursive workflow triggers (workflow.* events don't re-trigger workflows)
       if (eventType.startsWith('workflow.')) return;
+      const metadata = payload && typeof payload === 'object' && 'metadata' in payload
+        ? (payload as { metadata?: unknown }).metadata
+        : undefined;
+      if (metadata && typeof metadata === 'object' && (metadata as { sync_mode?: unknown }).sync_mode === 'replay') {
+        console.info(`[workflow] Skipping replayed sync event_id=${eventId} event_type=${eventType}`);
+        return;
+      }
 
       const workflows = await getCachedWorkflows(db, tenantId, eventType);
 
@@ -192,14 +200,18 @@ export async function dryRunWorkflow(
   if (filter && Object.keys(filter).length > 0) {
     for (const [key, expected] of Object.entries(filter)) {
       const condition = expected as Record<string, unknown>;
+      const actual = getPathValue(payload, key);
       if (condition && typeof condition === 'object' && 'op' in condition) {
         const op = condition.op as string;
-        const actual = payload[key];
         let matched = false;
         switch (op) {
           case 'eq':          matched = actual === condition.value; break;
           case 'neq':         matched = actual !== condition.value; break;
-          case 'contains':    matched = String(actual ?? '').includes(String(condition.value ?? '')); break;
+          case 'contains':
+            matched = Array.isArray(actual)
+              ? actual.includes(condition.value)
+              : String(actual ?? '').includes(String(condition.value ?? ''));
+            break;
           case 'starts_with': matched = String(actual ?? '').startsWith(String(condition.value ?? '')); break;
           case 'gt':          matched = Number(actual) > Number(condition.value); break;
           case 'lt':          matched = Number(actual) < Number(condition.value); break;
@@ -209,8 +221,8 @@ export async function dryRunWorkflow(
         if (!matched) mismatches.push({ field: key, expected: condition, actual });
       } else {
         // Legacy equality
-        if (payload[key] !== expected) {
-          mismatches.push({ field: key, expected, actual: payload[key] });
+        if (actual !== expected) {
+          mismatches.push({ field: key, expected, actual });
         }
       }
     }
@@ -255,21 +267,34 @@ async function executeWithTimeout(fn: () => Promise<void>, timeoutMs: number): P
   ]);
 }
 
+function getPathValue(data: Record<string, unknown>, path: string): unknown {
+  if (!path.includes('.')) return data[path];
+  return path.split('.').reduce<unknown>((acc, key) => {
+    if (!acc || typeof acc !== 'object') return undefined;
+    return (acc as Record<string, unknown>)[key];
+  }, data);
+}
+
 // Extended filter matching with operator support
-function matchesFilter(filter: Record<string, unknown>, payload: unknown): boolean {
+export function matchesFilter(filter: Record<string, unknown>, payload: unknown): boolean {
   if (!filter || Object.keys(filter).length === 0) return true;
   if (!payload || typeof payload !== 'object') return false;
 
   const data = payload as Record<string, unknown>;
+
   for (const [key, expected] of Object.entries(filter)) {
     const condition = expected as Record<string, unknown>;
+    const actual = getPathValue(data, key);
     if (condition && typeof condition === 'object' && 'op' in condition) {
       const op = condition.op as string;
-      const actual = data[key];
       switch (op) {
         case 'eq':          if (actual !== condition.value) return false; break;
         case 'neq':         if (actual === condition.value) return false; break;
-        case 'contains':    if (!String(actual ?? '').includes(String(condition.value ?? ''))) return false; break;
+        case 'contains':
+          if (Array.isArray(actual)) {
+            if (!actual.includes(condition.value)) return false;
+          } else if (!String(actual ?? '').includes(String(condition.value ?? ''))) return false;
+          break;
         case 'starts_with': if (!String(actual ?? '').startsWith(String(condition.value ?? ''))) return false; break;
         case 'gt':          if (!(Number(actual) > Number(condition.value))) return false; break;
         case 'lt':          if (!(Number(actual) < Number(condition.value))) return false; break;
@@ -279,7 +304,7 @@ function matchesFilter(filter: Record<string, unknown>, payload: unknown): boole
       }
     } else {
       // Legacy: plain equality
-      if (data[key] !== expected) return false;
+      if (actual !== expected) return false;
     }
   }
   return true;
@@ -293,6 +318,18 @@ async function executeAction(
 ): Promise<void> {
   // Resolve template variables in all string config values
   const cfg = resolveConfig(action.config, variableContext) as Record<string, unknown>;
+  const parseObject = (value: unknown): Record<string, unknown> => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+    if (typeof value === 'string' && value.trim()) {
+      try {
+        const parsed = JSON.parse(value);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+      } catch {
+        return { body: value };
+      }
+    }
+    return {};
+  };
 
   switch (action.type) {
     case 'create_context_entry':
@@ -543,14 +580,74 @@ async function executeAction(
     }
     case 'enroll_in_sequence': {
       const sequenceId = String(cfg.sequence_id ?? '');
-      // Use explicit contact_id override, or resolve from variable context (contact.id / subject.id)
+      const eventPayload = payload as Record<string, unknown>;
+      const subjectId = (variableContext as Record<string, Record<string, unknown>>)?.subject?.id;
+      const subjectType = eventPayload?.object_type;
+      const metadata = eventPayload.metadata && typeof eventPayload.metadata === 'object'
+        ? eventPayload.metadata as Record<string, unknown>
+        : {};
+      const resolvedContactId = resolveSequenceGoalContactId({
+        objectType: typeof eventPayload.object_type === 'string' ? eventPayload.object_type : undefined,
+        objectId: typeof eventPayload.object_id === 'string' ? eventPayload.object_id : undefined,
+        afterData: eventPayload,
+        metadata,
+      });
+      // Use explicit contact_id override, resolved contact relationship, or
+      // subject.id only when the event subject itself is a contact.
       const contactId = String(
         cfg.contact_id ||
         (variableContext as Record<string, Record<string, unknown>>)?.contact?.id ||
-        (variableContext as Record<string, Record<string, unknown>>)?.subject?.id ||
+        resolvedContactId ||
+        eventPayload?.contact_id ||
+        (subjectType === 'contact' ? subjectId : '') ||
         '',
       );
       if (!sequenceId || !contactId) {
+        const origin = typeof metadata.origin === 'string' ? metadata.origin : undefined;
+        const isExternalOrigin = origin === 'crm_sync' || origin === 'warehouse_sync';
+        if (sequenceId && !contactId && isExternalOrigin) {
+          const actorRepo = await import('../db/repos/actors.js');
+          const assignmentRepo = await import('../db/repos/assignments.js');
+          const systemActor = await actorRepo.ensureActor(db, tenantId, {
+            actor_type: 'agent',
+            display_name: 'System Sync',
+            agent_identifier: 'system-sync',
+            agent_model: 'crmy-sync',
+            scopes: ['read', 'write'],
+          } as Parameters<typeof actorRepo.ensureActor>[2]);
+          const assignment = await assignmentRepo.createAssignment(db, tenantId, {
+            title: 'Resolve external contact before sequence enrollment',
+            description: 'An external system event matched this workflow, but CRMy could not resolve a contact to enroll. Review the source record, mapping, and external record reference.',
+            assignment_type: 'data_quality',
+            assigned_by: systemActor.id,
+            assigned_to: systemActor.id,
+            priority: 'normal',
+            context: 'Created by workflow sequence enrollment guard.',
+            metadata: {
+              reason: 'unresolved_external_contact_for_sequence',
+              sequence_id: sequenceId,
+              event_type: eventPayload.event_type,
+              object_type: eventPayload.object_type,
+              object_id: eventPayload.object_id,
+              metadata,
+            },
+          });
+          await emitEvent(db, {
+            tenantId,
+            eventType: 'assignment.created',
+            actorType: 'system',
+            objectType: 'assignment',
+            objectId: assignment.id,
+            afterData: assignment,
+            metadata: {
+              origin: 'workflow',
+              system_id: metadata.system_id,
+              system_type: metadata.system_type,
+              external_record_id: metadata.external_record_id,
+              conflict_state: 'open',
+            },
+          });
+        }
         console.warn('[workflow] enroll_in_sequence: missing sequence_id or resolvable contact_id — skipping');
         break;
       }
@@ -581,6 +678,105 @@ async function executeAction(
         objectType: 'sequence_enrollment',
         afterData: { sequence_id: sequenceId, contact_id: contactId, via: 'workflow' },
       });
+      break;
+    }
+    case 'request_external_writeback': {
+      const { requestExternalWriteback } = await import('../services/systems-of-record/index.js');
+      if (!cfg.payload) {
+        throw new Error('request_external_writeback requires a payload JSON object. Add a payload field instead of relying on action config values.');
+      }
+      const origin = (payload as Record<string, unknown>)?.metadata &&
+        typeof (payload as Record<string, unknown>).metadata === 'object'
+        ? ((payload as Record<string, unknown>).metadata as Record<string, unknown>).origin
+        : undefined;
+      const sourceSystemId = (payload as Record<string, unknown>)?.metadata &&
+        typeof (payload as Record<string, unknown>).metadata === 'object'
+        ? ((payload as Record<string, unknown>).metadata as Record<string, unknown>).system_id
+        : undefined;
+      if ((origin === 'crm_sync' || origin === 'warehouse_sync') && sourceSystemId === cfg.system_id && cfg.allow_source_loop !== true) {
+        console.warn('[workflow] request_external_writeback skipped to prevent source loop');
+        break;
+      }
+      const writeback = await requestExternalWriteback(db, tenantId, 'workflow', {
+        system_id: cfg.system_id as UUID,
+        mapping_id: cfg.mapping_id as UUID | undefined,
+        object_type: String(cfg.object_type ?? (payload as Record<string, unknown>)?.object_type ?? 'unknown'),
+        object_id: (cfg.object_id as UUID | undefined) ?? ((payload as Record<string, unknown>)?.id as UUID | undefined),
+        external_object: String(cfg.external_object ?? ''),
+        external_record_id: cfg.external_record_id as string | undefined,
+        operation: (cfg.operation as 'create' | 'update' | 'upsert' | 'append_event' | 'stored_procedure') ?? 'upsert',
+        writeback_mode: (cfg.writeback_mode as 'append_event' | 'mapped_upsert' | 'stored_procedure') ?? 'mapped_upsert',
+        payload: parseObject(cfg.payload),
+        require_approval: cfg.require_approval !== false,
+        idempotency_key: (cfg.idempotency_key as string | undefined)
+          ?? [
+            'workflow',
+            String((payload as Record<string, unknown>)?.event_id ?? 'manual'),
+            String(cfg.system_id ?? 'system'),
+            String(cfg.external_object ?? 'object'),
+            String(cfg.operation ?? 'upsert'),
+          ].join(':'),
+      });
+      await emitEvent(db, {
+        tenantId,
+        eventType: 'workflow.action.request_external_writeback',
+        actorType: 'system',
+        objectType: 'external_writeback',
+        objectId: writeback.id,
+        afterData: writeback,
+        metadata: { origin: 'workflow', system_id: writeback.system_id, external_record_id: writeback.external_record_id },
+      });
+      break;
+    }
+    case 'run_system_sync': {
+      const { runSystemSync } = await import('../services/systems-of-record/index.js');
+      const run = await runSystemSync(db, tenantId, {
+        system_id: cfg.system_id as UUID,
+        mapping_id: cfg.mapping_id as UUID | undefined,
+        mode: (cfg.mode as 'test' | 'full' | 'incremental' | 'replay') ?? 'incremental',
+      });
+      await emitEvent(db, {
+        tenantId,
+        eventType: 'workflow.action.run_system_sync',
+        actorType: 'system',
+        objectType: 'external_sync_run',
+        objectId: run.id,
+        afterData: run,
+        metadata: { origin: 'workflow', system_id: run.system_id, sync_run_id: run.id },
+      });
+      break;
+    }
+    case 'create_sync_conflict_review': {
+      const hitlRepo = await import('../db/repos/hitl.js');
+      await hitlRepo.createHITLRequest(db, tenantId, {
+        agent_id: 'workflow',
+        action_type: 'sync.conflict.review',
+        action_summary: String(cfg.title ?? 'Review system-of-record sync conflict'),
+        action_payload: { ...cfg, event_payload: payload },
+        priority: (cfg.priority as 'low' | 'normal' | 'high' | 'urgent' | undefined) ?? 'normal',
+      });
+      break;
+    }
+    case 'create_context_from_external_change': {
+      const { createContextEntry } = await import('../db/repos/context-entries.js');
+      const actorRepo = await import('../db/repos/actors.js');
+      const systemActor = await actorRepo.ensureActor(db, tenantId, {
+        actor_type: 'agent',
+        display_name: 'System Sync',
+        agent_identifier: 'system-sync',
+        agent_model: 'crmy-sync',
+        scopes: ['read', 'write'],
+      } as Parameters<typeof actorRepo.ensureActor>[2]);
+      await createContextEntry(db, tenantId, {
+        subject_type: String(cfg.subject_type ?? (payload as Record<string, unknown>)?.object_type),
+        subject_id: String(cfg.subject_id ?? (payload as Record<string, unknown>)?.id),
+        context_type: String(cfg.context_type ?? 'external_update'),
+        title: cfg.title as string | undefined,
+        body: String(cfg.body ?? cfg.message ?? 'External system update received.'),
+        confidence: Number(cfg.confidence ?? 0.8),
+        source: 'external_sync',
+        authored_by: systemActor.id,
+      } as Parameters<typeof createContextEntry>[2]);
       break;
     }
     case 'hitl_checkpoint': {

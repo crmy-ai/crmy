@@ -57,6 +57,18 @@ export async function getAccount(db: DbPool, tenantId: UUID, id: UUID): Promise<
   return (result.rows[0] as Account) ?? null;
 }
 
+export async function getAccountByDomain(db: DbPool, tenantId: UUID, domain: string): Promise<Account | null> {
+  const normalized = domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+  if (!normalized) return null;
+  const result = await db.query(
+    `SELECT * FROM accounts
+     WHERE tenant_id = $1 AND lower(domain) = $2 AND merged_into IS NULL
+     LIMIT 1`,
+    [tenantId, normalized],
+  );
+  return (result.rows[0] as Account) ?? null;
+}
+
 export async function getAccountContacts(db: DbPool, tenantId: UUID, accountId: UUID): Promise<Contact[]> {
   const result = await db.query(
     'SELECT * FROM contacts WHERE account_id = $1 AND tenant_id = $2 AND merged_into IS NULL ORDER BY created_at DESC',

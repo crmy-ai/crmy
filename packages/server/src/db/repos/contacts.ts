@@ -58,6 +58,18 @@ export async function getContact(db: DbPool, tenantId: UUID, id: UUID): Promise<
   return (result.rows[0] as Contact) ?? null;
 }
 
+export async function getContactByEmail(db: DbPool, tenantId: UUID, email: string): Promise<Contact | null> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+  const result = await db.query(
+    `SELECT * FROM contacts
+     WHERE tenant_id = $1 AND lower(email) = $2 AND merged_into IS NULL
+     LIMIT 1`,
+    [tenantId, normalized],
+  );
+  return (result.rows[0] as Contact) ?? null;
+}
+
 export async function searchContacts(
   db: DbPool,
   tenantId: UUID,

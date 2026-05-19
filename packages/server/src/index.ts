@@ -265,7 +265,7 @@ export async function createApp(config: ServerConfig) {
   const { processNextBatch: processContextOutbox } = await import('./workers/context_ingestion_worker.service.js');
   const { checkHitlSlaExpiry } = await import('./hitl/sla-checker.js');
   const { refreshStaleScores } = await import('./services/scoring.js');
-  const { processSequenceDue, handleSequenceGoalEvent } = await import('./services/sequence-executor.js');
+  const { processSequenceDue, handleSequenceGoalEvent, resolveSequenceGoalContactId } = await import('./services/sequence-executor.js');
   const { refreshSequenceAnalytics } = await import('./services/sequence-analytics.js');
   const hitlInterval = setInterval(async () => {
     try {
@@ -306,14 +306,26 @@ export async function createApp(config: ServerConfig) {
   const { registerHitlNotificationHandler } = await import('./hitl/notification-handler.js');
   registerHitlNotificationHandler(db);
 
+  // Register Systems of Record writeback approval/rejection handler
+  const { registerSystemsOfRecordHitlHandler } = await import('./services/systems-of-record/hitl-handler.js');
+  registerSystemsOfRecordHitlHandler(db);
+
   // Wire workflow engine to event bus — workflows trigger on emitted events
   const { createWorkflowEngine } = await import('./workflows/engine.js');
   const workflowEngine = createWorkflowEngine(db);
   eventBus.on('crmy:event', (event) => {
     // Skip workflow-generated events to prevent infinite loops
     if (event.eventType.startsWith('workflow.')) return;
+    const workflowPayload = {
+      ...((event.afterData && typeof event.afterData === 'object') ? event.afterData as Record<string, unknown> : { value: event.afterData }),
+      event_type: event.eventType,
+      event_id: event.event_id,
+      object_type: event.objectType,
+      object_id: event.objectId,
+      metadata: event.metadata ?? {},
+    };
     workflowEngine
-      .processEvent(event.tenantId, event.eventType, event.event_id, event.afterData)
+      .processEvent(event.tenantId, event.eventType, event.event_id, workflowPayload)
       .catch((err) => console.error('[workflow] processEvent error:', err));
   });
 
@@ -337,7 +349,12 @@ export async function createApp(config: ServerConfig) {
 
   // Wire sequence goal-event detection to event bus
   eventBus.on('crmy:event', (event) => {
-    const contactId = (event.afterData as any)?.contact_id ?? (event.afterData as any)?.id;
+    const contactId = resolveSequenceGoalContactId({
+      objectType: event.objectType,
+      objectId: event.objectId,
+      afterData: event.afterData,
+      metadata: event.metadata ?? {},
+    });
     if (contactId) {
       handleSequenceGoalEvent(db, event.tenantId, event.eventType, contactId)
         .catch((err) => console.error('[sequences] goal-event error:', err));
@@ -502,6 +519,18 @@ async function main() {
 
   const server = app.listen(config.port, () => {
     console.log(`crmy server ready on :${config.port}`);
+  });
+  server.on('error', async (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Could not start CRMy server: port ${config.port} is already in use. Stop the other CRMy server process or set PORT to another value.`);
+    } else {
+      console.error('Could not start CRMy server:', err.message);
+    }
+    clearInterval(hitlInterval);
+    stopRetryLoop();
+    await shutdownPlugins();
+    await closePool();
+    process.exit(1);
   });
 
   // Graceful shutdown

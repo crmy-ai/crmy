@@ -93,6 +93,27 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   workflow_delete: { method: 'DELETE', path: (i) => `/api/v1/workflows/${i.id}` },
   workflow_run_list: { method: 'GET', path: (i) => `/api/v1/workflows/${i.workflow_id ?? i.id}/runs` },
 
+  // Systems of Record
+  sor_system_create: { method: 'POST', path: () => '/api/v1/systems-of-record' },
+  sor_system_update: { method: 'PATCH', path: (i) => `/api/v1/systems-of-record/${i.id}` },
+  sor_system_delete: { method: 'DELETE', path: (i) => `/api/v1/systems-of-record/${i.id}` },
+  sor_system_list: { method: 'GET', path: (i) => `/api/v1/systems-of-record?limit=${i.limit ?? 20}${i.system_type ? `&system_type=${i.system_type}` : ''}${i.status ? `&status=${i.status}` : ''}` },
+  sor_system_get: { method: 'GET', path: (i) => `/api/v1/systems-of-record/${i.id}` },
+  sor_system_test: { method: 'POST', path: (i) => `/api/v1/systems-of-record/${i.id}/test` },
+  sor_discover: { method: 'GET', path: (i) => `/api/v1/systems-of-record/${i.system_id}/discover${i.object_name ? `?object_name=${encodeURIComponent(i.object_name as string)}` : ''}` },
+  sor_mapping_list: { method: 'GET', path: (i) => `/api/v1/systems-of-record/mappings/list?limit=${i.limit ?? 20}${i.system_id ? `&system_id=${i.system_id}` : ''}${i.object_type ? `&object_type=${i.object_type}` : ''}` },
+  sor_mapping_upsert: { method: 'POST', path: () => '/api/v1/systems-of-record/mappings' },
+  sor_mapping_delete: { method: 'DELETE', path: (i) => `/api/v1/systems-of-record/mappings/${i.id}` },
+  sor_sync_run: { method: 'POST', path: (i) => `/api/v1/systems-of-record/${i.system_id}/sync` },
+  sor_sync_status: { method: 'GET', path: (i) => `/api/v1/systems-of-record/sync-runs/list?limit=${i.limit ?? 20}${i.system_id ? `&system_id=${i.system_id}` : ''}${i.status ? `&status=${i.status}` : ''}` },
+  sor_conflict_list: { method: 'GET', path: (i) => `/api/v1/systems-of-record/conflicts/list?limit=${i.limit ?? 20}${i.system_id ? `&system_id=${i.system_id}` : ''}${i.status ? `&status=${i.status}` : ''}` },
+  sor_conflict_resolve: { method: 'POST', path: (i) => `/api/v1/systems-of-record/conflicts/${i.id}/resolve` },
+  sor_writeback_preview: { method: 'POST', path: () => '/api/v1/systems-of-record/writebacks/preview' },
+  sor_writeback_request: { method: 'POST', path: () => '/api/v1/systems-of-record/writebacks' },
+  sor_writeback_review: { method: 'POST', path: (i) => `/api/v1/systems-of-record/writebacks/${i.id}/review` },
+  sor_writeback_execute: { method: 'POST', path: (i) => `/api/v1/systems-of-record/writebacks/${i.id}/execute` },
+  sor_writeback_status: { method: 'GET', path: (i) => `/api/v1/systems-of-record/writebacks/list?limit=${i.limit ?? 20}${i.system_id ? `&system_id=${i.system_id}` : ''}${i.status ? `&status=${i.status}` : ''}` },
+
   // Events
   event_search: { method: 'GET', path: (i) => `/api/v1/events?${i.object_id ? `object_id=${i.object_id}&` : ''}limit=${i.limit ?? 20}` },
 
