@@ -19,11 +19,11 @@ import {
   useEmails,
   useRawContextSources,
   useReprocessRawContextSource,
+  useSignalGroups,
   useSystemSyncRuns,
 } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { toast } from '@/hooks/use-toast';
-import { SeedSampleDataButton } from '@/components/crm/OnboardingEmptyState';
 
 type ObservationStatus = 'Processed' | 'Needs review' | 'No context found' | 'Failed';
 type ObservationSource = 'activity' | 'inbound_email' | 'outbound_email' | 'system_sync' | 'add_context' | 'mcp' | 'context_api';
@@ -223,6 +223,7 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
   const rawSourcesQ = useRawContextSources({ limit: 100 }) as any;
   const memoryQ = useContextEntries({ memory_status: 'active', limit: 100 }) as any;
   const signalsQ = useContextEntries({ memory_status: 'signal', limit: 100 }) as any;
+  const signalGroupsQ = useSignalGroups({ attention_only: true, limit: 1 }) as any;
   const staleQ = useContextEntries({ is_current: false, limit: 100 }) as any;
 
   const activities: any[] = activitiesQ.data?.data ?? [];
@@ -411,28 +412,12 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
     return days;
   }, [rows]);
 
-  const isLoading = activitiesQ.isLoading || outboundQ.isLoading || rawSourcesQ.isLoading || memoryQ.isLoading || signalsQ.isLoading;
+  const signalReviewTotal = Number(signalGroupsQ.data?.total ?? 0);
+  const isLoading = activitiesQ.isLoading || outboundQ.isLoading || rawSourcesQ.isLoading || memoryQ.isLoading || signalsQ.isLoading || signalGroupsQ.isLoading;
   const hasFilters = sourceFilter !== 'all' || statusFilter !== 'all' || query.trim().length > 0;
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6 space-y-4 md:space-y-6">
-      <div className="flex flex-col gap-3 rounded-2xl border border-[#0ea5e9]/20 bg-[#0ea5e9]/10 p-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="font-display font-bold text-foreground">Add Raw Context</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Paste notes, transcripts, emails, research, or source updates. CRMy turns them into Signals and trusted Memory.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onAddContext}
-          className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#0ea5e9]/80 px-4 text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md disabled:opacity-50"
-        >
-          <Plus className="h-4 w-4" />
-          Add Context
-        </button>
-      </div>
-
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="rounded-2xl border border-border bg-card p-4 md:p-5 shadow-sm lg:col-span-2">
           <div className="mb-4">
@@ -441,7 +426,7 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <OutcomeCard label="Memory available" value={Number(memoryQ.data?.total ?? 0)} detail="Confirmed context agents can rely on." tone="border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" />
-            <OutcomeCard label="Signals need attention" value={Number(signalsQ.data?.total ?? 0)} detail="Inferred context waiting for Memory, dismissal, or more evidence." tone="border-violet-500/20 bg-violet-500/10 text-violet-500" />
+            <OutcomeCard label="Signals needing review" value={signalReviewTotal} detail="Corroborated Signals waiting for Memory, dismissal, or more evidence." tone="border-violet-500/20 bg-violet-500/10 text-violet-500" />
             <OutcomeCard label="Memory Needs Review" value={Number(staleQ.data?.total ?? staleEntries.length)} detail="Current Memory that needs reconfirmation or retirement." tone="border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400" />
             <OutcomeCard label="Failed sources" value={failedRows} detail="Recent rows with failed source processing or delivery." tone="border-destructive/20 bg-destructive/10 text-destructive" />
           </div>
@@ -491,7 +476,17 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
             <h2 className="font-display font-bold text-foreground">Recent Sources</h2>
             <p className="mt-1 text-sm text-muted-foreground">Activities, emails, systems, MCP/API writes, and imports that produced or attempted context.</p>
           </div>
-          {isLoading && <Clock className="h-4 w-4 animate-pulse text-muted-foreground" />}
+          <div className="flex flex-shrink-0 items-center gap-2">
+            {isLoading && <Clock className="h-4 w-4 animate-pulse text-muted-foreground" />}
+            <button
+              type="button"
+              onClick={onAddContext}
+              className="inline-flex h-9 items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[#0ea5e9] to-[#0ea5e9]/80 px-4 text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4" />
+              Add Context
+            </button>
+          </div>
         </div>
         <div className="mb-4 flex flex-col gap-2 lg:flex-row">
           <div className="relative flex-1">
@@ -554,7 +549,6 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
                   <Plus className="h-4 w-4" />
                   Add Context
                 </button>
-                <SeedSampleDataButton className="bg-card" />
               </div>
             )}
           </div>

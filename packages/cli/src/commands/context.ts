@@ -42,7 +42,7 @@ function printProcessingReceipt(data: Record<string, unknown>): void {
 
 function printSignalGroups(groups: Record<string, unknown>[], total?: number, limit = 20): void {
   if (groups.length === 0) {
-    console.log('No Signal Groups found.');
+    console.log('No Signals found.');
     return;
   }
   console.table(groups.map((g) => ({
@@ -55,7 +55,7 @@ function printSignalGroups(groups: Record<string, unknown>[], total?: number, li
     sources: g.independent_source_count ?? 0,
     conflicts: g.conflict_count ?? 0,
   })));
-  if (total && total > limit) console.log(`\n  Showing ${limit} of ${total} groups`);
+  if (total && total > limit) console.log(`\n  Showing ${limit} of ${total} Signals`);
 }
 
 export function contextCommand(): Command {
@@ -186,7 +186,7 @@ export function contextCommand(): Command {
     });
 
   cmd.command('signal-groups')
-    .description('List grouped, evidence-backed Signal claims')
+    .description('List evidence-backed Signals with combined source support')
     .option('--subject <type:id>', 'Filter by subject')
     .option('--status <status>', 'Filter by status (gathering, ready, blocked, conflicting, promoted, dismissed)')
     .option('--all', 'Include groups that do not need attention')
@@ -208,22 +208,32 @@ export function contextCommand(): Command {
     });
 
   cmd.command('promote-group <id>')
-    .description('Promote a trusted Signal Group into confirmed Memory')
+    .description('Promote a trusted Signal into confirmed Memory')
     .action(async (id) => {
       const client = await getClient();
       const result = await client.call('context_signal_group_promote', { id });
       const data = JSON.parse(result);
-      console.log(`\n  Promoted Signal Group to Memory: ${data.context_entry?.id ?? id}\n`);
+      console.log(`\n  Promoted Signal to Memory: ${data.context_entry?.id ?? id}\n`);
       await client.close();
     });
 
   cmd.command('reject-group <id>')
-    .description('Dismiss a Signal Group while preserving evidence for audit')
+    .description('Dismiss a Signal while preserving evidence for audit')
     .option('-r, --reason <reason>', 'Reason for rejection')
     .action(async (id, opts) => {
       const client = await getClient();
       await client.call('context_signal_group_reject', { id, reason: opts.reason });
-      console.log(`\n  Rejected Signal Group: ${id}\n`);
+      console.log(`\n  Rejected Signal: ${id}\n`);
+      await client.close();
+    });
+
+  cmd.command('handoff-group <id>')
+    .description('Send a Signal to Handoff for human review')
+    .action(async (id) => {
+      const client = await getClient();
+      const result = await client.call('context_signal_handoff', { id });
+      const data = JSON.parse(result);
+      console.log(`\n  Created Handoff for Signal: ${data.hitl_request?.id ?? id}\n`);
       await client.close();
     });
 

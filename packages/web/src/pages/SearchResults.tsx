@@ -46,12 +46,12 @@ export function SearchResultsPage() {
     },
     {
       key: 'accounts',
-      label: 'Companies',
+      label: 'Accounts',
       icon: Building2,
       color: ENTITY_COLORS.accounts.text,
       items: data?.accounts ?? [],
-      open: item => { navigate('/companies'); openDrawer('account', item.id); },
-      title: item => item.name ?? item.domain ?? 'Unnamed company',
+      open: item => { navigate('/accounts'); openDrawer('account', item.id); },
+      title: item => item.name ?? item.domain ?? 'Unnamed account',
       detail: item => item.domain ?? item.industry ?? '',
     },
     {
@@ -127,7 +127,7 @@ export function SearchResultsPage() {
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <Search className="w-8 h-8 text-muted-foreground/40 mb-3" />
             <p className="text-sm font-semibold text-foreground">No results found</p>
-            <p className="text-sm text-muted-foreground mt-1">Try a customer name, company domain, email, deal, context phrase, or assignment title.</p>
+            <p className="text-sm text-muted-foreground mt-1">Try a customer name, account domain, email, deal, context phrase, or assignment title.</p>
           </div>
         ) : (
           <div className="space-y-5">

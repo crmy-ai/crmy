@@ -816,7 +816,9 @@ export default function AgentSettings() {
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-medium text-foreground">Auto-promote high-confidence Signals</p>
-                <p className="text-xs text-muted-foreground">CRMy can turn very confident extracted Signals into Memory automatically.</p>
+                <p className="text-xs text-muted-foreground">
+                  CRMy can turn trusted Signals into Memory when confidence, source trust, evidence, and policy checks pass.
+                </p>
               </div>
               <Switch
                 checked={autoPromoteSignals}
@@ -838,7 +840,7 @@ export default function AgentSettings() {
                   <div>
                     <p className="text-xs font-semibold text-foreground">Promotion threshold</p>
                     <p className="text-xs text-muted-foreground">
-                      Lower is faster. Higher is safer. Items below this stay in Signals for review.
+                      Higher threshold means safer promotion and more review. Lower threshold means faster, more automatic Memory.
                     </p>
                   </div>
                   <span className="text-sm font-semibold text-primary tabular-nums">{Math.round(signalPromotionThreshold * 100)}%</span>
@@ -881,6 +883,17 @@ export default function AgentSettings() {
                   <span>Faster</span>
                   <span>Safer</span>
                 </div>
+                <div className="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
+                  Trust scores combine extracted confidence, source trust, supporting evidence, independent sources, and conflicts. Items below this threshold stay as Signals unless a user promotes them or sends them to Handoff.
+                </div>
+                <details className="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
+                  <summary className="cursor-pointer font-semibold text-foreground">Advanced source trust defaults</summary>
+                  <div className="mt-3 space-y-2">
+                    <p><span className="font-medium text-foreground">High trust:</span> activities, transcripts, email, CRM sync, and warehouse sync.</p>
+                    <p><span className="font-medium text-foreground">Medium trust:</span> MCP, Slack, support, product usage, and manual Add Context.</p>
+                    <p><span className="font-medium text-foreground">Lower trust:</span> research and external sources.</p>
+                  </div>
+                </details>
               </div>
             )}
           </div>
@@ -890,7 +903,7 @@ export default function AgentSettings() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-foreground">Allow agent to write revenue objects</p>
-                <p className="text-xs text-muted-foreground">Agent can create and edit contacts, companies, opportunities, and related state</p>
+                <p className="text-xs text-muted-foreground">Agent can create and edit contacts, accounts, opportunities, and related state</p>
               </div>
               <Switch
                 checked={canWriteObjects}

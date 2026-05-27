@@ -30,7 +30,7 @@ export async function seedDefaults(db: DbPool, tenantId: UUID): Promise<void> {
     await db.query(
       `INSERT INTO activity_type_registry (type_name, tenant_id, label, description, category, is_default)
        VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (type_name) DO NOTHING`,
+       ON CONFLICT (tenant_id, type_name) DO NOTHING`,
       [entry.type_name, tenantId, entry.label, entry.description ?? null, entry.category, true],
     );
   }

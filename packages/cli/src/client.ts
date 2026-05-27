@@ -146,6 +146,7 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   context_signal_group_get: { method: 'GET', path: (i) => `/api/v1/context/signal-groups/${i.id}` },
   context_signal_group_promote: { method: 'POST', path: (i) => `/api/v1/context/signal-groups/${i.id}/promote` },
   context_signal_group_reject: { method: 'POST', path: (i) => `/api/v1/context/signal-groups/${i.id}/reject` },
+  context_signal_handoff: { method: 'POST', path: (i) => `/api/v1/context/signal-groups/${i.id}/handoff` },
   context_supersede: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/supersede` },
   context_search: { method: 'GET', path: (i) => `/api/v1/context/search?q=${encodeURIComponent(i.query as string)}&limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.context_type ? `&context_type=${i.context_type}` : ''}${i.tag ? `&tag=${i.tag}` : ''}${i.current_only === false ? '&current_only=false' : ''}` },
   context_review: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/review` },

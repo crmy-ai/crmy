@@ -535,6 +535,13 @@ Approve or reject a request.
 
 ## Context Engine Tools
 
+Use these tools with the Active Context / Memory distinction in mind:
+
+- **Retrieval tools** load persistent Memory and related customer state into the model's temporary Active Context: `briefing_get`, `context_search`, `context_semantic_search`, `context_get`, `context_list`, `context_lineage_get`, and `context_diff`.
+- **Ingestion tools** accept Raw Context and let CRMy extract evidence-backed Signals: `context_ingest_auto`, `context_ingest`, and `context_extract`.
+- **Promotion tools** turn trusted Signals into Current Memory: `context_signal_group_promote` and `context_signal_promote`.
+- **Governance tools** keep Memory safe to act on: Handoff, stale review, rejection, supersession, and review tools.
+
 ### context_add
 Advanced direct write for Current Memory or an evidence-backed Signal about a customer record. For raw transcripts, emails, meeting notes, research, or other messy input, use `context_ingest_auto` or `context_ingest` so CRMy records Raw Context, extracts Signals, and promotes high-confidence Memory.
 - **Input**: `subject_type` (required), `subject_id` (required), `context_type` (required), `body` (required), `title`, `confidence` (0.0–1.0), `memory_status`, `evidence`, `tags`, `valid_until`, `structured_data`, `source_activity_id`, `source`, `source_ref`
@@ -580,10 +587,22 @@ Inspect one corroborated Signal with supporting/conflicting source evidence.
 - **Input**: `id` (required)
 - **Output**: `{ signal_group }`
 
+### context_lineage_get
+Trace Raw Context through Signals, Memory, Handoffs, governed writebacks, and audit events.
+- **Input**: one of `subject_type` + `subject_id`, `context_entry_id`, `signal_group_id`, or `raw_context_source_id`
+- **Output**: `{ lineage: { nodes, edges, summary } }`
+- **Use when**: an agent needs to explain why a Memory exists, what evidence supports it, whether a human reviewed it, or whether it produced a system-of-record writeback. Lineage is provenance; it is not the same as the model's current Active Context.
+
 ### context_signal_group_promote
 Promote a trusted corroborated Signal into Current Memory.
 - **Input**: `id` (required)
 - **Output**: `{ signal_group, context_entry, mutation }`
+
+### context_signal_handoff
+Route a Signal to Handoff when policy, conflict, or risk requires human review before it becomes Memory.
+- **Input**: `id` (required)
+- **Output**: `{ signal_group, hitl_request, mutation }`
+- **Use when**: the Signal is useful but should not yet guide forecast, customer engagement, assignment, or system-of-record writeback without approval.
 
 ### context_signal_group_reject
 Dismiss a corroborated Signal while preserving evidence for audit.
@@ -655,6 +674,7 @@ Get a unified briefing for any customer record — assembles the record, related
 - **Input**: `subject_type` (required), `subject_id` (required), `since`, `context_types`, `include_stale`, `format` (`"json"` | `"text"`), `context_radius` (`"direct"` | `"adjacent"` | `"account_wide"`, default `"direct"`), `token_budget`
 - **Output (json)**: `{ briefing: { record, related, activities, open_assignments, context, stale_warnings, adjacent_context?, token_estimate, truncated?, dropped_entries? } }`
 - **Output (text)**: `{ briefing_text }` — a formatted string ready for prompt injection
+- **Active Context**: this is the main retrieval tool for moving persistent Memory and relevant Signals into the model's current working set before action.
 - **Note**: `token_budget` enables priority-ranked, budget-constrained packing. Entries are scored by `effective_confidence × priority_weight` (with per-type half-life decay) and greedily packed. Pass `context_radius: "adjacent"` or `"account_wide"` to pull in context from related entities. When entries are dropped due to budget exhaustion, `dropped_entries` summarizes what was cut (context_type, title, confidence) so agents can request specific entries via `context_get`.
 
 ## Actor Tools

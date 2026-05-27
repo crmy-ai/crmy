@@ -138,7 +138,7 @@ async function parseOpenAIStream(
             });
           } else {
             if (tcd.id) existing.id = tcd.id;
-            if (tcd.function?.name) existing.name += tcd.function.name;
+            if (tcd.function?.name) existing.name = mergeToolNameChunk(existing.name, tcd.function.name);
             if (tcd.function?.arguments) existing.arguments += tcd.function.arguments;
           }
         }
@@ -152,4 +152,23 @@ async function parseOpenAIStream(
   }
 
   return { content: fullText, tool_calls };
+}
+
+function mergeToolNameChunk(existing: string, chunk: string): string {
+  if (!chunk) return existing;
+  if (!existing) return chunk;
+
+  // Some OpenAI-compatible providers repeat the full function name in multiple
+  // deltas instead of streaming only the missing suffix. Treat exact or prefix
+  // repeats as replacement/no-op, while still supporting true incremental chunks.
+  if (existing === chunk) return existing;
+  if (chunk.startsWith(existing)) return chunk;
+  if (existing.endsWith(chunk)) return existing;
+
+  let overlap = 0;
+  const max = Math.min(existing.length, chunk.length);
+  for (let size = 1; size <= max; size += 1) {
+    if (existing.slice(-size) === chunk.slice(0, size)) overlap = size;
+  }
+  return existing + chunk.slice(overlap);
 }

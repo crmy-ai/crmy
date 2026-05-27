@@ -4,6 +4,8 @@ An agent that runs before every outreach action. It pulls a briefing, checks for
 
 **What you will build:** A pre-send pipeline that ensures every outreach message is grounded in current customer context, respects contact preferences, and gets human approval when the stakes are high.
 
+The agent should treat the briefing as Active Context: the temporary working set of Memory, Signals, recent activity, and tool results it can safely use while drafting.
+
 **Prerequisites:**
 
 - A running CRMy instance with demo data seeded (`crmy seed-demo`)

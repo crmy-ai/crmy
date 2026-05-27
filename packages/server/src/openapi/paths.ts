@@ -642,7 +642,7 @@ registry.registerPath({
   security: bearer,
   request: {
     query: z.object({
-      status: z.enum(['gathering', 'ready', 'promoted', 'blocked', 'dismissed', 'conflicting']).optional(),
+      status: z.enum(['gathering', 'ready', 'promoted', 'blocked', 'dismissed', 'conflicting', 'merged']).optional(),
       subject_type: S.subjectType.optional(),
       subject_id: S.uuid.optional(),
       context_type: z.string().optional(),
@@ -652,6 +652,23 @@ registry.registerPath({
     }),
   },
   responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/context/lineage',
+  tags: ['Context'],
+  summary: 'Trace Raw Context through Signals, Memory, Handoffs, writebacks, and audit',
+  security: bearer,
+  request: {
+    query: z.object({
+      subject_type: S.subjectType.optional(),
+      subject_id: S.uuid.optional(),
+      context_entry_id: S.uuid.optional(),
+      signal_group_id: S.uuid.optional(),
+      raw_context_source_id: S.uuid.optional(),
+    }),
+  },
+  responses: { 200: ok(GenericObject), 401: err401 },
 });
 
 registry.registerPath({

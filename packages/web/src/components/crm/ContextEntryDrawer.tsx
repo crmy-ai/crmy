@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { formatDistanceToNow, format, isPast, addDays } from 'date-fns';
 import {
   Sheet,
@@ -26,7 +27,7 @@ import {
   Bot, UserCircle2, Clock, Tag, ExternalLink,
   ChevronDown, ChevronRight, Copy, CheckCircle2,
   AlertTriangle, RefreshCcw, Trash2, Edit3,
-  ShieldCheck, Activity,
+  ShieldCheck, Activity, GitBranch,
 } from 'lucide-react';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -399,6 +400,15 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
           {/* Claim */}
           <Section title={isSignal ? 'Claim (Signal)' : 'Claim (Memory)'} defaultOpen>
             <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{entry.body}</p>
+            <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
+              isSignal
+                ? 'border-violet-500/20 bg-violet-500/10 text-violet-700 dark:text-violet-300'
+                : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+            }`}>
+              {isSignal
+                ? 'Signals are inferred claims. Promote them to Memory before agents use them for operational decisions.'
+                : 'Memory is persistent customer context. Agents retrieve it into Active Context through briefings and search before they act.'}
+            </div>
             {structuredDataKeys.length > 0 && (
               <div className="mt-3 rounded-lg border border-border overflow-hidden">
                 {structuredDataKeys.map(k => (
@@ -715,6 +725,18 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
 
             {/* Spacer */}
             <div className="flex-1" />
+
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+              asChild
+            >
+              <Link to={`/context?tab=lineage&context_entry_id=${entry.id}`}>
+                <GitBranch className="w-3.5 h-3.5" />
+                View Lineage
+              </Link>
+            </Button>
 
             {/* Copy ID */}
             <Button

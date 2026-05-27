@@ -306,6 +306,23 @@ function getAvailableTools(db: DbPool, scopes: string[]): { defs: AgentToolDef[]
   return { defs, handlers };
 }
 
+function normalizeToolCallName(name: string, handlers: Map<string, ToolDef>): string {
+  if (handlers.has(name)) return name;
+
+  // Defensive repair for OpenAI-compatible providers that repeat the complete
+  // function name while streaming, e.g. entity_resolveentity_resolve.
+  if (name.length % 2 === 0) {
+    const half = name.slice(0, name.length / 2);
+    if (half + half === name && handlers.has(half)) return half;
+  }
+
+  for (const toolName of handlers.keys()) {
+    if (name === `${toolName}${toolName}`) return toolName;
+  }
+
+  return name;
+}
+
 // ── Zod → JSON Schema ────────────────────────────────────────────────────────
 
 /**
@@ -723,15 +740,20 @@ export async function runAgentTurn(
       return history;
     }
 
+    const toolCalls = result.tool_calls.map(tc => ({
+      ...tc,
+      name: normalizeToolCallName(tc.name, handlers),
+    }));
+
     // Record the assistant message with tool calls
     history.push({
       role: 'assistant',
       content: result.content,
-      tool_calls: result.tool_calls,
+      tool_calls: toolCalls,
     });
 
     // Execute each tool call
-    for (const tc of result.tool_calls) {
+    for (const tc of toolCalls) {
       let args: Record<string, unknown>;
       try {
         args = JSON.parse(tc.arguments);

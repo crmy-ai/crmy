@@ -4,6 +4,8 @@ An agent that runs before renewal or expansion reviews. It assembles account-wid
 
 **What you will build:** A renewal risk workflow that turns scattered activities, context entries, assignments, and opportunity state into an auditable renewal plan.
 
+This recipe treats `briefing_get` as the retrieval step: it loads persistent Memory and relevant Signals into the agent's temporary Active Context before the agent reasons or writes anything.
+
 **Prerequisites:**
 
 - A running CRMy instance with demo data seeded (`crmy seed-demo`)

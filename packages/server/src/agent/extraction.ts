@@ -17,15 +17,19 @@
  */
 
 import type { DbPool } from '../db/pool.js';
+import type { UUID } from '@crmy/shared';
 import * as agentRepo from '../db/repos/agent.js';
 import * as contextRepo from '../db/repos/context-entries.js';
 import * as contextTypeRepo from '../db/repos/context-type-registry.js';
 import * as actorRepo from '../db/repos/actors.js';
 import * as outboxRepo from '../db/repos/context-outbox.js';
 import * as rawContextRepo from '../db/repos/raw-context-sources.js';
+import * as customFieldRepo from '../db/repos/custom-fields.js';
+import * as signalGroupRepo from '../db/repos/signal-groups.js';
 import { decrypt } from './crypto.js';
 import { callLLM } from './providers/llm.js';
 import { attachSignalToGroup } from '../services/signal-groups.js';
+import { embedQuery, ensureEmbeddingBestEffort } from '../services/embedding-service.js';
 
 // Activity types worth extracting from (those with text content)
 const EXTRACTABLE_ACTIVITY_TYPES = new Set([
@@ -61,6 +65,10 @@ interface ExtractedEntry {
   valid_until?: string;
   tags?: string[];
   evidence?: EvidenceItem[];
+  supports_existing_signal_group_hint?: string;
+  contradicts_existing_memory_hint?: string;
+  duplicate_of_memory_hint?: string;
+  extraction_rationale?: string;
 }
 
 interface EvidenceItem {
@@ -85,6 +93,8 @@ export interface ExtractionResult {
   memory_created: number;
   signals_created: number;
   skipped: number;
+  skipped_reasons?: string[];
+  unsupported_context_types?: string[];
 }
 
 const EMPTY_EXTRACTION_RESULT: ExtractionResult = {
@@ -93,6 +103,116 @@ const EMPTY_EXTRACTION_RESULT: ExtractionResult = {
   signals_created: 0,
   skipped: 0,
 };
+
+const CONTEXT_TYPE_ALIASES: Record<string, string> = {
+  action_item: 'next_step',
+  follow_up: 'next_step',
+  followup: 'next_step',
+  next_action: 'next_step',
+  risk: 'deal_risk',
+  blocker: 'deal_risk',
+  forecast_risk: 'deal_risk',
+  stakeholder_role: 'stakeholder',
+  buyer_role: 'stakeholder',
+  champion: 'stakeholder',
+  economic_buyer: 'stakeholder',
+  competitor: 'competitive_intel',
+  competitive: 'competitive_intel',
+  concern: 'objection',
+  pain_point: 'objection',
+  fact: 'key_fact',
+  insight: 'key_fact',
+};
+
+interface ExtractionPacketRecordSummary {
+  type: string;
+  id: string;
+  name: string;
+  fields: Record<string, unknown>;
+  custom_fields?: Record<string, unknown>;
+}
+
+interface ExtractionPacketMemorySummary {
+  id: string;
+  context_type: string;
+  title: string;
+  body: string;
+  confidence?: number | null;
+  valid_until?: string | null;
+  created_at?: string;
+  evidence_count?: number;
+}
+
+interface ExtractionPacketSignalSummary extends ExtractionPacketMemorySummary {
+  memory_status?: string;
+}
+
+interface ContextExtractionPacket {
+  objective: string;
+  source: {
+    activity_id: string;
+    activity_type: string;
+    source_label: string;
+    occurred_at: string;
+    actor_id?: string | null;
+    source_agent?: string | null;
+    channel?: string | null;
+  };
+  subject: ExtractionPacketRecordSummary;
+  related_records: ExtractionPacketRecordSummary[];
+  current_memory: ExtractionPacketMemorySummary[];
+  open_signals: ExtractionPacketSignalSummary[];
+  existing_signal_groups: Array<{
+    id: string;
+    context_type: string;
+    claim: string;
+    status: string;
+    aggregate_confidence: number;
+    evidence_count: number;
+    source_count: number;
+    conflict_count: number;
+  }>;
+  custom_field_definitions: Array<{
+    object_type: string;
+    field_key: string;
+    label: string;
+    field_type: string;
+    required: boolean;
+    options?: unknown;
+    current_value?: unknown;
+  }>;
+  extractable_context_types: Array<{
+    type_name: string;
+    label: string;
+    description?: string | null;
+    extraction_prompt?: string | null;
+    schema?: Record<string, unknown> | null;
+  }>;
+}
+
+function normalizeTypeName(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+function resolveExtractedContextType(
+  value: string,
+  extractableTypes: { type_name: string; label: string }[],
+): { typeName?: string; normalized: boolean } {
+  const supported = new Set(extractableTypes.map(type => type.type_name));
+  if (supported.has(value)) return { typeName: value, normalized: false };
+
+  const normalized = normalizeTypeName(value);
+  if (supported.has(normalized)) return { typeName: normalized, normalized: true };
+
+  const alias = CONTEXT_TYPE_ALIASES[normalized];
+  if (alias && supported.has(alias)) return { typeName: alias, normalized: true };
+
+  const labelMatch = extractableTypes.find(type => normalizeTypeName(type.label) === normalized);
+  if (labelMatch) return { typeName: labelMatch.type_name, normalized: true };
+
+  if (supported.has('key_fact')) return { typeName: 'key_fact', normalized: true };
+  return { normalized: false };
+}
 
 export function shouldAutoPromoteSignal(input: {
   confidence?: number;
@@ -174,6 +294,333 @@ function rawExcerpt(activity: ActivityRow): string | null {
   const text = buildActivityContent(activity).trim();
   if (!text) return null;
   return text.slice(0, 1000);
+}
+
+function truncateText(value: unknown, max = 800): unknown {
+  if (value == null) return value;
+  if (typeof value !== 'string') return value;
+  return value.length > max ? `${value.slice(0, max)}...` : value;
+}
+
+function compactJsonObject(value: unknown, maxStringLength = 500): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== null && item !== undefined && item !== '')
+      .slice(0, 30)
+      .map(([key, item]) => [key, truncateText(item, maxStringLength)]),
+  );
+}
+
+function recordSummary(type: string, row: Record<string, unknown>): ExtractionPacketRecordSummary {
+  const fullName = [row.first_name, row.last_name].filter(Boolean).join(' ').trim();
+  const name = String(row.name ?? fullName ?? row.subject ?? row.email ?? row.id);
+  const fields = { ...row };
+  delete fields.tenant_id;
+  delete fields.created_by;
+  delete fields.created_at;
+  delete fields.updated_at;
+  const customFields = compactJsonObject(fields.custom_fields);
+  delete fields.custom_fields;
+  return {
+    type,
+    id: String(row.id),
+    name,
+    fields: compactJsonObject(fields, 400),
+    ...(Object.keys(customFields).length > 0 ? { custom_fields: customFields } : {}),
+  };
+}
+
+function memorySummary(entry: Record<string, unknown>): ExtractionPacketMemorySummary {
+  const evidence = Array.isArray(entry.evidence) ? entry.evidence : [];
+  return {
+    id: String(entry.id),
+    context_type: String(entry.context_type),
+    title: String(entry.title ?? ''),
+    body: String(truncateText(entry.body, 600) ?? ''),
+    confidence: typeof entry.confidence === 'number' ? entry.confidence : null,
+    valid_until: typeof entry.valid_until === 'string' ? entry.valid_until : null,
+    created_at: typeof entry.created_at === 'string' ? entry.created_at : undefined,
+    evidence_count: evidence.length,
+  };
+}
+
+async function semanticContextCandidates(
+  db: DbPool,
+  tenantId: string,
+  activity: ActivityRow,
+  memoryStatus: 'active' | 'signal',
+): Promise<Array<Record<string, unknown>>> {
+  if (!supportedSubjectType(activity.subject_type) || !activity.subject_id || !activity.body?.trim()) return [];
+  try {
+    const embedded = await embedQuery(activity.body.slice(0, 4000));
+    if (!embedded) return [];
+    const entries = await contextRepo.semanticSearch(db, tenantId as UUID, embedded.embedding, {
+      subject_type: activity.subject_type,
+      subject_id: activity.subject_id as UUID,
+      memory_status: memoryStatus,
+      current_only: true,
+      limit: 8,
+    });
+    return entries as unknown as Array<Record<string, unknown>>;
+  } catch (err) {
+    console.warn(`[extraction] semantic packet candidates unavailable: ${(err as Error).message}`);
+    return [];
+  }
+}
+
+function mergeEntries<T extends { id?: unknown }>(primary: T[], candidates: T[], limit: number): T[] {
+  const seen = new Set(primary.map(entry => String(entry.id ?? '')));
+  const merged = [...primary];
+  for (const candidate of candidates) {
+    const id = String(candidate.id ?? '');
+    if (id && seen.has(id)) continue;
+    if (id) seen.add(id);
+    merged.push(candidate);
+    if (merged.length >= limit) break;
+  }
+  return merged.slice(0, limit);
+}
+
+function supportedSubjectType(value: string | null): value is 'contact' | 'account' | 'opportunity' | 'use_case' {
+  return value === 'contact' || value === 'account' || value === 'opportunity' || value === 'use_case';
+}
+
+async function loadSubjectSummary(
+  db: DbPool,
+  tenantId: string,
+  subjectType: string,
+  subjectId: string,
+): Promise<ExtractionPacketRecordSummary | null> {
+  const queries: Record<string, string> = {
+    contact: `
+      SELECT c.*, a.name AS account_name, a.domain AS account_domain
+      FROM contacts c
+      LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
+      WHERE c.tenant_id = $1 AND c.id = $2
+    `,
+    account: `SELECT * FROM accounts WHERE tenant_id = $1 AND id = $2`,
+    opportunity: `
+      SELECT o.*, a.name AS account_name, c.first_name || ' ' || c.last_name AS contact_name, c.email AS contact_email
+      FROM opportunities o
+      LEFT JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
+      LEFT JOIN contacts c ON c.id = o.contact_id AND c.tenant_id = o.tenant_id
+      WHERE o.tenant_id = $1 AND o.id = $2
+    `,
+    use_case: `
+      SELECT uc.*, a.name AS account_name, o.name AS opportunity_name
+      FROM use_cases uc
+      LEFT JOIN accounts a ON a.id = uc.account_id AND a.tenant_id = uc.tenant_id
+      LEFT JOIN opportunities o ON o.id = uc.opportunity_id AND o.tenant_id = uc.tenant_id
+      WHERE uc.tenant_id = $1 AND uc.id = $2
+    `,
+  };
+  const sql = queries[subjectType];
+  if (!sql) return null;
+  const result = await db.query(sql, [tenantId, subjectId]);
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  return row ? recordSummary(subjectType, row) : null;
+}
+
+async function loadRelatedRecords(
+  db: DbPool,
+  tenantId: string,
+  subjectType: string,
+  subjectId: string,
+): Promise<ExtractionPacketRecordSummary[]> {
+  const related: ExtractionPacketRecordSummary[] = [];
+  const pushRows = (type: string, rows: Record<string, unknown>[]) => {
+    related.push(...rows.slice(0, 8).map(row => recordSummary(type, row)));
+  };
+
+  if (subjectType === 'contact') {
+    const account = await db.query(
+      `SELECT a.* FROM accounts a
+       JOIN contacts c ON c.account_id = a.id AND c.tenant_id = a.tenant_id
+       WHERE c.tenant_id = $1 AND c.id = $2`,
+      [tenantId, subjectId],
+    );
+    pushRows('account', account.rows as Record<string, unknown>[]);
+    const opps = await db.query(
+      `SELECT o.*, a.name AS account_name
+       FROM opportunities o
+       LEFT JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
+       WHERE o.tenant_id = $1 AND (o.contact_id = $2 OR o.account_id IN (
+         SELECT account_id FROM contacts WHERE tenant_id = $1 AND id = $2 AND account_id IS NOT NULL
+       ))
+       ORDER BY o.updated_at DESC
+       LIMIT 8`,
+      [tenantId, subjectId],
+    );
+    pushRows('opportunity', opps.rows as Record<string, unknown>[]);
+  } else if (subjectType === 'account') {
+    const contacts = await db.query(
+      `SELECT * FROM contacts WHERE tenant_id = $1 AND account_id = $2 ORDER BY updated_at DESC LIMIT 8`,
+      [tenantId, subjectId],
+    );
+    pushRows('contact', contacts.rows as Record<string, unknown>[]);
+    const opps = await db.query(
+      `SELECT * FROM opportunities WHERE tenant_id = $1 AND account_id = $2 ORDER BY updated_at DESC LIMIT 8`,
+      [tenantId, subjectId],
+    );
+    pushRows('opportunity', opps.rows as Record<string, unknown>[]);
+    const useCases = await db.query(
+      `SELECT * FROM use_cases WHERE tenant_id = $1 AND account_id = $2 ORDER BY updated_at DESC LIMIT 8`,
+      [tenantId, subjectId],
+    );
+    pushRows('use_case', useCases.rows as Record<string, unknown>[]);
+  } else if (subjectType === 'opportunity') {
+    const rows = await db.query(
+      `SELECT 'account' AS relation_type, to_jsonb(a.*) AS record
+       FROM opportunities o
+       JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
+       WHERE o.tenant_id = $1 AND o.id = $2
+       UNION ALL
+       SELECT 'contact' AS relation_type, to_jsonb(c.*) AS record
+       FROM opportunities o
+       JOIN contacts c ON c.id = o.contact_id AND c.tenant_id = o.tenant_id
+       WHERE o.tenant_id = $1 AND o.id = $2`,
+      [tenantId, subjectId],
+    );
+    for (const row of rows.rows as { relation_type: string; record: Record<string, unknown> }[]) {
+      related.push(recordSummary(row.relation_type, row.record));
+    }
+    const useCases = await db.query(
+      `SELECT * FROM use_cases WHERE tenant_id = $1 AND opportunity_id = $2 ORDER BY updated_at DESC LIMIT 8`,
+      [tenantId, subjectId],
+    );
+    pushRows('use_case', useCases.rows as Record<string, unknown>[]);
+  } else if (subjectType === 'use_case') {
+    const rows = await db.query(
+      `SELECT 'account' AS relation_type, to_jsonb(a.*) AS record
+       FROM use_cases uc
+       JOIN accounts a ON a.id = uc.account_id AND a.tenant_id = uc.tenant_id
+       WHERE uc.tenant_id = $1 AND uc.id = $2
+       UNION ALL
+       SELECT 'opportunity' AS relation_type, to_jsonb(o.*) AS record
+       FROM use_cases uc
+       JOIN opportunities o ON o.id = uc.opportunity_id AND o.tenant_id = uc.tenant_id
+       WHERE uc.tenant_id = $1 AND uc.id = $2`,
+      [tenantId, subjectId],
+    );
+    for (const row of rows.rows as { relation_type: string; record: Record<string, unknown> }[]) {
+      related.push(recordSummary(row.relation_type, row.record));
+    }
+  }
+
+  const seen = new Set<string>();
+  return related.filter(record => {
+    const key = `${record.type}:${record.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return key !== `${subjectType}:${subjectId}`;
+  }).slice(0, 16);
+}
+
+async function buildContextExtractionPacket(
+  db: DbPool,
+  tenantId: string,
+  activity: ActivityRow,
+  extractableTypes: { type_name: string; label: string; description?: string | null; extraction_prompt: string | null; json_schema: Record<string, unknown> | null }[],
+): Promise<ContextExtractionPacket | null> {
+  if (!supportedSubjectType(activity.subject_type) || !activity.subject_id) return null;
+  const subject = await loadSubjectSummary(db, tenantId, activity.subject_type, activity.subject_id);
+  if (!subject) return null;
+
+  const [relatedRecords, currentMemory, openSignals, signalGroups, customFields] = await Promise.all([
+    loadRelatedRecords(db, tenantId, activity.subject_type, activity.subject_id),
+    contextRepo.getContextForSubject(db, tenantId, activity.subject_type, activity.subject_id, {
+      memory_status: 'active',
+      current_only: true,
+      limit: 12,
+    }),
+    contextRepo.getContextForSubject(db, tenantId, activity.subject_type, activity.subject_id, {
+      memory_status: 'signal',
+      current_only: true,
+      limit: 12,
+    }),
+    signalGroupRepo.listSignalGroups(db, tenantId, {
+      subject_type: activity.subject_type,
+      subject_id: activity.subject_id,
+      limit: 10,
+    }),
+    customFieldRepo.listCustomFields(db, tenantId, activity.subject_type),
+  ]);
+  const [semanticMemory, semanticSignals] = await Promise.all([
+    semanticContextCandidates(db, tenantId, activity, 'active'),
+    semanticContextCandidates(db, tenantId, activity, 'signal'),
+  ]);
+  const memoryForPacket = mergeEntries(
+    currentMemory as unknown as Array<Record<string, unknown>>,
+    semanticMemory,
+    12,
+  );
+  const signalsForPacket = mergeEntries(
+    openSignals as unknown as Array<Record<string, unknown>>,
+    semanticSignals,
+    12,
+  );
+
+  const currentValues = subject.custom_fields ?? {};
+  return {
+    objective: 'Turn messy Raw Context into evidence-backed Signals. CRMy will group Signals, promote trustworthy Signals to Memory, and enforce policy before any action or system-of-record writeback.',
+    source: {
+      activity_id: activity.id,
+      activity_type: activity.type,
+      source_label: activity.subject,
+      occurred_at: activity.occurred_at ?? activity.created_at,
+      actor_id: activity.performed_by ?? activity.created_by,
+      source_agent: activity.source_agent,
+      channel: activity.direction,
+    },
+    subject,
+    related_records: relatedRecords,
+    current_memory: memoryForPacket.map(entry => memorySummary(entry)),
+    open_signals: signalsForPacket.map(entry => ({
+      ...memorySummary(entry as unknown as Record<string, unknown>),
+      memory_status: 'signal',
+    })),
+    existing_signal_groups: signalGroups.data.map(group => ({
+      id: group.id,
+      context_type: group.context_type,
+      claim: group.title ?? group.normalized_claim,
+      status: group.status,
+      aggregate_confidence: Number(group.aggregate_confidence ?? 0),
+      evidence_count: Number(group.evidence_count ?? 0),
+      source_count: Number(group.independent_source_count ?? 0),
+      conflict_count: Number(group.conflict_count ?? 0),
+    })),
+    custom_field_definitions: customFields.map(field => ({
+      object_type: field.object_type,
+      field_key: field.field_key,
+      label: field.label,
+      field_type: field.field_type,
+      required: field.is_required,
+      options: field.options,
+      current_value: truncateText(currentValues[field.field_key], 400),
+    })),
+    extractable_context_types: extractableTypes.map(type => ({
+      type_name: type.type_name,
+      label: type.label,
+      description: type.description,
+      extraction_prompt: type.extraction_prompt,
+      schema: type.json_schema,
+    })),
+  };
+}
+
+function summarizeExtractionPacket(packet: ContextExtractionPacket | null): Record<string, unknown> {
+  if (!packet) return { available: false };
+  return {
+    available: true,
+    subject: { type: packet.subject.type, id: packet.subject.id, name: packet.subject.name },
+    related_record_count: packet.related_records.length,
+    current_memory_count: packet.current_memory.length,
+    open_signal_count: packet.open_signals.length,
+    signal_group_count: packet.existing_signal_groups.length,
+    custom_field_count: packet.custom_field_definitions.length,
+    context_type_count: packet.extractable_context_types.length,
+  };
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -258,6 +705,7 @@ export async function extractContextFromActivity(
       stage: 'resolve_subject',
       skipped: 1,
       failure_reason: 'No linked customer record. Resolve the subject before extraction.',
+      metadata: { failure_code: 'no_linked_subject' },
     });
     return { ...EMPTY_EXTRACTION_RESULT, skipped: 1 };
   }
@@ -271,6 +719,7 @@ export async function extractContextFromActivity(
       stage: 'normalize',
       skipped: 1,
       failure_reason: 'No text content to process.',
+      metadata: { failure_code: 'no_text_content' },
     });
     return { ...EMPTY_EXTRACTION_RESULT, skipped: 1 };
   }
@@ -283,6 +732,7 @@ export async function extractContextFromActivity(
       stage: 'classify',
       skipped: 1,
       failure_reason: `Activity type '${activity.type}' is not configured for extraction.`,
+      metadata: { failure_code: 'unsupported_activity_type', activity_type: activity.type },
     });
     return { ...EMPTY_EXTRACTION_RESULT, skipped: 1 };
   }
@@ -297,6 +747,7 @@ export async function extractContextFromActivity(
       status: 'pending',
       stage: 'extract_signals',
       failure_reason: 'Workspace Agent is not enabled yet.',
+      metadata: { failure_code: 'agent_not_enabled' },
     });
     return EMPTY_EXTRACTION_RESULT;
   }
@@ -307,6 +758,7 @@ export async function extractContextFromActivity(
       status: 'pending',
       stage: 'extract_signals',
       failure_reason: 'Workspace Agent needs a model and base URL before extraction can run.',
+      metadata: { failure_code: 'agent_config_incomplete' },
     });
     return EMPTY_EXTRACTION_RESULT;
   }
@@ -320,6 +772,7 @@ export async function extractContextFromActivity(
       stage: 'classify',
       skipped: 1,
       failure_reason: 'No extractable context types are configured.',
+      metadata: { failure_code: 'no_extractable_context_types' },
     });
     return { ...EMPTY_EXTRACTION_RESULT, skipped: 1 };
   }
@@ -332,6 +785,7 @@ export async function extractContextFromActivity(
     agent_model: config.model,
     metadata: { purpose: 'context_extraction' },
   });
+  const extractionPacket = await buildContextExtractionPacket(db, tenantId, activity, extractableTypes);
 
   // Build and call the LLM
   let entries: ExtractedEntry[];
@@ -339,8 +793,9 @@ export async function extractContextFromActivity(
     await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
       status: 'processing',
       stage: 'extract_signals',
+      metadata: { extraction_packet: summarizeExtractionPacket(extractionPacket) },
     });
-    entries = await callExtractionLLM(db, tenantId, activity, content, extractableTypes, config.max_tokens_per_turn);
+    entries = await callExtractionLLM(db, tenantId, activity, content, extractableTypes, config.max_tokens_per_turn, extractionPacket);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'LLM call failed';
     await markExtractionStatus(db, activityId, 'error', msg);
@@ -349,6 +804,10 @@ export async function extractContextFromActivity(
       stage: 'extract_signals',
       skipped: 1,
       failure_reason: msg,
+      metadata: {
+        failure_code: 'model_failed',
+        extraction_packet: summarizeExtractionPacket(extractionPacket),
+      },
     });
     console.error(`[extraction] Activity ${activityId}: ${msg}`);
     return { ...EMPTY_EXTRACTION_RESULT, skipped: 1 };
@@ -359,7 +818,12 @@ export async function extractContextFromActivity(
     await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
       status: 'processed',
       stage: 'extract_signals',
-      metadata: { extracted_count: 0 },
+      failure_reason: 'No customer-specific Signals were found. Try adding source text with a decision, next step, risk, stakeholder, objection, commitment, or customer fact.',
+      metadata: {
+        extracted_count: 0,
+        failure_code: 'model_returned_empty',
+        extraction_packet: summarizeExtractionPacket(extractionPacket),
+      },
     });
     return EMPTY_EXTRACTION_RESULT;
   }
@@ -369,43 +833,68 @@ export async function extractContextFromActivity(
   const autoPromoteSignals = config.auto_promote_signals !== false;
   const autoPromoteThreshold = Number(config.signal_auto_promote_threshold ?? 0.85);
   for (const entry of entries) {
-    // Skip if context_type doesn't exist in registry
-    const typeExists = extractableTypes.find(t => t.type_name === entry.context_type);
-    if (!typeExists) { outcome.skipped++; continue; }
-
     try {
-      const evidence = buildEvidence(activity, entry);
+      const resolvedType = resolveExtractedContextType(entry.context_type, extractableTypes);
+      if (!resolvedType.typeName) {
+        outcome.skipped++;
+        outcome.unsupported_context_types = Array.from(new Set([...(outcome.unsupported_context_types ?? []), entry.context_type]));
+        outcome.skipped_reasons = [...(outcome.skipped_reasons ?? []), `Unsupported context type: ${entry.context_type}`];
+        continue;
+      }
+      const normalizedEntry = {
+        ...entry,
+        context_type: resolvedType.typeName,
+        tags: [
+          ...(entry.tags ?? []),
+          ...(resolvedType.normalized ? [`normalized-type:${normalizeTypeName(entry.context_type)}`] : []),
+          ...(entry.supports_existing_signal_group_hint ? ['supports-existing-signal'] : []),
+          ...(entry.contradicts_existing_memory_hint ? ['contradicts-memory'] : []),
+          ...(entry.duplicate_of_memory_hint ? ['possible-duplicate'] : []),
+        ],
+        structured_data: {
+          ...(entry.structured_data ?? {}),
+          ...(resolvedType.normalized ? { original_context_type: entry.context_type } : {}),
+          ...(entry.supports_existing_signal_group_hint ? { supports_existing_signal_group_hint: entry.supports_existing_signal_group_hint } : {}),
+          ...(entry.contradicts_existing_memory_hint ? { contradicts_existing_memory_hint: entry.contradicts_existing_memory_hint } : {}),
+          ...(entry.duplicate_of_memory_hint ? { duplicate_of_memory_hint: entry.duplicate_of_memory_hint } : {}),
+          ...(entry.extraction_rationale ? { extraction_rationale: entry.extraction_rationale } : {}),
+        },
+      };
+      const evidence = buildEvidence(activity, normalizedEntry);
       const created = await contextRepo.createContextEntry(db, tenantId, {
         subject_type: activity.subject_type as 'contact' | 'account' | 'opportunity' | 'use_case',
         subject_id: activity.subject_id,
-        context_type: entry.context_type,
+        context_type: normalizedEntry.context_type,
         authored_by: extractorActor.id,
-        title: entry.title,
-        body: entry.body,
-        structured_data: entry.structured_data ?? {},
-        confidence: entry.confidence ?? undefined,
+        title: normalizedEntry.title,
+        body: normalizedEntry.body,
+        structured_data: normalizedEntry.structured_data ?? {},
+        confidence: normalizedEntry.confidence ?? undefined,
         memory_status: 'signal',
         evidence,
-        tags: entry.tags ?? ['extracted', activity.type],
+        tags: normalizedEntry.tags && normalizedEntry.tags.length > 0
+          ? Array.from(new Set(['extracted', activity.type, ...normalizedEntry.tags]))
+          : ['extracted', activity.type],
         source: 'extraction',
         source_ref: activityId,
         source_activity_id: activityId,
-        valid_until: entry.valid_until ?? undefined,
+        valid_until: normalizedEntry.valid_until ?? undefined,
         is_current: true,
       });
 
       // Enqueue for search indexing — fire-and-forget.
       outboxRepo.insertJob(db, tenantId, 'context_entry', created.id, created as unknown as Record<string, unknown>)
         .catch((err: unknown) => console.warn(`[outbox] extraction enqueue ${created.id}: ${(err as Error).message}`));
+      await ensureEmbeddingBestEffort(db, tenantId, 'context_entry', created.id, created.body);
 
       outcome.extracted_count++;
       outcome.signals_created++;
 
       const eligibleForGroupingPromotion = autoPromoteSignals && shouldAutoPromoteSignal({
-        confidence: Math.max(entry.confidence ?? 0, 1),
+        confidence: Math.max(normalizedEntry.confidence ?? 0, 1),
         threshold: 1,
         evidenceCount: evidence.length,
-        speculative: looksSpeculative(entry, evidence),
+        speculative: looksSpeculative(normalizedEntry, evidence),
       });
       const groupResult = await attachSignalToGroup(db, tenantId, created, {
         threshold: autoPromoteThreshold,
@@ -419,6 +908,10 @@ export async function extractContextFromActivity(
     } catch (err) {
       console.error(`[extraction] Failed to write context entry for activity ${activityId}:`, err);
       outcome.skipped++;
+      outcome.skipped_reasons = [
+        ...(outcome.skipped_reasons ?? []),
+        err instanceof Error ? err.message : 'Failed to write extracted Signal.',
+      ];
     }
   }
 
@@ -433,7 +926,17 @@ export async function extractContextFromActivity(
     signals_created: outcome.signals_created,
     memory_created: outcome.memory_created,
     skipped: outcome.skipped,
-    metadata: { extracted_count: outcome.extracted_count },
+    failure_reason: outcome.extracted_count === 0 && outcome.skipped_reasons?.length
+      ? outcome.skipped_reasons.slice(0, 3).join('; ')
+      : null,
+    metadata: {
+      extracted_count: outcome.extracted_count,
+      extraction_packet: summarizeExtractionPacket(extractionPacket),
+      ...(outcome.skipped_reasons?.length ? { skipped_reasons: outcome.skipped_reasons.slice(0, 10) } : {}),
+      ...(outcome.unsupported_context_types?.length ? { unsupported_context_types: outcome.unsupported_context_types } : {}),
+      ...(outcome.unsupported_context_types?.length ? { failure_code: 'unsupported_type_normalized' } : {}),
+      ...(outcome.extracted_count === 0 && outcome.skipped > 0 ? { failure_code: 'write_failed' } : {}),
+    },
   });
   return outcome;
 }
@@ -481,9 +984,10 @@ async function callExtractionLLM(
   content: string,
   extractableTypes: { type_name: string; label: string; description?: string | null; extraction_prompt: string | null; json_schema: Record<string, unknown> | null }[],
   maxTokens: number,
+  extractionPacket: ContextExtractionPacket | null,
 ): Promise<ExtractedEntry[]> {
   const systemPrompt = buildSystemPrompt(extractableTypes);
-  const userPrompt = buildUserPrompt(activity, content);
+  const userPrompt = buildUserPrompt(activity, content, extractionPacket);
 
   const responseText = await callLLM(db, tenantId, {
     system: systemPrompt,
@@ -491,7 +995,15 @@ async function callExtractionLLM(
     maxTokens: Math.min(maxTokens, 2000),
   });
 
-  return parseExtractionResponse(responseText);
+  const primaryEntries = parseExtractionResponse(responseText);
+  if (primaryEntries.length > 0) return primaryEntries;
+
+  const recoveryText = await callLLM(db, tenantId, {
+    system: buildRecoverySystemPrompt(extractableTypes),
+    user: userPrompt,
+    maxTokens: Math.min(maxTokens, 1200),
+  });
+  return parseExtractionResponse(recoveryText);
 }
 
 function buildSystemPrompt(
@@ -516,9 +1028,11 @@ function buildSystemPrompt(
     return lines.join('\n');
   }).join('\n\n');
 
-  return `You are a CRMy signal extraction agent. Extract structured signals from customer observations.
+  return `You are the CRMy Raw Context extraction model.
 
-Signals are inferred, evidence-backed context. They are not confirmed operational memory until reviewed or promoted.
+Your job is to transform messy customer Raw Context into evidence-backed Signals that CRMy can group, review, and possibly promote to Memory. You do not call tools. CRMy already resolved the subject record, assembled related records, loaded current Memory, loaded open Signals, and provided custom field definitions in the extraction packet.
+
+Signals are unconfirmed inferred context. Memory is confirmed operational context that agents, workflows, handoffs, and system-of-record writebacks may rely on after CRMy policy allows it.
 
 Return a JSON object with a single key "context_entries" containing an array of signals. Each signal:
 - context_type: must be one of the supported types below
@@ -529,23 +1043,51 @@ Return a JSON object with a single key "context_entries" containing an array of 
 - evidence: array of evidence objects supporting this claim. Each item should include source_type, snippet, observed_at, speaker if known, confidence, and rationale. Use an exact short quote or source excerpt when possible.
 - valid_until: ISO date string if this information will become stale (use for next_step, commitment, deal_risk)
 - tags: array of relevant string tags (optional)
+- supports_existing_signal_group_hint: signal group id or claim when the Raw Context supports an existing open Signal (optional)
+- contradicts_existing_memory_hint: memory id or title when the Raw Context contradicts existing Memory (optional)
+- duplicate_of_memory_hint: memory id or title when the Raw Context only repeats existing Memory (optional)
+- extraction_rationale: short explanation of why this is useful GTM context (optional)
 
 Rules:
 1. Only extract information clearly present in the activity — never hallucinate or speculate
 2. Set confidence below 0.7 if you're inferring rather than reading directly
 3. Treat extracted items as signals. Do not imply that they are confirmed memory.
-4. If nothing extractable is found, return {"context_entries": []}
-5. Create one entry per distinct piece of information (e.g. one entry per stakeholder, one per competitor)
-6. Every extracted signal must include evidence. Prefer verbatim snippets and include speaker/source timing when the text provides it.
-7. Return valid JSON only — no markdown code fences, no commentary
+4. Prefer useful GTM claims: stakeholders, economic buyers, champions, risks, blockers, commitments, next steps, objections, competitive intel, methodology gaps, product/customer facts, timing, and customer intent
+5. Avoid duplicating current Memory. Extract a repeated claim only if this source updates it, contradicts it, increases evidence quality, or provides materially new evidence.
+6. Strengthen or contradict existing open Signals when the new source supports or conflicts with them. Use the advisory hint fields when helpful.
+7. Create one entry per distinct piece of information (e.g. one entry per stakeholder, one per competitor)
+8. Every extracted signal must include evidence. Prefer verbatim snippets and include speaker/source timing when the text provides it.
+9. If nothing customer-specific and operationally useful is found, return {"context_entries": []}
+10. Return valid JSON only — no markdown code fences, no commentary
 
 Supported context types:
 ${typeDescriptions}`;
 }
 
-function buildUserPrompt(activity: ActivityRow, content: string): string {
+function buildRecoverySystemPrompt(
+  types: { type_name: string; label: string; description?: string | null; extraction_prompt: string | null; json_schema: Record<string, unknown> | null }[],
+): string {
+  const supported = types.map(type => `${type.type_name}: ${type.label}`).join('\n');
+  const hasKeyFact = types.some(type => type.type_name === 'key_fact');
+  return `You are the CRMy Raw Context extraction model. Your previous extraction found no Signals.
+
+Review the same extraction packet and Raw Context again. If it contains any customer-specific information that could help a sales or customer-success agent later, extract it as evidence-backed Signals. Do not produce generic summaries.
+
+Use the most specific supported context_type. If none fits${hasKeyFact ? ', use key_fact' : ''}. Do not create generic summaries of the whole document. Do not extract the mere fact that a contact or company was mentioned.
+
+Return valid JSON only:
+{"context_entries":[{"context_type":"key_fact","title":"...","body":"...","confidence":0.7,"structured_data":{},"evidence":[{"source_type":"activity","snippet":"exact short excerpt","confidence":0.7,"rationale":"why this supports the claim"}],"tags":["extracted"]}]}
+
+If there is truly no useful customer context beyond names, return {"context_entries":[]}.
+
+Supported context types:
+${supported}`;
+}
+
+function buildUserPrompt(activity: ActivityRow, content: string, extractionPacket: ContextExtractionPacket | null): string {
   const date = activity.occurred_at ?? activity.created_at;
   const lines = [
+    'Objective: Create evidence-backed Signals from this Raw Context. CRMy will handle grouping, promotion to Memory, policy, and audit after extraction.',
     `Activity Type: ${activity.type}`,
     `Subject: ${activity.subject}`,
     `Date: ${date}`,
@@ -554,6 +1096,13 @@ function buildUserPrompt(activity: ActivityRow, content: string): string {
     lines.push(`CRM Object: ${activity.subject_type} (${activity.subject_id})`);
   }
   if (activity.outcome) lines.push(`Outcome: ${activity.outcome}`);
+  if (extractionPacket) {
+    lines.push(
+      '',
+      'Context Extraction Packet:',
+      JSON.stringify(extractionPacket, null, 2),
+    );
+  }
   lines.push('', 'Content:', content);
   return lines.join('\n');
 }

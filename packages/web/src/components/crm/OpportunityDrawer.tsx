@@ -121,12 +121,12 @@ function OpportunityEditForm({
           </select>
         </div>
         <div className="space-y-1.5">
-          <label className={labelClass}>Company</label>
+          <label className={labelClass}>Account</label>
           <EntityCombobox
             entityType="account"
             value={fields.account_id}
             onChange={v => set('account_id', v)}
-            placeholder="No company"
+            placeholder="No account"
           />
         </div>
         <div className="space-y-1.5">
@@ -387,7 +387,7 @@ export function OpportunityDrawer() {
       <DrawerSection title="Details">
         {linkedAccount && (
           <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground flex items-center gap-1"><Building2 className="w-3 h-3" /> Company</span>
+            <span className="text-xs text-muted-foreground flex items-center gap-1"><Building2 className="w-3 h-3" /> Account</span>
             <button
               onClick={() => openDrawer('account', opportunity.account_id)}
               className="text-sm text-accent hover:underline font-medium"
@@ -409,7 +409,7 @@ export function OpportunityDrawer() {
         )}
         {!linkedAccount && !linkedContactName && (
           <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Company & Contact</span>
+            <span className="text-xs text-muted-foreground">Account & Contact</span>
             <button onClick={() => setEditing(true)} className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
               Link via Edit
             </button>

@@ -150,6 +150,34 @@ const CHECKS: CheckSpec[] = [
       LIMIT $2
     `,
   },
+  {
+    name: 'failed_context_embedding_jobs',
+    severity: 'warning',
+    sql: `
+      SELECT id, entity_type, entity_id, attempt_count, last_error, updated_at
+      FROM context_embedding_jobs
+      WHERE tenant_id = $1
+        AND status = 'failed'
+      ORDER BY updated_at DESC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'current_context_missing_embedding',
+    severity: 'info',
+    sql: `
+      SELECT c.id, c.subject_type, c.subject_id, c.context_type
+      FROM context_entries c
+      WHERE c.tenant_id = $1
+        AND c.is_current = true
+        AND EXISTS (
+          SELECT 1 FROM pg_extension WHERE extname = 'vector'
+        )
+        AND (to_jsonb(c)->'embedding') IS NULL
+      ORDER BY c.created_at DESC
+      LIMIT $2
+    `,
+  },
 ];
 
 async function runCheck(db: DbPool, tenantId: UUID, spec: CheckSpec, sampleLimit: number): Promise<DataQualityCheck> {

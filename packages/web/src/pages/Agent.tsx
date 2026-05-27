@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { TopBar } from '@/components/layout/TopBar';
@@ -17,11 +17,11 @@ import {
   type AgentSessionSummary,
 } from '@/api/hooks';
 import {
-  Send, Bot, X, User, Briefcase, Building, Layers, Clock, Loader2, Wrench,
+  Send, X, User, Briefcase, Building, Layers, Clock, Loader2, Wrench,
   ChevronDown, ChevronRight, Pencil, Trash2, Check, MessageSquare,
   Brain, Eye, EyeOff, RotateCcw, WifiOff, ClipboardList, ShieldCheck,
-  ShieldAlert, Database, CheckCircle2, Circle, AlertTriangle, FileCheck2,
-  GitPullRequestArrow,
+  Database, CheckCircle2, Circle, AlertTriangle, FileCheck2,
+  GitPullRequestArrow, Sparkles, PanelRightClose, PanelRightOpen,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -75,6 +75,42 @@ function deriveSessionLabel(message: string): string {
   return label.length > 60 ? `${label.slice(0, 57).trimEnd()}...` : label;
 }
 
+function humanizeToolName(name: string): string {
+  return name
+    .replace(/^crm_/, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function summarizeToolInput(args?: Record<string, unknown>): string | null {
+  if (!args || Object.keys(args).length === 0) return null;
+  const subject = args.subject_type && args.subject_id ? `${args.subject_type} ${String(args.subject_id).slice(0, 8)}` : null;
+  const named = args.name ?? args.title ?? args.query ?? args.q ?? args.email ?? args.type;
+  if (named) return String(named);
+  if (subject) return subject;
+  return `${Object.keys(args).length} input field${Object.keys(args).length === 1 ? '' : 's'}`;
+}
+
+function summarizeToolOutput(result: unknown, isError?: boolean): string | null {
+  if (!result) return null;
+  if (isError) {
+    if (typeof result === 'string') return result;
+    if (typeof result === 'object') {
+      const body = result as Record<string, unknown>;
+      return String(body.error ?? body.message ?? body.detail ?? 'Tool failed');
+    }
+    return 'Tool failed';
+  }
+  if (typeof result !== 'object') return String(result).slice(0, 120);
+  const body = result as Record<string, unknown>;
+  const data = body.data && typeof body.data === 'object' ? body.data as Record<string, unknown> : body;
+  const label = data.name ?? data.title ?? data.subject ?? data.id;
+  if (label) return String(label);
+  if (Array.isArray(body.data)) return `${body.data.length} result${body.data.length === 1 ? '' : 's'}`;
+  if (typeof body.total === 'number') return `${body.total} result${body.total === 1 ? '' : 's'}`;
+  return null;
+}
+
 type AgentTaskStatus = 'running' | 'waiting_approval' | 'failed' | 'complete';
 type AgentTaskRisk = 'low' | 'medium' | 'high';
 type AgentTaskStepStatus = 'pending' | 'running' | 'complete' | 'failed';
@@ -110,6 +146,7 @@ type MemoryProposal = {
 type WorkflowCommand = {
   label: string;
   prompt: string;
+  description: string;
 };
 
 function normalizeSubjectType(type?: string | null): string | undefined {
@@ -213,18 +250,24 @@ function completeTask(task: AgentTaskState | null): AgentTaskState | null {
 }
 
 function getWorkflowCommands(subject: AIContextEntity | null): WorkflowCommand[] {
-  const target = subject ? `this ${typeLabels[subject.type].toLowerCase()} (${subject.name})` : 'the selected customer record';
+  const target = subject ? `this ${typeLabels[subject.type].toLowerCase()} (${subject.name})` : 'your workspace';
   return [
-    { label: '/account brief', prompt: `Get a briefing for ${target}. Include Current Memory, recent activity, risks, and recommended next action.` },
-    { label: '/deal review', prompt: `Review the deal context for ${target}. Summarize stage fit, blockers, health, probability, and next steps.` },
-    { label: '/renewal risk', prompt: `Assess renewal risk for ${target}. Look for Memory that needs review, missing activity, objections, and handoff needs.` },
-    { label: '/next best action', prompt: `Recommend the next best action for ${target}. Explain the evidence and whether a handoff or write needs approval.` },
-    { label: '/meeting prep', prompt: `Prepare meeting notes for ${target}. Include what changed, open questions, and suggested agenda.` },
-    { label: '/follow-up summary', prompt: `Draft a follow-up summary for ${target}. Ground it in known context and call out assumptions.` },
-    { label: '/handoff prep', prompt: `Prepare a human handoff for ${target}. Include urgency, owner, reasoning, and context the reviewer needs.` },
-    { label: '/memory health review', prompt: `Review Memory that needs review or weak context for ${target}. Suggest what should be refreshed before action.` },
-    { label: '/data quality scan', prompt: `Scan data quality for ${target}. Identify missing relationships, weak fields, and conflicts that could affect agent work.` },
+    { label: '/brief', description: 'Current state, risks, activity, and next action', prompt: `Get a briefing for ${target}. Include Current Memory, recent activity, risks, and recommended next action.` },
+    { label: '/deal-review', description: 'Stage fit, blockers, health, and probability', prompt: `Review the deal context for ${target}. Summarize stage fit, blockers, health, probability, and next steps.` },
+    { label: '/renewal-risk', description: 'Risk, missing context, objections, and handoff needs', prompt: `Assess renewal risk for ${target}. Look for Memory that needs review, missing activity, objections, and handoff needs.` },
+    { label: '/next-action', description: 'Recommended action with evidence and safety boundary', prompt: `Recommend the next best action for ${target}. Explain the evidence and whether a handoff or write needs approval.` },
+    { label: '/meeting-prep', description: 'Agenda, open questions, and what changed', prompt: `Prepare meeting notes for ${target}. Include what changed, open questions, and suggested agenda.` },
+    { label: '/follow-up', description: 'Grounded follow-up summary or email draft', prompt: `Draft a follow-up summary for ${target}. Ground it in known context and call out assumptions.` },
+    { label: '/handoff', description: 'Human review packet for risky or blocked work', prompt: `Prepare a human handoff for ${target}. Include urgency, owner, reasoning, and context the reviewer needs.` },
+    { label: '/memory-health', description: 'Stale, weak, or contradictory Memory', prompt: `Review Memory that needs review or weak context for ${target}. Suggest what should be refreshed before action.` },
+    { label: '/data-quality', description: 'Missing relationships, weak fields, and conflicts', prompt: `Scan data quality for ${target}. Identify missing relationships, weak fields, and conflicts that could affect agent work.` },
   ];
+}
+
+function resolveShortcutInput(text: string, commands: WorkflowCommand[]): string {
+  const trimmed = text.trim();
+  const command = commands.find(item => item.label === trimmed);
+  return command?.prompt ?? trimmed;
 }
 
 function buildMemoryProposal(assistantText: string): MemoryProposal | null {
@@ -256,6 +299,7 @@ function buildContextEvidence(messages: DisplayMessage[], subject: AIContextEnti
   return {
     subject,
     uniqueTools,
+    toolCount: toolNames.length,
     usedBriefing,
     usedMemory,
     usedActivity,
@@ -397,6 +441,7 @@ export default function Agent() {
   const [entityContext, setEntityContext] = useState<AIContextEntity | null>(null);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const didRestoreRef = useRef(false);
@@ -409,15 +454,23 @@ export default function Agent() {
   // True when we've sent a message but haven't received the agent's response yet —
   // covers both the live-streaming window and the "navigated away mid-turn" case.
   const [isSessionPending, setIsSessionPending] = useState(false);
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
 
-  // Verbose mode: when on, show reasoning bubbles and tool call/result details.
-  // Persisted to localStorage so users who build trust can keep it hidden.
-  const [verbose, setVerbose] = useState<boolean>(() => {
-    try { return localStorage.getItem('crmy_agent_verbose') !== 'false'; } catch { return true; }
+  // Process mode: when on, show model reasoning when available and richer tool detail.
+  const [showProcess, setShowProcess] = useState<boolean>(() => {
+    try { return localStorage.getItem('crmy_agent_show_process') === 'true'; } catch { return false; }
   });
-  const toggleVerbose = () => setVerbose(v => {
+  const toggleProcess = () => setShowProcess(v => {
     const next = !v;
-    try { localStorage.setItem('crmy_agent_verbose', String(next)); } catch {}
+    try { localStorage.setItem('crmy_agent_show_process', String(next)); } catch {}
+    return next;
+  });
+  const [sessionsOpen, setSessionsOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('crmy_agent_sessions_open') !== 'false'; } catch { return true; }
+  });
+  const toggleSessionsOpen = () => setSessionsOpen(v => {
+    const next = !v;
+    try { localStorage.setItem('crmy_agent_sessions_open', String(next)); } catch {}
     return next;
   });
 
@@ -527,7 +580,7 @@ export default function Agent() {
     setMemoryProposals([]);
   }, []);
 
-  const sendMessage = useCallback(async (overrideText?: string) => {
+  const sendMessage = useCallback(async (overrideText?: string, opts?: { skipUserMessage?: boolean }) => {
     const text = (overrideText !== undefined ? overrideText : input).trim();
     if (!text || streaming) return;
     if (overrideText === undefined) setInput('');
@@ -538,7 +591,7 @@ export default function Agent() {
     if (nextTask) setTask(nextTask);
 
     // Add user message immediately (skip if retrying — user message already shown)
-    if (overrideText === undefined) {
+    if (!opts?.skipUserMessage) {
       setMessages(prev => [...prev, { kind: 'user', content: text }]);
     }
 
@@ -723,7 +776,7 @@ export default function Agent() {
   const retryLast = useCallback(() => {
     if (!lastSentMessage || streaming) return;
     setMessages(prev => prev.filter(m => m.kind !== 'error'));
-    sendMessage(lastSentMessage);
+    sendMessage(lastSentMessage, { skipUserMessage: true });
   }, [lastSentMessage, streaming, sendMessage]);
 
   const approveMemoryProposal = useCallback(async (proposal: MemoryProposal) => {
@@ -800,8 +853,65 @@ export default function Agent() {
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
   }, [isSessionPending, streaming, activeSessionId, refetchSessions]);
 
-  const suggestions = getSuggestions(entityContext?.type ?? null, entityContext?.name ?? null);
-  const workflowCommands = getWorkflowCommands(entityContext);
+  const suggestions = useMemo(() => getSuggestions(entityContext?.type ?? null, entityContext?.name ?? null), [entityContext?.type, entityContext?.name]);
+  const workflowCommands = useMemo(() => getWorkflowCommands(entityContext), [entityContext]);
+  const quickPromptButtons = useMemo(() => {
+    if (entityContext) return workflowCommands.slice(0, 5);
+    return [
+      ...suggestions.slice(0, 2).map(prompt => ({ label: prompt, description: 'Starter prompt', prompt })),
+      ...workflowCommands.slice(0, 3),
+    ];
+  }, [entityContext, suggestions, workflowCommands]);
+  const slashQuery = useMemo(() => {
+    const match = input.match(/(?:^|\s)\/([a-z0-9-]*)$/i);
+    return match ? match[1].toLowerCase() : null;
+  }, [input]);
+  const commandMatches = useMemo(() => {
+    if (slashQuery === null) return [];
+    return workflowCommands
+      .filter(command => {
+        const haystack = `${command.label} ${command.description}`.toLowerCase();
+        return haystack.includes(slashQuery);
+      })
+      .slice(0, 6);
+  }, [slashQuery, workflowCommands]);
+  useEffect(() => setSelectedCommandIndex(0), [slashQuery]);
+
+  const applyCommand = useCallback((command: WorkflowCommand) => {
+    setInput(command.prompt);
+    requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  const sendComposerMessage = useCallback(() => {
+    const resolved = resolveShortcutInput(input, workflowCommands);
+    if (!resolved) return;
+    if (resolved !== input.trim()) setInput('');
+    sendMessage(resolved);
+  }, [input, sendMessage, workflowCommands]);
+
+  const handleComposerKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (commandMatches.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedCommandIndex(index => (index + 1) % commandMatches.length);
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedCommandIndex(index => (index - 1 + commandMatches.length) % commandMatches.length);
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        applyCommand(commandMatches[selectedCommandIndex] ?? commandMatches[0]);
+        return;
+      }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendComposerMessage();
+    }
+  }, [applyCommand, commandMatches, selectedCommandIndex, sendComposerMessage]);
   const contextEvidence = buildContextEvidence(messages, entityContext);
 
   const IconComponent = entityContext ? typeIcons[entityContext.type] : null;
@@ -815,7 +925,7 @@ export default function Agent() {
   if (configLoading) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription} />
+        <TopBar title="Workspace Agent" icon={Sparkles} iconClassName={agentIconClassName} description={agentDescription} />
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/40" />
         </div>
@@ -827,10 +937,10 @@ export default function Agent() {
   if (!enabled) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription} />
+        <TopBar title="Workspace Agent" icon={Sparkles} iconClassName={agentIconClassName} description={agentDescription} />
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center max-w-md space-y-3">
-            <Bot className="w-12 h-12 mx-auto text-muted-foreground/40" />
+            <Sparkles className="w-12 h-12 mx-auto text-muted-foreground/40" />
             <h2 className="text-lg font-display font-bold text-foreground">Workspace Agent is not enabled</h2>
             <p className="text-sm text-muted-foreground">
               Enable it in <span className="text-foreground font-medium">Settings → Model Settings</span> to let the app reason over local customer context, call scoped tools, and keep sensitive workspace state under your control.
@@ -849,7 +959,7 @@ export default function Agent() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription} />
+      <TopBar title="Workspace Agent" icon={Sparkles} iconClassName={agentIconClassName} description={agentDescription} />
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
 
         {/* ── Chat panel ── */}
@@ -877,11 +987,24 @@ export default function Agent() {
                   </button>
                 )}
                 <button
-                  onClick={toggleVerbose}
-                  title={verbose ? 'Hide reasoning & tool details' : 'Show reasoning & tool details'}
-                  className={`p-1 rounded-md transition-colors ${verbose ? 'text-primary bg-primary/10 hover:bg-primary/20' : 'text-muted-foreground hover:bg-muted'}`}
+                  onClick={toggleProcess}
+                  title={showProcess ? 'Hide process details' : 'Show reasoning and tool details'}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors ${
+                    showProcess ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-muted-foreground hover:bg-muted'
+                  }`}
                 >
-                  {verbose ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  {showProcess ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                  Process
+                </button>
+                <button
+                  onClick={toggleSessionsOpen}
+                  title={sessionsOpen ? 'Hide session history' : 'Show session history'}
+                  className={`hidden lg:inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors ${
+                    sessionsOpen ? 'bg-muted text-muted-foreground hover:text-foreground' : 'bg-primary/10 text-primary hover:bg-primary/20'
+                  }`}
+                >
+                  {sessionsOpen ? <PanelRightClose className="w-3.5 h-3.5" /> : <PanelRightOpen className="w-3.5 h-3.5" />}
+                  Sessions
                 </button>
                 <button
                   onClick={startNewChat}
@@ -928,6 +1051,7 @@ export default function Agent() {
             canWrite={config?.can_write_objects}
             canHandoff={config?.can_create_assignments}
             autoExtract={config?.auto_extract_context}
+            hasSubject={Boolean(entityContext)}
           />
 
           {/* Pending-session banner — shown when the agent is working in the background */}
@@ -983,19 +1107,19 @@ export default function Agent() {
                     <div className="w-10 h-10 mx-auto mb-3 rounded-xl bg-accent/10 flex items-center justify-center">
                       <IconComponent className="w-5 h-5 text-accent" />
                     </div>
-                    <p className="text-sm font-medium text-foreground">Record context attached.</p>
-                    <p className="text-sm mt-1">Ask about this record or get a briefing when you need full Current Memory.</p>
+                    <p className="text-sm font-medium text-foreground">Active Context is bound to this record.</p>
+                    <p className="text-sm mt-1">Ask about this record, or get a briefing to retrieve Current Memory into the chat.</p>
                   </>
                 ) : (
                   <>
-                    <Bot className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                    <Sparkles className="w-10 h-10 mx-auto mb-3 opacity-40" />
                     <p className="text-sm">Ask about customer context, revenue objects, handoffs, or safe next actions.</p>
                   </>
                 )}
               </div>
             )}
             {groupToolMessages(messages).map((item, i) => (
-              <MessageBubble key={i} item={item} index={i} verbose={verbose} onRetry={retryLast} />
+              <MessageBubble key={i} item={item} index={i} showProcess={showProcess} onRetry={retryLast} />
             ))}
             {streaming && !['assistant', 'tool_status'].includes(messages[messages.length - 1]?.kind ?? '') && (
               <TypingIndicator />
@@ -1003,58 +1127,84 @@ export default function Agent() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Suggestions */}
-          {messages.length === 0 && (
-            <div className="px-4 space-y-3">
-              <div className="flex gap-2 flex-wrap">
-              {suggestions.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setInput(s)}
-                  className="px-3.5 py-2 rounded-xl text-xs bg-card border border-border text-muted-foreground hover:bg-primary/5 hover:text-primary hover:border-primary/30 transition-all press-scale"
-                >
-                  {s}
-                </button>
-              ))}
-              </div>
-              <div className="flex gap-2 flex-wrap">
-                {workflowCommands.slice(0, entityContext ? 9 : 5).map((command) => (
-                  <button
-                    key={command.label}
-                    onClick={() => setInput(command.prompt)}
-                    className="px-3 py-1.5 rounded-lg text-xs bg-muted/60 border border-border text-foreground hover:bg-accent/10 hover:border-accent/30 transition-colors"
-                  >
-                    {command.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Input */}
           <div className="p-4 pb-20 md:pb-4">
-            <div className="flex gap-2 items-end bg-card border border-border rounded-2xl p-2 shadow-sm focus-within:border-primary/40 transition-colors">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), sendMessage())}
-                placeholder="Ask your workspace agent…"
-                rows={1}
-                disabled={streaming}
-                className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none outline-none px-2 py-1.5 disabled:opacity-50"
-              />
-              <button
-                onClick={() => sendMessage()}
-                disabled={!input.trim() || streaming}
-                className="p-2.5 rounded-xl bg-gradient-to-br from-primary to-primary/80 text-primary-foreground hover:shadow-md disabled:opacity-40 transition-all press-scale"
-              >
-                {streaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-              </button>
+            <div className="relative">
+              {commandMatches.length > 0 && (
+                <div className="absolute bottom-full left-0 right-0 z-20 mb-2 overflow-hidden rounded-2xl border border-border bg-card shadow-xl">
+                  <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
+                    Choose a command. Use arrow keys, then Enter.
+                  </div>
+                  <div className="max-h-64 overflow-y-auto p-1.5">
+                    {commandMatches.map((command, index) => (
+                      <button
+                        key={command.label}
+                        onClick={() => applyCommand(command)}
+                        className={`flex w-full items-start gap-3 rounded-xl px-3 py-2 text-left transition-colors ${
+                          index === selectedCommandIndex ? 'bg-primary/10' : 'hover:bg-muted/60'
+                        }`}
+                      >
+                        <span className="mt-0.5 rounded-md bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">{command.label}</span>
+                        <span className="min-w-0">
+                          <span className="block text-sm font-medium text-foreground">{command.description}</span>
+                          <span className="block truncate text-xs text-muted-foreground">{command.prompt}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm focus-within:border-primary/40 transition-colors">
+                {(messages.length === 0 || entityContext) && (
+                  <div className="flex items-center gap-2 border-b border-border bg-muted/20 px-3 py-2">
+                    {entityContext && IconComponent ? (
+                      <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">
+                        <IconComponent className="h-3 w-3 shrink-0" />
+                        <span className="truncate">Bound to {typeLabels[entityContext.type]} · {entityContext.name}</span>
+                      </span>
+                    ) : (
+                      <span className="hidden text-xs text-muted-foreground sm:inline">Type <span className="font-mono text-foreground">/</span> for commands</span>
+                    )}
+                    <div className="ml-auto flex min-w-0 gap-1 overflow-x-auto">
+                      {quickPromptButtons.map((command) => (
+                        <button
+                          key={command.label}
+                          onClick={() => applyCommand(command)}
+                          title={command.description}
+                          className="shrink-0 rounded-lg bg-background/70 px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors"
+                        >
+                          {command.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-end gap-2 p-2">
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleComposerKeyDown}
+                    placeholder={entityContext ? `Ask about ${entityContext.name}...` : 'Ask your workspace agent... Type / for commands'}
+                    rows={1}
+                    disabled={streaming}
+                    className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none outline-none px-2 py-1.5 disabled:opacity-50"
+                  />
+                  <button
+                    onClick={sendComposerMessage}
+                    disabled={!input.trim() || streaming}
+                    className="p-2.5 rounded-xl bg-gradient-to-br from-primary to-primary/80 text-primary-foreground hover:shadow-md disabled:opacity-40 transition-all press-scale"
+                  >
+                    {streaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
         {/* ── Session sidebar (desktop) ── */}
+        {sessionsOpen && (
         <div className="hidden lg:flex flex-col w-72 border-l border-border bg-surface">
           <div className="px-4 pt-4 pb-2 flex items-center justify-between">
             <h3 className="font-display font-bold text-foreground text-sm flex items-center gap-1.5">
@@ -1090,6 +1240,7 @@ export default function Agent() {
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
@@ -1101,39 +1252,57 @@ function AgentTrustBar({
   canWrite,
   canHandoff,
   autoExtract,
+  hasSubject,
 }: {
   provider?: string;
   model?: string;
   canWrite?: boolean;
   canHandoff?: boolean;
   autoExtract?: boolean;
+  hasSubject?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const actionLabel = canWrite ? 'Can request scoped writes' : 'Read-only by default';
+
   return (
-    <div className="px-4 py-2 border-b border-border bg-card/60">
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
-          <ShieldCheck className="w-3 h-3 text-primary" />
-          {provider && model ? `${provider} · ${model}` : 'Model boundary configured'}
+    <div className="border-b border-border bg-card/60">
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="flex w-full items-center gap-2 px-4 py-2 text-left text-xs text-muted-foreground hover:bg-muted/40 transition-colors"
+      >
+        <ShieldCheck className="w-3.5 h-3.5 text-primary" />
+        <span className="font-medium text-foreground">Trust boundary</span>
+        <span className="hidden sm:inline">
+          {provider && model ? `${provider} · ${model}` : 'Model configured'} · Active Context {hasSubject ? 'record-bound' : 'session-bound'} · {actionLabel}
         </span>
-        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 ${
-          canWrite ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'bg-muted text-muted-foreground'
-        }`}>
-          {canWrite ? <ShieldAlert className="w-3 h-3" /> : <ShieldCheck className="w-3 h-3" />}
-          {canWrite ? 'Writes visible and scoped' : 'Writes disabled'}
+        <span className="ml-auto inline-flex items-center gap-1 text-primary">
+          Details {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
         </span>
-        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 ${
-          canHandoff ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
-        }`}>
-          <GitPullRequestArrow className="w-3 h-3" />
-          {canHandoff ? 'Handoffs enabled' : 'Handoffs read-only'}
-        </span>
-        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 ${
-          autoExtract ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'bg-muted text-muted-foreground'
-        }`}>
-          <Database className="w-3 h-3" />
-          {autoExtract ? 'Memory review available' : 'Memory extraction off'}
-        </span>
-      </div>
+      </button>
+      {expanded && (
+        <div className="grid gap-2 border-t border-border px-4 py-3 text-xs sm:grid-cols-2 xl:grid-cols-5">
+          <div className="rounded-lg bg-muted/40 p-2">
+            <p className="font-semibold text-foreground">Model</p>
+            <p className="mt-0.5 text-muted-foreground">{provider && model ? `${provider} · ${model}` : 'Configured in Model Settings'}</p>
+          </div>
+          <div className="rounded-lg bg-muted/40 p-2">
+            <p className="font-semibold text-foreground">Writes</p>
+            <p className="mt-0.5 text-muted-foreground">{canWrite ? 'Visible, scoped, and auditable.' : 'Disabled until enabled in settings.'}</p>
+          </div>
+          <div className="rounded-lg bg-muted/40 p-2">
+            <p className="font-semibold text-foreground">Handoffs</p>
+            <p className="mt-0.5 text-muted-foreground">{canHandoff ? 'Can route risky decisions for review.' : 'Review requests are disabled.'}</p>
+          </div>
+          <div className="rounded-lg bg-muted/40 p-2">
+            <p className="font-semibold text-foreground">Active Context</p>
+            <p className="mt-0.5 text-muted-foreground">{hasSubject ? 'Record metadata is loaded. Briefings add Memory and Signals when needed.' : 'This chat starts with session context and tool results.'}</p>
+          </div>
+          <div className="rounded-lg bg-muted/40 p-2">
+            <p className="font-semibold text-foreground">Memory</p>
+            <p className="mt-0.5 text-muted-foreground">{autoExtract ? 'Useful chats can propose reviewed Memory.' : 'Conversation Memory proposals are off.'}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1232,7 +1401,12 @@ function ContextUsedPanel({ evidence }: { evidence: NonNullable<ReturnType<typeo
     <div className="rounded-xl border border-border bg-card/80 px-4 py-3">
       <div className="flex items-center gap-2 mb-2">
         <FileCheck2 className="w-4 h-4 text-primary" />
-        <p className="text-sm font-semibold text-foreground">Context used</p>
+        <div>
+          <p className="text-sm font-semibold text-foreground">Active Context used</p>
+          <p className="text-xs text-muted-foreground">
+            The temporary working set visible to the agent in this session.
+          </p>
+        </div>
       </div>
       <div className="flex flex-wrap gap-2 text-xs">
         {subject && (
@@ -1251,6 +1425,9 @@ function ContextUsedPanel({ evidence }: { evidence: NonNullable<ReturnType<typeo
         </span>
         <span className={`rounded-full px-2.5 py-1 ${evidence.usedHandoff ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'bg-muted text-muted-foreground'}`}>
           Handoffs {evidence.usedHandoff ? 'involved' : 'not involved'}
+        </span>
+        <span className="rounded-full bg-muted px-2.5 py-1 text-muted-foreground">
+          {evidence.toolCount} tool event{evidence.toolCount === 1 ? '' : 's'}
         </span>
       </div>
       {evidence.warnings.length > 0 && (
@@ -1355,7 +1532,7 @@ function TypingIndicator() {
       className="flex justify-start"
     >
       <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mr-2 flex-shrink-0 mt-1">
-        <Bot className="w-4 h-4 text-primary" />
+        <Sparkles className="w-4 h-4 text-primary" />
       </div>
       <div className="bg-card border border-border rounded-2xl rounded-bl-md px-4 py-3.5 shadow-sm flex items-center gap-1.5">
         <span className="w-2 h-2 rounded-full bg-primary/50 animate-bounce [animation-delay:0ms]" />
@@ -1405,30 +1582,37 @@ function ThinkingBubble({ content }: { content: string }) {
 
 // ── Expandable Step ──────────────────────────────────────────────────────────
 
-function ExpandableStep({ step, verbose }: { step: ToolGroupStep; verbose: boolean }) {
+function ExpandableStep({ step }: { step: ToolGroupStep }) {
   const [open, setOpen] = useState(false);
   const done = step.status.endsWith('✓');
   const err = step.status.startsWith('Error') || step.is_error;
-  const hasDetail = verbose && (step.arguments !== undefined || step.result !== undefined);
+  const hasDetail = step.arguments !== undefined || step.result !== undefined;
+  const inputSummary = summarizeToolInput(step.arguments);
+  const outputSummary = summarizeToolOutput(step.result, step.is_error);
 
   return (
-    <div className="text-xs text-muted-foreground">
+    <div className="rounded-lg bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground">
       <button
         onClick={() => hasDetail && setOpen(v => !v)}
-        className={`flex items-center gap-1.5 w-full text-left py-0.5 ${hasDetail ? 'hover:text-foreground transition-colors cursor-pointer' : 'cursor-default'}`}
+        className={`flex w-full items-start gap-2 text-left ${hasDetail ? 'hover:text-foreground transition-colors cursor-pointer' : 'cursor-default'}`}
       >
-        <code className="font-mono text-muted-foreground/60 bg-muted px-1 rounded shrink-0">{step.name}</code>
-        <span className={err ? 'text-destructive' : done ? 'text-muted-foreground' : 'text-foreground/60'}>
-          {step.status}
+        <Wrench className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${err ? 'text-destructive' : done ? 'text-emerald-500' : 'text-primary'}`} />
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium text-foreground">{humanizeToolName(step.name)}</span>
+          <span className={err ? 'text-destructive' : 'text-muted-foreground'}>
+            {step.status}
+            {inputSummary ? ` · ${inputSummary}` : ''}
+            {outputSummary ? ` → ${outputSummary}` : ''}
+          </span>
         </span>
         {hasDetail && (
-          <span className="ml-auto opacity-60">
-            {open ? <ChevronDown className="w-2.5 h-2.5" /> : <ChevronRight className="w-2.5 h-2.5" />}
+          <span className="ml-auto mt-0.5 opacity-60">
+            {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </span>
         )}
       </button>
-      {open && verbose && (
-        <div className="mt-1 ml-2 space-y-2">
+      {open && (
+        <div className="mt-2 space-y-2 border-t border-border pt-2">
           {step.arguments !== undefined && (
             <div>
               <p className="text-muted-foreground/50 uppercase tracking-wider text-[10px] mb-0.5">Input</p>
@@ -1455,37 +1639,45 @@ function ExpandableStep({ step, verbose }: { step: ToolGroupStep; verbose: boole
 
 // ── Tool Group (collapsible) ─────────────────────────────────────────────────
 
-function ToolGroup({ group, verbose }: { group: ToolGroupItem; verbose: boolean }) {
+function ToolGroup({ group, showProcess }: { group: ToolGroupItem; showProcess: boolean }) {
   const allDone = group.steps.every(s => s.status.endsWith('✓') || s.status.startsWith('Error') || s.is_error);
   const hasError = group.steps.some(s => s.status.startsWith('Error') || s.is_error);
   const [expanded, setExpanded] = useState(hasError); // auto-expand on error
+  useEffect(() => {
+    if (showProcess) setExpanded(true);
+  }, [showProcess]);
 
   // While running: show current active step name
   const activeStep = group.steps.find(s => !s.status.endsWith('✓') && !s.status.startsWith('Error'));
   const currentStatus = activeStep?.status ?? (hasError ? 'Error in tool call' : `${group.steps.length} step${group.steps.length !== 1 ? 's' : ''} complete`);
+  const primaryTool = activeStep?.name ?? group.steps[group.steps.length - 1]?.name ?? group.steps[0]?.name;
+  const summary = primaryTool ? humanizeToolName(primaryTool) : 'Tool activity';
 
   const iconClass = hasError ? 'text-destructive' : allDone ? 'text-emerald-500' : 'text-primary animate-pulse';
 
   return (
-    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="px-3 py-1">
+    <motion.div initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="px-2 py-1">
       <button
         onClick={() => setExpanded(v => !v)}
-        className="flex items-center gap-2 w-full text-left text-xs text-muted-foreground hover:text-foreground transition-colors group"
+        className="flex w-full items-center gap-2 rounded-xl border border-border bg-card/70 px-3 py-2 text-left text-xs text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors group"
       >
         <Wrench className={`w-3 h-3 shrink-0 ${iconClass}`} />
-        <span className={hasError ? 'text-destructive' : allDone ? 'text-muted-foreground' : 'text-foreground/70'}>
+        <span className={hasError ? 'text-destructive' : allDone ? 'text-foreground' : 'text-foreground/80'}>
           {allDone
-            ? `✓ ${group.steps.length} step${group.steps.length !== 1 ? 's' : ''}`
+            ? `Used ${summary}`
             : currentStatus}
         </span>
-        <span className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
+        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+          {group.steps.length} {group.steps.length === 1 ? 'step' : 'steps'}
+        </span>
+        <span className="ml-auto opacity-70 transition-opacity group-hover:opacity-100">
           {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
         </span>
       </button>
       {expanded && (
-        <div className="mt-1 ml-5 space-y-0.5 border-l border-border pl-3">
+        <div className="mt-2 ml-5 space-y-1.5 border-l border-border pl-3">
           {group.steps.map(step => (
-            <ExpandableStep key={step.id} step={step} verbose={verbose} />
+            <ExpandableStep key={step.id} step={step} />
           ))}
         </div>
       )}
@@ -1495,15 +1687,15 @@ function ToolGroup({ group, verbose }: { group: ToolGroupItem; verbose: boolean 
 
 // ── Message Bubble ──────────────────────────────────────────────────────────
 
-function MessageBubble({ item, index, verbose, onRetry }: { item: RenderItem; index: number; verbose: boolean; onRetry?: () => void }) {
+function MessageBubble({ item, index, showProcess, onRetry }: { item: RenderItem; index: number; showProcess: boolean; onRetry?: () => void }) {
   if (item.kind === 'tool_group') {
-    return <ToolGroup group={item} verbose={verbose} />;
+    return <ToolGroup group={item} showProcess={showProcess} />;
   }
 
   const msg = item as DisplayMessage;
 
   if (msg.kind === 'thinking') {
-    return verbose ? <ThinkingBubble content={msg.content} /> : null;
+    return showProcess ? <ThinkingBubble content={msg.content} /> : null;
   }
 
   if (msg.kind === 'tool_status' || msg.kind === 'tool_call' || msg.kind === 'tool_result') {
@@ -1547,7 +1739,7 @@ function MessageBubble({ item, index, verbose, onRetry }: { item: RenderItem; in
     >
       {!isUser && (
         <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mr-2 flex-shrink-0 mt-1">
-          <Bot className="w-4 h-4 text-primary" />
+          <Sparkles className="w-4 h-4 text-primary" />
         </div>
       )}
       <div

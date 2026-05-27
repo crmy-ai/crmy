@@ -86,11 +86,12 @@ interface GraphSidebarProps {
   onBack?:        () => void;
   /** Previous subjects in the traversal stack (up to 2 shown as breadcrumbs) */
   historyItems?:  Array<{ name: string; type: string }>;
+  showHeader?:    boolean;
 }
 
 export function GraphSidebar({
   subjectType, subjectName,
-  activeFilters, filterCounts, onFilterChange, onFitView, onBack, historyItems,
+  activeFilters, filterCounts, onFilterChange, onFitView, onBack, historyItems, showHeader = true,
 }: GraphSidebarProps) {
   const navigate = useNavigate();
   const entityColor = ENTITY_HEX[subjectType] ?? '#f97316';
@@ -111,58 +112,59 @@ export function GraphSidebar({
   return (
     <div className="w-[220px] flex-shrink-0 flex flex-col border-r border-border bg-card overflow-hidden">
 
-      {/* Entity header */}
-      <div className="flex-shrink-0 px-4 pt-4 pb-3 border-b border-border">
-        {/* Breadcrumb trail */}
-        {historyItems && historyItems.length > 0 ? (
-          <div className="mb-3 space-y-1">
-            <div className="flex items-center gap-1 flex-wrap">
-              {historyItems.length > 2 && (
-                <span className="text-xs text-muted-foreground/50">…</span>
-              )}
-              {historyItems.map((item, i) => (
-                <span key={i} className="flex items-center gap-1">
-                  <span
-                    className="text-xs text-muted-foreground/60 max-w-[64px] truncate"
-                    title={item.name}
-                  >
-                    {item.name}
+      {showHeader && (
+        <div className="flex-shrink-0 px-4 pt-4 pb-3 border-b border-border">
+          {/* Breadcrumb trail */}
+          {historyItems && historyItems.length > 0 ? (
+            <div className="mb-3 space-y-1">
+              <div className="flex items-center gap-1 flex-wrap">
+                {historyItems.length > 2 && (
+                  <span className="text-xs text-muted-foreground/50">…</span>
+                )}
+                {historyItems.map((item, i) => (
+                  <span key={i} className="flex items-center gap-1">
+                    <span
+                      className="text-xs text-muted-foreground/60 max-w-[64px] truncate"
+                      title={item.name}
+                    >
+                      {item.name}
+                    </span>
+                    <span className="text-xs text-muted-foreground/30">›</span>
                   </span>
-                  <span className="text-xs text-muted-foreground/30">›</span>
-                </span>
-              ))}
+                ))}
+              </div>
+              <button
+                onClick={() => (onBack ? onBack() : navigate(-1))}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <ArrowLeft className="w-3 h-3" />
+                Back to {historyItems[historyItems.length - 1].name}
+              </button>
             </div>
+          ) : (
             <button
               onClick={() => (onBack ? onBack() : navigate(-1))}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mb-3 transition-colors"
             >
-              <ArrowLeft className="w-3 h-3" />
-              Back to {historyItems[historyItems.length - 1].name}
+              <ArrowLeft className="w-3 h-3" /> Back
             </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => (onBack ? onBack() : navigate(-1))}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground mb-3 transition-colors"
-          >
-            <ArrowLeft className="w-3 h-3" /> Back
-          </button>
-        )}
-        <div className="flex items-center gap-3">
-          <div
-            className="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center text-sm font-bold"
-            style={{ backgroundColor: entityColor + '18', border: `1.5px solid ${entityColor}50`, color: entityColor }}
-          >
-            {(subjectName || '??').slice(0, 2).toUpperCase()}
-          </div>
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-foreground truncate">{subjectName || 'Loading…'}</p>
-            <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground capitalize">
-              {subjectType.replace(/_/g, ' ')}
-            </span>
+          )}
+          <div className="flex items-center gap-3">
+            <div
+              className="w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center text-sm font-bold"
+              style={{ backgroundColor: entityColor + '18', border: `1.5px solid ${entityColor}50`, color: entityColor }}
+            >
+              {(subjectName || '??').slice(0, 2).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground truncate">{subjectName || 'Loading…'}</p>
+              <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground capitalize">
+                {subjectType.replace(/_/g, ' ')}
+              </span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Filters */}
       <div className="flex-1 px-3 py-3">

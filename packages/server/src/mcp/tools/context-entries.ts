@@ -7,10 +7,12 @@ import {
   contextEntryCreate, contextEntryGet, contextEntrySearch, contextEntrySupersede,
   contextSearch, contextReview, contextStaleList, briefingGet,
   contextDiff, contextIngest, contextSemanticSearch, contextEmbedBackfill,
-  contextSignalPromote, contextSignalReject,
+  contextSignalPromote, contextSignalReject, contextLineageGet,
 } from '@crmy/shared';
 import { detectRawContextSubjects } from '../../services/raw-context-subjects.js';
 import { loadEmbeddingConfig, embedText } from '../../agent/providers/embeddings.js';
+import { ensureEmbeddingBestEffort } from '../../services/embedding-service.js';
+import { getContextLineage } from '../../services/context-lineage.js';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext, SubjectType, UUID } from '@crmy/shared';
 import * as contextRepo from '../../db/repos/context-entries.js';
@@ -30,7 +32,8 @@ import { consolidateContextEntries } from '../../services/consolidation.js';
 import { checkContextConvergence } from '../../services/context-convergence.js';
 import { createContradictionReviewAssignments } from '../../services/context-review-assignments.js';
 import { assertActionPolicyAllowsMutation, evaluateActionPolicy } from '../../services/action-policy.js';
-import { attachSignalToGroup, dismissSignalGroup, promoteSignalGroup } from '../../services/signal-groups.js';
+import { attachSignalToGroup, createSignalGroupHandoff, dismissSignalGroup, promoteSignalGroup } from '../../services/signal-groups.js';
+import { ensureActorRecordForContext } from '../../services/actor-identity.js';
 import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
@@ -137,16 +140,30 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         if (input.memory_status === 'active' && input.confidence !== undefined && input.confidence < 0.7) {
           lifecycle_warnings.push('Low-confidence operational Memory should usually be created as a Signal first, then promoted after review or confirmation.');
         }
+        const createInput = { ...input };
+        if (createInput.parent_id && createInput.context_type !== 'note') {
+          delete createInput.parent_id;
+          lifecycle_warnings.push('Ignored parent_id because parent_id is only used for threaded notes. Current Memory and Signals should be linked by subject_type and subject_id.');
+        }
+        if (createInput.parent_id) {
+          const parent = await contextRepo.getContextEntry(db, actor.tenant_id, createInput.parent_id);
+          if (!parent) {
+            throw validationError('Parent context entry was not found. Omit parent_id unless you are replying to an existing note context entry.');
+          }
+          if (parent.subject_type !== createInput.subject_type || parent.subject_id !== createInput.subject_id) {
+            throw validationError('Parent context entry must belong to the same customer record as the new note.');
+          }
+        }
 
-        const convergence = input.memory_status === 'signal'
+        const convergence = createInput.memory_status === 'signal'
           ? { suggested_action: 'add_new' as const, should_block: false, candidates: [] }
           : await checkContextConvergence(db, actor.tenant_id, {
-          subject_type: input.subject_type,
-          subject_id: input.subject_id,
-          context_type: input.context_type,
-          title: input.title,
-          body: input.body,
-          structured_data: input.structured_data as Record<string, unknown> | undefined,
+          subject_type: createInput.subject_type,
+          subject_id: createInput.subject_id,
+          context_type: createInput.context_type,
+          title: createInput.title,
+          body: createInput.body,
+          structured_data: createInput.structured_data as Record<string, unknown> | undefined,
         });
 
         if (!input.allow_similar && convergence.should_block) {
@@ -161,18 +178,19 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           );
         }
 
+        const actorRecordId = await ensureActorRecordForContext(db, actor);
         const entry = await contextRepo.createContextEntry(db, actor.tenant_id, {
-          ...input,
-          source: input.source ?? 'mcp',
-          source_ref: input.source_ref ?? `actor:${actor.actor_id}`,
-          authored_by: actor.actor_id,
+          ...createInput,
+          source: createInput.source ?? 'mcp',
+          source_ref: createInput.source_ref ?? `actor:${actor.actor_id}`,
+          authored_by: actorRecordId,
         });
 
         const signal_group_result = entry.memory_status === 'signal'
           ? await attachSignalToGroup(db, actor.tenant_id, entry, {
             threshold: 0.85,
             autoPromote: false,
-            actorId: actor.actor_id,
+            actorId: actorRecordId,
           })
           : undefined;
 
@@ -184,7 +202,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           source_label: input.title ?? input.context_type,
           subject_type: input.subject_type,
           subject_id: input.subject_id,
-          actor_id: actor.actor_id,
+          actor_id: actorRecordId,
           status: entry.memory_status === 'signal' ? 'needs_review' : 'processed',
           stage: entry.memory_status === 'signal' ? 'review_signals' : 'confirmed_memory',
           raw_excerpt: input.body.slice(0, 1000),
@@ -197,13 +215,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           },
         });
 
-        // Fire-and-forget embedding — never delays context_add; failures are isolated.
-        const _embCfg = loadEmbeddingConfig();
-        if (_embCfg && entry.body) {
-          embedText(entry.body, _embCfg)
-            .then(vec => contextRepo.updateEmbedding(db, entry.id, actor.tenant_id, vec))
-            .catch((err: unknown) => console.warn(`[embedding] context_add ${entry.id}: ${(err as Error).message}`));
-        }
+        await ensureEmbeddingBestEffort(db, actor.tenant_id, 'context_entry', entry.id, entry.body);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -330,6 +342,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       handler: async (input: { id: string }, actor: ActorContext) => {
         const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.id);
         if (!source) throw notFound('RawContextSource', input.id);
+        const actorRecordId = await ensureActorRecordForContext(db, actor);
 
         await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
           status: 'processing',
@@ -384,7 +397,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
                   body: source.raw_excerpt,
                   subject_type: subject.type as 'contact' | 'account',
                   subject_id: subject.id,
-                  performed_by: actor.actor_type === 'agent' ? actor.actor_id : undefined,
+                  performed_by: actorRecordId,
                   source_agent: actor.actor_type === 'agent' ? 'context_raw_source_reprocess' : undefined,
                   occurred_at: new Date().toISOString(),
                 });
@@ -453,7 +466,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             memory_status: 'signal',
           });
           assertActionPolicyAllowsMutation(policy);
-          const entry = await contextRepo.promoteSignal(db, actor.tenant_id, input.id, actor.actor_id, {
+          const actorRecordId = await ensureActorRecordForContext(db, actor);
+          const entry = await contextRepo.promoteSignal(db, actor.tenant_id, input.id, actorRecordId, {
             body: input.body,
             title: input.title,
             structured_data: input.structured_data as Record<string, unknown> | undefined,
@@ -500,7 +514,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
-          const entry = await contextRepo.rejectSignal(db, actor.tenant_id, input.id, actor.actor_id, input.reason);
+          const actorRecordId = await ensureActorRecordForContext(db, actor);
+          const entry = await contextRepo.rejectSignal(db, actor.tenant_id, input.id, actorRecordId, input.reason);
           if (!entry) throw notFound('Signal', input.id);
           const event_id = await emitEvent(db, {
             tenantId: actor.tenant_id,
@@ -528,7 +543,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       tier: 'core',
       description: 'List corroborated Signals: evidence-backed inferred claims created from one or more source Signals. Use attention_only=true to find Signals that need promotion, dismissal, or review before agents use the claim operationally.',
       inputSchema: z.object({
-        status: z.enum(['gathering', 'ready', 'promoted', 'blocked', 'dismissed', 'conflicting']).optional(),
+        status: z.enum(['gathering', 'ready', 'promoted', 'blocked', 'dismissed', 'conflicting', 'merged']).optional(),
         subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case']).optional(),
         subject_id: z.string().uuid().optional(),
         context_type: z.string().optional(),
@@ -561,6 +576,17 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       },
     },
     {
+      name: 'context_lineage_get',
+      tier: 'core',
+      description: 'Read the lineage behind Raw Context, Signals, Memory, Handoffs, writebacks, and audit events for a customer record or context artifact.',
+      inputSchema: contextLineageGet,
+      handler: async (input: z.infer<typeof contextLineageGet>, actor: ActorContext) => {
+        return {
+          lineage: await getContextLineage(db, actor.tenant_id, input),
+        };
+      },
+    },
+    {
       name: 'context_signal_group_promote',
       tier: 'core',
       description: 'Promote a trusted corroborated Signal into Current Memory. This promotes the best supporting Signal, preserves combined evidence, and retires duplicate supporting Signals.',
@@ -573,7 +599,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
-          const result = await promoteSignalGroup(db, actor.tenant_id, input.id, actor.actor_id);
+          const actorRecordId = await ensureActorRecordForContext(db, actor);
+          const result = await promoteSignalGroup(db, actor.tenant_id, input.id, actorRecordId, actor);
           if (!result.context_entry) {
             throw validationError('This Signal could not be promoted. Confirm it has supporting current Signals and no unresolved conflict.');
           }
@@ -583,6 +610,32 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
               objectType: 'context_entry',
               objectId: result.context_entry.id,
               sideEffects: ['signal_group:promoted', 'search_index:queued'],
+            }),
+          };
+        });
+      },
+    },
+    {
+      name: 'context_signal_handoff',
+      tier: 'core',
+      description: 'Send a Signal to Handoff for human review when evidence is conflicting, policy-blocked, or not yet trusted enough to become Memory.',
+      inputSchema: z.object({ id: z.string().uuid(), idempotency_key: z.string().max(128).optional() }),
+      handler: async (input: { id: string; idempotency_key?: string }, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_signal_handoff',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
+          const actorRecordId = await ensureActorRecordForContext(db, actor);
+          const result = await createSignalGroupHandoff(db, actor.tenant_id, input.id, actorRecordId, actor);
+          return {
+            ...result,
+            mutation: mutationReceipt(actor, {
+              objectType: 'hitl_request',
+              objectId: (result.hitl_request as { id: string }).id,
+              sideEffects: ['signal:handoff_requested'],
             }),
           };
         });
@@ -605,7 +658,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
-          const group = await dismissSignalGroup(db, actor.tenant_id, input.id, actor.actor_id, input.reason);
+          const actorRecordId = await ensureActorRecordForContext(db, actor);
+          const group = await dismissSignalGroup(db, actor.tenant_id, input.id, actorRecordId, input.reason);
           if (!group) throw notFound('Signal', input.id);
           return {
             signal_group: group,
@@ -634,6 +688,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         const existing = await contextRepo.getContextEntry(db, actor.tenant_id, input.id);
         if (!existing) throw notFound('ContextEntry', input.id);
 
+        const actorRecordId = await ensureActorRecordForContext(db, actor);
         const result = await contextRepo.supersedeContextEntry(
           db,
           actor.tenant_id,
@@ -644,17 +699,11 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             structured_data: input.structured_data as Record<string, unknown> | undefined,
             confidence: input.confidence ?? undefined,
             tags: input.tags,
-            authored_by: actor.actor_id,
+            authored_by: actorRecordId,
           },
         );
 
-        // Fire-and-forget embedding for the new entry created by supersession.
-        const _embCfgSup = loadEmbeddingConfig();
-        if (_embCfgSup && result.new.body) {
-          embedText(result.new.body, _embCfgSup)
-            .then(vec => contextRepo.updateEmbedding(db, result.new.id, actor.tenant_id, vec))
-            .catch((err: unknown) => console.warn(`[embedding] context_supersede ${result.new.id}: ${(err as Error).message}`));
-        }
+        await ensureEmbeddingBestEffort(db, actor.tenant_id, 'context_entry', result.new.id, result.new.body);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -862,6 +911,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           throw validationError(`Document exceeds maximum ingest length (${input.document.length} chars)`);
         }
 
+        const actorRecordId = await ensureActorRecordForContext(db, actor);
+
         // Create an activity as provenance for the ingested content
         const activity = await activityRepo.createActivity(db, actor.tenant_id, {
           type: 'note',
@@ -869,8 +920,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           body: input.document,
           subject_type: input.subject_type,
           subject_id: input.subject_id,
-          performed_by: actor.actor_type === 'agent' ? actor.actor_id : undefined,
-          source_agent: actor.actor_type === 'agent' ? 'context_ingest' : undefined,
+          performed_by: actorRecordId,
+          source_agent: 'context_ingest',
           occurred_at: new Date().toISOString(),
         });
 
@@ -939,12 +990,13 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+        const actorRecordId = await ensureActorRecordForContext(db, actor);
         const sourceRef = `auto:${createHash('sha256').update(input.document).digest('hex').slice(0, 32)}`;
         await rawContextRepo.upsertRawContextSource(db, actor.tenant_id, {
           source_type: actor.actor_type === 'agent' ? 'mcp' : 'add_context',
           source_ref: sourceRef,
           source_label: input.source_label ?? 'Auto-ingested Raw Context',
-          actor_id: actor.actor_id,
+          actor_id: actorRecordId,
           status: 'processing',
           stage: 'resolve_subjects',
           raw_excerpt: input.document.slice(0, 1000),
@@ -1019,6 +1071,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           activity_id: string;
           raw_context_source_id?: string;
           processing_receipt?: ReturnType<typeof processingReceipt>;
+          failure_reason?: string;
+          skipped_reasons?: string[];
         }[] = [];
 
         for (const subject of resolvedSubjects) {
@@ -1029,8 +1083,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
               body: input.document,
               subject_type: subject.entity_type as 'contact' | 'account',
               subject_id: subject.id,
-              performed_by: actor.actor_type === 'agent' ? actor.actor_id : undefined,
-              source_agent: actor.actor_type === 'agent' ? 'context_ingest_auto' : undefined,
+              performed_by: actorRecordId,
+              source_agent: 'context_ingest_auto',
               occurred_at: new Date().toISOString(),
             });
             const extracted = await extractContextFromActivity(db, actor.tenant_id, activity.id);
@@ -1059,10 +1113,23 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
               activity_id: activity.id,
               raw_context_source_id: rawSource?.id,
               processing_receipt: receipt,
+              failure_reason: rawSource?.failure_reason,
+              skipped_reasons: Array.isArray(rawSource?.metadata?.skipped_reasons)
+                ? rawSource.metadata.skipped_reasons.map(String)
+                : undefined,
             });
           } catch (err) {
             console.error(`[context_ingest_auto] Failed for subject ${subject.id}:`, err);
             skippedCount++;
+            subjectResults.push({
+              ...subject,
+              entries_created: 0,
+              memory_created: 0,
+              signals_created: 0,
+              skipped: 1,
+              activity_id: '',
+              failure_reason: err instanceof Error ? err.message : 'Extraction failed for this subject.',
+            });
           }
         }
 
@@ -1073,6 +1140,16 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             : skippedCount > 0
               ? 'skipped'
               : 'processed';
+        const noExtractionReasons = subjectResults
+          .flatMap(subject => [
+            subject.failure_reason,
+            ...(subject.skipped_reasons ?? []),
+          ])
+          .filter((reason): reason is string => Boolean(reason?.trim()));
+        const noExtractionReason = noExtractionReasons.length > 0
+          ? Array.from(new Set(noExtractionReasons)).slice(0, 3).join('; ')
+          : 'Subjects were matched, but the Workspace Agent did not find customer-specific Signals to save.';
+
         await rawContextRepo.updateRawContextSource(
           db,
           actor.tenant_id,
@@ -1096,7 +1173,10 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             signals_created: signalsCreated,
             memory_created: memoryCreated,
             skipped: skippedCount,
-            failure_reason: totalCreated === 0 && skippedCount > 0 ? 'Resolved subjects produced no extractable context.' : null,
+            failure_reason: totalCreated === 0 ? noExtractionReason : null,
+            metadata: {
+              no_extraction_reasons: noExtractionReasons.slice(0, 10),
+            },
           },
         );
 
@@ -1107,6 +1187,9 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           memory_created: memoryCreated,
           signals_created: signalsCreated,
           skipped: skippedCount,
+          message: totalCreated > 0
+            ? undefined
+            : noExtractionReason,
           processing_receipts: subjectResults
             .map(result => result.processing_receipt)
             .filter(Boolean),
@@ -1119,7 +1202,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           low_confidence_skipped: skipped.length > 0 ? skipped : undefined,
           mutation: mutationReceipt(actor, {
             objectType: 'context_entry',
-            objectId: subjectResults[0]?.activity_id ?? 'multiple',
+            objectId: subjectResults.find(result => result.activity_id)?.activity_id ?? 'multiple',
             sideEffects: ['context_extraction:completed'],
           }),
         };
@@ -1249,10 +1332,11 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+          const actorRecordId = await ensureActorRecordForContext(db, actor);
           const result = await createContradictionReviewAssignments(
             db,
             actor.tenant_id,
-            actor.actor_id,
+            actorRecordId,
             {
               subject_type: input.subject_type,
               subject_id: input.subject_id,
@@ -1304,6 +1388,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         if (!keepEntry) return notFound('context_entry', input.keep_entry_id);
 
         // Supersede the incorrect entry with the kept entry's content + resolution note
+        const actorRecordId = await ensureActorRecordForContext(db, actor);
         const result = await contextRepo.supersedeContextEntry(
           db, actor.tenant_id, input.supersede_entry_id,
           {
@@ -1316,7 +1401,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             },
             confidence: keepEntry.confidence,
             tags: keepEntry.tags,
-            authored_by: actor.actor_id,
+            authored_by: actorRecordId,
           },
         );
 
@@ -1366,10 +1451,11 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+        const actorRecordId = await ensureActorRecordForContext(db, actor);
         const result = await consolidateContextEntries(
           db,
           actor.tenant_id,
-          actor.actor_id,
+          actorRecordId,
           input.subject_type,
           input.subject_id,
           input.context_type,

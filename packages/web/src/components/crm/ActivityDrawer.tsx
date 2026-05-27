@@ -9,7 +9,7 @@ import { activityIcon } from './CrmWidgets';
 
 const SUBJECT_TYPE_LABELS: Record<string, string> = {
   contact: 'Contact',
-  account: 'Company',
+  account: 'Account',
   opportunity: 'Opportunity',
   use_case: 'Use Case',
 };

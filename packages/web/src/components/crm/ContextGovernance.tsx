@@ -5,15 +5,15 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
-  ClipboardCheck,
   GitCompareArrows,
   Loader2,
   Search,
   ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
 import {
   useAssignContextContradictions,
-  useBulkMarkContextStale,
+  useContextEntries,
   useContextContradictions,
   useReviewContextBatch,
   useReviewContextEntry,
@@ -34,6 +34,7 @@ interface ContextEntry {
   title?: string;
   body: string;
   confidence?: number;
+  confidence_score?: number;
   valid_until?: string;
   created_at?: string;
 }
@@ -54,7 +55,8 @@ const SUBJECT_OPTIONS: Array<{ value: SubjectType; label: string }> = [
 ];
 
 function confidence(entry: ContextEntry) {
-  return entry.confidence == null ? 'n/a' : `${Math.round(entry.confidence * 100)}%`;
+  const value = entry.confidence ?? entry.confidence_score;
+  return value == null ? 'n/a' : `${Math.round(value * 100)}%`;
 }
 
 function daysStale(entry: ContextEntry) {
@@ -73,11 +75,27 @@ function normalizeStale(data: any): ContextEntry[] {
   return data?.stale_entries ?? data?.data ?? [];
 }
 
+function confidenceValue(entry: ContextEntry) {
+  return Number(entry.confidence ?? entry.confidence_score ?? 0);
+}
+
+function isExpiringSoon(entry: ContextEntry) {
+  if (!entry.valid_until) return false;
+  const reviewAt = new Date(entry.valid_until).getTime();
+  if (!Number.isFinite(reviewAt)) return false;
+  const days = (reviewAt - Date.now()) / 86400000;
+  return days >= 0 && days <= 7;
+}
+
+function pct(value: number) {
+  return `${Math.max(0, Math.min(100, Math.round(value)))}%`;
+}
+
 export function ContextGovernance() {
   const staleQ = useStaleContextEntries({ limit: 100 }) as any;
+  const activeQ = useContextEntries({ memory_status: 'active', limit: 200 }) as any;
   const reviewOne = useReviewContextEntry();
   const reviewBatch = useReviewContextBatch();
-  const markStale = useBulkMarkContextStale();
   const assignContradictions = useAssignContextContradictions();
   const resolveContradiction = useResolveContextContradiction();
 
@@ -86,12 +104,12 @@ export function ContextGovernance() {
   const [subjectId, setSubjectId] = useState('');
   const [contextType, setContextType] = useState('');
   const [resolutionNote, setResolutionNote] = useState('Verified during context governance review.');
-  const [markIds, setMarkIds] = useState('');
-  const [markReason, setMarkReason] = useState('');
   const [stalePage, setStalePage] = useState(1);
   const [stalePageSize, setStalePageSize] = useState(25);
 
   const staleEntries = normalizeStale(staleQ.data);
+  const activeEntries: ContextEntry[] = activeQ.data?.data ?? [];
+  const activeTotal = Number(activeQ.data?.total ?? activeEntries.length);
   const contradictionQ = useContextContradictions({
     subject_type: subjectType,
     subject_id: subjectId,
@@ -105,12 +123,21 @@ export function ContextGovernance() {
   const stats = useMemo(() => {
     const byType = new Map<string, number>();
     for (const entry of staleEntries) byType.set(entry.context_type, (byType.get(entry.context_type) ?? 0) + 1);
+    const weakConfidence = activeEntries.filter(entry => confidenceValue(entry) > 0 && confidenceValue(entry) < 0.7).length;
+    const expiringSoon = activeEntries.filter(isExpiringSoon).length;
+    const healthy = Math.max(0, activeTotal - staleEntries.length - weakConfidence);
+    const healthScore = activeTotal === 0 ? 100 : (healthy / Math.max(activeTotal, 1)) * 100;
     return {
       total: staleEntries.length,
       selected: selected.size,
+      activeTotal,
+      weakConfidence,
+      expiringSoon,
+      healthy,
+      healthScore,
       noisyTypes: [...byType.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3),
     };
-  }, [staleEntries, selected.size]);
+  }, [activeEntries, activeTotal, staleEntries, selected.size]);
 
   const toggleSelected = (id: string) => {
     setSelected(prev => {
@@ -149,19 +176,6 @@ export function ContextGovernance() {
     }
   };
 
-  const markExplicitIdsStale = async () => {
-    const entryIds = markIds.split(/[\s,]+/).map(v => v.trim()).filter(Boolean);
-    if (entryIds.length === 0) return;
-    try {
-      await markStale.mutateAsync({ entry_ids: entryIds, reason: markReason.trim() || undefined });
-      toast({ title: 'Memory marked for review', description: `${entryIds.length} entries queued for reverification.` });
-      setMarkIds('');
-      setMarkReason('');
-    } catch (err) {
-      toast({ title: 'Could not mark Memory for review', description: err instanceof Error ? err.message : 'Could not update entries.', variant: 'destructive' });
-    }
-  };
-
   const assignReviews = async () => {
     if (!subjectId) return;
     try {
@@ -194,21 +208,44 @@ export function ContextGovernance() {
 
   return (
     <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-10 space-y-5">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4">
-        <StatCard icon={<AlertTriangle className="w-4 h-4" />} label="Needs Review" value={stats.total} tone={stats.total > 0 ? 'warning' : 'normal'} />
-        <StatCard icon={<ClipboardCheck className="w-4 h-4" />} label="Selected for review" value={stats.selected} />
-        <div className="rounded-xl border border-border bg-card p-3">
-          <p className="text-xs font-semibold text-muted-foreground mb-2">Noisiest Memory types</p>
-          {stats.noisyTypes.length === 0 ? (
-            <p className="text-sm text-foreground">All current</p>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {stats.noisyTypes.map(([type, count]) => (
-                <span key={type} className="px-2 py-1 rounded-lg bg-muted text-xs text-foreground">{type} · {count}</span>
-              ))}
+      <div className="grid grid-cols-1 gap-3 pt-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+        <section className="rounded-xl border border-border bg-card p-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Memory Health Overview</p>
+              <p className="mt-1 text-xs text-muted-foreground">How much confirmed Memory is current enough for agents to rely on.</p>
             </div>
-          )}
-        </div>
+            <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold ${
+              stats.total > 0
+                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+            }`}>
+              {stats.total > 0 ? <AlertTriangle className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+              {pct(stats.healthScore)} healthy
+            </div>
+          </div>
+          <div className="mt-4 h-3 overflow-hidden rounded-full bg-muted">
+            <div className="h-full bg-emerald-500" style={{ width: pct((stats.healthy / Math.max(stats.activeTotal, 1)) * 100) }} />
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+            <MiniMetric label="Current Memory" value={stats.activeTotal} />
+            <MiniMetric label="Needs review" value={stats.total} tone={stats.total > 0 ? 'warning' : 'normal'} />
+            <MiniMetric label="Low confidence" value={stats.weakConfidence} tone={stats.weakConfidence > 0 ? 'warning' : 'normal'} />
+            <MiniMetric label="Review soon" value={stats.expiringSoon} tone={stats.expiringSoon > 0 ? 'warning' : 'normal'} />
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-border bg-card p-4">
+          <p className="text-sm font-semibold text-foreground">What to do next</p>
+          <div className="mt-3 space-y-2 text-sm">
+            {stats.total > 0 ? (
+              <ActionHint icon={<AlertTriangle className="h-4 w-4" />} title="Review stale Memory" detail="Select visible rows below, then extend or retire context after verification." />
+            ) : (
+              <ActionHint icon={<CheckCircle2 className="h-4 w-4" />} title="No stale Memory" detail="Confirmed Memory is inside its review window." tone="success" />
+            )}
+            <ActionHint icon={<GitCompareArrows className="h-4 w-4" />} title="Scan contradictions by record" detail="Choose an account, contact, opportunity, or use case to compare current Memory." />
+          </div>
+        </section>
       </div>
 
       <section className="rounded-xl border border-border bg-card overflow-hidden">
@@ -245,7 +282,7 @@ export function ContextGovernance() {
                   </div>
                   <p className="text-sm font-medium text-foreground truncate">{entryTitle(entry)}</p>
 	                  <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{entry.body}</p>
-                  <p className="text-[11px] text-muted-foreground font-mono mt-2">{entry.subject_type ?? 'record'}:{entry.subject_id ?? 'unknown'} · {entry.id}</p>
+                  <p className="text-[11px] text-muted-foreground mt-2">{entry.subject_type ?? 'Record'} Memory · review source before extending</p>
                 </div>
                 <button
                   onClick={() => reviewSingle(entry.id)}
@@ -317,30 +354,28 @@ export function ContextGovernance() {
         )}
       </section>
 
-      <section className="rounded-xl border border-border bg-card p-4">
-        <p className="text-sm font-semibold text-foreground mb-1">Mark Memory For Review</p>
-        <p className="text-xs text-muted-foreground mb-3">Paste entry IDs when a source event invalidates existing Memory.</p>
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px_auto] gap-3 items-end">
-          <textarea value={markIds} onChange={e => setMarkIds(e.target.value)} rows={3} placeholder="Entry IDs separated by spaces, commas, or new lines" className="w-full px-3 py-2 rounded-md border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground resize-none" />
-          <label className="space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">Reason</span>
-            <input value={markReason} onChange={e => setMarkReason(e.target.value)} placeholder="e.g. Contact changed roles" className="w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground" />
-          </label>
-          <button onClick={markExplicitIdsStale} disabled={!markIds.trim() || markStale.isPending} className="h-10 px-3 rounded-lg border border-amber-500/30 text-amber-600 text-xs font-semibold hover:bg-amber-500/10 disabled:opacity-40">Needs review</button>
-        </div>
-      </section>
     </div>
   );
 }
 
-function StatCard({ icon, label, value, tone = 'normal' }: { icon: ReactNode; label: string; value: number; tone?: 'normal' | 'warning' }) {
-  const toneClass = tone === 'warning' ? 'text-amber-600 bg-amber-500/10' : 'text-primary bg-primary/10';
+function MiniMetric({ label, value, tone = 'normal' }: { label: string; value: number; tone?: 'normal' | 'warning' }) {
+  const valueClass = tone === 'warning' ? 'text-amber-600 dark:text-amber-400' : 'text-foreground';
   return (
-    <div className="rounded-xl border border-border bg-card p-3 flex items-center gap-3">
-      <span className={`w-9 h-9 rounded-lg flex items-center justify-center ${toneClass}`}>{icon}</span>
+    <div className="rounded-xl bg-muted/60 p-3">
+      <p className={`text-lg font-semibold ${valueClass}`}>{value.toLocaleString()}</p>
+      <p className="text-xs text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
+function ActionHint({ icon, title, detail, tone = 'normal' }: { icon: ReactNode; title: string; detail: string; tone?: 'normal' | 'success' }) {
+  const toneClass = tone === 'success' ? 'text-emerald-600 bg-emerald-500/10' : 'text-primary bg-primary/10';
+  return (
+    <div className="flex gap-3 rounded-xl border border-border bg-muted/30 p-3">
+      <span className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${toneClass}`}>{icon}</span>
       <div>
-        <p className="text-xl font-semibold text-foreground">{value}</p>
-        <p className="text-xs text-muted-foreground">{label}</p>
+        <p className="font-semibold text-foreground">{title}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p>
       </div>
     </div>
   );

@@ -1377,6 +1377,14 @@ export const contextEmbedBackfill = z.object({
   idempotency_key: idempotencyKey,
 });
 
+export const contextLineageGet = z.object({
+  subject_type: subjectType.optional(),
+  subject_id: uuid.optional(),
+  context_entry_id: uuid.optional(),
+  signal_group_id: uuid.optional(),
+  raw_context_source_id: uuid.optional(),
+});
+
 // -- Context review schema --
 
 export const contextReview = z.object({

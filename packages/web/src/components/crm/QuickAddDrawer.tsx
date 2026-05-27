@@ -23,11 +23,11 @@ const typeLabels: Record<string, string> = {
 };
 
 const typeGreetings: Record<string, string> = {
-  contact: "Hi! Tell me about the new contact — name, email, company, and any other details.",
+  contact: "Hi! Tell me about the new contact — name, email, account, and any other details.",
   opportunity: "Let's create a new opportunity! What's the name, amount, and who's the contact?",
   'use-case': "Let's set up a new use case. What's the name and which client is it for?",
   activity: "Log an activity — tell me the type (call, email, meeting, note, demo, proposal, etc.), what it's about, and any outcome or notes.",
-  account: "Let's add a new account. What's the company name and any other details?",
+  account: "Let's add a new account. What's the account name and any other details?",
   assignment: "Let's create a new assignment. What's the title, type (call, email, research, etc.), and who should it be assigned to?",
 };
 
@@ -171,7 +171,7 @@ function formatFieldValue(value: unknown): string {
 
 function missingRequiredDraftFields(type: string, fields: Record<string, unknown>): string[] {
   if (type === 'contact') return fields.first_name ? [] : ['first name'];
-  if (type === 'account') return fields.name ? [] : ['company name'];
+  if (type === 'account') return fields.name ? [] : ['account name'];
   if (type === 'opportunity') return fields.name ? [] : ['opportunity name'];
   if (type === 'activity') return fields.type && fields.subject ? [] : ['type', 'subject'].filter(key => !fields[key]);
   if (type === 'use-case') {
@@ -559,7 +559,7 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
     { key: 'last_name', label: 'Last Name', placeholder: 'Last name' },
     { key: 'email', label: 'Email', placeholder: 'email@example.com', inputType: 'email' },
     { key: 'phone', label: 'Phone', placeholder: '(555) 123-4567', inputType: 'tel' },
-    { key: 'company_name', label: 'Company', placeholder: 'Company name' },
+    { key: 'company_name', label: 'Account', placeholder: 'Account name' },
     { key: 'account_id', label: 'Existing Account', fieldType: 'account-select' },
   ],
   opportunity: [
@@ -591,7 +591,7 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
     { key: 'body', label: 'Notes', placeholder: 'Additional details...', fieldType: 'textarea' },
   ],
   account: [
-    { key: 'name', label: 'Company Name', placeholder: 'e.g. Acme Corp', required: true },
+    { key: 'name', label: 'Account Name', placeholder: 'e.g. Acme Corp', required: true },
     { key: 'industry', label: 'Industry', placeholder: 'e.g. Real Estate, Technology' },
     { key: 'website', label: 'Website', placeholder: 'https://acme.com', inputType: 'url' },
     { key: 'domain', label: 'Domain', placeholder: 'acme.com' },
@@ -810,7 +810,7 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
                 entityType="account"
                 value={fields[f.key] || ''}
                 onChange={(v) => set(f.key, v)}
-                placeholder="Select company…"
+                placeholder="Select account…"
               />
             ) : f.fieldType === 'contact-select' ? (
               <EntityCombobox

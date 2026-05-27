@@ -732,7 +732,7 @@ export interface SignalGroup {
   claim_key: string;
   title?: string | null;
   normalized_claim: string;
-  status: 'gathering' | 'ready' | 'promoted' | 'blocked' | 'dismissed' | 'conflicting';
+  status: 'gathering' | 'ready' | 'promoted' | 'blocked' | 'dismissed' | 'conflicting' | 'merged';
   aggregate_confidence: number;
   support_count: number;
   independent_source_count: number;
@@ -742,11 +742,65 @@ export interface SignalGroup {
   promoted_context_entry_id?: UUID | null;
   blocked_reason?: string | null;
   metadata: Record<string, unknown>;
+  subject_name?: string | null;
   dismissed_at?: string | null;
   dismissed_by?: UUID | null;
+  merged_into_signal_group_id?: UUID | null;
+  merged_at?: string | null;
   created_at: string;
   updated_at: string;
   members?: SignalGroupMember[];
+}
+
+export type EmbeddingJobStatus = 'pending' | 'processing' | 'complete' | 'failed';
+
+export type ContextLineageNodeType =
+  | 'record'
+  | 'raw_context'
+  | 'activity'
+  | 'signal'
+  | 'signal_group'
+  | 'memory'
+  | 'handoff'
+  | 'writeback'
+  | 'audit';
+
+export interface ContextLineageNode {
+  id: string;
+  type: ContextLineageNodeType;
+  label: string;
+  timestamp?: string | null;
+  status?: string | null;
+  subject_type?: SubjectType | null;
+  subject_id?: UUID | null;
+  object_id?: UUID | string | null;
+  stage?: string | null;
+  display_order?: number | null;
+  description?: string | null;
+  data?: Record<string, unknown>;
+}
+
+export interface ContextLineageEdge {
+  id: string;
+  source: string;
+  target: string;
+  relation: string;
+  data?: Record<string, unknown>;
+}
+
+export interface ContextLineage {
+  nodes: ContextLineageNode[];
+  edges: ContextLineageEdge[];
+  summary: {
+    records: number;
+    raw_context: number;
+    signals: number;
+    signal_groups: number;
+    memory: number;
+    handoffs: number;
+    writebacks: number;
+    audit_events: number;
+  };
 }
 
 export interface ContextEvidence {

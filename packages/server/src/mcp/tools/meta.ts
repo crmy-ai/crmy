@@ -6,6 +6,7 @@ import { schemaGet, tenantGetStats } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as searchRepo from '../../db/repos/search.js';
+import * as customFieldRepo from '../../db/repos/custom-fields.js';
 import { getAuditTrail } from '../../services/audit.js';
 import { getDataQualityReport, repairDataQualityFinding } from '../../services/data-quality.js';
 import { recoverOperationalJob } from '../../services/operational-recovery.js';
@@ -144,6 +145,26 @@ const FIELD_SCHEMAS: Record<string, { name: string; type: string; required: bool
     { name: 'opportunity_id', type: 'uuid', required: false },
     { name: 'custom_fields', type: 'json', required: false },
   ],
+  use_case: [
+    { name: 'name', type: 'string', required: true },
+    { name: 'description', type: 'string', required: false },
+    { name: 'account_id', type: 'uuid', required: true },
+    { name: 'opportunity_id', type: 'uuid', required: false },
+    { name: 'owner_id', type: 'uuid', required: false },
+    { name: 'stage', type: 'enum(discovery,validation,pilot,production,expansion,closed)', required: true },
+    { name: 'unit_label', type: 'string', required: false },
+    { name: 'consumption_current', type: 'integer', required: false },
+    { name: 'consumption_capacity', type: 'integer', required: false },
+    { name: 'consumption_unit', type: 'string', required: false },
+    { name: 'attributed_arr', type: 'integer', required: false },
+    { name: 'currency_code', type: 'string', required: false },
+    { name: 'expansion_potential', type: 'integer', required: false },
+    { name: 'health_score', type: 'integer(0-100)', required: false },
+    { name: 'health_note', type: 'string', required: false },
+    { name: 'target_prod_date', type: 'date', required: false },
+    { name: 'tags', type: 'string[]', required: false },
+    { name: 'custom_fields', type: 'json', required: false },
+  ],
 };
 
 interface StatusCountRow {
@@ -234,6 +255,23 @@ const QUEUE_SPECS: QueueSpec[] = [
       SELECT id, entity_type, entity_id, status, attempt_count, last_error, created_at, processed_at
       FROM context_outbox
       WHERE tenant_id = $1 AND status IN ('failed', 'processing', 'parked')
+      ORDER BY created_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'context_embedding_jobs',
+    pendingStatuses: ['pending', 'processing', 'failed'],
+    countSql: `
+      SELECT status, count(*)::int AS count, min(created_at) AS oldest_created_at
+      FROM context_embedding_jobs
+      WHERE tenant_id = $1
+      GROUP BY status
+    `,
+    failureSql: `
+      SELECT id, entity_type, entity_id, status, attempt_count, last_error, created_at, processed_at
+      FROM context_embedding_jobs
+      WHERE tenant_id = $1 AND status IN ('failed', 'processing')
       ORDER BY created_at ASC
       LIMIT $2
     `,
@@ -357,10 +395,29 @@ export function metaTools(db: DbPool): ToolDef[] {
       tier: 'admin',
       description: 'Get the full schema for a typed revenue object including standard fields and any custom fields defined by the tenant. Agents should call this on first connect to understand the data model — it returns field names, types, required constraints, and available options for enum fields. Pass object_type as "contact", "account", "opportunity", "activity", or "use_case".',
       inputSchema: schemaGet,
-      handler: async (input: z.infer<typeof schemaGet>, _actor: ActorContext) => {
+      handler: async (input: z.infer<typeof schemaGet>, actor: ActorContext) => {
+        const customFields = await customFieldRepo.listCustomFields(db, actor.tenant_id, input.object_type);
+        const customFieldsSchema = Object.fromEntries(customFields.map(field => [
+          field.field_key,
+          {
+            label: field.label,
+            type: field.field_type,
+            required: field.is_required,
+            filterable: field.is_filterable,
+            options: field.options ?? null,
+          },
+        ]));
         return {
           standard_fields: FIELD_SCHEMAS[input.object_type] ?? [],
-          custom_fields_schema: {},
+          custom_fields_schema: customFieldsSchema,
+          custom_fields: customFields.map(field => ({
+            field_key: field.field_key,
+            label: field.label,
+            field_type: field.field_type,
+            required: field.is_required,
+            filterable: field.is_filterable,
+            options: field.options ?? null,
+          })),
         };
       },
     },

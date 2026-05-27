@@ -9,10 +9,12 @@ import { useAccounts } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { RecordMemoryIndicator } from '@/components/crm/RecordMemoryIndicator';
 import { motion } from 'framer-motion';
 import { LayoutGrid, List, ChevronUp, ChevronDown, Sparkles, Globe, DollarSign, Heart, Building2, FileText } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useRecordMemoryCounts } from '@/hooks/useRecordMemoryCounts';
 import { headerDescription } from '@/lib/headerCopy';
 
 type ViewMode = 'table' | 'cards';
@@ -70,6 +72,7 @@ export default function Accounts() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, isLoading } = useAccounts({ q: search || undefined, limit: 200 }) as any;
   const allAccounts: Account[] = data?.data ?? [];
+  const memoryCounts = useRecordMemoryCounts('account');
 
   // Derive industry options from loaded data (stable reference via ref)
   const seenIndustriesRef = useRef<Set<string>>(new Set());
@@ -148,10 +151,10 @@ export default function Accounts() {
   return (
     <div className="flex flex-col h-full">
       <TopBar
-        title="Companies"
+        title="Accounts"
         icon={Building2}
         iconClassName="text-[#8b5cf6]"
-        description={headerDescription('Manage companies and account context', filtered.length, 'company', 'companies')}
+        description={headerDescription('Manage accounts and customer context', filtered.length, 'account', 'accounts')}
       >
         <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
           <button onClick={() => setView('table')} className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
@@ -164,11 +167,11 @@ export default function Accounts() {
       </TopBar>
 
       <ListToolbar
-        searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search companies..."
+        searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search accounts..."
         filters={filterConfigs} activeFilters={activeFilters} onFilterChange={handleFilterChange}
         onClearFilters={() => setActiveFilters({})} sortOptions={sortOptions} currentSort={sort}
         onSortChange={handleSortChange} entityType="accounts"
-        onAdd={() => openQuickAdd('account')} addLabel="New Company"
+        onAdd={() => openQuickAdd('account')} addLabel="New Account"
       />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">
@@ -180,15 +183,15 @@ export default function Accounts() {
           allAccounts.length === 0 && !search && Object.keys(activeFilters).length === 0 ? (
             <OnboardingEmptyState
               icon={Building2}
-              title="Add your first company"
-              description="Companies connect stakeholders, opportunities, activities, and context."
-              primary={{ label: 'New Company', onClick: () => openQuickAdd('account') }}
+              title="Add your first account"
+              description="Accounts connect stakeholders, opportunities, activities, and context."
+              primary={{ label: 'New Account', onClick: () => openQuickAdd('account') }}
             />
           ) : (
             <OnboardingEmptyState
               icon={Building2}
-              title="No companies match"
-              description="Adjust the search or filters to find the company you need."
+              title="No accounts match"
+              description="Adjust the search or filters to find the account you need."
               primary={{ label: 'Clear filters', onClick: () => { setSearch(''); setActiveFilters({}); } }}
               showSampleData={false}
             />
@@ -213,7 +216,10 @@ export default function Accounts() {
                       className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer group transition-colors ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
                       <td className="px-4 py-3">
                         <div>
-                          <p className="font-display font-bold text-foreground">{a.name as string}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-display font-bold text-foreground">{a.name as string}</p>
+                            <RecordMemoryIndicator count={memoryCounts.get(a.id as string)} />
+                          </div>
                           {a.website && <p className="text-xs text-muted-foreground">{a.website as string}</p>}
                         </div>
                       </td>
@@ -264,7 +270,10 @@ export default function Accounts() {
                   )}
                 </div>
                 <div className="mb-3">
-                  <p className="font-display font-bold text-foreground truncate">{a.name as string}</p>
+                  <div className="flex items-center gap-2 pr-16">
+                    <p className="font-display font-bold text-foreground truncate">{a.name as string}</p>
+                    <RecordMemoryIndicator count={memoryCounts.get(a.id as string)} className="shrink-0" />
+                  </div>
                   <p className="text-xs text-muted-foreground">{(a.industry as string) || '—'}</p>
                 </div>
                 <div className="flex items-center gap-2 mb-3">

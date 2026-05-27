@@ -4,7 +4,7 @@
 import type { ContextEntry, PaginatedResponse, SubjectType, UUID } from '@crmy/shared';
 import type { DbPool } from '../pool.js';
 
-export type SignalGroupStatus = 'gathering' | 'ready' | 'promoted' | 'blocked' | 'dismissed' | 'conflicting';
+export type SignalGroupStatus = 'gathering' | 'ready' | 'promoted' | 'blocked' | 'dismissed' | 'conflicting' | 'merged';
 export type SignalGroupRelation = 'supports' | 'conflicts' | 'supersedes';
 
 export interface SignalGroup {
@@ -26,8 +26,11 @@ export interface SignalGroup {
   promoted_context_entry_id?: UUID | null;
   blocked_reason?: string | null;
   metadata: Record<string, unknown>;
+  subject_name?: string | null;
   dismissed_at?: string | null;
   dismissed_by?: UUID | null;
+  merged_into_signal_group_id?: UUID | null;
+  merged_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -57,15 +60,134 @@ export async function listCandidateGroups(
   const result = await db.query(
     `SELECT * FROM signal_groups
      WHERE tenant_id = $1
-       AND subject_type = $2
-       AND subject_id = $3
        AND context_type = $4
-       AND status <> 'dismissed'
+       AND status NOT IN ('dismissed', 'merged')
+       AND merged_into_signal_group_id IS NULL
+       AND (
+         (subject_type = $2 AND subject_id = $3)
+         OR (
+           $2 = 'contact'
+           AND subject_type = 'account'
+           AND subject_id = (
+             SELECT account_id FROM contacts
+             WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
+           )
+         )
+         OR (
+           $2 = 'account'
+           AND subject_type = 'contact'
+           AND subject_id IN (
+             SELECT id FROM contacts
+             WHERE tenant_id = $1 AND account_id = $3
+           )
+         )
+         OR (
+           $2 = 'account'
+           AND subject_type = 'opportunity'
+           AND subject_id IN (
+             SELECT id FROM opportunities
+             WHERE tenant_id = $1 AND account_id = $3
+           )
+         )
+         OR (
+           $2 = 'account'
+           AND subject_type = 'use_case'
+           AND subject_id IN (
+             SELECT id FROM use_cases
+             WHERE tenant_id = $1 AND account_id = $3
+           )
+         )
+         OR (
+           $2 IN ('opportunity', 'use_case')
+           AND subject_type = 'account'
+           AND subject_id = COALESCE(
+             (SELECT account_id FROM opportunities WHERE tenant_id = $1 AND id = $3),
+             (SELECT account_id FROM use_cases WHERE tenant_id = $1 AND id = $3)
+           )
+         )
+       )
      ORDER BY updated_at DESC
      LIMIT 50`,
     [tenantId, input.subject_type, input.subject_id, input.context_type],
   );
   return result.rows as SignalGroup[];
+}
+
+export async function semanticCandidateGroups(
+  db: DbPool,
+  tenantId: UUID | string,
+  input: {
+    subject_type: string;
+    subject_id: string;
+    context_type: string;
+    embedding: number[];
+    limit?: number;
+  },
+): Promise<Array<SignalGroup & { vector_similarity: number }>> {
+  const result = await db.query(
+    `SELECT sg.*,
+       1 - (sg.embedding <=> $5::vector) AS vector_similarity
+     FROM signal_groups sg
+     WHERE sg.tenant_id = $1
+       AND sg.context_type = $4
+       AND sg.status NOT IN ('dismissed', 'merged')
+       AND sg.merged_into_signal_group_id IS NULL
+       AND sg.embedding IS NOT NULL
+       AND (
+         (sg.subject_type = $2 AND sg.subject_id = $3)
+         OR (
+           $2 = 'contact'
+           AND sg.subject_type = 'account'
+           AND sg.subject_id = (
+             SELECT account_id FROM contacts
+             WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
+           )
+         )
+         OR (
+           $2 = 'account'
+           AND sg.subject_type = 'contact'
+           AND sg.subject_id IN (
+             SELECT id FROM contacts
+             WHERE tenant_id = $1 AND account_id = $3
+           )
+         )
+         OR (
+           $2 = 'account'
+           AND sg.subject_type = 'opportunity'
+           AND sg.subject_id IN (
+             SELECT id FROM opportunities
+             WHERE tenant_id = $1 AND account_id = $3
+           )
+         )
+         OR (
+           $2 = 'account'
+           AND sg.subject_type = 'use_case'
+           AND sg.subject_id IN (
+             SELECT id FROM use_cases
+             WHERE tenant_id = $1 AND account_id = $3
+           )
+         )
+         OR (
+           $2 IN ('opportunity', 'use_case')
+           AND sg.subject_type = 'account'
+           AND sg.subject_id = COALESCE(
+             (SELECT account_id FROM opportunities WHERE tenant_id = $1 AND id = $3),
+             (SELECT account_id FROM use_cases WHERE tenant_id = $1 AND id = $3)
+           )
+         )
+       )
+     ORDER BY sg.embedding <=> $5::vector
+     LIMIT $6`,
+    [
+      tenantId,
+      input.subject_type,
+      input.subject_id,
+      input.context_type,
+      `[${input.embedding.join(',')}]`,
+      input.limit ?? 25,
+    ],
+  );
+  return result.rows as Array<SignalGroup & { vector_similarity: number }>;
 }
 
 export async function upsertSignalGroup(
@@ -152,13 +274,29 @@ export async function getSignalGroup(
   id: UUID | string,
 ): Promise<SignalGroupWithMembers | null> {
   const groupResult = await db.query(
-    `SELECT * FROM signal_groups WHERE tenant_id = $1 AND id = $2`,
+    `SELECT sg.*,
+       CASE sg.subject_type
+         WHEN 'contact'     THEN (SELECT COALESCE(NULLIF(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')), ''), email) FROM contacts WHERE id = sg.subject_id AND tenant_id = sg.tenant_id)
+         WHEN 'account'     THEN (SELECT name FROM accounts WHERE id = sg.subject_id AND tenant_id = sg.tenant_id)
+         WHEN 'opportunity' THEN (SELECT name FROM opportunities WHERE id = sg.subject_id AND tenant_id = sg.tenant_id)
+         WHEN 'use_case'    THEN (SELECT name FROM use_cases WHERE id = sg.subject_id AND tenant_id = sg.tenant_id)
+       END AS subject_name
+     FROM signal_groups sg WHERE sg.tenant_id = $1 AND sg.id = $2`,
     [tenantId, id],
   );
   const group = groupResult.rows[0] as SignalGroup | undefined;
   if (!group) return null;
   const memberResult = await db.query(
-    `SELECT sgm.*, to_jsonb(ce.*) AS context_entry
+    `SELECT sgm.*,
+       to_jsonb(ce.*) || jsonb_build_object(
+         'subject_name',
+         CASE ce.subject_type
+           WHEN 'contact'     THEN (SELECT COALESCE(NULLIF(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')), ''), email) FROM contacts WHERE id = ce.subject_id AND tenant_id = ce.tenant_id)
+           WHEN 'account'     THEN (SELECT name FROM accounts WHERE id = ce.subject_id AND tenant_id = ce.tenant_id)
+           WHEN 'opportunity' THEN (SELECT name FROM opportunities WHERE id = ce.subject_id AND tenant_id = ce.tenant_id)
+           WHEN 'use_case'    THEN (SELECT name FROM use_cases WHERE id = ce.subject_id AND tenant_id = ce.tenant_id)
+         END
+       ) AS context_entry
      FROM signal_group_members sgm
      JOIN context_entries ce ON ce.id = sgm.context_entry_id AND ce.tenant_id = sgm.tenant_id
      WHERE sgm.tenant_id = $1 AND sgm.signal_group_id = $2
@@ -171,6 +309,24 @@ export async function getSignalGroup(
     ...group,
     members: memberResult.rows as SignalGroupMember[],
   };
+}
+
+export async function listGroupsForContextEntry(
+  db: DbPool,
+  tenantId: UUID | string,
+  contextEntryId: UUID | string,
+): Promise<SignalGroup[]> {
+  const result = await db.query(
+    `SELECT sg.*
+     FROM signal_groups sg
+     JOIN signal_group_members sgm ON sgm.signal_group_id = sg.id AND sgm.tenant_id = sg.tenant_id
+     WHERE sg.tenant_id = $1
+       AND sgm.context_entry_id = $2
+       AND sg.status <> 'merged'
+     ORDER BY sg.updated_at DESC`,
+    [tenantId, contextEntryId],
+  );
+  return result.rows as SignalGroup[];
 }
 
 export async function listSignalGroups(
@@ -193,6 +349,8 @@ export async function listSignalGroups(
   if (filters.status) {
     conditions.push(`status = $${idx++}`);
     params.push(filters.status);
+  } else {
+    conditions.push(`status <> 'merged'`);
   }
   if (filters.subject_type) {
     conditions.push(`subject_type = $${idx++}`);
@@ -218,10 +376,17 @@ export async function listSignalGroups(
   const count = await db.query(`SELECT count(*)::int AS total FROM signal_groups WHERE ${where}`, params);
   params.push(filters.limit + 1);
   const rows = await db.query(
-    `SELECT * FROM signal_groups
+    `SELECT sg.*,
+       CASE sg.subject_type
+         WHEN 'contact'     THEN (SELECT COALESCE(NULLIF(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')), ''), email) FROM contacts WHERE id = sg.subject_id AND tenant_id = sg.tenant_id)
+         WHEN 'account'     THEN (SELECT name FROM accounts WHERE id = sg.subject_id AND tenant_id = sg.tenant_id)
+         WHEN 'opportunity' THEN (SELECT name FROM opportunities WHERE id = sg.subject_id AND tenant_id = sg.tenant_id)
+         WHEN 'use_case'    THEN (SELECT name FROM use_cases WHERE id = sg.subject_id AND tenant_id = sg.tenant_id)
+       END AS subject_name
+     FROM signal_groups sg
      WHERE ${where}
-     ORDER BY
-       CASE status WHEN 'conflicting' THEN 0 WHEN 'blocked' THEN 1 WHEN 'ready' THEN 2 WHEN 'gathering' THEN 3 ELSE 4 END,
+       ORDER BY
+         CASE status WHEN 'conflicting' THEN 0 WHEN 'blocked' THEN 1 WHEN 'ready' THEN 2 WHEN 'gathering' THEN 3 ELSE 4 END,
        updated_at DESC
      LIMIT $${idx}`,
     params,
@@ -234,6 +399,62 @@ export async function listSignalGroups(
     next_cursor: hasMore ? page[page.length - 1]?.updated_at : undefined,
     total: count.rows[0]?.total ?? 0,
   };
+}
+
+export async function updateSignalGroupEmbedding(
+  db: DbPool,
+  tenantId: UUID | string,
+  id: UUID | string,
+  embedding: number[],
+): Promise<void> {
+  await db.query(
+    `UPDATE signal_groups SET embedding = $3::vector WHERE tenant_id = $1 AND id = $2`,
+    [tenantId, id, `[${embedding.join(',')}]`],
+  );
+}
+
+export async function markSignalGroupMerged(
+  db: DbPool,
+  tenantId: UUID | string,
+  sourceGroupId: UUID | string,
+  targetGroupId: UUID | string,
+): Promise<SignalGroup | null> {
+  const result = await db.query(
+    `UPDATE signal_groups
+     SET status = 'merged',
+         merged_into_signal_group_id = $3,
+         merged_at = now(),
+         updated_at = now()
+     WHERE tenant_id = $1
+       AND id = $2
+       AND status IN ('gathering', 'ready', 'blocked', 'conflicting')
+       AND promoted_context_entry_id IS NULL
+     RETURNING *`,
+    [tenantId, sourceGroupId, targetGroupId],
+  );
+  return (result.rows[0] as SignalGroup | undefined) ?? null;
+}
+
+export async function moveSignalGroupMembers(
+  db: DbPool,
+  tenantId: UUID | string,
+  sourceGroupId: UUID | string,
+  targetGroupId: UUID | string,
+): Promise<number> {
+  const result = await db.query(
+    `UPDATE signal_group_members
+     SET signal_group_id = $3
+     WHERE tenant_id = $1
+       AND signal_group_id = $2
+       AND NOT EXISTS (
+         SELECT 1 FROM signal_group_members existing
+         WHERE existing.tenant_id = signal_group_members.tenant_id
+           AND existing.signal_group_id = $3
+           AND existing.context_entry_id = signal_group_members.context_entry_id
+       )`,
+    [tenantId, sourceGroupId, targetGroupId],
+  );
+  return result.rowCount ?? 0;
 }
 
 export async function updateSignalGroupState(
@@ -279,6 +500,23 @@ export async function updateSignalGroupState(
       patch.blocked_reason ?? null,
       patch.metadata ? JSON.stringify(patch.metadata) : null,
     ],
+  );
+  return (result.rows[0] as SignalGroup | undefined) ?? null;
+}
+
+export async function updateSignalGroupMetadata(
+  db: DbPool,
+  tenantId: UUID | string,
+  id: UUID | string,
+  metadata: Record<string, unknown>,
+): Promise<SignalGroup | null> {
+  const result = await db.query(
+    `UPDATE signal_groups
+     SET metadata = metadata || $3::jsonb,
+         updated_at = now()
+     WHERE tenant_id = $1 AND id = $2
+     RETURNING *`,
+    [tenantId, id, JSON.stringify(metadata)],
   );
   return (result.rows[0] as SignalGroup | undefined) ?? null;
 }

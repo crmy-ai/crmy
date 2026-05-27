@@ -340,10 +340,10 @@ export async function seedDefaults(db: DbPool, tenantId: UUID): Promise<void> {
   for (const entry of DEFAULT_CONTEXT_TYPES) {
     await db.query(
       `INSERT INTO context_type_registry
-         (type_name, tenant_id, label, description, is_default, json_schema,
-          extraction_prompt, is_extractable, priority_weight, confidence_half_life_days)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       ON CONFLICT (type_name) DO UPDATE SET
+       (type_name, tenant_id, label, description, is_default, json_schema,
+        extraction_prompt, is_extractable, priority_weight, confidence_half_life_days)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (tenant_id, type_name) DO UPDATE SET
          label                     = EXCLUDED.label,
          description               = EXCLUDED.description,
          json_schema               = EXCLUDED.json_schema,
@@ -371,10 +371,17 @@ export async function listContextTypes(
   db: DbPool,
   tenantId: UUID,
 ): Promise<ContextTypeRegistryEntry[]> {
-  const result = await db.query(
+  let result = await db.query(
     'SELECT * FROM context_type_registry WHERE tenant_id = $1 ORDER BY type_name',
     [tenantId],
   );
+  if (result.rows.length === 0) {
+    await seedDefaults(db, tenantId);
+    result = await db.query(
+      'SELECT * FROM context_type_registry WHERE tenant_id = $1 ORDER BY type_name',
+      [tenantId],
+    );
+  }
   return result.rows as ContextTypeRegistryEntry[];
 }
 
@@ -383,12 +390,21 @@ export async function getExtractableTypes(
   db: DbPool,
   tenantId: UUID,
 ): Promise<(ContextTypeRegistryEntry & { json_schema: Record<string, unknown> | null; extraction_prompt: string | null })[]> {
-  const result = await db.query(
+  let result = await db.query(
     `SELECT * FROM context_type_registry
      WHERE tenant_id = $1 AND is_extractable = true
      ORDER BY type_name`,
     [tenantId],
   );
+  if (result.rows.length === 0) {
+    await seedDefaults(db, tenantId);
+    result = await db.query(
+      `SELECT * FROM context_type_registry
+       WHERE tenant_id = $1 AND is_extractable = true
+       ORDER BY type_name`,
+      [tenantId],
+    );
+  }
   return result.rows as (ContextTypeRegistryEntry & { json_schema: Record<string, unknown> | null; extraction_prompt: string | null })[];
 }
 

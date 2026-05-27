@@ -9,10 +9,12 @@ import { useUseCases } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { RecordMemoryIndicator } from '@/components/crm/RecordMemoryIndicator';
 import { DatePicker } from '@/components/ui/date-picker';
 import { motion } from 'framer-motion';
 import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown, FolderKanban } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
+import { useRecordMemoryCounts } from '@/hooks/useRecordMemoryCounts';
 import { useCaseStageConfig } from '@/lib/stageConfig';
 import { headerDescription } from '@/lib/headerCopy';
 
@@ -89,6 +91,7 @@ export default function UseCases() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, isLoading } = useUseCases({ q: search || undefined, limit: 200 }) as any;
   const allUseCases: UseCase[] = data?.data ?? [];
+  const memoryCounts = useRecordMemoryCounts('use_case');
 
   const handleFilterChange = (key: string, values: string[]) => {
     setActiveFilters(prev => { const next = { ...prev }; if (values.length === 0) delete next[key]; else next[key] = values; return next; });
@@ -237,7 +240,10 @@ export default function UseCases() {
                             onClick={() => openDrawer('use-case', uc.id as string)}
                             className="bg-card border border-border rounded-2xl p-3.5 cursor-pointer hover:border-primary/30 hover:shadow-md transition-all press-scale group">
                             <div className="flex items-start justify-between">
-                              <p className="text-sm font-display font-bold text-foreground">{uc.name as string}</p>
+                              <div className="flex min-w-0 items-center gap-2">
+                                <p className="truncate text-sm font-display font-bold text-foreground">{uc.name as string}</p>
+                                <RecordMemoryIndicator count={memoryCounts.get(uc.id as string)} className="shrink-0" />
+                              </div>
                               {agentEnabled && (
                                 <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'use-case', id: uc.id as string, name: uc.name as string, detail: client }); navigate('/agent'); }}
                                   className="p-0.5 rounded-lg md:opacity-0 md:group-hover:opacity-100 hover:bg-accent/10 transition-all">
@@ -318,7 +324,12 @@ export default function UseCases() {
                         return (
                           <tr key={uc.id as string} onClick={() => openDrawer('use-case', uc.id as string)}
                             className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer transition-colors group ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
-                            <td className="px-4 py-3 font-display font-bold text-foreground">{uc.name as string}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <span className="font-display font-bold text-foreground">{uc.name as string}</span>
+                                <RecordMemoryIndicator count={memoryCounts.get(uc.id as string)} />
+                              </div>
+                            </td>
                             <td className="px-4 py-3 text-muted-foreground">{client || '—'}</td>
                             <td className="px-4 py-3 text-muted-foreground">{opportunity || '—'}</td>
                             <td className="px-4 py-3">

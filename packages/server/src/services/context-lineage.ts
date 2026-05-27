@@ -1,0 +1,580 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
+import type { ContextLineage, ContextLineageEdge, ContextLineageNode, UUID } from '@crmy/shared';
+import type { DbPool } from '../db/pool.js';
+
+export interface ContextLineageQuery {
+  subject_type?: string;
+  subject_id?: string;
+  context_entry_id?: string;
+  signal_group_id?: string;
+  raw_context_source_id?: string;
+}
+
+function addNode(nodes: Map<string, ContextLineageNode>, node: ContextLineageNode): void {
+  if (!nodes.has(node.id)) nodes.set(node.id, node);
+}
+
+function addEdge(edges: Map<string, ContextLineageEdge>, edge: ContextLineageEdge): void {
+  if (edge.source === edge.target) return;
+  if (!edges.has(edge.id)) edges.set(edge.id, edge);
+}
+
+function label(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim() ? value : fallback;
+}
+
+function uuidLike(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f-]{36}$/i.test(value);
+}
+
+function lineageNodeIdForObject(objectType: string, objectId: string): string {
+  if (objectType === 'context_entry') return `context:${objectId}`;
+  if (objectType === 'hitl_request') return `handoff:${objectId}`;
+  if (objectType === 'external_writeback') return `writeback:${objectId}`;
+  if (objectType === 'activity') return `activity:${objectId}`;
+  if (['account', 'contact', 'opportunity', 'use_case'].includes(objectType)) return `record:${objectType}:${objectId}`;
+  return `${objectType}:${objectId}`;
+}
+
+function subjectKey(subjectType?: unknown, subjectId?: unknown): string | null {
+  if (typeof subjectType !== 'string' || !uuidLike(subjectId)) return null;
+  if (!['account', 'contact', 'opportunity', 'use_case'].includes(subjectType)) return null;
+  return `${subjectType}:${subjectId}`;
+}
+
+function relationLabel(relation: string): string {
+  return relation.replace(/_/g, ' ');
+}
+
+export async function getContextLineage(
+  db: DbPool,
+  tenantId: UUID | string,
+  query: ContextLineageQuery,
+): Promise<ContextLineage> {
+  const nodes = new Map<string, ContextLineageNode>();
+  const edges = new Map<string, ContextLineageEdge>();
+  const contextRows: Record<string, unknown>[] = [];
+
+  const contextConditions = ['tenant_id = $1'];
+  const contextParams: unknown[] = [tenantId];
+  let idx = 2;
+
+  if (query.context_entry_id) {
+    contextConditions.push(`id = $${idx++}`);
+    contextParams.push(query.context_entry_id);
+  } else if (query.subject_type && query.subject_id) {
+    contextConditions.push(`subject_type = $${idx++}`);
+    contextParams.push(query.subject_type);
+    contextConditions.push(`subject_id = $${idx++}`);
+    contextParams.push(query.subject_id);
+  } else if (query.raw_context_source_id) {
+    const source = await db.query(
+      `SELECT * FROM raw_context_sources WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, query.raw_context_source_id],
+    );
+    const row = source.rows[0];
+    if (row?.subject_type && row?.subject_id) {
+      contextConditions.push(`subject_type = $${idx++}`);
+      contextParams.push(row.subject_type);
+      contextConditions.push(`subject_id = $${idx++}`);
+      contextParams.push(row.subject_id);
+    }
+    if (uuidLike(row?.source_ref)) {
+      contextConditions.push(`source_activity_id = $${idx++}`);
+      contextParams.push(row.source_ref);
+    }
+  } else if (query.signal_group_id) {
+    const members = await db.query(
+      `SELECT context_entry_id FROM signal_group_members WHERE tenant_id = $1 AND signal_group_id = $2`,
+      [tenantId, query.signal_group_id],
+    );
+    const ids = members.rows.map(row => row.context_entry_id).filter(Boolean);
+    if (ids.length > 0) {
+      contextConditions.push(`id = ANY($${idx++}::uuid[])`);
+      contextParams.push(ids);
+    }
+  }
+
+  if (contextConditions.length === 1 && !query.signal_group_id && !query.raw_context_source_id) {
+    contextConditions.push('created_at > now() - interval \'30 days\'');
+  }
+
+  contextParams.push(100);
+  const contextEntries = await db.query(
+    `SELECT *
+     FROM context_entries
+     WHERE ${contextConditions.join(' AND ')}
+     ORDER BY created_at DESC
+     LIMIT $${idx}`,
+    contextParams,
+  );
+
+  const contextIds = new Set<string>();
+  const activityIds = new Set<string>();
+  for (const entry of contextEntries.rows) {
+    contextRows.push(entry);
+    contextIds.add(entry.id);
+    const type = entry.memory_status === 'active' ? 'memory' : 'signal';
+    addNode(nodes, {
+      id: `context:${entry.id}`,
+      type,
+      label: label(entry.title, type === 'memory' ? 'Memory' : 'Signal'),
+      timestamp: entry.created_at,
+      status: entry.memory_status,
+      subject_type: entry.subject_type,
+      subject_id: entry.subject_id,
+      object_id: entry.id,
+      stage: type,
+      display_order: type === 'memory' ? 30 : 20,
+      description: type === 'memory'
+        ? 'Confirmed Memory that agents can retrieve into Active Context.'
+        : 'Evidence-backed Signal extracted from Raw Context.',
+      data: entry,
+    });
+    if (uuidLike(entry.source_activity_id)) activityIds.add(entry.source_activity_id);
+  }
+
+  const groupConditions = ['sg.tenant_id = $1'];
+  const groupParams: unknown[] = [tenantId];
+  let groupIdx = 2;
+  if (query.signal_group_id) {
+    groupConditions.push(`sg.id = $${groupIdx++}`);
+    groupParams.push(query.signal_group_id);
+  } else if (contextIds.size > 0) {
+    groupConditions.push(`(sgm.context_entry_id = ANY($${groupIdx}::uuid[]) OR sg.promoted_context_entry_id = ANY($${groupIdx}::uuid[]))`);
+    groupParams.push([...contextIds]);
+    groupIdx++;
+  } else if (query.subject_type && query.subject_id) {
+    groupConditions.push(`sg.subject_type = $${groupIdx++}`);
+    groupParams.push(query.subject_type);
+    groupConditions.push(`sg.subject_id = $${groupIdx++}`);
+    groupParams.push(query.subject_id);
+  }
+  groupParams.push(100);
+  const groups = await db.query(
+    `SELECT DISTINCT sg.*
+     FROM signal_groups sg
+     LEFT JOIN signal_group_members sgm ON sgm.signal_group_id = sg.id AND sgm.tenant_id = sg.tenant_id
+     WHERE ${groupConditions.join(' AND ')}
+     ORDER BY sg.updated_at DESC
+     LIMIT $${groupIdx}`,
+    groupParams,
+  );
+  const groupIds = new Set<string>();
+  const promotedContextIds = new Set<string>();
+  for (const group of groups.rows) {
+    groupIds.add(group.id);
+    addNode(nodes, {
+      id: `signal_group:${group.id}`,
+      type: 'signal_group',
+      label: label(group.title, group.normalized_claim ?? 'Signal'),
+      timestamp: group.updated_at,
+      status: group.status,
+      subject_type: group.subject_type,
+      subject_id: group.subject_id,
+      object_id: group.id,
+      stage: 'signal',
+      display_order: 25,
+      description: `${Math.round(Number(group.aggregate_confidence ?? 0) * 100)}% trust from ${Number(group.evidence_count ?? 0)} evidence item${Number(group.evidence_count ?? 0) === 1 ? '' : 's'}.`,
+      data: group,
+    });
+    if (group.promoted_context_entry_id) {
+      promotedContextIds.add(group.promoted_context_entry_id);
+      addEdge(edges, {
+        id: `group-promoted:${group.id}:${group.promoted_context_entry_id}`,
+        source: `signal_group:${group.id}`,
+        target: `context:${group.promoted_context_entry_id}`,
+        relation: 'promoted_to_memory',
+      });
+    }
+  }
+
+  const missingPromotedIds = [...promotedContextIds].filter(id => !contextIds.has(id));
+  if (missingPromotedIds.length > 0) {
+    const promotedEntries = await db.query(
+      `SELECT *
+       FROM context_entries
+       WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [tenantId, missingPromotedIds],
+    );
+    for (const entry of promotedEntries.rows) {
+      contextRows.push(entry);
+      contextIds.add(entry.id);
+      const type = entry.memory_status === 'active' ? 'memory' : 'signal';
+      addNode(nodes, {
+        id: `context:${entry.id}`,
+        type,
+        label: label(entry.title, type === 'memory' ? 'Memory' : 'Signal'),
+        timestamp: entry.created_at,
+        status: entry.memory_status,
+        subject_type: entry.subject_type,
+        subject_id: entry.subject_id,
+        object_id: entry.id,
+        stage: type,
+        display_order: type === 'memory' ? 30 : 20,
+        description: type === 'memory'
+          ? 'Confirmed Memory that agents can retrieve into Active Context.'
+          : 'Evidence-backed Signal extracted from Raw Context.',
+        data: entry,
+      });
+      if (uuidLike(entry.source_activity_id)) activityIds.add(entry.source_activity_id);
+    }
+  }
+
+  if (groupIds.size > 0) {
+    const members = await db.query(
+      `SELECT signal_group_id, context_entry_id, relation, similarity_score
+       FROM signal_group_members
+       WHERE tenant_id = $1 AND signal_group_id = ANY($2::uuid[])`,
+      [tenantId, [...groupIds]],
+    );
+    for (const member of members.rows) {
+      addEdge(edges, {
+        id: `member:${member.signal_group_id}:${member.context_entry_id}`,
+        source: `context:${member.context_entry_id}`,
+        target: `signal_group:${member.signal_group_id}`,
+        relation: member.relation,
+        data: { similarity_score: member.similarity_score, label: relationLabel(String(member.relation)) },
+      });
+    }
+  }
+
+  if (activityIds.size > 0) {
+    const activities = await db.query(
+      `SELECT id, type, subject, body, outcome, occurred_at, subject_type, subject_id
+       FROM activities
+       WHERE tenant_id = $1 AND id = ANY($2::uuid[])`,
+      [tenantId, [...activityIds]],
+    );
+    for (const activity of activities.rows) {
+      addNode(nodes, {
+        id: `activity:${activity.id}`,
+        type: 'activity',
+        label: label(activity.subject, label(activity.body, activity.type ?? 'Activity')),
+        timestamp: activity.occurred_at,
+        status: activity.type,
+        subject_type: activity.subject_type,
+        subject_id: activity.subject_id,
+        object_id: activity.id,
+        stage: 'source',
+        display_order: 12,
+        description: 'Recorded customer interaction used as extraction provenance.',
+        data: activity,
+      });
+    }
+    for (const entry of contextRows) {
+      if (uuidLike(entry.source_activity_id)) {
+        addEdge(edges, {
+          id: `activity-context:${entry.source_activity_id}:${entry.id}`,
+          source: `activity:${entry.source_activity_id}`,
+          target: `context:${entry.id}`,
+          relation: 'extracted_signal',
+        });
+      }
+    }
+  }
+
+  const rawConditions = ['tenant_id = $1'];
+  const rawParams: unknown[] = [tenantId];
+  let rawIdx = 2;
+  if (query.raw_context_source_id) {
+    rawConditions.push(`id = $${rawIdx++}`);
+    rawParams.push(query.raw_context_source_id);
+  } else if (query.subject_type && query.subject_id) {
+    rawConditions.push(`subject_type = $${rawIdx++}`);
+    rawParams.push(query.subject_type);
+    rawConditions.push(`subject_id = $${rawIdx++}`);
+    rawParams.push(query.subject_id);
+  } else if (activityIds.size > 0) {
+    rawConditions.push(`source_ref = ANY($${rawIdx++}::text[])`);
+    rawParams.push([...activityIds]);
+  }
+  rawParams.push(50);
+  const rawSources = await db.query(
+    `SELECT *
+     FROM raw_context_sources
+     WHERE ${rawConditions.join(' AND ')}
+     ORDER BY created_at DESC
+     LIMIT $${rawIdx}`,
+    rawParams,
+  );
+  for (const source of rawSources.rows) {
+    addNode(nodes, {
+      id: `raw:${source.id}`,
+      type: 'raw_context',
+      label: label(source.source_label, source.source_type ?? 'Raw Context'),
+      timestamp: source.created_at,
+      status: source.status,
+      subject_type: source.subject_type,
+      subject_id: source.subject_id,
+      object_id: source.id,
+      stage: 'source',
+      display_order: 10,
+      description: `${Number(source.memory_created ?? 0)} Memory, ${Number(source.signals_created ?? 0)} Signals, ${Number(source.skipped ?? 0)} skipped.`,
+      data: source,
+    });
+    if (uuidLike(source.source_ref)) {
+      addEdge(edges, {
+        id: `raw-activity:${source.id}:${source.source_ref}`,
+        source: `raw:${source.id}`,
+        target: `activity:${source.source_ref}`,
+        relation: 'recorded_as_activity',
+      });
+    }
+  }
+
+  if (groupIds.size > 0) {
+    const handoffs = await db.query(
+      `SELECT id, action_type, action_summary, action_payload, status, created_at, resolved_at
+       FROM hitl_requests
+       WHERE tenant_id = $1
+         AND action_payload->>'signal_group_id' = ANY($2::text[])
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [tenantId, [...groupIds]],
+    );
+    for (const handoff of handoffs.rows) {
+      const groupId = handoff.action_payload?.signal_group_id;
+      addNode(nodes, {
+        id: `handoff:${handoff.id}`,
+        type: 'handoff',
+        label: label(handoff.action_summary, 'Handoff'),
+        timestamp: handoff.created_at,
+        status: handoff.status,
+        object_id: handoff.id,
+        stage: 'action',
+        display_order: 40,
+        description: 'Human review for a Signal, writeback, or high-impact agent decision.',
+        data: handoff,
+      });
+      if (groupId) {
+        addEdge(edges, {
+          id: `group-handoff:${groupId}:${handoff.id}`,
+          source: `signal_group:${groupId}`,
+          target: `handoff:${handoff.id}`,
+          relation: 'sent_to_handoff',
+        });
+      }
+    }
+  }
+
+  const handoffIds = new Set<string>();
+  for (const node of nodes.values()) {
+    if (node.type === 'handoff' && uuidLike(node.object_id)) handoffIds.add(node.object_id);
+  }
+
+  const writebacks = await db.query(
+    `SELECT id, object_type, object_id, external_object, operation, status, hitl_request_id, created_at, executed_at
+     FROM external_writeback_requests
+     WHERE tenant_id = $1
+       AND (
+         ($2::text IS NOT NULL AND object_type = $2 AND object_id = $3::uuid)
+         OR ($4::uuid[] IS NOT NULL AND object_id = ANY($4::uuid[]))
+         OR ($5::uuid[] IS NOT NULL AND hitl_request_id = ANY($5::uuid[]))
+       )
+     ORDER BY created_at DESC
+     LIMIT 50`,
+    [tenantId, query.subject_type ?? null, query.subject_id ?? null, [...contextIds], [...handoffIds]],
+  ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+  for (const writeback of writebacks.rows) {
+    addNode(nodes, {
+      id: `writeback:${writeback.id}`,
+      type: 'writeback',
+      label: `${writeback.operation ?? 'writeback'} ${writeback.external_object ?? 'system record'}`,
+      timestamp: writeback.executed_at ?? writeback.created_at,
+      status: String(writeback.status ?? ''),
+      subject_type: writeback.object_type as never,
+      subject_id: writeback.object_id as never,
+      object_id: writeback.id as never,
+      stage: 'action',
+      display_order: 45,
+      description: 'Governed system-of-record writeback request or execution.',
+      data: writeback,
+    });
+    if (uuidLike(writeback.hitl_request_id)) {
+      handoffIds.add(writeback.hitl_request_id);
+      addEdge(edges, {
+        id: `handoff-writeback:${writeback.hitl_request_id}:${writeback.id}`,
+        source: `handoff:${writeback.hitl_request_id}`,
+        target: `writeback:${writeback.id}`,
+        relation: 'approved_writeback',
+        data: { label: 'approved' },
+      });
+    }
+    if (uuidLike(writeback.object_id)) {
+      const contextNodeId = `context:${writeback.object_id}`;
+      const recordNodeId = `record:${writeback.object_type}:${writeback.object_id}`;
+      const sourceNodeId = nodes.has(contextNodeId) ? contextNodeId : recordNodeId;
+      addEdge(edges, {
+        id: `writeback-target:${sourceNodeId}:${writeback.id}`,
+        source: sourceNodeId,
+        target: `writeback:${writeback.id}`,
+        relation: 'requested_writeback',
+        data: { label: 'written back' },
+      });
+    }
+  }
+
+  const missingHandoffIds = [...handoffIds].filter(id => !nodes.has(`handoff:${id}`));
+  if (missingHandoffIds.length > 0) {
+    const linkedHandoffs = await db.query(
+      `SELECT id, action_type, action_summary, action_payload, status, created_at, resolved_at
+       FROM hitl_requests
+       WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [tenantId, missingHandoffIds],
+    ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+    for (const handoff of linkedHandoffs.rows) {
+      addNode(nodes, {
+        id: `handoff:${handoff.id}`,
+        type: 'handoff',
+        label: label(handoff.action_summary, 'Handoff'),
+        timestamp: handoff.created_at,
+        status: handoff.status,
+        object_id: handoff.id,
+        stage: 'action',
+        display_order: 40,
+        description: 'Human review for a Signal, writeback, or high-impact agent decision.',
+        data: handoff,
+      });
+    }
+  }
+
+  const subjectPairs = new Set<string>();
+  if (query.subject_type && query.subject_id) {
+    const key = subjectKey(query.subject_type, query.subject_id);
+    if (key) subjectPairs.add(key);
+  }
+  for (const node of nodes.values()) {
+    const key = subjectKey(node.subject_type, node.subject_id);
+    if (key) subjectPairs.add(key);
+  }
+
+  const recordLabels = new Map<string, { label: string; data: Record<string, unknown> }>();
+  const idsByType = new Map<string, string[]>();
+  for (const key of subjectPairs) {
+    const [type, id] = key.split(':');
+    idsByType.set(type, [...(idsByType.get(type) ?? []), id]);
+  }
+  async function loadLabels(type: string, sql: string, ids: string[]) {
+    if (ids.length === 0) return;
+    const result = await db.query(sql, [tenantId, ids]).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+    for (const row of result.rows) {
+      const id = String(row.id);
+      recordLabels.set(`${type}:${id}`, {
+        label: label(row.name, type.replace('_', ' ')),
+        data: row,
+      });
+    }
+  }
+  await loadLabels('account', 'SELECT id, name, domain, health_score, created_at FROM accounts WHERE tenant_id = $1 AND id = ANY($2::uuid[])', idsByType.get('account') ?? []);
+  await loadLabels('opportunity', 'SELECT id, name, stage, amount, close_date, created_at FROM opportunities WHERE tenant_id = $1 AND id = ANY($2::uuid[])', idsByType.get('opportunity') ?? []);
+  await loadLabels('use_case', 'SELECT id, name, stage, health_score, created_at FROM use_cases WHERE tenant_id = $1 AND id = ANY($2::uuid[])', idsByType.get('use_case') ?? []);
+  const contactIds = idsByType.get('contact') ?? [];
+  if (contactIds.length > 0) {
+    const contacts = await db.query(
+      `SELECT id, first_name, last_name, email, lifecycle_stage, created_at,
+              trim(concat(coalesce(first_name, ''), ' ', coalesce(last_name, ''))) AS name
+       FROM contacts
+       WHERE tenant_id = $1 AND id = ANY($2::uuid[])`,
+      [tenantId, contactIds],
+    ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+    for (const row of contacts.rows) {
+      const id = String(row.id);
+      recordLabels.set(`contact:${id}`, {
+        label: label(row.name, label(row.email, 'Contact')),
+        data: row,
+      });
+    }
+  }
+
+  for (const key of subjectPairs) {
+    const [type, id] = key.split(':');
+    const record = recordLabels.get(key);
+    addNode(nodes, {
+      id: `record:${type}:${id}`,
+      type: 'record',
+      label: record?.label ?? type.replace('_', ' '),
+      timestamp: typeof record?.data.created_at === 'string' ? record.data.created_at : undefined,
+      status: type,
+      subject_type: type as never,
+      subject_id: id as never,
+      object_id: id,
+      stage: 'record',
+      display_order: 0,
+      description: 'Customer record this lineage is attached to.',
+      data: record?.data ?? { id, type },
+    });
+  }
+
+  for (const node of [...nodes.values()]) {
+    if (node.type === 'record') continue;
+    const key = subjectKey(node.subject_type, node.subject_id);
+    if (!key) continue;
+    addEdge(edges, {
+      id: `record-node:${key}:${node.id}`,
+      source: `record:${key}`,
+      target: node.id,
+      relation: 'about_record',
+      data: { label: 'about' },
+    });
+  }
+
+  const objectIds = [...nodes.values()]
+    .map(node => node.object_id)
+    .filter(uuidLike);
+  if (objectIds.length > 0) {
+    const events = await db.query(
+      `SELECT id, event_type, object_type, object_id, metadata, created_at
+       FROM events
+       WHERE tenant_id = $1
+         AND object_id = ANY($2::uuid[])
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [tenantId, objectIds],
+    );
+    for (const event of events.rows) {
+      addNode(nodes, {
+        id: `audit:${event.id}`,
+        type: 'audit',
+        label: event.event_type,
+        timestamp: event.created_at,
+        status: event.object_type,
+        object_id: String(event.id),
+        stage: 'audit',
+        display_order: 50,
+        description: 'Immutable audit receipt for this lineage item.',
+        data: event,
+      });
+      const target = lineageNodeIdForObject(String(event.object_type), String(event.object_id));
+      addEdge(edges, {
+        id: `audit-edge:${event.id}:${event.object_id}`,
+        source: target,
+        target: `audit:${event.id}`,
+        relation: 'audits',
+        data: { label: 'audited' },
+      });
+    }
+  }
+
+  const nodeList = [...nodes.values()];
+  return {
+    nodes: nodeList,
+    edges: [...edges.values()].filter(edge => nodes.has(edge.source) && nodes.has(edge.target)),
+    summary: {
+      records: nodeList.filter(node => node.type === 'record').length,
+      raw_context: nodeList.filter(node => node.type === 'raw_context').length,
+      signals: nodeList.filter(node => node.type === 'signal').length,
+      signal_groups: nodeList.filter(node => node.type === 'signal_group').length,
+      memory: nodeList.filter(node => node.type === 'memory').length,
+      handoffs: nodeList.filter(node => node.type === 'handoff').length,
+      writebacks: nodeList.filter(node => node.type === 'writeback').length,
+      audit_events: nodeList.filter(node => node.type === 'audit').length,
+    },
+  };
+}

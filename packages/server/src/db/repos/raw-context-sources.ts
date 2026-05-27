@@ -47,11 +47,37 @@ export interface RawContextSourceInput {
   metadata?: Record<string, unknown>;
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function normalizeActorId(
+  db: DbPool,
+  tenantId: UUID | string,
+  actorId?: UUID | string | null,
+): Promise<UUID | string | null> {
+  if (!actorId) return null;
+  if (!isUuid(String(actorId))) return null;
+  const result = await db.query(
+    `SELECT id
+     FROM (
+       SELECT id, 0 AS priority FROM actors WHERE tenant_id = $1 AND id = $2
+       UNION ALL
+       SELECT id, 1 AS priority FROM actors WHERE tenant_id = $1 AND user_id = $2
+     ) matched_actor
+     ORDER BY priority
+     LIMIT 1`,
+    [tenantId, actorId],
+  );
+  return result.rows[0]?.id ?? null;
+}
+
 export async function upsertRawContextSource(
   db: DbPool,
   tenantId: UUID | string,
   input: RawContextSourceInput,
 ): Promise<RawContextSource> {
+  const actorId = await normalizeActorId(db, tenantId, input.actor_id);
   const result = await db.query(
     `INSERT INTO raw_context_sources (
        tenant_id, source_type, source_ref, source_label, subject_type, subject_id,
@@ -89,7 +115,7 @@ export async function upsertRawContextSource(
       input.source_label ?? null,
       input.subject_type ?? null,
       input.subject_id ?? null,
-      input.actor_id ?? null,
+      actorId,
       input.status ?? 'pending',
       input.stage ?? 'received',
       input.raw_excerpt ?? null,
@@ -111,6 +137,7 @@ export async function updateRawContextSource(
   sourceRef: string,
   patch: Partial<RawContextSourceInput>,
 ): Promise<RawContextSource | null> {
+  const actorId = await normalizeActorId(db, tenantId, patch.actor_id);
   const result = await db.query(
     `UPDATE raw_context_sources
      SET status = COALESCE($4, status),
@@ -142,7 +169,7 @@ export async function updateRawContextSource(
       patch.source_label ?? null,
       patch.subject_type ?? null,
       patch.subject_id ?? null,
-      patch.actor_id ?? null,
+      actorId,
       patch.raw_excerpt ?? null,
       patch.detected_subjects ? JSON.stringify(patch.detected_subjects) : null,
       patch.signals_created ?? null,

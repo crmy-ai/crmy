@@ -38,7 +38,7 @@ export async function createContextEntry(
       data.valid_until ?? null,
       (data as Record<string, unknown>).parent_id ?? null,
       (data as Record<string, unknown>).visibility ?? 'internal',
-      JSON.stringify((data as Record<string, unknown>).mentions ?? []),
+      (data as Record<string, unknown>).mentions ?? [],
       (data as Record<string, unknown>).pinned ?? false,
     ],
   );
@@ -389,7 +389,7 @@ export async function supersedeContextEntry(
         oldEntry.source_activity_id,
         oldEntry.valid_until ?? null,
         (oldEntry as unknown as Record<string, unknown>).visibility ?? 'internal',
-        JSON.stringify((oldEntry as unknown as Record<string, unknown>).mentions ?? []),
+        (oldEntry as unknown as Record<string, unknown>).mentions ?? [],
         (oldEntry as unknown as Record<string, unknown>).pinned ?? false,
       ],
     );

@@ -10,11 +10,13 @@ import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge, DealHealthBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { RecordMemoryIndicator } from '@/components/crm/RecordMemoryIndicator';
 import { DatePicker } from '@/components/ui/date-picker';
 import { motion } from 'framer-motion';
 import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown, Briefcase } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { ContactAvatar } from '@/components/crm/ContactAvatar';
+import { useRecordMemoryCounts } from '@/hooks/useRecordMemoryCounts';
 import { stageConfig } from '@/lib/stageConfig';
 import { headerDescription } from '@/lib/headerCopy';
 
@@ -93,6 +95,7 @@ export default function Opportunities() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, isLoading } = useOpportunities({ q: search || undefined, limit: 200 }) as any;
   const allOpportunities: Opportunity[] = data?.data ?? [];
+  const memoryCounts = useRecordMemoryCounts('opportunity');
 
   const handleFilterChange = (key: string, values: string[]) => {
     setActiveFilters(prev => { const next = { ...prev }; if (values.length === 0) delete next[key]; else next[key] = values; return next; });
@@ -242,7 +245,10 @@ export default function Opportunities() {
                           onClick={() => openDrawer('opportunity', opp.id as string)}
                           className="bg-card border border-border rounded-2xl p-3.5 cursor-pointer hover:border-primary/30 hover:shadow-md transition-all press-scale group">
                           <div className="flex items-start justify-between">
-                            <p className="text-sm font-display font-bold text-foreground">{opp.name as string}</p>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <p className="truncate text-sm font-display font-bold text-foreground">{opp.name as string}</p>
+                              <RecordMemoryIndicator count={memoryCounts.get(opp.id as string)} className="shrink-0" />
+                            </div>
                             {agentEnabled && (
                               <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: opp.id as string, name: opp.name as string, detail: `$${(amount / 1000).toFixed(0)}K` }); navigate('/agent'); }}
                                 className="p-0.5 rounded-lg md:opacity-0 md:group-hover:opacity-100 hover:bg-accent/10 transition-all">
@@ -312,7 +318,7 @@ export default function Opportunities() {
                     <thead>
                       <tr className="border-b border-border bg-surface-sunken/50">
                         <SortHeader label="Opportunity" sortKey="name" />
-                        <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Company</th>
+                        <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Account</th>
                         <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Contact</th>
                         <SortHeader label="Amount" sortKey="amount" />
                         <SortHeader label="Stage" sortKey="stage" />
@@ -330,7 +336,12 @@ export default function Opportunities() {
                         return (
                           <tr key={d.id as string} onClick={() => openDrawer('opportunity', d.id as string)}
                             className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer transition-colors group ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
-                            <td className="px-4 py-3 font-display font-bold text-foreground">{d.name as string}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <span className="font-display font-bold text-foreground">{d.name as string}</span>
+                                <RecordMemoryIndicator count={memoryCounts.get(d.id as string)} />
+                              </div>
+                            </td>
                             <td className="px-4 py-3 text-muted-foreground">{accountName || '—'}</td>
                             <td className="px-4 py-3">
                               {contactName ? (

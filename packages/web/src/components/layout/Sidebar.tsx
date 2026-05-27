@@ -6,10 +6,9 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
-  Bot,
   Inbox,
   Zap,
-  Layers,
+  Library,
   Users,
   Building2,
   Briefcase,
@@ -24,7 +23,6 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { useInboxCounts } from '@/api/hooks';
-import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import crmyLogo from '@/assets/crmy-logo.png';
 import { ENTITY_COLORS } from '@/lib/entityColors';
 
@@ -32,8 +30,8 @@ export { ENTITY_COLORS };
 
 // Agent-facing tier — top of nav
 const agentNavItems = [
-  { icon: Brain,       label: 'Overview',     path: '/',             color: ENTITY_COLORS.contacts },
-  { icon: Layers,      label: 'Context',      path: '/context',      color: ENTITY_COLORS.activities },
+  { icon: Brain,       label: 'Overview',     path: '/',             color: ENTITY_COLORS.sequences },
+  { icon: Library,     label: 'Context',      path: '/context',      color: ENTITY_COLORS.context },
   { icon: Zap,         label: 'Automations',  path: '/automations',  color: ENTITY_COLORS.workflows },
   { icon: Inbox,       label: 'Handoffs',     path: '/handoffs',     color: ENTITY_COLORS.assignments },
 ];
@@ -41,7 +39,7 @@ const agentNavItems = [
 // Data tier — customer record objects
 const dataNavItems = [
   { icon: Users,       label: 'Contacts',      path: '/contacts',      color: ENTITY_COLORS.contacts },
-  { icon: Building2,   label: 'Companies',     path: '/companies',     color: ENTITY_COLORS.accounts },
+  { icon: Building2,   label: 'Accounts',      path: '/accounts',      color: ENTITY_COLORS.accounts },
   { icon: Briefcase,   label: 'Opportunities', path: '/opportunities', color: ENTITY_COLORS.opportunities },
   { icon: FolderKanban,label: 'Use Cases',     path: '/use-cases',     color: ENTITY_COLORS.useCases },
   { icon: Activity,    label: 'Activities',    path: '/activities',    color: ENTITY_COLORS.activities },
@@ -113,61 +111,10 @@ function NavItem({ item, active, badge }: {
   );
 }
 
-function WorkspaceAgentItem({ active, enabled }: { active: boolean; enabled: boolean }) {
-  const { sidebarExpanded } = useAppStore();
-  const item = { icon: Bot, label: 'Workspace Agent', path: '/agent', color: ENTITY_COLORS.agents };
-
-  return (
-    <Link
-      to={item.path}
-      className={`group relative flex items-center gap-3 rounded-xl px-2.5 py-2.5 text-sm transition-all
-        ${active
-          ? `${item.color.bg} ${item.color.text}`
-          : enabled
-            ? 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-            : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
-        }`}
-      title={!sidebarExpanded ? (enabled ? item.label : 'Workspace Agent setup') : undefined}
-    >
-      <Bot className="w-5 h-5 flex-shrink-0" />
-      <AnimatePresence>
-        {sidebarExpanded && (
-          <motion.span
-            initial={{ opacity: 0, width: 0 }}
-            animate={{ opacity: 1, width: 'auto' }}
-            exit={{ opacity: 0, width: 0 }}
-            className="whitespace-nowrap overflow-hidden font-medium flex-1"
-          >
-            {item.label}
-          </motion.span>
-        )}
-      </AnimatePresence>
-      {!enabled && sidebarExpanded && (
-        <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 text-[10px] font-bold">
-          Setup
-        </span>
-      )}
-      {active && (
-        <motion.div
-          layoutId="sidebar-active"
-          className={`absolute -left-2 top-2 w-[3px] h-6 ${item.color.bar} rounded-r-full`}
-          transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-        />
-      )}
-      {!sidebarExpanded && (
-        <div className="absolute left-full ml-2 px-2.5 py-1.5 rounded-lg bg-popover text-popover-foreground text-xs shadow-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 font-medium">
-          {enabled ? item.label : 'Workspace Agent setup'}
-        </div>
-      )}
-    </Link>
-  );
-}
-
 export function Sidebar() {
   const location = useLocation();
   const { sidebarExpanded, setSidebarExpanded } = useAppStore();
   const { hitlCount, assignCount } = useInboxCounts();
-  const { enabled: agentEnabled } = useAgentSettings();
 
   function isActive(path: string) {
     return path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
@@ -210,8 +157,6 @@ export function Sidebar() {
         {agentNavItems.map((item) => (
           <NavItem key={item.path} item={item} active={isActive(item.path)} badge={badge(item.path)} />
         ))}
-
-        <WorkspaceAgentItem active={isActive('/agent')} enabled={agentEnabled} />
 
         {/* Divider */}
         <div className="mt-2 mb-1">

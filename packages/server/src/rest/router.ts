@@ -1734,6 +1734,21 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.get('/context/lineage', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_lineage_get');
+      const result = await handler({
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        context_entry_id: qs(req.query.context_entry_id),
+        signal_group_id: qs(req.query.signal_group_id),
+        raw_context_source_id: qs(req.query.raw_context_source_id),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   router.get('/context/signal-groups', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
@@ -1765,6 +1780,15 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       const handler = toolHandler(db, 'context_signal_group_promote');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/signal-groups/:id/handoff', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_signal_handoff');
       const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }

@@ -456,7 +456,15 @@ type IngestSummary = {
   skipped: number;
 } | null;
 
-export function ContextBrowser({ memoryStatus = 'active' }: { memoryStatus?: 'signal' | 'active' }) {
+export function ContextBrowser({
+  memoryStatus = 'active',
+  drawerOnly = false,
+  allowAddContext = true,
+}: {
+  memoryStatus?: 'signal' | 'active';
+  drawerOnly?: boolean;
+  allowAddContext?: boolean;
+}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const isSignalMode = memoryStatus === 'signal';
 
@@ -816,7 +824,8 @@ export function ContextBrowser({ memoryStatus = 'active' }: { memoryStatus?: 'si
     }
     setIngesting(true);
     try {
-      const results = autoResolveIngest
+      const useResolvedSubjects = validSubjects.length > 0;
+      const results = autoResolveIngest && !useResolvedSubjects
         ? [await ingestAutoMut.mutateAsync({
             text: activeText,
             source: activeSource || undefined,
@@ -842,16 +851,23 @@ export function ContextBrowser({ memoryStatus = 'active' }: { memoryStatus?: 'si
           title: 'Context processed',
           description: `${memoryCreated} Memory created, ${signalsCreated} ${signalsCreated === 1 ? 'Signal needs' : 'Signals need'} review, ${skipped} skipped.`,
         });
+        closeIngestDialog();
       } else {
+        const firstResult = results[0] as any;
+        const matchedCount = Number(firstResult?.subjects_resolved?.length ?? 0);
+        const reason = firstResult?.message
+          ?? firstResult?.raw_context_source?.failure_reason
+          ?? firstResult?.processing_receipts?.find((receipt: any) => receipt?.failure_reason)?.failure_reason;
         toast({
-          title: 'Raw Context saved',
-          description: autoResolveIngest
-            ? 'No customer records were confidently matched. Add matching contacts/accounts or choose a subject manually.'
-            : 'No signals were extracted. Check the Workspace Agent configuration or context type settings.',
+          title: matchedCount > 0 || useResolvedSubjects ? 'No Signals extracted' : 'No customer record matched',
+          description: autoResolveIngest && !useResolvedSubjects
+            ? matchedCount > 0
+              ? reason || `CRMy matched ${matchedCount} customer ${matchedCount === 1 ? 'record' : 'records'}, but the Workspace Agent did not find customer-specific Signals to save. Add more detail or choose a record manually.`
+              : reason || 'No customer records were confidently matched. Add matching contacts/accounts or choose a subject manually.'
+            : reason || 'CRMy processed the selected customer record, but did not find evidence-backed Signals to save. Add more specific customer statements, next steps, risks, commitments, or decision details.',
           variant: 'destructive',
         });
       }
-      closeIngestDialog();
     } catch (err) {
       toast({
         title: 'Ingestion failed',
@@ -961,6 +977,8 @@ export function ContextBrowser({ memoryStatus = 'active' }: { memoryStatus?: 'si
 
   return (
     <>
+      {!drawerOnly && (
+      <>
       <ListToolbar
         searchValue={q}
         onSearchChange={setQ}
@@ -976,8 +994,8 @@ export function ContextBrowser({ memoryStatus = 'active' }: { memoryStatus?: 'si
         sortOptions={SORT_OPTIONS}
         currentSort={sort}
         onSortChange={handleSortChange}
-        onAdd={() => { setIngestOpen(true); setIngestTab('text'); }}
-        addLabel="Add Context"
+        onAdd={allowAddContext ? () => { setIngestOpen(true); setIngestTab('text'); } : undefined}
+        addLabel={allowAddContext ? 'Add Context' : undefined}
         entityType="context"
         searchSuffix={searchModeToggle}
       />
@@ -1266,6 +1284,8 @@ export function ContextBrowser({ memoryStatus = 'active' }: { memoryStatus?: 'si
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
       />
+      </>
+      )}
 
       {/* ── Add Context Drawer ─────────────────────────────────────────────── */}
       <Sheet open={ingestOpen} onOpenChange={(open) => { if (!open) closeIngestDialog(); else setIngestOpen(true); }}>
@@ -1482,11 +1502,11 @@ export function ContextBrowser({ memoryStatus = 'active' }: { memoryStatus?: 'si
             <Button variant="outline" onClick={closeIngestDialog}>Cancel</Button>
             <Button
               onClick={handleIngest}
-              disabled={ingesting || uploadParsing}
+              disabled={ingesting || uploadParsing || detecting}
               className="gap-1.5 bg-[#0ea5e9] text-white hover:bg-[#0284c7]"
             >
               {ingesting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Add Context
+              {detecting ? 'Matching records…' : 'Add Context'}
             </Button>
           </SheetFooter>
         </SheetContent>

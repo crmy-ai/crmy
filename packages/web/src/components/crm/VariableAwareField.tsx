@@ -45,7 +45,7 @@ const BASE_VARIABLES: VariableToken[] = [
   { path: 'contact.last_name',     label: 'Last name',        group: 'Contact' },
   { path: 'contact.email',         label: 'Email',            group: 'Contact' },
   { path: 'contact.title',         label: 'Job title',        group: 'Contact' },
-  { path: 'contact.company_name',  label: 'Company',          group: 'Contact' },
+  { path: 'contact.company_name',  label: 'Account',          group: 'Contact' },
   { path: 'contact.lifecycle_stage', label: 'Lifecycle stage', group: 'Contact' },
   // Account
   { path: 'account.name',          label: 'Account name',     group: 'Account' },

@@ -114,7 +114,7 @@ function AccountEditForm({
       </div>
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
         {[
-          { key: 'name', label: 'Company Name', type: 'text', placeholder: 'e.g. Acme Corp', required: true },
+          { key: 'name', label: 'Account Name', type: 'text', placeholder: 'e.g. Acme Corp', required: true },
           { key: 'industry', label: 'Industry', type: 'text', placeholder: 'e.g. Technology' },
           { key: 'website', label: 'Website', type: 'url', placeholder: 'https://acme.com' },
           { key: 'domain', label: 'Domain', type: 'text', placeholder: 'acme.com' },
@@ -210,7 +210,7 @@ export function AccountDrawer() {
   const { drawerEntityId, closeDrawer, drawerBriefing } = useAppStore();
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
-  const graphHref = drawerEntityId ? `/companies/${drawerEntityId}/graph` : undefined;
+  const graphHref = drawerEntityId ? `/accounts/${drawerEntityId}/graph` : undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: accountData, isLoading } = useAccount(drawerEntityId ?? '') as any;
   const updateAccount = useUpdateAccount(drawerEntityId ?? '');

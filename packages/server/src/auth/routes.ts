@@ -91,6 +91,13 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
       );
       const user = userResult.rows[0];
 
+      await client.query(
+        `INSERT INTO actors (tenant_id, actor_type, display_name, email, user_id, role, registration_source, registration_status)
+         VALUES ($1, 'human', $2, $3, $4, $5, 'admin', 'approved')
+         ON CONFLICT (tenant_id, user_id) WHERE user_id IS NOT NULL DO NOTHING`,
+        [tenant.id, user.name, user.email, user.id, user.role],
+      );
+
       await client.query('COMMIT');
 
       // Emit event outside transaction (non-critical)

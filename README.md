@@ -19,6 +19,41 @@ MCP-native. PostgreSQL-backed. Open source.
 
 ---
 
+## What CRMy is
+
+CRMy is the agent-native layer between messy GTM context and revenue-system action.
+
+It does not replace your CRM. Your CRM, warehouse, or customer platform remains the system of record. CRMy makes that state agent-operable by giving agents a trusted workflow:
+
+```text
+Raw Context → Signals → Memory → Handoffs → Systems of Record
+```
+
+- **Raw Context**: transcripts, emails, notes, CRM changes, support updates, product usage, research, and MCP/REST/CLI inputs.
+- **Signals**: inferred GTM claims with evidence, confidence, and source lineage.
+- **Memory**: confirmed account, opportunity, stakeholder, risk, commitment, and next-action context agents can rely on.
+- **Handoffs**: human review for sensitive or uncertain decisions.
+- **Systems of Record**: governed writeback to CRM and warehouse targets through preview, policy, audit, and approval.
+
+The goal is simple: let agents observe customer work, understand what is true now, coordinate the next step, and safely prepare or execute revenue-system updates.
+
+CRMy is not a CRM replacement, a generic chatbot memory store, or a workflow toy. It is the operational context and policy boundary for GTM agents.
+
+---
+
+## Active Context vs Memory
+
+Think of **Active Context** as the agent's working desk and **Memory** as the filing cabinet.
+
+- **Active Context** is temporary: the current prompt, conversation, bound customer record, retrieved briefing, tool results, and any loaded source material the model can see right now. It is constrained by the model's context window.
+- **Memory** is persistent: confirmed, typed customer context that survives across sessions and can be retrieved for future work.
+- **Raw Context** is incoming source material before extraction: calls, emails, transcripts, notes, systems-of-record changes, documents, and MCP/REST/CLI inputs.
+- **Retrieval** is how CRMy moves the right filing-cabinet entries onto the working desk. Agents use `briefing_get`, `context_search`, semantic search, Context Graph, and Lineage to load relevant Memory into Active Context before they act.
+
+This separation is the reason CRMy can let agents reason over messy GTM work without treating every inference as truth. Raw Context creates Signals, trusted Signals become Memory, and Memory is retrieved into Active Context when an agent needs to coordinate work, request a Handoff, or prepare system-of-record writeback.
+
+---
+
 ## The problem CRMy solves
 
 Your agent takes an action — sends an email, advances a deal, books a follow-up call. Before it acts, it needs to know:
@@ -116,8 +151,19 @@ With demo data loaded, try these to see CRMy in action:
 ```bash
 npx @crmy/cli briefing contact:d0000000-0000-4000-c000-000000000101       # Maya Patel at Northstar Labs
 npx @crmy/cli briefing account:d0000000-0000-4000-b000-000000000101       # Northstar Labs account context
+npx @crmy/cli context raw-sources                                         # Raw Context processing receipts
+npx @crmy/cli context signal-groups                                       # Evidence-backed Signals that need attention
 npx @crmy/cli hitl list                                                   # Pending governed Handoff
 ```
+
+What you should see:
+
+1. Seeded Raw Context from a discovery call and meeting notes.
+2. Signals about buying process, security/data residency, stakeholder influence, and next steps.
+3. Confirmed Memory that appears in `briefing_get`.
+4. A Handoff showing how uncertain or sensitive action routes to human review.
+
+Open `http://localhost:3000/app` and follow the same flow in the web UI: **Raw Context → Signals → Memory → Handoffs**. This is the fastest way to understand how CRMy turns messy customer context into trusted GTM action.
 
 ### Connect via MCP
 
@@ -233,23 +279,23 @@ Works on contacts, companies, opportunities, and use cases.
 ## Agent workflow example
 
 ```
-1. agent: "Get me a full briefing on contact abc."
-   ← record + recent activities + open assignments + typed context + stale warnings
+1. agent: "Get me a full briefing on the Northstar Labs opportunity."
+   ← account/deal state + stakeholders + activities + Memory + Signals + stale warnings
 
-2. agent: "Log a discovery call with abc — champion identified, pricing concern raised."
-   → activity logged as an observation; extraction pipeline creates reviewable signals
+2. agent or human: "Add this call transcript: Maya likes the governed writeback workflow, but data residency and Finance proof are still blockers."
+   → Raw Context captured; extraction creates evidence-backed Signals
 
-3. human or agent: "Promote the budget approval signal."
-   → confirmed as Memory; visible in future briefings and safe for coordinated work
+3. CRMy: "Security and data residency need review" and "Finance needs proof of workflow savings."
+   → related Signals are combined, scored, and either promoted to Memory or held for review
 
-4. agent: "Create an assignment for rep Sarah to send the proposal."
-   → appears in the rep's assignment queue
+4. agent: "Prepare the next-best action and propose any CRM update."
+   → Current Memory can guide the recommendation; uncertain Signals stay marked as unconfirmed
 
-5. human: "Get me a briefing on contact abc."
-   ← same context the agent built, plus the open assignment
+5. CRMy: "Forecast/writeback needs approval."
+   → Handoff created with evidence, trust score, proposed change, and audit trail
 
-6. human: "Mark assignment 123 complete — proposal sent."
-   → logged to audit trail; context entry written
+6. human: "Approve the governed writeback."
+   → system-of-record update proceeds through policy, idempotency, and mutation receipts
 ```
 
 ### Human-in-the-loop handoffs
@@ -333,7 +379,7 @@ The MCP server uses **scoped exposure**:
 | Category | Tools |
 |---|---|
 | **Briefing** | `briefing_get` — with `context_radius` (direct/adjacent/account_wide), `token_budget`, and `dropped_entries` in response |
-| **Context** | `context_ingest_auto`, `context_ingest`, `context_raw_source_list`, `context_raw_source_get`, `context_add`, `context_get`, `context_list`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_promote`, `context_signal_group_reject`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_review_batch` ★, `context_stale`, `context_bulk_mark_stale` ★, `context_diff`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
+| **Context** | `context_ingest_auto`, `context_ingest`, `context_raw_source_list`, `context_raw_source_get`, `context_add`, `context_get`, `context_list`, `context_lineage_get`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_promote`, `context_signal_handoff`, `context_signal_group_reject`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_review_batch` ★, `context_stale`, `context_bulk_mark_stale` ★, `context_diff`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
 | **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise`, `agent_register_specialization`, `agent_find_specialist`, `agent_set_availability` |
 | **Assignments** | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | **HITL** | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve`, `hitl_rule_create`, `hitl_rule_list`, `hitl_rule_delete` |
@@ -439,8 +485,11 @@ Context
   crmy context ingest [--file <path>]    Add Raw Context and extract Signals/Memory
   crmy context raw-sources               List Raw Context processing receipts
   crmy context signals                   List Signals that need review
+  crmy context signal-groups             List Signals with combined source support
   crmy context promote <id>              Promote a Signal to Memory
   crmy context reject <id>               Reject a Signal
+  crmy context promote-group <id>        Promote a corroborated Signal to Memory
+  crmy context handoff-group <id>        Send a Signal to Handoff for review
   crmy context list [--subject <type:id>]
   crmy context add                       Advanced direct Memory/Signal write
   crmy context get <id>                  Get context entry
@@ -499,15 +548,15 @@ Available at `/app` when the server is running. The web UI provides full CRUD fo
 
 | Section | Pages |
 |---------|-------|
-| **Agent Hub** | Memory Hub (dashboard), Approvals (HITL), Agents, Context, Workflows, Handoffs (assignments) |
+| **Agent Hub** | Overview, Workspace Agent, Context, Automations, Handoffs |
 | **Customer State** | Contacts, Companies, Opportunities, Use Cases, Activities, Emails |
-| **System** | Settings (Profile, Appearance, API Keys, Webhooks, Custom Fields, Actors, Registries, Workspace Agent, Database) |
+| **System** | Settings (Profile, Appearance, API Keys, Webhooks, Custom Fields, Actors, Registries, Workspace Agent, Database, Systems of Record) |
 
 **Key features:**
-- **Memory Hub** — command-center flow showing Raw Context → Signals → Memory → Actions, plus next-step attention items and activity
-- **Contact/Company drawers** — Detail, Brief, and Graph tabs; Brief surfaces a full structured briefing inline; Graph opens a full-page Obsidian-style memory graph
-- **Memory Graph** — dark canvas visualization showing entity nodes, context clusters, related records, activities, and assignments in a concentric radial layout; sidebar for category filtering; click any node to open a detail Sheet drawer
-- **Context page** — inspect Raw Context, review Signals, browse Current Memory, and run Memory Health checks; inline keyword/semantic search toggle; semantic fallback to keyword when pgvector is unavailable; **Add Context** flow for pasted notes, transcripts, emails, or files; 15 MB upload guard with clear error
+- **Overview** — command-center flow showing Raw Context → Signals → Memory → Handoffs, plus the next items that need attention and a Memory Health tab for review work
+- **Contact/Company drawers** — Detail, Brief, and Graph tabs; Brief surfaces a full structured briefing inline; Graph opens a full-page Obsidian-style context graph
+- **Context Graph** — dark canvas visualization showing entity nodes, context clusters, related records, activities, and assignments in a concentric radial layout; sidebar for category filtering; click any node to open a detail Sheet drawer
+- **Context page** — inspect Raw Context, review Signals, browse Current Memory, explore the Context Graph, and trace Memory Lineage; inline keyword/semantic search toggle; semantic fallback to keyword when pgvector is unavailable; **Add Context** flow for pasted notes, transcripts, emails, or files; 15 MB upload guard with clear error
 - **Context import** — paste text or upload a file (PDF, DOCX, TXT, MD); subjects are auto-detected from the document using entity resolution; extracted Raw Context becomes Signals until promoted to Memory
 - **Assignments** — My Queue / Delegated / All tabs with status-based filtering
 - **HITL Approvals** — approve or reject pending agent action requests; sequence step cards show full email preview + enrollment progress with **Approve & Send** / **Decline & Skip** actions
@@ -515,7 +564,7 @@ Available at `/app` when the server is running. The web UI provides full CRUD fo
 - **Sequences** — email sequence management; enrollment status filters (All / Active / Paused / Completed); Resume button for paused enrollments awaiting HITL approval
 - **Emails** — compose, view, and track outbound emails with approval flow
 - **Settings → Registries** — manage custom context types and activity types
-- **Settings → Actors** — view and configure registered agents
+- **Settings → Actors** — view and configure humans, users, self-registered agents, scopes, and API keys
 - **Settings → Workspace Agent** — enable auto-extraction of context from activities; configure provider, model, and capability flags
 - **Command palette** — `⌘K` for cross-entity search, quick navigation, and automation shortcuts (New Trigger, New Sequence, Go to Automations)
 
@@ -724,7 +773,8 @@ claude mcp add crmy -- npx @crmy/cli mcp
 
 Step-by-step guides for building agents on CRMy, each with MCP tool calls, CLI equivalents, realistic response shapes, and a copy-paste system prompt:
 
-- [**Post-Meeting Agent**](docs/recipes/post-meeting-agent.md) — Process call transcripts into structured customer context
+- [**Post-Meeting Agent**](docs/recipes/post-meeting-agent.md) — Turn call transcripts into Signals, Memory, Handoffs, and follow-up work
+- [**GTM Agent Demo**](docs/recipes/gtm-agent-demo.md) — End-to-end Raw Context → Signals → Memory → Handoffs workflow
 - [**Outreach Agent**](docs/recipes/outreach-agent.md) — Briefing-driven outreach with HITL approval flow
 - [**Pipeline Review Agent**](docs/recipes/pipeline-review-agent.md) — Weekly pipeline forecast, Memory Health review, and at-risk deal identification
 - [**Renewal Risk Agent**](docs/recipes/renewal-risk-agent.md) — Account-wide risk review with semantic memory search and HITL escalation
@@ -804,7 +854,7 @@ context_bulk_mark_stale { entry_ids: [...200], reason: "outdated" }
 
 ---
 
-### v0.7 context import and Memory Graph
+### v0.7 context import and Context Graph
 
 #### Context import — zero-friction ingestion
 
@@ -826,9 +876,9 @@ context_ingest_auto {
 
 - **Auto-extract from activities** — configurable in Settings → Workspace Agent (`auto_extract_context` toggle). When enabled, the extraction pipeline runs automatically on every new activity.
 
-#### Memory Graph — full redesign
+#### Context Graph — full redesign
 
-The entity memory graph (`/contacts/:id/graph`, `/companies/:id/graph`) is now an Obsidian-style dark canvas visualization:
+The entity context graph (`/contacts/:id/graph`, `/companies/:id/graph`) is now an Obsidian-style dark canvas visualization:
 
 - **6 node types**: entity center, related objects, context type clusters, individual context entries, activities, and assignments
 - **5-zone concentric radial layout**: related records on the right arc, context clusters on the left, leaf entries orbiting their cluster, activities and assignments in the lower arcs

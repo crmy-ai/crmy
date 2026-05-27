@@ -25,6 +25,7 @@ import { evaluateActionPolicy } from '../dist/services/action-policy.js';
 import { resolveSequenceGoalContactId } from '../dist/services/sequence-executor.js';
 import { createWorkflowEngine, dryRunWorkflowDefinition, matchesFilter } from '../dist/workflows/engine.js';
 import { buildVariableContext, interpolate } from '../dist/workflows/variables.js';
+import { __testSignalGrouping } from '../dist/services/signal-groups.js';
 
 const baseInput = {
   tenantId: '11111111-1111-4111-8111-111111111111',
@@ -303,6 +304,24 @@ test('signal auto-promotion requires evidence and configured confidence threshol
   assert.equal(shouldAutoPromoteSignal({ confidence: 0.84, threshold: 0.85, evidenceCount: 1 }), false);
   assert.equal(shouldAutoPromoteSignal({ confidence: 0.95, threshold: 0.85, evidenceCount: 0 }), false);
   assert.equal(shouldAutoPromoteSignal({ threshold: 0.85, evidenceCount: 1 }), false);
+});
+
+test('Signal grouping recognizes semantically related GTM claims beyond token overlap', () => {
+  const score = __testSignalGrouping.semanticClaimScore(
+    'Finance wants proof that the agent workflow reduces manual CRM updates.',
+    'Budget approval is unresolved until the business case shows ROI.',
+  );
+  assert.ok(score >= 0.42, `expected finance/budget claims to be groupable, got ${score}`);
+});
+
+test('Signal relation verifier JSON parser accepts support/conflict decisions', () => {
+  const decision = __testSignalGrouping.parseRelationDecision('{"relation":"conflicts","confidence":0.82,"rationale":"One says security is approved and the other says security is blocked."}');
+  assert.deepEqual(decision, {
+    relation: 'conflicts',
+    confidence: 0.82,
+    rationale: 'One says security is approved and the other says security is blocked.',
+    method: 'llm',
+  });
 });
 
 class FakeRecoveryDb {

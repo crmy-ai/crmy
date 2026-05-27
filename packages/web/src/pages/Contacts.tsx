@@ -11,10 +11,12 @@ import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge, LeadScoreBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { RecordMemoryIndicator } from '@/components/crm/RecordMemoryIndicator';
 import { motion } from 'framer-motion';
 import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown, Users, FileText } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useRecordMemoryCounts } from '@/hooks/useRecordMemoryCounts';
 import { stageConfig } from '@/lib/stageConfig';
 import { headerDescription } from '@/lib/headerCopy';
 
@@ -26,7 +28,7 @@ const filterConfigs: FilterConfig[] = [
 
 const sortOptions: SortOption[] = [
   { key: 'name', label: 'Name' },
-  { key: 'company', label: 'Company' },
+  { key: 'company', label: 'Account' },
   { key: 'created_at', label: 'Created' },
   { key: 'lifecycle_stage', label: 'Stage' },
   { key: 'lead_score', label: 'Score' },
@@ -61,6 +63,7 @@ export default function Contacts() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, isLoading } = useContacts({ q: search || undefined, limit: 200 }) as any;
   const allContacts: Contact[] = data?.data ?? [];
+  const memoryCounts = useRecordMemoryCounts('contact');
 
   const handleFilterChange = (key: string, values: string[]) => {
     setActiveFilters(prev => { const next = { ...prev }; if (values.length === 0) delete next[key]; else next[key] = values; return next; });
@@ -151,7 +154,7 @@ export default function Contacts() {
                 <thead>
                   <tr className="border-b border-border bg-surface-sunken/50">
                     <SortHeader label="Contact" sortKey="name" />
-                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Company</th>
+                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Account</th>
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Email</th>
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Phone</th>
                     <SortHeader label="Stage" sortKey="lifecycle_stage" />
@@ -165,7 +168,10 @@ export default function Contacts() {
                       className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer group transition-colors ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
                       <td className="px-4 py-3">
                         <div>
-                          <p className="font-display font-bold text-foreground">{displayName(c)}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-display font-bold text-foreground">{displayName(c)}</p>
+                            <RecordMemoryIndicator count={memoryCounts.get(c.id as string)} />
+                          </div>
                           {c.title && <p className="text-xs text-muted-foreground">{c.title as string}</p>}
                         </div>
                       </td>
@@ -221,7 +227,10 @@ export default function Contacts() {
                 <div className="flex items-center gap-3 mb-3">
                   <ContactAvatar name={displayName(c)} className="w-11 h-11 rounded-2xl text-sm" />
                   <div>
-                    <p className="font-display font-bold text-foreground">{displayName(c)}</p>
+                    <div className="flex items-center gap-2 pr-16">
+                      <p className="font-display font-bold text-foreground truncate">{displayName(c)}</p>
+                      <RecordMemoryIndicator count={memoryCounts.get(c.id as string)} className="shrink-0" />
+                    </div>
                     <p className="text-xs text-muted-foreground">{companyName(c) || 'Individual'}</p>
                   </div>
                 </div>

@@ -517,7 +517,7 @@ export const VARIABLE_SUGGESTIONS: VariableSuggestion[] = [
   { path: 'subject.email',           label: 'Email',            group: 'Contact' },
   { path: 'subject.phone',           label: 'Phone',            group: 'Contact' },
   { path: 'subject.title',           label: 'Job title',        group: 'Contact' },
-  { path: 'subject.company_name',    label: 'Company',          group: 'Contact' },
+  { path: 'subject.company_name',    label: 'Account',          group: 'Contact' },
   { path: 'subject.lifecycle_stage', label: 'Lifecycle stage',  group: 'Contact' },
   // Account fields
   { path: 'subject.name',            label: 'Name',             group: 'Account' },

@@ -270,6 +270,7 @@ export async function createApp(config: ServerConfig) {
   // Background workers (every 60 seconds)
   const { processWebhookRetries } = await import('./webhooks/dispatcher.js');
   const { processNextBatch: processContextOutbox } = await import('./workers/context_ingestion_worker.service.js');
+  const { processEmbeddingJobs } = await import('./services/embedding-service.js');
   const { checkHitlSlaExpiry } = await import('./hitl/sla-checker.js');
   const { refreshStaleScores } = await import('./services/scoring.js');
   const { processSequenceDue, handleSequenceGoalEvent, resolveSequenceGoalContactId } = await import('./services/sequence-executor.js');
@@ -301,6 +302,7 @@ export async function createApp(config: ServerConfig) {
       await processStaleEntries(db);
       await processWebhookRetries(db);
       await processContextOutbox(db);
+      await processEmbeddingJobs(db);
       await refreshStaleScores(db);
       // Purge workflow run history older than 90 days
       await purgeOldWorkflowRuns(db);
@@ -483,8 +485,12 @@ async function seedDefaults(db: DbPool, tenantSlug: string): Promise<void> {
   try {
     const { seedDefaults: seedActivityTypes } = await import('./db/repos/activity-type-registry.js');
     const { seedDefaults: seedContextTypes } = await import('./db/repos/context-type-registry.js');
-    await seedActivityTypes(db, tenantId);
-    await seedContextTypes(db, tenantId);
+    const tenants = await db.query<{ id: string }>('SELECT id FROM tenants');
+    const tenantIds = new Set([tenantId, ...tenants.rows.map(row => row.id)]);
+    for (const id of tenantIds) {
+      await seedActivityTypes(db, id);
+      await seedContextTypes(db, id);
+    }
   } catch {
     // Tables may not exist yet if migration hasn't run
   }

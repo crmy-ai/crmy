@@ -43,13 +43,14 @@ const DESTINATIONS: DestinationCommand[] = [
   { label: 'Context',         icon: FileText,        path: '/context',                  color: ENTITY_COLORS.context, keywords: 'memory browser context entries customer memory' },
   { label: 'Raw Context',     icon: FileText,        path: '/context?tab=observations', color: ENTITY_COLORS.context, keywords: 'raw context observations sources ingestion processing volume' },
   { label: 'Signals',         icon: Sparkles,        path: '/context?tab=signals',      color: ENTITY_COLORS.context, keywords: 'signals inferred context review promote dismiss evidence confidence' },
-  { label: 'Memory',          icon: FileText,        path: '/context?tab=memory',       color: ENTITY_COLORS.context, keywords: 'memory confirmed context operational knowledge evidence' },
-  { label: 'Memory Health',   icon: ShieldCheck,     path: '/context?tab=governance',   color: ENTITY_COLORS.context, keywords: 'memory health review contradictions context quality' },
-  { label: 'Memory Graph',    icon: Network,         path: '/?tab=graph',               color: ENTITY_COLORS.context, keywords: 'graph memory relationships network' },
+  { label: 'Memory',          icon: FileText,        path: '/context?tab=browser',      color: ENTITY_COLORS.context, keywords: 'memory confirmed context operational knowledge evidence' },
+  { label: 'Memory Health',   icon: ShieldCheck,     path: '/?tab=health',              color: ENTITY_COLORS.context, keywords: 'memory health review contradictions context quality' },
+  { label: 'Context Graph',   icon: Network,         path: '/context?tab=graph',        color: ENTITY_COLORS.context, keywords: 'graph context memory relationships briefing network' },
+  { label: 'Memory Lineage',  icon: Network,         path: '/context?tab=lineage',      color: ENTITY_COLORS.context, keywords: 'lineage evidence sources signals memory handoffs writebacks audit' },
   { label: 'Workspace Agent', icon: Bot,             path: '/agent',                    color: ENTITY_COLORS.agents, keywords: 'agent chat local model workspace reasoning' },
   { label: 'Agent Activity',  icon: Activity,        path: '/agent/activity',           color: ENTITY_COLORS.agents, keywords: 'agent activity tools mcp traces latency errors' },
   { label: 'Contacts',        icon: Users,           path: '/contacts',                 color: ENTITY_COLORS.contacts, keywords: 'people leads customers contacts' },
-  { label: 'Companies',       icon: Building2,       path: '/companies',                color: ENTITY_COLORS.accounts, keywords: 'accounts companies organizations domains' },
+  { label: 'Accounts',        icon: Building2,       path: '/accounts',                 color: ENTITY_COLORS.accounts, keywords: 'accounts companies organizations domains' },
   { label: 'Opportunities',   icon: Briefcase,       path: '/opportunities',            color: ENTITY_COLORS.opportunities, keywords: 'deals pipeline revenue opportunities' },
   { label: 'Use Cases',       icon: FolderKanban,    path: '/use-cases',                color: ENTITY_COLORS.useCases, keywords: 'deployments products use cases outcomes' },
   { label: 'Activities',      icon: Activity,        path: '/activities',               color: ENTITY_COLORS.activities, keywords: 'calls notes meetings timeline activities' },
@@ -97,7 +98,7 @@ function contactCompany(c: any) {
 }
 
 function accountName(a: any) {
-  return (a.name ?? a.domain ?? 'Unnamed company') as string;
+  return (a.name ?? a.domain ?? 'Unnamed account') as string;
 }
 
 function opportunityName(o: any) {
@@ -154,7 +155,7 @@ export function CommandPalette() {
 
   const actions: ActionCommand[] = useMemo(() => [
     { label: 'New Contact',     icon: Plus, color: ENTITY_COLORS.contacts,      keywords: 'create add person lead contact', run: () => openQuickAdd('contact') },
-    { label: 'New Company',     icon: Plus, color: ENTITY_COLORS.accounts,      keywords: 'create add account company organization', run: () => openQuickAdd('account') },
+    { label: 'New Account',     icon: Plus, color: ENTITY_COLORS.accounts,      keywords: 'create add account company organization', run: () => openQuickAdd('account') },
     { label: 'New Opportunity', icon: Plus, color: ENTITY_COLORS.opportunities, keywords: 'create add deal pipeline opportunity', run: () => openQuickAdd('opportunity') },
     { label: 'New Use Case',    icon: Plus, color: ENTITY_COLORS.useCases,      keywords: 'create add use case deployment', run: () => openQuickAdd('use-case') },
     { label: 'Log Activity',    icon: Plus, color: ENTITY_COLORS.activities,    keywords: 'create add log call note meeting activity', run: () => openQuickAdd('activity') },
@@ -271,12 +272,12 @@ export function CommandPalette() {
         )}
 
         {accounts.length > 0 && (
-          <Command.Group heading="Companies" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
+          <Command.Group heading="Accounts" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
             {accounts.slice(0, 5).map((a) => (
               <Command.Item
                 key={a.id as string}
                 value={`${accountName(a)} ${a.domain ?? ''} ${a.industry ?? ''}`}
-                onSelect={() => runAction(() => { navigate('/companies'); openDrawer('account', a.id as string); })}
+                onSelect={() => runAction(() => { navigate('/accounts'); openDrawer('account', a.id as string); })}
                 className={itemClass}
               >
                 <Building2 className={cn('w-4 h-4', ENTITY_COLORS.accounts.text)} />

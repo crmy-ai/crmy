@@ -1,15 +1,16 @@
 # Build a post-meeting agent with CRMy
 
-An agent that runs after every sales call. It logs the meeting, extracts structured context from the transcript, updates superseded beliefs, and creates a follow-up assignment for the rep.
+An agent that runs after a sales or customer-success call. It turns a messy transcript into evidence-backed Signals, promotes trusted items to Memory, routes uncertain or risky claims to Handoffs, and creates clear follow-up work.
 
-**What you will build:** A post-meeting processing pipeline that turns a raw call transcript into structured customer context, flags stale intelligence, and hands off next steps to the right human.
+**What you will build:** A post-meeting processing workflow that uses CRMy as the context engine, not a hand-written parser.
 
 **Prerequisites:**
 
 - A running CRMy instance with demo data seeded (`crmy seed-demo`)
+- Workspace Agent configured for local model extraction
 - MCP connection configured (`claude mcp add crmy -- npx @crmy/cli mcp`)
 
-**Context engine capabilities used:** `briefing_get`, `activity_create`, `context_add`, `context_search`, `context_detect_contradictions`, `context_supersede`, and `assignment_create`.
+**Context engine capabilities used:** `actor_whoami`, `briefing_get`, `context_ingest_auto`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_promote`, `context_signal_handoff`, `assignment_create`, and `hitl_submit_request`.
 
 ---
 
@@ -17,98 +18,54 @@ An agent that runs after every sales call. It logs the meeting, extracts structu
 
 Copy-paste this system prompt into your agent configuration to create a Post-Meeting Agent.
 
-```
-You are the Post-Meeting Agent for CRMy. You run after every sales call to process the transcript and update customer context.
+```text
+You are the Post-Meeting Agent for CRMy. Your job is to turn messy customer calls into trusted GTM operating context.
 
-## Identity
-- Call `actor_whoami` at the start of every session to confirm your actor ID.
-- All context entries and assignments you create will be attributed to your actor.
+CRMy's context lifecycle is:
+Raw Context -> Signals -> Memory -> Active Context -> Handoffs -> Systems of Record.
 
-## Workflow
+Definitions:
+- Raw Context is messy input: transcripts, emails, meeting notes, support updates, research, and CRM/warehouse changes.
+- Signals are inferred claims with evidence and trust scores. They are useful, but not confirmed truth.
+- Memory is confirmed operational context that agents, automations, handoffs, and governed writeback may rely on.
+- Active Context is the temporary working set the model can see right now: briefing results, bound records, tool outputs, and the current conversation.
+- Handoffs are the human-review path for risky, conflicting, or low-confidence action.
 
-### 1. Pre-meeting baseline
-Call `briefing_get` with `context_radius: "direct"` on the primary contact from the meeting. Save this response — you will compare it to the enriched version at the end.
+Workflow:
 
-### 2. Log the meeting
-Call `activity_create` with:
-- `type`: "meeting_held"
-- `subject`: A concise title including the contact name and company
-- `body`: A 2-3 sentence summary of the call
-- `contact_id`, `account_id`, `opportunity_id`: Link to all relevant customer records
-- `occurred_at`: The actual time the call happened (not the current time if processing is delayed)
+1. Call actor_whoami so all actions are attributed.
+2. If you know the customer record, call briefing_get before processing the meeting. If you do not know it, let CRMy resolve the subjects during ingestion.
+3. Send the full transcript or notes to context_ingest_auto. Do not manually parse the transcript into context_add calls unless a human explicitly asks you to write reviewed Memory.
+4. Read the ingestion result:
+   - memory_created means trusted Memory is already available.
+   - signals_created means inferred claims need review, more evidence, or promotion.
+   - skipped or failed means inspect the processing receipt before acting.
+5. Call context_signal_group_list for the resolved account, contact, opportunity, or use case. Treat these as the primary Signals view.
+6. For each important Signal:
+   - Promote it with context_signal_group_promote only when it is not conflicting and its evidence is strong enough for operational use.
+   - Route it with context_signal_handoff when it is sensitive, conflicting, low confidence, forecast-impacting, or writeback-driving.
+   - Leave it alone if it is weak or not useful yet.
+7. Pull briefing_get again after promotion or Handoff creation so the new Memory is retrieved into Active Context. Use confirmed Memory first. Mention unpromoted Signals only as uncertain.
+8. Create assignments for clear follow-up tasks. Use HITL before commitments, executive outreach, forecast changes, or external writeback.
 
-Save the returned `activity.id` for use as `source_activity_id` in context entries.
-
-### 3. Extract context entries
-Parse the transcript for these context types. Create one `context_add` call per entry:
-
-- **objection**: Any concern, pushback, or blocker raised. Set confidence 0.8-0.95 based on how explicit the objection was.
-- **preference**: Communication preferences, decision-making style, scheduling constraints, format preferences. Set confidence 0.85-0.95.
-- **relationship_map**: New stakeholders mentioned, reporting structures, influence dynamics. Set confidence 0.7-0.9 depending on whether the info is firsthand or secondhand.
-- **competitive_intel**: Mentions of other vendors, pricing comparisons, feature gaps. Set confidence based on recency and source reliability.
-- **meeting_notes**: A structured summary of the call itself. Set confidence 1.0.
-
-For every context entry:
-- Always set `source_activity_id` to the meeting activity you just created
-- Always set `source` to a descriptive label like "follow_up_call" or "discovery_call"
-- Set `valid_until` for time-sensitive facts (competitive intel, budget windows, headcount)
-- Tag entries with 2-4 lowercase, hyphenated tags for searchability
-
-### 4. Check for contradictions
-Call `context_search` with keywords from your new entries and `context_detect_contradictions` on the affected account or opportunity to find potentially contradicted existing context. Look for:
-- Relationship maps that are now incomplete or wrong
-- Competitive intel that has been overtaken by events
-- Preferences that have changed
-- Objections that have been resolved
-
-### 5. Supersede stale entries
-For each contradicted entry, call `context_supersede` with:
-- The `id` of the stale entry
-- Updated `body` explaining what changed
-- A new `confidence` score (usually higher, since the new info is fresher)
-- Updated `tags`
-
-Do NOT supersede entries that are merely incomplete — only supersede when the old information is actually wrong or misleading.
-
-If CRMy returns a structured convergence warning from `context_add`, do not force a duplicate. Use `context_supersede`, `context_consolidate`, or request human review depending on the warning.
-
-### 6. Create follow-up assignments
-Call `assignment_create` for each actionable next step. Include:
-- `assignee_actor_id`: The human rep who should act (use the account owner or the meeting host)
-- `subject_type` and `subject_id`: Link to the relevant opportunity or contact
-- `priority`: "urgent" for time-sensitive items, "high" for important follow-ups, "normal" for routine
-- `due_at`: A reasonable deadline (usually 1-3 business days)
-- `context`: A summary of WHY this action matters, drawn from the call. Include specific quotes or facts.
-- `instructions`: Clear, specific instructions on WHAT to do
-
-### 7. Verify enrichment
-Call `briefing_get` again with the same parameters as Step 1. Compare the before/after to confirm all context was stored correctly.
-
-## Confidence scoring guidelines
-- 1.0: Direct quote or explicit statement from the contact
-- 0.9-0.95: Clear implication from the conversation with high certainty
-- 0.8-0.9: Reasonable inference supported by multiple signals
-- 0.7-0.8: Secondhand information or educated guess
-- 0.5-0.7: Weak signal, needs verification
-- Below 0.5: Do not store — request verification instead
-
-## Rules
-- Never fabricate context that was not in the transcript
-- Never set confidence higher than the evidence warrants
-- Always link context entries to the source activity
-- If unsure about a fact, create an assignment asking the rep to verify rather than storing low-confidence context
-- Process every meeting, even short ones — a 5-minute call can contain critical context updates
+Rules:
+- Never fabricate customer context.
+- Never use unpromoted Signals as confirmed truth.
+- Never update CRM, forecast, assignments, or customer-facing work based only on an unreviewed Signal unless policy/Handoff approval allows it.
+- Prefer evidence excerpts over vague summaries.
+- Preserve source lineage: transcript label, date, speaker or author when available, and the customer record involved.
+- When in doubt, create a Handoff rather than silently promoting sensitive context.
 ```
 
 ---
 
-## Step 1 — Identify yourself
+## Step 1 - Identify yourself
 
-Every agent session starts by confirming identity. This tells CRMy who is writing context entries and creating assignments.
+Every agent session starts by confirming identity.
 
 **MCP tool call:**
 
-```
+```text
 actor_whoami {}
 ```
 
@@ -118,34 +75,17 @@ actor_whoami {}
 crmy actors whoami
 ```
 
-**Response:**
-
-```json
-{
-  "tenant_id": "default",
-  "actor_id": "d0000000-0000-4000-a000-000000000003",
-  "actor_type": "agent",
-  "role": "member"
-}
-```
-
-The agent now knows it is the **Outreach Agent** (`d0000000-0000-4000-a000-000000000003`). All subsequent writes will be attributed to this actor.
-
 ---
 
-## Step 2 — Pull the pre-meeting briefing
+## Step 2 - Get the baseline briefing
 
-Before processing the transcript, pull what was already known about this contact. This gives you the baseline to compare against.
+Before processing the call, get the current state for the primary record. Demo data includes Northstar Labs:
 
-We are briefing on **Sarah Chen** (`d0000000-0000-4000-c000-000000000001`), VP Engineering at Acme Corp.
-
-**MCP tool call:**
-
-```
+```text
 briefing_get {
-  "subject_type": "contact",
-  "subject_id": "d0000000-0000-4000-c000-000000000001",
-  "context_radius": "direct",
+  "subject_type": "opportunity",
+  "subject_id": "d0000000-0000-4000-d000-000000000101",
+  "context_radius": "account_wide",
   "format": "json"
 }
 ```
@@ -153,503 +93,188 @@ briefing_get {
 **CLI equivalent:**
 
 ```bash
-crmy briefing contact:d0000000-0000-4000-c000-000000000001 --format json
+crmy briefing opportunity:d0000000-0000-4000-d000-000000000101 --format json
 ```
 
-**Response:**
+**What to inspect:**
 
-```json
-{
-  "briefing": {
-    "record": {
-      "id": "d0000000-0000-4000-c000-000000000001",
-      "first_name": "Sarah",
-      "last_name": "Chen",
-      "email": "sarah.chen@acme.com",
-      "title": "VP Engineering",
-      "account_id": "d0000000-0000-4000-b000-000000000001",
-      "lifecycle_stage": "prospect"
-    },
-    "related": {
-      "account": {
-        "id": "d0000000-0000-4000-b000-000000000001",
-        "name": "Acme Corp"
-      }
-    },
-    "activities": [
-      {
-        "id": "d0000000-0000-4000-e000-000000000001",
-        "type": "outreach_email",
-        "subject": "Initial outreach to Sarah Chen",
-        "outcome": "replied",
-        "occurred_at": "2026-03-12T00:00:00.000Z"
-      }
-    ],
-    "open_assignments": [],
-    "context": [
-      {
-        "id": "d0000000-0000-4000-f000-000000000005",
-        "context_type": "preference",
-        "title": "Sarah Chen communication preferences",
-        "body": "Sarah Chen prefers async communication (Slack or email) over calls. She responds fastest to technical content — architecture diagrams, API documentation, and code examples. Avoid scheduling calls before 10am PT. She is the internal champion at Acme.",
-        "confidence": 0.9,
-        "is_current": true
-      }
-    ],
-    "stale_warnings": [],
-    "token_estimate": 420
-  }
-}
-```
-
-**What to notice:** The briefing shows one preference context entry and one prior outreach activity. There are no stale warnings. Save this response — you will compare it to the enriched briefing at the end.
+- Current Memory about stakeholders, risks, commitments, and next actions
+- Signals that are useful but not yet confirmed
+- Memory Health warnings
+- Open assignments or Handoffs
 
 ---
 
-## Step 3 — Log the meeting
+## Step 3 - Ingest the raw meeting context
 
-Create an activity record for the call that just happened. Use `occurred_at` set to the actual call time, not "now."
-
-**MCP tool call:**
-
-```
-activity_create {
-  "type": "meeting_held",
-  "subject": "Follow-up call — Sarah Chen, Acme Corp",
-  "body": "30-minute follow-up with Sarah Chen. Discussed pricing concerns, confirmed preference for annual billing, and learned that their VP Sales (Dana Park) is now involved in evaluation. Sarah mentioned Acme's board approved a $200K budget for CRM tooling in Q2.",
-  "contact_id": "d0000000-0000-4000-c000-000000000001",
-  "account_id": "d0000000-0000-4000-b000-000000000001",
-  "opportunity_id": "d0000000-0000-4000-d000-000000000001",
-  "direction": "outbound",
-  "custom_fields": {
-    "duration_minutes": 30,
-    "attendees": ["sarah.chen@acme.com", "cody@crmy.ai"]
-  }
-}
-```
-
-**CLI note:** activity creation is agent-facing through MCP and REST today. Use `activity_create` from the agent runtime or log the activity in the web app.
-
-**Response:**
-
-```json
-{
-  "activity": {
-    "id": "a1b2c3d4-0000-4000-e000-000000000099",
-    "type": "meeting_held",
-    "subject": "Follow-up call — Sarah Chen, Acme Corp",
-    "body": "30-minute follow-up with Sarah Chen...",
-    "contact_id": "d0000000-0000-4000-c000-000000000001",
-    "account_id": "d0000000-0000-4000-b000-000000000001",
-    "opportunity_id": "d0000000-0000-4000-d000-000000000001",
-    "performed_by": "d0000000-0000-4000-a000-000000000003",
-    "occurred_at": "2026-03-26T14:30:00.000Z",
-    "direction": "outbound",
-    "created_at": "2026-03-26T14:35:00.000Z"
-  },
-  "event_id": "evt_abc123"
-}
-```
-
-Save the `activity.id` — you will reference it as `source_activity_id` in the context entries below.
-
----
-
-## Step 4 — Extract structured context from the transcript
-
-Now extract three distinct context entries from the call. Each entry gets its own `context_type`, `confidence` score, and tags.
-
-### 4a — Objection: pricing concern
+Use CRMy's ingestion path so the local Workspace Agent receives the extraction objective, resolved customer records, current Memory, existing Signals, custom fields, and context type registry.
 
 **MCP tool call:**
 
-```
-context_add {
-  "subject_type": "account",
-  "subject_id": "d0000000-0000-4000-b000-000000000001",
-  "context_type": "objection",
-  "title": "Sarah Chen raised annual vs. monthly billing concern",
-  "body": "Sarah asked whether CRMy offers annual billing with a discount. She said 'our finance team strongly prefers annual contracts with net-30 terms — monthly billing is a non-starter for tools over $50K ARR.' This is a procurement process concern, not a price objection. Confirm annual billing availability in the next proposal revision.",
-  "confidence": 0.9,
-  "source": "follow_up_call",
-  "source_activity_id": "a1b2c3d4-0000-4000-e000-000000000099",
-  "tags": ["billing", "procurement", "annual-contract"],
-  "valid_until": "2026-05-26"
-}
-```
-
-**CLI note:** `crmy context add` opens an interactive terminal form. For automated post-call processing, use the MCP `context_add` call above.
-
-**Response:**
-
-```json
-{
-  "context_entry": {
-    "id": "f0000001-0000-4000-f000-000000000099",
-    "subject_type": "account",
-    "subject_id": "d0000000-0000-4000-b000-000000000001",
-    "context_type": "objection",
-    "title": "Sarah Chen raised annual vs. monthly billing concern",
-    "body": "Sarah asked whether CRMy offers annual billing with a discount...",
-    "confidence": 0.9,
-    "authored_by": "d0000000-0000-4000-a000-000000000003",
-    "source": "follow_up_call",
-    "source_activity_id": "a1b2c3d4-0000-4000-e000-000000000099",
-    "tags": ["billing", "procurement", "annual-contract"],
-    "is_current": true,
-    "valid_until": "2026-05-26T00:00:00.000Z",
-    "created_at": "2026-03-26T14:36:00.000Z"
-  },
-  "event_id": "evt_abc124"
-}
-```
-
-### 4b — Preference: annual billing
-
-**MCP tool call:**
-
-```
-context_add {
-  "subject_type": "contact",
-  "subject_id": "d0000000-0000-4000-c000-000000000001",
-  "context_type": "preference",
-  "title": "Sarah Chen confirmed preference for annual billing",
-  "body": "Sarah explicitly stated that annual contracts with net-30 terms are required by Acme's finance team for any tool over $50K ARR. She said this is non-negotiable and to factor it into the proposal. She also confirmed she prefers receiving proposals as Google Docs links, not PDF attachments.",
-  "confidence": 0.95,
-  "source": "follow_up_call",
-  "source_activity_id": "a1b2c3d4-0000-4000-e000-000000000099",
-  "tags": ["billing", "proposal-format", "procurement"]
-}
-```
-
-**CLI note:** `crmy context add` opens an interactive terminal form. For automated post-call processing, use the MCP `context_add` call above.
-
-**Response:**
-
-```json
-{
-  "context_entry": {
-    "id": "f0000002-0000-4000-f000-000000000099",
-    "subject_type": "contact",
-    "subject_id": "d0000000-0000-4000-c000-000000000001",
-    "context_type": "preference",
-    "title": "Sarah Chen confirmed preference for annual billing",
-    "confidence": 0.95,
-    "is_current": true,
-    "created_at": "2026-03-26T14:36:30.000Z"
-  },
-  "event_id": "evt_abc125"
-}
-```
-
-### 4c — Relationship map: new stakeholder
-
-**MCP tool call:**
-
-```
-context_add {
-  "subject_type": "account",
-  "subject_id": "d0000000-0000-4000-b000-000000000001",
-  "context_type": "relationship_map",
-  "title": "VP Sales Dana Park now involved in Acme evaluation",
-  "body": "Sarah Chen revealed that Acme's VP Sales, Dana Park, is now actively involved in the CRM evaluation. Dana will be the primary end user and has been asked by Marcus Webb to evaluate the pipeline reporting features specifically. Sarah described Dana as 'pragmatic — she will test it herself before giving a thumbs-up.' We need to identify Dana's contact info and loop her in.",
-  "confidence": 0.85,
-  "source": "follow_up_call",
-  "source_activity_id": "a1b2c3d4-0000-4000-e000-000000000099",
-  "tags": ["stakeholder-map", "vp-sales", "end-user"]
-}
-```
-
-**CLI note:** `crmy context add` opens an interactive terminal form. For automated post-call processing, use the MCP `context_add` call above.
-
-**Response:**
-
-```json
-{
-  "context_entry": {
-    "id": "f0000003-0000-4000-f000-000000000099",
-    "subject_type": "account",
-    "subject_id": "d0000000-0000-4000-b000-000000000001",
-    "context_type": "relationship_map",
-    "title": "VP Sales Dana Park now involved in Acme evaluation",
-    "confidence": 0.85,
-    "is_current": true,
-    "created_at": "2026-03-26T14:37:00.000Z"
-  },
-  "event_id": "evt_abc126"
-}
-```
-
----
-
-## Step 5 — Check for contradicted beliefs
-
-Search existing context to see if anything we just learned contradicts what was previously recorded.
-
-**MCP tool call:**
-
-```
-context_search {
-  "query": "competitive evaluation Acme alternative CRM",
-  "subject_type": "account",
-  "subject_id": "d0000000-0000-4000-b000-000000000001",
-  "current_only": true
+```text
+context_ingest_auto {
+  "source_label": "Northstar technical validation call",
+  "confidence_threshold": 0.6,
+  "document": "Maya Patel from Northstar Labs said the architecture review went well. The team likes governed writebacks because agents can prepare CRM updates without bypassing approval. Security still needs data residency answers before pilot approval. Finance wants proof that the agent workflow reduces manual CRM updates. Maya can sponsor the pilot if the follow-up workshop covers audit logs, HITL review, and Salesforce writeback controls."
 }
 ```
 
 **CLI equivalent:**
 
 ```bash
-crmy context search "competitive evaluation Acme alternative CRM" \
-  --subject account:d0000000-0000-4000-b000-000000000001
+crmy context ingest --auto --source "Northstar technical validation call" --file transcript.txt
 ```
 
-**Response:**
+Expected result:
 
 ```json
 {
-  "context_entries": [
+  "subjects_resolved": [
     {
-      "id": "d0000000-0000-4000-f000-000000000007",
-      "context_type": "relationship_map",
-      "title": "Acme Corp internal dynamics",
-      "body": "Sarah Chen (VP Engineering) is the champion. Marcus Webb (CFO) is the economic buyer and final decision maker. There is a third stakeholder — their VP Sales (name unknown) who would be the primary end user.",
-      "confidence": 0.8,
-      "is_current": true,
-      "authored_by": "d0000000-0000-4000-a000-000000000001"
+      "entity_type": "account",
+      "name": "Northstar Labs",
+      "memory_created": 1,
+      "signals_created": 3,
+      "processing_receipt": {
+        "status": "needs_review",
+        "next_action": "Review Signals and promote trusted items to Memory."
+      }
     }
   ],
-  "total": 1
+  "memory_created": 1,
+  "signals_created": 3,
+  "skipped": 0
 }
 ```
 
-For higher-stakes updates, run the contradiction scanner before creating follow-up work. This catches conflicts that keyword search may miss.
-
-**MCP tool call:**
-
-```
-context_detect_contradictions {
-  "subject_type": "account",
-  "subject_id": "d0000000-0000-4000-b000-000000000001"
-}
-```
-
-**Response:**
-
-```json
-{
-  "contradictions": [],
-  "total": 0
-}
-```
-
-If contradictions are returned, resolve them with `context_resolve_contradiction` or create a review assignment with `context_contradiction_assign` before relying on the disputed fact.
-
-**What to notice:** The existing relationship map entry (`d0000000-0000-4000-f000-000000000007`) says "VP Sales (name unknown)." We now know the VP Sales is Dana Park. However, since we added a *new* relationship_map entry with the updated info, both entries remain current. In this case we do not need to supersede — the new entry supplements the old one with the name. The old entry is still accurate (just incomplete).
-
-Now let us check the stale competitive intel entry for Vertex that the demo seed data marks as outdated.
+If no subjects are resolved, do not manually invent IDs. Ask the user for the customer record, or run `entity_resolve` with the names from the transcript.
 
 ---
 
-## Step 6 — Supersede stale competitive intelligence
+## Step 4 - Review Signals
 
-The demo seed data includes a competitive_intel entry (`d0000000-0000-4000-f000-000000000004`) about Vertex Logistics considering Attio. The `valid_until` date has passed and the confidence is only 0.6. From the Vertex PoC results, we know this is no longer accurate.
+List the evidence-backed Signals CRMy assembled from the transcript and any prior sources.
 
 **MCP tool call:**
 
-```
-context_supersede {
-  "id": "d0000000-0000-4000-f000-000000000004",
-  "title": "Vertex no longer evaluating Attio — CRMy selected after PoC",
-  "body": "Vertex Logistics is no longer evaluating Attio as a CRM alternative. After the PoC exceeded throughput targets by 22%, Tomás Rivera confirmed CRMy is the selected vendor. The only remaining gate is CEO Keiko Yamamoto's sign-off on the annual contract. Previous intelligence about Attio evaluation is superseded.",
-  "confidence": 0.95,
-  "tags": ["competitive", "attio", "poc-complete", "vendor-selected"]
+```text
+context_signal_group_list {
+  "subject_type": "account",
+  "subject_id": "d0000000-0000-4000-b000-000000000101",
+  "attention_only": true,
+  "limit": 20
 }
 ```
 
 **CLI equivalent:**
 
 ```bash
-crmy context supersede d0000000-0000-4000-f000-000000000004 \
-  --title "Vertex no longer evaluating Attio — CRMy selected after PoC" \
-  --body "Vertex Logistics is no longer evaluating Attio as a CRM alternative..."
+crmy context signal-groups --subject account:d0000000-0000-4000-b000-000000000101
 ```
 
-**CLI note:** the CLI supersede shortcut updates title/body. Use MCP `context_supersede` when the agent also needs to set confidence, tags, or other context metadata.
+Look for:
 
-**Response:**
-
-```json
-{
-  "context_entry": {
-    "id": "f0000004-0000-4000-f000-000000000099",
-    "subject_type": "account",
-    "subject_id": "d0000000-0000-4000-b000-000000000003",
-    "context_type": "competitive_intel",
-    "title": "Vertex no longer evaluating Attio — CRMy selected after PoC",
-    "body": "Vertex Logistics is no longer evaluating Attio as a CRM alternative...",
-    "confidence": 0.95,
-    "is_current": true,
-    "tags": ["competitive", "attio", "poc-complete", "vendor-selected"],
-    "created_at": "2026-03-26T14:38:00.000Z"
-  },
-  "superseded": {
-    "id": "d0000000-0000-4000-f000-000000000004",
-    "title": "Vertex considering Attio as alternative",
-    "is_current": false,
-    "superseded_by": "f0000004-0000-4000-f000-000000000099"
-  },
-  "event_id": "evt_abc127"
-}
-```
-
-The old entry is now marked `is_current: false` and will no longer appear in briefings (unless `include_stale: true` is set).
+- Trust score and promotion threshold
+- Evidence count and independent source count
+- Conflict state
+- Whether the Signal is ready for Memory, needs more evidence, or needs approval
 
 ---
 
-## Step 7 — Create a follow-up assignment for the rep
+## Step 5 - Promote safe Signals to Memory
 
-Hand off the next action to the human rep (Cody, `d0000000-0000-4000-a000-000000000001`) with full context from the call.
+Promote only when the Signal is supported and safe to use operationally.
 
 **MCP tool call:**
 
+```text
+context_signal_group_promote {
+  "id": "<signal-id>"
+}
 ```
+
+**CLI equivalent:**
+
+```bash
+crmy context promote-group <signal-id>
+```
+
+After promotion, the claim is Current Memory and will appear in `briefing_get`, context search, Automations, Handoffs, and governed writeback planning.
+
+---
+
+## Step 6 - Send risky Signals to Handoff
+
+Use Handoff when the Signal is sensitive, conflicting, or likely to affect forecast, customer engagement, assignments, or system-of-record writeback.
+
+**MCP tool call:**
+
+```text
+context_signal_handoff {
+  "id": "<signal-id>"
+}
+```
+
+**CLI equivalent:**
+
+```bash
+crmy context handoff-group <signal-id>
+```
+
+CRMy creates a HITL review request with the claim, evidence summary, trust score, subject record, and requested decision.
+
+---
+
+## Step 7 - Coordinate follow-up
+
+Create assignments only from confirmed Memory or reviewed/Handoff-approved context.
+
+**MCP tool call:**
+
+```text
 assignment_create {
-  "title": "Send revised proposal to Sarah Chen with annual billing terms",
-  "assignee_actor_id": "d0000000-0000-4000-a000-000000000001",
   "subject_type": "opportunity",
-  "subject_id": "d0000000-0000-4000-d000-000000000001",
-  "instructions": "Send the revised Acme Corp proposal to Sarah Chen. Include annual billing with net-30 terms (required by their finance team). Send as a Google Docs link, not PDF. CC Dana Park (VP Sales) if we have her email — she is now part of the evaluation.",
+  "subject_id": "d0000000-0000-4000-d000-000000000101",
+  "title": "Schedule Northstar follow-up workshop",
   "priority": "high",
-  "due_at": "2026-03-28T17:00:00.000Z",
-  "context": "From the follow-up call on 2026-03-26: (1) Sarah confirmed annual billing is mandatory for tools over $50K ARR. (2) VP Sales Dana Park is now involved and will evaluate pipeline reporting features. (3) Sarah prefers Google Docs links over PDF attachments. (4) Acme board approved $200K Q2 budget for CRM tooling."
+  "context": "Northstar wants a workshop covering audit logs, HITL review, and Salesforce writeback controls. Security still needs data residency answers before pilot approval.",
+  "instructions": "Schedule the workshop, include the SE, and prepare a short data residency answer before the meeting."
 }
 ```
 
-**CLI note:** `crmy assignments create` opens an interactive terminal form. For automated handoffs, use the MCP `assignment_create` call above.
-
-**Response:**
-
-```json
-{
-  "assignment": {
-    "id": "a0000001-0000-4000-f100-000000000099",
-    "title": "Send revised proposal to Sarah Chen with annual billing terms",
-    "assignee_actor_id": "d0000000-0000-4000-a000-000000000001",
-    "assigner_actor_id": "d0000000-0000-4000-a000-000000000003",
-    "subject_type": "opportunity",
-    "subject_id": "d0000000-0000-4000-d000-000000000001",
-    "status": "pending",
-    "priority": "high",
-    "due_at": "2026-03-28T17:00:00.000Z",
-    "context": "From the follow-up call on 2026-03-26: (1) Sarah confirmed annual billing is mandatory...",
-    "created_at": "2026-03-26T14:39:00.000Z"
-  },
-  "event_id": "evt_abc128"
-}
-```
+Use `hitl_submit_request` before any external commitment, forecast change, executive outreach, or CRM writeback proposal.
 
 ---
 
-## Step 8 — Pull the enriched briefing
+## Step 8 - Verify the enriched state
 
-Call `briefing_get` again on the same contact. Compare the response to Step 2.
+Pull another briefing:
 
-**MCP tool call:**
-
-```
+```text
 briefing_get {
-  "subject_type": "contact",
-  "subject_id": "d0000000-0000-4000-c000-000000000001",
-  "context_radius": "direct",
+  "subject_type": "opportunity",
+  "subject_id": "d0000000-0000-4000-d000-000000000101",
+  "context_radius": "account_wide",
   "format": "json"
 }
 ```
 
-**CLI equivalent:**
+The final briefing should show:
 
-```bash
-crmy briefing contact:d0000000-0000-4000-c000-000000000001 --format json
-```
-
-**Response:**
-
-```json
-{
-  "briefing": {
-    "record": {
-      "id": "d0000000-0000-4000-c000-000000000001",
-      "first_name": "Sarah",
-      "last_name": "Chen",
-      "email": "sarah.chen@acme.com",
-      "title": "VP Engineering",
-      "account_id": "d0000000-0000-4000-b000-000000000001",
-      "lifecycle_stage": "prospect"
-    },
-    "related": {
-      "account": {
-        "id": "d0000000-0000-4000-b000-000000000001",
-        "name": "Acme Corp"
-      }
-    },
-    "activities": [
-      {
-        "id": "a1b2c3d4-0000-4000-e000-000000000099",
-        "type": "meeting_held",
-        "subject": "Follow-up call — Sarah Chen, Acme Corp",
-        "outcome": null,
-        "occurred_at": "2026-03-26T14:30:00.000Z"
-      },
-      {
-        "id": "d0000000-0000-4000-e000-000000000001",
-        "type": "outreach_email",
-        "subject": "Initial outreach to Sarah Chen",
-        "outcome": "replied",
-        "occurred_at": "2026-03-12T00:00:00.000Z"
-      }
-    ],
-    "open_assignments": [
-      {
-        "id": "a0000001-0000-4000-f100-000000000099",
-        "title": "Send revised proposal to Sarah Chen with annual billing terms",
-        "status": "pending",
-        "priority": "high",
-        "due_at": "2026-03-28T17:00:00.000Z"
-      }
-    ],
-    "context": [
-      {
-        "id": "f0000002-0000-4000-f000-000000000099",
-        "context_type": "preference",
-        "title": "Sarah Chen confirmed preference for annual billing",
-        "confidence": 0.95,
-        "is_current": true
-      },
-      {
-        "id": "d0000000-0000-4000-f000-000000000005",
-        "context_type": "preference",
-        "title": "Sarah Chen communication preferences",
-        "confidence": 0.9,
-        "is_current": true
-      }
-    ],
-    "stale_warnings": [],
-    "token_estimate": 780
-  }
-}
-```
-
-**What changed:**
-
-| Field | Before | After |
-|---|---|---|
-| Activities | 1 (outreach email) | 2 (+ follow-up meeting) |
-| Context entries | 1 (communication prefs) | 2 (+ annual billing preference) |
-| Open assignments | 0 | 1 (send revised proposal) |
-| Token estimate | 420 | 780 |
-
-The briefing now reflects everything the agent learned. The next agent — or the human rep — can call `briefing_get` and get the full picture in a single request.
+- New confirmed Memory from promoted Signals
+- Unconfirmed Signals kept separate
+- Open Handoffs for review-gated claims
+- Follow-up assignments
+- Memory Health warnings if any claims have expiration or contradiction risk
 
 ---
 
-*Licensed under Apache 2.0. Copyright 2026 CRMy.ai*
+## Why this matters
+
+The post-meeting agent does not need to rebuild customer state from notes, CRM history, and prior prompts. CRMy gives it a repeatable operating path:
+
+1. Ingest messy GTM context.
+2. Extract evidence-backed Signals.
+3. Promote trusted Signals into Memory.
+4. Route risky action through Handoffs.
+5. Act or write back only after policy allows it.

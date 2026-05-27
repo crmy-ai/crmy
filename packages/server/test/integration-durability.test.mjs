@@ -10,6 +10,7 @@ import * as contextRepo from '../dist/db/repos/context-entries.js';
 import { accountTools } from '../dist/mcp/tools/accounts.js';
 import { compoundTools } from '../dist/mcp/tools/compound.js';
 import { contactTools } from '../dist/mcp/tools/contacts.js';
+import { contextEntryTools } from '../dist/mcp/tools/context-entries.js';
 
 const { Pool } = pg;
 
@@ -65,6 +66,41 @@ async function seedTenantAndActor(db) {
 
   return {
     tenantId,
+    actor: {
+      tenant_id: tenantId,
+      actor_id: userId,
+      actor_type: 'user',
+      role: 'owner',
+    },
+  };
+}
+
+async function seedTenantUserAndLinkedActor(db) {
+  const tenantResult = await db.query(
+    `INSERT INTO tenants (slug, name) VALUES ($1, $2) RETURNING id`,
+    [`tenant-${randomUUID()}`, 'Linked Actor Tenant'],
+  );
+  const tenantId = tenantResult.rows[0].id;
+
+  const userResult = await db.query(
+    `INSERT INTO users (tenant_id, email, name, role)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id`,
+    [tenantId, `owner-${randomUUID()}@example.com`, 'Linked Owner', 'owner'],
+  );
+  const userId = userResult.rows[0].id;
+
+  const actorResult = await db.query(
+    `INSERT INTO actors (tenant_id, actor_type, display_name, email, user_id, role)
+     VALUES ($1, 'human', $2, $3, $4, 'owner')
+     RETURNING id`,
+    [tenantId, 'Linked Owner', `actor-${randomUUID()}@example.com`, userId],
+  );
+
+  return {
+    tenantId,
+    userId,
+    actorId: actorResult.rows[0].id,
     actor: {
       tenant_id: tenantId,
       actor_id: userId,
@@ -446,6 +482,50 @@ if (!databaseUrl) {
       assert.equal(rows.rows.length, 2);
       assert.equal(rows.rows.filter(row => row.is_current).length, 1);
       assert.equal(rows.rows.filter(row => row.supersedes_id === original.id).length, 1);
+    });
+  });
+
+  test('context tools resolve user identity to actor foreign keys', async () => {
+    await withMigratedSchema(async (db) => {
+      const { tenantId, userId, actorId, actor } = await seedTenantUserAndLinkedActor(db);
+      assert.notEqual(userId, actorId);
+      const account = await createAccount(db, tenantId, userId, {
+        name: `Actor FK Account ${randomUUID()}`,
+      });
+      const tools = contextEntryTools(db);
+      const contextAdd = tools.find(tool => tool.name === 'context_add');
+      const signalPromote = tools.find(tool => tool.name === 'context_signal_promote');
+      assert.ok(contextAdd);
+      assert.ok(signalPromote);
+
+      const created = await contextAdd.handler({
+        subject_type: 'account',
+        subject_id: account.id,
+        context_type: 'risk',
+        title: 'Budget approval risk',
+        body: 'Budget approval appears unresolved based on the latest call.',
+        memory_status: 'signal',
+        confidence: 0.82,
+        evidence: [{
+          source_type: 'call',
+          source_ref: 'call-1',
+          snippet: 'Budget approval is not complete yet.',
+        }],
+        idempotency_key: `context-add-${randomUUID()}`,
+      }, actor);
+
+      assert.equal(created.context_entry.authored_by, actorId);
+      const rawSource = await db.query(
+        `SELECT actor_id FROM raw_context_sources WHERE tenant_id = $1 AND metadata->>'context_entry_id' = $2`,
+        [tenantId, created.context_entry.id],
+      );
+      assert.equal(rawSource.rows[0].actor_id, actorId);
+
+      const promoted = await signalPromote.handler({
+        id: created.context_entry.id,
+        idempotency_key: `signal-promote-${randomUUID()}`,
+      }, actor);
+      assert.equal(promoted.context_entry.promoted_by, actorId);
     });
   });
 }

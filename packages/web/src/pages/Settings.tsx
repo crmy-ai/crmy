@@ -2506,12 +2506,12 @@ function SystemsOfRecordSettings() {
         { value: 'email', label: 'Email' },
         { value: 'phone', label: 'Phone' },
         { value: 'title', label: 'Title' },
-        { value: 'company_name', label: 'Company name' },
+        { value: 'company_name', label: 'Account name' },
         { value: 'lifecycle_stage', label: 'Lifecycle stage' },
         { value: 'lead_score', label: 'Lead score' },
       ],
       account: [
-        { value: 'name', label: 'Company name' },
+        { value: 'name', label: 'Account name' },
         { value: 'domain', label: 'Domain' },
         { value: 'industry', label: 'Industry' },
         { value: 'annual_revenue', label: 'Annual revenue' },
@@ -3104,7 +3104,7 @@ function SystemsOfRecordSettings() {
         await upsertMapping.mutateAsync(preset);
       }
       setTab('mappings');
-      toast({ title: 'HubSpot mappings added', description: 'Contacts, companies, deals, and notes are ready to sync.' });
+      toast({ title: 'HubSpot mappings added', description: 'Contacts, accounts, deals, and notes are ready to sync.' });
     } catch (err) {
       toast({ title: 'Could not apply presets', description: err instanceof Error ? err.message : 'Review the connection and try again.', variant: 'destructive' });
     }

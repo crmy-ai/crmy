@@ -946,7 +946,7 @@ export interface SignalGroup {
   context_type: string;
   title?: string | null;
   normalized_claim: string;
-  status: 'gathering' | 'ready' | 'promoted' | 'blocked' | 'dismissed' | 'conflicting';
+  status: 'gathering' | 'ready' | 'promoted' | 'blocked' | 'dismissed' | 'conflicting' | 'merged';
   aggregate_confidence: number;
   support_count: number;
   independent_source_count: number;
@@ -956,6 +956,7 @@ export interface SignalGroup {
   promoted_context_entry_id?: string | null;
   blocked_reason?: string | null;
   metadata?: Record<string, unknown>;
+  subject_name?: string | null;
   updated_at: string;
   created_at: string;
   members?: Array<Record<string, unknown>>;
@@ -998,6 +999,60 @@ export function useRejectSignalGroup() {
       qc.invalidateQueries({ queryKey: ['context-entries'] });
       qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
     },
+  });
+}
+export function useSendSignalGroupToHandoff() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`context/signal-groups/${id}/handoff`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['signal-groups'] });
+      qc.invalidateQueries({ queryKey: ['hitl'] });
+      qc.invalidateQueries({ queryKey: ['inbox-count'] });
+    },
+  });
+}
+
+export interface ContextLineageNode {
+  id: string;
+  type: 'record' | 'raw_context' | 'activity' | 'signal' | 'signal_group' | 'memory' | 'handoff' | 'writeback' | 'audit';
+  label: string;
+  timestamp?: string | null;
+  status?: string | null;
+  subject_type?: string | null;
+  subject_id?: string | null;
+  object_id?: string | null;
+  stage?: string | null;
+  display_order?: number | null;
+  description?: string | null;
+  data?: Record<string, unknown>;
+}
+export interface ContextLineageEdge {
+  id: string;
+  source: string;
+  target: string;
+  relation: string;
+  data?: Record<string, unknown>;
+}
+export interface ContextLineage {
+  nodes: ContextLineageNode[];
+  edges: ContextLineageEdge[];
+  summary: Record<string, number>;
+}
+export function useContextLineage(params?: {
+  subject_type?: string;
+  subject_id?: string;
+  context_entry_id?: string;
+  signal_group_id?: string;
+  raw_context_source_id?: string;
+}) {
+  const query = new URLSearchParams();
+  Object.entries(params ?? {}).forEach(([key, value]) => {
+    if (value) query.set(key, String(value));
+  });
+  return useQuery<{ lineage: ContextLineage }>({
+    queryKey: ['context-lineage', params],
+    queryFn: () => api.get(`context/lineage?${query}`),
   });
 }
 export interface RawContextSource {

@@ -83,9 +83,9 @@ function ContactEditForm({
     // Always include account_id so it can be explicitly cleared (null) or set
     payload.account_id = fields.account_id || null;
     try {
-      if (fields.account_id) await assertReferenceExists('account', fields.account_id, 'company');
+      if (fields.account_id) await assertReferenceExists('account', fields.account_id, 'account');
     } catch (err) {
-      toast({ title: 'Check company link', description: err instanceof Error ? err.message : 'Choose another company.', variant: 'destructive' });
+      toast({ title: 'Check account link', description: err instanceof Error ? err.message : 'Choose another account.', variant: 'destructive' });
       return;
     }
     const cfPayload: Record<string, unknown> = {};
@@ -129,12 +129,12 @@ function ContactEditForm({
           </div>
         ))}
         <div className="space-y-1.5">
-          <label className={labelClass}>Company</label>
+          <label className={labelClass}>Account</label>
           <EntityCombobox
             entityType="account"
             value={fields.account_id}
             onChange={v => set('account_id', v)}
-            placeholder="Search companies…"
+            placeholder="Search accounts…"
           />
         </div>
         {[
@@ -429,7 +429,7 @@ export function ContactDrawer() {
         {[
           { label: 'Email', value: contact.email },
           { label: 'Phone', value: contact.phone },
-          { label: 'Company', value: company },
+          { label: 'Account', value: company },
           { label: 'Source', value: contact.source },
           { label: 'Last Contacted', value: contact.last_contacted_at ? new Date(contact.last_contacted_at).toLocaleDateString() : undefined },
           { label: 'Created', value: contact.created_at ? new Date(contact.created_at).toLocaleDateString() : undefined },

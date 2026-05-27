@@ -8888,7 +8888,8 @@
                 "promoted",
                 "blocked",
                 "dismissed",
-                "conflicting"
+                "conflicting",
+                "merged"
               ]
             },
             "required": false,
@@ -8963,6 +8964,93 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GenericList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context/lineage": {
+      "get": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "Trace Raw Context through Signals, Memory, Handoffs, writebacks, and audit",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "contact",
+                "account",
+                "opportunity",
+                "use_case"
+              ]
+            },
+            "required": false,
+            "name": "subject_type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "subject_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "context_entry_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "signal_group_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "raw_context_source_id",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
                 }
               }
             }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Search, X, Network, Building2, User, Briefcase, FolderKanban } from 'lucide-react';
+import { ArrowLeft, Search, X, Network, Building2, User, Briefcase, FolderKanban } from 'lucide-react';
 import { MemoryGraph } from '@/components/crm/MemoryGraph';
 import {
   GraphSidebar,
@@ -77,11 +77,15 @@ function SubjectPicker({
   onSelect,
   onClear,
   size = 'default',
+  showSelectedChip = true,
+  placeholder,
 }: {
   subject: Subject | null;
   onSelect: (s: Subject) => void;
   onClear: () => void;
   size?: 'default' | 'large';
+  showSelectedChip?: boolean;
+  placeholder?: string;
 }) {
   const [query, setQuery] = useState('');
   const [open, setOpen]   = useState(false);
@@ -126,7 +130,7 @@ function SubjectPicker({
   const isLarge = size === 'large';
 
   // ── Selected chip ────────────────────────────────────────────────────────
-  if (subject) {
+  if (subject && showSelectedChip) {
     const cfg = ENTITY_CONFIG[subject.type];
     const Icon = cfg.icon;
     return (
@@ -158,7 +162,7 @@ function SubjectPicker({
           value={query}
           onChange={e => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
-          placeholder={isLarge ? 'Search contacts, accounts, opportunities, use cases…' : 'Search…'}
+          placeholder={placeholder ?? (isLarge ? 'Search contacts, accounts, opportunities, use cases…' : 'Search…')}
           className={`bg-transparent outline-none text-foreground placeholder:text-muted-foreground ${isLarge ? 'text-base w-96' : 'text-sm w-52'}`}
         />
         {query && (
@@ -217,7 +221,7 @@ function SubjectPicker({
   );
 }
 
-// ── GraphTab — embeds inside the Dashboard tab panel ─────────────────────────
+// ── GraphTab — embeds inside the Context tab panel ───────────────────────────
 
 export function GraphTab() {
   const [subject, setSubject]               = useState<Subject | null>(null);
@@ -277,55 +281,101 @@ export function GraphTab() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Empty state — prompt user to pick a record ────────────────────────────
-  if (!subject) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center gap-5 text-center px-6 min-h-0">
-        <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center"
-          style={{ background: '#0ea5e9' + '15', border: `1.5px solid ${'#0ea5e9'}30` }}
-        >
-          <Network className="w-7 h-7" style={{ color: '#0ea5e9' }} />
-        </div>
-        <div>
-          <p className="text-base font-semibold text-foreground">Memory graph</p>
-          <p className="text-sm text-muted-foreground mt-1 max-w-xs">
-            Select a contact, account, opportunity, or use case to explore its
-            connections. Click any related node to traverse the graph.
-          </p>
-        </div>
-        <SubjectPicker subject={null} onSelect={handlePickSubject} onClear={() => {}} size="large" />
-      </div>
-    );
+  function clearGraphSubject() {
+    setHistory([]);
+    setSubject(null);
+    resetGraphState();
   }
 
   // ── Detail graph ─────────────────────────────────────────────────────────
   // Build breadcrumb: last 2 history items
   const historyItems = history.slice(-2).map(h => ({ name: h.name, type: h.type }));
+  const subjectConfig = subject ? ENTITY_CONFIG[subject.type] : null;
+  const SubjectIcon = subjectConfig?.icon;
 
   return (
-    <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
-      <GraphSidebar
-        subjectType={subject.type}
-        subjectName={subject.name}
-        activeFilters={activeFilters}
-        filterCounts={filterCounts}
-        onFilterChange={setActiveFilters}
-        onFitView={() => fitViewRef.current?.()}
-        onBack={handleBack}
-        historyItems={historyItems}
-      />
-      <MemoryGraph
-        subjectType={subject.type}
-        subjectId={subject.id}
-        subjectName={subject.name}
-        selectedNodeId={selectedNodeId}
-        onNodeSelect={handleNodeSelect}
-        activeFilters={activeFilters}
-        fitViewRef={fitViewRef}
-        onFilterCounts={counts => setFilterCounts(counts)}
-        onNavigateToEntity={handleNavigateToEntity}
-      />
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-col gap-2 px-4 py-2 md:px-6 md:py-3">
+        <div className="flex items-center gap-2">
+          <SubjectPicker
+            subject={subject}
+            onSelect={handlePickSubject}
+            onClear={clearGraphSubject}
+            showSelectedChip={false}
+            size="large"
+            placeholder={subject?.name || 'Search records...'}
+          />
+          {historyItems.length > 0 && (
+            <button
+              type="button"
+              onClick={handleBack}
+              className="h-10 flex-shrink-0 rounded-xl border border-border bg-card px-3 text-sm font-semibold text-muted-foreground transition-all hover:border-primary/30 hover:text-foreground"
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back
+              </span>
+            </button>
+          )}
+        </div>
+
+        {subject && subjectConfig && SubjectIcon && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center gap-1.5 rounded-lg bg-muted px-2.5 py-1 text-xs text-foreground">
+              <SubjectIcon className="h-3.5 w-3.5" style={{ color: subjectConfig.color }} />
+              <span className="text-muted-foreground">Record:</span> {subject.name}
+              <span className="rounded bg-background px-1.5 py-0.5 text-[11px] text-muted-foreground capitalize">
+                {subject.type.replace('_', ' ')}
+              </span>
+              <button onClick={clearGraphSubject} className="ml-0.5 p-0.5 hover:text-destructive">
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          </div>
+        )}
+      </div>
+
+      {!subject ? (
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 px-6 text-center">
+          <div
+            className="flex h-16 w-16 items-center justify-center rounded-2xl"
+            style={{ background: '#0ea5e9' + '15', border: `1.5px solid ${'#0ea5e9'}30` }}
+          >
+            <Network className="h-7 w-7" style={{ color: '#0ea5e9' }} />
+          </div>
+          <div>
+            <p className="text-base font-semibold text-foreground">Search for a record to view the graph</p>
+            <p className="mt-1 max-w-xs text-sm text-muted-foreground">
+              Select a customer record to explore related records, Current Memory, recent activity, and open handoffs.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-row overflow-hidden">
+          <GraphSidebar
+            subjectType={subject.type}
+            subjectName={subject.name}
+            activeFilters={activeFilters}
+            filterCounts={filterCounts}
+            onFilterChange={setActiveFilters}
+            onFitView={() => fitViewRef.current?.()}
+            onBack={handleBack}
+            historyItems={historyItems}
+            showHeader={false}
+          />
+          <MemoryGraph
+            subjectType={subject.type}
+            subjectId={subject.id}
+            subjectName={subject.name}
+            selectedNodeId={selectedNodeId}
+            onNodeSelect={handleNodeSelect}
+            activeFilters={activeFilters}
+            fitViewRef={fitViewRef}
+            onFilterCounts={counts => setFilterCounts(counts)}
+            onNavigateToEntity={handleNavigateToEntity}
+          />
+        </div>
+      )}
       <GraphNodeSheet
         node={selectedNodeData}
         onClose={() => handleNodeSelect(null, null)}
