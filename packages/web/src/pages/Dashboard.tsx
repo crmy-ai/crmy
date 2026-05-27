@@ -3,13 +3,13 @@
 
 import { useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ContextBrowser } from '@/components/crm/ContextBrowser';
 import { GraphTab } from './GraphExplorerPage';
 import { TopBar } from '@/components/layout/TopBar';
 import { ActivityFeed } from '@/components/crm/CrmWidgets';
 import { SeedSampleDataButton } from '@/components/crm/OnboardingEmptyState';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { useHITLRequests, useResolveHITL, useContextEntries, useActors, useDbConfig } from '@/api/hooks';
+import { useHITLRequests, useResolveHITL, useContextEntries, useActors, useDbConfig, useActivities, useSignalGroups, useStaleContextEntries } from '@/api/hooks';
+import { ENTITY_COLORS } from '@/lib/entityColors';
 import { motion } from 'framer-motion';
 import {
   ShieldCheck,
@@ -29,6 +29,8 @@ import {
   ArrowUpRight,
   X,
   RotateCcw,
+  Zap,
+  Server,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -132,51 +134,84 @@ function SetupStep({
   );
 }
 
-function StatCard({
+function FlowStep({
   icon: Icon,
-  label,
+  title,
   value,
-  sub,
-  color,
+  detail,
+  action,
   href,
-  delay,
+  color,
 }: {
   icon: React.ElementType;
-  label: string;
+  title: string;
   value: number | string;
-  sub?: string;
-  color: string;
+  detail: string;
+  action: string;
   href: string;
-  delay: number;
+  color: string;
 }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay }}
+    <Link
+      to={href}
+      className="group flex min-w-0 items-start gap-3 rounded-xl border border-border bg-card p-4 shadow-sm transition-all hover:border-primary/30 hover:shadow-md"
     >
-      <Link
-        to={href}
-        className="flex items-start gap-3 p-4 rounded-2xl bg-card border border-border shadow-sm hover:shadow-md hover:border-border/80 transition-all press-scale group"
-      >
-        <div className={`w-9 h-9 rounded-xl ${color} flex items-center justify-center flex-shrink-0 mt-0.5`}>
-          <Icon className="w-4 h-4" />
+      <div className={`mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl ${color}`}>
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-semibold text-foreground">{title}</p>
+          <p className="font-display text-xl font-bold leading-none text-foreground">{value}</p>
         </div>
-        <div className="min-w-0">
-          <p className="text-xs text-muted-foreground font-medium">{label}</p>
-          <p className="text-2xl font-display font-bold text-foreground leading-tight">{value}</p>
-          {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
-        </div>
-        <ArrowRight className="w-4 h-4 text-muted-foreground/40 group-hover:text-muted-foreground ml-auto mt-1 transition-colors" />
-      </Link>
-    </motion.div>
+        <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
+        <span className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary">
+          {action}
+          <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+        </span>
+      </div>
+    </Link>
+  );
+}
+
+function AttentionItem({
+  icon: Icon,
+  title,
+  detail,
+  href,
+  tone = 'action',
+}: {
+  icon: React.ElementType;
+  title: string;
+  detail: string;
+  href: string;
+  tone?: 'action' | 'watch';
+}) {
+  const color = tone === 'watch'
+    ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+    : 'bg-primary/10 text-primary';
+
+  return (
+    <Link
+      to={href}
+      className="group flex items-start gap-3 rounded-xl border border-border bg-card px-3 py-2.5 transition-all hover:border-primary/30 hover:shadow-sm"
+    >
+      <div className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${color}`}>
+        <Icon className="h-3.5 w-3.5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-foreground">{title}</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p>
+      </div>
+      <ArrowRight className="mt-1 h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/50 transition-colors group-hover:text-primary" />
+    </Link>
   );
 }
 
 export default function Dashboard() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get('tab') ?? 'overview';
+  const activeTab = searchParams.get('tab') === 'graph' ? 'graph' : 'overview';
   const [activityWindow, setActivityWindow] = useState<'today' | 'week'>('today');
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [activationDismissed, setActivationDismissed] = useState(() => localStorage.getItem('crmy-activation-dismissed') === 'true');
@@ -186,18 +221,26 @@ export default function Dashboard() {
   const { data: hitlData } = useHITLRequests() as any;
   const resolveHITL = useResolveHITL();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: contextData } = useContextEntries({ limit: 1 }) as any;
+  const { data: memoryData } = useContextEntries({ memory_status: 'active', limit: 1 }) as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: staleData } = useContextEntries({ is_current: false, limit: 200 }) as any;
+  const { data: signalData } = useContextEntries({ memory_status: 'signal', limit: 1 }) as any;
+  const { data: signalGroupData } = useSignalGroups({ attention_only: true, limit: 1 }) as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: staleData } = useStaleContextEntries({ limit: 200 }) as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: actorsData } = useActors({ limit: 200 }) as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: activitiesData } = useActivities({ limit: 1 }) as any;
   const { data: dbInfo } = useDbConfig() as any;
   const { enabled: agentEnabled } = useAgentSettings();
 
   const hitlRequests: any[] = hitlData?.data ?? [];
   const pendingHITL = hitlRequests.filter((r: any) => r.status === 'pending');
-  const contextTotal: number = contextData?.total ?? 0;
-  const staleCount: number = staleData?.data?.length ?? 0;
+  const memoryTotal: number = memoryData?.total ?? 0;
+  const signalTotal: number = signalData?.total ?? 0;
+  const signalGroupTotal: number = signalGroupData?.total ?? 0;
+  const observationsTotal: number = activitiesData?.total ?? 0;
+  const staleCount: number = (staleData?.stale_entries ?? staleData?.data ?? []).length;
   const actors: any[] = actorsData?.data ?? [];
   const activeActors = actors.filter((a: any) => a.is_active);
   const agents = actors.filter((a: any) => a.actor_type === 'agent');
@@ -210,7 +253,7 @@ export default function Dashboard() {
     { id: 'sample-data', complete: sampleSeeded },
     { id: 'pgvector', complete: pgvectorEnabled },
     { id: 'workspace-agent', complete: agentEnabled },
-    { id: 'context-memory', complete: contextTotal > 0 },
+    { id: 'context-memory', complete: memoryTotal > 0 },
     { id: 'handoffs', complete: handoffReady },
   ];
   const activationTotal = activationSteps.length;
@@ -238,62 +281,96 @@ export default function Dashboard() {
     });
   };
 
+  const attentionItems = [
+    ...(signalGroupTotal > 0 ? [{
+      icon: Sparkles,
+      title: `${signalGroupTotal.toLocaleString()} Signal${signalGroupTotal === 1 ? '' : 's'} need attention`,
+      detail: 'Promote trusted claims, review conflicts, or dismiss noise.',
+      href: '/context?tab=signals',
+      tone: 'action' as const,
+    }] : []),
+    ...(staleCount > 0 ? [{
+      icon: AlertCircle,
+      title: `${staleCount.toLocaleString()} Memory ${staleCount === 1 ? 'entry needs' : 'entries need'} review`,
+      detail: 'Refresh or retire outdated customer context.',
+      href: '/context?tab=governance',
+      tone: 'watch' as const,
+    }] : []),
+    ...(pendingHITL.length > 0 ? [{
+      icon: ShieldCheck,
+      title: `${pendingHITL.length.toLocaleString()} handoff${pendingHITL.length === 1 ? '' : 's'} pending`,
+      detail: 'Approve, reject, or route agent decisions.',
+      href: '/handoffs',
+      tone: 'action' as const,
+    }] : []),
+    ...(!pgvectorEnabled ? [{
+      icon: Brain,
+      title: 'Semantic search is not enabled',
+      detail: 'Keyword search works; pgvector improves context retrieval.',
+      href: '/settings/database',
+      tone: 'watch' as const,
+    }] : []),
+    ...(!agentEnabled ? [{
+      icon: Bot,
+      title: 'Workspace Agent is not configured',
+      detail: 'Enable private reasoning over customer context.',
+      href: '/settings/model',
+      tone: 'action' as const,
+    }] : []),
+    ...(memoryTotal === 0 && signalTotal === 0 ? [{
+      icon: Library,
+      title: 'No context has been added yet',
+      detail: 'Paste notes, transcripts, emails, or research to create Signals and Memory.',
+      href: '/context',
+      tone: 'action' as const,
+    }] : []),
+  ];
+
   return (
     <div className="flex flex-col h-full">
       <TopBar
         title="Overview"
         icon={Brain}
         iconClassName="text-primary"
-        description="Operational state, customer context, scoped agents, handoffs, and reliability at a glance."
+        description="Watch raw context become trusted Memory and governed handoffs."
       />
 
       {/* Tab bar */}
-      <div className="flex items-center gap-1 px-4 md:px-6 pt-4 border-b border-border pb-0">
-        <button
-          onClick={() => setSearchParams({})}
-          className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-            activeTab === 'overview' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <Brain className="w-3.5 h-3.5" /> Status
-        </button>
-        <button
-          onClick={() => setSearchParams({ tab: 'knowledge' })}
-          className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-            activeTab === 'knowledge' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <Library className="w-3.5 h-3.5" /> Knowledge
-        </button>
-        <button
-          onClick={() => setSearchParams({ tab: 'graph' })}
-          className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-            activeTab === 'graph' ? 'border-[#0ea5e9] text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
-          }`}
-        >
-          <Network className="w-3.5 h-3.5" /> Memory Graph
-        </button>
+      <div className="flex items-end justify-between gap-3 px-4 md:px-6 pt-4 border-b border-border pb-0">
+        <div className="flex min-w-0 items-center gap-1">
+          <button
+            onClick={() => setSearchParams({})}
+            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === 'overview' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Brain className="w-3.5 h-3.5" /> Overview
+          </button>
+          <button
+            onClick={() => setSearchParams({ tab: 'graph' })}
+            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === 'graph' ? 'border-[#0ea5e9] text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Network className="w-3.5 h-3.5" /> Memory Graph
+          </button>
+        </div>
+        {!showActivation && activationIsComplete && activeTab === 'overview' && (
+          <button
+            type="button"
+            onClick={restoreActivation}
+            className="mb-1 inline-flex h-8 flex-shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            Show setup
+          </button>
+        )}
       </div>
 
-      {activeTab === 'knowledge' ? (
-        <ContextBrowser />
-      ) : activeTab === 'graph' ? (
+      {activeTab === 'graph' ? (
         <GraphTab />
       ) : (
       <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6">
-        {!showActivation && activationIsComplete && (
-          <div className="mb-3 flex justify-end">
-            <button
-              type="button"
-              onClick={restoreActivation}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Show setup
-            </button>
-          </div>
-        )}
-
         {/* Activation checklist */}
         {showActivation && (
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 }}>
@@ -367,9 +444,9 @@ export default function Dashboard() {
                 />
                 <SetupStep
                   icon={Library}
-                  title={contextTotal > 0 ? 'Context memory exists' : 'Add first context'}
-                  detail={contextTotal > 0 ? `${contextTotal} context entries available.` : 'Paste notes or add a manual memory for a customer object.'}
-                  status={contextTotal > 0 ? 'ready' : 'action'}
+                  title={memoryTotal > 0 ? 'Memory exists' : 'Add Context'}
+                  detail={memoryTotal > 0 ? `${memoryTotal} Current Memory ${memoryTotal === 1 ? 'entry is' : 'entries are'} available.` : 'Paste notes or transcripts so CRMy can find Signals and create high-confidence Memory.'}
+                  status={memoryTotal > 0 ? 'ready' : 'action'}
                   href="/context"
                   skipped={Boolean(skippedActivationSteps['context-memory'])}
                   onSkipToggle={() => toggleActivationSkip('context-memory')}
@@ -388,36 +465,108 @@ export default function Dashboard() {
           </motion.div>
         )}
 
-        {/* Stat row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-4 md:mb-6">
-          <StatCard
-            icon={Inbox}
-            label="Open handoffs"
-            value={pendingHITL.length}
-            sub={pendingHITL.length > 0 ? 'needs your review' : 'all clear'}
-            color="bg-amber-500/15 text-amber-500"
-            href="/handoffs"
-            delay={0.04}
-          />
-          <StatCard
-            icon={Layers}
-            label="Context entries"
-            value={contextTotal}
-            sub={staleCount > 0 ? `${staleCount} stale` : 'all current'}
-            color="bg-[#0ea5e9]/15 text-[#0ea5e9]"
-            href="/context"
-            delay={0.07}
-          />
-          <StatCard
-            icon={UsersRound}
-            label="Active actors"
-            value={activeActors.length}
-            sub={actors.length > 0 ? `of ${actors.length} registered` : 'none registered'}
-            color="bg-[#6366f1]/15 text-[#6366f1]"
-            href="/settings/agents"
-            delay={0.1}
-          />
-        </div>
+        {/* Context engine flow */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.03 }}>
+          <div className="mb-4 md:mb-6 rounded-2xl border border-border bg-surface p-4 md:p-5 shadow-sm">
+            <div className="mb-4">
+              <div>
+                <h2 className="font-display font-bold text-foreground">Context Engine Flow</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Messy customer context becomes Signals, confirmed Memory, and governed human decisions.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] md:items-stretch">
+              <FlowStep
+                icon={Inbox}
+                title="Raw Context"
+                value={observationsTotal}
+                detail="Calls, notes, transcripts, emails, and system updates before extraction."
+                action="View Sources"
+                href="/context?tab=observations"
+                color="bg-sky-500/15 text-sky-500"
+              />
+              <ArrowRight className="hidden h-4 w-4 self-center text-muted-foreground/40 md:block" />
+              <FlowStep
+                icon={Sparkles}
+                title="Signals"
+                value={signalGroupTotal}
+                detail="Inferred customer context with confidence and evidence."
+                action="Review Signals"
+                href="/context?tab=signals"
+                color="bg-violet-500/15 text-violet-500"
+              />
+              <ArrowRight className="hidden h-4 w-4 self-center text-muted-foreground/40 md:block" />
+              <FlowStep
+                icon={Library}
+                title="Memory"
+                value={memoryTotal}
+                detail="Confirmed context agents can safely use."
+                action="View Memory"
+                href="/context"
+                color="bg-emerald-500/15 text-emerald-500"
+              />
+              <ArrowRight className="hidden h-4 w-4 self-center text-muted-foreground/40 md:block" />
+              <FlowStep
+                icon={Inbox}
+                title="Handoffs"
+                value={pendingHITL.length}
+                detail="Human review for approvals, escalations, and governed agent decisions."
+                action="Review Handoffs"
+                href="/handoffs"
+                color={`${ENTITY_COLORS.assignments.bg} ${ENTITY_COLORS.assignments.text}`}
+              />
+            </div>
+            <div className="mt-4 flex flex-col gap-2 rounded-xl border border-border bg-card/70 px-3 py-2.5 text-sm text-muted-foreground md:flex-row md:items-center md:justify-between">
+              <p>
+                Turn trusted Memory into safe actions, governed workflows, and system-of-record writeback.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Link to="/automations" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground">
+                  <Zap className="h-3.5 w-3.5" />
+                  Automations
+                </Link>
+                <Link to="/settings/systems" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground">
+                  <Server className="h-3.5 w-3.5" />
+                  Systems of Record
+                </Link>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+
+        {/* Needs attention */}
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+          <div className="mb-4 md:mb-6 rounded-2xl border border-border bg-card p-4 md:p-5 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="font-display font-bold text-foreground">Needs Attention</h2>
+                <p className="mt-1 text-sm text-muted-foreground">The highest-value next steps for this workspace.</p>
+              </div>
+              {attentionItems.length === 0 && (
+                <Link to="/context" className="hidden h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-primary hover:bg-primary/10 md:inline-flex">
+                  Add Context
+                  <ArrowRight className="h-3 w-3" />
+                </Link>
+              )}
+            </div>
+            {attentionItems.length > 0 ? (
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {attentionItems.map(item => (
+                  <AttentionItem key={item.title} {...item} />
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-3 text-emerald-700 dark:text-emerald-300">
+                <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">No action needed right now</p>
+                  <p className="text-xs opacity-80">Signals, Memory, handoffs, and search readiness are in good shape.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </motion.div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
           {/* Left column */}
@@ -527,15 +676,15 @@ export default function Dashboard() {
           {/* Right column */}
           <div className="space-y-4 md:space-y-5">
 
-            {/* Active agents */}
+            {/* Active actors */}
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 }}>
               <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-display font-bold text-foreground flex items-center gap-2">
                     <Bot className="w-4 h-4 text-[#6366f1]" />
-                    Agents
+                    Actors
                   </h3>
-                  <Link to="/settings/agents" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  <Link to="/settings/actors" className="text-xs text-primary hover:underline flex items-center gap-1">
                     Manage <ArrowRight className="w-3 h-3" />
                   </Link>
                 </div>
@@ -543,8 +692,8 @@ export default function Dashboard() {
                   <div className="text-center py-6">
                     <Bot className="w-8 h-8 text-muted-foreground/40 mx-auto mb-2" />
                     <p className="text-xs text-muted-foreground">No agents registered yet.</p>
-                    <Link to="/settings/agents" className="text-xs text-primary hover:underline mt-1 inline-block">
-                      Register your first agent
+                    <Link to="/settings/actors" className="text-xs text-primary hover:underline mt-1 inline-block">
+                      Manage actors
                     </Link>
                   </div>
                 ) : (
@@ -564,7 +713,7 @@ export default function Dashboard() {
                       </div>
                     ))}
                     {agents.length > 5 && (
-                      <Link to="/settings/agents" className="text-xs text-muted-foreground hover:text-primary block text-center pt-1">
+                      <Link to="/settings/actors" className="text-xs text-muted-foreground hover:text-primary block text-center pt-1">
                         +{agents.length - 5} more
                       </Link>
                     )}
@@ -573,44 +722,50 @@ export default function Dashboard() {
               </div>
             </motion.div>
 
-            {/* Context health */}
+            {/* Memory health */}
             <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.11 }}>
               <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-display font-bold text-foreground flex items-center gap-2">
                     <Library className="w-4 h-4 text-[#0ea5e9]" />
-                    Context health
+                    Memory Health
                   </h3>
-                  <Link to="/context" className="text-xs text-primary hover:underline flex items-center gap-1">
-                    Browse <ArrowRight className="w-3 h-3" />
+                  <Link to="/context?tab=governance" className="text-xs text-primary hover:underline flex items-center gap-1">
+                    Govern <ArrowRight className="w-3 h-3" />
                   </Link>
                 </div>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">Total entries</span>
-                    <span className="text-sm font-bold text-foreground">{contextTotal}</span>
+                    <span className="text-xs text-muted-foreground">Confirmed Memory</span>
+                    <span className="text-sm font-bold text-foreground">{memoryTotal}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-muted-foreground flex items-center gap-1">
                       {staleCount > 0 && <AlertCircle className="w-3 h-3 text-destructive" />}
-                      Stale / expired
+                      Needs Review
                     </span>
                     <span className={`text-sm font-bold ${staleCount > 0 ? 'text-destructive' : 'text-foreground'}`}>
                       {staleCount}
                     </span>
                   </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Semantic search</span>
+                    <span className={`text-xs font-bold ${pgvectorEnabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                      {pgvectorEnabled ? 'Ready' : 'Keyword fallback'}
+                    </span>
+                  </div>
                   {staleCount > 0 && (
                     <Link
-                      to="/context"
+                      to="/context?tab=governance"
                       className="flex items-center gap-1 text-xs text-destructive hover:underline"
                     >
                       <AlertCircle className="w-3 h-3" />
-                      Review stale entries
+                      Review Memory
                     </Link>
                   )}
-                  {contextTotal === 0 && (
+                  {memoryTotal === 0 && (
                     <p className="text-xs text-muted-foreground text-center py-2">
-                      Agents write context entries after each interaction.
+                      Add Context to turn useful customer inputs into Memory.
                     </p>
                   )}
                 </div>

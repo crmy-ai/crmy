@@ -9,6 +9,7 @@ import * as searchRepo from '../../db/repos/search.js';
 import { getAuditTrail } from '../../services/audit.js';
 import { getDataQualityReport, repairDataQualityFinding } from '../../services/data-quality.js';
 import { recoverOperationalJob } from '../../services/operational-recovery.js';
+import { getAutomationSchedulerHealth } from '../../services/scheduler-health.js';
 import {
   applyRetentionPolicy,
   deleteSubjectForPrivacy,
@@ -396,6 +397,7 @@ export function metaTools(db: DbPool): ToolDef[] {
         return {
           generated_at: new Date().toISOString(),
           tenant_id: actor.tenant_id,
+          scheduler_health: await getAutomationSchedulerHealth(db, actor.tenant_id),
           queues,
           attention_required: attentionRequired.map(queue => ({
             name: queue.name,

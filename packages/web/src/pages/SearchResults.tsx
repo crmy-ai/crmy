@@ -96,7 +96,7 @@ export function SearchResultsPage() {
     },
     {
       key: 'contextEntries',
-      label: 'Context Memory',
+      label: 'Memory',
       icon: FileText,
       color: ENTITY_COLORS.context.text,
       items: data?.contextEntries ?? [],

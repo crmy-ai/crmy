@@ -3,7 +3,7 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
-import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Link, Route, Routes, useLocation } from 'react-router-dom';
 import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Zap, ListOrdered, GitBranch, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
@@ -31,7 +31,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'] },
   { icon: Tags,       label: 'Registries',    path: '/settings/registries',   roles: ['admin', 'owner'] },
   { icon: MessageSquare, label: 'Messaging', path: '/settings/messaging',   roles: ['admin', 'owner'] },
-  { icon: ShieldCheck, label: 'HITL Rules', path: '/settings/hitl-rules',  roles: ['admin', 'owner'] },
+  { icon: ShieldCheck, label: 'Action Policies', path: '/settings/hitl-rules',  roles: ['admin', 'owner'] },
   { icon: Sparkles,   label: 'Model Settings', path: '/settings/model',     roles: ['admin', 'owner'] },
   { icon: Zap,        label: 'Automations',   path: '/settings/automations',  roles: ['admin', 'owner'] },
   { icon: Server,     label: 'Systems of Record', path: '/settings/systems', roles: ['admin', 'owner'] },
@@ -3191,6 +3191,38 @@ function SystemsOfRecordSettings() {
     value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const writebackReceipt = (writeback: Record<string, unknown>) => asObject(writeback.execution_result);
   const writebackReference = (writeback: Record<string, unknown>) => asObject(writebackReceipt(writeback).reference);
+  const asStringList = (value: unknown): string[] =>
+    Array.isArray(value) ? value.map(item => String(item)).filter(Boolean) : [];
+  const actionPolicyFrom = (value: unknown): Record<string, unknown> => {
+    const root = asObject(value);
+    const policy = asObject(root.policy);
+    const nestedPolicy = asObject(policy.action_policy);
+    if (Object.keys(nestedPolicy).length > 0) return nestedPolicy;
+    const directPolicy = asObject(root.action_policy);
+    const directNested = asObject(directPolicy.action_policy);
+    if (Object.keys(directNested).length > 0) return directNested;
+    return directPolicy;
+  };
+  const writebackDecisionLabel = (value: Record<string, unknown>, actionPolicy = actionPolicyFrom(value)) => {
+    if (value.allowed === false || actionPolicy.decision === 'blocked') return 'Blocked';
+    if (value.requires_approval === true || actionPolicy.decision === 'approval_required') return 'Approval required';
+    if (actionPolicy.decision === 'draft_only') return 'Draft only';
+    return 'Allowed';
+  };
+  const writebackDecisionClass = (label: string) => {
+    if (label === 'Blocked') return statusClass('failed');
+    if (label === 'Approval required' || label === 'Draft only') return statusClass('pending');
+    return statusClass('completed');
+  };
+  const writebackReasonList = (value: Record<string, unknown>, actionPolicy = actionPolicyFrom(value)) => [
+    ...asStringList(value.warnings),
+    ...asStringList(actionPolicy.reasons).filter(reason => reason !== 'Policy allows this action.'),
+  ];
+  const writebackFieldList = (preview: Record<string, unknown>, fallbackPayload?: unknown) => {
+    const diff = asObject(preview.diff);
+    const payload = asObject(diff.payload ?? fallbackPayload);
+    return Object.keys(payload);
+  };
   const runSystemSyncFor = (system: SystemOfRecord, mappedCount: number) => {
     if (system.status !== 'connected') {
       toast({
@@ -4312,15 +4344,47 @@ function SystemsOfRecordSettings() {
                 <textarea value={writebackPayloadJson} onChange={e => { setWritebackPayloadJson(e.target.value); setWritebackPreview(null); }} className={`${textAreaCls} min-h-48`} />
               </div>
               {writebackPreview ? (
-                <div className={`rounded-xl border p-3 ${writebackPreview.allowed === false ? 'border-destructive/30 bg-destructive/5' : 'border-border bg-muted/20'}`}>
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <p className="text-sm font-semibold text-foreground">Preview result</p>
-                    <span className={`text-xs px-2 py-0.5 rounded-full border ${writebackPreview.allowed === false ? statusClass('failed') : statusClass('completed')}`}>
-                      {writebackPreview.allowed === false ? 'blocked' : 'allowed'}
-                    </span>
-                  </div>
-                  <code className="block text-xs text-foreground whitespace-pre-wrap break-words">{JSON.stringify(writebackPreview, null, 2)}</code>
-                </div>
+                (() => {
+                  const actionPolicy = actionPolicyFrom(writebackPreview);
+                  const decision = writebackDecisionLabel(writebackPreview, actionPolicy);
+                  const reasons = writebackReasonList(writebackPreview, actionPolicy);
+                  const fields = writebackFieldList(writebackPreview);
+                  return (
+                    <div className={`rounded-xl border p-3 ${decision === 'Blocked' ? 'border-destructive/30 bg-destructive/5' : 'border-border bg-muted/20'}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">Preview result</p>
+                          <p className="text-sm text-muted-foreground mt-0.5">
+                            {fields.length > 0 ? `${fields.length} field${fields.length !== 1 ? 's' : ''} checked` : 'Payload checked'}
+                            {writebackPreview.mode ? ` • ${String(writebackPreview.mode).replace('_', ' ')}` : ''}
+                          </p>
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full border ${writebackDecisionClass(decision)}`}>
+                          {decision}
+                        </span>
+                      </div>
+                      {fields.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {fields.slice(0, 8).map(field => (
+                            <span key={field} className="rounded-md border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">{field}</span>
+                          ))}
+                          {fields.length > 8 && <span className="rounded-md border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">+{fields.length - 8} more</span>}
+                        </div>
+                      )}
+                      {reasons.length > 0 ? (
+                        <ul className="mt-3 space-y-1 text-sm text-muted-foreground">
+                          {reasons.map(reason => <li key={reason}>• {reason}</li>)}
+                        </ul>
+                      ) : (
+                        <p className="mt-3 text-sm text-muted-foreground">No policy warnings. This writeback can follow the selected approval setting.</p>
+                      )}
+                      <details className="mt-3">
+                        <summary className="cursor-pointer text-xs font-semibold text-muted-foreground hover:text-foreground">View preview JSON</summary>
+                        <code className="block text-xs text-foreground whitespace-pre-wrap break-words mt-2">{JSON.stringify(writebackPreview, null, 2)}</code>
+                      </details>
+                    </div>
+                  );
+                })()
               ) : (
                 <div className="rounded-xl border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
                   Preview shows whether the mapping allows this payload, which fields will change, and whether approval is required.
@@ -4345,20 +4409,59 @@ function SystemsOfRecordSettings() {
                 </div>
                 <span className={`text-xs px-2 py-0.5 rounded-full border ${statusClass(String(writeback.status ?? ''))}`}>{String(writeback.status)}</span>
               </div>
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 mt-3">
-                <div className="rounded-lg bg-muted/50 p-2">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Policy</p>
-                  <code className="block text-xs text-foreground whitespace-pre-wrap break-words">{JSON.stringify(writeback.policy_result ?? {}, null, 2)}</code>
-                </div>
-                <div className="rounded-lg bg-muted/50 p-2">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Preview</p>
-                  <code className="block text-xs text-foreground whitespace-pre-wrap break-words">{JSON.stringify(writeback.preview ?? {}, null, 2)}</code>
-                </div>
-                <div className="rounded-lg bg-muted/50 p-2">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Payload</p>
-                  <code className="block text-xs text-foreground whitespace-pre-wrap break-words">{JSON.stringify(writeback.payload ?? {}, null, 2)}</code>
-                </div>
-              </div>
+              {(() => {
+                const policyResult = asObject(writeback.policy_result);
+                const preview = asObject(writeback.preview);
+                const actionPolicy = actionPolicyFrom(policyResult);
+                const decision = writebackDecisionLabel(policyResult, actionPolicy);
+                const reasons = writebackReasonList(policyResult, actionPolicy);
+                const fields = writebackFieldList(preview, writeback.payload);
+                return (
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-2 mt-3">
+                    <div className="rounded-lg border border-border bg-muted/40 p-3">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Policy</p>
+                      <span className={`inline-flex text-xs px-2 py-0.5 rounded-full border ${writebackDecisionClass(decision)}`}>
+                        {decision}
+                      </span>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        {reasons[0] ?? 'Policy allows this request.'}
+                      </p>
+                      {reasons.length > 1 && (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-xs font-semibold text-muted-foreground hover:text-foreground">View all reasons</summary>
+                          <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                            {reasons.map(reason => <li key={reason}>• {reason}</li>)}
+                          </ul>
+                        </details>
+                      )}
+                    </div>
+                    <div className="rounded-lg border border-border bg-muted/40 p-3">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Preview</p>
+                      <p className="text-sm text-foreground">
+                        {fields.length > 0 ? `${fields.length} field${fields.length !== 1 ? 's' : ''} checked` : 'No field diff available'}
+                      </p>
+                      {fields.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {fields.slice(0, 6).map(field => (
+                            <span key={field} className="rounded-md border border-border bg-background px-1.5 py-0.5 text-xs text-muted-foreground">{field}</span>
+                          ))}
+                          {fields.length > 6 && <span className="rounded-md border border-border bg-background px-1.5 py-0.5 text-xs text-muted-foreground">+{fields.length - 6}</span>}
+                        </div>
+                      )}
+                    </div>
+                    <div className="rounded-lg border border-border bg-muted/40 p-3">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Payload</p>
+                      <p className="text-sm text-foreground">{Object.keys(asObject(writeback.payload)).length} field{Object.keys(asObject(writeback.payload)).length !== 1 ? 's' : ''}</p>
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs font-semibold text-muted-foreground hover:text-foreground">View request JSON</summary>
+                        <code className="block text-xs text-foreground whitespace-pre-wrap break-words mt-2">
+                          {JSON.stringify({ policy_result: writeback.policy_result ?? {}, preview: writeback.preview ?? {}, payload: writeback.payload ?? {} }, null, 2)}
+                        </code>
+                      </details>
+                    </div>
+                  </div>
+                );
+              })()}
               {Boolean(writeback.execution_result && Object.keys(writeback.execution_result as Record<string, unknown>).length > 0) && (
                 <div className="rounded-xl border border-border bg-muted/30 p-3 mt-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
@@ -4532,7 +4635,19 @@ function DatabaseSettings() {
     user: string;
     ssl: string | null;
     pgvector_enabled?: boolean;
-    sample_data?: { seeded: boolean; counts: { accounts: number; contacts: number; opportunities: number; context_entries: number } };
+    sample_data?: {
+      seeded: boolean;
+      counts: {
+        accounts: number;
+        contacts: number;
+        opportunities: number;
+        context_entries: number;
+        signals?: number;
+        memory?: number;
+        raw_context_sources?: number;
+        handoffs?: number;
+      };
+    };
   } | undefined;
   const currentProvider = detectDbProvider(dbInfo?.host);
   const selectedGuide = DB_PROVIDER_GUIDES[provider];
@@ -4645,6 +4760,57 @@ function DatabaseSettings() {
           </div>
         )}
 
+        <div className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Sample data</h3>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Load the same demo records used by <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">crmy seed-demo</code>: one customer thread that shows Raw Context becoming Signals, Memory, and a pending Handoff.
+            </p>
+          </div>
+          {sampleCounts && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              {[
+                ['Raw Context', sampleCounts.raw_context_sources ?? 0],
+                ['Signals', sampleCounts.signals ?? 0],
+                ['Memory', sampleCounts.memory ?? sampleCounts.context_entries],
+                ['Handoffs', sampleCounts.handoffs ?? 0],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-lg border border-border bg-background px-2 py-1.5">
+                  <span className="text-muted-foreground">{label}</span>
+                  <span className="float-right font-mono text-foreground">{value}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {!showSeedConfirm ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={() => setShowSeedConfirm(true)}
+                className="h-9 px-4 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">
+                Add sample data
+              </button>
+              <button onClick={() => copyCommand('crmy seed-demo')} className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                <Copy className="w-3.5 h-3.5" /> Copy CLI command
+              </button>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-3">
+              <div className="flex gap-2 text-xs text-amber-700">
+                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>{hasWorkspaceData ? 'This workspace already has records. Sample data is idempotent: CRMy refreshes demo records and leaves your other records alone.' : 'This will add demo records to the current tenant.'}</span>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={handleSeedSample} disabled={seedSample.isPending}
+                  className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40">
+                  {seedSample.isPending ? 'Adding...' : 'Confirm'}
+                </button>
+                <button onClick={() => setShowSeedConfirm(false)} className="flex-1 px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         {saveSuccess && (
           <div className="flex items-start gap-2 p-3 rounded-xl border border-success/30 bg-success/5 text-sm text-success">
             <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
@@ -4735,52 +4901,6 @@ function DatabaseSettings() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">Sample data</h3>
-              <p className="text-sm text-muted-foreground mt-0.5">If you skipped demo data during init, add a small sample account, contact, opportunity, use case, activity, context entry, and assignment.</p>
-            </div>
-            {sampleCounts && (
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                {[
-                  ['Accounts', sampleCounts.accounts],
-                  ['Contacts', sampleCounts.contacts],
-                  ['Opportunities', sampleCounts.opportunities],
-                  ['Context', sampleCounts.context_entries],
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-lg border border-border bg-background px-2 py-1.5">
-                    <span className="text-muted-foreground">{label}</span>
-                    <span className="float-right font-mono text-foreground">{value}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {!showSeedConfirm ? (
-              <button onClick={() => setShowSeedConfirm(true)}
-                className="w-full h-9 px-4 rounded-lg border border-border text-sm font-semibold text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">
-                Add Sample Data
-              </button>
-            ) : (
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 space-y-3">
-                <div className="flex gap-2 text-xs text-amber-700">
-                  <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                  <span>{hasWorkspaceData ? 'This workspace already has records. Sample data is idempotent and will not overwrite existing rows, but it will add demo records.' : 'This will add demo records to the current tenant.'}</span>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={handleSeedSample} disabled={seedSample.isPending}
-                    className="flex-1 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40">
-                    {seedSample.isPending ? 'Adding...' : 'Confirm'}
-                  </button>
-                  <button onClick={() => setShowSeedConfirm(false)} className="flex-1 px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted">
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-            <button onClick={() => copyCommand('crmy seed-demo')} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-              <Copy className="w-3.5 h-3.5" /> Copy CLI alternative
-            </button>
-          </div>
         </aside>
       </div>
     </div>
@@ -4875,7 +4995,7 @@ function RegistriesSettings() {
     <div className="max-w-2xl">
       <h2 className="font-display font-bold text-lg text-foreground mb-1">Type Registries</h2>
       <p className="text-sm text-muted-foreground mb-6">
-        Context types classify the knowledge your agents store — objections, next steps, competitive intel, and more.
+        Context types classify the Memory your agents store — objections, next steps, competitive intel, and more.
         Activity types categorize what happened — calls, emails, meetings, handoffs. Both registries come with system
         defaults and can be extended with custom types to match your workflow.
       </p>
@@ -5061,7 +5181,6 @@ export default function Settings() {
             <Route path="custom-fields" element={<RequireRole roles={['admin', 'owner']}><CustomFieldsSettings /></RequireRole>} />
             <Route path="registries" element={<RequireRole roles={['admin', 'owner']}><RegistriesSettings /></RequireRole>} />
             <Route path="actors" element={<RequireRole roles={['admin', 'owner']}><ActorsSettings /></RequireRole>} />
-            <Route path="agents" element={<Navigate to="/settings/actors" replace />} />
             <Route path="messaging" element={<RequireRole roles={['admin', 'owner']}><MessagingSettings /></RequireRole>} />
             <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
             <Route path="model" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />

@@ -19,6 +19,7 @@ import { salesforceAdapter, refreshSalesforceOAuthCredentials } from './salesfor
 import { databricksAdapter } from './databricks.js';
 import { snowflakeAdapter } from './snowflake.js';
 import type { ConnectorAdapter, ConnectorContext, ExternalRecord } from './adapters.js';
+import { evaluateActionPolicy } from '../action-policy.js';
 
 const adapters: Record<SystemOfRecordType, ConnectorAdapter> = {
   hubspot: hubspotAdapter,
@@ -1049,14 +1050,29 @@ export async function previewExternalWriteback(
     policyWarnings.push('This mapping requires approval before external writeback.');
   }
 
+  const actionPolicy = evaluateActionPolicy({
+    action_type: 'external.writeback',
+    object_type: mapping.object_type,
+    field_names: Object.keys(input.payload ?? {}),
+    target_system_type: ctx.system.system_type,
+    source_authority: mapping.source_authority,
+  });
+  if (actionPolicy.decision === 'blocked') {
+    allowed = false;
+    requiresApproval = false;
+  } else if (actionPolicy.decision === 'approval_required') {
+    requiresApproval = true;
+  }
+
   return {
     ...preview,
     allowed,
     requires_approval: requiresApproval,
-    warnings: [...(preview.warnings ?? []), ...policyWarnings],
+    warnings: [...(preview.warnings ?? []), ...policyWarnings, ...actionPolicy.reasons.filter(reason => reason !== 'Policy allows this action.')],
     policy: {
       source_authority: mapping.source_authority,
       mapping_id: mapping.id,
+      action_policy: actionPolicy,
     },
   };
 }
@@ -1097,7 +1113,11 @@ export async function requestExternalWriteback(
     ...input,
     operation: input.operation,
     preview: preview as unknown as Record<string, unknown>,
-    policy_result: { allowed: preview.allowed, requires_approval: preview.requires_approval || input.require_approval !== false },
+    policy_result: {
+      allowed: preview.allowed,
+      requires_approval: preview.requires_approval || input.require_approval !== false,
+      action_policy: (preview as { policy?: unknown }).policy,
+    },
     status,
     requested_by: actorId,
   });
@@ -1138,6 +1158,7 @@ export async function requestExternalWriteback(
         allowed: preview.allowed,
         requires_approval: preview.requires_approval || input.require_approval !== false,
         hitl_status: hitl.status,
+        action_policy: (preview as { policy?: unknown }).policy,
       },
     });
     return linked ?? writeback;

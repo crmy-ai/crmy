@@ -477,8 +477,8 @@ function buildSystemPrompt(
   const capLines = ['# Capabilities'];
   capLines.push('**You CAN:**');
   capLines.push('- Search, read, and summarise typed revenue records');
-  capLines.push('- Search workspace memory (context entries)');
-  capLines.push('- Add and update context memory entries');
+  capLines.push('- Search confirmed workspace Memory and review unconfirmed Signals');
+  capLines.push('- Add and update context Memory entries');
   if (canWrite)      capLines.push('- Create, update, and delete contacts, accounts, and opportunities');
   if (canActivities) capLines.push('- Log and complete activities');
   if (canAssignments) capLines.push('- Create and manage assignments');
@@ -505,6 +505,7 @@ function buildSystemPrompt(
     '  3. Execute — call write tools in sequence',
     '  4. Confirm — show what changed with the key new values, audit trail, and suggested next action',
     'Never call a write tool on a record you have not fetched in this session via `briefing_get` or the relevant object read tool.',
+    'Treat Signals as unconfirmed: cite them with uncertainty, but promote them or request approval before using them to update records, forecast, assign work, or guide customer-facing action.',
     'When you learn useful customer context in conversation, propose it for review before treating it as saved memory unless you explicitly call a context write tool.',
     'For risky work, prefer HITL approval tools and clearly explain what is waiting on a human decision.',
   ].join('\n'));
@@ -532,7 +533,7 @@ function buildSystemPrompt(
   const activities = pick('activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete');
   if (activities) toolLines.push(`**Activities:** ${activities}`);
 
-  const ctx = pick('context_add', 'context_get', 'context_list', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale');
+  const ctx = pick('context_add', 'context_get', 'context_list', 'context_raw_source_list', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale');
   if (ctx) toolLines.push(`**Context memory:** ${ctx}`);
 
   const hitl = pick('assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status');
@@ -551,7 +552,7 @@ function buildSystemPrompt(
     'account_search', 'account_get', 'account_get_hierarchy', 'account_health_report', 'account_update', 'account_set_health_score',
     'opportunity_search', 'opportunity_get', 'opportunity_create', 'opportunity_update', 'opportunity_advance_stage', 'deal_advance',
     'activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete',
-    'context_add', 'context_get', 'context_list', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale',
+    'context_add', 'context_get', 'context_list', 'context_raw_source_list', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale',
     'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status',
     'email_sequence_list', 'email_sequence_get', 'email_sequence_enroll', 'email_sequence_unenroll', 'email_sequence_enrollment_list', 'workflow_template_list',
     'pipeline_summary', 'pipeline_forecast', 'tenant_get_stats', 'crm_search',

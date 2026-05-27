@@ -1,0 +1,235 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
+import type { DbPool } from '../pool.js';
+import type { PaginatedResponse, SubjectType, UUID } from '@crmy/shared';
+
+export interface RawContextSource {
+  id: UUID;
+  tenant_id: UUID;
+  source_type: string;
+  source_ref: string;
+  source_label?: string;
+  subject_type?: SubjectType;
+  subject_id?: UUID;
+  actor_id?: UUID;
+  status: 'pending' | 'processing' | 'processed' | 'needs_review' | 'failed' | 'skipped';
+  stage: string;
+  raw_excerpt?: string;
+  detected_subjects: Array<Record<string, unknown>>;
+  signals_created: number;
+  memory_created: number;
+  skipped: number;
+  failure_reason?: string;
+  metadata: Record<string, unknown>;
+  processed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type RawContextSourceStatus = RawContextSource['status'];
+
+export interface RawContextSourceInput {
+  source_type: string;
+  source_ref: string;
+  source_label?: string | null;
+  subject_type?: SubjectType | string | null;
+  subject_id?: UUID | string | null;
+  actor_id?: UUID | string | null;
+  status?: RawContextSourceStatus;
+  stage?: string;
+  raw_excerpt?: string | null;
+  detected_subjects?: Array<Record<string, unknown>>;
+  signals_created?: number;
+  memory_created?: number;
+  skipped?: number;
+  failure_reason?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export async function upsertRawContextSource(
+  db: DbPool,
+  tenantId: UUID | string,
+  input: RawContextSourceInput,
+): Promise<RawContextSource> {
+  const result = await db.query(
+    `INSERT INTO raw_context_sources (
+       tenant_id, source_type, source_ref, source_label, subject_type, subject_id,
+       actor_id, status, stage, raw_excerpt, detected_subjects, signals_created,
+       memory_created, skipped, failure_reason, metadata, processed_at
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+       CASE WHEN $8 IN ('processed', 'needs_review', 'failed', 'skipped') THEN now() ELSE NULL END
+     )
+     ON CONFLICT (tenant_id, source_type, source_ref)
+     DO UPDATE SET
+       source_label = COALESCE(EXCLUDED.source_label, raw_context_sources.source_label),
+       subject_type = COALESCE(EXCLUDED.subject_type, raw_context_sources.subject_type),
+       subject_id = COALESCE(EXCLUDED.subject_id, raw_context_sources.subject_id),
+       actor_id = COALESCE(EXCLUDED.actor_id, raw_context_sources.actor_id),
+       status = EXCLUDED.status,
+       stage = EXCLUDED.stage,
+       raw_excerpt = COALESCE(EXCLUDED.raw_excerpt, raw_context_sources.raw_excerpt),
+       detected_subjects = CASE
+         WHEN jsonb_array_length(EXCLUDED.detected_subjects) > 0 THEN EXCLUDED.detected_subjects
+         ELSE raw_context_sources.detected_subjects
+       END,
+       signals_created = EXCLUDED.signals_created,
+       memory_created = EXCLUDED.memory_created,
+       skipped = EXCLUDED.skipped,
+       failure_reason = EXCLUDED.failure_reason,
+       metadata = raw_context_sources.metadata || EXCLUDED.metadata,
+       processed_at = COALESCE(EXCLUDED.processed_at, raw_context_sources.processed_at),
+       updated_at = now()
+     RETURNING *`,
+    [
+      tenantId,
+      input.source_type,
+      input.source_ref,
+      input.source_label ?? null,
+      input.subject_type ?? null,
+      input.subject_id ?? null,
+      input.actor_id ?? null,
+      input.status ?? 'pending',
+      input.stage ?? 'received',
+      input.raw_excerpt ?? null,
+      JSON.stringify(input.detected_subjects ?? []),
+      input.signals_created ?? 0,
+      input.memory_created ?? 0,
+      input.skipped ?? 0,
+      input.failure_reason ?? null,
+      JSON.stringify(input.metadata ?? {}),
+    ],
+  );
+  return result.rows[0] as RawContextSource;
+}
+
+export async function updateRawContextSource(
+  db: DbPool,
+  tenantId: UUID | string,
+  sourceType: string,
+  sourceRef: string,
+  patch: Partial<RawContextSourceInput>,
+): Promise<RawContextSource | null> {
+  const result = await db.query(
+    `UPDATE raw_context_sources
+     SET status = COALESCE($4, status),
+         stage = COALESCE($5, stage),
+         source_label = COALESCE($6, source_label),
+         subject_type = COALESCE($7, subject_type),
+         subject_id = COALESCE($8, subject_id),
+         actor_id = COALESCE($9, actor_id),
+         raw_excerpt = COALESCE($10, raw_excerpt),
+         detected_subjects = COALESCE($11::jsonb, detected_subjects),
+         signals_created = COALESCE($12, signals_created),
+         memory_created = COALESCE($13, memory_created),
+         skipped = COALESCE($14, skipped),
+         failure_reason = $15,
+         metadata = metadata || COALESCE($16::jsonb, '{}'::jsonb),
+         processed_at = CASE
+           WHEN COALESCE($4, status) IN ('processed', 'needs_review', 'failed', 'skipped') THEN COALESCE(processed_at, now())
+           ELSE processed_at
+         END,
+         updated_at = now()
+     WHERE tenant_id = $1 AND source_type = $2 AND source_ref = $3
+     RETURNING *`,
+    [
+      tenantId,
+      sourceType,
+      sourceRef,
+      patch.status ?? null,
+      patch.stage ?? null,
+      patch.source_label ?? null,
+      patch.subject_type ?? null,
+      patch.subject_id ?? null,
+      patch.actor_id ?? null,
+      patch.raw_excerpt ?? null,
+      patch.detected_subjects ? JSON.stringify(patch.detected_subjects) : null,
+      patch.signals_created ?? null,
+      patch.memory_created ?? null,
+      patch.skipped ?? null,
+      patch.failure_reason ?? null,
+      patch.metadata ? JSON.stringify(patch.metadata) : null,
+    ],
+  );
+  return (result.rows[0] as RawContextSource | undefined) ?? null;
+}
+
+export async function getRawContextSource(
+  db: DbPool,
+  tenantId: UUID | string,
+  id: UUID | string,
+): Promise<RawContextSource | null> {
+  const result = await db.query(
+    `SELECT * FROM raw_context_sources WHERE tenant_id = $1 AND id = $2`,
+    [tenantId, id],
+  );
+  return (result.rows[0] as RawContextSource | undefined) ?? null;
+}
+
+export async function getRawContextSourceByRef(
+  db: DbPool,
+  tenantId: UUID | string,
+  sourceType: string,
+  sourceRef: string,
+): Promise<RawContextSource | null> {
+  const result = await db.query(
+    `SELECT * FROM raw_context_sources WHERE tenant_id = $1 AND source_type = $2 AND source_ref = $3`,
+    [tenantId, sourceType, sourceRef],
+  );
+  return (result.rows[0] as RawContextSource | undefined) ?? null;
+}
+
+export async function listRawContextSources(
+  db: DbPool,
+  tenantId: UUID | string,
+  filters: {
+    source_type?: string;
+    status?: RawContextSourceStatus;
+    subject_type?: string;
+    subject_id?: string;
+    limit: number;
+    cursor?: string;
+  },
+): Promise<PaginatedResponse<RawContextSource>> {
+  const conditions = ['tenant_id = $1'];
+  const params: unknown[] = [tenantId];
+  let idx = 2;
+
+  if (filters.source_type) {
+    conditions.push(`source_type = $${idx++}`);
+    params.push(filters.source_type);
+  }
+  if (filters.status) {
+    conditions.push(`status = $${idx++}`);
+    params.push(filters.status);
+  }
+  if (filters.subject_type) {
+    conditions.push(`subject_type = $${idx++}`);
+    params.push(filters.subject_type);
+  }
+  if (filters.subject_id) {
+    conditions.push(`subject_id = $${idx++}`);
+    params.push(filters.subject_id);
+  }
+  if (filters.cursor) {
+    conditions.push(`created_at < $${idx++}`);
+    params.push(filters.cursor);
+  }
+
+  const where = conditions.join(' AND ');
+  const count = await db.query(`SELECT count(*)::int AS total FROM raw_context_sources WHERE ${where}`, params);
+  params.push(filters.limit + 1);
+  const rows = await db.query(
+    `SELECT * FROM raw_context_sources WHERE ${where} ORDER BY created_at DESC LIMIT $${idx}`,
+    params,
+  );
+  const data = rows.rows as RawContextSource[];
+  const hasMore = data.length > filters.limit;
+  const page = hasMore ? data.slice(0, filters.limit) : data;
+  return {
+    data: page,
+    next_cursor: hasMore ? page[page.length - 1]?.created_at : undefined,
+    total: count.rows[0]?.total ?? 0,
+  };
+}

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * HITL auto-approval rules engine.
+ * Action Policy auto-approval rules engine.
  *
  * Rules are evaluated in descending priority order. The first matching rule wins.
  * A rule matches when:

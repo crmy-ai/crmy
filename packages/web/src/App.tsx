@@ -95,29 +95,18 @@ function AnimatedRoutes() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/contacts" element={<Contacts />} />
           <Route path="/companies" element={<Accounts />} />
-          <Route path="/accounts" element={<Navigate to="/companies" replace />} />
           <Route path="/opportunities" element={<Opportunities />} />
           <Route path="/use-cases" element={<UseCasesPage />} />
           <Route path="/activities" element={<Activities />} />
           <Route path="/handoffs" element={<InboxPage />} />
-          <Route path="/assignments" element={<Navigate to="/handoffs" replace />} />
-          <Route path="/inbox" element={<Navigate to="/handoffs" replace />} />
-          <Route path="/approvals" element={<Navigate to="/handoffs" replace />} />
-          <Route path="/hitl" element={<Navigate to="/handoffs" replace />} />
           <Route path="/context" element={<ContextPage />} />
           <Route path="/automations" element={<AutomationsPage />} />
-          <Route path="/workflows"   element={<Navigate to="/automations?tab=triggers"  replace />} />
-          <Route path="/sequences"   element={<Navigate to="/automations?tab=sequences" replace />} />
           <Route path="/emails" element={<EmailsPage />} />
-          <Route path="/agents" element={<Navigate to="/settings/actors" replace />} />
-          <Route path="/actors" element={<Navigate to="/settings/actors" replace />} />
           <Route path="/contacts/:id/graph" element={<MemoryGraphPage />} />
-          <Route path="/inbound" element={<Navigate to="/emails" replace />} />
           <Route path="/operations" element={<OperationsPage />} />
           <Route path="/audit-log" element={<AuditLogPage />} />
           <Route path="/search" element={<SearchResultsPage />} />
           <Route path="/companies/:id/graph" element={<MemoryGraphPage />} />
-          <Route path="/accounts/:id/graph" element={<MemoryGraphPage />} />
           <Route path="/agent" element={<Agent />} />
           <Route path="/agent/activity" element={<AgentActivity />} />
           <Route path="/settings/*" element={<Settings />} />
@@ -132,8 +121,8 @@ function AppContent() {
   useKeyboardShortcuts();
   const {
     drawerType, zenMode,
-    workflowEditorOpen, workflowEditorId, closeWorkflowEditor,
-    sequenceEditorOpen, sequenceEditorId, closeSequenceEditor,
+    workflowEditorOpen, workflowEditorId, workflowEditorDraft, closeWorkflowEditor,
+    sequenceEditorOpen, sequenceEditorId, sequenceEditorDraft, closeSequenceEditor,
   } = useAppStore();
 
   const drawerTitle = drawerType === 'contact' ? 'Contact Details'
@@ -171,6 +160,7 @@ function AppContent() {
       <WorkflowEditor
         open={workflowEditorOpen}
         workflowId={workflowEditorId}
+        workflow={workflowEditorDraft}
         onClose={closeWorkflowEditor}
         onSaved={closeWorkflowEditor}
       />
@@ -179,6 +169,7 @@ function AppContent() {
       <SequenceEditor
         open={sequenceEditorOpen}
         sequenceId={sequenceEditorId}
+        sequence={sequenceEditorDraft}
         onClose={closeSequenceEditor}
         onSaved={closeSequenceEditor}
       />

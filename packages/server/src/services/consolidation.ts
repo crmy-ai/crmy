@@ -40,7 +40,7 @@ async function synthesiseWithLLM(
   tenantId: string,
   entries: ContextEntry[],
 ): Promise<SynthesisResult> {
-  const systemPrompt = `You are a CRM knowledge synthesiser. Given multiple context entries of the same type about the same record, produce a single authoritative consolidation.
+  const systemPrompt = `You are a CRMy Memory synthesiser. Given multiple context entries of the same type about the same customer record, produce a single authoritative consolidation.
 
 Rules:
 - Prefer the most recent and highest-confidence information when there is conflict

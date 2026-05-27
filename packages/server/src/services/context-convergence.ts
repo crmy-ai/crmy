@@ -165,6 +165,7 @@ export async function checkContextConvergence(
        AND subject_id = $3
        AND context_type = $4
        AND is_current = true
+       AND memory_status = 'active'
      ORDER BY created_at DESC
      LIMIT 25`,
     [tenantId, incoming.subject_type, incoming.subject_id, incoming.context_type],

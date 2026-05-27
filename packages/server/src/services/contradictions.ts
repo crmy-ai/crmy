@@ -288,7 +288,7 @@ async function callContradictionLLM(
   entryA: ContextEntry,
   entryB: ContextEntry,
 ): Promise<{ contradicts: boolean; field: string; evidence: string }> {
-  const systemPrompt = `You are a CRM knowledge consistency checker. Given two context entries about the same CRM record, determine if they state contradictory facts.
+  const systemPrompt = `You are a CRMy Memory consistency checker. Given two context entries about the same customer record, determine if they state contradictory facts.
 
 Respond ONLY with valid JSON in this exact format:
 {"contradicts": true|false, "field": "name of the conflicting field or topic", "evidence": "one sentence explaining what conflicts"}
@@ -325,4 +325,3 @@ Do these entries state contradictory facts about the same topic?`;
     return { contradicts: false, field: '', evidence: '' };
   }
 }
-

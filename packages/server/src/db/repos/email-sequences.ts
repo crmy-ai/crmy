@@ -29,9 +29,6 @@ export interface SequenceRow {
   exit_on_unsubscribe?: boolean;
 }
 
-/** Backward-compat alias */
-export type EmailSequenceRow = SequenceRow;
-
 export interface SequenceEnrollmentRow {
   id: UUID;
   sequence_id: UUID;

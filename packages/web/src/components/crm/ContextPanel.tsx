@@ -206,7 +206,7 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-foreground truncate">{entry.title ?? entry.context_type}</p>
                     <p className="text-xs text-muted-foreground">
-                      Expired {entry.valid_until ? new Date(entry.valid_until).toLocaleDateString() : ''}
+                      Review date {entry.valid_until ? new Date(entry.valid_until).toLocaleDateString() : ''}
                     </p>
                   </div>
                   <button
@@ -248,7 +248,7 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
           {/* Context entries */}
           {displayed.map(entry => {
             const color = TYPE_COLORS[entry.context_type] ?? '#94a3b8';
-            const isStale = entry.valid_until && new Date(entry.valid_until) < new Date();
+            const needsReview = entry.valid_until && new Date(entry.valid_until) < new Date();
             const isSelected = selected.has(entry.id);
             return (
               <div
@@ -257,7 +257,7 @@ export function ContextPanel({ subjectType, subjectId }: ContextPanelProps) {
                 className={`rounded-xl border p-3.5 space-y-2 ${
                   selectMode ? 'cursor-pointer' : ''
                 } ${
-                  isSelected ? 'border-primary/50 bg-primary/5' : isStale ? 'border-warning/30 bg-warning/5' : 'border-border bg-card'
+                  isSelected ? 'border-primary/50 bg-primary/5' : needsReview ? 'border-warning/30 bg-warning/5' : 'border-border bg-card'
                 }`}
               >
                 <div className="flex items-center gap-2 flex-wrap">

@@ -15,11 +15,11 @@ import {
   Zap, Trash2, Loader2, Play, Pause, UserCheck, Bot,
   ChevronDown, ChevronUp, Pencil, Power, PowerOff, X,
   ListOrdered, CheckCircle2, XCircle, AlertCircle, Clock,
-  FlaskConical, ArrowRight,
+  FlaskConical, ArrowRight, Radio, GitBranch, ShieldCheck, DatabaseZap,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
-import { ACTION_TYPES } from '@/lib/workflowConstants';
+import { ACTION_TYPES, TRIGGER_TEMPLATES } from '@/lib/workflowConstants';
 import { STATUS_TONES } from '@/lib/entityColors';
 import { headerDescription } from '@/lib/headerCopy';
 
@@ -51,6 +51,91 @@ const RUN_STATUS: Record<string, { label: string; cls: string; Icon: typeof Chec
   skipped:   { label: 'Skipped',   cls: STATUS_TONES.muted,       Icon: ArrowRight },
 };
 
+function TriggerGuidancePanel() {
+  const lanes = [
+    { title: 'Listen', body: 'React to customer, Memory, handoff, sequence, and system events.', Icon: Radio },
+    { title: 'Decide', body: 'Filter source metadata, changed fields, confidence, and approval state.', Icon: GitBranch },
+    { title: 'Act', body: 'Create tasks, update Memory, enroll sequences, run syncs, or request governed writebacks.', Icon: ShieldCheck },
+  ];
+
+  return (
+    <div className="grid gap-3 md:grid-cols-3 mb-3">
+      {lanes.map(({ title, body, Icon }) => (
+        <div key={title} className="rounded-xl border border-border bg-card px-3 py-3 flex gap-3 items-start">
+          <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
+            <Icon className="w-4 h-4 text-amber-500" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">{title}</p>
+            <p className="text-sm text-muted-foreground leading-snug">{body}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TriggerTemplatesPanel() {
+  const { openWorkflowEditor } = useAppStore();
+  const [hidden, setHidden] = useState(() => localStorage.getItem('crmy_hide_trigger_templates') === 'true');
+
+  const hide = () => {
+    localStorage.setItem('crmy_hide_trigger_templates', 'true');
+    setHidden(true);
+  };
+  const show = () => {
+    localStorage.removeItem('crmy_hide_trigger_templates');
+    setHidden(false);
+  };
+
+  if (hidden) {
+    return (
+      <div className="mb-3 flex justify-end">
+        <button
+          type="button"
+          onClick={show}
+          className="text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          Show trigger templates
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-muted/20 p-3 mb-3">
+      <div className="flex items-center justify-between gap-3 mb-2">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Suggested trigger templates</p>
+          <p className="text-sm text-muted-foreground">Start paused, then add the right system, mapping, and policy details before activation.</p>
+        </div>
+        <button
+          type="button"
+          onClick={hide}
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Hide suggested trigger templates"
+          title="Hide templates"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {TRIGGER_TEMPLATES.map(template => (
+          <button
+            key={template.label}
+            type="button"
+            onClick={() => openWorkflowEditor(null, template.workflow as unknown as Record<string, unknown>)}
+            className="text-left rounded-lg border border-border bg-card px-3 py-2 hover:border-primary/40 hover:bg-muted/30 transition-colors"
+          >
+            <p className="text-sm font-semibold text-foreground leading-snug">{template.label}</p>
+            <p className="text-xs text-muted-foreground mt-1 leading-snug">{template.description}</p>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Action read view ───────────────────────────────────────────────────────────
 
 function ActionReadView({ actions }: { actions: any[] }) {
@@ -66,11 +151,28 @@ function ActionReadView({ actions }: { actions: any[] }) {
       {actions.map((action: any, i: number) => {
         const def = ACTION_TYPES.find(d => d.value === action.type);
         const isHITL = def?.isHITL || action.config?.require_approval === true || action.config?.require_approval === 'true';
+        const isWriteback = action.type === 'request_external_writeback';
+        const isSystem = def?.group === 'Systems';
         const cfg = action.config ?? {};
 
-        // Short preview of config
-        const preview = cfg.title ?? cfg.subject ?? cfg.body ?? cfg.url ?? cfg.tag ?? cfg.field ?? '';
-        const previewStr = preview ? String(preview).slice(0, 80) : '';
+        const previewStr = (() => {
+          if (isWriteback) {
+            const target = cfg.external_object || cfg.object_type || 'system record';
+            const mode = cfg.writeback_mode || cfg.operation || 'mapped_upsert';
+            return `Request ${mode} for ${target}; execution follows policy and approvals.`;
+          }
+          if (action.type === 'run_system_sync') {
+            return `Run ${cfg.mode || 'incremental'} sync for the selected system.`;
+          }
+          if (action.type === 'create_sync_conflict_review') {
+            return cfg.title || 'Route a sync conflict to Handoffs.';
+          }
+          if (action.type === 'create_context_from_external_change') {
+            return cfg.body || 'Create Signal/Memory context from an external change.';
+          }
+          const preview = cfg.title ?? cfg.subject ?? cfg.body ?? cfg.url ?? cfg.tag ?? cfg.field ?? '';
+          return preview ? String(preview).slice(0, 100) : '';
+        })();
 
         return (
           <div key={i} className="flex gap-3 items-start">
@@ -92,6 +194,21 @@ function ActionReadView({ actions }: { actions: any[] }) {
                 {isHITL && (
                   <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-semibold">
                     Human review
+                  </span>
+                )}
+                {isWriteback && (
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-600 dark:text-violet-300 border border-violet-500/20 font-semibold">
+                    System writeback
+                  </span>
+                )}
+                {isSystem && !isWriteback && (
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-sky-500/10 text-sky-600 dark:text-sky-300 border border-sky-500/20 font-semibold">
+                    Systems
+                  </span>
+                )}
+                {def?.group && !isSystem && (
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border">
+                    {def.group}
                   </span>
                 )}
               </div>
@@ -185,7 +302,7 @@ function RunsTab({ workflowId }: { workflowId: string }) {
                   {run.trigger_event ?? 'manual'}
                 </p>
                 {run.objective && (
-                  <p className="text-xs text-orange-500 truncate font-medium">"{run.objective}"</p>
+                  <p className="text-xs text-amber-500 truncate font-medium">"{run.objective}"</p>
                 )}
                 {run.error && (
                   <p className="text-destructive truncate">{run.error}</p>
@@ -363,6 +480,7 @@ function TriggerRow({ wf }: { wf: any }) {
     const def = ACTION_TYPES.find(d => d.value === a.type);
     return def?.isHITL || a.config?.require_approval === true || a.config?.require_approval === 'true';
   });
+  const hasWriteback = Array.isArray(wf.actions) && wf.actions.some((a: any) => a.type === 'request_external_writeback');
 
   const handleToggleActive = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -409,6 +527,11 @@ function TriggerRow({ wf }: { wf: any }) {
                 <UserCheck className="w-2.5 h-2.5 mr-0.5" />Human
               </Badge>
             )}
+            {hasWriteback && (
+              <Badge className="text-xs px-1.5 bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/30 hover:bg-violet-500/15 shrink-0">
+                <DatabaseZap className="w-2.5 h-2.5 mr-0.5" />System writeback
+              </Badge>
+            )}
             {isManual && (
               <Badge variant="outline" className="text-xs px-1.5 text-blue-600 dark:text-blue-400 border-blue-500/30 shrink-0">
                 On demand
@@ -417,6 +540,9 @@ function TriggerRow({ wf }: { wf: any }) {
           </div>
           <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
             <span className="font-mono">{wf.trigger_event}</span>
+            {wf.description && (
+              <span className="truncate max-w-[360px]">{wf.description}</span>
+            )}
             {Array.isArray(wf.actions) && wf.actions.length > 0 && (
               <span className="flex items-center gap-1">
                 {hasHITL
@@ -615,7 +741,7 @@ export default function WorkflowsPage({ embedded }: { embedded?: boolean } = {})
           title="Triggers"
           icon={Zap}
           iconClassName="text-amber-500"
-          description={headerDescription('Run actions when events happen', filtered.length, 'trigger')}
+          description={headerDescription('React to events and coordinate governed actions', filtered.length, 'trigger')}
         />
       )}
 
@@ -636,6 +762,8 @@ export default function WorkflowsPage({ embedded }: { embedded?: boolean } = {})
       />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6 pt-2">
+        <TriggerGuidancePanel />
+        <TriggerTemplatesPanel />
         {isLoading ? (
           <div className="space-y-3">
             {[...Array(4)].map((_, i) => (
@@ -653,11 +781,11 @@ export default function WorkflowsPage({ embedded }: { embedded?: boolean } = {})
             </div>
             <h2 className="text-lg font-display font-semibold text-foreground mb-1">No triggers yet</h2>
             <p className="text-sm text-muted-foreground max-w-sm mb-4">
-              Create your first trigger to automate customer-context actions when events occur.
+              Actors use triggers to route approvals, create tasks, update Memory, enroll contacts, run syncs, and request governed writebacks.
             </p>
             <button
               onClick={() => openWorkflowEditor(null)}
-              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+              className="px-4 py-2 rounded-lg bg-yellow-400 text-slate-950 text-sm font-semibold hover:bg-yellow-300 transition-colors"
             >
               <span className="flex items-center gap-1.5"><Zap className="w-4 h-4" /> Create your first trigger</span>
             </button>

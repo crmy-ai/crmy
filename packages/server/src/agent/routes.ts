@@ -312,7 +312,7 @@ export function agentRouter(db: DbPool): Router {
       const update: Record<string, unknown> = {};
 
       // Pick allowed fields
-      const boolFields = ['enabled', 'can_write_objects', 'can_log_activities', 'can_create_assignments', 'auto_extract_context'];
+      const boolFields = ['enabled', 'can_write_objects', 'can_log_activities', 'can_create_assignments', 'auto_extract_context', 'auto_promote_signals'];
       const strFields = ['provider', 'base_url', 'model', 'system_prompt'];
       const intFields = ['max_tokens_per_turn', 'history_retention_days'];
 
@@ -324,6 +324,10 @@ export function agentRouter(db: DbPool): Router {
       }
       for (const f of intFields) {
         if (typeof body[f] === 'number') update[f] = body[f];
+      }
+      if (typeof body.signal_auto_promote_threshold === 'number') {
+        const threshold = Math.min(0.98, Math.max(0.7, body.signal_auto_promote_threshold));
+        update.signal_auto_promote_threshold = Number(threshold.toFixed(2));
       }
 
       // Encrypt API key if a new one was provided (non-empty string)

@@ -15,9 +15,9 @@ export async function createContextEntry(
   const result = await db.query(
     `INSERT INTO context_entries (tenant_id, subject_type, subject_id,
        context_type, authored_by, title, body, structured_data,
-       confidence, tags, source, source_ref, source_activity_id, valid_until,
+       confidence, memory_status, evidence, tags, source, source_ref, source_activity_id, valid_until,
        parent_id, visibility, mentions, pinned)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
      RETURNING *`,
     [
       tenantId,
@@ -29,6 +29,8 @@ export async function createContextEntry(
       data.body,
       JSON.stringify(data.structured_data ?? {}),
       data.confidence ?? null,
+      data.memory_status ?? 'active',
+      JSON.stringify(data.evidence ?? []),
       JSON.stringify(data.tags ?? []),
       data.source ?? null,
       data.source_ref ?? null,
@@ -52,7 +54,7 @@ export async function getContextEntry(db: DbPool, tenantId: UUID, id: UUID): Pro
 }
 
 /**
- * Get all current context for a given CRM object.
+ * Get all Current Memory for a given customer object.
  */
 export async function getContextForSubject(
   db: DbPool,
@@ -63,6 +65,7 @@ export async function getContextForSubject(
     context_type?: string;
     tag?: string;
     current_only?: boolean;
+    memory_status?: 'signal' | 'active' | 'rejected' | 'superseded';
     limit?: number;
     source_activity_id?: UUID;
   },
@@ -77,6 +80,14 @@ export async function getContextForSubject(
 
   if (filters?.current_only !== false) {
     conditions.push('is_current = true');
+  }
+
+  if (filters?.memory_status) {
+    conditions.push(`memory_status = $${idx}`);
+    params.push(filters.memory_status);
+    idx++;
+  } else {
+    conditions.push(`memory_status = 'active'`);
   }
 
   if (filters?.context_type) {
@@ -122,6 +133,7 @@ export async function getContextByActivityId(
   const result = await db.query(
     `SELECT * FROM context_entries
      WHERE tenant_id = $1 AND source_activity_id = $2 AND is_current = true
+       AND memory_status IN ('signal', 'active')
      ORDER BY created_at ASC`,
     [tenantId, activityId],
   );
@@ -151,6 +163,7 @@ export async function diffContextEntries(
     `SELECT * FROM context_entries
      WHERE tenant_id = $1 AND subject_type = $2 AND subject_id = $3
        AND created_at >= $4 AND is_current = true
+       AND memory_status = 'active'
        AND supersedes_id IS NULL
      ORDER BY created_at DESC`,
     base,
@@ -172,6 +185,7 @@ export async function diffContextEntries(
      WHERE tenant_id = $1 AND subject_type = $2 AND subject_id = $3
        AND valid_until >= $4 AND valid_until < now()
        AND is_current = true
+       AND memory_status = 'active'
      ORDER BY valid_until ASC`,
     base,
   );
@@ -206,6 +220,7 @@ export async function fullTextSearch(
     context_type?: string;
     tag?: string;
     current_only?: boolean;
+    memory_status?: 'signal' | 'active' | 'rejected' | 'superseded';
     limit?: number;
     structured_data_filter?: Record<string, unknown>;
   },
@@ -219,6 +234,13 @@ export async function fullTextSearch(
 
   if (filters?.current_only !== false) {
     conditions.push('c.is_current = true');
+  }
+  if (filters?.memory_status) {
+    conditions.push(`c.memory_status = $${idx}`);
+    params.push(filters.memory_status);
+    idx++;
+  } else {
+    conditions.push(`c.memory_status = 'active'`);
   }
 
   if (filters?.subject_type) {
@@ -264,7 +286,7 @@ export async function fullTextSearch(
 }
 
 /**
- * Get all current context for a list of CRM subjects in one query.
+ * Get all Current Memory for a list of customer subjects in one query.
  * Used by the briefing service when context_radius is 'adjacent' or 'account_wide'.
  * Returns entries tagged with their origin subject_type and subject_id (already on ContextEntry).
  */
@@ -272,7 +294,7 @@ export async function getContextForSubjectList(
   db: DbPool,
   tenantId: UUID,
   subjects: Array<{ subject_type: string; subject_id: UUID }>,
-  filters?: { current_only?: boolean; limit?: number },
+  filters?: { current_only?: boolean; memory_status?: 'signal' | 'active' | 'rejected' | 'superseded'; limit?: number },
 ): Promise<ContextEntry[]> {
   if (subjects.length === 0) return [];
 
@@ -286,6 +308,13 @@ export async function getContextForSubjectList(
 
   if (filters?.current_only !== false) {
     conditions.push('is_current = true');
+  }
+  if (filters?.memory_status) {
+    conditions.push(`memory_status = $${idx}`);
+    params.push(filters.memory_status);
+    idx++;
+  } else {
+    conditions.push(`memory_status = 'active'`);
   }
 
   const lim = filters?.limit ?? 500;
@@ -330,7 +359,7 @@ export async function supersedeContextEntry(
     if (!oldEntry.is_current) throw new Error('Context entry has already been superseded');
 
     await tx.query(
-      `UPDATE context_entries SET is_current = false, updated_at = now()
+      `UPDATE context_entries SET is_current = false, memory_status = 'superseded', updated_at = now()
        WHERE id = $1 AND tenant_id = $2`,
       [existingId, tenantId],
     );
@@ -338,9 +367,9 @@ export async function supersedeContextEntry(
     const result = await tx.query(
       `INSERT INTO context_entries (tenant_id, subject_type, subject_id,
          context_type, authored_by, title, body, structured_data,
-         confidence, tags, is_current, supersedes_id, source, source_ref,
+         confidence, memory_status, evidence, tags, is_current, supersedes_id, source, source_ref,
          source_activity_id, valid_until, visibility, mentions, pinned)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,$11,$12,$13,$14,$15,$16,$17,$18)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'active',$10,$11,true,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING *`,
       [
         tenantId,
@@ -352,6 +381,7 @@ export async function supersedeContextEntry(
         newData.body,
         JSON.stringify(newData.structured_data ?? oldEntry.structured_data),
         newData.confidence ?? oldEntry.confidence,
+        JSON.stringify(oldEntry.evidence ?? []),
         JSON.stringify(newData.tags ?? oldEntry.tags ?? []),
         existingId,
         oldEntry.source,
@@ -402,7 +432,80 @@ export async function reviewContextEntry(
 }
 
 /**
- * List stale context entries (valid_until has passed, still current).
+ * Promote an inferred signal into confirmed operational memory.
+ */
+export async function promoteSignal(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  actorId: UUID,
+  patch?: {
+    body?: string;
+    title?: string;
+    structured_data?: Record<string, unknown>;
+    confidence?: number;
+    tags?: string[];
+    evidence?: Record<string, unknown>[];
+  },
+): Promise<ContextEntry | null> {
+  const result = await db.query(
+    `UPDATE context_entries
+     SET memory_status = 'active',
+         body = COALESCE($4, body),
+         title = COALESCE($5, title),
+         structured_data = COALESCE($6::jsonb, structured_data),
+         confidence = COALESCE($7, confidence),
+         tags = COALESCE($8::jsonb, tags),
+         evidence = COALESCE($9::jsonb, evidence),
+         promoted_at = now(),
+         promoted_by = $3,
+         rejected_at = NULL,
+         rejected_by = NULL,
+         rejection_reason = NULL,
+         updated_at = now()
+     WHERE id = $1 AND tenant_id = $2 AND memory_status = 'signal' AND is_current = true
+     RETURNING *`,
+    [
+      id,
+      tenantId,
+      actorId,
+      patch?.body ?? null,
+      patch?.title ?? null,
+      patch?.structured_data ? JSON.stringify(patch.structured_data) : null,
+      patch?.confidence ?? null,
+      patch?.tags ? JSON.stringify(patch.tags) : null,
+      patch?.evidence ? JSON.stringify(patch.evidence) : null,
+    ],
+  );
+  return (result.rows[0] as ContextEntry) ?? null;
+}
+
+/**
+ * Reject a signal while preserving its evidence for audit/review.
+ */
+export async function rejectSignal(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  actorId: UUID,
+  reason?: string,
+): Promise<ContextEntry | null> {
+  const result = await db.query(
+    `UPDATE context_entries
+     SET memory_status = 'rejected',
+         rejected_at = now(),
+         rejected_by = $3,
+         rejection_reason = $4,
+         updated_at = now()
+     WHERE id = $1 AND tenant_id = $2 AND memory_status = 'signal'
+     RETURNING *`,
+    [id, tenantId, actorId, reason ?? null],
+  );
+  return (result.rows[0] as ContextEntry) ?? null;
+}
+
+/**
+ * List Current Memory entries that have reached their review date.
  */
 export async function listStaleEntries(
   db: DbPool,
@@ -413,6 +516,7 @@ export async function listStaleEntries(
     'tenant_id = $1',
     'valid_until < now()',
     'is_current = TRUE',
+    "memory_status = 'active'",
   ];
   const params: unknown[] = [tenantId];
   let idx = 2;
@@ -450,6 +554,7 @@ export async function searchContextEntries(
     context_type?: string;
     authored_by?: UUID;
     is_current?: boolean;
+    memory_status?: 'signal' | 'active' | 'rejected' | 'superseded';
     tag?: string;
     query?: string;
     structured_data_filter?: Record<string, unknown>;
@@ -487,6 +592,13 @@ export async function searchContextEntries(
     conditions.push(`c.is_current = $${idx}`);
     params.push(filters.is_current);
     idx++;
+  }
+  if (filters.memory_status) {
+    conditions.push(`c.memory_status = $${idx}`);
+    params.push(filters.memory_status);
+    idx++;
+  } else {
+    conditions.push(`c.memory_status = 'active'`);
   }
   if (filters.tag) {
     conditions.push(`c.tags @> $${idx}::jsonb`);
@@ -587,6 +699,7 @@ export async function semanticSearch(
     context_type?: string;
     tag?: string;
     current_only?: boolean;
+    memory_status?: 'signal' | 'active' | 'rejected' | 'superseded';
     limit?: number;
     structured_data_filter?: Record<string, unknown>;
   },
@@ -600,6 +713,12 @@ export async function semanticSearch(
 
   if (filters?.current_only !== false) {
     conditions.push('c.is_current = true');
+  }
+  if (filters?.memory_status) {
+    conditions.push(`c.memory_status = $${idx++}`);
+    params.push(filters.memory_status);
+  } else {
+    conditions.push(`c.memory_status = 'active'`);
   }
   if (filters?.subject_type) {
     conditions.push(`c.subject_type = $${idx++}`);

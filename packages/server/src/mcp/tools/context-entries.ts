@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import {
   contextEntryCreate, contextEntryGet, contextEntrySearch, contextEntrySupersede,
   contextSearch, contextReview, contextStaleList, briefingGet,
   contextDiff, contextIngest, contextSemanticSearch, contextEmbedBackfill,
+  contextSignalPromote, contextSignalReject,
 } from '@crmy/shared';
-import { entityResolve } from '../../services/entity-resolve.js';
+import { detectRawContextSubjects } from '../../services/raw-context-subjects.js';
 import { loadEmbeddingConfig, embedText } from '../../agent/providers/embeddings.js';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext, SubjectType, UUID } from '@crmy/shared';
@@ -15,6 +17,8 @@ import * as contextRepo from '../../db/repos/context-entries.js';
 import * as activityRepo from '../../db/repos/activities.js';
 import * as contextTypeRepo from '../../db/repos/context-type-registry.js';
 import * as outboxRepo from '../../db/repos/context-outbox.js';
+import * as rawContextRepo from '../../db/repos/raw-context-sources.js';
+import * as signalGroupRepo from '../../db/repos/signal-groups.js';
 import * as governorLimits from '../../db/repos/governor-limits.js';
 import { assembleBriefing, formatBriefingText } from '../../services/briefing.js';
 import { processStaleEntriesForTenant } from '../../services/staleness.js';
@@ -25,6 +29,8 @@ import { detectContradictions } from '../../services/contradictions.js';
 import { consolidateContextEntries } from '../../services/consolidation.js';
 import { checkContextConvergence } from '../../services/context-convergence.js';
 import { createContradictionReviewAssignments } from '../../services/context-review-assignments.js';
+import { assertActionPolicyAllowsMutation, evaluateActionPolicy } from '../../services/action-policy.js';
+import { attachSignalToGroup, dismissSignalGroup, promoteSignalGroup } from '../../services/signal-groups.js';
 import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
@@ -59,12 +65,45 @@ function validateAgainstSchema(
   return warnings;
 }
 
+function processingNextAction(input: {
+  status?: string;
+  memory_created?: number;
+  signals_created?: number;
+  skipped?: number;
+}): string {
+  if (input.status === 'failed') return 'Review the failure reason, fix the source or setup issue, then ingest again.';
+  if (input.signals_created && input.signals_created > 0) return 'Review Signals and promote trusted items to Memory.';
+  if (input.memory_created && input.memory_created > 0) return 'View Memory or ask for a briefing.';
+  if (input.skipped && input.skipped > 0) return 'Add more customer-specific detail or resolve the subject, then ingest again.';
+  return 'No action needed.';
+}
+
+function processingReceipt(source: rawContextRepo.RawContextSource | null, fallback: {
+  memory_created: number;
+  signals_created: number;
+  skipped: number;
+}) {
+  const receipt = {
+    raw_context_source_id: source?.id,
+    status: source?.status ?? 'processed',
+    stage: source?.stage ?? 'extracted',
+    memory_created: source?.memory_created ?? fallback.memory_created,
+    signals_created: source?.signals_created ?? fallback.signals_created,
+    skipped: source?.skipped ?? fallback.skipped,
+    failure_reason: source?.failure_reason ?? undefined,
+  };
+  return {
+    ...receipt,
+    next_action: processingNextAction(receipt),
+  };
+}
+
 export function contextEntryTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'context_add',
       tier: 'core',
-      description: 'Store a typed knowledge entry about a contact, account, opportunity, or use case — this is how agents write memory. Before creating a new current entry, CRMy checks existing current context on the same subject and type; likely duplicates, updates, or contradictions are rejected with suggested actions so agents can use context_supersede or request review instead of creating noisy memory. Set context_type to the taxonomy key: objection, preference, competitive_intel, relationship_map, meeting_notes, research, summary, decision, sentiment_analysis, agent_reasoning, or transcript. Set confidence (0.0–1.0) for agent-authored entries: 1.0 for confirmed facts, 0.6–0.8 for inferences, below 0.5 for hypotheses. Set valid_until whenever the information has a shelf life (competitive pricing, org chart details, budget cycles). Pass allow_similar only when the new entry is intentionally separate from the suggested existing entries. Use context_type "note" for threaded comments — supports parent_id for replies, visibility ("internal"/"external"), @mentions, and pinned flag.',
+      description: 'Advanced direct write for Current Memory or an already-reviewed Signal. Do not use this for raw transcripts, emails, notes, research, or other messy customer input; use context_ingest_auto or context_ingest so CRMy records Raw Context, extracts evidence-backed Signals, and promotes high-confidence Memory. Use memory_status="active" only for Current Memory that agents can rely on. Use memory_status="signal" only when you already have evidence and the entry needs review before writeback, forecast influence, task assignment, or customer engagement. Before creating Current Memory, CRMy checks existing Current Memory on the same subject and type; likely duplicates, updates, or contradictions are rejected with suggested actions so agents can use context_supersede or request review instead of creating noisy memory. Set confidence (0.0–1.0), evidence for signals, and valid_until whenever the information has a shelf life.',
       inputSchema: contextEntryCreate,
       handler: async (input: z.infer<typeof contextEntryCreate>, actor: ActorContext) => {
         return runIdempotent(db, {
@@ -86,7 +125,22 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           }
         }
 
-        const convergence = await checkContextConvergence(db, actor.tenant_id, {
+        if (input.memory_status === 'signal' && (!input.evidence || input.evidence.length === 0)) {
+          throw validationError('Signals require evidence. Add at least one evidence item with a source, snippet, or reference so reviewers can decide whether to promote it to Memory.');
+        }
+
+        if (input.memory_status === 'rejected' || input.memory_status === 'superseded') {
+          throw validationError('Create Current Memory or Signals only. Use context_signal_reject or context_supersede to move entries into rejected or superseded lifecycle states.');
+        }
+
+        const lifecycle_warnings: string[] = [];
+        if (input.memory_status === 'active' && input.confidence !== undefined && input.confidence < 0.7) {
+          lifecycle_warnings.push('Low-confidence operational Memory should usually be created as a Signal first, then promoted after review or confirmation.');
+        }
+
+        const convergence = input.memory_status === 'signal'
+          ? { suggested_action: 'add_new' as const, should_block: false, candidates: [] }
+          : await checkContextConvergence(db, actor.tenant_id, {
           subject_type: input.subject_type,
           subject_id: input.subject_id,
           context_type: input.context_type,
@@ -98,7 +152,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         if (!input.allow_similar && convergence.should_block) {
           throw new CrmyError(
             'CONFLICT',
-            `Similar or conflicting current context already exists; suggested action: ${convergence.suggested_action}`,
+            `Similar or conflicting Current Memory already exists; suggested action: ${convergence.suggested_action}`,
             409,
             {
               suggested_action: convergence.suggested_action,
@@ -109,7 +163,38 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
 
         const entry = await contextRepo.createContextEntry(db, actor.tenant_id, {
           ...input,
+          source: input.source ?? 'mcp',
+          source_ref: input.source_ref ?? `actor:${actor.actor_id}`,
           authored_by: actor.actor_id,
+        });
+
+        const signal_group_result = entry.memory_status === 'signal'
+          ? await attachSignalToGroup(db, actor.tenant_id, entry, {
+            threshold: 0.85,
+            autoPromote: false,
+            actorId: actor.actor_id,
+          })
+          : undefined;
+
+        const directSourceType = input.source ?? (actor.actor_type === 'agent' ? 'mcp' : 'context_api');
+        const directSourceRef = input.source_ref ?? entry.id;
+        await rawContextRepo.upsertRawContextSource(db, actor.tenant_id, {
+          source_type: directSourceType,
+          source_ref: directSourceRef,
+          source_label: input.title ?? input.context_type,
+          subject_type: input.subject_type,
+          subject_id: input.subject_id,
+          actor_id: actor.actor_id,
+          status: entry.memory_status === 'signal' ? 'needs_review' : 'processed',
+          stage: entry.memory_status === 'signal' ? 'review_signals' : 'confirmed_memory',
+          raw_excerpt: input.body.slice(0, 1000),
+          signals_created: entry.memory_status === 'signal' ? 1 : 0,
+          memory_created: entry.memory_status === 'active' ? 1 : 0,
+          metadata: {
+            context_entry_id: entry.id,
+            context_type: entry.context_type,
+            memory_status: entry.memory_status,
+          },
         });
 
         // Fire-and-forget embedding — never delays context_add; failures are isolated.
@@ -136,9 +221,10 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
 
         // Soft-validate structured_data against the context type's JSON Schema
         const schema = await contextTypeRepo.getContextTypeSchema(db, actor.tenant_id, input.context_type);
-        const validation_warnings = schema && input.structured_data
+        const schema_warnings = schema && input.structured_data
           ? validateAgainstSchema(input.structured_data as Record<string, unknown>, schema)
           : [];
+        const validation_warnings = [...lifecycle_warnings, ...schema_warnings];
         return {
           context_entry: entry,
           event_id,
@@ -153,6 +239,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             candidates: convergence.candidates,
             bypassed: input.allow_similar && convergence.candidates.length > 0,
           },
+          ...(signal_group_result ? { signal_group: signal_group_result.signal_group } : {}),
           ...(validation_warnings.length > 0 ? { validation_warnings } : {}),
         };
         });
@@ -172,17 +259,363 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_list',
       tier: 'core',
-      description: 'List context entries attached to a customer record with flexible filters. Use subject_type and subject_id to scope to a specific record, context_type to filter by knowledge category (e.g. "objection", "preference"), authored_by to see what a specific actor has contributed, and is_current to exclude superseded entries. The structured_data_filter parameter supports typed JSONB queries for domain-specific searches like finding all open objections or critical deal risks. Returns entries sorted by recency.',
+      description: 'List Current Memory and Signals attached to a customer record with flexible filters. Use memory_status="active" for Current Memory and memory_status="signal" for reviewable Signals. Use subject_type and subject_id to scope to a specific record, context_type to filter by category (e.g. "objection", "preference"), authored_by to see what a specific actor contributed, and is_current to exclude superseded entries. The structured_data_filter parameter supports typed JSONB queries for domain-specific searches like finding all open objections or critical deal risks. Returns entries sorted by recency.',
       inputSchema: contextEntrySearch,
       handler: async (input: z.infer<typeof contextEntrySearch>, actor: ActorContext) => {
         const result = await contextRepo.searchContextEntries(db, actor.tenant_id, {
           ...input,
+          memory_status: input.memory_status,
           structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
           visibility: input.visibility,
           pinned: input.pinned,
           limit: input.limit ?? 20,
         });
         return { context_entries: result.data, next_cursor: result.next_cursor, total: result.total };
+      },
+    },
+    {
+      name: 'context_raw_source_list',
+      tier: 'core',
+      description: 'List Raw Context processing records. Use this to see where context came from, whether source material was processed, how many Signals or Memory entries it produced, and what failed or needs review. This is the best tool for agents and operators to inspect ingestion receipts before deciding whether to retry, review Signals, or trust Memory.',
+      inputSchema: z.object({
+        source_type: z.string().optional().describe('Filter by source type such as activity, add_context, email_inbound, mcp, context_api, crm_sync, or warehouse_sync'),
+        status: z.enum(['pending', 'processing', 'processed', 'needs_review', 'failed', 'skipped']).optional(),
+        subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case']).optional(),
+        subject_id: z.string().uuid().optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+        cursor: z.string().optional(),
+      }),
+      handler: async (
+        input: {
+          source_type?: string;
+          status?: rawContextRepo.RawContextSourceStatus;
+          subject_type?: SubjectType;
+          subject_id?: string;
+          limit: number;
+          cursor?: string;
+        },
+        actor: ActorContext,
+      ) => {
+        const result = await rawContextRepo.listRawContextSources(db, actor.tenant_id, {
+          source_type: input.source_type,
+          status: input.status,
+          subject_type: input.subject_type,
+          subject_id: input.subject_id,
+          limit: input.limit ?? 50,
+          cursor: input.cursor,
+        });
+        return { raw_context_sources: result.data, next_cursor: result.next_cursor, total: result.total };
+      },
+    },
+    {
+      name: 'context_raw_source_get',
+      tier: 'core',
+      description: 'Get a Raw Context processing record by ID, including source label, source type, status, processing stage, excerpt, counts, failure reason, and metadata. Use this when a processing receipt or Raw Context list item needs inspection.',
+      inputSchema: z.object({
+        id: z.string().uuid().describe('Raw Context source ID'),
+      }),
+      handler: async (input: { id: string }, actor: ActorContext) => {
+        const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.id);
+        if (!source) throw notFound('RawContextSource', input.id);
+        return { raw_context_source: source };
+      },
+    },
+    {
+      name: 'context_raw_source_reprocess',
+      tier: 'core',
+      description: 'Retry a failed or skipped Raw Context processing record. If the source still points at an activity, CRMy reruns extraction on that activity. If only an excerpt is available, CRMy reruns automatic subject matching and extraction from the stored excerpt. Use this before asking a user to paste the same source again.',
+      inputSchema: z.object({
+        id: z.string().uuid().describe('Raw Context source ID to reprocess'),
+      }),
+      handler: async (input: { id: string }, actor: ActorContext) => {
+        const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.id);
+        if (!source) throw notFound('RawContextSource', input.id);
+
+        await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
+          status: 'processing',
+          stage: 'reprocess',
+          failure_reason: null,
+          metadata: {
+            reprocess_requested_at: new Date().toISOString(),
+            reprocess_requested_by: actor.actor_id,
+          },
+        });
+
+        const sourceRefLooksLikeActivity = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(source.source_ref);
+        const canRetryActivity = sourceRefLooksLikeActivity
+          && (source.source_type === 'activity' || source.source_type === 'add_context' || source.source_type.includes('email'));
+
+        try {
+          let result: unknown;
+          if (canRetryActivity) {
+            const outcome = await extractContextFromActivity(db, actor.tenant_id, source.source_ref);
+            result = {
+              ...outcome,
+              mutation: mutationReceipt(actor, {
+                objectType: 'activity',
+                objectId: source.source_ref,
+                sideEffects: ['context_extraction:completed'],
+              }),
+            };
+          } else if (source.raw_excerpt?.trim()) {
+            const detected = await detectRawContextSubjects(db, actor.tenant_id, source.raw_excerpt, {
+              limit: 20,
+              confidenceThreshold: 0.6,
+              actorId: actor.actor_id,
+            });
+            if (detected.subjects.length === 0) {
+              await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
+                status: 'skipped',
+                stage: 'reprocess',
+                skipped: Math.max(1, source.skipped),
+                detected_subjects: detected.skipped.map(item => ({ name: item.name, status: 'skipped', reason: item.reason })),
+                failure_reason: 'No customer records could be confidently identified in the stored excerpt.',
+              });
+              result = { extracted_count: 0, memory_created: 0, signals_created: 0, skipped: 1 };
+            } else {
+              let extractedCount = 0;
+              let memoryCreated = 0;
+              let signalsCreated = 0;
+              let skippedCount = 0;
+              for (const subject of detected.subjects) {
+                const activity = await activityRepo.createActivity(db, actor.tenant_id, {
+                  type: 'note',
+                  subject: source.source_label ?? 'Reprocessed Raw Context',
+                  body: source.raw_excerpt,
+                  subject_type: subject.type as 'contact' | 'account',
+                  subject_id: subject.id,
+                  performed_by: actor.actor_type === 'agent' ? actor.actor_id : undefined,
+                  source_agent: actor.actor_type === 'agent' ? 'context_raw_source_reprocess' : undefined,
+                  occurred_at: new Date().toISOString(),
+                });
+                const outcome = await extractContextFromActivity(db, actor.tenant_id, activity.id);
+                extractedCount += outcome.extracted_count;
+                memoryCreated += outcome.memory_created;
+                signalsCreated += outcome.signals_created;
+                skippedCount += outcome.skipped;
+              }
+              await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
+                status: signalsCreated > 0 ? 'needs_review' : extractedCount > 0 ? 'processed' : 'skipped',
+                stage: 'reprocessed',
+                memory_created: memoryCreated,
+                signals_created: signalsCreated,
+                skipped: skippedCount,
+                detected_subjects: detected.subjects.map(subject => ({
+                  subject_type: subject.type,
+                  subject_id: subject.id,
+                  name: subject.name,
+                  confidence: subject.confidence,
+                })),
+                failure_reason: extractedCount > 0 ? null : 'Reprocess completed but no extractable context was found.',
+              });
+              result = { extracted_count: extractedCount, memory_created: memoryCreated, signals_created: signalsCreated, skipped: skippedCount };
+            }
+          } else {
+            throw validationError('This Raw Context source cannot be reprocessed because CRMy does not have the original activity or source excerpt.');
+          }
+
+          const updated = await rawContextRepo.getRawContextSource(db, actor.tenant_id, source.id);
+          return { raw_context_source: updated, result };
+        } catch (err) {
+          await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
+            status: 'failed',
+            stage: 'reprocess',
+            failure_reason: err instanceof Error ? err.message : 'Reprocess failed.',
+          });
+          throw err;
+        }
+      },
+    },
+    {
+      name: 'context_signal_promote',
+      tier: 'core',
+      description: 'Promote an evidence-backed Signal into Current Memory. Use this only after human review, explicit user confirmation, or an Action Policy that allows the Signal to become Memory. Promotion makes the entry available to briefing_get and normal memory search.',
+      inputSchema: contextSignalPromote,
+      handler: async (input: z.infer<typeof contextSignalPromote>, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_signal_promote',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
+          const before = await contextRepo.getContextEntry(db, actor.tenant_id, input.id);
+          if (!before) throw notFound('Signal', input.id);
+          if (before.memory_status !== 'signal' || before.is_current === false) {
+            throw validationError('Only current Signals can be promoted to Current Memory.');
+          }
+          const policy = evaluateActionPolicy({
+            action_type: 'context.signal_promote',
+            object_type: before.subject_type,
+            actor,
+            confidence: input.confidence ?? before.confidence ?? null,
+            evidence: before.evidence ?? [],
+            memory_status: 'signal',
+          });
+          assertActionPolicyAllowsMutation(policy);
+          const entry = await contextRepo.promoteSignal(db, actor.tenant_id, input.id, actor.actor_id, {
+            body: input.body,
+            title: input.title,
+            structured_data: input.structured_data as Record<string, unknown> | undefined,
+            confidence: input.confidence,
+            tags: input.tags,
+          });
+          if (!entry) throw notFound('Signal', input.id);
+          const event_id = await emitEvent(db, {
+            tenantId: actor.tenant_id,
+            eventType: 'context.signal_promoted',
+            actorId: actor.actor_id,
+            actorType: actor.actor_type,
+            objectType: 'context_entry',
+            objectId: entry.id,
+            beforeData: before,
+            afterData: entry,
+            metadata: { action_policy: policy },
+          });
+          outboxRepo.insertJob(db, actor.tenant_id, 'context_entry', entry.id, entry as unknown as Record<string, unknown>)
+            .catch((err: unknown) => console.warn(`[outbox] context_signal_promote enqueue ${entry.id}: ${(err as Error).message}`));
+          return {
+            context_entry: entry,
+            event_id,
+            mutation: mutationReceipt(actor, {
+              objectType: 'context_entry',
+              objectId: entry.id,
+              eventId: event_id,
+              sideEffects: ['search_index:queued'],
+            }),
+          };
+        });
+      },
+    },
+    {
+      name: 'context_signal_reject',
+      tier: 'core',
+      description: 'Reject an unconfirmed signal while preserving its evidence for audit. Rejected signals are excluded from briefing_get and normal memory search.',
+      inputSchema: contextSignalReject,
+      handler: async (input: z.infer<typeof contextSignalReject>, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_signal_reject',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
+          const entry = await contextRepo.rejectSignal(db, actor.tenant_id, input.id, actor.actor_id, input.reason);
+          if (!entry) throw notFound('Signal', input.id);
+          const event_id = await emitEvent(db, {
+            tenantId: actor.tenant_id,
+            eventType: 'context.signal_rejected',
+            actorId: actor.actor_id,
+            actorType: actor.actor_type,
+            objectType: 'context_entry',
+            objectId: entry.id,
+            afterData: entry,
+          });
+          return {
+            context_entry: entry,
+            event_id,
+            mutation: mutationReceipt(actor, {
+              objectType: 'context_entry',
+              objectId: entry.id,
+              eventId: event_id,
+            }),
+          };
+        });
+      },
+    },
+    {
+      name: 'context_signal_group_list',
+      tier: 'core',
+      description: 'List corroborated Signals: evidence-backed inferred claims created from one or more source Signals. Use attention_only=true to find Signals that need promotion, dismissal, or review before agents use the claim operationally.',
+      inputSchema: z.object({
+        status: z.enum(['gathering', 'ready', 'promoted', 'blocked', 'dismissed', 'conflicting']).optional(),
+        subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case']).optional(),
+        subject_id: z.string().uuid().optional(),
+        context_type: z.string().optional(),
+        attention_only: z.boolean().default(false),
+        limit: z.number().int().min(1).max(100).default(20),
+        cursor: z.string().optional(),
+      }),
+      handler: async (input: {
+        status?: signalGroupRepo.SignalGroupStatus;
+        subject_type?: string;
+        subject_id?: string;
+        context_type?: string;
+        attention_only: boolean;
+        limit: number;
+        cursor?: string;
+      }, actor: ActorContext) => {
+        const result = await signalGroupRepo.listSignalGroups(db, actor.tenant_id, input);
+        return { signal_groups: result.data, data: result.data, next_cursor: result.next_cursor, total: result.total };
+      },
+    },
+    {
+      name: 'context_signal_group_get',
+      tier: 'core',
+      description: 'Get one corroborated Signal with its supporting and conflicting evidence, aggregate confidence, source count, and promotion status.',
+      inputSchema: z.object({ id: z.string().uuid() }),
+      handler: async (input: { id: string }, actor: ActorContext) => {
+        const group = await signalGroupRepo.getSignalGroup(db, actor.tenant_id, input.id);
+        if (!group) throw notFound('Signal', input.id);
+        return { signal_group: group };
+      },
+    },
+    {
+      name: 'context_signal_group_promote',
+      tier: 'core',
+      description: 'Promote a trusted corroborated Signal into Current Memory. This promotes the best supporting Signal, preserves combined evidence, and retires duplicate supporting Signals.',
+      inputSchema: z.object({ id: z.string().uuid(), idempotency_key: z.string().max(128).optional() }),
+      handler: async (input: { id: string; idempotency_key?: string }, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_signal_group_promote',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
+          const result = await promoteSignalGroup(db, actor.tenant_id, input.id, actor.actor_id);
+          if (!result.context_entry) {
+            throw validationError('This Signal could not be promoted. Confirm it has supporting current Signals and no unresolved conflict.');
+          }
+          return {
+            ...result,
+            mutation: mutationReceipt(actor, {
+              objectType: 'context_entry',
+              objectId: result.context_entry.id,
+              sideEffects: ['signal_group:promoted', 'search_index:queued'],
+            }),
+          };
+        });
+      },
+    },
+    {
+      name: 'context_signal_group_reject',
+      tier: 'core',
+      description: 'Dismiss a corroborated Signal and reject its unconfirmed supporting Signals while preserving evidence for audit.',
+      inputSchema: z.object({
+        id: z.string().uuid(),
+        reason: z.string().max(1000).optional(),
+        idempotency_key: z.string().max(128).optional(),
+      }),
+      handler: async (input: { id: string; reason?: string; idempotency_key?: string }, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_signal_group_reject',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
+          const group = await dismissSignalGroup(db, actor.tenant_id, input.id, actor.actor_id, input.reason);
+          if (!group) throw notFound('Signal', input.id);
+          return {
+            signal_group: group,
+            mutation: mutationReceipt(actor, {
+              objectType: 'context_entry',
+              objectId: input.id,
+              sideEffects: ['signal_group:dismissed'],
+            }),
+          };
+        });
       },
     },
     {
@@ -264,6 +697,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           context_type: input.context_type,
           tag: input.tag,
           current_only: input.current_only,
+          memory_status: input.memory_status,
           limit: input.limit,
           structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
         });
@@ -273,7 +707,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_review',
       tier: 'admin',
-      description: 'Mark a context entry as reviewed and still accurate. Resets reviewed_at to now and optionally extends valid_until by extend_days days (default: type half-life or 30 days). Use this after verifying an entry is still correct — prevents the staleness system from re-queuing it immediately.',
+      description: 'Mark Memory as reviewed and still accurate. Resets reviewed_at to now and optionally extends valid_until by extend_days days (default: type half-life or 30 days). Use this after verifying Memory is still correct — it returns the entry to Current Memory and prevents the review system from re-queuing it immediately.',
       inputSchema: contextReview,
       handler: async (input: z.infer<typeof contextReview>, actor: ActorContext) => {
         return runIdempotent(db, {
@@ -307,7 +741,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_stale',
       tier: 'core',
-      description: 'List all stale context entries where valid_until has passed but is_current is still true — these contain potentially outdated information that should be reverified before acting on. Use this as a recurring agent hygiene check to identify competitive intel, org chart details, or research that may have expired. Returns entries grouped by subject with staleness duration. Optionally filter by subject_type to scope the check to a specific entity type.',
+      description: 'List Current Memory that needs review because valid_until has passed. These entries may be outdated and should be reverified before an agent acts. Use this as a recurring Memory Health check to identify competitive intel, org chart details, next steps, or research that may have decayed. Optionally filter by subject_type to scope the check to a specific entity type.',
       inputSchema: contextStaleList,
       handler: async (input: z.infer<typeof contextStaleList>, actor: ActorContext) => {
         const entries = await contextRepo.listStaleEntries(db, actor.tenant_id, {
@@ -334,9 +768,9 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
-        const count = await extractContextFromActivity(db, actor.tenant_id, input.activity_id);
+        const outcome = await extractContextFromActivity(db, actor.tenant_id, input.activity_id);
         return {
-          extracted_count: count,
+          ...outcome,
           mutation: mutationReceipt(actor, {
             objectType: 'activity',
             objectId: input.activity_id,
@@ -349,7 +783,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'briefing_get',
       tier: 'core',
-      description: 'Get a unified briefing for any customer record — the single most important tool in CRMy. Call this before every agent action that needs current state. It assembles the full record, related entities, recent activity timeline, open assignments, typed context entries, and stale warnings in one response. Set context_radius to "direct" for single-contact outreach, "adjacent" to include related accounts and opportunities, or "account_wide" for deal reviews that need the full picture. Set token_budget (integer, token count) to tell CRMy how much space you have — it packs the highest-priority context to fit. Check stale_warnings in the response before acting — they identify context entries past their valid_until date that should be reverified. Works on contacts, accounts, opportunities, and use_cases.',
+      description: 'Get a unified briefing for any customer record — the single most important tool in CRMy. Call this before every agent action that needs current state. It assembles the full record, related entities, recent activity timeline, open assignments, Current Memory, Signals, Memory that needs review, and contradiction warnings in one response. Set context_radius to "direct" for single-contact outreach, "adjacent" to include related accounts and opportunities, or "account_wide" for deal reviews that need the full picture. Set token_budget (integer, token count) to tell CRMy how much space you have — it packs the highest-priority context to fit. Check stale_warnings before acting; they identify Memory past its valid_until date that should be reverified. Works on contacts, accounts, opportunities, and use_cases.',
       inputSchema: briefingGet,
       handler: async (input: z.infer<typeof briefingGet>, actor: ActorContext) => {
         const briefing = await assembleBriefing(
@@ -411,7 +845,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_ingest',
       tier: 'core',
-      description: 'Ingest a raw document (transcript, email, meeting notes, etc.) and auto-extract all structured context entries from it. Creates an activity as provenance and runs the full extraction pipeline. Returns all context entries produced.',
+      description: 'Ingest Raw Context (transcript, email, meeting notes, etc.) and auto-extract structured Signals from it. Creates an activity as provenance, records a Raw Context processing receipt, and runs the extraction pipeline. Signals are evidence-backed but unconfirmed until promoted to Memory.',
       inputSchema: contextIngest,
       handler: async (input: z.infer<typeof contextIngest>, actor: ActorContext) => {
         return runIdempotent(db, {
@@ -436,22 +870,43 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           subject_type: input.subject_type,
           subject_id: input.subject_id,
           performed_by: actor.actor_type === 'agent' ? actor.actor_id : undefined,
+          source_agent: actor.actor_type === 'agent' ? 'context_ingest' : undefined,
           occurred_at: new Date().toISOString(),
         });
 
         // Run the extraction pipeline
-        const extracted_count = await extractContextFromActivity(db, actor.tenant_id, activity.id);
+        const outcome = await extractContextFromActivity(db, actor.tenant_id, activity.id);
 
         // Fetch the entries produced by this activity
-        const entries = await contextRepo.getContextForSubject(
+        const signals = await contextRepo.getContextForSubject(
           db, actor.tenant_id, input.subject_type, input.subject_id,
-          { source_activity_id: activity.id, current_only: true, limit: 50 },
+          { source_activity_id: activity.id, current_only: true, memory_status: 'signal', limit: 50 },
         );
+        const memoryEntries = await contextRepo.getContextForSubject(
+          db, actor.tenant_id, input.subject_type, input.subject_id,
+          { source_activity_id: activity.id, current_only: true, memory_status: 'active', limit: 50 },
+        );
+        const rawSource = await rawContextRepo.getRawContextSourceByRef(
+          db,
+          actor.tenant_id,
+          'add_context',
+          activity.id,
+        ) ?? await rawContextRepo.getRawContextSourceByRef(
+          db,
+          actor.tenant_id,
+          'activity',
+          activity.id,
+        );
+        const receipt = processingReceipt(rawSource, outcome);
 
         return {
-          extracted_count,
-          context_entries: entries,
+          ...outcome,
+          signals,
+          memory_entries: memoryEntries,
+          context_entries: [...memoryEntries, ...signals],
           activity_id: activity.id,
+          raw_context_source: rawSource ?? undefined,
+          processing_receipt: receipt,
           mutation: mutationReceipt(actor, {
             objectType: 'activity',
             objectId: activity.id,
@@ -464,7 +919,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_ingest_auto',
       tier: 'core',
-      description: 'Ingest a document (transcript, email, meeting notes, etc.) and automatically resolve which contacts and accounts are mentioned — no subject IDs required. Extracts candidate entity names from the text using regex patterns, resolves each against the CRM via the entity resolution service (6-tier: exact name, alias, email, domain, substring, fuzzy), and runs the full context extraction pipeline for every resolved subject above the confidence threshold. Returns resolved subjects, entries created, and any names that could not be resolved. Ideal for agents processing inbound content when they do not know which CRM records are involved.',
+      description: 'Ingest a document (transcript, email, meeting notes, etc.) and automatically resolve which contacts and accounts are mentioned — no subject IDs required. Requires the configured Workspace Agent: the model identifies likely customer people/companies and useful hints, then CRMy grounds those candidates against actual contacts/accounts using entity resolution before extraction. Runs the full Raw Context → Signals → Memory pipeline for every resolved subject above the confidence threshold. Returns resolved subjects, entries created, and any names that could not be resolved. Ideal for agents processing inbound content when they do not know which customer records are involved.',
       inputSchema: z.object({
         document: z.string().min(1).describe('The full text to ingest — transcript, email body, meeting notes, research, etc.'),
         source_label: z.string().optional().describe('Human-readable label for the source (e.g. "Discovery call 2026-04-09")'),
@@ -484,66 +939,64 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
-        // Step 1: extract candidate entity names from the document text
-        const candidates = new Set<string>();
-        const phraseRe = /\b([A-Z][a-zA-Z]{1,}(?:\s+[A-Z][a-zA-Z]{1,}){0,3})\b/g;
-        let m: RegExpExecArray | null;
-        while ((m = phraseRe.exec(input.document)) !== null) candidates.add(m[1]);
-        const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-        while ((m = emailRe.exec(input.document)) !== null) candidates.add(m[0]);
+        const sourceRef = `auto:${createHash('sha256').update(input.document).digest('hex').slice(0, 32)}`;
+        await rawContextRepo.upsertRawContextSource(db, actor.tenant_id, {
+          source_type: actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+          source_ref: sourceRef,
+          source_label: input.source_label ?? 'Auto-ingested Raw Context',
+          actor_id: actor.actor_id,
+          status: 'processing',
+          stage: 'resolve_subjects',
+          raw_excerpt: input.document.slice(0, 1000),
+          metadata: {
+            input_channel: actor.actor_type === 'agent' ? 'mcp' : 'api',
+            confidence_threshold: input.confidence_threshold,
+          },
+        });
 
-        const STOP = new Set([
-          'The', 'This', 'That', 'These', 'Those', 'With', 'From', 'They', 'Their',
-          'There', 'Here', 'When', 'Where', 'What', 'Which', 'While', 'After',
-          'Before', 'During', 'About', 'Above', 'Below', 'Between', 'Through',
-          'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
-          'January', 'February', 'March', 'April', 'June', 'July', 'August',
-          'September', 'October', 'November', 'December',
-          'Please', 'Thank', 'Thanks', 'Hello', 'Also', 'However', 'Therefore',
-          'Because', 'Since', 'Until', 'Although', 'Unless',
-          'CRM', 'CEO', 'CTO', 'CFO', 'COO', 'VP', 'SVP', 'EVP',
-        ]);
-        const filtered = [...candidates].filter(c => {
-          if (c.length < 2) return false;
-          return !c.split(/\s+/).every(w => STOP.has(w));
-        }).slice(0, 20);
-
-        // Step 2: resolve each candidate
-        const confThreshold = input.confidence_threshold;
-        const CONF_RANK: Record<string, number> = { high: 3, medium: 2, low: 1 };
-        const settled = await Promise.allSettled(
-          filtered.map(name => entityResolve(db, actor.tenant_id, { query: name, entity_type: 'any', limit: 1 })),
-        );
-
-        const resolvedSubjects: { entity_type: string; id: string; name: string; confidence: string }[] = [];
-        const skipped: string[] = [];
-        const seen = new Set<string>();
-
-        for (let i = 0; i < settled.length; i++) {
-          const result = settled[i];
-          const candidateName = filtered[i];
-          if (result.status !== 'fulfilled') { skipped.push(candidateName); continue; }
-          const r = result.value;
-          if (r.status !== 'resolved' || !r.resolved) { skipped.push(candidateName); continue; }
-          const confScore = (CONF_RANK[r.resolved.confidence] ?? 0) / 3;
-          if (confScore < confThreshold && r.resolved.confidence !== 'high' && r.resolved.confidence !== 'medium') {
-            skipped.push(candidateName); continue;
-          }
-          if (r.resolved.confidence === 'low' && confThreshold > 0.4) { skipped.push(candidateName); continue; }
-          if (seen.has(r.resolved.id)) continue;
-          seen.add(r.resolved.id);
-          resolvedSubjects.push({
-            entity_type: r.resolved.entity_type,
-            id: r.resolved.id,
-            name: r.resolved.name,
-            confidence: r.resolved.confidence,
-          });
-        }
+        const detected = await detectRawContextSubjects(db, actor.tenant_id, input.document, {
+          limit: 20,
+          confidenceThreshold: input.confidence_threshold,
+          actorId: actor.actor_id,
+        });
+        const resolvedSubjects = detected.subjects.map(subject => ({
+          entity_type: subject.type,
+          id: subject.id,
+          name: subject.name,
+          confidence: subject.confidence,
+        }));
+        const skipped = detected.skipped.map(item => item.name);
 
         if (resolvedSubjects.length === 0) {
+          await rawContextRepo.updateRawContextSource(
+            db,
+            actor.tenant_id,
+            actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+            sourceRef,
+            {
+              status: 'skipped',
+              stage: 'resolve_subjects',
+              skipped: 1,
+              detected_subjects: [
+                ...detected.candidates.map(name => ({ name, status: skipped.includes(name) ? 'unresolved' : 'candidate' })),
+                ...detected.skipped.map(item => ({ name: item.name, status: 'skipped', reason: item.reason })),
+              ],
+              failure_reason: 'No customer records could be confidently identified in the source.',
+            },
+          );
           return {
             subjects_resolved: [],
             entries_created: 0,
+            extracted_count: 0,
+            memory_created: 0,
+            signals_created: 0,
+            skipped: 1,
+            raw_context_source: await rawContextRepo.getRawContextSourceByRef(
+              db,
+              actor.tenant_id,
+              actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+              sourceRef,
+            ) ?? undefined,
             low_confidence_skipped: skipped,
             message: 'No customer records could be confidently identified in the document. Try adding contacts/accounts with matching names or aliases, or lower confidence_threshold.',
           };
@@ -551,7 +1004,22 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
 
         // Step 3: ingest for each resolved subject
         let totalCreated = 0;
-        const subjectResults: { entity_type: string; id: string; name: string; entries_created: number; activity_id: string }[] = [];
+        let memoryCreated = 0;
+        let signalsCreated = 0;
+        let skippedCount = 0;
+        const subjectResults: {
+          entity_type: string;
+          id: string;
+          name: string;
+          confidence: string;
+          entries_created: number;
+          memory_created: number;
+          signals_created: number;
+          skipped: number;
+          activity_id: string;
+          raw_context_source_id?: string;
+          processing_receipt?: ReturnType<typeof processingReceipt>;
+        }[] = [];
 
         for (const subject of resolvedSubjects) {
           try {
@@ -562,19 +1030,92 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
               subject_type: subject.entity_type as 'contact' | 'account',
               subject_id: subject.id,
               performed_by: actor.actor_type === 'agent' ? actor.actor_id : undefined,
+              source_agent: actor.actor_type === 'agent' ? 'context_ingest_auto' : undefined,
               occurred_at: new Date().toISOString(),
             });
             const extracted = await extractContextFromActivity(db, actor.tenant_id, activity.id);
-            totalCreated += extracted;
-            subjectResults.push({ ...subject, entries_created: extracted, activity_id: activity.id });
+            const rawSource = await rawContextRepo.getRawContextSourceByRef(
+              db,
+              actor.tenant_id,
+              'add_context',
+              activity.id,
+            ) ?? await rawContextRepo.getRawContextSourceByRef(
+              db,
+              actor.tenant_id,
+              'activity',
+              activity.id,
+            );
+            const receipt = processingReceipt(rawSource, extracted);
+            totalCreated += extracted.extracted_count;
+            memoryCreated += extracted.memory_created;
+            signalsCreated += extracted.signals_created;
+            skippedCount += extracted.skipped;
+            subjectResults.push({
+              ...subject,
+              entries_created: extracted.extracted_count,
+              memory_created: extracted.memory_created,
+              signals_created: extracted.signals_created,
+              skipped: extracted.skipped,
+              activity_id: activity.id,
+              raw_context_source_id: rawSource?.id,
+              processing_receipt: receipt,
+            });
           } catch (err) {
             console.error(`[context_ingest_auto] Failed for subject ${subject.id}:`, err);
+            skippedCount++;
           }
         }
+
+        const parentStatus = signalsCreated > 0
+          ? 'needs_review'
+          : totalCreated > 0
+            ? 'processed'
+            : skippedCount > 0
+              ? 'skipped'
+              : 'processed';
+        await rawContextRepo.updateRawContextSource(
+          db,
+          actor.tenant_id,
+          actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+          sourceRef,
+          {
+            status: parentStatus,
+            stage: 'promote_or_review',
+            detected_subjects: [
+              ...subjectResults.map(subject => ({
+                subject_type: subject.entity_type,
+                subject_id: subject.id,
+                name: subject.name,
+                confidence: subject.confidence,
+                entries_created: subject.entries_created,
+                memory_created: subject.memory_created,
+                signals_created: subject.signals_created,
+              })),
+              ...skipped.map(name => ({ name, status: 'unresolved' })),
+            ],
+            signals_created: signalsCreated,
+            memory_created: memoryCreated,
+            skipped: skippedCount,
+            failure_reason: totalCreated === 0 && skippedCount > 0 ? 'Resolved subjects produced no extractable context.' : null,
+          },
+        );
 
         return {
           subjects_resolved: subjectResults,
           entries_created: totalCreated,
+          extracted_count: totalCreated,
+          memory_created: memoryCreated,
+          signals_created: signalsCreated,
+          skipped: skippedCount,
+          processing_receipts: subjectResults
+            .map(result => result.processing_receipt)
+            .filter(Boolean),
+          raw_context_source: await rawContextRepo.getRawContextSourceByRef(
+            db,
+            actor.tenant_id,
+            actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+            sourceRef,
+          ) ?? undefined,
           low_confidence_skipped: skipped.length > 0 ? skipped : undefined,
           mutation: mutationReceipt(actor, {
             objectType: 'context_entry',
@@ -588,7 +1129,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_stale_assign',
       tier: 'admin',
-      description: 'Trigger the stale context review loop for the current tenant: finds all expired context entries and creates review assignments for the most knowledgeable actors. Normally runs automatically in the background every 60 seconds. Use this to trigger it on-demand.',
+      description: 'Trigger the Memory Health review loop for the current tenant: finds Current Memory past its review date and creates review assignments for the most knowledgeable actors. Normally runs automatically in the background every 60 seconds. Use this to trigger it on-demand.',
       inputSchema: z.object({
         limit: z.number().int().min(1).max(100).default(20)
           .describe('Maximum number of stale entries to process in this call'),
@@ -648,6 +1189,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           context_type: input.context_type,
           tag: input.tag,
           current_only: input.current_only,
+          memory_status: input.memory_status,
           limit: input.limit,
           structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
         });
@@ -658,7 +1200,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_detect_contradictions',
       tier: 'extended',
-      description: 'Scan a subject\'s current context entries for conflicting facts — e.g. two entries that claim different budget amounts, different champions, or contradictory next steps. Returns contradiction warnings with the two conflicting entries, a description of the conflict, and a suggested resolution action. Call before important decisions to ensure you\'re not acting on contradictory beliefs. Use context_resolve_contradiction to fix them.',
+      description: 'Scan a subject\'s Current Memory for conflicting facts — e.g. two entries that claim different budget amounts, different champions, or contradictory next steps. Returns contradiction warnings with the two conflicting entries, a description of the conflict, and a suggested resolution action. Call before important decisions to ensure you\'re not acting on contradictory beliefs. Use context_resolve_contradiction to fix them.',
       inputSchema: z.object({
         subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case'])
           .describe('Type of the CRM subject to check'),
@@ -685,7 +1227,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_contradiction_assign',
       tier: 'extended',
-      description: 'Scan a subject for contradictory current context and create durable review assignments for unresolved conflicts. Assignments are deduplicated by the conflicting entry pair so repeated scans do not spam reviewers. Use this when briefing_get or context_detect_contradictions returns warnings that need human or agent resolution.',
+      description: 'Scan a subject for contradictory Current Memory and create review assignments for unresolved conflicts. Assignments are deduplicated by the conflicting entry pair so repeated scans do not spam reviewers. Use this when briefing_get or context_detect_contradictions returns warnings that need human or agent resolution.',
       inputSchema: z.object({
         subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case'])
           .describe('Type of the CRM subject to check'),
@@ -795,7 +1337,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_consolidate',
       tier: 'extended',
-      description: 'Synthesise multiple current context entries of the same type for a subject into a single authoritative entry. Uses the tenant\'s configured LLM to merge bodies, resolve conflicts (preferring recent + high-confidence), and deduplicate. All source entries are superseded (is_current=false, audit trail preserved). Call when a subject has accumulated many redundant entries of the same type — e.g. 5 "next_step" entries that have piled up. If entry_ids is omitted, consolidates all current entries of context_type for the subject (up to max_entries).',
+      description: 'Synthesise multiple Current Memory entries of the same type for a subject into a single authoritative entry. Uses the tenant\'s configured LLM to merge bodies, resolve conflicts (preferring recent + high-confidence), and deduplicate. All source entries are superseded (is_current=false, audit trail preserved). Call when a subject has accumulated many redundant entries of the same type — e.g. 5 "next_step" entries that have piled up. If entry_ids is omitted, consolidates all current entries of context_type for the subject (up to max_entries).',
       inputSchema: z.object({
         subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case'])
           .describe('Type of the CRM subject'),
@@ -888,7 +1430,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_review_batch',
       tier: 'core',
-      description: 'Mark multiple stale context entries as reviewed in a single call — far more efficient than calling context_review for each one. Optionally extend valid_until by a number of days for all entries at once. Useful after a quarterly review or account health check where multiple facts have been re-verified. Returns counts of updated and not-found entries.',
+      description: 'Mark multiple Memory entries as reviewed in a single call — far more efficient than calling context_review for each one. Optionally extend valid_until by a number of days for all entries at once. Useful after a quarterly review or account health check where multiple facts have been re-verified. Returns counts of updated and not-found entries.',
       inputSchema: z.object({
         entry_ids:   z.array(z.string().uuid()).min(1).max(200)
           .describe('UUIDs of the context entries to mark reviewed (max 200 per call)'),

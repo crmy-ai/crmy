@@ -13,6 +13,7 @@
  *   - source_ref = activity.id
  *   - source_activity_id = activity.id
  *   - authored_by = the tenant's 'crmy-extraction' agent actor (created on demand)
+ *   - memory_status = 'signal' until reviewed/promoted into confirmed memory
  */
 
 import type { DbPool } from '../db/pool.js';
@@ -21,8 +22,10 @@ import * as contextRepo from '../db/repos/context-entries.js';
 import * as contextTypeRepo from '../db/repos/context-type-registry.js';
 import * as actorRepo from '../db/repos/actors.js';
 import * as outboxRepo from '../db/repos/context-outbox.js';
+import * as rawContextRepo from '../db/repos/raw-context-sources.js';
 import { decrypt } from './crypto.js';
 import { callLLM } from './providers/llm.js';
+import { attachSignalToGroup } from '../services/signal-groups.js';
 
 // Activity types worth extracting from (those with text content)
 const EXTRACTABLE_ACTIVITY_TYPES = new Set([
@@ -43,6 +46,9 @@ interface ActivityRow {
   subject_type: string | null;
   subject_id: string | null;
   created_by: string | null;
+  performed_by: string | null;
+  direction: string | null;
+  source_agent: string | null;
   detail: Record<string, unknown> | null;
 }
 
@@ -54,6 +60,120 @@ interface ExtractedEntry {
   structured_data?: Record<string, unknown>;
   valid_until?: string;
   tags?: string[];
+  evidence?: EvidenceItem[];
+}
+
+interface EvidenceItem {
+  source_type: string;
+  source_id?: string;
+  source_ref?: string;
+  source_url?: string;
+  source_label?: string;
+  speaker?: string;
+  snippet?: string;
+  observed_at?: string;
+  captured_at?: string;
+  confidence?: number;
+  rationale?: string;
+  verified_at?: string;
+  verified_by?: string;
+  [key: string]: unknown;
+}
+
+export interface ExtractionResult {
+  extracted_count: number;
+  memory_created: number;
+  signals_created: number;
+  skipped: number;
+}
+
+const EMPTY_EXTRACTION_RESULT: ExtractionResult = {
+  extracted_count: 0,
+  memory_created: 0,
+  signals_created: 0,
+  skipped: 0,
+};
+
+export function shouldAutoPromoteSignal(input: {
+  confidence?: number;
+  threshold: number;
+  evidenceCount: number;
+  speculative?: boolean;
+}): boolean {
+  return input.evidenceCount > 0 && !input.speculative && (input.confidence ?? 0) >= input.threshold;
+}
+
+function looksSpeculative(entry: ExtractedEntry, evidence: EvidenceItem[]): boolean {
+  const text = [
+    entry.title,
+    entry.body,
+    ...evidence.map(item => item.rationale),
+  ].filter(Boolean).join(' ').toLowerCase();
+  return /\b(may|might|could|appears|seems|possibly|probably|likely|unclear|unknown|not sure|inferred|speculative)\b/.test(text);
+}
+
+function normalizeEvidenceItem(
+  item: Record<string, unknown>,
+  activity: ActivityRow,
+  entry: ExtractedEntry,
+): EvidenceItem {
+  const observedAt = activity.occurred_at ?? activity.created_at;
+  const sourceType = typeof item.source_type === 'string' && item.source_type.trim()
+    ? item.source_type.trim()
+    : 'activity';
+  const snippet = typeof item.snippet === 'string' && item.snippet.trim()
+    ? item.snippet.trim().slice(0, 5000)
+    : undefined;
+  return {
+    ...item,
+    source_type: sourceType,
+    source_id: typeof item.source_id === 'string' ? item.source_id : activity.id,
+    source_ref: typeof item.source_ref === 'string' ? item.source_ref : activity.id,
+    source_label: typeof item.source_label === 'string' ? item.source_label : activity.subject,
+    observed_at: observedAt,
+    captured_at: new Date().toISOString(),
+    confidence: entry.confidence ?? null,
+    ...(typeof item.speaker === 'string' ? { speaker: item.speaker } : {}),
+    ...(snippet ? { snippet } : {}),
+    ...(typeof item.rationale === 'string' ? { rationale: item.rationale.slice(0, 2000) } : {}),
+  } as EvidenceItem;
+}
+
+function buildEvidence(activity: ActivityRow, entry: ExtractedEntry): EvidenceItem[] {
+  if (Array.isArray(entry.evidence) && entry.evidence.length > 0) {
+    return entry.evidence
+      .filter(item => item && typeof item === 'object')
+      .map(item => normalizeEvidenceItem(item as Record<string, unknown>, activity, entry))
+      .filter(item => Boolean(item.source_id || item.source_ref || item.source_url || item.snippet));
+  }
+
+  const observedAt = activity.occurred_at ?? activity.created_at;
+  const snippetSource = activity.body || entry.body || activity.subject;
+  return [normalizeEvidenceItem({
+    source_type: 'activity',
+    source_id: activity.id,
+    source_ref: activity.id,
+    source_label: activity.subject,
+    observed_at: observedAt,
+    snippet: snippetSource.slice(0, 1000),
+    rationale: 'Extracted from the source activity.',
+  }, activity, entry)];
+}
+
+function rawSourceTypeForActivity(activity: ActivityRow): string {
+  const subject = String(activity.subject ?? '').toLowerCase();
+  if (activity.source_agent === 'context_ingest' || subject.includes('ingested document') || subject.includes('auto-ingested')) {
+    return 'add_context';
+  }
+  if (activity.type === 'email' && activity.direction === 'inbound') return 'inbound_email';
+  if (activity.type === 'email') return 'outbound_email';
+  return 'activity';
+}
+
+function rawExcerpt(activity: ActivityRow): string | null {
+  const text = buildActivityContent(activity).trim();
+  if (!text) return null;
+  return text.slice(0, 1000);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -95,11 +215,11 @@ export async function extractContextFromActivity(
   db: DbPool,
   tenantId: string,
   activityId: string,
-): Promise<number> {
+): Promise<ExtractionResult> {
   // Load activity
   const actResult = await db.query(
     `SELECT id, tenant_id, type, subject, body, outcome, occurred_at, created_at,
-            subject_type, subject_id, created_by, detail
+            subject_type, subject_id, created_by, performed_by, direction, source_agent, detail
      FROM activities
      WHERE id = $1 AND tenant_id = $2`,
     [activityId, tenantId],
@@ -107,28 +227,64 @@ export async function extractContextFromActivity(
   const activity = actResult.rows[0] as ActivityRow | undefined;
   if (!activity) {
     await markExtractionStatus(db, activityId, 'skipped', 'Activity not found');
-    return 0;
+    return { ...EMPTY_EXTRACTION_RESULT, skipped: 1 };
   }
+
+  const rawSourceType = rawSourceTypeForActivity(activity);
+  await rawContextRepo.upsertRawContextSource(db, tenantId, {
+    source_type: rawSourceType,
+    source_ref: activity.id,
+    source_label: activity.subject,
+    subject_type: activity.subject_type ?? undefined,
+    subject_id: activity.subject_id ?? undefined,
+    actor_id: activity.performed_by ?? undefined,
+    status: 'processing',
+    stage: 'resolve_subject',
+    raw_excerpt: rawExcerpt(activity),
+    metadata: {
+      activity_type: activity.type,
+      direction: activity.direction,
+      occurred_at: activity.occurred_at ?? activity.created_at,
+    },
+  });
 
   // Reject activities without an explicit CRM subject — falling back to
   // activity.id as subject_id would create orphaned context entries that
   // cannot be associated with any contact, account, opportunity, or use case.
   if (!activity.subject_type || !activity.subject_id) {
     await markExtractionStatus(db, activityId, 'skipped', 'Activity has no subject_type or subject_id — cannot create context entries');
-    return 0;
+    await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
+      status: 'skipped',
+      stage: 'resolve_subject',
+      skipped: 1,
+      failure_reason: 'No linked customer record. Resolve the subject before extraction.',
+    });
+    return { ...EMPTY_EXTRACTION_RESULT, skipped: 1 };
   }
 
   // Skip activities without meaningful text
   const content = buildActivityContent(activity);
   if (!content.trim()) {
     await markExtractionStatus(db, activityId, 'skipped', 'No text content');
-    return 0;
+    await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
+      status: 'skipped',
+      stage: 'normalize',
+      skipped: 1,
+      failure_reason: 'No text content to process.',
+    });
+    return { ...EMPTY_EXTRACTION_RESULT, skipped: 1 };
   }
 
   // Skip non-extractable activity types
   if (!EXTRACTABLE_ACTIVITY_TYPES.has(activity.type)) {
     await markExtractionStatus(db, activityId, 'skipped', `Activity type '${activity.type}' not extractable`);
-    return 0;
+    await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
+      status: 'skipped',
+      stage: 'classify',
+      skipped: 1,
+      failure_reason: `Activity type '${activity.type}' is not configured for extraction.`,
+    });
+    return { ...EMPTY_EXTRACTION_RESULT, skipped: 1 };
   }
 
   // Load agent config
@@ -137,19 +293,35 @@ export async function extractContextFromActivity(
   // callLLM handles keyless providers correctly — only gate on enabled flag.
   if (!config?.enabled) {
     await markExtractionStatus(db, activityId, 'pending', 'Agent not enabled');
-    return 0;
+    await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
+      status: 'pending',
+      stage: 'extract_signals',
+      failure_reason: 'Workspace Agent is not enabled yet.',
+    });
+    return EMPTY_EXTRACTION_RESULT;
   }
   // Still need a model and base_url to proceed
   if (!config.model || !config.base_url) {
     await markExtractionStatus(db, activityId, 'pending', 'Agent not fully configured (missing model or base_url)');
-    return 0;
+    await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
+      status: 'pending',
+      stage: 'extract_signals',
+      failure_reason: 'Workspace Agent needs a model and base URL before extraction can run.',
+    });
+    return EMPTY_EXTRACTION_RESULT;
   }
 
   // Load extractable context types
   const extractableTypes = await contextTypeRepo.getExtractableTypes(db, tenantId);
   if (extractableTypes.length === 0) {
     await markExtractionStatus(db, activityId, 'skipped', 'No extractable context types defined');
-    return 0;
+    await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
+      status: 'skipped',
+      stage: 'classify',
+      skipped: 1,
+      failure_reason: 'No extractable context types are configured.',
+    });
+    return { ...EMPTY_EXTRACTION_RESULT, skipped: 1 };
   }
 
   // Ensure the extraction agent actor exists for this tenant
@@ -164,27 +336,45 @@ export async function extractContextFromActivity(
   // Build and call the LLM
   let entries: ExtractedEntry[];
   try {
+    await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
+      status: 'processing',
+      stage: 'extract_signals',
+    });
     entries = await callExtractionLLM(db, tenantId, activity, content, extractableTypes, config.max_tokens_per_turn);
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'LLM call failed';
     await markExtractionStatus(db, activityId, 'error', msg);
+    await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
+      status: 'failed',
+      stage: 'extract_signals',
+      skipped: 1,
+      failure_reason: msg,
+    });
     console.error(`[extraction] Activity ${activityId}: ${msg}`);
-    return 0;
+    return { ...EMPTY_EXTRACTION_RESULT, skipped: 1 };
   }
 
   if (entries.length === 0) {
     await markExtractionStatus(db, activityId, 'done');
-    return 0;
+    await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
+      status: 'processed',
+      stage: 'extract_signals',
+      metadata: { extracted_count: 0 },
+    });
+    return EMPTY_EXTRACTION_RESULT;
   }
 
   // Write context entries
-  let written = 0;
+  const outcome: ExtractionResult = { ...EMPTY_EXTRACTION_RESULT };
+  const autoPromoteSignals = config.auto_promote_signals !== false;
+  const autoPromoteThreshold = Number(config.signal_auto_promote_threshold ?? 0.85);
   for (const entry of entries) {
     // Skip if context_type doesn't exist in registry
     const typeExists = extractableTypes.find(t => t.type_name === entry.context_type);
-    if (!typeExists) continue;
+    if (!typeExists) { outcome.skipped++; continue; }
 
     try {
+      const evidence = buildEvidence(activity, entry);
       const created = await contextRepo.createContextEntry(db, tenantId, {
         subject_type: activity.subject_type as 'contact' | 'account' | 'opportunity' | 'use_case',
         subject_id: activity.subject_id,
@@ -194,6 +384,8 @@ export async function extractContextFromActivity(
         body: entry.body,
         structured_data: entry.structured_data ?? {},
         confidence: entry.confidence ?? undefined,
+        memory_status: 'signal',
+        evidence,
         tags: entry.tags ?? ['extracted', activity.type],
         source: 'extraction',
         source_ref: activityId,
@@ -206,14 +398,44 @@ export async function extractContextFromActivity(
       outboxRepo.insertJob(db, tenantId, 'context_entry', created.id, created as unknown as Record<string, unknown>)
         .catch((err: unknown) => console.warn(`[outbox] extraction enqueue ${created.id}: ${(err as Error).message}`));
 
-      written++;
+      outcome.extracted_count++;
+      outcome.signals_created++;
+
+      const eligibleForGroupingPromotion = autoPromoteSignals && shouldAutoPromoteSignal({
+        confidence: Math.max(entry.confidence ?? 0, 1),
+        threshold: 1,
+        evidenceCount: evidence.length,
+        speculative: looksSpeculative(entry, evidence),
+      });
+      const groupResult = await attachSignalToGroup(db, tenantId, created, {
+        threshold: autoPromoteThreshold,
+        autoPromote: eligibleForGroupingPromotion,
+        actorId: extractorActor.id,
+      });
+      if (groupResult.promoted_context_entry) {
+        outcome.memory_created++;
+        outcome.signals_created--;
+      }
     } catch (err) {
       console.error(`[extraction] Failed to write context entry for activity ${activityId}:`, err);
+      outcome.skipped++;
     }
   }
 
   await markExtractionStatus(db, activityId, 'done');
-  return written;
+  await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
+    status: outcome.skipped > 0 && outcome.extracted_count === 0
+      ? 'skipped'
+      : outcome.signals_created > 0
+        ? 'needs_review'
+        : 'processed',
+    stage: 'promote_or_review',
+    signals_created: outcome.signals_created,
+    memory_created: outcome.memory_created,
+    skipped: outcome.skipped,
+    metadata: { extracted_count: outcome.extracted_count },
+  });
+  return outcome;
 }
 
 /**
@@ -294,23 +516,28 @@ function buildSystemPrompt(
     return lines.join('\n');
   }).join('\n\n');
 
-  return `You are a CRM knowledge extraction agent. Extract structured context entries from CRM activity content.
+  return `You are a CRMy signal extraction agent. Extract structured signals from customer observations.
 
-Return a JSON object with a single key "context_entries" containing an array of entries. Each entry:
+Signals are inferred, evidence-backed context. They are not confirmed operational memory until reviewed or promoted.
+
+Return a JSON object with a single key "context_entries" containing an array of signals. Each signal:
 - context_type: must be one of the supported types below
 - title: concise title (required, ≤ 80 chars)
-- body: full description with all relevant detail (required)
+- body: the claim being made, written as a concise but complete operational statement (required)
 - confidence: 0.0–1.0 — how clearly stated this information is (0.9+ = explicitly stated, 0.5–0.8 = inferred, <0.5 = speculative)
 - structured_data: object with type-specific fields (see schemas below)
+- evidence: array of evidence objects supporting this claim. Each item should include source_type, snippet, observed_at, speaker if known, confidence, and rationale. Use an exact short quote or source excerpt when possible.
 - valid_until: ISO date string if this information will become stale (use for next_step, commitment, deal_risk)
 - tags: array of relevant string tags (optional)
 
 Rules:
 1. Only extract information clearly present in the activity — never hallucinate or speculate
 2. Set confidence below 0.7 if you're inferring rather than reading directly
-3. If nothing extractable is found, return {"context_entries": []}
-4. Create one entry per distinct piece of information (e.g. one entry per stakeholder, one per competitor)
-5. Return valid JSON only — no markdown code fences, no commentary
+3. Treat extracted items as signals. Do not imply that they are confirmed memory.
+4. If nothing extractable is found, return {"context_entries": []}
+5. Create one entry per distinct piece of information (e.g. one entry per stakeholder, one per competitor)
+6. Every extracted signal must include evidence. Prefer verbatim snippets and include speaker/source timing when the text provides it.
+7. Return valid JSON only — no markdown code fences, no commentary
 
 Supported context types:
 ${typeDescriptions}`;
@@ -356,17 +583,21 @@ function parseExtractionResponse(raw: string): ExtractedEntry[] {
   } catch {
     // Try extracting JSON from the response if it's wrapped in text
     const match = cleaned.match(/\{[\s\S]*\}/);
-    if (!match) return [];
+    if (!match) throw new Error('Extraction response was not valid JSON.');
     try {
       parsed = JSON.parse(match[0]);
     } catch {
-      return [];
+      throw new Error('Extraction response contained malformed JSON.');
     }
   }
 
-  if (!parsed || typeof parsed !== 'object') return [];
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Extraction response was empty or invalid.');
+  }
   const entries = (parsed as Record<string, unknown>).context_entries;
-  if (!Array.isArray(entries)) return [];
+  if (!Array.isArray(entries)) {
+    throw new Error('Extraction response must include a context_entries array.');
+  }
 
   return entries.filter((e): e is ExtractedEntry => (
     e !== null &&

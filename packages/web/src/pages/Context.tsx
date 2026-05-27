@@ -3,32 +3,46 @@
 
 import { TopBar } from '@/components/layout/TopBar';
 import { useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Library, Search, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, Inbox, Library, Search, ShieldCheck, Sparkles } from 'lucide-react';
 import { ContextBrowser } from '@/components/crm/ContextBrowser';
 import { ContextGovernance } from '@/components/crm/ContextGovernance';
-import { useContextEntries, useDbConfig } from '@/api/hooks';
+import { ObservationsDashboard } from '@/components/crm/ObservationsDashboard';
+import { SignalGroupsBrowser } from '@/components/crm/SignalGroupsBrowser';
+import { useActivities, useContextEntries, useDbConfig, useSignalGroups, useStaleContextEntries } from '@/api/hooks';
 import { headerDescription } from '@/lib/headerCopy';
 
-type ContextTab = 'browser' | 'governance';
+type ContextTab = 'observations' | 'browser' | 'signals' | 'governance';
 
 export default function ContextPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab = (searchParams.get('tab') ?? 'browser') as ContextTab;
+  const rawTab = searchParams.get('tab');
+  const tab = (rawTab === 'signal-groups' ? 'signals' : rawTab ?? 'browser') as ContextTab;
   const { data: dbInfo } = useDbConfig() as any;
   const { data: contextData } = useContextEntries({ limit: 1 }) as any;
-  const { data: staleData } = useContextEntries({ is_current: false, limit: 200 }) as any;
+  const { data: signalGroupData } = useSignalGroups({ attention_only: true, limit: 1 }) as any;
+  const { data: staleData } = useStaleContextEntries({ limit: 200 }) as any;
+  const { data: activitiesData } = useActivities({ limit: 1 }) as any;
   const pgvectorEnabled = Boolean(dbInfo?.pgvector_enabled);
   const contextTotal = Number(contextData?.total ?? 0);
-  const staleCount = Number(staleData?.data?.length ?? 0);
+  const signalGroupTotal = Number(signalGroupData?.total ?? 0);
+  const staleCount = Number((staleData?.stale_entries ?? staleData?.data ?? []).length);
+  const observationTotal = Number(activitiesData?.total ?? 0);
 
   const setTab = (nextTab: ContextTab) => {
     const existing = Object.fromEntries(searchParams.entries());
     setSearchParams({ ...existing, tab: nextTab });
   };
 
+  const openAddContext = () => {
+    const existing = Object.fromEntries(searchParams.entries());
+    setSearchParams({ ...existing, tab: 'browser', add: 'context' });
+  };
+
   const tabs: { key: ContextTab; label: string; Icon: typeof Library }[] = [
-    { key: 'browser', label: 'Memory Browser', Icon: Library },
-    { key: 'governance', label: 'Governance', Icon: ShieldCheck },
+    { key: 'observations', label: 'Raw Context', Icon: Inbox },
+    { key: 'signals', label: 'Signals', Icon: Sparkles },
+    { key: 'browser', label: 'Memory', Icon: Library },
+    { key: 'governance', label: 'Memory Health', Icon: ShieldCheck },
   ];
 
   return (
@@ -37,9 +51,13 @@ export default function ContextPage() {
         title="Context"
         icon={Library}
         iconClassName="text-[#0ea5e9]"
-        description={tab === 'governance'
-          ? headerDescription('Review stale memory and quality', staleCount, 'entry', 'entries')
-          : headerDescription('Search customer memory and notes', contextTotal, 'entry', 'entries')}
+        description={tab === 'observations'
+          ? headerDescription('Review source volume and processing outcomes', observationTotal, 'source', 'sources')
+          : tab === 'governance'
+          ? headerDescription('Review Memory that needs attention', staleCount, 'entry', 'entries')
+          : tab === 'signals'
+          ? headerDescription('Review inferred customer context before it becomes Memory', signalGroupTotal, 'signal', 'signals')
+          : headerDescription('Search Current Memory agents can rely on', contextTotal, 'entry', 'entries')}
         badge={(
           <span className={`hidden md:inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
             pgvectorEnabled
@@ -69,7 +87,13 @@ export default function ContextPage() {
         ))}
       </div>
 
-      {tab === 'governance' ? <ContextGovernance /> : <ContextBrowser />}
+      {tab === 'observations'
+        ? <ObservationsDashboard onAddContext={openAddContext} />
+        : tab === 'signals'
+        ? <SignalGroupsBrowser />
+        : tab === 'governance'
+        ? <ContextGovernance />
+        : <ContextBrowser memoryStatus="active" />}
     </div>
   );
 }

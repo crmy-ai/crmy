@@ -237,6 +237,7 @@ export function VariableAwareField({
   }
 
   function handleButtonInsert() {
+    if (disabled) return;
     const el = fieldRef.current;
     if (!el) return;
     // Insert `{{` at caret to trigger the popover
@@ -271,9 +272,10 @@ export function VariableAwareField({
           <button
             type="button"
             tabIndex={-1}
+            disabled={disabled}
             onMouseDown={(e) => { e.preventDefault(); handleButtonInsert(); }}
             title="Insert variable"
-            className="flex items-center gap-0.5 px-1 py-0.5 rounded text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-muted border border-border/60 transition-colors"
+            className="flex items-center gap-0.5 px-1 py-0.5 rounded text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-muted border border-border/60 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
           >
             <Braces className="w-3 h-3" />
             <span className="text-xs">{'{{}}'}</span>

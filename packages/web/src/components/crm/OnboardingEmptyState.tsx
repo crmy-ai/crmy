@@ -22,14 +22,14 @@ export function SeedSampleDataButton({
 
   const handleSeed = async () => {
     const confirmed = window.confirm(
-      'Add CRMy sample data to this workspace? This inserts demo companies, contacts, opportunities, and context entries. Use it only in local, demo, or evaluation workspaces.',
+      'Add CRMy sample data to this workspace? This inserts demo companies, contacts, opportunities, raw context, Signals, Memory, and Handoffs. Use it only in local, demo, or evaluation workspaces.',
     );
     if (!confirmed) return;
     try {
       await seedSample.mutateAsync(true);
       toast({
         title: 'Sample data added',
-        description: 'Demo records are ready. Next: open a company or contact and generate a briefing.',
+        description: 'Demo records are ready. Next: review Signals or open the pending Handoff.',
       });
     } catch (err) {
       toast({

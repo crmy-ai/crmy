@@ -11,16 +11,19 @@ import { enforceToolScopes } from '../dist/auth/scopes.js';
 import { recoverOperationalJob } from '../dist/services/operational-recovery.js';
 import { getAllTools, getToolsForActor } from '../dist/mcp/server.js';
 import { runIdempotent } from '../dist/db/repos/idempotency.js';
+import { searchContextEntries } from '../dist/db/repos/context-entries.js';
 import { withTransaction } from '../dist/db/transaction.js';
 import { encryptSecret, decryptSecret, redactSecrets } from '../dist/lib/secrets.js';
+import { shouldAutoPromoteSignal } from '../dist/agent/extraction.js';
 import { hubspotAdapter } from '../dist/services/systems-of-record/hubspot.js';
 import { salesforceAdapter } from '../dist/services/systems-of-record/salesforce.js';
 import { databricksAdapter } from '../dist/services/systems-of-record/databricks.js';
 import { snowflakeAdapter } from '../dist/services/systems-of-record/snowflake.js';
 import { connectorHttpError, writebackParameters } from '../dist/services/systems-of-record/adapters.js';
 import { buildConnectorContext, executeExternalWriteback, previewExternalWriteback, requestExternalWriteback, reviewExternalWriteback } from '../dist/services/systems-of-record/index.js';
+import { evaluateActionPolicy } from '../dist/services/action-policy.js';
 import { resolveSequenceGoalContactId } from '../dist/services/sequence-executor.js';
-import { createWorkflowEngine, matchesFilter } from '../dist/workflows/engine.js';
+import { createWorkflowEngine, dryRunWorkflowDefinition, matchesFilter } from '../dist/workflows/engine.js';
 import { buildVariableContext, interpolate } from '../dist/workflows/variables.js';
 
 const baseInput = {
@@ -174,10 +177,12 @@ test('withTransaction rolls back and releases on failure', async () => {
 class FakeContextDb {
   constructor(rows) {
     this.rows = rows;
+    this.queries = [];
   }
 
   async query(sql, params = []) {
     const text = sql.replace(/\s+/g, ' ').trim();
+    this.queries.push(text);
     if (text.startsWith('SELECT * FROM context_entries')) {
       const [tenantId, subjectType, subjectId, contextType] = params;
       return {
@@ -226,6 +231,7 @@ test('context convergence suggests using an exact existing entry', async () => {
   assert.equal(result.should_block, true);
   assert.equal(result.suggested_action, 'use_existing');
   assert.equal(result.candidates[0].score, 100);
+  assert.match(db.queries[0], /memory_status = 'active'/);
 });
 
 test('context convergence sends structured conflicts to manual review', async () => {
@@ -258,6 +264,45 @@ test('context convergence allows clearly distinct context', async () => {
   assert.equal(result.should_block, false);
   assert.equal(result.suggested_action, 'add_new');
   assert.deepEqual(result.candidates, []);
+});
+
+class FakeContextSearchDb {
+  constructor() {
+    this.queries = [];
+    this.params = [];
+  }
+
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    this.queries.push(text);
+    this.params.push([...params]);
+    if (text.startsWith('SELECT count(*)::int')) {
+      return { rows: [{ total: 0 }], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT c.*')) {
+      return { rows: [], rowCount: 0 };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  }
+}
+
+test('context search defaults to confirmed Memory and only includes Signals when requested', async () => {
+  const activeDb = new FakeContextSearchDb();
+  await searchContextEntries(activeDb, baseInput.tenantId, { limit: 20 });
+  assert.match(activeDb.queries[0], /c\.memory_status = 'active'/);
+  assert.deepEqual(activeDb.params[0], [baseInput.tenantId]);
+
+  const signalDb = new FakeContextSearchDb();
+  await searchContextEntries(signalDb, baseInput.tenantId, { memory_status: 'signal', limit: 20 });
+  assert.match(signalDb.queries[0], /c\.memory_status = \$2/);
+  assert.deepEqual(signalDb.params[0], [baseInput.tenantId, 'signal']);
+});
+
+test('signal auto-promotion requires evidence and configured confidence threshold', () => {
+  assert.equal(shouldAutoPromoteSignal({ confidence: 0.85, threshold: 0.85, evidenceCount: 1 }), true);
+  assert.equal(shouldAutoPromoteSignal({ confidence: 0.84, threshold: 0.85, evidenceCount: 1 }), false);
+  assert.equal(shouldAutoPromoteSignal({ confidence: 0.95, threshold: 0.85, evidenceCount: 0 }), false);
+  assert.equal(shouldAutoPromoteSignal({ threshold: 0.85, evidenceCount: 1 }), false);
 });
 
 class FakeRecoveryDb {
@@ -1232,6 +1277,38 @@ test('workflow filters and variables support connector metadata', () => {
   assert.equal(interpolate('Sync {{external.sync_run_id}} changed {{external.changed_fields}} on {{external.record_id}}', context), 'Sync run-1 changed health_score,renewal_date on warehouse-row-42');
 });
 
+test('workflow draft dry-run resolves governed system actions without persistence', () => {
+  const result = dryRunWorkflowDefinition({
+    trigger_filter: {
+      'metadata.origin': { op: 'eq', value: 'warehouse_sync' },
+    },
+    actions: [
+      {
+        type: 'request_external_writeback',
+        config: {
+          system_id: '22222222-2222-4222-8222-222222222222',
+          object_type: 'opportunity',
+          object_id: '{{subject.id}}',
+          external_object: 'deals',
+          operation: 'upsert',
+          writeback_mode: 'mapped_upsert',
+          payload: '{"id":"{{subject.id}}","stage":"{{subject.stage}}"}',
+          require_approval: 'true',
+        },
+      },
+    ],
+  }, {
+    id: 'opp-1',
+    subject: { stage: 'technical_validation' },
+    metadata: { origin: 'warehouse_sync' },
+  });
+
+  assert.equal(result.would_trigger, true);
+  assert.equal(result.actions[0].would_execute, true);
+  assert.equal(result.actions[0].resolved_config.object_id, 'opp-1');
+  assert.match(result.actions[0].note, /governed writeback request/);
+});
+
 test('workflow engine skips replayed sync events before querying workflows', async () => {
   let queries = 0;
   const db = {
@@ -1248,4 +1325,61 @@ test('workflow engine skips replayed sync events before querying workflows', asy
   });
 
   assert.equal(queries, 0);
+});
+
+test('workflow engine skips workflow-originated events before querying workflows', async () => {
+  let queries = 0;
+  const db = {
+    async query() {
+      queries++;
+      throw new Error('Workflow lookup should not run for workflow-originated events');
+    },
+  };
+  const engine = createWorkflowEngine(db);
+
+  await engine.processEvent(baseInput.tenantId, 'email.created', 124, {
+    id: 'email-1',
+    metadata: { origin: 'workflow' },
+  });
+
+  assert.equal(queries, 0);
+});
+
+test('action policy requires approval for non-user forecast changes', () => {
+  const result = evaluateActionPolicy({
+    action_type: 'opportunity.update',
+    object_type: 'opportunity',
+    field_names: ['forecast_cat'],
+    actor: {
+      tenant_id: baseInput.tenantId,
+      actor_id: 'agent-1',
+      actor_type: 'agent',
+      role: 'member',
+      scopes: ['opportunities:write'],
+    },
+  });
+
+  assert.equal(result.decision, 'approval_required');
+  assert.equal(result.risk_level, 'high');
+  assert.match(result.reasons.join(' '), /forecast/);
+});
+
+test('action policy blocks Signal promotion without evidence', () => {
+  const result = evaluateActionPolicy({
+    action_type: 'context.signal_promote',
+    object_type: 'opportunity',
+    memory_status: 'signal',
+    confidence: 0.95,
+    evidence: [],
+    actor: {
+      tenant_id: baseInput.tenantId,
+      actor_id: 'agent-1',
+      actor_type: 'agent',
+      role: 'member',
+      scopes: ['context:write'],
+    },
+  });
+
+  assert.equal(result.decision, 'blocked');
+  assert.equal(result.required_evidence, true);
 });

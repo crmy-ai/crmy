@@ -10,9 +10,13 @@ import {
   useContextTypes,
   useSemanticSearch,
   useContextIngest,
+  useContextIngestAuto,
   useDetectSubjects,
   useIngestFile,
   useCreateContextEntry,
+  usePromoteSignal,
+  useRejectSignal,
+  useStaleContextEntries,
   useContacts,
   useAccounts,
   useOpportunities,
@@ -43,6 +47,7 @@ import {
 import { useAppStore } from '@/store/appStore';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import {
@@ -60,6 +65,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet';
 import { toast } from '@/hooks/use-toast';
 import { ContextEntryDrawer } from '@/components/crm/ContextEntryDrawer';
 import { CompactList } from '@/components/crm/CompactList';
@@ -116,7 +129,7 @@ function ValidUntilBadge({ date }: { date: string | null | undefined }) {
   return (
     <span className={`inline-flex items-center gap-1 text-xs font-medium ${expired ? 'text-destructive' : 'text-muted-foreground'}`}>
       {expired && <AlertTriangle className="w-3 h-3" />}
-      {expired ? 'Expired ' : 'Valid until '}
+      {expired ? 'Needs review ' : 'Review by '}
       {formatDistanceToNow(new Date(date), { addSuffix: true })}
     </span>
   );
@@ -437,8 +450,15 @@ const BLANK_ADD_FORM: AddEntryForm = {
   confidence: '', tags: '', source: '', valid_until: '',
 };
 
-export function ContextBrowser() {
+type IngestSummary = {
+  memoryCreated: number;
+  signalsCreated: number;
+  skipped: number;
+} | null;
+
+export function ContextBrowser({ memoryStatus = 'active' }: { memoryStatus?: 'signal' | 'active' }) {
   const [searchParams, setSearchParams] = useSearchParams();
+  const isSignalMode = memoryStatus === 'signal';
 
   // Initialise filters from URL params
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>(() => {
@@ -459,8 +479,10 @@ export function ContextBrowser() {
   const [ingestText,        setIngestText]         = useState('');
   const [ingestSubjects,    setIngestSubjects]     = useState<IngestSubject[]>([]);
   const [ingestSource,      setIngestSource]       = useState('');
+  const [autoResolveIngest, setAutoResolveIngest]  = useState(true);
   const [ingesting,         setIngesting]          = useState(false);
   const [detecting,         setDetecting]          = useState(false);
+  const [detectError,       setDetectError]        = useState<string | null>(null);
   const [clipboardBanner,   setClipboardBanner]    = useState<string | null>(null);
   // File upload state
   const [uploadFile,        setUploadFile]         = useState<File | null>(null);
@@ -478,6 +500,7 @@ export function ContextBrowser() {
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState<AddEntryForm>(BLANK_ADD_FORM);
   const [adding, setAdding] = useState(false);
+  const [ingestSummary, setIngestSummary] = useState<IngestSummary>(null);
 
   // Detail drawer state
   const [selectedEntry, setSelectedEntry] = useState<any | null>(null);
@@ -490,7 +513,10 @@ export function ContextBrowser() {
 
   const reviewEntry      = useReviewContextEntry();
   const supersedeEntry   = useSupersedeContextEntry();
+  const promoteSignal    = usePromoteSignal();
+  const rejectSignal     = useRejectSignal();
   const ingestMutation   = useContextIngest();
+  const ingestAutoMut    = useContextIngestAuto();
   const detectSubjects   = useDetectSubjects();
   const ingestFileMut    = useIngestFile();
   const createEntry      = useCreateContextEntry();
@@ -507,12 +533,22 @@ export function ContextBrowser() {
     }).catch(() => {}); // permission denied — silently skip
   }, [ingestOpen]);
 
+  useEffect(() => {
+    if (searchParams.get('add') !== 'context') return;
+    setIngestOpen(true);
+    setIngestTab('text');
+    const next = new URLSearchParams(searchParams);
+    next.delete('add');
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   // Auto-detect subjects from pasted text (debounced 600ms)
   const runDetect = useCallback((text: string, targetTab: 'text' | 'file') => {
     clearTimeout(detectDebounceRef.current);
     if (text.trim().length < 40) return;
     detectDebounceRef.current = setTimeout(async () => {
       setDetecting(true);
+      setDetectError(null);
       try {
         const result = await detectSubjects.mutateAsync(text) as any;
         const detected: IngestSubject[] = (result?.subjects ?? []).map((s: any) => ({
@@ -533,7 +569,11 @@ export function ContextBrowser() {
         } else {
           setUploadSubjects(detected);
         }
-      } catch { /* silently fail */ } finally {
+      } catch (err) {
+        setDetectError(err instanceof Error
+          ? err.message
+          : 'Workspace Agent could not match customer records automatically.');
+      } finally {
         setDetecting(false);
       }
     }, 600);
@@ -567,6 +607,7 @@ export function ContextBrowser() {
       setUploadText(result.full_text ?? '');
       setUploadPreview(result.text_preview ?? '');
       setUploadTruncated(result.truncated ?? false);
+      setDetectError(result.subject_detection_error ?? null);
       const detected: IngestSubject[] = (result.subjects ?? []).map((s: any) => ({
         type: s.type, id: s.id, label: s.name, auto: true, confidence: s.confidence,
       }));
@@ -585,6 +626,7 @@ export function ContextBrowser() {
     setIngestText('');
     setIngestSubjects([]);
     setIngestSource('');
+    setAutoResolveIngest(true);
     setIngestTab('text');
     setUploadFile(null);
     setUploadText('');
@@ -592,6 +634,7 @@ export function ContextBrowser() {
     setUploadSubjects([]);
     setUploadSource('');
     setClipboardBanner(null);
+    setDetectError(null);
     clearTimeout(detectDebounceRef.current);
   }, []);
 
@@ -634,8 +677,8 @@ export function ContextBrowser() {
     },
   ], [contextTypeOptions]);
 
-  // Preserve the `tab` param when clearing/changing filters so Workspace's
-  // Knowledge tab doesn't get popped back to Overview.
+  // Preserve the `tab` param when clearing/changing filters so Context stays
+  // on the Current Memory, Signals, or Memory Health view.
   const preservedSetSearchParams = (updates: Record<string, string>) => {
     const tab = searchParams.get('tab');
     setSearchParams(tab ? { tab, ...updates } : updates);
@@ -668,9 +711,18 @@ export function ContextBrowser() {
   const params = useMemo(() => ({
     subject_type: subjectType || undefined,
     context_type: contextType || undefined,
-    is_current:   staleOnly ? false : undefined,
+    memory_status: memoryStatus,
     limit:        20,
-  }), [subjectType, contextType, staleOnly]);
+  }), [subjectType, contextType, memoryStatus]);
+
+  const staleQuery = useStaleContextEntries({
+    subject_type: subjectType || undefined,
+    limit: 200,
+  }) as any;
+  const staleEntries: any[] = useMemo(() => {
+    const rows = staleQuery.data?.stale_entries ?? staleQuery.data?.data ?? [];
+    return contextType ? rows.filter((entry: any) => entry.context_type === contextType) : rows;
+  }, [staleQuery.data, contextType]);
 
   const {
     data: infiniteData,
@@ -680,17 +732,17 @@ export function ContextBrowser() {
     fetchNextPage,
   } = useContextEntriesInfinite(params);
   const entries: any[] = useMemo(
-    () => infiniteData?.pages.flatMap((p: any) => p.data ?? []) ?? [],
-    [infiniteData],
+    () => staleOnly ? staleEntries : infiniteData?.pages.flatMap((p: any) => p.data ?? []) ?? [],
+    [infiniteData, staleOnly, staleEntries],
   );
-  const total: number = infiniteData?.pages[0]?.total ?? 0;
+  const total: number = staleOnly ? staleEntries.length : infiniteData?.pages[0]?.total ?? 0;
 
   const semanticParams = useMemo(() => ({
     subject_type:  subjectType || undefined,
     context_type:  contextType || undefined,
-    current_only:  staleOnly ? false : undefined,
+    memory_status: memoryStatus,
     limit:         50,
-  }), [subjectType, contextType, staleOnly]);
+  }), [subjectType, contextType, memoryStatus]);
 
   const {
     data: semanticData,
@@ -717,7 +769,7 @@ export function ContextBrowser() {
   const effectiveMode = searchMode === 'semantic' && semanticError ? 'keyword' : searchMode;
 
   const filtered = useMemo(() => {
-    let items = effectiveMode === 'semantic' ? semanticEntries : entries;
+    let items = staleOnly ? entries : effectiveMode === 'semantic' ? semanticEntries : entries;
 
     if (effectiveMode === 'keyword' && q.trim()) {
       const lower = q.toLowerCase();
@@ -737,9 +789,13 @@ export function ContextBrowser() {
     }
 
     return items;
-  }, [entries, semanticEntries, q, effectiveMode, sort]);
+  }, [entries, semanticEntries, q, effectiveMode, sort, staleOnly]);
 
-  const isSearching = searchMode === 'keyword' ? isLoading : (semanticError ? isLoading : semanticLoading);
+  const isSearching = staleOnly
+    ? staleQuery.isLoading
+    : searchMode === 'keyword'
+    ? isLoading
+    : (semanticError ? isLoading : semanticLoading);
   const hasFilters  = Object.keys(activeFilters).length > 0 || q;
 
   const handleIngest = useCallback(async () => {
@@ -748,11 +804,11 @@ export function ContextBrowser() {
     const activeSource = ingestTab === 'file' ? uploadSource : ingestSource;
 
     const validSubjects = activeSubjects.filter(s => s.type && s.id);
-    if (!activeText.trim() || validSubjects.length === 0) {
+    if (!activeText.trim() || (!autoResolveIngest && validSubjects.length === 0)) {
       toast({
         title: 'Missing fields',
-        description: validSubjects.length === 0
-          ? 'No subjects found or selected. Add one manually or paste text that mentions a contact or account.'
+        description: !autoResolveIngest && validSubjects.length === 0
+          ? 'Choose at least one customer record, or turn on automatic subject matching.'
           : 'No document text provided.',
         variant: 'destructive',
       });
@@ -760,24 +816,38 @@ export function ContextBrowser() {
     }
     setIngesting(true);
     try {
-      const results = await Promise.all(validSubjects.map(s =>
-        ingestMutation.mutateAsync({
-          text:         activeText,
-          subject_type: s.type,
-          subject_id:   s.id,
-          source:       activeSource || undefined,
-        }),
-      ));
+      const results = autoResolveIngest
+        ? [await ingestAutoMut.mutateAsync({
+            text: activeText,
+            source: activeSource || undefined,
+          })]
+        : await Promise.all(validSubjects.map(s =>
+            ingestMutation.mutateAsync({
+              text:         activeText,
+              subject_type: s.type,
+              subject_id:   s.id,
+              source:       activeSource || undefined,
+            }),
+          ));
       const totalExtracted: number = results.reduce((sum: number, r: any) => sum + (r?.extracted_count ?? 0), 0);
+      const memoryCreated = results.reduce((sum: number, r: any) => sum + Number(r?.memory_created ?? r?.memory_entries?.length ?? 0), 0);
+      const signalsCreated = results.reduce((sum: number, r: any) => sum + Number(r?.signals_created ?? r?.signals?.length ?? 0), 0);
+      const skipped = results.reduce((sum: number, r: any) => {
+        const explicit = Number(r?.skipped ?? 0);
+        return sum + (explicit > 0 ? explicit : r?.subjects_resolved?.length === 0 && totalExtracted === 0 ? 1 : 0);
+      }, 0);
+      setIngestSummary({ memoryCreated, signalsCreated, skipped });
       if (totalExtracted > 0) {
         toast({
-          title: 'Ingestion complete',
-          description: `${totalExtracted} context ${totalExtracted === 1 ? 'entry' : 'entries'} extracted across ${validSubjects.length === 1 ? '1 subject' : `${validSubjects.length} subjects`}.`,
+          title: 'Context processed',
+          description: `${memoryCreated} Memory created, ${signalsCreated} ${signalsCreated === 1 ? 'Signal needs' : 'Signals need'} review, ${skipped} skipped.`,
         });
       } else {
         toast({
-          title: 'Document saved',
-          description: 'No entries were extracted — the Workspace Agent may not be configured, or no extractable context types are defined.',
+          title: 'Raw Context saved',
+          description: autoResolveIngest
+            ? 'No customer records were confidently matched. Add matching contacts/accounts or choose a subject manually.'
+            : 'No signals were extracted. Check the Workspace Agent configuration or context type settings.',
           variant: 'destructive',
         });
       }
@@ -791,7 +861,7 @@ export function ContextBrowser() {
     } finally {
       setIngesting(false);
     }
-  }, [ingestTab, ingestText, ingestSubjects, ingestSource, uploadText, uploadSubjects, uploadSource, ingestMutation, closeIngestDialog]);
+  }, [autoResolveIngest, ingestTab, ingestText, ingestSubjects, ingestSource, uploadText, uploadSubjects, uploadSource, ingestAutoMut, ingestMutation, closeIngestDialog]);
 
   // Handle manual entry creation
   const handleAddEntry = useCallback(async () => {
@@ -822,11 +892,15 @@ export function ContextBrowser() {
         title: addForm.title.trim() || undefined,
         body: addForm.body.trim(),
         confidence: confidenceNum,
+        memory_status: 'active',
         tags,
         source: addForm.source.trim() || undefined,
         valid_until: addForm.valid_until || undefined,
       });
-      toast({ title: 'Context entry created', description: `Added to ${addForm.subject_label || addForm.subject_type}.` });
+      toast({
+        title: 'Memory saved',
+        description: `Added to ${addForm.subject_label || addForm.subject_type}.`,
+      });
       setAddOpen(false);
       setAddForm(BLANK_ADD_FORM);
     } catch (err) {
@@ -841,29 +915,45 @@ export function ContextBrowser() {
   }, [addForm, createEntry]);
 
   const searchModeToggle = (
-    <div className="flex items-center gap-0.5 bg-muted rounded-xl p-0.5 flex-shrink-0">
-      <button
-        onClick={() => setSearchMode('keyword')}
-        className={`flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm font-medium transition-all ${
-          searchMode === 'keyword'
-            ? 'bg-card text-foreground shadow-sm'
-            : 'text-muted-foreground hover:text-foreground'
-        }`}
-      >
-        <Search className="w-3.5 h-3.5" />
-        Keyword
-      </button>
-      <button
-        onClick={() => setSearchMode('semantic')}
-        className={`flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm font-medium transition-all ${
-          searchMode === 'semantic'
-            ? 'bg-violet-600 text-white shadow-sm'
-            : 'text-muted-foreground hover:text-foreground'
-        }`}
-      >
-        <Sparkles className="w-3.5 h-3.5" />
-        Semantic
-      </button>
+    <div className="flex items-center gap-2 flex-shrink-0">
+      <div className="flex items-center gap-0.5 bg-muted rounded-xl p-0.5">
+        <button
+          onClick={() => setSearchMode('keyword')}
+          className={`flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm font-medium transition-all ${
+            searchMode === 'keyword'
+              ? 'bg-card text-foreground shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Search className="w-3.5 h-3.5" />
+          Keyword
+        </button>
+        <button
+          onClick={() => setSearchMode('semantic')}
+          className={`flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm font-medium transition-all ${
+            searchMode === 'semantic'
+              ? 'bg-violet-600 text-white shadow-sm'
+              : 'text-muted-foreground hover:text-foreground'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          Semantic
+        </button>
+      </div>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" className="h-9 px-3 gap-1.5">
+            <MoreHorizontal className="w-4 h-4" />
+            <span className="hidden sm:inline">Advanced</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuItem onClick={() => { setAddForm(BLANK_ADD_FORM); setAddOpen(true); }}>
+            <Edit3 className="w-3.5 h-3.5 mr-2" />
+            Write Memory manually
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 
@@ -886,15 +976,52 @@ export function ContextBrowser() {
         sortOptions={SORT_OPTIONS}
         currentSort={sort}
         onSortChange={handleSortChange}
-        onSecondaryAdd={() => { setAddForm(BLANK_ADD_FORM); setAddOpen(true); }}
-        secondaryAddLabel="Add"
         onAdd={() => { setIngestOpen(true); setIngestTab('text'); }}
-        addLabel="Import"
+        addLabel="Add Context"
         entityType="context"
         searchSuffix={searchModeToggle}
       />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">
+        {ingestSummary && (
+          <div className="mb-4 rounded-xl border border-border bg-card px-4 py-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Context processed</p>
+                <p className="text-sm text-muted-foreground">
+                  {ingestSummary.memoryCreated} Memory created · {ingestSummary.signalsCreated} Signals need attention · {ingestSummary.skipped} skipped
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => preservedSetSearchParams({ tab: 'signals' })}>
+                  Review Signals
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => preservedSetSearchParams({ tab: 'browser' })}>
+                  View Memory
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+        {isSignalMode && (
+          <div className="mb-4 rounded-xl border border-violet-500/20 bg-violet-500/5 px-4 py-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Signals are raw inferences</p>
+                <p className="text-sm text-muted-foreground">
+                  CRMy combines supporting evidence across sources so trusted Signals can become Memory.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                <span>Raw Context</span>
+                <span className="text-violet-500">→</span>
+                <span className="text-violet-600 dark:text-violet-300">Signals</span>
+                <span className="text-violet-500">→</span>
+                <span>Memory</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Semantic unavailable banner */}
         {searchMode === 'semantic' && semanticError && (
@@ -926,14 +1053,18 @@ export function ContextBrowser() {
           >
             <Library className="w-14 h-14 text-muted-foreground/30 mb-4" />
             <p className="text-base font-display font-semibold text-foreground mb-1">
-              {hasFilters ? 'No entries match your filters' : 'No context entries yet'}
+              {hasFilters
+                ? memoryStatus === 'signal' ? 'No Signals match your filters' : staleOnly ? 'No Memory needs review' : 'No Memory matches your filters'
+                : memoryStatus === 'signal' ? 'No Signals waiting for review' : 'No Current Memory yet'}
             </p>
             <p className="text-sm text-muted-foreground max-w-sm">
               {hasFilters
                 ? searchMode === 'semantic'
                   ? 'Try rephrasing your question or adjusting filters.'
                   : 'Try adjusting your search or filters.'
-                : 'Agents write context entries after every interaction. They power the briefings returned by briefing_get.'}
+                : memoryStatus === 'signal'
+                ? 'Raw Context from calls, emails, documents, and systems of record creates Signals here before they become Memory.'
+                : 'Current Memory powers briefings, agent work, handoffs, and governed writeback.'}
             </p>
             {hasFilters && (
               <Button variant="outline" size="sm" className="mt-4" onClick={clearFilters}>
@@ -973,6 +1104,16 @@ export function ContextBrowser() {
                             {entry.context_type.replace(/_/g, ' ')}
                           </Badge>
                         )}
+                        {entry.memory_status === 'signal' && (
+                          <Badge className="text-xs bg-violet-600/10 text-violet-700 dark:text-violet-300 border border-violet-500/20">
+                            Signal
+                          </Badge>
+                        )}
+                        {expired && entry.memory_status !== 'signal' && (
+                          <Badge className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
+                            Needs review
+                          </Badge>
+                        )}
                         <SubjectChip
                           subjectType={entry.subject_type}
                           subjectId={entry.subject_id}
@@ -980,10 +1121,16 @@ export function ContextBrowser() {
                         />
                         {entry.is_current === false && (
                           <Badge variant="outline" className="text-xs text-muted-foreground border-muted">
-                            superseded
+                            Superseded
                           </Badge>
                         )}
                         <ConfidencePill value={entry.confidence_score} />
+                        {Array.isArray(entry.evidence) && entry.evidence.length > 0 && (
+                          <Badge variant="outline" className="text-xs gap-1 border-emerald-500/25 text-emerald-700 dark:text-emerald-300">
+                            <FileText className="w-3 h-3" />
+                            {entry.evidence.length} evidence
+                          </Badge>
+                        )}
                         {searchMode === 'semantic' && <SimilarityPill value={entry.similarity} />}
                       </div>
                       {entry.body && (
@@ -1020,8 +1167,36 @@ export function ContextBrowser() {
                           Mark reviewed
                         </Button>
                       )}
-                      {!expired && entry.is_current && (
+                      {!expired && entry.is_current && entry.memory_status !== 'signal' && (
                         <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                      )}
+                      {entry.memory_status === 'signal' && (
+                        <>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 text-xs"
+                            onClick={() => promoteSignal.mutate(
+                              { id: entry.id },
+                              { onSuccess: () => toast({ title: 'Promoted to Memory', description: 'Agents can now use this as confirmed operational context.' }) },
+                            )}
+                            disabled={promoteSignal.isPending}
+                          >
+                            Promote to Memory
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 text-xs text-muted-foreground"
+                            onClick={() => rejectSignal.mutate(
+                              { id: entry.id, reason: 'Rejected from Signals review' },
+                              { onSuccess: () => toast({ title: 'Signal dismissed', description: 'It will stay out of Memory.' }) },
+                            )}
+                            disabled={rejectSignal.isPending}
+                          >
+                            Dismiss
+                          </Button>
+                        </>
                       )}
                       {/* Kebab menu */}
                       <DropdownMenu>
@@ -1067,7 +1242,7 @@ export function ContextBrowser() {
                 </motion.div>
               );
             })}
-            {searchMode === 'keyword' && hasNextPage && (
+            {!staleOnly && searchMode === 'keyword' && hasNextPage && (
               <div className="flex justify-center pt-4 pb-2">
                 <Button
                   variant="outline"
@@ -1092,39 +1267,40 @@ export function ContextBrowser() {
         onClose={() => setDrawerOpen(false)}
       />
 
-      {/* ── Import Dialog ──────────────────────────────────────────────────── */}
-      <Dialog open={ingestOpen} onOpenChange={(open) => { if (!open) closeIngestDialog(); else setIngestOpen(true); }}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+      {/* ── Add Context Drawer ─────────────────────────────────────────────── */}
+      <Sheet open={ingestOpen} onOpenChange={(open) => { if (!open) closeIngestDialog(); else setIngestOpen(true); }}>
+        <SheetContent side="right" className="flex h-full w-full flex-col gap-0 p-0 sm:max-w-xl">
+          <SheetHeader className="border-b border-border px-5 pb-4 pt-5 text-left">
+            <SheetTitle className="flex items-center gap-2 text-base">
               <FileText className="w-5 h-5 text-[#0ea5e9]" />
-              Import context
-            </DialogTitle>
-            <DialogDescription>
-              Paste text or upload a file — CRMy automatically detects which contacts and accounts are mentioned.
-            </DialogDescription>
-          </DialogHeader>
+              Add Context
+            </SheetTitle>
+            <SheetDescription>
+              Paste transcripts, emails, meeting notes, support updates, or research. CRMy extracts Signals and promotes high-confidence items to Memory.
+            </SheetDescription>
+          </SheetHeader>
 
-          {/* Tab switcher */}
-          <div className="flex items-center gap-0.5 bg-muted rounded-xl p-0.5 self-start">
+          <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+            {/* Tab switcher */}
+            <div className="flex items-center gap-0.5 bg-muted rounded-xl p-0.5 self-start">
             <button
               onClick={() => setIngestTab('text')}
               className={`flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm font-medium transition-all ${ingestTab === 'text' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
             >
               <FileText className="w-3.5 h-3.5" />
-              Text / Paste
+              Paste text
             </button>
             <button
               onClick={() => setIngestTab('file')}
               className={`flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm font-medium transition-all ${ingestTab === 'file' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
             >
               <Upload className="w-3.5 h-3.5" />
-              Upload File
+              Upload file
             </button>
-          </div>
+            </div>
 
-          {ingestTab === 'text' ? (
-            <div className="space-y-3">
+            {ingestTab === 'text' ? (
+              <div className="space-y-3">
               {/* Smart paste banner */}
               {clipboardBanner && (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/8 border border-primary/20 text-sm">
@@ -1145,7 +1321,7 @@ export function ContextBrowser() {
               )}
 
               <Textarea
-                placeholder="Paste a meeting transcript, research notes, email thread…"
+                placeholder="Paste a meeting transcript, research notes, email thread, support update, or product usage summary…"
                 value={ingestText}
                 onChange={(e) => {
                   setIngestText(e.target.value);
@@ -1154,11 +1330,45 @@ export function ContextBrowser() {
                 className="min-h-[150px] text-sm"
               />
 
-              <SubjectSection
-                subjects={ingestSubjects}
-                onChange={setIngestSubjects}
-                detecting={detecting}
-              />
+              <div className="rounded-xl border border-border bg-muted/30 p-3">
+                <label className="flex items-start gap-3">
+                  <Checkbox
+                    checked={autoResolveIngest}
+                    onCheckedChange={(checked) => setAutoResolveIngest(Boolean(checked))}
+                    className="mt-0.5"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-foreground">Match customer records automatically</span>
+                    <span className="block text-xs text-muted-foreground">
+                      CRMy will find the contacts and accounts mentioned here, extract Signals, and promote high-confidence items to Memory.
+                    </span>
+                    {autoResolveIngest && ingestSubjects.length > 0 && (
+                      <span className="mt-2 block text-xs text-muted-foreground">
+                        Detected {ingestSubjects.length} possible {ingestSubjects.length === 1 ? 'subject' : 'subjects'} for matching.
+                      </span>
+                    )}
+                  </span>
+                </label>
+              </div>
+              {autoResolveIngest && detectError && (
+                <div className="flex items-start gap-2 rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-warning" />
+                  <div>
+                    <p className="font-semibold text-foreground">Automatic matching needs attention</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {detectError} You can still turn off automatic matching and choose the customer record manually.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {!autoResolveIngest && (
+                <SubjectSection
+                  subjects={ingestSubjects}
+                  onChange={setIngestSubjects}
+                  detecting={detecting}
+                />
+              )}
 
               <Input
                 placeholder="Source label (optional, e.g. 'Q1 review call')"
@@ -1166,9 +1376,9 @@ export function ContextBrowser() {
                 onChange={(e) => setIngestSource(e.target.value)}
                 className="h-9 text-sm"
               />
-            </div>
-          ) : (
-            <div className="space-y-3">
+              </div>
+            ) : (
+              <div className="space-y-3">
               {/* Dropzone */}
               {!uploadFile ? (
                 <div
@@ -1218,11 +1428,45 @@ export function ContextBrowser() {
                 </div>
               )}
 
-              <SubjectSection
-                subjects={uploadSubjects}
-                onChange={setUploadSubjects}
-                detecting={uploadParsing}
-              />
+              <div className="rounded-xl border border-border bg-muted/30 p-3">
+                <label className="flex items-start gap-3">
+                  <Checkbox
+                    checked={autoResolveIngest}
+                    onCheckedChange={(checked) => setAutoResolveIngest(Boolean(checked))}
+                    className="mt-0.5"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-foreground">Match customer records automatically</span>
+                    <span className="block text-xs text-muted-foreground">
+                      CRMy will resolve the file to matching customer records before extracting Signals and Memory.
+                    </span>
+                    {autoResolveIngest && uploadSubjects.length > 0 && (
+                      <span className="mt-2 block text-xs text-muted-foreground">
+                        Detected {uploadSubjects.length} possible {uploadSubjects.length === 1 ? 'subject' : 'subjects'} for matching.
+                      </span>
+                    )}
+                  </span>
+                </label>
+              </div>
+              {autoResolveIngest && detectError && (
+                <div className="flex items-start gap-2 rounded-xl border border-warning/25 bg-warning/10 p-3 text-sm">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-warning" />
+                  <div>
+                    <p className="font-semibold text-foreground">Automatic matching needs attention</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {detectError} You can still turn off automatic matching and choose the customer record manually.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {!autoResolveIngest && (
+                <SubjectSection
+                  subjects={uploadSubjects}
+                  onChange={setUploadSubjects}
+                  detecting={uploadParsing}
+                />
+              )}
 
               <Input
                 placeholder="Source label (e.g. 'Q1 review transcript')"
@@ -1230,22 +1474,23 @@ export function ContextBrowser() {
                 onChange={(e) => setUploadSource(e.target.value)}
                 className="h-9 text-sm"
               />
-            </div>
-          )}
+              </div>
+            )}
+          </div>
 
-          <DialogFooter>
+          <SheetFooter className="border-t border-border px-5 py-4">
             <Button variant="outline" onClick={closeIngestDialog}>Cancel</Button>
             <Button
               onClick={handleIngest}
               disabled={ingesting || uploadParsing}
-              className="gap-1.5"
+              className="gap-1.5 bg-[#0ea5e9] text-white hover:bg-[#0284c7]"
             >
               {ingesting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Extract &amp; Import
+              Add Context
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
 
       {/* ── Add Context Entry Dialog ────────────────────────────────────────── */}
       <Dialog open={addOpen} onOpenChange={(open) => { if (!open) { setAddOpen(false); setAddForm(BLANK_ADD_FORM); } else setAddOpen(true); }}>
@@ -1253,10 +1498,10 @@ export function ContextBrowser() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Plus className="w-5 h-5 text-primary" />
-              Add context entry
+              Write Memory manually
             </DialogTitle>
             <DialogDescription>
-              Manually record a belief, preference, or note about any customer object.
+              Record confirmed context directly. For transcripts, emails, notes, or other messy source material, use Add Context instead.
             </DialogDescription>
           </DialogHeader>
 
@@ -1390,7 +1635,7 @@ export function ContextBrowser() {
               className="gap-1.5"
             >
               {adding && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Save entry
+              Save Memory
             </Button>
           </DialogFooter>
         </DialogContent>

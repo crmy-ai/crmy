@@ -38,7 +38,7 @@ const agentNavItems = [
   { icon: Inbox,       label: 'Handoffs',     path: '/handoffs',     color: ENTITY_COLORS.assignments },
 ];
 
-// Data tier — knowledge base objects
+// Data tier — customer record objects
 const dataNavItems = [
   { icon: Users,       label: 'Contacts',      path: '/contacts',      color: ENTITY_COLORS.contacts },
   { icon: Building2,   label: 'Companies',     path: '/companies',     color: ENTITY_COLORS.accounts },
@@ -224,7 +224,7 @@ export function Sidebar() {
                 exit={{ opacity: 0 }}
                 className="text-xs font-semibold text-muted-foreground/60 uppercase tracking-widest px-2.5 pt-2 pb-0.5"
               >
-                Knowledge Base
+                Customer Records
               </motion.p>
             )}
           </AnimatePresence>

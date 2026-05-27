@@ -116,11 +116,11 @@ export function hitlTools(db: DbPool): ToolDef[] {
         });
       },
     },
-    // ── Auto-approval rule management ────────────────────────────────────────
+    // ── Action Policy auto-approval management ───────────────────────────────
     {
       name: 'hitl_rule_create',
       tier: 'admin',
-      description: 'Create an auto-approval rule that automatically approves or rejects HITL requests matching the specified criteria without human review. Rules are evaluated in descending priority order; first match wins. condition is a JSON object {field, op, value} or array of conditions (all must match). Operators: <, >, =, !=, contains, not_contains. field is a dot-path into action_payload. Use this to automate routine low-risk actions like small email drafts or research tasks.',
+      description: 'Create an Action Policy that automatically approves or rejects HITL requests matching the specified criteria without human review. Policies are evaluated in descending priority order; first match wins. condition is a JSON object {field, op, value} or array of conditions (all must match). Operators: <, >, =, !=, contains, not_contains. field is a dot-path into action_payload. Use this to automate routine low-risk actions while preserving the policy boundary for high-risk changes.',
       inputSchema: z.object({
         name: z.string().min(1).max(100).describe('Human-readable name for the rule'),
         action_type: z.string().optional().describe('action_type to match. Omit to match all types.'),
@@ -184,7 +184,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
     {
       name: 'hitl_rule_list',
       tier: 'admin',
-      description: 'List all auto-approval rules for this tenant, sorted by priority. Use this to audit what rules are active and may be automatically approving or rejecting agent requests.',
+      description: 'List all Action Policies for this tenant, sorted by priority. Use this to audit which policies may automatically approve or reject agent requests.',
       inputSchema: z.object({}),
       handler: async (_input: Record<never, never>, actor: ActorContext) => {
         const result = await db.query(

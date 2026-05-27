@@ -41,6 +41,10 @@ function displayName(c: Contact): string {
   return c.email || c.company_name || 'Unknown';
 }
 
+function companyName(c: Contact): string {
+  return (c.account_name ?? c.company_name ?? c.company ?? '') as string;
+}
+
 export default function Contacts() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -70,8 +74,8 @@ export default function Contacts() {
     if (activeFilters.lifecycle_stage?.length) result = result.filter(c => activeFilters.lifecycle_stage.includes(c.lifecycle_stage as string));
     if (sort) {
       result.sort((a, b) => {
-        const aVal = (sort.key === 'name' ? displayName(a) : a[sort.key] ?? '') as string | number;
-        const bVal = (sort.key === 'name' ? displayName(b) : b[sort.key] ?? '') as string | number;
+        const aVal = (sort.key === 'name' ? displayName(a) : sort.key === 'company' ? companyName(a) : a[sort.key] ?? '') as string | number;
+        const bVal = (sort.key === 'name' ? displayName(b) : sort.key === 'company' ? companyName(b) : b[sort.key] ?? '') as string | number;
         if (typeof aVal === 'number' && typeof bVal === 'number') return sort.dir === 'asc' ? aVal - bVal : bVal - aVal;
         return sort.dir === 'asc' ? String(aVal).localeCompare(String(bVal)) : String(bVal).localeCompare(String(aVal));
       });
@@ -165,7 +169,7 @@ export default function Contacts() {
                           {c.title && <p className="text-xs text-muted-foreground">{c.title as string}</p>}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{(c.company_name as string) || '—'}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{companyName(c) || '—'}</td>
                       <td className="px-4 py-3 text-muted-foreground">{(c.email as string) || '—'}</td>
                       <td className="px-4 py-3 text-muted-foreground">{(c.phone as string) || '—'}</td>
                       <td className="px-4 py-3">{c.lifecycle_stage ? <StageBadge stage={c.lifecycle_stage as string} /> : '—'}</td>
@@ -179,7 +183,7 @@ export default function Contacts() {
                             <FileText className="w-3.5 h-3.5 text-primary" />
                           </button>
                           {agentEnabled && (
-                            <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: c.company_name as string }); navigate('/agent'); }}
+                            <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: companyName(c) }); navigate('/agent'); }}
                               className="p-1.5 rounded-lg hover:bg-accent/10 transition-colors">
                               <Sparkles className="w-3.5 h-3.5 text-accent" />
                             </button>
@@ -208,7 +212,7 @@ export default function Contacts() {
                     <FileText className="w-3.5 h-3.5 text-primary" />
                   </button>
                   {agentEnabled && (
-                    <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: c.company_name as string }); navigate('/agent'); }}
+                    <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: companyName(c) }); navigate('/agent'); }}
                       className="p-1.5 rounded-lg hover:bg-accent/10 transition-colors">
                       <Sparkles className="w-3.5 h-3.5 text-accent" />
                     </button>
@@ -218,7 +222,7 @@ export default function Contacts() {
                   <ContactAvatar name={displayName(c)} className="w-11 h-11 rounded-2xl text-sm" />
                   <div>
                     <p className="font-display font-bold text-foreground">{displayName(c)}</p>
-                    <p className="text-xs text-muted-foreground">{(c.company_name as string) || 'Individual'}</p>
+                    <p className="text-xs text-muted-foreground">{companyName(c) || 'Individual'}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 mb-2 flex-wrap">

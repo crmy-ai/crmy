@@ -46,6 +46,15 @@ const TOKEN_BUDGETS: Record<TokenBudget, { label: string; value?: number; hint: 
   deep:     { label: 'Deep',     value: 3600, hint: 'Detailed review' },
 };
 
+function evidenceSummary(entry: any): string | null {
+  const first = Array.isArray(entry.evidence) ? entry.evidence[0] : null;
+  if (!first) return null;
+  const source = first.source_label ?? first.source_type ?? first.source_ref ?? 'source';
+  const speaker = first.speaker ? `${first.speaker}: ` : '';
+  const snippet = first.snippet ? String(first.snippet).replace(/\s+/g, ' ').slice(0, 140) : '';
+  return snippet ? `${source} — "${speaker}${snippet}"` : String(source);
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: BriefingPanelProps) {
@@ -112,10 +121,11 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
   const briefing = data?.briefing ?? data;
   const activityCount: number = briefing?.activities?.length ?? 0;
   const contextTypes = briefing?.context_entries ? Object.keys(briefing.context_entries) : [];
+  const signalTypes = briefing?.signals ? Object.keys(briefing.signals) : [];
   const assignmentCount: number = briefing?.open_assignments?.length ?? 0;
   const adjacentSubjects: any[] = briefing?.adjacent_context ?? [];
   const droppedEntries: any[] = briefing?.dropped_entries ?? [];
-  const isEmpty = activityCount === 0 && assignmentCount === 0 && contextTypes.length === 0;
+  const isEmpty = activityCount === 0 && assignmentCount === 0 && contextTypes.length === 0 && signalTypes.length === 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -262,11 +272,11 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
           </BriefingSection>
         )}
 
-        {/* Staleness warnings */}
+        {/* Memory review warnings */}
         {briefing?.staleness_warnings?.length > 0 && (
           <BriefingSection
             icon={<AlertTriangle className="w-4 h-4 text-warning" />}
-            title="Stale Context"
+            title="Memory Needs Review"
             defaultOpen
           >
             <div className="space-y-2">
@@ -277,7 +287,7 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
                   <div>
                     <span className="font-medium text-foreground">{w.title ?? w.context_type}</span>
                     <span className="text-muted-foreground ml-1.5">
-                      expired {w.valid_until ? new Date(w.valid_until).toLocaleDateString() : ''}
+                      needs review since {w.valid_until ? new Date(w.valid_until).toLocaleDateString() : ''}
                     </span>
                   </div>
                 </div>
@@ -347,11 +357,11 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
           </BriefingSection>
         )}
 
-        {/* Context Entries (grouped by type) */}
+        {/* Memory entries (grouped by type) */}
         {contextTypes.length > 0 && (
           <BriefingSection
             icon={<Brain className="w-4 h-4 text-primary" />}
-            title="Context"
+            title="Memory"
             defaultOpen
           >
             <div className="space-y-4">
@@ -371,6 +381,54 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
                         <div key={c.id} className="rounded-xl border border-border bg-card p-3">
                           {c.title && <p className="text-sm font-medium text-foreground mb-1">{c.title}</p>}
                           <p className="text-sm text-muted-foreground leading-relaxed">{c.body}</p>
+                          {evidenceSummary(c) && (
+                            <p className="text-xs text-muted-foreground mt-2 flex gap-1.5">
+                              <FileText className="w-3 h-3 mt-0.5 shrink-0" />
+                              <span>Evidence: {evidenceSummary(c)}</span>
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </BriefingSection>
+        )}
+
+        {signalTypes.length > 0 && (
+          <BriefingSection
+            icon={<Sparkles className="w-4 h-4 text-violet-500" />}
+            title="Signals"
+            pill={signalTypes.reduce((sum, type) => sum + ((briefing.signals?.[type] as any[])?.length ?? 0), 0)}
+            pillColor="#8b5cf6"
+          >
+            <p className="text-xs text-muted-foreground mb-3">
+              Signals are evidence-backed but unconfirmed. Promote or approve them before using them for writeback, forecast, assignments, or customer-facing guidance.
+            </p>
+            <div className="space-y-4">
+              {Object.entries(briefing.signals ?? {}).map(([type, entries]) => {
+                const typeColor = TYPE_COLORS[type] ?? '#8b5cf6';
+                return (
+                  <div key={type}>
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: typeColor }} />
+                      <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: typeColor }}>
+                        {type.replace(/_/g, ' ')}
+                      </p>
+                    </div>
+                    <div className="space-y-2 pl-3.5">
+                      {(entries as any[]).map((c: any) => (
+                        <div key={c.id} className="rounded-xl border border-violet-500/20 bg-violet-500/5 p-3">
+                          {c.title && <p className="text-sm font-medium text-foreground mb-1">{c.title}</p>}
+                          <p className="text-sm text-muted-foreground leading-relaxed">{c.body}</p>
+                          {evidenceSummary(c) && (
+                            <p className="text-xs text-muted-foreground mt-2 flex gap-1.5">
+                              <FileText className="w-3 h-3 mt-0.5 shrink-0" />
+                              <span>Evidence: {evidenceSummary(c)}</span>
+                            </p>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -472,7 +530,7 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
             onChange={e => setIncludeStale(e.target.checked)}
             className="w-3.5 h-3.5 rounded border-border accent-primary"
           />
-          <span className="text-sm text-muted-foreground">Include stale context</span>
+          <span className="text-sm text-muted-foreground">Include Memory that needs review</span>
         </div>
       </div>
     </div>

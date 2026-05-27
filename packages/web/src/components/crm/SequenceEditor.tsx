@@ -15,7 +15,7 @@
  *   └───────────────────────────┴──────────────────────────────────────────────┘
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useSequence, useCreateSequence, useUpdateSequence } from '@/api/hooks';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/hooks/use-toast';
 import {
-  ListOrdered, X, Loader2, UserCheck, AlertTriangle,
+  ListOrdered, X, Loader2, UserCheck, AlertTriangle, FlaskConical, CheckCircle2, XCircle,
 } from 'lucide-react';
 import {
   TypedStepBuilder, SEQUENCE_TRIGGER_EVENTS,
@@ -37,11 +37,83 @@ const fieldCls   = 'w-full h-9 px-3 rounded-lg border border-border bg-backgroun
 const areaCls    = 'w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring resize-none';
 const labelCls   = 'block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1';
 
+function SequenceTestPanel({
+  name,
+  steps,
+  goalEvent,
+}: {
+  name: string;
+  steps: SequenceStep[];
+  goalEvent: string;
+}) {
+  const issues: string[] = [];
+  if (!name.trim()) issues.push('Add a sequence name before saving.');
+  if (steps.length === 0) issues.push('Add at least one step.');
+  steps.forEach((step, index) => {
+    if (step.type === 'email') {
+      if (!step.subject?.trim()) issues.push(`Step ${index + 1}: email subject is empty.`);
+      if (!step.ai_generate && !step.body_text?.trim()) issues.push(`Step ${index + 1}: add body text or enable AI generation.`);
+      if (step.ai_generate && !step.ai_prompt?.trim()) issues.push(`Step ${index + 1}: add an AI prompt.`);
+    }
+    if (step.type === 'notification' && !step.body?.trim()) issues.push(`Step ${index + 1}: notification message is empty.`);
+    if (step.type === 'task' && !step.title?.trim()) issues.push(`Step ${index + 1}: task title is empty.`);
+    if (step.type === 'webhook' && !step.url?.trim()) issues.push(`Step ${index + 1}: webhook URL is empty.`);
+    if (step.type === 'ai_action' && !step.prompt?.trim()) issues.push(`Step ${index + 1}: AI action prompt is empty.`);
+  });
+  const totalDelayHours = steps.reduce((sum, step) => sum + Number(step.delay_hours ?? 0) + Number(step.delay_days ?? 0) * 24, 0);
+  const ok = issues.length === 0;
+
+  return (
+    <div className="w-[320px] shrink-0 border-l border-border bg-muted/10 p-5 overflow-y-auto">
+      <div className="mb-4 flex items-center gap-2">
+        <div className={`rounded-lg p-2 ${ok ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>
+          {ok ? <CheckCircle2 className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-foreground">Sequence test</p>
+          <p className="text-xs text-muted-foreground">Checks this draft without saving or enrolling contacts.</p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <div className="rounded-xl border border-border bg-card p-3">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Journey</p>
+          <p className="mt-2 text-sm text-foreground">{steps.length} step{steps.length === 1 ? '' : 's'}</p>
+          <p className="text-xs text-muted-foreground">
+            {totalDelayHours === 0 ? 'Runs immediately' : `About ${Math.round(totalDelayHours)} hours across delays`}
+          </p>
+          {goalEvent && <p className="mt-1 text-xs text-muted-foreground">Goal exits on {goalEvent}</p>}
+        </div>
+
+        <div className="rounded-xl border border-border bg-card p-3">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Readiness</p>
+          {ok ? (
+            <p className="mt-2 flex items-center gap-2 text-sm text-success">
+              <CheckCircle2 className="h-4 w-4" /> Ready to save as a draft.
+            </p>
+          ) : (
+            <div className="mt-2 space-y-2">
+              {issues.map(issue => (
+                <p key={issue} className="flex items-start gap-2 text-xs text-warning">
+                  <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  {issue}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface SequenceEditorProps {
   open:        boolean;
   onClose:     () => void;
+  /** Optional draft object used by templates */
+  sequence?:    any;
   /** Supply just the ID; editor fetches the sequence itself */
   sequenceId?: string | null;
   onSaved?:    () => void;
@@ -188,10 +260,10 @@ function SettingsPanel({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceEditorProps) {
+export function SequenceEditor({ open, onClose, sequence: sequenceProp, sequenceId, onSaved }: SequenceEditorProps) {
   // Self-fetch when only an ID is supplied
   const { data: fetchedData } = useSequence(sequenceId ?? '') as any;
-  const sequence = sequenceId ? ((fetchedData as any)?.data ?? fetchedData) : undefined;
+  const sequence = sequenceProp ?? (sequenceId ? ((fetchedData as any)?.data ?? fetchedData) : undefined);
 
   const isEdit = Boolean(sequence?.id);
 
@@ -202,7 +274,7 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
 
   const [name,                  setName]                  = useState(() => sequence?.name        ?? '');
   const [description,           setDescription]           = useState(() => sequence?.description ?? '');
-  const [isActive,              setIsActive]              = useState(() => sequence?.is_active   ?? true);
+  const [isActive,              setIsActive]              = useState(() => sequence?.is_active   ?? false);
   const [goalEvent,             setGoalEvent]             = useState(() => sequence?.goal_event  ?? '');
   const [exitOnReply,           setExitOnReply]           = useState(() => sequence?.exit_on_reply ?? true);
   const [exitOnUnsubscribe,     setExitOnUnsubscribe]     = useState(() => sequence?.exit_on_unsubscribe ?? true);
@@ -216,6 +288,7 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
 
   const [errors,  setErrors]  = useState<Record<string, string>>({});
   const [saving,  setSaving]  = useState(false);
+  const [testOpen, setTestOpen] = useState(false);
 
   // Whether any step requires human approval
   const hasHITL = steps.some(s =>
@@ -234,7 +307,28 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
     setAiPersona(seq?.ai_persona ?? '');
     setSteps(Array.isArray(seq?.steps) ? seq.steps as SequenceStep[] : []);
     setErrors({});
+    setTestOpen(false);
   }, []);
+
+  const resetToBlank = useCallback(() => {
+    setName('');
+    setDescription('');
+    setIsActive(false);
+    setGoalEvent('');
+    setExitOnReply(true);
+    setExitOnUnsubscribe(true);
+    setMaxActiveEnrollments('');
+    setAiPersona('');
+    setSteps([]);
+    setErrors({});
+    setTestOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    if (sequence) resetFromSequence(sequence);
+    else resetToBlank();
+  }, [open, sequence?.id, sequenceProp, sequenceId, resetFromSequence, resetToBlank]);
 
   // ── Validation ───────────────────────────────────────────────────────────
 
@@ -251,7 +345,7 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
 
   const validate = (): boolean => {
     const e: Record<string, string> = {};
-    if (!name.trim()) e.name = 'Name is required';
+    if (!name.trim()) e.name = 'Enter a sequence name before saving.';
     if (steps.length === 0) e.steps = 'Add at least one step';
 
     // Variable syntax check
@@ -294,7 +388,7 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
         toast({ title: 'Sequence saved' });
       } else {
         await createSequence.mutateAsync(payload);
-        toast({ title: 'Sequence created' });
+        toast({ title: isActive ? 'Sequence created and activated' : 'Draft sequence saved' });
       }
       onSaved?.();
       onClose();
@@ -312,7 +406,6 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
       open={open}
       onOpenChange={v => {
         if (!v) onClose();
-        if (v && sequence) resetFromSequence(sequence);
       }}
     >
       <DialogContent className="max-w-none p-0 gap-0 w-[min(95vw,1440px)] h-[min(90vh,920px)] flex flex-col overflow-hidden rounded-2xl [&>button]:hidden">
@@ -325,12 +418,19 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
           <ListOrdered className="w-5 h-5 text-primary shrink-0" />
 
           {/* Editable name */}
-          <input
-            value={name}
-            onChange={e => { setName(e.target.value); setErrors(p => ({ ...p, name: '' })); }}
-            placeholder="Sequence name…"
-            className="flex-1 bg-transparent text-base font-bold text-foreground placeholder:text-muted-foreground/50 outline-none min-w-0"
-          />
+          <label className={`flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border bg-background px-3 py-1.5 transition-colors ${
+            errors.name ? 'border-destructive' : 'border-border focus-within:border-primary/50'
+          }`}>
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Sequence name
+            </span>
+            <input
+              value={name}
+              onChange={e => { setName(e.target.value); setErrors(p => ({ ...p, name: '' })); }}
+              placeholder="Name this sequence…"
+              className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-foreground placeholder:text-muted-foreground/60 outline-none"
+            />
+          </label>
 
           {errors.name && (
             <span className="text-xs text-destructive shrink-0">{errors.name}</span>
@@ -347,8 +447,18 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
             {/* Active toggle */}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Switch checked={isActive} onCheckedChange={setIsActive} />
-              <span>{isActive ? 'Active' : 'Paused'}</span>
+              <span>{isActive ? 'Active' : isEdit ? 'Paused' : 'Paused draft'}</span>
             </div>
+
+            <Button
+              size="sm"
+              variant={testOpen ? 'default' : 'outline'}
+              onClick={() => setTestOpen(o => !o)}
+              className="h-8 gap-1.5 text-xs"
+            >
+              <FlaskConical className="h-3.5 w-3.5" />
+              Test
+            </Button>
 
             <div className="w-px h-5 bg-border" />
 
@@ -357,7 +467,7 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
             </Button>
             <Button size="sm" onClick={handleSave} disabled={saving} className="h-8 text-xs gap-1.5">
               {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              {isEdit ? 'Save changes' : 'Create'}
+              {isEdit ? 'Save changes' : isActive ? 'Create active sequence' : 'Save draft'}
             </Button>
           </div>
         </div>
@@ -430,6 +540,14 @@ export function SequenceEditor({ open, onClose, sequenceId, onSaved }: SequenceE
               </p>
             </div>
           </div>
+
+          {testOpen && (
+            <SequenceTestPanel
+              name={name}
+              steps={steps}
+              goalEvent={goalEvent}
+            />
+          )}
         </div>
       </DialogContent>
     </Dialog>

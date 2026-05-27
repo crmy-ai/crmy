@@ -52,7 +52,10 @@ export async function createContact(
 
 export async function getContact(db: DbPool, tenantId: UUID, id: UUID): Promise<Contact | null> {
   const result = await db.query(
-    'SELECT * FROM contacts WHERE id = $1 AND tenant_id = $2 AND merged_into IS NULL',
+    `SELECT c.*, a.name AS account_name
+     FROM contacts c
+     LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
+     WHERE c.id = $1 AND c.tenant_id = $2 AND c.merged_into IS NULL`,
     [id, tenantId],
   );
   return (result.rows[0] as Contact) ?? null;
@@ -89,7 +92,7 @@ export async function searchContacts(
 
   if (filters.query) {
     conditions.push(
-      `(c.first_name ILIKE $${idx} OR c.last_name ILIKE $${idx} OR c.email ILIKE $${idx} OR c.company_name ILIKE $${idx}` +
+      `(c.first_name ILIKE $${idx} OR c.last_name ILIKE $${idx} OR c.email ILIKE $${idx} OR c.company_name ILIKE $${idx} OR a.name ILIKE $${idx}` +
       ` OR EXISTS (SELECT 1 FROM unnest(c.aliases) _a WHERE _a ILIKE $${idx}))`,
     );
     params.push(`%${filters.query}%`);
@@ -124,13 +127,21 @@ export async function searchContacts(
   const where = conditions.join(' AND ');
 
   const countResult = await db.query(
-    `SELECT count(*)::int as total FROM contacts c WHERE ${where}`,
+    `SELECT count(*)::int as total
+     FROM contacts c
+     LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
+     WHERE ${where}`,
     params,
   );
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
-    `SELECT c.* FROM contacts c WHERE ${where} ORDER BY c.created_at DESC LIMIT $${idx}`,
+    `SELECT c.*, a.name AS account_name
+     FROM contacts c
+     LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
+     WHERE ${where}
+     ORDER BY c.created_at DESC
+     LIMIT $${idx}`,
     params,
   );
 
@@ -187,7 +198,7 @@ export async function updateContact(
   if (result.rows.length === 0 && options.expectedVersion !== undefined) {
     throw concurrencyConflict('Contact', id, options.expectedVersion);
   }
-  return (result.rows[0] as Contact) ?? null;
+  return result.rows[0] ? getContact(db, tenantId, id) : null;
 }
 
 export async function deleteContact(

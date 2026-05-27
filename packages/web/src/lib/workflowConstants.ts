@@ -26,6 +26,10 @@ export const TRIGGER_EVENTS = [
   { value: 'activity.created',           label: 'Activity created',           group: 'Activities'    },
   { value: 'activity.updated',           label: 'Activity updated',           group: 'Activities'    },
   { value: 'activity.completed',         label: 'Activity completed',         group: 'Activities'    },
+  // Signals / Memory
+  { value: 'context.signal_promoted',     label: 'Signal promoted to Memory', group: 'Signals & Memory' },
+  { value: 'context.signal_auto_promoted', label: 'Signal auto-promoted to Memory', group: 'Signals & Memory' },
+  { value: 'context.signal_rejected',     label: 'Signal dismissed',          group: 'Signals & Memory' },
   // Assignments
   { value: 'assignment.created',         label: 'Assignment created',         group: 'Assignments'   },
   { value: 'assignment.completed',       label: 'Assignment completed',       group: 'Assignments'   },
@@ -68,6 +72,7 @@ export interface ActionConfigField {
   required:    boolean;
   type?:       'text' | 'boolean' | 'textarea' | 'number' | 'sequence_picker' | 'system_picker' | 'mapping_picker';
   hint?:       string;
+  aiControlled?: boolean;
 }
 
 export interface ActionTypeDef {
@@ -109,7 +114,9 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     configFields: [
       { key: 'to_address',       label: 'To',               placeholder: 'e.g. {{subject.email}} or person@example.com', required: true,  type: 'text',     hint: 'Supports {{variables}}' },
       { key: 'subject',          label: 'Subject',          placeholder: 'e.g. Following up on {{subject.name}}',        required: true,  type: 'text',     hint: 'Supports {{variables}}' },
-      { key: 'body_text',        label: 'Body',             placeholder: 'Email body. Supports {{variables}}.',          required: true,  type: 'textarea', hint: 'Supports {{variables}}' },
+      { key: 'ai_generate',      label: 'AI generate content', placeholder: '', required: false, type: 'boolean', hint: 'Requires the Local Workspace Agent to be configured.' },
+      { key: 'ai_prompt',        label: 'AI prompt',        placeholder: 'Describe what to write. CRMy will use this prompt with current customer context.', required: false, type: 'textarea', hint: 'Supports {{variables}}' },
+      { key: 'body_text',        label: 'Body',             placeholder: 'Email body. Supports {{variables}}.',          required: true,  type: 'textarea', hint: 'Supports {{variables}}', aiControlled: true },
       { key: 'require_approval', label: 'Require human approval before sending', placeholder: '', required: false, type: 'boolean', hint: 'A HITL review request is created; email only sends after approval' },
     ],
   },
@@ -120,7 +127,9 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     group: 'Outreach',
     supportsVariables: true,
     configFields: [
-      { key: 'message',    label: 'Message',    placeholder: 'e.g. New lead arrived: {{subject.first_name}}', required: true,  type: 'textarea', hint: 'Supports {{variables}}' },
+      { key: 'ai_generate', label: 'AI generate message', placeholder: '', required: false, type: 'boolean', hint: 'Requires the Local Workspace Agent to be configured.' },
+      { key: 'ai_prompt',   label: 'AI prompt', placeholder: 'Describe the message CRMy should draft from this event.', required: false, type: 'textarea', hint: 'Supports {{variables}}' },
+      { key: 'message',    label: 'Message',    placeholder: 'e.g. New lead arrived: {{subject.first_name}}', required: true,  type: 'textarea', hint: 'Supports {{variables}}', aiControlled: true },
       { key: 'channel_id', label: 'Channel ID', placeholder: 'UUID (uses default if empty)',                  required: false, type: 'text' },
       { key: 'recipient',  label: 'Recipient',  placeholder: 'e.g. #channel or @user',                        required: false, type: 'text' },
     ],
@@ -129,7 +138,7 @@ export const ACTION_TYPES: ActionTypeDef[] = [
   {
     value: 'create_context_entry',
     label: 'Create context entry',
-    description: 'Add a note or insight to the triggered entity\'s knowledge base',
+    description: 'Add Memory to the triggered customer record',
     group: 'State',
     supportsVariables: true,
     configFields: [
@@ -202,8 +211,8 @@ export const ACTION_TYPES: ActionTypeDef[] = [
   // ── Systems of Record ─────────────────────────────────────────────────────
   {
     value: 'request_external_writeback',
-    label: 'Request external writeback',
-    description: 'Create a governed writeback request for Salesforce, HubSpot, Databricks, or Snowflake.',
+    label: 'Request governed writeback',
+    description: 'Create a policy-checked writeback request. Approval may be required before CRMy updates Salesforce, HubSpot, Databricks, Snowflake, or another system of record.',
     group: 'Systems',
     supportsVariables: true,
     hitlCapable: true,
@@ -215,7 +224,7 @@ export const ACTION_TYPES: ActionTypeDef[] = [
       { key: 'operation', label: 'Operation', placeholder: 'upsert, update, append_event', required: true, type: 'text' },
       { key: 'writeback_mode', label: 'Writeback mode', placeholder: 'mapped_upsert, append_event, stored_procedure', required: true, type: 'text' },
       { key: 'payload', label: 'Payload', placeholder: '{"field":"value"} — supports {{variables}}', required: true, type: 'textarea', hint: 'JSON object or templated payload' },
-      { key: 'require_approval', label: 'Require human approval', placeholder: '', required: false, type: 'boolean' },
+      { key: 'require_approval', label: 'Require human approval', placeholder: '', required: false, type: 'boolean', hint: 'System policy may still require approval before execution.' },
     ],
   },
   {
@@ -248,7 +257,7 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     supportsVariables: true,
     configFields: [
       { key: 'subject_type', label: 'Subject type', placeholder: 'contact, account, opportunity, use_case', required: true, type: 'text' },
-      { key: 'subject_id', label: 'Subject ID', placeholder: '{{id}}', required: true, type: 'text', hint: 'Supports {{variables}}' },
+      { key: 'subject_id', label: 'Subject ID', placeholder: '{{subject.id}}', required: true, type: 'text', hint: 'Supports {{variables}}' },
       { key: 'context_type', label: 'Context type', placeholder: 'external_update', required: false, type: 'text' },
       { key: 'body', label: 'Body', placeholder: 'What changed? Supports {{variables}}.', required: true, type: 'textarea', hint: 'Supports {{variables}}' },
     ],
@@ -273,31 +282,131 @@ export const ACTION_TYPES: ActionTypeDef[] = [
       { key: 'seconds', label: 'Delay (seconds)', placeholder: 'e.g. 30 (max 300)', required: true, type: 'number' },
     ],
   },
-  // ── Legacy (hidden from UI, kept for backward compat) ─────────────────────
-  {
-    value: 'create_note',
-    label: 'Create context entry (legacy)',
-    description: 'Deprecated — use "Create context entry" instead',
-    group: 'State',
-    supportsVariables: true,
-    configFields: [
-      { key: 'body', label: 'Note body', placeholder: 'Note content. Supports {{variables}}.', required: true, type: 'textarea', hint: 'Supports {{variables}}' },
-    ],
-  },
 ];
 
 /** Unique action groups in display order */
 export const ACTION_GROUPS = ['Human', 'Outreach', 'State', 'Sequences', 'Systems', 'Developer'] as const;
 export type ActionGroup = typeof ACTION_GROUPS[number];
 
-/** Action types shown to users when creating a new workflow (hide deprecated aliases) */
-export const VISIBLE_ACTION_TYPES = ACTION_TYPES.filter(a => a.value !== 'create_note');
+export const VISIBLE_ACTION_TYPES = ACTION_TYPES;
+
+export const ACTION_GROUP_HELP: Record<ActionGroup, string> = {
+  Human: 'Ask for review before risk.',
+  Outreach: 'Notify people or send approved messages.',
+  State: 'Update CRMy operational state.',
+  Sequences: 'Start or stop customer engagement.',
+  Systems: 'Sync or request governed writeback.',
+  Developer: 'Call controlled technical hooks.',
+};
+
+export const TRIGGER_TEMPLATES = [
+  {
+    label: 'Promote trusted Memory to system of record',
+    description: 'When a Signal becomes Memory, request a governed writeback instead of bypassing policy.',
+    workflow: {
+      name: 'Promote trusted Memory to system of record',
+      description: 'Requests a policy-checked system writeback after a Signal is promoted to confirmed Memory.',
+      trigger_event: 'context.signal_promoted',
+      trigger_filter: {},
+      is_active: false,
+      actions: [
+        {
+          type: 'request_external_writeback',
+          config: {
+            object_type: '{{subject.type}}',
+            object_id: '{{subject.id}}',
+            external_object: 'contacts',
+            operation: 'upsert',
+            writeback_mode: 'mapped_upsert',
+            payload: '{\n  "memory_id": "{{subject.id}}",\n  "summary": "{{subject.body}}"\n}',
+            require_approval: 'true',
+          },
+        },
+      ],
+    },
+  },
+  {
+    label: 'Update lifecycle stage after approved Signal',
+    description: 'Use approval resolution as the gate before requesting a stage update.',
+    workflow: {
+      name: 'Update lifecycle stage after approved Signal',
+      description: 'Requests governed writeback after a reviewer approves a lifecycle-stage change.',
+      trigger_event: 'hitl.resolved',
+      trigger_filter: {
+        status: { op: 'eq', value: 'approved' },
+      },
+      is_active: false,
+      actions: [
+        {
+          type: 'request_external_writeback',
+          config: {
+            object_type: '{{subject.type}}',
+            object_id: '{{subject.id}}',
+            external_object: 'contacts',
+            operation: 'update',
+            writeback_mode: 'mapped_upsert',
+            payload: '{\n  "lifecycle_stage": "{{payload.lifecycle_stage}}"\n}',
+            require_approval: 'true',
+          },
+        },
+      ],
+    },
+  },
+  {
+    label: 'Append product/customer event to warehouse',
+    description: 'Append governed activity or product signals into an approved warehouse event table.',
+    workflow: {
+      name: 'Append product/customer event to warehouse',
+      description: 'Requests an append-only warehouse writeback after a customer activity is logged.',
+      trigger_event: 'activity.created',
+      trigger_filter: {},
+      is_active: false,
+      actions: [
+        {
+          type: 'request_external_writeback',
+          config: {
+            object_type: 'activity',
+            object_id: '{{subject.id}}',
+            external_object: 'customer_events',
+            operation: 'append_event',
+            writeback_mode: 'append_event',
+            payload: '{\n  "activity_id": "{{subject.id}}",\n  "type": "{{subject.type}}",\n  "summary": "{{subject.subject}}"\n}',
+            require_approval: 'false',
+          },
+        },
+      ],
+    },
+  },
+  {
+    label: 'Sync external system after key CRMy change',
+    description: 'Run a governed sync after an important customer record changes.',
+    workflow: {
+      name: 'Sync external system after key CRMy change',
+      description: 'Runs an incremental system sync after an account update.',
+      trigger_event: 'account.updated',
+      trigger_filter: {},
+      is_active: false,
+      actions: [
+        {
+          type: 'run_system_sync',
+          config: {
+            mode: 'incremental',
+          },
+        },
+      ],
+    },
+  },
+] as const;
 
 /** Returns true if every required config field is filled for the given action. */
 export function isActionValid(action: { type: string; config: Record<string, string> }): boolean {
   const def = ACTION_TYPES.find(a => a.value === action.type);
   if (!def) return false;
-  return def.configFields.filter(f => f.required).every(f => (action.config[f.key] ?? '').trim() !== '');
+  const aiGenerate = action.config.ai_generate === 'true';
+  return def.configFields.filter(f => f.required).every(f => {
+    if (aiGenerate && f.aiControlled) return true;
+    return (action.config[f.key] ?? '').trim() !== '';
+  });
 }
 
 // ── Filter operators ────────────────────────────────────────────────────────

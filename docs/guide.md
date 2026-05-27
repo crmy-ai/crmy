@@ -24,20 +24,19 @@ Complete documentation for CRMy — the operational customer context layer for A
 16. [Scope Enforcement](#scope-enforcement)
 17. [Governor Limits](#governor-limits)
 18. [Use Cases](#use-cases)
-19. [Notes & Comments](#notes--comments)
-20. [Workflows & Automation](#workflows--automation)
-21. [Webhooks](#webhooks)
-22. [Email](#email)
-23. [Messaging & Channels](#messaging--channels)
-24. [Custom Fields](#custom-fields)
-25. [HITL (Human-in-the-Loop)](#hitl-human-in-the-loop)
-26. [Analytics & Reporting](#analytics--reporting)
-27. [Systems of Record](#systems-of-record)
-28. [Roadmap](#roadmap)
-29. [Plugins](#plugins)
-30. [MCP Tools Reference](#mcp-tools-reference)
-31. [REST API Reference](#rest-api-reference)
-32. [Database & Migrations](#database--migrations)
+19. [Workflows & Automation](#workflows--automation)
+20. [Webhooks](#webhooks)
+21. [Email](#email)
+22. [Messaging & Channels](#messaging--channels)
+23. [Custom Fields](#custom-fields)
+24. [Action Policies and HITL (Human-in-the-Loop)](#action-policies-and-hitl-human-in-the-loop)
+25. [Analytics & Reporting](#analytics--reporting)
+26. [Systems of Record](#systems-of-record)
+27. [Roadmap](#roadmap)
+28. [Plugins](#plugins)
+29. [MCP Tools Reference](#mcp-tools-reference)
+30. [REST API Reference](#rest-api-reference)
+31. [Database & Migrations](#database--migrations)
 
 ---
 
@@ -427,11 +426,11 @@ http://localhost:3000/app
 
 #### Memory Hub (`/app`)
 
-The operator's overview of agent activity. Two tabs sit in the page body:
+The operator's overview of the context engine. Two tabs sit in the page body:
 
-**Overview tab** (default): Four stat cards link to their respective pages: **Pending Approvals**, **Context Entries**, **Active Agents**, and **Open Handoffs**. Below the stat cards, up to three pending HITL requests are shown inline with approve/reject buttons — no need to navigate to the Approvals page for quick decisions. The right column shows active agents with status indicators and a context health widget (total entries + stale count). The left column shows the agent activity feed.
+**Overview tab** (default): A flow section shows **Raw Context → Signals → Memory → Actions** so operators can see source volume, reviewable Signals, Current Memory, and pending governed actions. A Needs Attention panel links directly to Signal review, Memory Health, handoffs, database search readiness, Workspace Agent setup, or Add Context when the workspace is empty.
 
-**Knowledge tab**: The full `ContextBrowser` component embedded in the dashboard. Search, filter, and import context entries without leaving the home page. The inline search toggle (keyword vs. semantic) sits directly in the search bar.
+**Memory Graph tab**: The full graph view for exploring relationships among customer records, Memory, activities, and assignments. Full Memory browsing and Signal review live on the dedicated Context page.
 
 #### Contacts (`/app/contacts`)
 
@@ -512,16 +511,17 @@ Full list of registered actors (humans and AI agents) with their role, model, sc
 
 #### Context (`/app/context`)
 
-The Knowledge tab on the Dashboard and the standalone Context page share the same `ContextBrowser` component. Features:
+The Context page is the dedicated workspace for Raw Context, Signal review, Current Memory, and Memory Health. Raw Context is the user-facing label for raw observations/source material. Features:
 
+- **Raw Context tab**: source volume and recent processing outcomes across activities, inbound/outbound emails, Add Context imports, Systems of Record sync runs, MCP/REST/CLI context writes, and future source types
 - **Dual search modes**: keyword (full-text, client-side) and **semantic** (pgvector similarity). The toggle sits inline in the search bar. If semantic search is unavailable (pgvector not configured), it falls back to keyword automatically with a warning banner.
 - **Filter** by subject type (contact, account, opportunity, use case) and context type
-- **Stale-only toggle** to surface entries past their `valid_until` date
-- Confidence score pills, expiry date highlighting, and `is_current` badges
-- Inline **"Mark reviewed"** action for stale entries
-- **Import dialog** (click "Import" button):
-  - **Text / Paste tab**: paste any document text; subjects are auto-detected and shown as colored chips; smart clipboard detection offers to use clipboard content on open
-  - **Upload File tab**: drag-and-drop or browse for PDF, DOCX, TXT, or Markdown; text is extracted server-side and subjects detected automatically; file name, size, and a text preview are shown before confirming
+- **Needs Review toggle** to surface Current Memory past its `valid_until` date
+- Confidence score pills, review-date highlighting, and `is_current` badges
+- Inline **"Mark reviewed"** action for Memory that has been reverified
+- **Add Context dialog**:
+  - **Paste text tab**: paste transcripts, emails, meeting notes, support updates, or research; subjects are auto-detected and shown as colored chips
+  - **Upload file tab**: drag-and-drop or browse for PDF, DOCX, TXT, or Markdown; text is extracted server-side and subjects detected automatically; file name, size, and a text preview are shown before confirming
   - Both tabs allow adding or removing detected subjects and providing a source label
   - Submit creates one context entry per confirmed subject and runs the full extraction pipeline
 
@@ -895,7 +895,7 @@ The narrower of the two always wins. This allows creating a key with broad scope
 | `actor_list` | List actors. Filter by `actor_type`, `is_active` |
 | `actor_update` | Update `display_name`, `scopes`, `is_active`, `metadata` |
 | `actor_whoami` | Return the actor identity for the current request (always allowed, no scope required) |
-| `actor_expertise` | Query actor knowledge contributions — two modes (see below) |
+| `actor_expertise` | Query actor Memory contributions — two modes (see below) |
 
 ### Actor expertise
 
@@ -922,7 +922,7 @@ Returns:
 }
 ```
 
-**Mode 2 — who knows the most about this entity?** Pass `subject_type` + `subject_id` to find the actors with the most context contributions. Useful before creating a stale review assignment or asking for a human opinion.
+**Mode 2 — who knows the most about this entity?** Pass `subject_type` + `subject_id` to find the actors with the most context contributions. Useful before creating a Memory review assignment or asking for a human opinion.
 
 ```
 actor_expertise { subject_type: "account", subject_id: "<uuid>", limit: 5 }
@@ -1048,20 +1048,26 @@ POST   /api/v1/assignments/:id/cancel
 
 ## Context Engine
 
-The Context Engine is the memory and knowledge layer. Context entries are structured pieces of information attached to any customer record — meeting transcripts, competitive intel, relationship maps, agent reasoning, decisions, and more.
-
-### What makes it different from notes
-
-Notes are human-written text. Context entries are structured, typed, searchable, and carry metadata for agent consumption:
+The Context Engine turns Raw Context into reviewable Signals and Current Memory attached to customer records. Context entries are structured, typed, searchable, and carry metadata for agent consumption:
 
 - **`context_type`** — typed from a registry (transcript, summary, objection, etc.)
 - **`confidence`** — how certain the source is (1.0 for verbatim transcripts, 0.6 for inferred sentiment)
-- **`valid_until`** — when the entry becomes stale (e.g., pricing info valid for 30 days)
+- **`valid_until`** — when the entry needs review (e.g., pricing info should be rechecked after 30 days)
 - **`tags`** — filterable JSONB array for fast lookup
 - **Full-text search** — PostgreSQL `tsvector`/`tsquery` with GIN index
 - **Supersede chain** — old entries are marked `is_current = false` rather than deleted; new entries point back via `supersedes_id`
 - **Priority weights** — each context type carries a `priority_weight` (0.5–2.0) used when ranking entries in token-budget-aware briefings
-- **Confidence decay** — each type can have a `confidence_half_life_days`; effective confidence decays as `stored_confidence × 0.5^(age / half_life)`, so old intel does not crowd out fresh knowledge
+- **Confidence decay** — each type can have a `confidence_half_life_days`; effective confidence decays as `stored_confidence × 0.5^(age / half_life)`, so old intel does not crowd out fresh Memory
+
+Memory has a first-class lifecycle:
+
+- **Signal** — inferred, evidence-backed context that is not confirmed truth yet.
+- **Current Memory** — confirmed operational context agents can use for briefings, workflows, handoffs, and governed writeback.
+- **Needs Review** — Current Memory whose `valid_until` has passed. Agents should verify it before acting.
+- **Superseded** — old Memory replaced by fresher evidence. It stays preserved for audit and lineage.
+- **Dismissed** — rejected Signal preserved with evidence, but excluded from operational Memory.
+
+This is the core Memory Health model: GTM facts decay, and CRMy keeps customer Memory current instead of letting old CRM notes silently rot.
 
 ### Context types
 
@@ -1110,22 +1116,22 @@ Custom types default to weight 1.0, no decay.
 | `confidence` | Float 0.0–1.0 signaling how reliable this information is |
 | `tags` | String array for filtering (e.g., `["pricing", "q2-2026"]`) |
 | `authored_by` | Which actor created this entry |
-| `valid_until` | Optional expiry timestamp; entries past this date are marked stale |
+| `valid_until` | Optional expiry timestamp; entries past this date need review |
 | `is_current` | `false` if superseded by a newer entry |
 | `supersedes_id` | Foreign key to the entry this one replaces |
 
-### Staleness and automatic assignments
+### Memory Health and automatic assignments
 
-Entries with a `valid_until` in the past are considered stale. The briefing service surfaces stale entries with warnings.
+Current Memory with a `valid_until` in the past needs review. The briefing service surfaces these entries with warnings so agents know not to treat aging customer context as unquestioned truth.
 
-CRMy automatically assigns stale entries for review — a background worker runs every 60 seconds, finds all expired entries, identifies the actor with the most context contributions to that subject (the most knowledgeable reviewer), and creates a `stale_context_review` assignment. Duplicate assignments are never created for the same entry.
+CRMy automatically assigns Memory that needs review — a background worker runs every 60 seconds, finds Current Memory past its review date, identifies the actor with the most context contributions to that subject, and creates a `stale_context_review` assignment. Duplicate assignments are never created for the same entry.
 
 Tools:
-- `context_stale` — list entries that need review
-- `context_review` — confirm an entry is still accurate (bumps `reviewed_at`)
+- `context_stale` — list Current Memory that needs review
+- `context_review` — confirm Memory is still accurate (bumps `reviewed_at`)
 - `context_review_batch` — mark up to 200 entries reviewed in a single call (v0.7+)
-- `context_bulk_mark_stale` — invalidate up to 200 entries in a single call, with optional reason tag (v0.7+)
-- `context_stale_assign` — trigger the stale review loop on-demand (normally runs automatically)
+- `context_bulk_mark_stale` — mark up to 200 entries as needing review in a single call, with optional reason tag (v0.7+)
+- `context_stale_assign` — trigger the Memory Health review loop on-demand (normally runs automatically)
 
 #### Bulk review example
 
@@ -1138,7 +1144,7 @@ context_review_batch {
   extend_days: 30
 }
 
-# Bulk-invalidate outdated research entries
+# Mark outdated research Memory for review
 context_bulk_mark_stale {
   entry_ids: ["uuid-a", "uuid-b", ...],
   reason: "superseded-by-q2-research"
@@ -1178,7 +1184,7 @@ The old entry's `is_current` is set to `false`. Queries for context automaticall
 
 ### Bulk ingestion
 
-`context_ingest` takes a raw document (transcript, email, meeting notes) and runs the full extraction pipeline, creating an activity as provenance and returning all structured context entries produced:
+`context_ingest` takes Raw Context (transcript, email, meeting notes) for a known record and runs the full extraction pipeline, creating an activity as provenance and returning a processing receipt plus the Signals and Memory produced:
 
 ```
 context_ingest {
@@ -1189,11 +1195,33 @@ context_ingest {
 }
 ```
 
-Returns `{ extracted_count, context_entries, activity_id }`.
+Returns `{ extracted_count, memory_created, signals_created, skipped, signals, memory_entries, context_entries, activity_id, raw_context_source, processing_receipt }`. `context_entries` is retained for broad clients; agents should use `signals`, `memory_entries`, and `processing_receipt.next_action` to decide whether to review, promote, retry, or brief.
+
+### Signals and Memory
+
+CRMy separates messy Raw Context from Current Memory:
+
+- **Raw Context** is raw source material: calls, emails, notes, transcripts, CRM/warehouse changes, Slack messages, support records, product usage, and documents.
+- **Signals** are inferred context extracted from Raw Context. They include confidence and evidence, but they are not confirmed truth.
+- CRMy combines related Signals into one evidence-backed claim so multiple sources can support, strengthen, or contradict the same inference.
+- **Memory** is Current typed operational context. Briefings and normal context search return Memory by default.
+
+Every Signal and important Memory entry should read as a **claim with evidence**. The claim is the entry body. Evidence records source type, source ID/reference, source URL when available, source label, speaker or author, snippet, observed timestamp, captured timestamp, support confidence, rationale, and optional verification metadata. This lets an agent explain, for example, “Budget approval is a risk” together with the meeting excerpt and date that support the claim.
+
+Corroborated Signals should be promoted before they are used to coordinate work, influence forecast, update external systems, assign tasks, or guide customer engagement. Use `context_signal_group_promote` for grouped/corroborated claims, `context_signal_promote` for a single reviewed Signal, and the reject tools when a claim should stay out of Memory.
+
+The lifecycle is first-class:
+
+- `signal`: inferred, evidence-backed, and reviewable.
+- `active`: Current Memory that agents, workflows, scoring, and writeback can rely on.
+- `superseded`: replaced by newer Memory.
+- `rejected`: dismissed after review but retained with evidence for audit.
+
+Creating a Signal requires evidence. Normal retrieval, briefings, actor expertise, scoring, and state prerequisites use Current Memory unless a caller explicitly asks for Signals.
 
 ### Automatic subject detection — `context_ingest_auto`
 
-When you don't know which CRM records a document mentions, use `context_ingest_auto`. It extracts candidate entity names from the text using regex, resolves each name against contacts and accounts using the 6-tier entity resolution service, and runs the extraction pipeline for every resolved subject:
+When you don't know which customer records a document mentions, use `context_ingest_auto`. The configured Workspace Agent identifies likely people and companies, CRMy grounds those candidates against existing contacts and accounts with entity resolution, and the extraction pipeline runs for every resolved subject:
 
 ```
 context_ingest_auto {
@@ -1208,10 +1236,12 @@ Returns:
 ```json
 {
   "subjects_resolved": [
-    { "entity_type": "account", "id": "...", "name": "Acme Corp", "confidence": "high", "entries_created": 3, "activity_id": "..." },
-    { "entity_type": "contact", "id": "...", "name": "Jane Smith", "confidence": "medium", "entries_created": 2, "activity_id": "..." }
+    { "entity_type": "account", "id": "...", "name": "Acme Corp", "confidence": "high", "entries_created": 3, "memory_created": 2, "signals_created": 1, "activity_id": "...", "processing_receipt": { "status": "needs_review", "next_action": "Review Signals and promote trusted items to Memory." } },
+    { "entity_type": "contact", "id": "...", "name": "Jane Smith", "confidence": "medium", "entries_created": 2, "memory_created": 0, "signals_created": 2, "activity_id": "...", "processing_receipt": { "status": "needs_review" } }
   ],
   "entries_created": 5,
+  "memory_created": 2,
+  "signals_created": 3,
   "low_confidence_skipped": ["Inc", "Q2", "Monday"]
 }
 ```
@@ -1222,7 +1252,9 @@ This is the recommended tool for agents processing inbound content (emails, tran
 
 ### Auto-extract from activities
 
-When the **Workspace Agent** is configured and `auto_extract_context` is enabled (Settings → Workspace Agent → "Auto-extract context from activities"), CRMy runs the extraction pipeline automatically on every new activity. Extraction happens fire-and-forget — it does not slow down activity creation. Activities are processed immediately if the agent is configured; otherwise they are queued with `extraction_status = 'pending'` and processed by the background worker (runs every 60 seconds) once the agent becomes available.
+When the **Workspace Agent** is configured and `auto_extract_context` is enabled (Settings → Workspace Agent → "Auto-extract context from activities"), CRMy runs the extraction pipeline automatically on every new activity. Extraction happens fire-and-forget — it does not slow down activity creation. Activities are processed immediately if the agent is configured; otherwise they are queued with `extraction_status = 'pending'` and processed by the background worker (runs every 60 seconds) once the agent becomes available. Extracted items are stored as Signals by default.
+
+Each raw input also creates or updates a Raw Context processing record with the source type, source reference, linked subject, processing stage, status, extracted Signal count, Memory count, skipped count, and failure reason when available. This gives operators and agents one place to understand whether a transcript, email, system update, MCP write, or import produced useful Signals and Memory.
 
 Use `context_extract { activity_id }` to manually re-run extraction on any activity.
 
@@ -1249,26 +1281,38 @@ Returns:
 
 | Tool | Description |
 |---|---|
-| `context_add` | Add a context entry. Required: `subject_type`, `subject_id`, `context_type`, `body`. Optional: `confidence`, `tags`, `valid_until`, `structured_data`, `source_activity_id` |
+| `context_ingest_auto` | Ingest Raw Context and automatically resolve mentioned entities — **no subject IDs needed**. Configurable `confidence_threshold`. Recommended for agents processing transcripts, emails, notes, and research. |
+| `context_ingest` | Ingest Raw Context and auto-extract structured Signals for a known subject. Requires explicit `subject_type` + `subject_id`. Returns a Raw Context processing receipt. |
+| `context_raw_source_list` | List Raw Context processing records with source, status, stage, Signal count, Memory count, skipped count, and failure reason. |
+| `context_raw_source_get` | Inspect one Raw Context processing record. |
+| `context_add` | Advanced direct write for Current Memory or an evidence-backed Signal. Required: `subject_type`, `subject_id`, `context_type`, `body`. Optional: `memory_status`, `confidence`, typed `evidence`, `tags`, `valid_until`, `structured_data`, `source_activity_id`. Signals require evidence; `rejected` and `superseded` are lifecycle states managed by review tools. |
 | `context_get` | Get by ID (includes superseded entry if applicable) |
-| `context_list` | List entries for an object. Filter by `context_type`, `tags`, `is_current`, `authored_by`, `structured_data_filter` |
-| `context_search` | Full-text search across all context entries. Filter by `subject_type`, `tags`, `context_type`, `structured_data_filter` |
+| `context_list` | List entries for an object. Filter by `memory_status`, `context_type`, `tags`, `is_current`, `authored_by`, `structured_data_filter` |
+| `context_search` | Full-text search across Memory by default. Pass `memory_status: "signal"` to search Signals. |
+| `context_signal_group_list` | List corroborated Signal claims with aggregate confidence, support count, source count, status, and conflict state. |
+| `context_signal_group_get` | Inspect one corroborated Signal with supporting/conflicting evidence. |
+| `context_signal_group_promote` | Promote a trusted corroborated Signal into Current Memory. |
+| `context_signal_group_reject` | Dismiss a corroborated Signal while preserving evidence for audit. |
+| `context_signal_promote` | Promote a reviewed Signal into Current Memory |
+| `context_signal_reject` | Reject a Signal while preserving evidence for audit |
 | `context_supersede` | Replace an entry with updated content |
 | `context_review` | Mark an entry as reviewed (confirm still accurate) |
-| `context_stale` | List entries that are past `valid_until` and may need updating |
+| `context_stale` | List Current Memory past `valid_until` that needs review |
 | `context_diff` | Catch-up diff since a timestamp: new, superseded, stale, and resolved entries |
-| `context_ingest` | Ingest a raw document and auto-extract all structured context entries. Requires explicit `subject_type` + `subject_id`. |
-| `context_ingest_auto` | Ingest a document and automatically resolve mentioned entities — **no subject IDs needed**. Configurable `confidence_threshold`. |
 | `context_extract` | Re-run the extraction pipeline on a specific activity (backfill or retry) |
-| `context_stale_assign` | Trigger the stale review loop on-demand for the current tenant |
+| `context_stale_assign` | Trigger the Memory Health review loop on-demand for the current tenant |
 | `context_semantic_search` | Semantic (vector) similarity search using pgvector. Falls back gracefully with `fallback_available: true` if embeddings are not configured. |
 | `context_embed_backfill` | Generate embeddings for context entries that have not yet been embedded. Use `dry_run: true` first to see pending count. |
 
 ### CLI
 
 ```bash
-crmy context list --subject-type contact --subject-id <id>
-crmy context add
+crmy context ingest --file discovery-call.txt --auto
+crmy context raw-sources --status needs_review
+crmy context signals --subject opportunity:<id>
+crmy context promote <signal-id>
+crmy context list --subject contact:<id> --status active
+crmy context add   # advanced direct write only
 crmy context get <id>
 crmy context supersede <id>
 crmy context search "competitor pricing"
@@ -1305,7 +1349,7 @@ A briefing is a single API call that assembles everything an agent or human need
 3. Recent activities (last 10 by default)
 4. Open assignments for this object
 5. Context entries grouped by `context_type` (only `is_current = true` entries)
-6. Staleness warnings for any context entries past `valid_until`
+6. Memory Health warnings for any Current Memory past `valid_until`
 7. Adjacent context from related entities (when `context_radius` is set)
 
 ### MCP tool
@@ -1632,12 +1676,10 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 | `use_case_get`, `use_case_search`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` | `accounts:read` |
 | `use_case_create`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_unlink_contact` | `accounts:write` |
 | `use_case_link_contact` | `accounts:write`, `contacts:read` |
-| `context_get`, `context_search`, `context_list`, `context_stale`, `context_diff`, `briefing_get` | `context:read` |
-| `context_add`, `context_supersede`, `context_review`, `context_extract`, `context_ingest`, `context_ingest_auto`, `context_bulk_mark_stale`, `context_embed_backfill`, `context_stale_assign`, `context_review_batch`, `context_resolve_contradiction`, `context_consolidate` | `context:write` |
+| `context_get`, `context_search`, `context_list`, `context_raw_source_list`, `context_raw_source_get`, `context_stale`, `context_diff`, `briefing_get` | `context:read` |
+| `context_add`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_review`, `context_extract`, `context_ingest`, `context_ingest_auto`, `context_bulk_mark_stale`, `context_embed_backfill`, `context_stale_assign`, `context_review_batch`, `context_resolve_contradiction`, `context_consolidate` | `context:write` |
 | `context_detect_contradictions`, `context_semantic_search` | `context:read` |
 | `context_contradiction_assign` | `context:read`, `assignments:write` |
-| `note_get`, `note_list` | `activities:read` |
-| `note_create`, `note_update`, `note_delete` | `activities:write` |
 | `email_get`, `email_search` | `activities:read` |
 | `email_create` | `activities:write` |
 | `hitl_check_status`, `hitl_list_pending` | `read` |
@@ -1772,57 +1814,6 @@ GET    /api/v1/use-cases/:id/timeline
 GET    /api/v1/analytics/use-cases?group_by=stage
 ```
 
----
-
-## Notes & Comments
-
-Threaded notes on any customer record. Supports internal vs external visibility, @mentions, and pinned notes.
-
-### Object types
-
-Notes can be attached to: `contact`, `account`, `opportunity`, `activity`, `use_case`
-
-### Visibility
-
-- `internal` (default) — only visible to team members
-- `external` — visible to customers (in future portal)
-
-### Threading
-
-Set `parent_id` when creating a note to reply to an existing note. Replies are returned when you `note_get` a parent.
-
-### MCP tools
-
-| Tool | Description |
-|---|---|
-| `note_create` | Add a note. Required: `object_type`, `object_id`, `body`. Optional: `parent_id`, `visibility`, `mentions`, `pinned` |
-| `note_get` | Get note with threaded replies |
-| `note_update` | Update `body`, `visibility`, or `pinned` status |
-| `note_delete` | Delete note and its replies |
-| `note_list` | List notes for an object. Pinned notes appear first. Filter by `visibility` or `pinned` |
-
-### CLI
-
-```bash
-crmy notes list contact <contact-id>
-crmy notes add account <account-id> --pin
-crmy notes add contact <id> --parent <note-id>    # threaded reply
-crmy notes get <note-id>
-crmy notes delete <note-id>
-```
-
-### REST API
-
-```
-GET    /api/v1/notes?object_type=contact&object_id=...&visibility=internal
-POST   /api/v1/notes              { object_type, object_id, body, ... }
-GET    /api/v1/notes/:id
-PATCH  /api/v1/notes/:id          { body, pinned }
-DELETE /api/v1/notes/:id
-```
-
----
-
 ## Workflows & Automation
 
 Event-driven automation. Workflows trigger on CRM events and execute a sequence of actions.
@@ -1859,7 +1850,7 @@ Optional JSON conditions on the event payload. Only events matching all filter c
 | `send_notification` | Send a message through a configured messaging channel (with delivery tracking) or emit a notification event. Falls back to the tenant's default channel when no `channel_id` is specified. |
 | `send_email` | Draft and optionally send an outbound email with HITL approval. Set `require_approval: false` to skip human review. |
 | `create_activity` | Create a follow-up task or activity |
-| `create_note` | Add a note to the triggering object |
+| `create_context_entry` | Add Memory to the triggering customer record |
 | `add_tag` | Add a tag to the triggering object (contact, account, or opportunity). Config: `tag`, optional `object_type`, `object_id`. |
 | `remove_tag` | Remove a tag from the triggering object. Config: `tag`, optional `object_type`, `object_id`. |
 | `assign_owner` | Change the owner of the triggering object. Config: `owner_id`, optional `object_type`, `object_id`. |
@@ -1868,7 +1859,7 @@ Optional JSON conditions on the event payload. Only events matching all filter c
 
 ### Example: notify on closed-won deals
 
-When `channel_id` is provided, the message is delivered through that channel with tracking and retries. When omitted, the tenant's **default channel** is used if one is configured (see [Default channel](#default-channel)). If no default exists, a `workflow.notification` event is emitted for plugin-based handling (legacy behavior).
+When `channel_id` is provided, the message is delivered through that channel with tracking and retries. When omitted, the tenant's **default channel** is used if one is configured (see [Default channel](#default-channel)). If no default exists, a `workflow.notification` event is emitted for plugin handling.
 
 ```json
 {
@@ -2320,9 +2311,18 @@ DELETE /api/v1/custom-fields/:id
 
 ---
 
-## HITL (Human-in-the-Loop)
+## Action Policies and HITL (Human-in-the-Loop)
 
-Approval workflows for high-impact actions. Agents submit requests; humans approve or reject.
+CRMy is the policy boundary between agent inference and operational change. Agents can infer Signals, draft recommendations, and prepare work freely, but actions that affect forecast, customer engagement, assignments, Current Memory, or systems of record pass through scopes, Action Policies, HITL approvals, and audit receipts.
+
+Built-in Action Policies protect high-risk actions before custom rules run:
+
+- Forecast category changes require approval for non-user actors.
+- Signal promotion requires evidence and may require approval when confidence is low.
+- External writebacks evaluate object write scope, source authority, allowed fields, writeback mode, idempotency, and target system policy.
+- Workflow field updates create approval requests instead of directly mutating sensitive fields.
+
+HITL is the review mechanism for policy decisions that require human judgment. Agents submit requests; humans approve or reject.
 
 ### How it works
 
@@ -2332,9 +2332,9 @@ Approval workflows for high-impact actions. Agents submit requests; humans appro
 4. Human approves or rejects with optional note
 5. Agent checks status with `hitl_check_status`
 
-### Auto-approval
+### Custom auto-approval policies
 
-Set `auto_approve_after_seconds` to auto-approve if no human responds within the timeout. A background worker checks every 60 seconds.
+Set `auto_approve_after_seconds` to auto-approve if no human responds within the timeout. Admins can also configure Action Policies in Settings to auto-approve routine requests or auto-reject risky ones. A background worker checks pending requests every 60 seconds.
 
 ### Request statuses
 
@@ -2503,31 +2503,13 @@ const config: ServerConfig = {
   tenantSlug: 'default',
   plugins: [
     {
-      module: './plugins/slack-notifier.js',
+      module: './plugins/customer-health-alerts.js',
       options: {
-        webhookUrl: 'https://hooks.slack.com/services/...',
-        channel: '#crm-alerts',
-        events: ['opportunity.stage_changed', 'hitl.submitted'],
+        events: ['account.health_changed', 'hitl.submitted'],
       },
     },
   ],
 };
-```
-
-### Sample plugin: Slack notifier (deprecated)
-
-> **Deprecated:** The `slack-notifier` plugin is superseded by the built-in [Messaging & Channels](#messaging--channels) system, which provides delivery tracking, automatic retries, and per-tenant configuration. To migrate, create a Slack messaging channel via `message_channel_create` and update your workflow actions to include `channel_id`.
-
-A legacy sample plugin at `packages/server/src/plugins/slack-notifier.ts` posts notifications to Slack on configurable events. It still works but lacks delivery tracking and retry logic.
-
-```typescript
-import slackNotifier from './plugins/slack-notifier.js';
-
-const plugin = slackNotifier({
-  webhookUrl: 'https://hooks.slack.com/services/...',
-  channel: '#crm-alerts',
-  events: ['opportunity.stage_changed', 'hitl.submitted', 'workflow.notification'],
-});
 ```
 
 ### Writing your own plugin
@@ -2590,7 +2572,7 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 | Category | Tools |
 |---|---|
 | Briefing | `briefing_get` |
-| Context | `context_add`, `context_get`, `context_list`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_stale`, `context_diff`, `context_ingest`, `context_ingest_auto`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
+| Context | `context_ingest_auto`, `context_ingest`, `context_raw_source_list`, `context_raw_source_get`, `context_add`, `context_get`, `context_list`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_stale`, `context_diff`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
 | Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise` |
 | Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
@@ -2601,7 +2583,6 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 | Messaging | `message_channel_create`, `message_channel_update`, `message_channel_get`, `message_channel_delete`, `message_channel_list`, `message_send`, `message_delivery_get`, `message_delivery_search` |
 | Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
 | Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
-| Notes | `note_create`, `note_get`, `note_update`, `note_delete`, `note_list` |
 | Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
 | Emails | `email_create`, `email_get`, `email_search`, `email_provider_set`, `email_provider_get` |
@@ -2733,16 +2714,6 @@ Base URL: `/api/v1`
 | POST | `/use-cases/:id/contacts` | Link contact |
 | DELETE | `/use-cases/:ucId/contacts/:contactId` | Unlink contact |
 | GET | `/use-cases/:id/timeline` | Activity timeline |
-
-### Notes
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/notes` | List (requires `object_type` + `object_id`) |
-| POST | `/notes` | Create |
-| GET | `/notes/:id` | Get with replies |
-| PATCH | `/notes/:id` | Update |
-| DELETE | `/notes/:id` | Delete with replies |
 
 ### Workflows
 

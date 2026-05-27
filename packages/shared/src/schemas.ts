@@ -24,6 +24,7 @@ export const externalOrigin = z.enum(['crmy', 'crm_sync', 'warehouse_sync', 'age
 export const writebackMode = z.enum(['append_event', 'mapped_upsert', 'stored_procedure']);
 export const sourceAuthority = z.enum(['crmy', 'external', 'bidirectional', 'read_only', 'approval_required']);
 export const externalObjectType = z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case', 'context_entry']);
+export const memoryStatus = z.enum(['signal', 'active', 'rejected', 'superseded']);
 
 const tags = z.array(z.string()).default([]);
 const customFields = z.record(z.unknown()).default({});
@@ -906,17 +907,6 @@ export const sequenceAnalytics = z.object({
   limit: z.number().int().min(1).max(90).default(30).optional(),
 });
 
-// ── Backward-compat aliases ────────────────────────────────────────────────────
-
-export const emailSequenceCreate = sequenceCreate;
-export const emailSequenceGet    = sequenceGet;
-export const emailSequenceDelete = sequenceDelete;
-export const emailSequenceUpdate = sequenceUpdate;
-export const emailSequenceList   = sequenceList;
-export const emailSequenceEnroll = sequenceEnroll;
-export const emailSequenceUnenroll = sequenceUnenroll;
-export const emailSequenceEnrollmentList = sequenceEnrollmentList;
-
 // -- Custom field schemas --
 
 export const customFieldCreate = z.object({
@@ -975,14 +965,25 @@ export const bulkJobList = z.object({
 
 // -- Workflow schemas --
 
+const workflowBool = z.preprocess(
+  value => value === 'true' ? true : value === 'false' ? false : value,
+  z.boolean(),
+);
+const workflowNumber = z.preprocess(
+  value => typeof value === 'string' && value.trim() !== '' ? Number(value) : value,
+  z.number(),
+);
+
 // Typed per-action-type schemas via discriminated union
 const wfActionSendNotification = z.object({
   type: z.literal('send_notification'),
   config: z.object({
-    message: z.string().min(1).describe('Notification message body'),
+    message: z.string().optional().describe('Notification message body. Required unless ai_generate is true.'),
     channel_id: z.string().uuid().optional().describe('Messaging channel UUID (uses tenant default if omitted)'),
     recipient: z.string().optional().describe('Recipient identifier (e.g. @user or #channel)'),
     subject: z.string().optional().describe('Optional subject/title'),
+    ai_generate: workflowBool.optional(),
+    ai_prompt: z.string().optional(),
   }),
 });
 
@@ -991,12 +992,14 @@ const wfActionSendEmail = z.object({
   config: z.object({
     to_address: z.string().min(1).describe('Recipient email address. Supports {{variables}}.'),
     subject: z.string().min(1).describe('Email subject line. Supports {{variables}}.'),
-    body_text: z.string().min(1).describe('Plain-text email body. Supports {{variables}}.'),
+    body_text: z.string().optional().describe('Plain-text email body. Supports {{variables}}. Required unless ai_generate is true.'),
     body_html: z.string().optional().describe('Optional HTML email body. Supports {{variables}}.'),
-    require_approval: z.boolean().default(true).describe('If true, creates a HITL request before sending'),
-    contact_id: z.string().uuid().optional(),
-    account_id: z.string().uuid().optional(),
-    opportunity_id: z.string().uuid().optional(),
+    require_approval: workflowBool.default(true).describe('If true, creates a HITL request before sending'),
+    ai_generate: workflowBool.optional(),
+    ai_prompt: z.string().optional(),
+    contact_id: z.string().optional(),
+    account_id: z.string().optional(),
+    opportunity_id: z.string().optional(),
   }),
 });
 
@@ -1004,7 +1007,7 @@ const wfActionUpdateField = z.object({
   type: z.literal('update_field'),
   config: z.object({
     object_type: z.enum(['contact', 'account', 'opportunity']).optional().describe('Entity type to update (defaults to triggered entity type)'),
-    object_id: z.string().uuid().optional().describe('Entity UUID (defaults to triggered entity ID)'),
+    object_id: z.string().optional().describe('Entity UUID or variable (defaults to triggered entity ID)'),
     field: z.string().min(1).describe('Field name to update, e.g. lifecycle_stage'),
     value: z.unknown().describe('New field value'),
   }),
@@ -1016,8 +1019,8 @@ const wfActionCreateActivity = z.object({
     type: z.string().min(1).describe('Activity type, e.g. task, call, note'),
     subject: z.string().min(1).describe('Activity subject. Supports {{variables}}.'),
     body: z.string().optional().describe('Activity body/notes. Supports {{variables}}.'),
-    contact_id: z.string().uuid().optional(),
-    account_id: z.string().uuid().optional(),
+    contact_id: z.string().optional(),
+    account_id: z.string().optional(),
   }),
 });
 
@@ -1026,7 +1029,7 @@ const wfActionAddTag = z.object({
   config: z.object({
     tag: z.string().min(1).describe('Tag to add, e.g. hot-lead'),
     object_type: z.enum(['contact', 'account', 'opportunity']).optional(),
-    object_id: z.string().uuid().optional(),
+    object_id: z.string().optional(),
   }),
 });
 
@@ -1035,26 +1038,26 @@ const wfActionRemoveTag = z.object({
   config: z.object({
     tag: z.string().min(1).describe('Tag to remove'),
     object_type: z.enum(['contact', 'account', 'opportunity']).optional(),
-    object_id: z.string().uuid().optional(),
+    object_id: z.string().optional(),
   }),
 });
 
 const wfActionAssignOwner = z.object({
   type: z.literal('assign_owner'),
   config: z.object({
-    owner_id: z.string().uuid().describe('UUID of the actor to assign as owner'),
+    owner_id: z.string().min(1).describe('UUID of the actor to assign as owner. Supports {{variables}}.'),
     object_type: z.enum(['contact', 'account', 'opportunity']).optional(),
-    object_id: z.string().uuid().optional(),
+    object_id: z.string().optional(),
   }),
 });
 
 const wfActionCreateContextEntry = z.object({
-  type: z.union([z.literal('create_context_entry'), z.literal('create_note')]),
+  type: z.literal('create_context_entry'),
   config: z.object({
     body: z.string().min(1).describe('Context entry body. Supports {{variables}}.'),
     context_type: z.string().default('note').describe('Context type, e.g. note, insight'),
     object_type: z.string().optional(),
-    object_id: z.string().uuid().optional(),
+    object_id: z.string().optional(),
     visibility: z.enum(['internal', 'shared']).default('internal').optional(),
   }),
 });
@@ -1070,15 +1073,15 @@ const wfActionWebhook = z.object({
 const wfActionWait = z.object({
   type: z.literal('wait'),
   config: z.object({
-    seconds: z.number().int().min(1).max(300).describe('Delay in seconds (max 300)'),
+    seconds: workflowNumber.pipe(z.number().int().min(1).max(300)).describe('Delay in seconds (max 300)'),
   }),
 });
 
 const wfActionEnrollInSequence = z.object({
   type: z.literal('enroll_in_sequence'),
   config: z.object({
-    sequence_id: z.string().uuid().describe('UUID of the sequence to enroll the contact into'),
-    contact_id:  z.string().uuid().optional().describe('Contact UUID override; auto-resolved from event subject if omitted'),
+    sequence_id: z.string().min(1).describe('UUID of the sequence to enroll the contact into'),
+    contact_id:  z.string().optional().describe('Contact UUID override; auto-resolved from event subject if omitted'),
     objective:   z.string().max(500).optional().describe('Optional goal text for this enrollment'),
   }),
 });
@@ -1089,6 +1092,52 @@ const wfActionHitlCheckpoint = z.object({
     title:        z.string().min(1).describe('Review request title shown to the human reviewer. Supports {{variables}}.'),
     instructions: z.string().optional().describe('Optional instructions for the reviewer — what to check or decide'),
     priority:     z.enum(['normal', 'high', 'urgent']).default('normal').optional(),
+  }),
+});
+
+const wfActionRequestExternalWriteback = z.object({
+  type: z.literal('request_external_writeback'),
+  config: z.object({
+    system_id: z.string().min(1).describe('System of record UUID'),
+    mapping_id: z.string().optional().describe('Optional external object mapping UUID'),
+    object_type: z.string().min(1).describe('CRMy object type, e.g. contact or opportunity'),
+    object_id: z.string().optional().describe('Optional CRMy object UUID or variable; defaults to the event subject when omitted'),
+    external_object: z.string().min(1).describe('External object, table, or endpoint name'),
+    external_record_id: z.string().optional().describe('Optional external record identifier'),
+    operation: z.enum(['create', 'update', 'upsert', 'append_event', 'stored_procedure']).default('upsert').optional(),
+    writeback_mode: z.enum(['append_event', 'mapped_upsert', 'stored_procedure']).default('mapped_upsert').optional(),
+    payload: z.union([z.record(z.unknown()), z.string().min(1)]).describe('JSON object or templated JSON string'),
+    require_approval: workflowBool.optional(),
+    allow_source_loop: workflowBool.optional(),
+    idempotency_key: z.string().optional(),
+  }),
+});
+
+const wfActionRunSystemSync = z.object({
+  type: z.literal('run_system_sync'),
+  config: z.object({
+    system_id: z.string().min(1).describe('System of record UUID'),
+    mapping_id: z.string().optional().describe('Optional mapping UUID'),
+    mode: z.enum(['test', 'full', 'incremental', 'replay']).default('incremental').optional(),
+  }),
+});
+
+const wfActionCreateSyncConflictReview = z.object({
+  type: z.literal('create_sync_conflict_review'),
+  config: z.object({
+    title: z.string().min(1).describe('Review title shown in Handoffs'),
+    instructions: z.string().optional(),
+    priority: z.enum(['low', 'normal', 'high', 'urgent']).default('normal').optional(),
+  }),
+});
+
+const wfActionCreateContextFromExternalChange = z.object({
+  type: z.literal('create_context_from_external_change'),
+  config: z.object({
+    subject_type: z.string().optional(),
+    subject_id: z.string().optional(),
+    context_type: z.string().default('note').optional(),
+    body: z.string().min(1).describe('Context body. Supports {{variables}}.'),
   }),
 });
 
@@ -1105,17 +1154,17 @@ export const workflowAction = z.discriminatedUnion('type', [
   wfActionWait,
   wfActionEnrollInSequence,
   wfActionHitlCheckpoint,
+  wfActionRequestExternalWriteback,
+  wfActionRunSystemSync,
+  wfActionCreateSyncConflictReview,
+  wfActionCreateContextFromExternalChange,
   // create_context_entry uses z.union so needs separate handling
 ]).or(wfActionCreateContextEntry);
 
-// Filter condition shape (structured or legacy plain-value)
-const workflowFilterCondition = z.union([
-  z.object({
-    op: z.enum(['eq', 'neq', 'contains', 'starts_with', 'gt', 'lt', 'exists', 'not_exists']),
-    value: z.unknown().optional(),
-  }),
-  z.unknown(), // legacy: { field: value } plain equality
-]);
+const workflowFilterCondition = z.object({
+  op: z.enum(['eq', 'neq', 'contains', 'starts_with', 'gt', 'lt', 'exists', 'not_exists']),
+  value: z.unknown().optional(),
+});
 
 export const workflowCreate = z.object({
   name: z.string().min(1),
@@ -1291,6 +1340,7 @@ export const contextSearch = z.object({
   context_type: z.string().optional(),
   tag: z.string().optional(),
   current_only: z.boolean().default(true),
+  memory_status: memoryStatus.optional(),
   limit: z.number().int().min(1).max(100).default(20),
   /**
    * Partial JSONB match against structured_data (PostgreSQL @> operator).
@@ -1310,6 +1360,7 @@ export const contextSemanticSearch = z.object({
   context_type: z.string().optional(),
   tag: z.string().optional(),
   current_only: z.boolean().default(true),
+  memory_status: memoryStatus.optional(),
   limit: z.number().int().min(1).max(100).default(20),
   structured_data_filter: z.record(z.unknown()).optional(),
 });
@@ -1463,6 +1514,38 @@ export const assignmentCancel = z.object({
 
 const contextTag = z.string().min(1).max(100).regex(/^[a-z0-9][a-z0-9-]*$/);
 
+export const contextEvidence = z.object({
+  source_type: z.string().min(1).default('raw_context')
+    .describe('Where the evidence came from, such as activity, email, transcript, mcp, context_api, crm_sync, warehouse_sync, support, product_usage, slack, or research.'),
+  source_id: z.string().optional()
+    .describe('CRMy record ID for the source when available.'),
+  source_ref: z.string().optional()
+    .describe('External or human-readable source reference.'),
+  source_url: z.string().optional()
+    .describe('URL or deep link to the source system when available.'),
+  source_label: z.string().optional()
+    .describe('Human-readable source label, such as the meeting title or email subject.'),
+  speaker: z.string().optional()
+    .describe('Speaker or author for quoted evidence when known.'),
+  snippet: z.string().max(5000).optional()
+    .describe('Short quote or excerpt supporting the claim.'),
+  observed_at: z.string().optional()
+    .describe('When the source event happened.'),
+  captured_at: z.string().optional()
+    .describe('When CRMy captured or processed the source.'),
+  confidence: z.number().min(0).max(1).optional()
+    .describe('How strongly this evidence supports the claim.'),
+  rationale: z.string().max(2000).optional()
+    .describe('Why this evidence supports the claim.'),
+  verified_at: z.string().optional()
+    .describe('When a human or policy last verified this evidence.'),
+  verified_by: uuid.optional()
+    .describe('Actor who verified this evidence.'),
+}).passthrough().refine(
+  item => Boolean(item.source_id || item.source_ref || item.source_url || item.snippet),
+  { message: 'Evidence must include at least a source ID, source reference, source URL, or snippet.' },
+);
+
 export const contextEntryCreate = z.object({
   subject_type: subjectType,
   subject_id: uuid,
@@ -1471,6 +1554,8 @@ export const contextEntryCreate = z.object({
   body: z.string().min(1).max(50000),
   structured_data: z.record(z.unknown()).default({}),
   confidence: z.number().min(0).max(1).optional(),
+  memory_status: memoryStatus.optional().default('active'),
+  evidence: z.array(contextEvidence).optional().default([]),
   tags: z.array(contextTag).max(20).default([]),
   source: z.string().optional(),
   source_ref: z.string().optional(),
@@ -1493,6 +1578,7 @@ export const contextEntrySearch = z.object({
   subject_id: uuid.optional(),
   context_type: z.string().optional(),
   authored_by: uuid.optional(),
+  memory_status: memoryStatus.optional(),
   is_current: z.boolean().optional(),
   query: z.string().optional(),
   /** Partial JSONB match against structured_data. Example: { "severity": "critical" } */
@@ -1511,6 +1597,22 @@ export const contextEntrySupersede = z.object({
   structured_data: z.record(z.unknown()).optional(),
   confidence: z.number().min(0).max(1).optional(),
   tags: z.array(contextTag).max(20).optional(),
+  idempotency_key: idempotencyKey,
+});
+
+export const contextSignalPromote = z.object({
+  id: uuid,
+  body: z.string().min(1).max(50000).optional(),
+  title: z.string().optional(),
+  structured_data: z.record(z.unknown()).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  tags: z.array(contextTag).max(20).optional(),
+  idempotency_key: idempotencyKey,
+});
+
+export const contextSignalReject = z.object({
+  id: uuid,
+  reason: z.string().max(1000).optional(),
   idempotency_key: idempotencyKey,
 });
 

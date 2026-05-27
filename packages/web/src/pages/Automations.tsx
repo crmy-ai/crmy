@@ -36,8 +36,8 @@ export default function AutomationsPage() {
         icon={Zap}
         iconClassName="text-amber-500"
         description={tab === 'triggers'
-          ? headerDescription('Run actions when events happen', triggerCount, 'trigger')
-          : headerDescription('Manage multi-step outreach', sequenceCount, 'sequence')}
+          ? headerDescription('React to customer and system events', triggerCount, 'trigger')
+          : headerDescription('Coordinate multi-step customer engagement', sequenceCount, 'sequence')}
       />
 
       {/* Email-style tab bar */}

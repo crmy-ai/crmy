@@ -17,6 +17,8 @@ export interface AgentConfig {
   can_log_activities: boolean;
   can_create_assignments: boolean;
   auto_extract_context: boolean;
+  auto_promote_signals: boolean;
+  signal_auto_promote_threshold: number;
 }
 
 /** A single message in a conversation. */

@@ -16,9 +16,10 @@
  *   └─────────────────────────────┴───────────────────────────────────────────┘
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  useCreateWorkflow, useUpdateWorkflow, useTestWorkflow, useSequences, useWorkflow,
+  useCreateWorkflow, useUpdateWorkflow, useTestWorkflow, useTestDraftWorkflow, useDraftWorkflowContentPreview, useSequences, useWorkflow,
   useSystemsOfRecord, useSystemMappings,
 } from '@/api/hooks';
 import {
@@ -27,6 +28,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { ToastAction } from '@/components/ui/toast';
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator,
   SelectTrigger, SelectValue,
@@ -35,10 +37,10 @@ import { toast } from '@/hooks/use-toast';
 import {
   Zap, X, Plus, Loader2, ChevronUp, ChevronDown, Trash2,
   FlaskConical, CheckCircle2, XCircle, Bot, UserCheck,
-  Play, ArrowRight, AlertTriangle,
+  Play, ArrowRight, AlertTriangle, Sparkles, Check,
 } from 'lucide-react';
 import {
-  TRIGGER_EVENTS, ACTION_TYPES, VISIBLE_ACTION_TYPES, ACTION_GROUPS,
+  TRIGGER_EVENTS, ACTION_TYPES, VISIBLE_ACTION_TYPES, ACTION_GROUPS, ACTION_GROUP_HELP,
   isActionValid, filterToConditions, conditionsToFilter,
   getSuggestionsForTrigger, getSamplePayload,
   type FilterCondition,
@@ -46,6 +48,7 @@ import {
 import { WorkflowFilterBuilder } from './WorkflowFilterBuilder';
 import { VarField } from '@/components/ui/VarField';
 import { EditorErrorBoundary } from './EditorErrorBoundary';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -226,6 +229,9 @@ function ActionTypeSelect({
               <SelectLabel className="text-xs font-bold uppercase tracking-wider text-muted-foreground/60 px-2 py-1">
                 {group}
               </SelectLabel>
+              {ACTION_GROUP_HELP[group] && (
+                <div className="px-2 pb-1 text-xs text-muted-foreground">{ACTION_GROUP_HELP[group]}</div>
+              )}
               {items.map(a => (
                 <SelectItem key={a.value} value={a.value} className="text-xs">
                   <span className="flex items-center gap-1.5">
@@ -259,6 +265,9 @@ function ActionCard({
   canMoveDown,
   canRemove,
   triggerEvent,
+  sequences,
+  systems,
+  mappings: allMappings,
 }: {
   index:      number;
   action:     ActionDraft;
@@ -270,7 +279,14 @@ function ActionCard({
   canMoveDown:boolean;
   canRemove:  boolean;
   triggerEvent: string;
+  sequences: any[];
+  systems: any[];
+  mappings: any[];
 }) {
+  const navigate = useNavigate();
+  const { enabled: agentEnabled, config: agentConfig, connectivity } = useAgentSettings();
+  const previewMutation = useDraftWorkflowContentPreview();
+  const [preview, setPreview] = useState<{ subject?: string; body_text?: string; message?: string } | null>(null);
   const def        = VISIBLE_ACTION_TYPES.find(a => a.value === action.type)
                   ?? ACTION_TYPES.find(a => a.value === action.type)
                   ?? VISIBLE_ACTION_TYPES[0];
@@ -278,20 +294,52 @@ function ActionCard({
   const suggestions = getSuggestionsForTrigger(triggerEvent);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: seqData } = useSequences({ is_active: true }) as any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sequences: any[] = seqData?.data ?? [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: systemsData } = useSystemsOfRecord({ limit: 100 }) as any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: mappingsData } = useSystemMappings({ limit: 100, is_active: true }) as any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const systems: any[] = systemsData?.data ?? [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mappings: any[] = (mappingsData?.data ?? []).filter((m: any) => !action.config.system_id || m.system_id === action.config.system_id);
+  const mappings: any[] = allMappings.filter((m: any) => !action.config.system_id || m.system_id === action.config.system_id);
+  const agentReady = agentEnabled && Boolean(agentConfig?.model && agentConfig?.base_url) && connectivity !== 'offline';
+  const canPreviewAi = action.config.ai_generate === 'true' && (action.type === 'send_email' || action.type === 'send_notification');
+
+  function promptConfigureAgent() {
+    toast({
+      title: 'Configure the Local Workspace Agent',
+      description: 'AI-generated trigger messages need an enabled model in Model Settings.',
+      action: (
+        <ToastAction altText="Open Model Settings" onClick={() => navigate('/settings/model')}>
+          Configure
+        </ToastAction>
+      ),
+    });
+  }
 
   function set(key: string, val: string) {
+    if (key === 'ai_generate' && val === 'true' && !agentReady) {
+      promptConfigureAgent();
+      return;
+    }
+    if (key === 'ai_generate' || key === 'ai_prompt') setPreview(null);
     onChange({ ...action, config: { ...action.config, [key]: val } });
+  }
+
+  async function previewAiContent() {
+    if (!canPreviewAi) return;
+    if (!agentReady) {
+      promptConfigureAgent();
+      return;
+    }
+    setPreview(null);
+    try {
+      const result = await previewMutation.mutateAsync({
+        action_type: action.type as 'send_email' | 'send_notification',
+        config: action.config,
+        sample_payload: getSamplePayload(triggerEvent) as Record<string, unknown>,
+      });
+      setPreview(result);
+    } catch {
+      toast({
+        title: 'Preview failed',
+        description: 'Could not generate content. Check Model Settings and try again.',
+        variant: 'destructive',
+      });
+    }
   }
 
   return (
@@ -365,6 +413,10 @@ function ActionCard({
       <div className={`px-4 py-3 space-y-3 ${isHITL ? 'pl-5' : ''}`}>
         {def.configFields.map(field => {
           const val = action.config[field.key] ?? '';
+          const aiGenerate = action.config.ai_generate === 'true';
+          const aiControlled = aiGenerate && field.aiControlled;
+
+          if (field.key === 'ai_prompt' && !aiGenerate) return null;
 
           // Boolean toggle
           if (field.type === 'boolean') {
@@ -430,7 +482,7 @@ function ActionCard({
                   onChange={e => {
                     const nextSystemId = e.target.value;
                     const patch: Record<string, string> = { ...action.config, [field.key]: nextSystemId };
-                    if (action.config.mapping_id && !mappingsData?.data?.some((m: any) => m.id === action.config.mapping_id && m.system_id === nextSystemId)) {
+                    if (action.config.mapping_id && !allMappings.some((m: any) => m.id === action.config.mapping_id && m.system_id === nextSystemId)) {
                       delete patch.mapping_id;
                     }
                     onChange({ ...action, config: patch });
@@ -522,12 +574,66 @@ function ActionCard({
                   rows={3}
                   value={val}
                   onChange={v => set(field.key, v)}
-                  placeholder={field.placeholder}
+                  placeholder={aiControlled ? 'Generated dynamically from the AI prompt at run time' : field.placeholder}
                   suggestions={def.supportsVariables ? suggestions : []}
-                  className={areaCls}
+                  disabled={aiControlled}
+                  className={`${areaCls} ${aiControlled ? 'bg-muted/60 border-dashed text-muted-foreground' : ''}`}
                 />
                 {field.hint && (
                   <p className="text-xs text-muted-foreground mt-0.5">{field.hint}</p>
+                )}
+                {field.key === 'ai_prompt' && canPreviewAi && (
+                  <div className="mt-2 space-y-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={previewAiContent}
+                        disabled={previewMutation.isPending}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600 transition-colors hover:text-amber-500 disabled:opacity-50 dark:text-amber-400"
+                      >
+                        {previewMutation.isPending
+                          ? <><Loader2 className="h-3 w-3 animate-spin" /> Generating preview…</>
+                          : <><Sparkles className="h-3 w-3" /> Preview AI content</>}
+                      </button>
+                      {!agentReady && (
+                        <button
+                          type="button"
+                          onClick={() => navigate('/settings/model')}
+                          className="text-xs font-medium text-primary hover:underline"
+                        >
+                          Configure Model Settings
+                        </button>
+                      )}
+                    </div>
+                    {preview && (
+                      <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <span className="font-semibold text-primary">AI preview</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const next = { ...action.config };
+                              if (preview.subject) next.subject = preview.subject;
+                              if (preview.body_text) next.body_text = preview.body_text;
+                              if (preview.message) next.message = preview.message;
+                              onChange({ ...action, config: next });
+                              setPreview(null);
+                            }}
+                            className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                          >
+                            <Check className="h-3 w-3" /> Use preview
+                          </button>
+                        </div>
+                        {preview.subject && <p className="mb-1"><span className="font-semibold">Subject:</span> {preview.subject}</p>}
+                        <p className="whitespace-pre-wrap text-foreground">{preview.body_text ?? preview.message}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {aiControlled && (
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Turn off AI generation to write a fixed {action.type === 'send_email' ? 'body' : 'message'} manually.
+                  </p>
                 )}
               </div>
             );
@@ -561,6 +667,14 @@ function ActionCard({
               {def.isHITL
                 ? 'This step creates a review request in Handoffs. Subsequent actions run only after a human approves.'
                 : 'This email will not send until a human approves the HITL request in Handoffs.'}
+            </span>
+          </div>
+        )}
+        {action.type === 'request_external_writeback' && (
+          <div className="flex items-start gap-2 p-2.5 rounded-lg bg-violet-500/10 border border-violet-500/20 text-xs text-violet-700 dark:text-violet-300">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+            <span>
+              This creates a governed writeback request; execution still follows system policy, source authority, and approval rules.
             </span>
           </div>
         )}
@@ -632,6 +746,9 @@ function AddActionButton({ onAdd }: { onAdd: (type: string) => void }) {
                   <p className="px-3 pt-2.5 pb-1 text-xs font-bold uppercase tracking-widest text-muted-foreground/60">
                     {group}
                   </p>
+                  {ACTION_GROUP_HELP[group] && (
+                    <p className="px-3 pb-1 text-xs text-muted-foreground">{ACTION_GROUP_HELP[group]}</p>
+                  )}
                   {items.map(a => (
                     <button
                       key={a.value}
@@ -662,23 +779,49 @@ function AddActionButton({ onAdd }: { onAdd: (type: string) => void }) {
 
 // ── Test panel ────────────────────────────────────────────────────────────────
 
-function TestPanel({ workflowId, triggerEvent }: { workflowId?: string; triggerEvent: string }) {
+function TestPanel({
+  workflowId,
+  triggerEvent,
+  getDraftWorkflow,
+  validateDraft,
+}: {
+  workflowId?: string;
+  triggerEvent: string;
+  getDraftWorkflow: () => Record<string, unknown>;
+  validateDraft: () => boolean;
+}) {
   const skeleton = getSamplePayload(triggerEvent);
   const [payload, setPayload]       = useState(() => JSON.stringify(skeleton, null, 2));
   const [parseError, setParseError] = useState('');
   const testMutation = useTestWorkflow();
+  const draftMutation = useTestDraftWorkflow();
+
+  useEffect(() => {
+    setPayload(JSON.stringify(getSamplePayload(triggerEvent), null, 2));
+    setParseError('');
+  }, [triggerEvent]);
 
   const run = async () => {
-    if (!workflowId) {
-      toast({ title: 'Save the workflow first before testing.', variant: 'destructive' }); return;
+    if (!validateDraft()) {
+      toast({ title: 'Fix required fields before testing.', variant: 'destructive' });
+      return;
     }
     let parsed: Record<string, unknown>;
     try { parsed = JSON.parse(payload); setParseError(''); }
     catch { setParseError('Invalid JSON'); return; }
-    await testMutation.mutateAsync({ id: workflowId, sample_payload: parsed });
+    try {
+      if (workflowId) {
+        await testMutation.mutateAsync({ id: workflowId, sample_payload: parsed });
+      } else {
+        await draftMutation.mutateAsync({ workflow: getDraftWorkflow(), sample_payload: parsed });
+      }
+    } catch (err: any) {
+      toast({ title: 'Dry run failed', description: err?.message ?? 'Check the trigger and action configuration.', variant: 'destructive' });
+    }
   };
 
-  const result = testMutation.data as any;
+  const result = (workflowId ? testMutation.data : draftMutation.data) as any;
+  const isPending = workflowId ? testMutation.isPending : draftMutation.isPending;
 
   return (
     <div className="space-y-4 text-xs">
@@ -694,15 +837,15 @@ function TestPanel({ workflowId, triggerEvent }: { workflowId?: string; triggerE
         {parseError && <p className="text-destructive mt-1 text-xs">{parseError}</p>}
       </div>
 
-      <Button size="sm" onClick={run} disabled={testMutation.isPending} className="w-full gap-1.5 text-xs">
-        {testMutation.isPending
+      <Button size="sm" onClick={run} disabled={isPending} className="w-full gap-1.5 text-xs">
+        {isPending
           ? <Loader2 className="w-3 h-3 animate-spin" />
           : <FlaskConical className="w-3 h-3" />}
         Dry run
       </Button>
 
       {!workflowId && (
-        <p className="text-xs text-muted-foreground text-center">Save first to enable test.</p>
+        <p className="text-xs text-muted-foreground text-center">Testing this draft will not create or activate the trigger.</p>
       )}
 
       {result && (
@@ -738,9 +881,10 @@ function TestPanel({ workflowId, triggerEvent }: { workflowId?: string; triggerE
                   <div key={i} className="px-2.5 py-1.5 flex items-start gap-2 text-xs">
                     <span className="shrink-0 text-muted-foreground w-4">{i + 1}.</span>
                     <span className="font-mono text-foreground shrink-0">{a.type}</span>
-                    <span className="text-muted-foreground font-mono truncate">
+                    <span className="text-muted-foreground font-mono truncate flex-1">
                       {Object.entries(a.resolved_config ?? {}).map(([k, v]) => `${k}: ${v}`).join(' · ')}
                     </span>
+                    {a.note && <span className="text-muted-foreground shrink-0">{a.note}</span>}
                   </div>
                 ))}
               </div>
@@ -765,13 +909,19 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
 
   const createWorkflow = useCreateWorkflow();
   const updateWorkflow = useUpdateWorkflow(workflow?.id ?? '');
+  const { data: seqData } = useSequences({ is_active: true }) as any;
+  const { data: systemsData } = useSystemsOfRecord({ limit: 100 }) as any;
+  const { data: mappingsData } = useSystemMappings({ limit: 100, is_active: true }) as any;
+  const sequences: any[] = seqData?.data ?? [];
+  const systems: any[] = systemsData?.data ?? [];
+  const systemMappings: any[] = mappingsData?.data ?? [];
 
   // ── Editor state ─────────────────────────────────────────────────────────
 
   const [name,        setName]        = useState(() => workflow?.name        ?? '');
   const [description, setDescription] = useState(() => workflow?.description ?? '');
   const [trigger,     setTrigger]     = useState(() => workflow?.trigger_event ?? '');
-  const [isActive,    setIsActive]    = useState(() => workflow?.is_active    ?? true);
+  const [isActive,    setIsActive]    = useState(() => workflow?.is_active    ?? false);
   const [conditions,  setConditions]  = useState<FilterCondition[]>(() =>
     workflow?.trigger_filter && typeof workflow.trigger_filter === 'object'
       ? filterToConditions(workflow.trigger_filter as Record<string, unknown>)
@@ -815,16 +965,34 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
         : [{ type: 'send_notification', config: {} }],
     );
     setErrors({});
+    setTestOpen(false);
   }, []);
+
+  const resetToBlank = useCallback(() => {
+    setName('');
+    setDescription('');
+    setTrigger('');
+    setIsActive(false);
+    setConditions([]);
+    setActions([{ type: 'send_notification', config: {} }]);
+    setErrors({});
+    setTestOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    if (workflow) resetFromWorkflow(workflow);
+    else resetToBlank();
+  }, [open, workflow?.id, workflowProp, workflowId, resetFromWorkflow, resetToBlank]);
 
   // ── Validation ───────────────────────────────────────────────────────────
 
   /** Detect an opening {{ that is never closed, e.g. {{contact.name */
   const UNCLOSED_VAR = /\{\{(?![^{}]*\}\})/;
 
-  const validate = (): boolean => {
+  const validateCore = (requireName: boolean): boolean => {
     const e: Record<string, string> = {};
-    if (!name.trim())    e.name    = 'Name is required';
+    if (requireName && !name.trim()) e.name = 'Enter a trigger name before saving.';
     if (!trigger.trim()) e.trigger = 'Trigger event is required';
     actions.forEach((a, i) => {
       if (!isActionValid(a)) {
@@ -847,32 +1015,37 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
     return Object.keys(e).length === 0;
   };
 
+  const validate = (): boolean => validateCore(true);
+  const validateForTest = (): boolean => validateCore(false);
+
+  const buildWorkflowPayload = useCallback((requireName = true) => ({
+    name:           name.trim() || (requireName ? '' : 'Untitled trigger draft'),
+    description:    description.trim() || undefined,
+    trigger_event:  trigger.trim(),
+    trigger_filter: (!isManual && conditions.length > 0) ? conditionsToFilter(conditions) : {},
+    is_active:      isActive,
+    actions: actions.map(a => ({
+      type:   a.type,
+      config: Object.fromEntries(
+        Object.entries(a.config).map(([k, v]) => [k, v.trim()]),
+      ),
+    })),
+  }), [actions, conditions, description, isActive, isManual, name, trigger]);
+
   // ── Save ─────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
     if (!validate()) return;
     setSaving(true);
     try {
-      const payload = {
-        name:           name.trim(),
-        description:    description.trim() || undefined,
-        trigger_event:  trigger.trim(),
-        trigger_filter: (!isManual && conditions.length > 0) ? conditionsToFilter(conditions) : {},
-        is_active:      isActive,
-        actions: actions.map(a => ({
-          type:   a.type,
-          config: Object.fromEntries(
-            Object.entries(a.config).map(([k, v]) => [k, v.trim()]),
-          ),
-        })),
-      };
+      const payload = buildWorkflowPayload(true);
 
       if (isEdit) {
         await updateWorkflow.mutateAsync(payload);
-        toast({ title: 'Automation saved' });
+        toast({ title: 'Trigger saved' });
       } else {
         await createWorkflow.mutateAsync(payload);
-        toast({ title: 'Automation created' });
+        toast({ title: isActive ? 'Trigger created and activated' : 'Draft trigger saved' });
       }
       onSaved?.();
       onClose();
@@ -920,8 +1093,6 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
       open={open}
       onOpenChange={v => {
         if (!v) onClose();
-        // Reset state when reopening with same workflow
-        if (v && workflow) resetFromWorkflow(workflow);
       }}
     >
       <DialogContent className="max-w-none p-0 gap-0 w-[min(95vw,1440px)] h-[min(90vh,920px)] flex flex-col overflow-hidden rounded-2xl [&>button]:hidden">
@@ -934,12 +1105,19 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
           <Zap className="w-5 h-5 text-amber-500 shrink-0" />
 
           {/* Editable name */}
-          <input
-            value={name}
-            onChange={e => { setName(e.target.value); setErrors(p => ({ ...p, name: '' })); }}
-            placeholder="Automation name…"
-            className="flex-1 bg-transparent text-base font-bold text-foreground placeholder:text-muted-foreground/50 outline-none min-w-0"
-          />
+          <label className={`flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border bg-background px-3 py-1.5 transition-colors ${
+            errors.name ? 'border-destructive' : 'border-border focus-within:border-primary/50'
+          }`}>
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Trigger name
+            </span>
+            <input
+              value={name}
+              onChange={e => { setName(e.target.value); setErrors(p => ({ ...p, name: '' })); }}
+              placeholder="Name this trigger…"
+              className="min-w-0 flex-1 bg-transparent text-sm font-semibold text-foreground placeholder:text-muted-foreground/60 outline-none"
+            />
+          </label>
 
           {errors.name && (
             <span className="text-xs text-destructive shrink-0">{errors.name}</span>
@@ -956,7 +1134,7 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
             {/* Active toggle */}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Switch checked={isActive} onCheckedChange={setIsActive} />
-              <span>{isActive ? 'Active' : 'Paused'}</span>
+              <span>{isActive ? 'Active' : isEdit ? 'Paused' : 'Paused draft'}</span>
             </div>
 
             {/* Test toggle */}
@@ -976,7 +1154,7 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
             </Button>
             <Button size="sm" onClick={handleSave} disabled={saving} className="h-8 text-xs gap-1.5">
               {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              {isEdit ? 'Save changes' : 'Create'}
+              {isEdit ? 'Save changes' : isActive ? 'Create active trigger' : 'Save draft'}
             </Button>
           </div>
         </div>
@@ -1023,6 +1201,9 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
                       canMoveDown={i < actions.length - 1}
                       canRemove={actions.length > 1}
                       triggerEvent={trigger}
+                      sequences={sequences}
+                      systems={systems}
+                      mappings={systemMappings}
                     />
                   </EditorErrorBoundary>
                   {errors[`action_${i}`] && (
@@ -1054,7 +1235,12 @@ export function WorkflowEditor({ open, onClose, workflow: workflowProp, workflow
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
-              <TestPanel workflowId={workflow?.id} triggerEvent={trigger} />
+              <TestPanel
+                workflowId={workflow?.id}
+                triggerEvent={trigger}
+                getDraftWorkflow={() => buildWorkflowPayload(false)}
+                validateDraft={validateForTest}
+              />
             </div>
           )}
         </div>

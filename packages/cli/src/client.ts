@@ -80,12 +80,6 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   custom_field_list: { method: 'GET', path: (i) => `/api/v1/custom-fields?object_type=${i.object_type}` },
   custom_field_delete: { method: 'DELETE', path: (i) => `/api/v1/custom-fields/${i.id}` },
 
-  // Notes
-  note_create: { method: 'POST', path: () => '/api/v1/notes' },
-  note_get: { method: 'GET', path: (i) => `/api/v1/notes/${i.id}` },
-  note_list: { method: 'GET', path: (i) => `/api/v1/notes?object_type=${i.object_type}&object_id=${i.object_id}` },
-  note_delete: { method: 'DELETE', path: (i) => `/api/v1/notes/${i.id}` },
-
   // Workflows
   workflow_create: { method: 'POST', path: () => '/api/v1/workflows' },
   workflow_get: { method: 'GET', path: (i) => `/api/v1/workflows/${i.id}` },
@@ -143,11 +137,21 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   // Context Entries
   context_add: { method: 'POST', path: () => '/api/v1/context' },
   context_get: { method: 'GET', path: (i) => `/api/v1/context/${i.id}` },
-  context_list: { method: 'GET', path: (i) => `/api/v1/context?limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}${i.context_type ? `&context_type=${i.context_type}` : ''}` },
+  context_list: { method: 'GET', path: (i) => `/api/v1/context?limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}${i.context_type ? `&context_type=${i.context_type}` : ''}${i.memory_status ? `&memory_status=${i.memory_status}` : ''}${i.is_current !== undefined ? `&is_current=${i.is_current}` : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
+  context_raw_source_list: { method: 'GET', path: (i) => `/api/v1/context/raw-sources?limit=${i.limit ?? 50}${i.source_type ? `&source_type=${i.source_type}` : ''}${i.status ? `&status=${i.status}` : ''}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
+  context_raw_source_get: { method: 'GET', path: (i) => `/api/v1/context/raw-sources/${i.id}` },
+  context_signal_promote: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/promote` },
+  context_signal_reject: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/reject` },
+  context_signal_group_list: { method: 'GET', path: (i) => `/api/v1/context/signal-groups?limit=${i.limit ?? 20}${i.status ? `&status=${i.status}` : ''}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}${i.context_type ? `&context_type=${i.context_type}` : ''}${i.attention_only ? '&attention_only=true' : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
+  context_signal_group_get: { method: 'GET', path: (i) => `/api/v1/context/signal-groups/${i.id}` },
+  context_signal_group_promote: { method: 'POST', path: (i) => `/api/v1/context/signal-groups/${i.id}/promote` },
+  context_signal_group_reject: { method: 'POST', path: (i) => `/api/v1/context/signal-groups/${i.id}/reject` },
   context_supersede: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/supersede` },
   context_search: { method: 'GET', path: (i) => `/api/v1/context/search?q=${encodeURIComponent(i.query as string)}&limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.context_type ? `&context_type=${i.context_type}` : ''}${i.tag ? `&tag=${i.tag}` : ''}${i.current_only === false ? '&current_only=false' : ''}` },
   context_review: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/review` },
   context_stale: { method: 'GET', path: (i) => `/api/v1/context/stale?limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}` },
+  context_ingest: { method: 'POST', path: () => '/api/v1/context/ingest' },
+  context_ingest_auto: { method: 'POST', path: () => '/api/v1/context/ingest-auto' },
 
   // Activity Type Registry
   activity_type_list: { method: 'GET', path: (i) => `/api/v1/activity-types${i.category ? `?category=${i.category}` : ''}` },

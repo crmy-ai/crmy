@@ -139,7 +139,7 @@ async function checkContext(
   const result = await db.query(
     `SELECT 1 FROM context_entries
      WHERE tenant_id = $1 AND subject_type = $2 AND subject_id = $3
-       AND context_type = $4 AND is_current = true
+       AND context_type = $4 AND is_current = true AND memory_status = 'active'
      LIMIT 1`,
     [tenantId, prereq.subject_type, subjectId, prereq.context_type],
   );
