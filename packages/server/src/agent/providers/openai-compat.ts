@@ -5,12 +5,17 @@ import type { AgentConfig, ConversationMessage, AgentToolDef, ToolCallRecord } f
 
 const AGENT_STREAM_TIMEOUT_MS = Number(process.env.AGENT_STREAM_TIMEOUT_MS ?? 120_000);
 
-function timeoutSignal(timeoutMs = AGENT_STREAM_TIMEOUT_MS): { signal: AbortSignal; done: () => void } {
+function timeoutSignal(timeoutMs = AGENT_STREAM_TIMEOUT_MS, externalSignal?: AbortSignal): { signal: AbortSignal; done: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onAbort = () => controller.abort();
+  externalSignal?.addEventListener('abort', onAbort, { once: true });
   return {
     signal: controller.signal,
-    done: () => clearTimeout(timer),
+    done: () => {
+      clearTimeout(timer);
+      externalSignal?.removeEventListener('abort', onAbort);
+    },
   };
 }
 
@@ -24,7 +29,7 @@ export async function callOpenAICompat(
   config: AgentConfig,
   apiKey: string | null,
   onDelta: (text: string) => void,
-  _onThinking?: (text: string) => void, // not supported by OpenAI-compatible providers
+  opts?: { abortSignal?: AbortSignal },
 ): Promise<{ content: string; tool_calls: ToolCallRecord[] }> {
   const openaiMessages = toOpenAIFormat(messages);
   const openaiTools = tools.length > 0 ? tools.map(t => ({
@@ -56,7 +61,7 @@ export async function callOpenAICompat(
     headers['X-Title'] = 'CRMy';
   }
 
-  const timeout = timeoutSignal();
+  const timeout = timeoutSignal(AGENT_STREAM_TIMEOUT_MS, opts?.abortSignal);
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -70,7 +75,7 @@ export async function callOpenAICompat(
       throw new Error(`LLM API error ${res.status}: ${errBody}`);
     }
 
-    return await parseOpenAIStream(res, onDelta);
+    return await parseOpenAIStream(res, onDelta, new Set(tools.map(tool => tool.name)));
   } finally {
     timeout.done();
   }
@@ -86,7 +91,7 @@ function toOpenAIFormat(messages: ConversationMessage[]): Record<string, unknown
         tool_calls: msg.tool_calls.map(tc => ({
           id: tc.id,
           type: 'function',
-          function: { name: tc.name, arguments: tc.arguments },
+          function: { name: tc.name, arguments: sanitizeToolArguments(tc.arguments) },
         })),
       };
     }
@@ -107,9 +112,13 @@ function toOpenAIFormat(messages: ConversationMessage[]): Record<string, unknown
 async function parseOpenAIStream(
   res: Response,
   onDelta: (text: string) => void,
+  knownToolNames: Set<string>,
 ): Promise<{ content: string; tool_calls: ToolCallRecord[] }> {
   let fullText = '';
   const toolCallsMap = new Map<number, { id: string; name: string; arguments: string }>();
+  const idToIndex = new Map<string, number>();
+  let nextFallbackIndex = 10_000;
+  let lastFallbackIndex: number | null = null;
 
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
@@ -143,12 +152,20 @@ async function parseOpenAIStream(
       }
 
       // Tool calls (streamed incrementally)
-      const tcDeltas = delta.tool_calls as { index: number; id?: string; function?: { name?: string; arguments?: string } }[] | undefined;
+      const tcDeltas = delta.tool_calls as { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] | undefined;
       if (tcDeltas) {
         for (const tcd of tcDeltas) {
-          const existing = toolCallsMap.get(tcd.index);
+          const index = resolveToolCallIndex(tcd, {
+            toolCallsMap,
+            idToIndex,
+            knownToolNames,
+            getNextFallbackIndex: () => nextFallbackIndex++,
+            getLastFallbackIndex: () => lastFallbackIndex,
+            setLastFallbackIndex: (value) => { lastFallbackIndex = value; },
+          });
+          const existing = toolCallsMap.get(index);
           if (!existing) {
-            toolCallsMap.set(tcd.index, {
+            toolCallsMap.set(index, {
               id: tcd.id ?? '',
               name: tcd.function?.name ?? '',
               arguments: tcd.function?.arguments ?? '',
@@ -165,10 +182,76 @@ async function parseOpenAIStream(
 
   const tool_calls: ToolCallRecord[] = [];
   for (const [, tc] of [...toolCallsMap.entries()].sort((a, b) => a[0] - b[0])) {
-    tool_calls.push({ id: tc.id, name: tc.name, arguments: tc.arguments });
+    tool_calls.push({ id: tc.id || crypto.randomUUID(), name: tc.name, arguments: sanitizeToolArguments(tc.arguments) });
   }
 
   return { content: fullText, tool_calls };
+}
+
+function sanitizeToolArguments(raw: string | undefined): string {
+  if (!raw?.trim()) return '{}';
+  try {
+    JSON.parse(raw);
+    return raw;
+  } catch {
+    return '{}';
+  }
+}
+
+function resolveToolCallIndex(
+  tcd: { index?: number; id?: string; function?: { name?: string; arguments?: string } },
+  state: {
+    toolCallsMap: Map<number, { id: string; name: string; arguments: string }>;
+    idToIndex: Map<string, number>;
+    knownToolNames: Set<string>;
+    getNextFallbackIndex: () => number;
+    getLastFallbackIndex: () => number | null;
+    setLastFallbackIndex: (value: number) => void;
+  },
+): number {
+  if (typeof tcd.index === 'number') {
+    state.setLastFallbackIndex(tcd.index);
+    if (tcd.id) state.idToIndex.set(tcd.id, tcd.index);
+    return tcd.index;
+  }
+
+  if (tcd.id) {
+    const existing = state.idToIndex.get(tcd.id);
+    if (existing !== undefined) {
+      state.setLastFallbackIndex(existing);
+      return existing;
+    }
+    const next = state.getNextFallbackIndex();
+    state.idToIndex.set(tcd.id, next);
+    state.setLastFallbackIndex(next);
+    return next;
+  }
+
+  const nameChunk = tcd.function?.name ?? '';
+  const last = state.getLastFallbackIndex();
+  if (last === null) {
+    const next = state.getNextFallbackIndex();
+    state.setLastFallbackIndex(next);
+    return next;
+  }
+
+  const existing = state.toolCallsMap.get(last);
+  const existingNameIsKnown = Boolean(existing?.name && state.knownToolNames.has(existing.name));
+  const chunkIsDifferentKnownTool = Boolean(
+    nameChunk
+      && state.knownToolNames.has(nameChunk)
+      && existing?.name
+      && existing.name !== nameChunk
+      && existingNameIsKnown,
+  );
+
+  if (chunkIsDifferentKnownTool) {
+    const next = state.getNextFallbackIndex();
+    state.setLastFallbackIndex(next);
+    return next;
+  }
+
+  return last;
 }
 
 function mergeToolNameChunk(existing: string, chunk: string): string {

@@ -31,6 +31,7 @@ interface EntityComboboxProps {
   entityType: EntityType;
   value: string;
   onChange: (id: string) => void;
+  onSelectItem?: (item: { id: string; label: string }) => void;
   placeholder?: string;
   clearable?: boolean;
   disabled?: boolean;
@@ -98,6 +99,7 @@ export function EntityCombobox({
   entityType,
   value,
   onChange,
+  onSelectItem,
   placeholder,
   clearable = true,
   disabled = false,
@@ -121,6 +123,8 @@ export function EntityCombobox({
 
   const handleSelect = (id: string) => {
     onChange(id);
+    const item = results.find(result => result.id === id);
+    if (item) onSelectItem?.(item);
     setOpen(false);
     setQuery('');
   };

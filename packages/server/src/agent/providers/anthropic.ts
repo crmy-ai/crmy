@@ -5,15 +5,6 @@ import type { AgentConfig, ConversationMessage, AgentToolDef, ToolCallRecord } f
 
 const AGENT_STREAM_TIMEOUT_MS = Number(process.env.AGENT_STREAM_TIMEOUT_MS ?? 120_000);
 
-function timeoutSignal(timeoutMs = AGENT_STREAM_TIMEOUT_MS): { signal: AbortSignal; done: () => void } {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return {
-    signal: controller.signal,
-    done: () => clearTimeout(timer),
-  };
-}
-
 // ── Thinking support ──────────────────────────────────────────────────────────
 
 /** Models that support extended thinking + interleaved reasoning between tool calls. */
@@ -33,6 +24,21 @@ export interface CallAnthropicOpts {
    * need interleaved reasoning.
    */
   enableThinking?: boolean;
+  abortSignal?: AbortSignal;
+}
+
+function timeoutSignal(timeoutMs = AGENT_STREAM_TIMEOUT_MS, externalSignal?: AbortSignal): { signal: AbortSignal; done: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const onAbort = () => controller.abort();
+  externalSignal?.addEventListener('abort', onAbort, { once: true });
+  return {
+    signal: controller.signal,
+    done: () => {
+      clearTimeout(timer);
+      externalSignal?.removeEventListener('abort', onAbort);
+    },
+  };
 }
 
 /**
@@ -87,7 +93,7 @@ export async function callAnthropic(
     headers['anthropic-beta'] = 'interleaved-thinking-2025-05-14';
   }
 
-  const timeout = timeoutSignal();
+  const timeout = timeoutSignal(AGENT_STREAM_TIMEOUT_MS, opts?.abortSignal);
   try {
     const res = await fetch(`${baseUrl}/messages`, {
       method: 'POST',

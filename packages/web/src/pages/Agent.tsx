@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { TopBar } from '@/components/layout/TopBar';
 import { AgentStatusDot } from '@/components/crm/CrmWidgets';
+import { EntityCombobox, type EntityType } from '@/components/ui/entity-combobox';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAppStore, type AIContextEntity } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
+import { toast } from '@/hooks/use-toast';
 import {
   useAgentSessions,
   useCreateAgentSession,
@@ -18,29 +21,32 @@ import {
   type AgentSessionSummary,
 } from '@/api/hooks';
 import {
-  Send, X, User, Briefcase, Building, Layers, Clock, Loader2, Wrench,
+  ArrowLeft, ArrowUp, X, User, Briefcase, Building, Layers, Clock, Loader2, Wrench,
   ChevronDown, ChevronRight, Pencil, Trash2, Check, MessageSquare,
   Bot, Brain, Eye, EyeOff, RotateCcw, WifiOff, ClipboardList, ShieldCheck,
   Database, CheckCircle2, Circle, AlertTriangle, FileCheck2,
   GitPullRequestArrow, PanelRightClose, PanelRightOpen,
+  Paperclip, FileText, Search,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  streamChat, groupToolMessages, getSuggestions,
-  SYSTEM_INIT_PREFIX, COMPACT_SUMMARY_PREFIX, COMPACT_ACK_PREFIX,
-  type DisplayMessage, type RenderItem, type ToolGroupItem, type ToolGroupStep,
+  cancelAgentTurn, createAgentTurn, deleteAgentAttachment, streamAgentTurn,
+  uploadAgentAttachment, groupToolMessages,
+  SYSTEM_INIT_PREFIX, COMPACT_SUMMARY_PREFIX, COMPACT_ACK_PREFIX, ATTACHED_CONTEXT_PREFIX,
+  type AgentAttachmentSummary, type AgentTurnSummary,
+  type DisplayMessage, type RenderItem, type ToolGroupItem, type ToolGroupStep, type SSEEvent,
 } from '@/lib/agentStream';
 import { AgentMarkdown } from '@/components/ui/agent-markdown';
 import { ENTITY_COLORS } from '@/lib/entityColors';
 
-const agentDescription = 'Private workspace reasoning over typed revenue objects, customer context, and scoped CRMy tools.';
+const agentDescription = 'Ask questions, prep follow-ups, add context, and safely act on your book of business.';
 const agentIconClassName = ENTITY_COLORS.agents.text;
 
 const typeIcons: Record<string, typeof User> = {
-  contact: User, opportunity: Briefcase, 'use-case': Layers, account: Building,
+  contact: User, opportunity: Briefcase, 'use-case': Layers, use_case: Layers, account: Building,
 };
 const typeLabels: Record<string, string> = {
-  contact: 'Contact', opportunity: 'Opportunity', 'use-case': 'Use Case', account: 'Account',
+  contact: 'Contact', opportunity: 'Opportunity', 'use-case': 'Use Case', use_case: 'Use Case', account: 'Account',
 };
 
 // ── Message filtering helpers ────────────────────────────────────────────────
@@ -51,6 +57,7 @@ type RawMsg = { role: string; content: string };
 function isVisibleMsg(m: RawMsg): boolean {
   if (m.role === 'system') return false;
   if (m.role === 'user' && m.content?.startsWith(SYSTEM_INIT_PREFIX)) return false;
+  if (m.role === 'user' && m.content?.startsWith(ATTACHED_CONTEXT_PREFIX)) return false;
   if (m.role === 'user' && m.content?.startsWith(COMPACT_SUMMARY_PREFIX)) return false;
   if (m.role === 'assistant' && m.content?.startsWith(COMPACT_ACK_PREFIX)) return false;
   return true;
@@ -114,7 +121,7 @@ function summarizeToolOutput(result: unknown, isError?: boolean): string | null 
 
 type AgentTaskStatus = 'running' | 'waiting_approval' | 'failed' | 'complete';
 type AgentTaskRisk = 'low' | 'medium' | 'high';
-type AgentTaskStepStatus = 'pending' | 'running' | 'complete' | 'failed';
+type AgentTaskStepStatus = 'pending' | 'running' | 'complete' | 'failed' | 'skipped';
 
 type AgentTaskStep = {
   id: string;
@@ -183,10 +190,11 @@ function createAgentTask(goal: string, subject: AIContextEntity | null, canWrite
     startedAt: Date.now(),
     changedRecords: [],
     steps: [
-      { id: 'understand', label: 'Clarify goal and subject', status: 'complete' },
-      { id: 'context', label: 'Gather customer context', status: subject ? 'pending' : 'complete' },
+      { id: 'understand', label: 'Understand goal and scope', status: 'complete' },
+      { id: 'context', label: 'Retrieve customer context', status: 'pending' },
       { id: 'tools', label: 'Use scoped tools if needed', status: 'pending' },
       { id: 'review', label: 'Review safety, audit, and next action', status: 'pending' },
+      { id: 'answer', label: 'Answer with evidence and next step', status: 'pending' },
     ],
   };
 }
@@ -241,12 +249,17 @@ function updateTaskForToolResult(task: AgentTaskState | null, toolName: string, 
 
 function completeTask(task: AgentTaskState | null): AgentTaskState | null {
   if (!task || task.status === 'failed' || task.status === 'waiting_approval') return task;
+  const skippableSteps = new Set(['context', 'tools']);
   return {
     ...task,
     status: 'complete',
     completedAt: Date.now(),
     nextAction: task.changedRecords.length > 0 ? 'Review audit trail' : 'Save useful context or choose a next workflow',
-    steps: task.steps.map(step => ({ ...step, status: step.status === 'pending' || step.status === 'running' ? 'complete' : step.status })),
+    steps: task.steps.map(step => {
+      if (step.status !== 'pending' && step.status !== 'running') return step;
+      if (skippableSteps.has(step.id) && !step.toolName) return { ...step, status: 'skipped' };
+      return { ...step, status: 'complete' };
+    }),
   };
 }
 
@@ -262,6 +275,42 @@ function getWorkflowCommands(subject: AIContextEntity | null): WorkflowCommand[]
     { label: '/handoff', description: 'Human review packet for risky or blocked work', prompt: `Prepare a human handoff for ${target}. Include urgency, owner, reasoning, and context the reviewer needs.` },
     { label: '/memory-health', description: 'Stale, weak, or contradictory Memory', prompt: `Review Memory that needs review or weak context for ${target}. Suggest what should be refreshed before action.` },
     { label: '/data-quality', description: 'Missing relationships, weak fields, and conflicts', prompt: `Scan data quality for ${target}. Identify missing relationships, weak fields, and conflicts that could affect agent work.` },
+  ];
+}
+
+function getHighValueSuggestions(subject: AIContextEntity | null): WorkflowCommand[] {
+  if (!subject) {
+    return [
+      { label: 'Show my focus queue', description: 'Review scoped work needing attention', prompt: 'Show me the highest priority accounts, opportunities, Signals, and handoffs that need my attention.' },
+      { label: 'Summarize pipeline risk', description: 'Find risky deals and next actions', prompt: 'Summarize pipeline risk across my visible book of business. Focus on stalled opportunities, missing next steps, and open handoffs.' },
+      { label: 'Review handoffs', description: 'Inspect pending decisions', prompt: 'Review my pending handoffs and tell me which decisions need action first.' },
+    ];
+  }
+  if (subject.type === 'account') {
+    return [
+      { label: 'Get account briefing', description: 'Current Memory, risks, and next action', prompt: `Get an account-wide briefing for ${subject.name}. Include Current Memory, open Signals, recent activity, risks, and recommended next action.` },
+      { label: 'Find risks and next steps', description: 'Actionable account review', prompt: `Find risks, unresolved Signals, stale Memory, and next steps for ${subject.name}. Recommend what I should do first.` },
+      { label: 'Prep follow-up', description: 'Draft grounded follow-up', prompt: `Prepare a follow-up for ${subject.name}. Ground it in confirmed Memory and call out any assumptions from Signals.` },
+    ];
+  }
+  if (subject.type === 'opportunity') {
+    return [
+      { label: 'Review deal health', description: 'Stage fit, blockers, and confidence', prompt: `Review deal health for ${subject.name}. Include stage fit, blockers, commitments, risks, and next best action.` },
+      { label: 'Identify blockers', description: 'Find risks before the next step', prompt: `Identify blockers and missing context for ${subject.name}. Tell me what needs review or a handoff before action.` },
+      { label: 'Prepare next meeting', description: 'Agenda and open questions', prompt: `Prepare the next meeting for ${subject.name}. Include agenda, open questions, likely objections, and useful Memory.` },
+    ];
+  }
+  if (subject.type === 'contact') {
+    return [
+      { label: 'Prep outreach', description: 'Grounded message prep', prompt: `Prep outreach to ${subject.name}. Include relationship context, recent activity, likely interests, and what not to assume.` },
+      { label: 'Summarize relationship', description: 'Role, influence, and history', prompt: `Summarize the relationship with ${subject.name}. Include stakeholder role, influence, commitments, and recent activity.` },
+      { label: 'Log follow-up context', description: 'Capture useful context safely', prompt: `Help me turn a follow-up note about ${subject.name} into useful Signals or Memory with evidence.` },
+    ];
+  }
+  return [
+    { label: 'Review adoption health', description: 'Use case health and risks', prompt: `Review adoption health for ${subject.name}. Include current outcomes, risks, blockers, and next action.` },
+    { label: 'Find expansion risks', description: 'Signals that affect expansion', prompt: `Find expansion risks and success criteria for ${subject.name}. Separate confirmed Memory from uncertain Signals.` },
+    { label: 'Prepare check-in', description: 'Grounded customer check-in', prompt: `Prepare a customer check-in for ${subject.name}. Include what changed, open questions, and recommended next steps.` },
   ];
 }
 
@@ -436,6 +485,7 @@ function SessionItem({
 
 export default function Agent() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -445,8 +495,11 @@ export default function Agent() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const assistantTextRef = useRef('');
   const didRestoreRef = useRef(false);
   const launchContextRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatResetRef = useRef(0);
 
   // Track the last message the user sent so we can retry it after errors.
   const [lastSentMessage, setLastSentMessage] = useState('');
@@ -456,6 +509,14 @@ export default function Agent() {
   // covers both the live-streaming window and the "navigated away mid-turn" case.
   const [isSessionPending, setIsSessionPending] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
+  const [currentTurnId, setCurrentTurnId] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<AgentAttachmentSummary[]>([]);
+  const [attachmentMode, setAttachmentMode] = useState<'active_context' | 'raw_context'>('active_context');
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const [scopeType, setScopeType] = useState<EntityType>('account');
+  const [scopeId, setScopeId] = useState('');
+  const [scopeLabel, setScopeLabel] = useState('');
+  const [scopePickerOpen, setScopePickerOpen] = useState(false);
 
   // Process mode: when on, show model reasoning when available and richer tool detail.
   const [showProcess, setShowProcess] = useState<boolean>(() => {
@@ -486,6 +547,41 @@ export default function Agent() {
 
   const sessions: AgentSessionSummary[] = sessionsData?.data ?? [];
 
+  const exitAgent = useCallback(() => {
+    const historyIndex = typeof window !== 'undefined'
+      ? (window.history.state as { idx?: number } | null)?.idx
+      : 0;
+    if (typeof historyIndex === 'number' && historyIndex > 0) {
+      navigate(-1);
+    } else {
+      navigate('/app');
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+      event.preventDefault();
+      exitAgent();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [exitAgent]);
+
+  const exitButton = (
+    <button
+      onClick={exitAgent}
+      className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-background px-2.5 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      title="Exit Workspace Agent (Esc)"
+    >
+      <ArrowLeft className="h-4 w-4" />
+      <span className="hidden sm:inline">Exit</span>
+      <kbd className="hidden rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground md:inline">
+        Esc
+      </kbd>
+    </button>
+  );
+
   // Persist the active session id so we can restore it on page re-visit.
   useEffect(() => {
     if (activeSessionId) {
@@ -504,10 +600,12 @@ export default function Agent() {
   const loadSession = useCallback(async (session: AgentSessionSummary, contextOverride?: AIContextEntity | null) => {
     setActiveSessionId(session.id);
     setIsSessionPending(false);
+    setCurrentTurnId(null);
     setTask(null);
     setMemoryProposals([]);
+    setAttachments([]);
     setEntityContext(contextOverride ?? (session.context_type ? {
-      type: session.context_type as AIContextEntity['type'],
+      type: (session.context_type === 'use_case' ? 'use-case' : session.context_type) as AIContextEntity['type'],
       id: session.context_id ?? '',
       name: session.context_name ?? '',
     } : null));
@@ -520,14 +618,22 @@ export default function Agent() {
       if (res.ok) {
         const { data } = await res.json();
         const rawMsgs: { role: string; content: string }[] = data.messages ?? [];
-        setMessages(rawMsgsToDisplay(rawMsgs));
+        const display = rawMsgsToDisplay(rawMsgs);
+        if (data.active_turn?.input_message) {
+          setMessages([...display, { kind: 'user', content: data.active_turn.input_message }]);
+          setIsSessionPending(true);
+          setCurrentTurnId(data.active_turn.id);
+        } else {
+          setMessages(display);
+        }
+        setAttachments(data.attachments ?? []);
 
         // Detect an incomplete turn: if the last meaningful message is from the user,
         // the server is still (or was) working on a response. Start polling.
         const lastMeaningful = [...rawMsgs]
           .reverse()
           .find(m => isVisibleMsg(m));
-        if (lastMeaningful?.role === 'user') {
+        if (lastMeaningful?.role === 'user' || data.active_turn) {
           setIsSessionPending(true);
         }
       }
@@ -544,9 +650,11 @@ export default function Agent() {
     setMessages([]);
     setActiveSessionId(null);
     setIsSessionPending(false);
+    setCurrentTurnId(null);
     setLastSentMessage('');
     setTask(null);
     setMemoryProposals([]);
+    setAttachments([]);
 
     try {
       const session = await createSession.mutateAsync({
@@ -573,23 +681,113 @@ export default function Agent() {
   }, [aiContext, openRecordSession]);
 
   const startNewChat = useCallback(() => {
+    chatResetRef.current += 1;
+    abortRef.current?.abort();
+    launchContextRef.current = null;
+    localStorage.removeItem('crmy_active_session_id');
     setActiveSessionId(null);
     setMessages([]);
     setEntityContext(null);
     setInput('');
     setIsSessionPending(false);
+    setCurrentTurnId(null);
     setLastSentMessage('');
     setTask(null);
     setMemoryProposals([]);
+    setAttachments([]);
+    setScopeId('');
+    setScopeLabel('');
+    setScopePickerOpen(false);
+    requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
+
+  const handleAgentEvent = useCallback((event: SSEEvent, opts?: { proposeMemory?: boolean }) => {
+    switch (event.type) {
+      case 'delta': {
+        assistantTextRef.current += event.content;
+        const snapshot = assistantTextRef.current;
+        setMessages(prev => {
+          const last = prev[prev.length - 1];
+          if (last?.kind === 'assistant') {
+            return [...prev.slice(0, -1), { kind: 'assistant', content: snapshot }];
+          }
+          return [...prev, { kind: 'assistant', content: snapshot }];
+        });
+        break;
+      }
+      case 'tool_status':
+        setTask(prev => updateTaskForToolStatus(prev, event.name));
+        assistantTextRef.current = '';
+        setMessages(prev => {
+          let existingIdx = -1;
+          for (let i = prev.length - 1; i >= 0; i--) {
+            const m = prev[i];
+            if (m.kind === 'tool_status' && m.id === event.id) { existingIdx = i; break; }
+          }
+          const newMsg: DisplayMessage = {
+            kind: 'tool_status',
+            id: event.id,
+            name: event.name,
+            status: event.status,
+            turn_id: event.turn_id,
+          };
+          if (existingIdx >= 0) {
+            const updated = [...prev];
+            updated[existingIdx] = newMsg;
+            return updated;
+          }
+          return [...prev, newMsg];
+        });
+        break;
+      case 'thinking':
+        setMessages(prev => {
+          const last = prev[prev.length - 1];
+          if (last?.kind === 'thinking' && last.turn_id === event.turn_id) {
+            return [...prev.slice(0, -1), { ...last, content: last.content + event.content }];
+          }
+          return [...prev, { kind: 'thinking', content: event.content, turn_id: event.turn_id }];
+        });
+        break;
+      case 'tool_call':
+        setMessages(prev => [...prev, { kind: 'tool_call', id: event.id, name: event.name, arguments: event.arguments, turn_id: event.turn_id }]);
+        break;
+      case 'tool_result':
+        setTask(prev => updateTaskForToolResult(prev, event.name, event.is_error, event.result));
+        setMessages(prev => {
+          const updated = prev.map(m =>
+            m.kind === 'tool_status' && m.id === event.id
+              ? { ...m, status: event.is_error ? `Error from ${m.name.replace(/_/g, ' ')}` : m.status.replace('…', ' ✓'), turn_id: event.turn_id }
+              : m
+          );
+          return [...updated, { kind: 'tool_result' as const, id: event.id, name: event.name, is_error: event.is_error, result: event.result, turn_id: event.turn_id }];
+        });
+        break;
+      case 'error':
+        setTask(prev => prev ? { ...prev, status: 'failed', nextAction: 'Retry the request or inspect the failed tool output.' } : prev);
+        setMessages(prev => [...prev, { kind: 'error', message: event.message }]);
+        break;
+      case 'done':
+        setIsSessionPending(false);
+        setCurrentTurnId(null);
+        setTask(prev => completeTask(prev));
+        if (entityContext && opts?.proposeMemory) {
+          const proposal = buildMemoryProposal(assistantTextRef.current);
+          if (proposal) setMemoryProposals(prev => [proposal, ...prev].slice(0, 3));
+        }
+        refetchSessions();
+        break;
+    }
+  }, [entityContext, refetchSessions]);
 
   const sendMessage = useCallback(async (overrideText?: string, opts?: { skipUserMessage?: boolean }) => {
     const text = (overrideText !== undefined ? overrideText : input).trim();
     if (!text || streaming) return;
+    const resetVersion = chatResetRef.current;
     if (overrideText === undefined) setInput('');
 
     setLastSentMessage(text);
     setIsSessionPending(true);
+    assistantTextRef.current = '';
     const nextTask = createAgentTask(text, entityContext, config?.can_write_objects);
     if (nextTask) setTask(nextTask);
 
@@ -602,12 +800,6 @@ export default function Agent() {
     const abort = new AbortController();
     abortRef.current = abort;
 
-    // Track whether any assistant content arrived via SSE so we can fallback
-    // to a server reload if the connection was buffered.
-    // NOTE: this is intentionally NOT set inside a setMessages updater — updaters
-    // can be called multiple times (React Strict Mode) and must be side-effect-free.
-    let hasAssistantContent = false;
-    let receivedDone = false;
     let resolvedSessionId: string | null = null;
 
     try {
@@ -640,112 +832,25 @@ export default function Agent() {
         renameSession.mutate({ id: sessionId, label: nextLabel });
       }
 
-      // Streaming accumulator for assistant text.
-      // Reset to '' each time a tool_status arrives so the post-tool response
-      // starts a fresh bubble rather than appending to a pre-tool one.
-      let assistantText = '';
+      const turn = await createAgentTurn(sessionId, text, entityContext?.detail ? { context_detail: entityContext.detail } : undefined);
+      setCurrentTurnId(turn.id);
+      queryClient.setQueryData<{ data: AgentSessionSummary[] }>(['agent-sessions'], (old) => {
+        if (!old?.data) return old;
+        return {
+          ...old,
+          data: old.data.map((session) => (
+            session.id === sessionId ? { ...session, active_turn: turn } : session
+          )),
+        };
+      });
 
-      await streamChat(sessionId, text, (event) => {
-        switch (event.type) {
-          case 'delta': {
-            assistantText += event.content;
-            hasAssistantContent = true;
-            // Capture the accumulated text so the pure updater below is
-            // side-effect-free (React may call updaters more than once).
-            const snapshot = assistantText;
-            setMessages(prev => {
-              const last = prev[prev.length - 1];
-              if (last?.kind === 'assistant') {
-                // Extend the existing assistant bubble in-place
-                return [...prev.slice(0, -1), { kind: 'assistant', content: snapshot }];
-              }
-              // No assistant bubble yet for this turn — create one
-              return [...prev, { kind: 'assistant', content: snapshot }];
-            });
-            break;
-          }
-
-          case 'tool_status':
-            setTask(prev => updateTaskForToolStatus(prev, event.name));
-            // Reset accumulator so the next delta starts a fresh assistant bubble
-            // after the tool call, rather than appending to any pre-tool text.
-            assistantText = '';
-            // Append or update the status row (collapse duplicates by tool id)
-            setMessages(prev => {
-              let existingIdx = -1;
-              for (let i = prev.length - 1; i >= 0; i--) {
-                const m = prev[i];
-                if (m.kind === 'tool_status' && m.id === event.id) { existingIdx = i; break; }
-              }
-              const newMsg: DisplayMessage = {
-                kind: 'tool_status',
-                id: event.id,
-                name: event.name,
-                status: event.status,
-                turn_id: event.turn_id,
-              };
-              if (existingIdx >= 0) {
-                const updated = [...prev];
-                updated[existingIdx] = newMsg;
-                return updated;
-              }
-              return [...prev, newMsg];
-            });
-            break;
-
-          case 'thinking': {
-            // Accumulate reasoning text — one bubble per turn_id
-            setMessages(prev => {
-              const last = prev[prev.length - 1];
-              if (last?.kind === 'thinking' && last.turn_id === event.turn_id) {
-                return [...prev.slice(0, -1), { ...last, content: last.content + event.content }];
-              }
-              return [...prev, { kind: 'thinking', content: event.content, turn_id: event.turn_id }];
-            });
-            break;
-          }
-
-          case 'tool_call':
-            // Store in messages so groupToolMessages can attach arguments to ToolGroupStep
-            setMessages(prev => [...prev, { kind: 'tool_call', id: event.id, name: event.name, arguments: event.arguments, turn_id: event.turn_id }]);
-            break;
-
-          case 'tool_result':
-            setTask(prev => updateTaskForToolResult(prev, event.name, event.is_error, event.result));
-            // Update status text AND store result so groupToolMessages can show it in expanded view
-            setMessages(prev => {
-              const updated = prev.map(m =>
-                m.kind === 'tool_status' && m.id === event.id
-                  ? { ...m, status: event.is_error ? `Error from ${m.name.replace(/_/g, ' ')}` : m.status.replace('…', ' ✓'), turn_id: event.turn_id }
-                  : m
-              );
-              return [...updated, { kind: 'tool_result' as const, id: event.id, name: event.name, is_error: event.is_error, result: event.result, turn_id: event.turn_id }];
-            });
-            break;
-
-          case 'error':
-            setTask(prev => prev ? { ...prev, status: 'failed', nextAction: 'Retry the request or inspect the failed tool output.' } : prev);
-            setMessages(prev => [...prev, { kind: 'error', message: event.message }]);
-            break;
-
-          case 'done':
-            receivedDone = true;
-            setIsSessionPending(false);
-            setTask(prev => completeTask(prev));
-            if (entityContext && nextTask) {
-              const proposal = buildMemoryProposal(assistantText);
-              if (proposal) {
-                setMemoryProposals(prev => [proposal, ...prev].slice(0, 3));
-              }
-            }
-            refetchSessions();
-            break;
-        }
-      }, abort.signal, entityContext?.detail ? { context_detail: entityContext.detail } : undefined);
+      await streamAgentTurn(sessionId, turn.id, (event) => {
+        handleAgentEvent(event, { proposeMemory: Boolean(nextTask) });
+      }, abort.signal);
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
-        // User deliberately stopped — clear pending, no error bubble.
-        setIsSessionPending(false);
+        // Stream was interrupted locally. The durable turn may still finish.
+        setIsSessionPending(Boolean(currentTurnId));
       } else {
         // Network / server error. Keep isSessionPending=true so polling can
         // recover if the server finishes the turn after disconnect.
@@ -756,9 +861,8 @@ export default function Agent() {
       setStreaming(false);
       abortRef.current = null;
 
-      // Fallback: if the SSE stream completed but no assistant content arrived
-      // (proxy buffered the response and flushed only at close), reload from server.
-      if (!hasAssistantContent && !receivedDone && resolvedSessionId) {
+      if (resolvedSessionId) {
+        if (chatResetRef.current !== resetVersion) return;
         const sid = resolvedSessionId;
         const token = localStorage.getItem('crmy_token');
         fetch(`/api/v1/agent/sessions/${sid}`, {
@@ -768,12 +872,21 @@ export default function Agent() {
           .then(json => {
             if (!json?.data?.messages) return;
             const display = rawMsgsToDisplay(json.data.messages as { role: string; content: string }[]);
-            if (display.length > 0) setMessages(display);
+            if (json.data.active_turn?.input_message) {
+              setMessages([...display, { kind: 'user', content: json.data.active_turn.input_message }]);
+              setCurrentTurnId(json.data.active_turn.id);
+              setIsSessionPending(true);
+            } else if (display.length > 0) {
+              setMessages(display);
+              setCurrentTurnId(null);
+              setIsSessionPending(false);
+            }
+            setAttachments(json.data.attachments ?? []);
           })
           .catch(() => { /* ignore */ });
       }
     }
-  }, [input, streaming, activeSessionId, entityContext, config?.can_write_objects, createSession, refetchSessions, sessions, queryClient, renameSession]);
+  }, [input, streaming, activeSessionId, entityContext, config?.can_write_objects, createSession, sessions, queryClient, renameSession, handleAgentEvent, currentTurnId]);
 
   // Retry the last sent message: strip error bubbles and re-send.
   const retryLast = useCallback(() => {
@@ -781,6 +894,88 @@ export default function Agent() {
     setMessages(prev => prev.filter(m => m.kind !== 'error'));
     sendMessage(lastSentMessage, { skipUserMessage: true });
   }, [lastSentMessage, streaming, sendMessage]);
+
+  const stopCurrentTurn = useCallback(async () => {
+    abortRef.current?.abort();
+    if (activeSessionId && currentTurnId) {
+      try {
+        await cancelAgentTurn(activeSessionId, currentTurnId);
+        setIsSessionPending(false);
+        setCurrentTurnId(null);
+      } catch (err) {
+        toast({ title: 'Could not stop agent turn', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+      }
+    } else {
+      setIsSessionPending(false);
+    }
+  }, [activeSessionId, currentTurnId]);
+
+  const ensureSessionForAttachment = useCallback(async (): Promise<string> => {
+    if (activeSessionId) return activeSessionId;
+    const session = await createSession.mutateAsync({
+      context_type: entityContext?.type,
+      context_id: entityContext?.id,
+      context_name: entityContext?.name,
+      reuse_context: Boolean(entityContext?.type && entityContext?.id),
+    });
+    setActiveSessionId(session.data.id);
+    refetchSessions();
+    return session.data.id;
+  }, [activeSessionId, createSession, entityContext, refetchSessions]);
+
+  const handleAttachmentFile = useCallback(async (file: File) => {
+    setUploadingAttachment(true);
+    try {
+      const sessionId = await ensureSessionForAttachment();
+      const data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = typeof reader.result === 'string' ? reader.result : '';
+          resolve(result.includes(',') ? result.slice(result.indexOf(',') + 1) : result);
+        };
+        reader.onerror = () => reject(reader.error ?? new Error('Could not read file'));
+        reader.readAsDataURL(file);
+      });
+      const result = await uploadAgentAttachment(sessionId, {
+        filename: file.name,
+        data,
+        mode: attachmentMode,
+        source_label: file.name,
+      });
+      setAttachments(prev => [result.data, ...prev.filter(item => item.id !== result.data.id)]);
+      if (attachmentMode === 'raw_context') {
+        toast({ title: 'Raw Context processed', description: 'CRMy added the file to the Raw Context pipeline.' });
+      } else {
+        toast({ title: 'Attachment added', description: 'It will be used as temporary Active Context on the next turn.' });
+      }
+    } catch (err) {
+      toast({ title: 'Attachment failed', description: err instanceof Error ? err.message : 'Please try another file.', variant: 'destructive' });
+    } finally {
+      setUploadingAttachment(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  }, [attachmentMode, ensureSessionForAttachment]);
+
+  const removeAttachment = useCallback(async (attachmentId: string) => {
+    if (!activeSessionId) return;
+    try {
+      await deleteAgentAttachment(activeSessionId, attachmentId);
+      setAttachments(prev => prev.filter(item => item.id !== attachmentId));
+    } catch (err) {
+      toast({ title: 'Could not remove attachment', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+    }
+  }, [activeSessionId]);
+
+  const applyScope = useCallback(async () => {
+    if (!scopeId || !scopeLabel) return;
+    const ctx: AIContextEntity = {
+      type: scopeType === 'use_case' ? 'use-case' : scopeType,
+      id: scopeId,
+      name: scopeLabel,
+    };
+    await openRecordSession(ctx);
+    setScopePickerOpen(false);
+  }, [openRecordSession, scopeId, scopeLabel, scopeType]);
 
   const approveMemoryProposal = useCallback(async (proposal: MemoryProposal) => {
     if (!entityContext) return;
@@ -841,11 +1036,20 @@ export default function Agent() {
         if (!res.ok) return;
         const { data } = await res.json();
         const rawMsgs: { role: string; content: string }[] = data.messages ?? [];
+        const display = rawMsgsToDisplay(rawMsgs);
+        setAttachments(data.attachments ?? []);
+        if (data.active_turn?.input_message) {
+          setCurrentTurnId(data.active_turn.id);
+          setMessages([...display, { kind: 'user', content: data.active_turn.input_message }]);
+          setIsSessionPending(true);
+          return;
+        }
         // If the last meaningful message is now from assistant, the turn completed.
         const lastMeaningful = [...rawMsgs].reverse().find(m => isVisibleMsg(m));
         if (lastMeaningful?.role === 'assistant') {
           setIsSessionPending(false);
-          setMessages(rawMsgsToDisplay(rawMsgs));
+          setCurrentTurnId(null);
+          setMessages(display);
           refetchSessions();
         }
       } catch { /* ignore */ }
@@ -856,15 +1060,8 @@ export default function Agent() {
     return () => { if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; } };
   }, [isSessionPending, streaming, activeSessionId, refetchSessions]);
 
-  const suggestions = useMemo(() => getSuggestions(entityContext?.type ?? null, entityContext?.name ?? null), [entityContext?.type, entityContext?.name]);
   const workflowCommands = useMemo(() => getWorkflowCommands(entityContext), [entityContext]);
-  const quickPromptButtons = useMemo(() => {
-    if (entityContext) return workflowCommands.slice(0, 5);
-    return [
-      ...suggestions.slice(0, 2).map(prompt => ({ label: prompt, description: 'Starter prompt', prompt })),
-      ...workflowCommands.slice(0, 3),
-    ];
-  }, [entityContext, suggestions, workflowCommands]);
+  const quickPromptButtons = useMemo(() => getHighValueSuggestions(entityContext), [entityContext]);
   const slashQuery = useMemo(() => {
     const match = input.match(/(?:^|\s)\/([a-z0-9-]*)$/i);
     return match ? match[1].toLowerCase() : null;
@@ -916,6 +1113,7 @@ export default function Agent() {
     }
   }, [applyCommand, commandMatches, selectedCommandIndex, sendComposerMessage]);
   const contextEvidence = buildContextEvidence(messages, entityContext);
+  const hasThinkingBlocks = messages.some(message => message.kind === 'thinking');
 
   const IconComponent = entityContext ? typeIcons[entityContext.type] : null;
 
@@ -928,7 +1126,9 @@ export default function Agent() {
   if (configLoading) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription} />
+        <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription}>
+          {exitButton}
+        </TopBar>
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/40" />
         </div>
@@ -940,7 +1140,9 @@ export default function Agent() {
   if (!enabled) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription} />
+        <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription}>
+          {exitButton}
+        </TopBar>
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center max-w-md space-y-3">
             <Bot className="w-12 h-12 mx-auto text-muted-foreground/40" />
@@ -966,7 +1168,9 @@ export default function Agent() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription} />
+      <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription}>
+        {exitButton}
+      </TopBar>
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
 
         {/* ── Chat panel ── */}
@@ -992,27 +1196,41 @@ export default function Agent() {
               <div className="ml-auto flex items-center gap-2">
                 {streaming && (
                   <button
-                    onClick={() => abortRef.current?.abort()}
+                    onClick={stopCurrentTurn}
                     className="text-xs text-destructive bg-destructive/10 px-2 py-0.5 rounded-full hover:bg-destructive/20 transition-colors"
                   >
                     Stop
                   </button>
                 )}
                 <button
-                  onClick={toggleProcess}
-                  title={showProcess ? 'Hide process details' : 'Show reasoning and tool details'}
+                  onClick={() => setScopePickerOpen(v => !v)}
+                  title={scopePickerOpen ? 'Hide scope picker' : 'Set customer scope'}
                   className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors ${
-                    showProcess ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-muted-foreground hover:bg-muted'
+                    scopePickerOpen
+                      ? 'bg-muted text-foreground hover:bg-muted/80'
+                      : entityContext
+                        ? 'bg-muted text-muted-foreground hover:text-foreground'
+                        : 'text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  <Search className="w-3.5 h-3.5" />
+                  Scope
+                </button>
+                <button
+                  onClick={toggleProcess}
+                  title={showProcess ? 'Hide work log' : 'Show reasoning and tool details'}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors ${
+                    showProcess ? 'bg-muted text-foreground hover:bg-muted/80' : 'text-muted-foreground hover:bg-muted'
                   }`}
                 >
                   {showProcess ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                  Process
+                  Work log
                 </button>
                 <button
                   onClick={toggleSessionsOpen}
                   title={sessionsOpen ? 'Hide session history' : 'Show session history'}
                   className={`hidden lg:inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors ${
-                    sessionsOpen ? 'bg-muted text-muted-foreground hover:text-foreground' : 'bg-primary/10 text-primary hover:bg-primary/20'
+                    sessionsOpen ? 'bg-muted text-muted-foreground hover:text-foreground' : 'text-muted-foreground hover:bg-muted'
                   }`}
                 >
                   {sessionsOpen ? <PanelRightClose className="w-3.5 h-3.5" /> : <PanelRightOpen className="w-3.5 h-3.5" />}
@@ -1066,6 +1284,47 @@ export default function Agent() {
             hasSubject={Boolean(entityContext)}
           />
 
+          {!entityContext && scopePickerOpen && (
+            <div className="border-b border-border bg-card/50 px-4 py-2.5">
+              <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                <div className="flex items-center gap-2 text-sm">
+                  <Search className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <p className="font-medium text-foreground">Set customer scope</p>
+                    <p className="text-xs text-muted-foreground">Pick a record to give the agent sharper context.</p>
+                  </div>
+                </div>
+                <div className="flex flex-1 flex-col gap-2 sm:flex-row lg:ml-auto lg:max-w-2xl">
+                  <select
+                    value={scopeType}
+                    onChange={(e) => { setScopeType(e.target.value as EntityType); setScopeId(''); setScopeLabel(''); }}
+                    className="h-10 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none"
+                  >
+                    <option value="account">Account</option>
+                    <option value="opportunity">Opportunity</option>
+                    <option value="contact">Contact</option>
+                    <option value="use_case">Use Case</option>
+                  </select>
+                  <EntityCombobox
+                    entityType={scopeType}
+                    value={scopeId}
+                    onChange={setScopeId}
+                    onSelectItem={(item) => setScopeLabel(item.label)}
+                    placeholder={`Search ${scopeType.replace('_', ' ')}`}
+                    className="h-10"
+                  />
+                  <button
+                    onClick={applyScope}
+                    disabled={!scopeId || !scopeLabel}
+                    className="h-10 min-w-[6.25rem] whitespace-nowrap rounded-lg border border-border bg-background px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50 disabled:hover:bg-background"
+                  >
+                    Set scope
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Pending-session banner — shown when the agent is working in the background */}
           <AnimatePresence>
             {isSessionPending && !streaming && (
@@ -1099,11 +1358,16 @@ export default function Agent() {
               <AgentTaskCard
                 task={task}
                 onRetry={retryLast}
-                onStop={() => abortRef.current?.abort()}
+                onStop={stopCurrentTurn}
               />
             )}
             {contextEvidence && (messages.length > 0 || task) && (
               <ContextUsedPanel evidence={contextEvidence} />
+            )}
+            {showProcess && messages.length > 0 && !hasThinkingBlocks && (
+              <div className="rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground">
+                Model reasoning stream not provided by this model. The work log still shows scoped tools, inputs, results, and safety checks.
+              </div>
             )}
             {memoryProposals.length > 0 && entityContext && (
               <MemoryReviewPanel
@@ -1166,18 +1430,18 @@ export default function Agent() {
                   </div>
                 </div>
               )}
-              <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm focus-within:border-primary/40 transition-colors">
+              <div className="overflow-hidden rounded-2xl border-2 border-border bg-background shadow-sm transition-colors focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/10">
                 {(messages.length === 0 || entityContext) && (
-                  <div className="flex items-center gap-2 border-b border-border bg-muted/20 px-3 py-2">
+                  <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/20 px-3 py-2">
                     {entityContext && IconComponent ? (
                       <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1 text-xs font-medium text-accent">
                         <IconComponent className="h-3 w-3 shrink-0" />
                         <span className="truncate">Bound to {typeLabels[entityContext.type]} · {entityContext.name}</span>
                       </span>
                     ) : (
-                      <span className="hidden text-xs text-muted-foreground sm:inline">Type <span className="font-mono text-foreground">/</span> for commands</span>
+                      <span className="hidden text-xs text-muted-foreground sm:inline">Workspace-wide</span>
                     )}
-                    <div className="ml-auto flex min-w-0 gap-1 overflow-x-auto">
+                    <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto sm:justify-end">
                       {quickPromptButtons.map((command) => (
                         <button
                           key={command.label}
@@ -1191,23 +1455,92 @@ export default function Agent() {
                     </div>
                   </div>
                 )}
+                {attachments.filter(att => att.status === 'ready' || att.status === 'processed' || att.status === 'failed').length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 border-b border-border bg-card px-3 py-2">
+                    {attachments.slice(0, 6).map(att => (
+                      <span
+                        key={att.id}
+                        className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-xs ${
+                          att.status === 'failed'
+                            ? 'bg-destructive/10 text-destructive'
+                            : att.mode === 'raw_context'
+                              ? 'bg-primary/10 text-primary'
+                              : 'bg-muted text-muted-foreground'
+                        }`}
+                        title={att.error_message ?? att.text_excerpt ?? att.filename}
+                      >
+                        <FileText className="h-3 w-3 shrink-0" />
+                        <span className="truncate max-w-[12rem]">{att.filename}</span>
+                        <span className="hidden sm:inline">{att.mode === 'raw_context' ? 'Raw Context' : 'Active Context'}</span>
+                        {!att.consumed_at && att.status === 'ready' && (
+                          <button onClick={() => removeAttachment(att.id)} className="rounded-full hover:text-foreground" title="Remove attachment">
+                            <X className="h-3 w-3" />
+                          </button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-end gap-2 p-2">
+                  <div className="mb-0.5 flex shrink-0 items-center rounded-xl border border-border bg-muted/30 p-1">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      accept=".txt,.md,.csv,.pdf,.docx,.json,.xml,.html"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) void handleAttachmentFile(file);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingAttachment || streaming}
+                      className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-background hover:text-foreground disabled:opacity-50"
+                      title={attachmentMode === 'raw_context' ? 'Attach and process into Raw Context' : 'Attach as temporary Active Context'}
+                    >
+                      {uploadingAttachment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+                    </button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => setAttachmentMode(mode => mode === 'active_context' ? 'raw_context' : 'active_context')}
+                          aria-label="Toggle attachment mode"
+                          className={`rounded-lg px-2 py-1.5 text-xs font-medium transition-colors ${
+                            attachmentMode === 'raw_context'
+                              ? 'bg-primary/10 text-primary'
+                              : 'bg-background text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {attachmentMode === 'raw_context' ? 'Raw' : 'Chat'}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" align="start" className="max-w-72 text-xs leading-relaxed">
+                        <div className="space-y-1.5">
+                          <p><span className="font-semibold text-foreground">Chat</span> uses the file only in this conversation as temporary Active Context.</p>
+                          <p><span className="font-semibold text-foreground">Raw</span> sends the file into Raw Context so CRMy can extract Signals and Memory.</p>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
                   <textarea
                     ref={textareaRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleComposerKeyDown}
-                    placeholder={entityContext ? `Ask about ${entityContext.name}...` : 'Ask your workspace agent... Type / for commands'}
+                    placeholder={entityContext ? `Ask about ${entityContext.name}...` : 'Ask your workspace agent...'}
                     rows={1}
                     disabled={streaming}
-                    className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none outline-none px-2 py-1.5 disabled:opacity-50"
+                    className="flex-1 resize-none bg-transparent px-2 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-50"
                   />
                   <button
                     onClick={sendComposerMessage}
                     disabled={!input.trim() || streaming}
-                    className="p-2.5 rounded-xl bg-gradient-to-br from-primary to-primary/80 text-primary-foreground hover:shadow-md disabled:opacity-40 transition-all press-scale"
+                    className="p-2.5 rounded-xl bg-white text-slate-950 hover:bg-white/90 hover:shadow-md disabled:opacity-40 transition-all press-scale"
                   >
-                    {streaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    {streaming ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowUp className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
@@ -1240,7 +1573,7 @@ export default function Agent() {
                   key={session.id}
                   session={session}
                   isActive={activeSessionId === session.id}
-                  taskStatus={activeSessionId === session.id ? task?.status : undefined}
+                  taskStatus={session.active_turn ? 'running' : activeSessionId === session.id ? task?.status : undefined}
                   onSelect={() => loadSession(session)}
                   onRenamed={() => refetchSessions()}
                   onDeleted={() => {
@@ -1328,11 +1661,58 @@ function AgentTaskCard({
   onRetry: () => void;
   onStop: () => void;
 }) {
+  const [expanded, setExpanded] = useState(true);
+  const statusCopy: Record<AgentTaskStatus, { label: string; description: string }> = {
+    running: {
+      label: 'Running',
+      description: 'The agent is actively working through the task, retrieving context, using scoped tools, and preparing a response.',
+    },
+    waiting_approval: {
+      label: 'Waiting approval',
+      description: 'The agent reached a governed action boundary and needs a human decision before continuing.',
+    },
+    failed: {
+      label: 'Failed',
+      description: 'The task stopped because a tool, permission check, model call, or network request failed.',
+    },
+    complete: {
+      label: 'Complete',
+      description: 'The agent finished the task and returned a response or next step.',
+    },
+  };
+  const riskCopy: Record<AgentTaskRisk, { label: string; description: string }> = {
+    low: {
+      label: 'Low risk',
+      description: 'Mostly read-only work, such as retrieval, briefing, summarization, or planning.',
+    },
+    medium: {
+      label: 'Medium risk',
+      description: 'This may prepare or request scoped changes, create Memory, or route work for review. Writes still follow permissions and audit.',
+    },
+    high: {
+      label: 'High risk',
+      description: 'This may involve sensitive actions such as sends, approvals, ownership, pricing, contracts, or destructive changes.',
+    },
+  };
+  const stepCopy: Record<string, string> = {
+    understand: 'Clarify the user goal, customer scope, and likely action boundary.',
+    context: 'Retrieve relevant records, Memory, Signals, activities, and prior handoffs.',
+    tools: 'Use CRMy tools that are allowed for the current user and visible records.',
+    review: 'Check whether the answer, update, handoff, or writeback needs policy review.',
+    answer: 'Return the final answer with evidence, assumptions, and the next useful step.',
+  };
+  const stepStatusCopy: Record<AgentTaskStepStatus, string> = {
+    pending: 'Not started yet.',
+    running: 'In progress.',
+    complete: 'Completed.',
+    failed: 'This phase hit an error.',
+    skipped: 'Skipped because this phase was not needed for the request.',
+  };
   const statusTone =
     task.status === 'complete' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' :
     task.status === 'failed' ? 'bg-destructive/10 text-destructive' :
     task.status === 'waiting_approval' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' :
-    'bg-primary/10 text-primary';
+    'bg-purple-500/10 text-purple-700 dark:text-purple-300';
   const riskTone =
     task.risk === 'high' ? 'bg-destructive/10 text-destructive' :
     task.risk === 'medium' ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300' :
@@ -1341,18 +1721,33 @@ function AgentTaskCard({
   return (
     <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
       <div className="px-4 py-3 border-b border-border flex items-start gap-3">
-        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-          <ClipboardList className="w-4 h-4 text-primary" />
+        <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center flex-shrink-0">
+          <ClipboardList className="w-4 h-4 text-purple-500" />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-foreground">Agent task</p>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusTone}`}>
-              {task.status === 'waiting_approval' ? 'waiting approval' : task.status}
-            </span>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${riskTone}`}>
-              {task.risk} risk
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={`cursor-help rounded-full px-2 py-0.5 text-xs font-medium ${statusTone}`}>
+                  {statusCopy[task.status].label}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-72 text-xs leading-relaxed">
+                {statusCopy[task.status].description}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={`cursor-help rounded-full px-2 py-0.5 text-xs font-medium ${riskTone}`}>
+                  {riskCopy[task.risk].label}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-72 text-xs leading-relaxed">
+                <p>{riskCopy[task.risk].description}</p>
+                <p className="mt-1 text-muted-foreground">Risk is estimated from the request and enabled agent capabilities; policy still controls writes and handoffs.</p>
+              </TooltipContent>
+            </Tooltip>
           </div>
           <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{task.goal}</p>
           {task.subject && (
@@ -1371,38 +1766,59 @@ function AgentTaskCard({
             Retry
           </button>
         )}
+        <button
+          onClick={() => setExpanded(v => !v)}
+          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          title={expanded ? 'Collapse task details' : 'Expand task details'}
+        >
+          {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          Details
+        </button>
       </div>
-      <div className="px-4 py-3 space-y-2">
-        {task.steps.map(step => (
-          <div key={step.id} className="flex items-center gap-2 text-sm">
-            {step.status === 'complete' ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> :
-              step.status === 'failed' ? <AlertTriangle className="w-4 h-4 text-destructive" /> :
-              step.status === 'running' ? <Loader2 className="w-4 h-4 text-primary animate-spin" /> :
-              <Circle className="w-4 h-4 text-muted-foreground/40" />}
-            <span className={step.status === 'pending' ? 'text-muted-foreground' : 'text-foreground'}>{step.label}</span>
+      {expanded && (
+        <div className="px-4 py-3 space-y-2">
+          {task.steps.map(step => (
+            <div key={step.id} className="flex items-center gap-2 text-sm">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex cursor-help">
+                  {step.status === 'complete' ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> :
+                    step.status === 'failed' ? <AlertTriangle className="w-4 h-4 text-destructive" /> :
+                    step.status === 'running' ? <Loader2 className="w-4 h-4 text-purple-500 animate-spin" /> :
+                    <Circle className="w-4 h-4 text-muted-foreground/40" />}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" className="max-w-72 text-xs leading-relaxed">
+                <p>{stepCopy[step.id] ?? step.label}</p>
+                <p className="mt-1 text-muted-foreground">{stepStatusCopy[step.status]}</p>
+              </TooltipContent>
+            </Tooltip>
+            <span className={step.status === 'pending' || step.status === 'skipped' ? 'text-muted-foreground' : 'text-foreground'}>{step.label}</span>
+            {step.status === 'skipped' && <span className="text-xs text-muted-foreground/70">Not needed</span>}
             {step.toolName && <code className="ml-auto text-[11px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">{step.toolName}</code>}
           </div>
         ))}
-        {task.changedRecords.length > 0 && (
-          <div className="pt-2 border-t border-border">
-            <p className="text-xs font-semibold text-foreground mb-1">Changed records</p>
-            <div className="flex flex-wrap gap-1.5">
-              {task.changedRecords.map(record => (
-                <span key={record} className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-300">{record}</span>
-              ))}
+          {task.changedRecords.length > 0 && (
+            <div className="pt-2 border-t border-border">
+              <p className="text-xs font-semibold text-foreground mb-1">Changed records</p>
+              <div className="flex flex-wrap gap-1.5">
+                {task.changedRecords.map(record => (
+                  <span key={record} className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-300">{record}</span>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-        {task.status === 'waiting_approval' && (
-          <Link to="/handoffs" className="inline-flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 hover:underline">
-            <GitPullRequestArrow className="w-3 h-3" />
-            Review pending handoffs
-          </Link>
-        )}
-        {task.nextAction && (
-          <p className="text-xs text-muted-foreground pt-1">Next: {task.nextAction}</p>
-        )}
-      </div>
+          )}
+          {task.status === 'waiting_approval' && (
+            <Link to="/handoffs" className="inline-flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 hover:underline">
+              <GitPullRequestArrow className="w-3 h-3" />
+              Review pending handoffs
+            </Link>
+          )}
+          {task.nextAction && (
+            <p className="text-xs text-muted-foreground pt-1">Next: {task.nextAction}</p>
+          )}
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -1411,13 +1827,23 @@ function ContextUsedPanel({ evidence }: { evidence: NonNullable<ReturnType<typeo
   const subject = evidence.subject;
   return (
     <div className="rounded-xl border border-border bg-card/80 px-4 py-3">
-      <div className="flex items-center gap-2 mb-2">
-        <FileCheck2 className="w-4 h-4 text-primary" />
-        <div>
-          <p className="text-sm font-semibold text-foreground">Active Context used</p>
-          <p className="text-xs text-muted-foreground">
-            The temporary working set visible to the agent in this session.
-          </p>
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <FileCheck2 className="w-4 h-4 text-primary" />
+          <div>
+            <p className="text-sm font-semibold text-foreground">Active Context used</p>
+            <p className="text-xs text-muted-foreground">
+              The temporary working set visible to the agent in this session.
+            </p>
+          </div>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5 text-xs">
+          <Link to="/context" className="rounded-lg border border-border bg-background px-2 py-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            Memory Browser
+          </Link>
+          <Link to="/handoffs" className="rounded-lg border border-border bg-background px-2 py-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            Handoffs
+          </Link>
         </div>
       </div>
       <div className="flex flex-wrap gap-2 text-xs">
@@ -1452,15 +1878,13 @@ function ContextUsedPanel({ evidence }: { evidence: NonNullable<ReturnType<typeo
           ))}
         </div>
       )}
-      <div className="mt-2 flex flex-wrap gap-3 text-xs">
-        <Link to="/context" className="text-primary hover:underline">Memory Browser</Link>
-        {subject && (
-          <Link to={`/audit-log?object_type=${normalizeSubjectType(subject.type)}&object_id=${encodeURIComponent(subject.id)}`} className="text-primary hover:underline">
+      {subject && (
+        <div className="mt-2 text-xs">
+          <Link to={`/audit-log?object_type=${normalizeSubjectType(subject.type)}&object_id=${encodeURIComponent(subject.id)}`} className="text-muted-foreground hover:text-foreground hover:underline">
             Audit history
           </Link>
-        )}
-        <Link to="/handoffs" className="text-primary hover:underline">Handoffs</Link>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1571,7 +1995,7 @@ function ThinkingBubble({ content }: { content: string }) {
         >
           <Brain className="w-3 h-3 text-primary/60 shrink-0" />
           <span className="text-primary/70 font-medium shrink-0">
-            {expanded ? 'Reasoning' : `Reasoned · ${lines} line${lines !== 1 ? 's' : ''}`}
+            {expanded ? 'Model reasoning' : `Model reasoning · ${lines} line${lines !== 1 ? 's' : ''}`}
           </span>
           {!expanded && (
             <span className="text-muted-foreground truncate flex-1 min-w-0">{preview}</span>

@@ -22,7 +22,7 @@ import { detectRawContextSubjects } from '../services/raw-context-subjects.js';
 import * as ucRepo from '../db/repos/use-cases.js';
 import * as actorRepo from '../db/repos/actors.js';
 import { emitEvent } from '../events/emitter.js';
-import { getAllTools } from '../mcp/server.js';
+import { getAllTools, normalizeToolInput } from '../mcp/server.js';
 import { enforceToolScopes, requireScopes } from '../auth/scopes.js';
 import * as governorLimits from '../db/repos/governor-limits.js';
 import { getSpec } from '../openapi/spec.js';
@@ -94,7 +94,7 @@ function toolHandler(db: DbPool, toolName: string) {
   if (!tool) throw new Error(`Tool ${toolName} not found`);
   return async (input: unknown, actor: ActorContext) => {
     enforceToolScopes(toolName, actor);
-    return tool.handler(input, actor);
+    return tool.handler(normalizeToolInput(input), actor);
   };
 }
 
@@ -110,7 +110,7 @@ function adminToolHandler(db: DbPool, toolName: string) {
         403,
       );
     }
-    return tool.handler(input, actor);
+    return tool.handler(normalizeToolInput(input), actor);
   };
 }
 

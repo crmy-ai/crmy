@@ -5,7 +5,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import type { ZodRawShape, ZodObject } from 'zod';
+import { z, type ZodRawShape, type ZodObject, type ZodTypeAny } from 'zod';
 
 const _require = createRequire(import.meta.url);
 function getServerVersion(): string {
@@ -60,6 +60,32 @@ export interface ToolDef {
   inputSchema: ZodObject<ZodRawShape>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handler: (input: any, actor: ActorContext) => Promise<unknown>;
+}
+
+function normalizeProductType(value: unknown): unknown {
+  if (value === 'use-case' || value === 'useCase') return 'use_case';
+  return value;
+}
+
+export function normalizeToolInput<T = unknown>(input: T): T {
+  if (Array.isArray(input)) return input.map(item => normalizeToolInput(item)) as T;
+  if (!input || typeof input !== 'object') return input;
+
+  return Object.fromEntries(Object.entries(input as Record<string, unknown>).map(([key, value]) => {
+    if (key === 'subject_type' || key === 'object_type' || key === 'record_type') {
+      return [key, normalizeProductType(value)];
+    }
+    return [key, normalizeToolInput(value)];
+  })) as T;
+}
+
+function toolInputShapeWithProductAliases(shape: ZodRawShape): ZodRawShape {
+  return Object.fromEntries(Object.entries(shape).map(([key, schema]) => {
+    if (key === 'subject_type' || key === 'object_type' || key === 'record_type') {
+      return [key, z.preprocess(normalizeProductType, schema as ZodTypeAny)];
+    }
+    return [key, schema];
+  }));
 }
 
 export function getAllTools(db: DbPool): ToolDef[] {
@@ -171,12 +197,12 @@ export function createMcpServer(db: DbPool, actor: ActorContext, getActor: () =>
     server.tool(
       tool.name,
       tool.description,
-      tool.inputSchema.shape,
+      toolInputShapeWithProductAliases(tool.inputSchema.shape),
       async (input) => {
         try {
           const actor = getActor();
           enforceToolScopes(tool.name, actor);
-          const result = await tool.handler(input, actor);
+          const result = await tool.handler(normalizeToolInput(input), actor);
           return {
             content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
           };

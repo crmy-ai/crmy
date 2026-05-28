@@ -1613,10 +1613,29 @@ export interface AgentSessionSummary {
   token_count: number;
   created_at: string;
   updated_at: string;
+  active_turn?: {
+    id: string;
+    status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+    input_message: string;
+    created_at: string;
+    updated_at: string;
+  } | null;
 }
 
 export interface AgentSessionFull extends AgentSessionSummary {
   messages: { role: string; content: string; tool_calls?: unknown[]; tool_call_id?: string }[];
+  attachments?: Array<{
+    id: string;
+    filename: string;
+    format?: string | null;
+    mode: 'active_context' | 'raw_context';
+    status: 'ready' | 'processing' | 'processed' | 'failed' | 'consumed';
+    text_excerpt?: string | null;
+    truncated?: boolean;
+    raw_context_source_id?: string | null;
+    error_message?: string | null;
+    created_at: string;
+  }>;
 }
 
 export function useAgentConfig() {

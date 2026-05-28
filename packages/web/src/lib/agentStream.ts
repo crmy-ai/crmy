@@ -57,6 +57,35 @@ export const COMPACT_SUMMARY_PREFIX = '[COMPACTED_CONTEXT]';
 /** Prefix for the agent's acknowledgement of a compacted context. Filtered out of displayed history. */
 export const COMPACT_ACK_PREFIX = '[COMPACT_ACK]';
 
+/** Prefix for temporary attachment context injected into model history. */
+export const ATTACHED_CONTEXT_PREFIX = '[ATTACHED_CONTEXT]';
+
+export type AgentTurnSummary = {
+  id: string;
+  session_id: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  input_message: string;
+  error_message?: string | null;
+  final_label?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentAttachmentSummary = {
+  id: string;
+  filename: string;
+  format?: string | null;
+  mode: 'active_context' | 'raw_context';
+  status: 'ready' | 'processing' | 'processed' | 'failed' | 'consumed';
+  text_excerpt?: string | null;
+  truncated?: boolean;
+  raw_context_result?: unknown;
+  raw_context_source_id?: string | null;
+  consumed_at?: string | null;
+  error_message?: string | null;
+  created_at: string;
+};
+
 // ── SSE stream helper ─────────────────────────────────────────────────────────
 
 export async function streamChat(
@@ -105,6 +134,111 @@ export async function streamChat(
         onEvent(event);
       } catch { /* skip malformed */ }
     }
+  }
+}
+
+export async function createAgentTurn(
+  sessionId: string,
+  message: string,
+  opts?: { context_detail?: string },
+): Promise<AgentTurnSummary> {
+  const token = localStorage.getItem('crmy_token');
+  const res = await fetch(`/api/v1/agent/sessions/${sessionId}/turns`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      message,
+      ...(opts?.context_detail ? { context_detail: opts.context_detail } : {}),
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  return json.data as AgentTurnSummary;
+}
+
+export async function streamAgentTurn(
+  sessionId: string,
+  turnId: string,
+  onEvent: (event: SSEEvent) => void,
+  signal?: AbortSignal,
+  opts?: { after?: number },
+): Promise<void> {
+  const token = localStorage.getItem('crmy_token');
+  const query = opts?.after ? `?after=${encodeURIComponent(String(opts.after))}` : '';
+  const res = await fetch(`/api/v1/agent/sessions/${sessionId}/turns/${turnId}/stream${query}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    signal,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+  }
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop()!;
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      try {
+        const event: SSEEvent = JSON.parse(line.slice(6));
+        onEvent(event);
+      } catch { /* skip malformed */ }
+    }
+  }
+}
+
+export async function cancelAgentTurn(sessionId: string, turnId: string): Promise<void> {
+  const token = localStorage.getItem('crmy_token');
+  const res = await fetch(`/api/v1/agent/sessions/${sessionId}/turns/${turnId}/cancel`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+  }
+}
+
+export async function uploadAgentAttachment(
+  sessionId: string,
+  payload: { filename: string; data: string; mode: 'active_context' | 'raw_context'; source_label?: string },
+): Promise<{ data: AgentAttachmentSummary; result?: unknown }> {
+  const token = localStorage.getItem('crmy_token');
+  const res = await fetch(`/api/v1/agent/sessions/${sessionId}/attachments`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+  }
+  return body;
+}
+
+export async function deleteAgentAttachment(sessionId: string, attachmentId: string): Promise<void> {
+  const token = localStorage.getItem('crmy_token');
+  const res = await fetch(`/api/v1/agent/sessions/${sessionId}/attachments/${attachmentId}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
   }
 }
 

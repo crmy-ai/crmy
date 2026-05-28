@@ -8,13 +8,17 @@ import { CrmyError, permissionDenied } from '@crmy/shared';
 import * as agentRepo from '../db/repos/agent.js';
 import * as activityRepo from '../db/repos/agent-activity.js';
 import { encrypt, decrypt } from './crypto.js';
-import { runAgentTurn } from './engine.js';
 import { callLLM } from './providers/llm.js';
-import { trimForPersistence, estimateHistoryChars } from './compaction.js';
-import type { AgentEvent, ConversationMessage } from './types.js';
 import { getToolsForActor } from '../mcp/server.js';
-import { getToolScopeRequirements } from '../auth/scopes.js';
+import { getAllTools } from '../mcp/server.js';
+import { enforceToolScopes, getToolScopeRequirements } from '../auth/scopes.js';
 import { assertSubjectAccess } from '../services/access-control.js';
+import { extractTextFromBuffer } from '../lib/file-extract.js';
+import {
+  cancelRunningAgentTurn,
+  startAgentTurnRunner,
+} from './turn-runner.js';
+import type { AgentSessionAttachment, AgentTurn, AgentTurnEventRow } from './types.js';
 
 function getActor(req: Request): ActorContext {
   return req.actor!;
@@ -231,6 +235,16 @@ function isAdmin(actor: ActorContext): boolean {
   return actor.role === 'owner' || actor.role === 'admin';
 }
 
+function toolHandler(db: DbPool, toolName: string) {
+  const tools = getAllTools(db);
+  const tool = tools.find(t => t.name === toolName);
+  if (!tool) throw new Error(`Tool ${toolName} not found`);
+  return async (input: unknown, actor: ActorContext) => {
+    enforceToolScopes(toolName, actor);
+    return tool.handler(input, actor);
+  };
+}
+
 function normalizeAgentContextType(contextType?: string | null): 'account' | 'contact' | 'opportunity' | 'use_case' | null {
   if (!contextType) return null;
   if (contextType === 'account' || contextType === 'contact' || contextType === 'opportunity' || contextType === 'use_case') return contextType;
@@ -255,6 +269,87 @@ async function canAccessAgentContext(
   }
 }
 
+function redactAttachment(att: AgentSessionAttachment): Omit<AgentSessionAttachment, 'extracted_text'> & { extracted_text?: never } {
+  const { extracted_text: _text, ...rest } = att;
+  return rest;
+}
+
+async function loadOwnedSession(db: DbPool, actor: ActorContext, sessionId: string) {
+  const session = await agentRepo.getSession(db, actor.tenant_id, sessionId);
+  if (!session || session.user_id !== actor.actor_id) return null;
+  if (!(await canAccessAgentContext(db, actor, session.context_type, session.context_id))) return null;
+  return session;
+}
+
+async function loadOwnedTurn(db: DbPool, actor: ActorContext, sessionId: string, turnId: string): Promise<AgentTurn | null> {
+  const session = await loadOwnedSession(db, actor, sessionId);
+  if (!session) return null;
+  return await agentRepo.getTurnForSession(db, actor.tenant_id, session.id, turnId);
+}
+
+function dataUrlToBuffer(input: string): Buffer {
+  const base64 = input.includes(',') && input.slice(0, 40).includes('base64')
+    ? input.slice(input.indexOf(',') + 1)
+    : input;
+  return Buffer.from(base64, 'base64');
+}
+
+function writeSse(res: Response, event: unknown): void {
+  res.write(`data: ${JSON.stringify(event)}\n\n`);
+  if (typeof (res as unknown as { flush?: () => void }).flush === 'function') {
+    (res as unknown as { flush: () => void }).flush();
+  }
+}
+
+async function streamTurnEvents(
+  db: DbPool,
+  actor: ActorContext,
+  res: Response,
+  sessionId: string,
+  turnId: string,
+  startAfterIndex = 0,
+): Promise<void> {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.socket?.setNoDelay(true);
+  res.flushHeaders();
+
+  let closed = false;
+  res.on('close', () => { closed = true; });
+  let afterIndex = startAfterIndex;
+
+  while (!closed && !res.writableEnded) {
+    const turn = await loadOwnedTurn(db, actor, sessionId, turnId);
+    if (!turn) {
+      writeSse(res, { type: 'error', message: 'Agent turn not found' });
+      break;
+    }
+    const events = await agentRepo.listTurnEventsAfter(db, actor.tenant_id, turnId, afterIndex);
+    for (const row of events) {
+      afterIndex = row.event_index;
+      writeSse(res, row.payload);
+    }
+    if (['succeeded', 'failed', 'cancelled'].includes(turn.status) && events.length === 0) {
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 750));
+  }
+
+  setImmediate(() => res.end());
+}
+
+function turnWithEvents(turn: AgentTurn, events: AgentTurnEventRow[]) {
+  return {
+    ...turn,
+    events: events.map(row => row.payload),
+    last_event_index: events.length > 0 ? events[events.length - 1].event_index : 0,
+  };
+}
+
 /**
  * Build safe key metadata for the client response.
  * Decrypts the stored key only to extract the last 4 chars as a hint.
@@ -269,15 +364,6 @@ function buildKeyMeta(apiKeyEnc: string | null): { api_key_configured: boolean; 
     // Key exists but cannot be decrypted (wrong env key, corrupted data)
     return { api_key_configured: true, api_key_hint: null };
   }
-}
-
-function deriveSessionLabel(message: string): string {
-  const label = message
-    .replace(/^\s*(please|can you|could you|would you|help me|i need you to|let'?s)\s+/i, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!label) return 'New conversation';
-  return label.length > 60 ? `${label.slice(0, 57).trimEnd()}...` : label;
 }
 
 function parseJsonObject(raw: string): Record<string, unknown> {
@@ -738,16 +824,17 @@ export function agentRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       const body = req.body as { context_type?: string; context_id?: string; context_name?: string; reuse_context?: boolean };
-      if (!(await canAccessAgentContext(db, actor, body.context_type, body.context_id))) {
+      const normalizedContextType = normalizeAgentContextType(body.context_type);
+      if (!(await canAccessAgentContext(db, actor, normalizedContextType, body.context_id))) {
         res.status(404).json({ error: 'Record not found' });
         return;
       }
-      if (body.reuse_context && body.context_type && body.context_id) {
+      if (body.reuse_context && normalizedContextType && body.context_id) {
         const existing = await agentRepo.getLatestSessionForContext(
           db,
           actor.tenant_id,
           actor.actor_id,
-          body.context_type,
+          normalizedContextType,
           body.context_id,
         );
         if (existing) {
@@ -759,7 +846,10 @@ export function agentRouter(db: DbPool): Router {
           return;
         }
       }
-      const session = await agentRepo.createSession(db, actor.tenant_id, actor.actor_id, body);
+      const session = await agentRepo.createSession(db, actor.tenant_id, actor.actor_id, {
+        ...body,
+        context_type: normalizedContextType ?? undefined,
+      });
       res.status(201).json({ data: session });
     } catch (err) { handleError(res, err); }
   });
@@ -828,111 +918,218 @@ export function agentRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
-  /** POST /agent/sessions/:id/chat — send a message and stream the response via SSE. */
+  /** POST /agent/sessions/:id/attachments — attach file/text to a session. */
+  router.post('/sessions/:id/attachments', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const session = await loadOwnedSession(db, actor, String(req.params.id));
+      if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+
+      const { filename, data, mode, source_label } = req.body as {
+        filename?: string;
+        data?: string;
+        mode?: 'active_context' | 'raw_context';
+        source_label?: string;
+      };
+      if (!filename || !data) {
+        res.status(400).json({ error: 'filename and data are required' });
+        return;
+      }
+      if (mode !== 'active_context' && mode !== 'raw_context') {
+        res.status(400).json({ error: 'mode must be active_context or raw_context' });
+        return;
+      }
+
+      const buffer = dataUrlToBuffer(data);
+      const { text, truncated, format } = await extractTextFromBuffer(buffer, filename);
+      if (!text.trim()) {
+        const attachment = await agentRepo.createAttachment(db, actor.tenant_id, actor.actor_id, session.id, {
+          filename,
+          format,
+          mode,
+          status: 'failed',
+          text_excerpt: '',
+          truncated,
+          error_message: 'No readable text was found in this file.',
+        });
+        res.status(400).json({ error: 'No readable text was found in this file.', attachment: redactAttachment(attachment) });
+        return;
+      }
+
+      if (mode === 'raw_context') {
+        const attachment = await agentRepo.createAttachment(db, actor.tenant_id, actor.actor_id, session.id, {
+          filename,
+          format,
+          mode,
+          status: 'processing',
+          text_excerpt: text.slice(0, 1000),
+          truncated,
+          metadata: { source_label: source_label ?? filename },
+        });
+        try {
+          const handler = toolHandler(db, 'context_ingest_auto');
+          const result = await handler({
+            document: text,
+            source_label: source_label ?? filename,
+            confidence_threshold: 0.6,
+          }, actor) as Record<string, unknown>;
+          const rawSource = result.raw_context_source as { id?: string } | undefined;
+          const updated = await agentRepo.updateAttachment(db, actor.tenant_id, attachment.id, {
+            status: 'processed',
+            raw_context_result: result,
+            raw_context_source_id: rawSource?.id ?? null,
+          });
+          res.status(201).json({ data: redactAttachment(updated ?? attachment), result });
+          return;
+        } catch (err) {
+          const updated = await agentRepo.updateAttachment(db, actor.tenant_id, attachment.id, {
+            status: 'failed',
+            error_message: safeErrorMessage(err, 'Raw Context processing failed.'),
+          });
+          res.status(400).json({
+            error: safeErrorMessage(err, 'Raw Context processing failed.'),
+            attachment: updated ? redactAttachment(updated) : redactAttachment(attachment),
+          });
+          return;
+        }
+      }
+
+      const attachment = await agentRepo.createAttachment(db, actor.tenant_id, actor.actor_id, session.id, {
+        filename,
+        format,
+        mode,
+        status: 'ready',
+        extracted_text: text,
+        text_excerpt: text.slice(0, 1000),
+        truncated,
+      });
+      res.status(201).json({ data: redactAttachment(attachment) });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/sessions/:id/attachments/:attachment_id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const session = await loadOwnedSession(db, actor, String(req.params.id));
+      if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      const count = await agentRepo.deleteAttachment(db, actor.tenant_id, session.id, String(req.params.attachment_id));
+      if (count === 0) {
+        res.status(404).json({ error: 'Attachment not found or already used' });
+        return;
+      }
+      res.status(204).end();
+    } catch (err) { handleError(res, err); }
+  });
+
+  /** POST /agent/sessions/:id/turns — enqueue and start a durable agent turn. */
+  router.post('/sessions/:id/turns', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const session = await loadOwnedSession(db, actor, String(req.params.id));
+      if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      const { message, context_detail } = req.body as { message?: string; context_detail?: string };
+      if (!message?.trim()) {
+        res.status(400).json({ error: 'message is required' });
+        return;
+      }
+      const config = await agentRepo.getConfig(db, actor.tenant_id);
+      if (!config?.enabled) {
+        res.status(400).json({ error: 'Agent is not enabled for this workspace' });
+        return;
+      }
+      const active = await agentRepo.getActiveTurnForSession(db, actor.tenant_id, session.id);
+      if (active) {
+        res.status(409).json({ error: 'An agent turn is already running for this session', active_turn: active });
+        return;
+      }
+      const turn = await agentRepo.createTurn(db, actor.tenant_id, actor.actor_id, session.id, {
+        input_message: message.trim(),
+        context_detail: context_detail ?? null,
+      });
+      startAgentTurnRunner(db, turn.id);
+      res.status(202).json({ data: turn });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/sessions/:id/turns/:turn_id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const turn = await loadOwnedTurn(db, actor, String(req.params.id), String(req.params.turn_id));
+      if (!turn) {
+        res.status(404).json({ error: 'Agent turn not found' });
+        return;
+      }
+      const events = await agentRepo.listTurnEventsAfter(db, actor.tenant_id, turn.id, 0);
+      res.json({ data: turnWithEvents(turn, events) });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/sessions/:id/turns/:turn_id/stream', async (req: Request, res: Response) => {
+    const actor = getActor(req);
+    const turn = await loadOwnedTurn(db, actor, String(req.params.id), String(req.params.turn_id));
+    if (!turn) {
+      res.status(404).json({ error: 'Agent turn not found' });
+      return;
+    }
+    const after = typeof req.query.after === 'string' ? Number(req.query.after) || 0 : 0;
+    await streamTurnEvents(db, actor, res, String(req.params.id), String(req.params.turn_id), after);
+  });
+
+  router.post('/sessions/:id/turns/:turn_id/cancel', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const turn = await loadOwnedTurn(db, actor, String(req.params.id), String(req.params.turn_id));
+      if (!turn) {
+        res.status(404).json({ error: 'Agent turn not found' });
+        return;
+      }
+      const cancelled = await cancelRunningAgentTurn(db, actor.tenant_id, turn.id);
+      if (!cancelled) {
+        res.status(409).json({ error: 'Agent turn is no longer running' });
+        return;
+      }
+      res.json({ data: { id: turn.id, status: 'cancelled' } });
+    } catch (err) { handleError(res, err); }
+  });
+
+  /** Compatibility wrapper for older clients. */
   router.post('/sessions/:id/chat', async (req: Request, res: Response) => {
     const actor = getActor(req);
-    const { message, auto_greet, context_detail } = req.body as { message?: string; auto_greet?: boolean; context_detail?: string };
-
-    // auto_greet is retained for older clients, but current clients attach
-    // record context without starting a hidden model turn.
-    const GREET_PROMPT =
-      '[SYSTEM_INIT] The user has just opened this conversation from a CRM record. ' +
-      'Acknowledge that the record context is attached and offer to get a briefing if they want the latest full context. ' +
-      'Do not call briefing_get unless the user asks for a briefing or current record summary.';
-
-    const effectiveMessage = auto_greet ? GREET_PROMPT : message;
-
-    if (!effectiveMessage?.trim()) {
-      res.status(400).json({ error: 'message is required' });
-      return;
-    }
-
-    // Load config
-    const config = await agentRepo.getConfig(db, actor.tenant_id);
-    if (!config?.enabled) {
-      res.status(400).json({ error: 'Agent is not enabled for this workspace' });
-      return;
-    }
-
-    // Load or verify session
-    let session = await agentRepo.getSession(db, actor.tenant_id, String(req.params.id));
-    if (!session || session.user_id !== actor.actor_id) {
-      res.status(404).json({ error: 'Session not found' });
-      return;
-    }
-    if (!(await canAccessAgentContext(db, actor, session.context_type, session.context_id))) {
-      res.status(404).json({ error: 'Session not found' });
-      return;
-    }
-
-    // Set up SSE headers
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no', // disable nginx buffering
-    });
-    // Disable Nagle's algorithm so small SSE packets aren't delayed
-    res.socket?.setNoDelay(true);
-    // Flush headers immediately so the browser knows the stream has started
-    res.flushHeaders();
-
-    const sendEvent = (event: AgentEvent) => {
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
-      // If compression middleware is present it wraps the socket with flush()
-      if (typeof (res as unknown as { flush?: () => void }).flush === 'function') {
-        (res as unknown as { flush: () => void }).flush();
-      }
-    };
-
     try {
-      // Build conversation history from session
-      const history: ConversationMessage[] = [...(session.messages as ConversationMessage[])];
-
-      // Add user message (or auto-greet internal prompt)
-      history.push({ role: 'user', content: effectiveMessage });
-
-      // Run the agent turn, injecting context metadata from the session so the
-      // system prompt knows which record the conversation is about.
-      const contextMeta = session.context_type
-        ? { type: session.context_type, id: session.context_id ?? '', name: session.context_name ?? '', detail: context_detail }
-        : undefined;
-
-      const updatedHistory = await runAgentTurn(history, config, actor, db, sendEvent, {
-        sessionId: session.id,
-        contextMeta,
-      });
-
-      // Auto-label: use first visible user message as label (skip SYSTEM_INIT prompts)
-      let label: string | undefined = session.label ?? undefined;
-      if (!label && !auto_greet) {
-        label = deriveSessionLabel(effectiveMessage);
+      const session = await loadOwnedSession(db, actor, String(req.params.id));
+      if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
       }
-
-      // Trim large tool results before writing back to DB. The LLM has already
-      // consumed them; future turns only need the gist. This keeps the stored
-      // history lean so compaction is triggered less often.
-      const persistHistory = trimForPersistence(updatedHistory);
-
-      // Estimate token count (1 token ≈ 4 chars) for observability.
-      const tokenCount = Math.round(estimateHistoryChars(persistHistory) / 4);
-
-      // Persist updated session
-      await agentRepo.updateSession(db, actor.tenant_id, session.id, {
-        messages: persistHistory,
-        label,
-        token_count: tokenCount,
+      const { message, auto_greet, context_detail } = req.body as { message?: string; auto_greet?: boolean; context_detail?: string };
+      const effectiveMessage = auto_greet
+        ? '[SYSTEM_INIT] The user opened this conversation from a CRM record. Acknowledge that record context is attached.'
+        : message;
+      if (!effectiveMessage?.trim()) {
+        res.status(400).json({ error: 'message is required' });
+        return;
+      }
+      const turn = await agentRepo.createTurn(db, actor.tenant_id, actor.actor_id, session.id, {
+        input_message: effectiveMessage.trim(),
+        context_detail: context_detail ?? null,
       });
-
-      sendEvent({ type: 'done', session_id: session.id, label: label ?? null });
+      startAgentTurnRunner(db, turn.id);
+      await streamTurnEvents(db, actor, res, session.id, turn.id);
     } catch (err) {
-      const errMsg = safeErrorMessage(err, 'Agent request failed. Check Model Settings and try again.');
-      sendEvent({ type: 'error', message: errMsg });
-    } finally {
-      // setImmediate ensures the last SSE frames are flushed to the TCP buffer
-      // before we close the connection, avoiding a race where res.end() races
-      // ahead of the final write on some Node.js / proxy configurations.
-      setImmediate(() => res.end());
+      if (!res.headersSent) handleError(res, err);
+      else {
+        writeSse(res, { type: 'error', message: safeErrorMessage(err, 'Agent request failed. Check Model Settings and try again.') });
+        setImmediate(() => res.end());
+      }
     }
   });
 

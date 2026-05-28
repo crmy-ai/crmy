@@ -51,6 +51,62 @@ export interface AgentSession {
   token_count: number;
   created_at: string;
   updated_at: string;
+  active_turn?: AgentTurn | null;
+  attachments?: AgentSessionAttachment[];
+}
+
+export type AgentTurnStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+export interface AgentTurn {
+  id: string;
+  tenant_id: string;
+  session_id: string;
+  user_id: string;
+  status: AgentTurnStatus;
+  input_message: string;
+  context_detail: string | null;
+  error_message: string | null;
+  final_label: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  cancelled_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentTurnEventRow {
+  id: string;
+  tenant_id: string;
+  turn_id: string;
+  event_index: number;
+  event_type: AgentEvent['type'];
+  payload: AgentEvent;
+  created_at: string;
+}
+
+export type AgentAttachmentMode = 'active_context' | 'raw_context';
+export type AgentAttachmentStatus = 'ready' | 'processing' | 'processed' | 'failed' | 'consumed';
+
+export interface AgentSessionAttachment {
+  id: string;
+  tenant_id: string;
+  session_id: string;
+  user_id: string;
+  filename: string;
+  format: string | null;
+  mode: AgentAttachmentMode;
+  status: AgentAttachmentStatus;
+  extracted_text: string | null;
+  text_excerpt: string | null;
+  truncated: boolean;
+  raw_context_result: unknown | null;
+  raw_context_source_id: string | null;
+  consumed_turn_id: string | null;
+  consumed_at: string | null;
+  error_message: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 /** SSE events emitted during a chat turn. */

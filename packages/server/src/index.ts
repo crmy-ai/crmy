@@ -19,6 +19,7 @@ import { mcpSessions, registerMcpSession, removeMcpSession, touchMcpSession, evi
 import { autoApproveExpired, expireOldRequests } from './db/repos/hitl.js';
 import { cleanExpiredSessions } from './db/repos/agent.js';
 import { processPendingExtractions } from './agent/extraction.js';
+import { processPendingAgentTurns } from './agent/turn-runner.js';
 import { processStaleEntries } from './services/staleness.js';
 import { seedSampleData } from './services/sample-data.js';
 import { loadPlugins, shutdownPlugins, type PluginConfig } from './plugins/index.js';
@@ -327,6 +328,7 @@ export async function createApp(config: ServerConfig) {
       await runBackgroundTask('hitl_expire_old_requests', () => expireOldRequests(db), failures);
       await runBackgroundTask('hitl_sla_expiry', () => checkHitlSlaExpiry(db), failures);
       await runBackgroundTask('agent_session_cleanup', () => cleanExpiredSessions(db), failures);
+      await runBackgroundTask('agent_turns', () => processPendingAgentTurns(db), failures);
       await runBackgroundTask('context_pending_extractions', () => processPendingExtractions(db), failures);
       await runBackgroundTask('context_stale_entries', () => processStaleEntries(db), failures);
       await runBackgroundTask('webhook_retries', () => processWebhookRetries(db), failures);
@@ -577,7 +579,7 @@ if (isMain && !process.env.CRMY_IMPORTED) {
 
 export { getPool, initPool, closePool } from './db/pool.js';
 export { runMigrations, getMigrationStatus } from './db/migrate.js';
-export { createMcpServer, getAllTools } from './mcp/server.js';
+export { createMcpServer, getAllTools, normalizeToolInput } from './mcp/server.js';
 export { emitEvent } from './events/emitter.js';
 export { createWorkflowEngine } from './workflows/engine.js';
 export { getSampleDataStatus, resetSampleData, seedSampleData } from './services/sample-data.js';

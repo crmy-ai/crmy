@@ -232,7 +232,7 @@ function createHttpClient(serverUrl: string, token: string): CliClient {
 async function createDbClient(databaseUrl: string, apiKey?: string): Promise<CliClient> {
   process.env.CRMY_IMPORTED = '1';
 
-  const { initPool, closePool, getAllTools } = await import('@crmy/server');
+  const { initPool, closePool, getAllTools, normalizeToolInput } = await import('@crmy/server');
   const db = await initPool(databaseUrl);
 
   let actor = {
@@ -271,7 +271,7 @@ async function createDbClient(databaseUrl: string, apiKey?: string): Promise<Cli
     async call(toolName: string, input: Record<string, unknown>): Promise<string> {
       const tool = tools.find(t => t.name === toolName);
       if (!tool) throw new Error(`Unknown tool: ${toolName}`);
-      const result = await tool.handler(input, actor);
+      const result = await tool.handler(normalizeToolInput(input), actor);
       return JSON.stringify(result, null, 2);
     },
     async close() {

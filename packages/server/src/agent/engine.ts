@@ -165,6 +165,12 @@ const TOOL_STATUS_MAP: Record<string, string> = {
   context_consolidate:         'Consolidating context entries…',
   context_detect_contradictions: 'Detecting contradictions in context…',
   context_resolve_contradiction: 'Resolving context contradiction…',
+  context_signal_group_list:  'Loading Signals…',
+  context_signal_group_get:   'Reading Signal details…',
+  context_signal_group_promote: 'Confirming Signal as Memory…',
+  context_signal_handoff:     'Sending Signal for review…',
+  context_signal_group_reject: 'Dismissing Signal…',
+  context_lineage_get:        'Loading context lineage…',
   context_type_list:           'Loading context types…',
   context_type_add:            'Adding context type…',
   context_type_remove:         'Removing context type…',
@@ -261,6 +267,7 @@ function buildAgentScopes(config: AgentConfig): string[] {
   }
   if (config.can_create_assignments) {
     scopes.push('assignments:read', 'assignments:write');
+    scopes.push('hitl:read', 'hitl:write');
   }
   // Context writing is always allowed — the agent should be able to add context
   scopes.push('context:write');
@@ -323,6 +330,89 @@ function normalizeToolCallName(name: string, handlers: Map<string, ToolDef>): st
   return name;
 }
 
+function splitKnownToolNames(name: string, handlers: Map<string, ToolDef>): string[] {
+  if (handlers.has(name)) return [name];
+
+  const names = [...handlers.keys()].sort((a, b) => b.length - a.length);
+  const memo = new Map<number, string[] | null>();
+
+  const walk = (index: number): string[] | null => {
+    if (index === name.length) return [];
+    if (memo.has(index)) return memo.get(index) ?? null;
+
+    for (const candidate of names) {
+      if (!name.startsWith(candidate, index)) continue;
+      const rest = walk(index + candidate.length);
+      if (!rest) continue;
+      const result = [candidate, ...rest];
+      memo.set(index, result);
+      return result;
+    }
+
+    memo.set(index, null);
+    return null;
+  };
+
+  return walk(0) ?? [];
+}
+
+function normalizeSubjectTypeValue(value: unknown): unknown {
+  return value === 'use-case' || value === 'useCase' ? 'use_case' : value;
+}
+
+function normalizeToolArgumentObject(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(normalizeToolArgumentObject);
+  if (!value || typeof value !== 'object') return value;
+
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, child]) => {
+    if (key === 'subject_type' || key === 'object_type' || key === 'record_type') {
+      return [key, normalizeSubjectTypeValue(child)];
+    }
+    return [key, normalizeToolArgumentObject(child)];
+  }));
+}
+
+function normalizeToolArguments(raw: string | undefined): string {
+  if (!raw?.trim()) return '{}';
+  try {
+    return JSON.stringify(normalizeToolArgumentObject(JSON.parse(raw)));
+  } catch {
+    return '{}';
+  }
+}
+
+function normalizeToolCalls(toolCalls: ToolCallRecord[], handlers: Map<string, ToolDef>): {
+  valid: ToolCallRecord[];
+  invalid: ToolCallRecord[];
+} {
+  const valid: ToolCallRecord[] = [];
+  const invalid: ToolCallRecord[] = [];
+
+  for (const tc of toolCalls) {
+    const normalizedName = normalizeToolCallName(tc.name, handlers);
+    if (handlers.has(normalizedName)) {
+      valid.push({ ...tc, name: normalizedName, arguments: normalizeToolArguments(tc.arguments) });
+      continue;
+    }
+
+    const splitNames = splitKnownToolNames(tc.name, handlers);
+    if (splitNames.length > 1) {
+      splitNames.forEach((name, index) => {
+        valid.push({
+          id: `${tc.id || 'tool'}-${index}`,
+          name,
+          arguments: '{}',
+        });
+      });
+      continue;
+    }
+
+    invalid.push(tc);
+  }
+
+  return { valid, invalid };
+}
+
 // ── Zod → JSON Schema ────────────────────────────────────────────────────────
 
 /**
@@ -343,7 +433,11 @@ function zodToJsonSchema(schema: any): Record<string, unknown> {
       for (const [key, val] of Object.entries(shape)) {
         properties[key] = zodToJsonSchema(val);
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if ((val as any)?._def?.typeName !== 'ZodOptional') {
+        const childType = (val as any)?._def?.typeName;
+        // Defaults are optional at the API boundary: omitting the field lets the
+        // tool handler apply its schema default. Marking them required makes
+        // model tool calls unnecessarily brittle.
+        if (childType !== 'ZodOptional' && childType !== 'ZodDefault') {
           required.push(key);
         }
       }
@@ -552,10 +646,10 @@ function buildSystemPrompt(
   const activities = pick('activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete');
   if (activities) toolLines.push(`**Activities:** ${activities}`);
 
-  const ctx = pick('context_add', 'context_get', 'context_list', 'context_raw_source_list', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale');
+  const ctx = pick('context_add', 'context_get', 'context_list', 'context_raw_source_list', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_group_list', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_handoff', 'context_signal_group_reject', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale');
   if (ctx) toolLines.push(`**Context memory:** ${ctx}`);
 
-  const hitl = pick('assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status');
+  const hitl = pick('assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status', 'hitl_list_pending');
   if (hitl) toolLines.push(`**Assignments & HITL:** ${hitl}`);
 
   const seqWf = pick('email_sequence_list', 'email_sequence_get', 'email_sequence_enroll', 'email_sequence_unenroll', 'email_sequence_enrollment_list', 'workflow_template_list');
@@ -571,8 +665,8 @@ function buildSystemPrompt(
     'account_search', 'account_get', 'account_get_hierarchy', 'account_health_report', 'account_update', 'account_set_health_score',
     'opportunity_search', 'opportunity_get', 'opportunity_create', 'opportunity_update', 'opportunity_advance_stage', 'deal_advance',
     'activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete',
-    'context_add', 'context_get', 'context_list', 'context_raw_source_list', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale',
-    'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status',
+    'context_add', 'context_get', 'context_list', 'context_raw_source_list', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_group_list', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_handoff', 'context_signal_group_reject', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale',
+    'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status', 'hitl_list_pending',
     'email_sequence_list', 'email_sequence_get', 'email_sequence_enroll', 'email_sequence_unenroll', 'email_sequence_enrollment_list', 'workflow_template_list',
     'pipeline_summary', 'pipeline_forecast', 'tenant_get_stats', 'crm_search',
   ]);
@@ -624,6 +718,7 @@ function buildSystemPrompt(
 export interface RunAgentTurnOpts {
   sessionId?: string;
   contextMeta?: ContextMeta;
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -702,6 +797,9 @@ export async function runAgentTurn(
 
   // Agent loop: LLM call → tool execution → repeat
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    if (opts?.abortSignal?.aborted) {
+      throw new Error('Agent turn was cancelled');
+    }
     // Each loop round gets a unique turn_id so the UI can group all tool calls
     // from the same round into a single collapsible "Working…" row.
     const turnId = crypto.randomUUID();
@@ -718,6 +816,7 @@ export async function runAgentTurn(
           // Emit reasoning blocks with the current turn_id so the UI can group
           // thinking with the tool calls that follow it in the same round.
           (text) => onEvent({ type: 'thinking', content: text, turn_id: turnId }),
+          { abortSignal: opts?.abortSignal },
         );
       } else {
         // OpenAI-compatible providers (OpenAI, OpenRouter, Ollama, custom)
@@ -728,6 +827,7 @@ export async function runAgentTurn(
           config,
           apiKey || null,
           (text) => onEvent({ type: 'delta', content: text }),
+          { abortSignal: opts?.abortSignal },
         );
       }
     } catch (err) {
@@ -742,10 +842,21 @@ export async function runAgentTurn(
       return history;
     }
 
-    const toolCalls = result.tool_calls.map(tc => ({
-      ...tc,
-      name: normalizeToolCallName(tc.name, handlers),
-    }));
+    const { valid: toolCalls, invalid: invalidToolCalls } = normalizeToolCalls(result.tool_calls, handlers);
+
+    if (invalidToolCalls.length > 0) {
+      const invalidNames = invalidToolCalls.map(tc => tc.name || '(unnamed tool)').join(', ');
+      console.warn('[agent] ignored invalid tool call(s):', invalidNames);
+    }
+
+    if (!toolCalls.length) {
+      const content = [
+        result.content,
+        'I could not continue because the model produced an invalid tool call. Please try the request again or choose a more specific action.',
+      ].filter(Boolean).join('\n\n');
+      history.push({ role: 'assistant', content });
+      return history;
+    }
 
     // Record the assistant message with tool calls
     history.push({
@@ -779,7 +890,8 @@ export async function runAgentTurn(
         isError = true;
       } else {
         try {
-          toolResult = await handler.handler(args, agentActor);
+          if (opts?.abortSignal?.aborted) throw new Error('Agent turn was cancelled');
+          toolResult = await withTimeout(handler.handler(args, agentActor), TOOL_TIMEOUT_MS, tc.name);
         } catch (err) {
           toolResult = { error: err instanceof Error ? err.message : 'Tool execution failed' };
           isError = true;
