@@ -13,7 +13,7 @@ import { StageBadge, LeadScoreBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { RecordMemoryIndicator } from '@/components/crm/RecordMemoryIndicator';
 import { motion } from 'framer-motion';
-import { LayoutGrid, List, Sparkles, ChevronUp, ChevronDown, Users, FileText } from 'lucide-react';
+import { LayoutGrid, List, Bot, ChevronUp, ChevronDown, Users, FileText } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useRecordMemoryCounts } from '@/hooks/useRecordMemoryCounts';
@@ -134,9 +134,11 @@ export default function Contacts() {
           allContacts.length === 0 && !search && Object.keys(activeFilters).length === 0 ? (
             <OnboardingEmptyState
               icon={Users}
-              title="Add your first contact"
+              title="No contacts yet"
               description="Contacts store people, preferences, handoffs, and follow-up history."
-              primary={{ label: 'New Contact', onClick: () => openQuickAdd('contact') }}
+              showSampleData={false}
+              iconClassName="text-primary"
+              iconBgClassName="bg-primary/10"
             />
           ) : (
             <OnboardingEmptyState
@@ -145,6 +147,8 @@ export default function Contacts() {
               description="Adjust the search or filters to find the person you need."
               primary={{ label: 'Clear filters', onClick: () => { setSearch(''); setActiveFilters({}); } }}
               showSampleData={false}
+              iconClassName="text-primary"
+              iconBgClassName="bg-primary/10"
             />
           )
         ) : effectiveView === 'table' ? (
@@ -190,8 +194,8 @@ export default function Contacts() {
                           </button>
                           {agentEnabled && (
                             <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: companyName(c) }); navigate('/agent'); }}
-                              className="p-1.5 rounded-lg hover:bg-accent/10 transition-colors">
-                              <Sparkles className="w-3.5 h-3.5 text-accent" />
+                              className="p-1.5 rounded-lg hover:bg-violet-500/10 transition-colors">
+                              <Bot className="w-3.5 h-3.5 text-violet-500" />
                             </button>
                           )}
                         </div>
@@ -219,8 +223,8 @@ export default function Contacts() {
                   </button>
                   {agentEnabled && (
                     <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'contact', id: c.id as string, name: displayName(c), detail: companyName(c) }); navigate('/agent'); }}
-                      className="p-1.5 rounded-lg hover:bg-accent/10 transition-colors">
-                      <Sparkles className="w-3.5 h-3.5 text-accent" />
+                      className="p-1.5 rounded-lg hover:bg-violet-500/10 transition-colors">
+                      <Bot className="w-3.5 h-3.5 text-violet-500" />
                     </button>
                   )}
                 </div>

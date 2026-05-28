@@ -215,7 +215,7 @@ export function GraphNodeSheet({ node, onClose, onNodeFocus }: GraphNodeSheetPro
     <Sheet open={!!node} onOpenChange={open => { if (!open) onClose(); }}>
       <SheetContent
         side="right"
-        className="w-[420px] sm:max-w-[420px] p-0 flex flex-col overflow-hidden"
+        className="w-full sm:max-w-2xl p-0 flex flex-col overflow-hidden"
       >
         {node && <NodeSheetContent node={node} onNodeFocus={onNodeFocus} />}
       </SheetContent>

@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { X, Send, Sparkles, Check, FileText, Pencil, ChevronLeft } from 'lucide-react';
+import { X, Send, Sparkles, Check, FileText, Pencil, ChevronLeft, Bot } from 'lucide-react';
 import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useCreateAssignment, useActors, useExtractRecordDraft } from '@/api/hooks';
 import { EntityCombobox } from '@/components/ui/entity-combobox';
 import { toast } from '@/components/ui/use-toast';
@@ -463,7 +463,7 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
       {canUseAgentExtraction && (
         <div className="border-b border-border px-4 py-2.5">
           <div className="flex items-start gap-2 rounded-xl border border-violet-500/25 bg-violet-500/8 px-3 py-2 text-violet-300">
-            <Sparkles className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-violet-400" />
+            <Bot className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-violet-400" />
             <div className="min-w-0">
               <p className="text-xs font-semibold">Workspace Agent extraction</p>
               <p className="mt-0.5 text-xs opacity-80">{extractionModeDetail}</p>
@@ -921,10 +921,10 @@ export function QuickAddDrawer() {
   return (
     <>
       <div className="fixed inset-0 bg-background/60 backdrop-blur-sm z-[80]" onClick={closeQuickAdd} />
-      <div className="fixed right-0 top-0 h-full w-full max-w-md bg-card border-l border-border z-[90] shadow-2xl flex flex-col animate-slide-in-right">
+      <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-background border-l border-border z-[90] shadow-2xl flex flex-col animate-slide-in-right">
         {loading ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-            <Sparkles className="h-5 w-5 animate-pulse text-violet-400" />
+            <Bot className="h-5 w-5 animate-pulse text-violet-400" />
             <p className="text-sm text-muted-foreground">Checking Workspace Agent settings…</p>
           </div>
         ) : agentReady

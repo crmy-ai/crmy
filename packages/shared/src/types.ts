@@ -18,7 +18,8 @@ export interface User {
   tenant_id: UUID;
   email: string;
   name: string;
-  role: 'owner' | 'admin' | 'member';
+  role: 'owner' | 'admin' | 'manager' | 'member';
+  manager_id?: UUID;
   custom_fields: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -199,7 +200,7 @@ export interface ActorContext {
   tenant_id: UUID;
   actor_id: string;
   actor_type: 'user' | 'agent' | 'system';
-  role: 'owner' | 'admin' | 'member';
+  role: 'owner' | 'admin' | 'manager' | 'member';
   scopes?: string[];
 }
 

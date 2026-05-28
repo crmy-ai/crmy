@@ -84,7 +84,15 @@ export function useDeleteAccount(id: string) {
 }
 
 // Opportunities
-export function useOpportunities(params?: { q?: string; stage?: string; limit?: number; cursor?: string }) {
+export function useOpportunities(params?: {
+  q?: string;
+  stage?: string;
+  forecast_cat?: string;
+  close_date_before?: string;
+  close_date_after?: string;
+  limit?: number;
+  cursor?: string;
+}) {
   return useList('opportunities', 'opportunities', params);
 }
 export function useOpportunity(id: string) {
@@ -260,11 +268,16 @@ export function useUseCaseAnalytics(params?: { account_id?: string; group_by?: s
 }
 
 // HITL
-export function useHITLRequests() {
+export function useHITLRequests(params?: { status?: 'pending' | 'approved' | 'rejected' | 'expired' | 'auto_approved' | 'all'; limit?: number; refetchInterval?: number | false }) {
+  const query = new URLSearchParams();
+  if (params?.status) query.set('status', params.status);
+  if (params?.limit) query.set('limit', String(params.limit));
+  const url = query.toString() ? `hitl?${query}` : 'hitl';
   return useQuery({
-    queryKey: ['hitl'],
-    queryFn: () => api.get('hitl'),
-    refetchInterval: 10_000,
+    queryKey: ['hitl', params?.status ?? 'pending', params?.limit ?? 20],
+    queryFn: () => api.get(url),
+    refetchInterval: params?.refetchInterval ?? false,
+    refetchOnWindowFocus: false,
   });
 }
 export function useHandoffSnapshot(snapshotId: string | null | undefined) {
@@ -278,8 +291,21 @@ export function useHandoffSnapshot(snapshotId: string | null | undefined) {
 export function useResolveHITL() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; status: string; note?: string }) =>
-      api.post(`hitl/${id}/resolve`, data),
+    mutationFn: ({ id, status, decision, note }: { id: string; status?: string; decision?: 'approved' | 'rejected'; note?: string }) =>
+      api.post(`hitl/${id}/resolve`, { decision: decision ?? status, note }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hitl'] }),
+  });
+}
+export function useUpdateHITL() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: {
+      id: string;
+      action_summary?: string;
+      priority?: 'low' | 'normal' | 'high' | 'urgent';
+      sla_minutes?: number | null;
+      escalate_to_id?: string | null;
+    }) => api.patch(`hitl/${id}`, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['hitl'] }),
   });
 }
@@ -571,6 +597,7 @@ type AdminUser = {
   email: string;
   name: string;
   role: string;
+  manager_id?: string | null;
   is_active?: boolean;
   invited_at?: string | null;
   password_set_at?: string | null;
@@ -625,7 +652,7 @@ export function useUsers() {
 export function useCreateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name: string; email: string; phone?: string; password?: string; role: string; send_invite?: boolean; metadata?: Record<string, unknown> }) =>
+    mutationFn: (data: { name: string; email: string; phone?: string; password?: string; role: string; manager_id?: string | null; send_invite?: boolean; metadata?: Record<string, unknown> }) =>
       api.post<AdminUser & { invite?: { setup_url: string; email_sent: boolean; email_error?: string } | null }>('admin/users', data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-users'] });
@@ -637,7 +664,7 @@ export function useCreateUser() {
 export function useUpdateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; name?: string; email?: string; role?: string; password?: string; is_active?: boolean }) =>
+    mutationFn: ({ id, ...data }: { id: string; name?: string; email?: string; role?: string; manager_id?: string | null; password?: string; is_active?: boolean }) =>
       api.patch<AdminUser>(`admin/users/${id}`, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin-users'] });
@@ -1433,7 +1460,20 @@ export function useContextIngest() {
 export function useContextIngestAuto() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { text: string; source?: string; confidence_threshold?: number }) =>
+    mutationFn: (data: {
+      text: string;
+      source?: string;
+      confidence_threshold?: number;
+      subjects?: Array<{ type: string; id: string; name?: string }>;
+      proposed_records?: Array<{
+        record_type: string;
+        name: string;
+        confidence?: number;
+        reason?: string;
+        fields?: Record<string, unknown>;
+        duplicate_candidates?: unknown[];
+      }>;
+    }) =>
       api.post('context/ingest-auto', data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['context-entries'] });
@@ -1468,7 +1508,7 @@ export function useIngestFile() {
 export function useInboxCounts() {
   const { data: whoami } = useWhoAmI() as any;
   const myActorId: string | undefined = whoami?.actor_id;
-  const hitlQ = useHITLRequests();
+  const hitlQ = useHITLRequests({ status: 'pending', limit: 200 });
   const assignQ = useQuery<{ data: any[]; total: number }>({
     queryKey: ['inbox-assignments', myActorId],
     queryFn: () => api.get(`assignments?assigned_to=${encodeURIComponent(myActorId!)}&limit=200`),
@@ -1597,7 +1637,11 @@ export function useSaveAgentConfig() {
 }
 
 export function useTestAgentConnection() {
-  return useMutation<{ ok: boolean; error?: string }, Error, Record<string, string>>({
+  return useMutation<
+    { ok: boolean; status?: string; error?: string; warning?: string; tool_calling_verified?: boolean },
+    Error,
+    Record<string, string>
+  >({
     mutationFn: (payload) => api.post('agent/config/test', payload),
   });
 }

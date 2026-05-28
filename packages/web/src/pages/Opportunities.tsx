@@ -13,7 +13,7 @@ import { ListToolbar, type FilterConfig, type SortOption } from '@/components/cr
 import { RecordMemoryIndicator } from '@/components/crm/RecordMemoryIndicator';
 import { DatePicker } from '@/components/ui/date-picker';
 import { motion } from 'framer-motion';
-import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown, Briefcase } from 'lucide-react';
+import { Columns3, List, BarChart3, Plus, Bot, ChevronUp, ChevronDown, Briefcase } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { useRecordMemoryCounts } from '@/hooks/useRecordMemoryCounts';
@@ -251,8 +251,8 @@ export default function Opportunities() {
                             </div>
                             {agentEnabled && (
                               <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: opp.id as string, name: opp.name as string, detail: `$${(amount / 1000).toFixed(0)}K` }); navigate('/agent'); }}
-                                className="p-0.5 rounded-lg md:opacity-0 md:group-hover:opacity-100 hover:bg-accent/10 transition-all">
-                                <Sparkles className="w-3.5 h-3.5 text-accent" />
+                                className="p-0.5 rounded-lg md:opacity-0 md:group-hover:opacity-100 hover:bg-violet-500/10 transition-all">
+                                <Bot className="w-3.5 h-3.5 text-violet-500" />
                               </button>
                             )}
                           </div>
@@ -298,9 +298,11 @@ export default function Opportunities() {
               allOpportunities.length === 0 && !search && Object.keys(activeFilters).length === 0 ? (
                 <OnboardingEmptyState
                   icon={Briefcase}
-                  title="Create your first opportunity"
+                  title="No opportunities yet"
                   description="Opportunities track stage, value, context, and next steps."
-                  primary={{ label: 'New Opportunity', onClick: () => openQuickAdd('opportunity') }}
+                  showSampleData={false}
+                  iconClassName="text-accent"
+                  iconBgClassName="bg-accent/15"
                 />
               ) : (
                 <OnboardingEmptyState
@@ -309,6 +311,8 @@ export default function Opportunities() {
                   description="Adjust filters or date range to find the deal you need."
                   primary={{ label: 'Clear filters', onClick: () => { setSearch(''); setActiveFilters({}); setCloseDate('all'); } }}
                   showSampleData={false}
+                  iconClassName="text-accent"
+                  iconBgClassName="bg-accent/15"
                 />
               )
             ) : (
@@ -369,8 +373,8 @@ export default function Opportunities() {
                             {agentEnabled && (
                               <td className="px-2 py-3">
                                 <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: d.id as string, name: d.name as string, detail: `$${(amount / 1000).toFixed(0)}K` }); navigate('/agent'); }}
-                                  className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
-                                  <Sparkles className="w-3.5 h-3.5 text-accent" />
+                                  className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-violet-500/10 transition-all">
+                                  <Bot className="w-3.5 h-3.5 text-violet-500" />
                                 </button>
                               </td>
                             )}

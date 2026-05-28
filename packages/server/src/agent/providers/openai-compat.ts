@@ -3,6 +3,17 @@
 
 import type { AgentConfig, ConversationMessage, AgentToolDef, ToolCallRecord } from '../types.js';
 
+const AGENT_STREAM_TIMEOUT_MS = Number(process.env.AGENT_STREAM_TIMEOUT_MS ?? 120_000);
+
+function timeoutSignal(timeoutMs = AGENT_STREAM_TIMEOUT_MS): { signal: AbortSignal; done: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    done: () => clearTimeout(timer),
+  };
+}
+
 /**
  * Call any OpenAI-compatible API (OpenAI, OpenRouter, Ollama, custom gateways)
  * with streaming. Uses raw fetch — no SDK dependency.
@@ -45,18 +56,24 @@ export async function callOpenAICompat(
     headers['X-Title'] = 'CRMy';
   }
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  const timeout = timeoutSignal();
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: timeout.signal,
+    });
 
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`LLM API error ${res.status}: ${errBody}`);
+    if (!res.ok) {
+      const errBody = await res.text();
+      throw new Error(`LLM API error ${res.status}: ${errBody}`);
+    }
+
+    return await parseOpenAIStream(res, onDelta);
+  } finally {
+    timeout.done();
   }
-
-  return parseOpenAIStream(res, onDelta);
 }
 
 /** Convert generic messages to OpenAI chat format. */

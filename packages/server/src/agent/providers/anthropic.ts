@@ -3,6 +3,17 @@
 
 import type { AgentConfig, ConversationMessage, AgentToolDef, ToolCallRecord } from '../types.js';
 
+const AGENT_STREAM_TIMEOUT_MS = Number(process.env.AGENT_STREAM_TIMEOUT_MS ?? 120_000);
+
+function timeoutSignal(timeoutMs = AGENT_STREAM_TIMEOUT_MS): { signal: AbortSignal; done: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    done: () => clearTimeout(timer),
+  };
+}
+
 // ── Thinking support ──────────────────────────────────────────────────────────
 
 /** Models that support extended thinking + interleaved reasoning between tool calls. */
@@ -76,18 +87,24 @@ export async function callAnthropic(
     headers['anthropic-beta'] = 'interleaved-thinking-2025-05-14';
   }
 
-  const res = await fetch(`${baseUrl}/messages`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  const timeout = timeoutSignal();
+  try {
+    const res = await fetch(`${baseUrl}/messages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: timeout.signal,
+    });
 
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`Anthropic API error ${res.status}: ${errBody}`);
+    if (!res.ok) {
+      const errBody = await res.text();
+      throw new Error(`Anthropic API error ${res.status}: ${errBody}`);
+    }
+
+    return await parseAnthropicStream(res, onDelta, onThinking);
+  } finally {
+    timeout.done();
   }
-
-  return parseAnthropicStream(res, onDelta, onThinking);
 }
 
 // ── Message format conversion ─────────────────────────────────────────────────

@@ -12,7 +12,7 @@ Complete documentation for CRMy — the operational customer context layer for A
 4. [Web UI](#web-ui)
 5. [Core Concepts](#core-concepts)
 6. [Contacts](#contacts)
-7. [Companies](#companies)
+7. [Accounts](#accounts)
 8. [Opportunities](#opportunities)
 9. [Activities](#activities)
 10. [Actors](#actors)
@@ -219,8 +219,14 @@ Created by `crmy init`. Stored in your project root. Auto-added to `.gitignore`.
 | `JWT_SECRET` | Yes | — | Secret for JWT token signing |
 | `PORT` | No | `3000` | HTTP server port |
 | `CRMY_TENANT_ID` | No | `default` | Default tenant slug |
+| `CRMY_ALLOW_PUBLIC_REGISTRATION` | No | — | Set `true` to keep unauthenticated registration open after initial workspace setup |
 | `CRMY_API_KEY` | No | — | API key for CLI auth (overrides .crmy.json) |
 | `CRMY_SERVER_URL` | No | — | Server URL for remote CLI mode |
+| `LLM_TIMEOUT_MS` | No | `30000` | Hard timeout for general background LLM calls |
+| `CONTEXT_EXTRACTION_LLM_TIMEOUT_MS` | No | `90000` | Hard timeout for Raw Context → Signals extraction |
+| `CONTEXT_EXTRACTION_RECOVERY_TIMEOUT_MS` | No | `45000` | Fallback extraction timeout after an empty valid response |
+| `CONTEXT_EXTRACTION_REPAIR_TIMEOUT_MS` | No | `30000` | JSON repair timeout after malformed model output |
+| `RAW_CONTEXT_SUBJECT_MATCH_TIMEOUT_MS` | No | `15000` | Hard timeout for automatic Raw Context record matching |
 
 ---
 
@@ -456,14 +462,14 @@ The operator's overview of the context engine. A flow section shows **Raw Contex
   - **Brief**: AI-generated structured briefing (relationship history, key themes, open items)
   - **Graph**: full-page Context Graph — see [Context Graph](#context-graph) below
 
-#### Companies (`/app/companies`)
+#### Accounts (`/app/accounts`)
 
 - **List**: searchable table with name, industry, revenue, employees, health score
-- **Create** (`/app/companies/new`): name, domain, industry, website
-- **Detail** (`/app/companies/:id`): three-tab layout:
-  - **Overview**: company info, contacts, opportunities, use cases
-  - **Brief**: AI-generated company briefing surfaced inline
-  - **Graph**: full-page Context Graph for the company
+- **Create** (`/app/accounts/new`): name, domain, industry, website
+- **Detail** (`/app/accounts/:id`): three-tab layout:
+  - **Overview**: account info, contacts, opportunities, use cases
+  - **Brief**: AI-generated account briefing surfaced inline
+  - **Graph**: full-page Context Graph for the account
 
 #### Pipeline (`/app/pipeline`)
 
@@ -738,21 +744,21 @@ GET    /api/v1/contacts/:id/timeline
 
 ---
 
-## Companies
+## Accounts
 
-Companies represent organizations. Companies can have parent/child hierarchies, health scores, and linked contacts and opportunities.
+Accounts represent organizations. Accounts can have parent/child hierarchies, health scores, and linked contacts and opportunities.
 
 ### MCP tools
 
 | Tool | Description |
 |---|---|
-| `account_create` | Create a company. Required: `name`. Optional: `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `aliases`, `tags`, `custom_fields` |
-| `account_get` | Get a company with its contacts and open opportunities |
+| `account_create` | Create an account. Required: `name`. Optional: `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `aliases`, `tags`, `custom_fields` |
+| `account_get` | Get an account with its contacts and open opportunities |
 | `account_search` | Search with filters: `query`, `industry`, `owner_id`, `min_revenue`, `tags`. Query matches name, domain, and any alias. |
 | `account_update` | Patch any fields. Supports `aliases` array. |
 | `account_set_health_score` | Set score (0-100) with `rationale` |
 | `account_get_hierarchy` | Get parent/child tree |
-| `account_delete` | Permanently delete a company. Admin/owner role required. |
+| `account_delete` | Permanently delete an account. Admin/owner role required. |
 
 ### CLI
 
@@ -1244,6 +1250,8 @@ CRMy separates messy Raw Context from Current Memory:
 
 Every Signal and important Memory entry should read as a **claim with evidence**. The claim is the entry body. Evidence records source type, source ID/reference, source URL when available, source label, speaker or author, snippet, observed timestamp, captured timestamp, support confidence, rationale, and optional verification metadata. This lets an agent explain, for example, “Budget approval is a risk” together with the meeting excerpt and date that support the claim.
 
+Extraction stays tolerant of messy customer context. CRMy can keep an incomplete but useful Signal, then mark what it needs before it becomes Memory. Readiness language is intentionally operational: **Ready for Memory**, **Needs more detail**, **Needs supporting evidence**, **Needs review before agents can act**, or **Could affect forecast, approval required**. Internally, context type registries define the typed details that make a Signal actionable; developer/API docs may call these JSON schemas, but the product concept is typed Memory readiness.
+
 Corroborated Signals should be promoted before they are used to coordinate work, influence forecast, update external systems, assign tasks, or guide customer engagement. Use `context_signal_group_promote` for grouped/corroborated claims, `context_signal_promote` for a single reviewed Signal, and the reject tools when a claim should stay out of Memory.
 
 The lifecycle is first-class:
@@ -1257,7 +1265,7 @@ Creating a Signal requires evidence. Normal retrieval, briefings, actor expertis
 
 ### Automatic subject detection — `context_ingest_auto`
 
-When you don't know which customer records a document mentions, use `context_ingest_auto`. The configured Workspace Agent identifies likely people and companies, CRMy grounds those candidates against existing contacts and accounts with entity resolution, and the extraction pipeline runs for every resolved subject:
+When you don't know which customer records a document mentions, use `context_ingest_auto`. The configured Workspace Agent identifies likely people and accounts, CRMy grounds those candidates against existing contacts and accounts with entity resolution, and the extraction pipeline runs for every resolved subject:
 
 ```
 context_ingest_auto {
@@ -2446,7 +2454,7 @@ Use **Settings → Systems of Record** to:
 - Salesforce supports encrypted OAuth refresh credentials with `instance_url`, `refresh_token`, `client_id`, and `client_secret`, so CRMy can refresh tokens before sync or writeback.
 - Databricks and Snowflake use credential JSON for host/account and token metadata. Warehouse writeback remains restricted to configured mappings and SQL templates.
 - Test credentials and health.
-- Discover schema and map external objects, tables, or views into CRMy contacts, companies, opportunities, activities, use cases, and context entries.
+- Discover schema and map external objects, tables, or views into CRMy contacts, accounts, opportunities, activities, use cases, and context entries.
 - Run syncs and inspect run status.
 - Review source/local conflicts.
 - Preview and request governed external writebacks.

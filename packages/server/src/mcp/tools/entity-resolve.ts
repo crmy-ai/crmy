@@ -6,6 +6,7 @@ import { uuid } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import { entityResolve } from '../../services/entity-resolve.js';
+import { resolveOwnerFilter } from '../../services/access-control.js';
 import type { ToolDef } from '../server.js';
 
 // ─── Input schema ──────────────────────────────────────────────────────────
@@ -63,9 +64,11 @@ export function entityResolveTools(db: DbPool): ToolDef[] {
       handler: async (input: z.infer<typeof entityResolveInput>, actor: ActorContext) => {
         // Use the requesting actor's ID for affinity scoring unless overridden
         const actorId = input.actor_id ?? actor.actor_id;
+        const ownerFilter = await resolveOwnerFilter(db, actor);
         return entityResolve(db, actor.tenant_id, {
           ...input,
           actor_id: actorId,
+          owner_ids: 'owner_ids' in ownerFilter ? ownerFilter.owner_ids : undefined,
         });
       },
     },

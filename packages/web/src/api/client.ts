@@ -29,12 +29,12 @@ export function clearToken() {
   localStorage.removeItem('crmy_user');
 }
 
-export function getUser(): { id: string; email: string; name: string; role: string; tenant_id: string } | null {
+export function getUser(): { id: string; email: string; name: string; role: string; tenant_id: string; manager_id?: string | null } | null {
   const raw = localStorage.getItem('crmy_user');
   return raw ? JSON.parse(raw) : null;
 }
 
-export function setUser(user: { id: string; email: string; name: string; role: string; tenant_id: string }) {
+export function setUser(user: { id: string; email: string; name: string; role: string; tenant_id: string; manager_id?: string | null }) {
   localStorage.setItem('crmy_user', JSON.stringify(user));
 }
 
@@ -90,11 +90,11 @@ export const auth = {
   login: (email: string, password: string) =>
     request<{ token: string; user: { id: string; email: string; name: string; role: string; tenant_id: string } }>(
       '/auth/login',
-      { method: 'POST', body: JSON.stringify({ email, password }) },
+      { method: 'POST', body: JSON.stringify({ email: email.trim(), password }) },
     ),
   register: (data: { email: string; password: string; name: string; tenant_name: string }) =>
     request<{ token: string; user: { id: string; email: string; name: string; role: string; tenant_id: string } }>(
       '/auth/register',
-      { method: 'POST', body: JSON.stringify(data) },
+      { method: 'POST', body: JSON.stringify({ ...data, email: data.email.trim() }) },
     ),
 };

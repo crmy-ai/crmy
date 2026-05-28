@@ -3,8 +3,8 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
-import { Link, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Zap, ListOrdered, GitBranch, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -12,7 +12,7 @@ import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
-import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useWorkflows, useSequences, useSequenceEnrollments, useSystemsOfRecord, useCreateSystemOfRecord, useUpdateSystemOfRecord, useDeleteSystemOfRecord, useTestSystemOfRecord, useRunSystemSync, useDiscoverSystemOfRecord, useSystemMappings, useUpsertSystemMapping, useDeleteSystemMapping, useSystemSyncRuns, useSystemConflicts, useResolveSystemConflict, useSystemWritebacks, usePreviewSystemWriteback, useRequestSystemWriteback, useExecuteSystemWriteback, useReviewSystemWriteback } from '@/api/hooks';
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useSystemsOfRecord, useCreateSystemOfRecord, useUpdateSystemOfRecord, useDeleteSystemOfRecord, useTestSystemOfRecord, useRunSystemSync, useDiscoverSystemOfRecord, useSystemMappings, useUpsertSystemMapping, useDeleteSystemMapping, useSystemSyncRuns, useSystemConflicts, useResolveSystemConflict, useSystemWritebacks, usePreviewSystemWriteback, useRequestSystemWriteback, useExecuteSystemWriteback, useReviewSystemWriteback } from '@/api/hooks';
 import type { SystemMapping, SystemOfRecord } from '@/api/hooks';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import AgentSettings from '@/pages/AgentSettings';
@@ -20,12 +20,12 @@ import ActorsSettings from '@/components/settings/ActorsSettings';
 import MessagingSettings from '@/components/settings/MessagingSettings';
 import HITLRulesSettings from '@/components/settings/HITLRulesSettings';
 
-type NavRole = 'member' | 'admin' | 'owner';
+type NavRole = 'member' | 'manager' | 'admin' | 'owner';
 
 const settingsNavConfig: { icon: React.ElementType; label: string; path: string; roles: NavRole[] }[] = [
-  { icon: CircleUser, label: 'Profile',       path: '/settings',              roles: ['member', 'admin', 'owner'] },
-  { icon: Palette,    label: 'Appearance',    path: '/settings/appearance',   roles: ['member', 'admin', 'owner'] },
-  { icon: Lock,       label: 'API Keys',      path: '/settings/api-keys',     roles: ['member', 'admin', 'owner'] },
+  { icon: CircleUser, label: 'Profile',       path: '/settings',              roles: ['member', 'manager', 'admin', 'owner'] },
+  { icon: Palette,    label: 'Appearance',    path: '/settings/appearance',   roles: ['member', 'manager', 'admin', 'owner'] },
+  { icon: Lock,       label: 'API Keys',      path: '/settings/api-keys',     roles: ['member', 'manager', 'admin', 'owner'] },
   { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'] },
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
   { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'] },
@@ -33,7 +33,6 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: MessageSquare, label: 'Messaging', path: '/settings/messaging',   roles: ['admin', 'owner'] },
   { icon: ShieldCheck, label: 'Action Policies', path: '/settings/hitl-rules',  roles: ['admin', 'owner'] },
   { icon: Sparkles,   label: 'Model Settings', path: '/settings/model',     roles: ['admin', 'owner'] },
-  { icon: Zap,        label: 'Automations',   path: '/settings/automations',  roles: ['admin', 'owner'] },
   { icon: Server,     label: 'Systems of Record', path: '/settings/systems', roles: ['admin', 'owner'] },
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
 ];
@@ -52,6 +51,68 @@ function RequireRole({ roles, children }: { roles: NavRole[]; children: React.Re
   const user = getUser();
   if (!user || !roles.includes(user.role as NavRole)) return <AccessDenied />;
   return <>{children}</>;
+}
+
+function SettingsHealthDot({ tone, className = '' }: { tone: 'ok' | 'warn' | 'error' | 'muted'; className?: string }) {
+  const color = tone === 'ok'
+    ? 'bg-success'
+    : tone === 'warn'
+    ? 'bg-warning'
+    : tone === 'error'
+    ? 'bg-destructive'
+    : 'bg-muted-foreground/40';
+  return <span className={`w-2 h-2 rounded-full ${color} ${className}`} />;
+}
+
+function ModelSettingsDot({ className = '' }: { className?: string }) {
+  const { enabled, connectivity } = useAgentSettings();
+  const tone = enabled && connectivity === 'online'
+    ? 'ok'
+    : enabled && connectivity === 'offline'
+    ? 'error'
+    : enabled
+    ? 'warn'
+    : 'muted';
+  return <SettingsHealthDot tone={tone} className={className} />;
+}
+
+function DatabaseSettingsDot({ className = '' }: { className?: string }) {
+  const { data, isLoading, isError } = useDbConfig();
+  const dbInfo = data as { host?: string; database?: string } | undefined;
+  const tone = isError
+    ? 'error'
+    : isLoading
+    ? 'muted'
+    : dbInfo?.host && dbInfo?.database
+    ? 'ok'
+    : 'warn';
+  return <SettingsHealthDot tone={tone} className={className} />;
+}
+
+function SystemsSettingsDot({ className = '' }: { className?: string }) {
+  const { data, isLoading, isError } = useSystemsOfRecord({ limit: 50 }) as any;
+  const systems: SystemOfRecord[] = data?.data ?? [];
+  const hasError = systems.some(system => system.status === 'error' || system.status === 'failed');
+  const allConnected = systems.length > 0 && systems.every(system => system.status === 'connected');
+  const tone = isError
+    ? 'error'
+    : isLoading
+    ? 'muted'
+    : hasError
+    ? 'error'
+    : allConnected
+    ? 'ok'
+    : systems.length > 0
+    ? 'warn'
+    : 'muted';
+  return <SettingsHealthDot tone={tone} className={className} />;
+}
+
+function SettingsNavHealthDot({ path, className = '' }: { path: string; className?: string }) {
+  if (path === '/settings/model') return <ModelSettingsDot className={className} />;
+  if (path === '/settings/database') return <DatabaseSettingsDot className={className} />;
+  if (path === '/settings/systems') return <SystemsSettingsDot className={className} />;
+  return null;
 }
 
 function ProfileSettings() {
@@ -1766,17 +1827,17 @@ const PASSWORD_RULES = [
   { label: 'One number', test: (p: string) => /\d/.test(p) },
   { label: 'One special character', test: (p: string) => /[^A-Za-z0-9]/.test(p) },
 ];
-const ROLES = ['member', 'admin', 'owner'] as const;
+const ROLES = ['member', 'manager', 'admin', 'owner'] as const;
 type Role = typeof ROLES[number];
-const roleLabels: Record<Role, string> = { member: 'Member', admin: 'Admin', owner: 'Owner' };
+const roleLabels: Record<Role, string> = { member: 'Member', manager: 'Manager', admin: 'Admin', owner: 'Owner' };
 
 function isValidEmail(email: string) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
 function isStrongPassword(p: string) { return PASSWORD_RULES.every(r => r.test(p)); }
 
-type UserRow = { id: string; email: string; name: string; role: string; created_at: string };
+type UserRow = { id: string; email: string; name: string; role: string; manager_id?: string | null; created_at: string };
 
 interface UserFormState {
-  name: string; email: string; password: string; role: Role;
+  name: string; email: string; password: string; role: Role; manager_id?: string;
   showPassword: boolean; touched: Record<string, boolean>;
 }
 
@@ -1785,13 +1846,14 @@ function initForm(defaults?: Partial<UserFormState>): UserFormState {
 }
 
 function UserForm({
-  form, onChange, onTouch, isEdit, currentUserRole,
+  form, onChange, onTouch, isEdit, currentUserRole, users = [],
 }: {
   form: UserFormState;
   onChange: (patch: Partial<UserFormState>) => void;
   onTouch: (field: string) => void;
   isEdit: boolean;
   currentUserRole: string;
+  users?: UserRow[];
 }) {
   const nameErr = form.touched.name && !form.name.trim() ? 'Name is required' : '';
   const emailErr = form.touched.email && !isValidEmail(form.email) ? 'Enter a valid email address' : '';
@@ -1859,8 +1921,23 @@ function UserForm({
             ))}
           </select>
           <p className="text-xs text-muted-foreground">
-            {form.role === 'owner' ? 'Full access including billing and account deletion' : form.role === 'admin' ? 'Can manage users, settings, and all data' : 'Can access workspace data only'}
+            {form.role === 'owner' ? 'Full access including billing and account deletion' : form.role === 'admin' ? 'Can manage users, settings, and all data' : form.role === 'manager' ? 'Can see their own book plus reporting users' : 'Can access owned records only'}
           </p>
+          {form.role === 'member' && (
+            <div className="pt-2 space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">Manager</label>
+              <select
+                value={form.manager_id ?? ''}
+                onChange={e => onChange({ manager_id: e.target.value || undefined })}
+                className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-1 focus:ring-ring appearance-none"
+              >
+                <option value="">No manager</option>
+                {users.filter(u => ['manager', 'admin', 'owner'].includes(u.role)).map(u => (
+                  <option key={u.id} value={u.id}>{u.name} ({roleLabels[u.role as Role] ?? u.role})</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1928,6 +2005,7 @@ function UsersSettings() {
       key: 'role', label: 'Role', options: [
         { value: 'owner', label: 'Owner' },
         { value: 'admin', label: 'Admin' },
+        { value: 'manager', label: 'Manager' },
         { value: 'member', label: 'Member' },
       ],
     },
@@ -1956,7 +2034,7 @@ function UsersSettings() {
     setCreateForm(f);
     if (!f.name.trim() || !isValidEmail(f.email) || !isStrongPassword(f.password)) return;
     try {
-      await createUser.mutateAsync({ name: f.name.trim(), email: f.email.trim(), password: f.password, role: f.role });
+      await createUser.mutateAsync({ name: f.name.trim(), email: f.email.trim(), password: f.password, role: f.role, manager_id: f.manager_id || null });
       setShowCreate(false);
       setCreateForm(initForm());
       toast({ title: 'User created' });
@@ -1967,7 +2045,7 @@ function UsersSettings() {
 
   const startEdit = (u: UserRow) => {
     setEditingId(u.id);
-    setEditForm(initForm({ name: u.name, email: u.email, role: u.role as Role }));
+    setEditForm(initForm({ name: u.name, email: u.email, role: u.role as Role, manager_id: u.manager_id ?? undefined }));
   };
 
   const handleUpdate = async () => {
@@ -1981,6 +2059,7 @@ function UsersSettings() {
         name: f.name.trim(),
         email: f.email.trim(),
         role: f.role,
+        manager_id: f.manager_id || null,
         ...(f.password ? { password: f.password } : {}),
       });
       setEditingId(null);
@@ -2003,6 +2082,7 @@ function UsersSettings() {
   const rolePillCls: Record<string, string> = {
     owner: 'bg-accent/15 text-accent border-accent/30',
     admin: 'bg-primary/15 text-primary border-primary/30',
+    manager: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
     member: 'bg-muted text-muted-foreground border-border',
   };
 
@@ -2073,7 +2153,7 @@ function UsersSettings() {
             <UserForm
               form={createForm} onChange={p => setCreateForm(f => ({ ...f, ...p }))}
               onTouch={field => setCreateForm(f => ({ ...f, touched: { ...f.touched, [field]: true } }))}
-              isEdit={false} currentUserRole={currentUserRole}
+              isEdit={false} currentUserRole={currentUserRole} users={allUsers}
             />
             <div className="flex gap-2 pt-1">
               <button onClick={handleCreate} disabled={createUser.isPending}
@@ -2130,7 +2210,7 @@ function UsersSettings() {
                             <UserForm
                               form={editForm} onChange={p => setEditForm(f => ({ ...f, ...p }))}
                               onTouch={field => setEditForm(f => ({ ...f, touched: { ...f.touched, [field]: true } }))}
-                              isEdit={true} currentUserRole={currentUserRole}
+                              isEdit={true} currentUserRole={currentUserRole} users={allUsers.filter(user => user.id !== editingId)}
                             />
                             <InlineEditActions onSave={handleUpdate} onCancel={() => setEditingId(null)} isPending={updateUser.isPending} />
                           </td>
@@ -2215,7 +2295,7 @@ function UsersSettings() {
                   <UserForm
                     form={editForm} onChange={p => setEditForm(f => ({ ...f, ...p }))}
                     onTouch={field => setEditForm(f => ({ ...f, touched: { ...f.touched, [field]: true } }))}
-                    isEdit={true} currentUserRole={currentUserRole}
+                    isEdit={true} currentUserRole={currentUserRole} users={allUsers.filter(user => user.id !== editingId)}
                   />
                   <InlineEditActions onSave={handleUpdate} onCancel={() => setEditingId(null)} isPending={updateUser.isPending} />
                 </motion.div>
@@ -2287,120 +2367,6 @@ function UsersSettings() {
           <PaginationBar page={page} pageSize={pageSize} total={filtered.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
           </>
         )}
-      </div>
-    </div>
-  );
-}
-
-function AutomationSettings() {
-  const { data: workflowsData } = useWorkflows({ limit: 100 });
-  const { data: sequencesData } = useSequences({ limit: 100 });
-  const { data: enrollmentsData } = useSequenceEnrollments({ status: 'active', limit: 1 });
-  const { openWorkflowEditor, openSequenceEditor } = useAppStore();
-
-  const workflows = (workflowsData?.data ?? []) as Array<{ id: string; name: string; is_active: boolean }>;
-  const sequences = (sequencesData?.data ?? []) as Array<{ id: string; name: string; is_active: boolean; max_active_enrollments?: number | null; exit_on_unsubscribe: boolean }>;
-  const activeWorkflows = workflows.filter(w => w.is_active).length;
-  const activeSequences = sequences.filter(s => s.is_active).length;
-  const totalEnrollments = (enrollmentsData as { total?: number } | undefined)?.total ?? 0;
-
-  const cardCls = 'rounded-xl border border-border bg-card p-5 space-y-4';
-  const labelCls = 'block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1';
-  const valueCls = 'text-sm font-medium text-foreground';
-
-  return (
-    <div className="space-y-6">
-      {/* Overview stats */}
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-foreground">System Overview</h3>
-        <div className="grid grid-cols-3 gap-4">
-          {[
-            { icon: GitBranch, label: 'Active Triggers', value: activeWorkflows, total: workflows.length },
-            { icon: ListOrdered, label: 'Active Sequences', value: activeSequences, total: sequences.length },
-            { icon: Users, label: 'Active Enrollments', value: totalEnrollments },
-          ].map(({ icon: Icon, label, value, total }) => (
-            <div key={label} className="rounded-lg bg-muted/40 p-3 text-center">
-              <Icon className="w-4 h-4 mx-auto mb-1 text-primary" />
-              <p className="text-lg font-bold text-foreground">{value}{total !== undefined ? <span className="text-sm font-normal text-muted-foreground"> / {total}</span> : ''}</p>
-              <p className="text-xs text-muted-foreground">{label}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Global defaults */}
-      <div className={cardCls}>
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">Global Defaults</h3>
-          <span className="text-xs text-muted-foreground">Configurable per workflow/sequence</span>
-        </div>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <p className={labelCls}>Failure Alert Threshold</p>
-            <p className={valueCls}>3 consecutive failures → HITL escalation</p>
-          </div>
-          <div>
-            <p className={labelCls}>Max Tool Rounds (Agent)</p>
-            <p className={valueCls}>10 rounds per agent turn</p>
-          </div>
-          <div>
-            <p className={labelCls}>Action Timeout</p>
-            <p className={valueCls}>30 seconds per workflow action</p>
-          </div>
-          <div>
-            <p className={labelCls}>Sequence Tick Interval</p>
-            <p className={valueCls}>Every 60 seconds</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Sequence compliance summary */}
-      {sequences.length > 0 && (
-        <div className={cardCls}>
-          <h3 className="text-sm font-semibold text-foreground">Sequence Compliance</h3>
-          <div className="space-y-2">
-            {sequences.map(s => (
-              <div key={s.id} className="flex items-center gap-3 py-2 border-b border-border last:border-0">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{s.name}</p>
-                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                    <span className={`text-xs ${s.exit_on_unsubscribe ? 'text-emerald-600' : 'text-amber-600'}`}>
-                      {s.exit_on_unsubscribe ? '✓ Exits on unsubscribe' : '⚠ Does not exit on unsubscribe'}
-                    </span>
-                    {s.max_active_enrollments && (
-                      <span className="text-xs text-muted-foreground">· max {s.max_active_enrollments} enrollments</span>
-                    )}
-                  </div>
-                </div>
-                <button
-                  onClick={() => openSequenceEditor(s.id)}
-                  className="text-xs text-primary hover:underline shrink-0"
-                >
-                  Edit
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Quick actions */}
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-foreground">Quick Actions</h3>
-        <div className="flex gap-3 flex-wrap">
-          <button
-            onClick={() => openWorkflowEditor(null)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
-          >
-            <GitBranch className="w-4 h-4 text-primary" /> New Trigger
-          </button>
-          <button
-            onClick={() => openSequenceEditor(null)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
-          >
-            <ListOrdered className="w-4 h-4 text-primary" /> New Sequence
-          </button>
-        </div>
       </div>
     </div>
   );
@@ -5129,7 +5095,6 @@ export default function Settings() {
   const user = getUser();
   const userRole = (user?.role ?? 'member') as NavRole;
   const visibleNav = settingsNavConfig.filter(item => item.roles.includes(userRole));
-  const { enabled: agentEnabled } = useAgentSettings();
 
   return (
     <div className="flex flex-col h-full">
@@ -5148,16 +5113,14 @@ export default function Settings() {
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ${active ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'}`}>
               <item.icon className="w-3.5 h-3.5" />
               {item.label}
-              {item.path === '/settings/model' && (
-                <span className={`w-2 h-2 rounded-full ${agentEnabled ? 'bg-amber-500' : 'bg-muted-foreground/40'}`} />
-              )}
+              <SettingsNavHealthDot path={item.path} />
             </Link>
           );
         })}
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        <nav className="hidden md:flex flex-col w-48 border-r border-border bg-muted p-2 gap-0.5">
+        <nav className="hidden md:flex flex-col w-56 border-r border-border bg-muted p-2 gap-0.5">
           {visibleNav.map((item) => {
             const active = item.path === '/settings' ? location.pathname === '/settings' : location.pathname.startsWith(item.path);
             return (
@@ -5165,9 +5128,7 @@ export default function Settings() {
                 className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${active ? 'bg-primary/15 text-primary' : 'text-foreground/60 hover:bg-muted hover:text-foreground'}`}>
                 <item.icon className="w-4 h-4" />
                 {item.label}
-                {item.path === '/settings/model' && (
-                  <span className={`ml-auto w-2 h-2 rounded-full ${agentEnabled ? 'bg-amber-500' : 'bg-muted-foreground/40'}`} />
-                )}
+                <SettingsNavHealthDot path={item.path} className="ml-auto" />
               </Link>
             );
           })}
@@ -5184,7 +5145,7 @@ export default function Settings() {
             <Route path="messaging" element={<RequireRole roles={['admin', 'owner']}><MessagingSettings /></RequireRole>} />
             <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
             <Route path="model" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
-            <Route path="automations" element={<RequireRole roles={['admin', 'owner']}><AutomationSettings /></RequireRole>} />
+            <Route path="automations" element={<Navigate to="/automations" replace />} />
             <Route path="systems" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
             <Route path="systems/oauth/hubspot/callback" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
             <Route path="database" element={<RequireRole roles={['admin', 'owner']}><DatabaseSettings /></RequireRole>} />

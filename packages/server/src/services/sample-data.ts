@@ -2,9 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DbPool } from '../db/pool.js';
+import { hashPassword } from '../auth/password.js';
 
 export const SAMPLE_DATA_IDS = {
+  USER_ADMIN: 'd0000000-0000-4000-9000-000000000101',
+  USER_MANAGER: 'd0000000-0000-4000-9000-000000000102',
+  USER_MEMBER: 'd0000000-0000-4000-9000-000000000103',
+  USER_PEER: 'd0000000-0000-4000-9000-000000000104',
   ACTOR_HUMAN: 'd0000000-0000-4000-a000-000000000101',
+  ACTOR_MANAGER: 'd0000000-0000-4000-a000-000000000103',
+  ACTOR_PEER: 'd0000000-0000-4000-a000-000000000104',
   ACTOR_AGENT: 'd0000000-0000-4000-a000-000000000102',
   ACCOUNT: 'd0000000-0000-4000-b000-000000000101',
   CONTACT: 'd0000000-0000-4000-c000-000000000101',
@@ -22,6 +29,8 @@ export const SAMPLE_DATA_IDS = {
   ASSIGNMENT: 'd0000000-0000-4000-f100-000000000101',
   RAW_CONTEXT: 'd0000000-0000-4000-f300-000000000101',
   HANDOFF: 'd0000000-0000-4000-f400-000000000101',
+  PEER_ACCOUNT: 'd0000000-0000-4000-b000-000000000202',
+  PEER_OPPORTUNITY: 'd0000000-0000-4000-d000-000000000202',
 } as const;
 
 const IDS = SAMPLE_DATA_IDS;
@@ -133,6 +142,7 @@ export async function resetSampleData(db: DbPool, tenantId: string, options?: { 
     await db.query('DELETE FROM contacts WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
     await db.query('DELETE FROM accounts WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
     await db.query('DELETE FROM actors WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
+    await db.query('DELETE FROM users WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
     await db.query('COMMIT');
   } catch (err) {
     await db.query('ROLLBACK');
@@ -172,29 +182,65 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
   await db.query('DELETE FROM contacts WHERE tenant_id <> $1 AND id = ANY($2::uuid[])', [tenantId, sampleIds]);
   await db.query('DELETE FROM accounts WHERE tenant_id <> $1 AND id = ANY($2::uuid[])', [tenantId, sampleIds]);
   await db.query('DELETE FROM actors WHERE tenant_id <> $1 AND id = ANY($2::uuid[])', [tenantId, sampleIds]);
+  await db.query('DELETE FROM users WHERE tenant_id <> $1 AND id = ANY($2::uuid[])', [tenantId, sampleIds]);
+
+  const demoPasswordHash = hashPassword('crmy-demo-123');
+  await db.query(
+    `INSERT INTO users (id, tenant_id, email, name, role, manager_id, password_hash, is_active, password_set_at)
+     VALUES
+       ($1, $5, 'sample.admin@crmy.local', 'Sample Admin', 'admin', NULL, $6, true, now()),
+       ($2, $5, 'sample.manager@crmy.local', 'Jordan Lee', 'manager', NULL, $6, true, now()),
+       ($3, $5, 'sample.rep@crmy.local', 'Cody Harris', 'member', $2, $6, true, now()),
+       ($4, $5, 'sample.peer@crmy.local', 'Avery Kim', 'member', $2, $6, true, now())
+     ON CONFLICT (tenant_id, email) DO UPDATE SET
+       name = EXCLUDED.name,
+       role = EXCLUDED.role,
+       manager_id = EXCLUDED.manager_id,
+       password_hash = EXCLUDED.password_hash,
+       is_active = true,
+       password_set_at = now(),
+       updated_at = now()`,
+    [IDS.USER_ADMIN, IDS.USER_MANAGER, IDS.USER_MEMBER, IDS.USER_PEER, tenantId, demoPasswordHash],
+  );
 
   await db.query(
-    `INSERT INTO actors (id, tenant_id, actor_type, display_name, email)
-     VALUES ($1, $2, 'human', 'Sample Owner', 'owner@example.com')
+    `INSERT INTO actors (id, tenant_id, actor_type, display_name, email, user_id, role, registration_source, registration_status)
+     VALUES ($1, $2, 'human', 'Cody Harris', 'sample.rep@crmy.local', $3, 'member', 'sample_data', 'approved')
      ON CONFLICT (id) DO UPDATE SET
        display_name = EXCLUDED.display_name,
        email = EXCLUDED.email,
+       user_id = EXCLUDED.user_id,
+       role = EXCLUDED.role,
        updated_at = now()`,
-    [IDS.ACTOR_HUMAN, tenantId],
+    [IDS.ACTOR_HUMAN, tenantId, IDS.USER_MEMBER],
   );
   await db.query(
-    `INSERT INTO actors (id, tenant_id, actor_type, display_name, agent_identifier, agent_model)
-     VALUES ($1, $2, 'agent', 'Sample Research Agent', 'sample-research-agent', 'local-model')
+    `INSERT INTO actors (id, tenant_id, actor_type, display_name, email, user_id, role, registration_source, registration_status)
+     VALUES
+       ($1, $4, 'human', 'Jordan Lee', 'sample.manager@crmy.local', $2, 'manager', 'sample_data', 'approved'),
+       ($3, $4, 'human', 'Avery Kim', 'sample.peer@crmy.local', $5, 'member', 'sample_data', 'approved')
+     ON CONFLICT (id) DO UPDATE SET
+       display_name = EXCLUDED.display_name,
+       email = EXCLUDED.email,
+       user_id = EXCLUDED.user_id,
+       role = EXCLUDED.role,
+       updated_at = now()`,
+    [IDS.ACTOR_MANAGER, IDS.USER_MANAGER, IDS.ACTOR_PEER, tenantId, IDS.USER_PEER],
+  );
+  await db.query(
+    `INSERT INTO actors (id, tenant_id, actor_type, display_name, agent_identifier, agent_model, role, registration_source, registration_status)
+     VALUES ($1, $2, 'agent', 'Sample Revenue Agent', 'sample-revenue-agent', 'local-model', 'member', 'sample_data', 'approved')
      ON CONFLICT (id) DO UPDATE SET
        display_name = EXCLUDED.display_name,
        agent_identifier = EXCLUDED.agent_identifier,
        agent_model = EXCLUDED.agent_model,
+       role = EXCLUDED.role,
        updated_at = now()`,
     [IDS.ACTOR_AGENT, tenantId],
   );
   await db.query(
-    `INSERT INTO accounts (id, tenant_id, name, industry, health_score, annual_revenue, domain, website)
-     VALUES ($1, $2, 'Northstar Labs', 'AI Infrastructure', 82, 250000, 'northstarlabs.example', 'https://northstarlabs.example')
+    `INSERT INTO accounts (id, tenant_id, name, industry, health_score, annual_revenue, domain, website, owner_id)
+     VALUES ($1, $2, 'Northstar Labs', 'AI Infrastructure', 82, 250000, 'northstarlabs.example', 'https://northstarlabs.example', $3)
      ON CONFLICT (id) DO UPDATE SET
        name = EXCLUDED.name,
        industry = EXCLUDED.industry,
@@ -202,12 +248,13 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
        annual_revenue = EXCLUDED.annual_revenue,
        domain = EXCLUDED.domain,
        website = EXCLUDED.website,
+       owner_id = EXCLUDED.owner_id,
        updated_at = now()`,
-    [IDS.ACCOUNT, tenantId],
+    [IDS.ACCOUNT, tenantId, IDS.USER_MEMBER],
   );
   await db.query(
-    `INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage)
-     VALUES ($1, $2, 'Maya', 'Patel', 'maya@northstarlabs.example', 'VP Revenue Systems', $3, 'prospect')
+    `INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage, owner_id)
+     VALUES ($1, $2, 'Maya', 'Patel', 'maya@northstarlabs.example', 'VP Revenue Systems', $3, 'prospect', $4)
      ON CONFLICT (id) DO UPDATE SET
        first_name = EXCLUDED.first_name,
        last_name = EXCLUDED.last_name,
@@ -215,12 +262,13 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
        title = EXCLUDED.title,
        account_id = EXCLUDED.account_id,
        lifecycle_stage = EXCLUDED.lifecycle_stage,
+       owner_id = EXCLUDED.owner_id,
        updated_at = now()`,
-    [IDS.CONTACT, tenantId, IDS.ACCOUNT],
+    [IDS.CONTACT, tenantId, IDS.ACCOUNT, IDS.USER_MEMBER],
   );
   await db.query(
-    `INSERT INTO opportunities (id, tenant_id, name, account_id, contact_id, stage, amount, close_date)
-     VALUES ($1, $2, 'Northstar Agent Context Rollout', $3, $4, 'prospecting', 125000, '2026-06-30')
+    `INSERT INTO opportunities (id, tenant_id, name, account_id, contact_id, stage, amount, close_date, owner_id)
+     VALUES ($1, $2, 'Northstar Agent Context Rollout', $3, $4, 'prospecting', 125000, '2026-06-30', $5)
      ON CONFLICT (id) DO UPDATE SET
        name = EXCLUDED.name,
        account_id = EXCLUDED.account_id,
@@ -228,12 +276,13 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
        stage = EXCLUDED.stage,
        amount = EXCLUDED.amount,
        close_date = EXCLUDED.close_date,
+       owner_id = EXCLUDED.owner_id,
        updated_at = now()`,
-    [IDS.OPPORTUNITY, tenantId, IDS.ACCOUNT, IDS.CONTACT],
+    [IDS.OPPORTUNITY, tenantId, IDS.ACCOUNT, IDS.CONTACT, IDS.USER_MEMBER],
   );
   await db.query(
-    `INSERT INTO use_cases (id, tenant_id, name, account_id, opportunity_id, stage, health_score, attributed_arr)
-     VALUES ($1, $2, 'Agent Briefing Memory', $3, $4, 'discovery', 76, 125000)
+    `INSERT INTO use_cases (id, tenant_id, name, account_id, opportunity_id, stage, health_score, attributed_arr, owner_id)
+     VALUES ($1, $2, 'Agent Briefing Memory', $3, $4, 'discovery', 76, 125000, $5)
      ON CONFLICT (id) DO UPDATE SET
        name = EXCLUDED.name,
        account_id = EXCLUDED.account_id,
@@ -241,12 +290,40 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
        stage = EXCLUDED.stage,
        health_score = EXCLUDED.health_score,
        attributed_arr = EXCLUDED.attributed_arr,
+       owner_id = EXCLUDED.owner_id,
        updated_at = now()`,
-    [IDS.USE_CASE, tenantId, IDS.ACCOUNT, IDS.OPPORTUNITY],
+    [IDS.USE_CASE, tenantId, IDS.ACCOUNT, IDS.OPPORTUNITY, IDS.USER_MEMBER],
   );
   await db.query(
-    `INSERT INTO activities (id, tenant_id, type, subject, body, performed_by, subject_type, subject_id, account_id, contact_id, opportunity_id, occurred_at, outcome, detail)
-     VALUES ($1, $2, 'call', 'Discovery call with Maya Patel', $3, $4, 'opportunity', $5, $6, $7, $5, now(), 'connected', $8)
+    `INSERT INTO accounts (id, tenant_id, name, industry, health_score, annual_revenue, domain, website, owner_id)
+     VALUES ($1, $2, 'Atlas Supply Co', 'Manufacturing', 69, 180000, 'atlassupply.example', 'https://atlassupply.example', $3)
+     ON CONFLICT (id) DO UPDATE SET
+       name = EXCLUDED.name,
+       industry = EXCLUDED.industry,
+       health_score = EXCLUDED.health_score,
+       annual_revenue = EXCLUDED.annual_revenue,
+       domain = EXCLUDED.domain,
+       website = EXCLUDED.website,
+       owner_id = EXCLUDED.owner_id,
+       updated_at = now()`,
+    [IDS.PEER_ACCOUNT, tenantId, IDS.USER_PEER],
+  );
+  await db.query(
+    `INSERT INTO opportunities (id, tenant_id, name, account_id, stage, amount, close_date, owner_id)
+     VALUES ($1, $2, 'Atlas Renewal Workflow', $3, 'qualification', 64000, '2026-07-15', $4)
+     ON CONFLICT (id) DO UPDATE SET
+       name = EXCLUDED.name,
+       account_id = EXCLUDED.account_id,
+       stage = EXCLUDED.stage,
+       amount = EXCLUDED.amount,
+       close_date = EXCLUDED.close_date,
+       owner_id = EXCLUDED.owner_id,
+       updated_at = now()`,
+    [IDS.PEER_OPPORTUNITY, tenantId, IDS.PEER_ACCOUNT, IDS.USER_PEER],
+  );
+  await db.query(
+    `INSERT INTO activities (id, tenant_id, type, subject, body, performed_by, subject_type, subject_id, account_id, contact_id, opportunity_id, occurred_at, outcome, detail, owner_id)
+     VALUES ($1, $2, 'call', 'Discovery call with Maya Patel', $3, $4, 'opportunity', $5, $6, $7, $5, now(), 'connected', $8, $9)
      ON CONFLICT (id) DO UPDATE SET
        subject = EXCLUDED.subject,
        body = EXCLUDED.body,
@@ -258,7 +335,8 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
        opportunity_id = EXCLUDED.opportunity_id,
        occurred_at = EXCLUDED.occurred_at,
        outcome = EXCLUDED.outcome,
-       detail = EXCLUDED.detail`,
+       detail = EXCLUDED.detail,
+       owner_id = EXCLUDED.owner_id`,
     [
       IDS.ACTIVITY,
       tenantId,
@@ -276,6 +354,7 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
           memory_created: 2,
         },
       }),
+      IDS.USER_MEMBER,
     ],
   );
   await db.query(
@@ -587,13 +666,13 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
        action_type = EXCLUDED.action_type,
        action_summary = EXCLUDED.action_summary,
        action_payload = EXCLUDED.action_payload,
-       status = CASE WHEN hitl_requests.status IN ('approved', 'rejected') THEN hitl_requests.status ELSE EXCLUDED.status END,
+       status = EXCLUDED.status,
        priority = EXCLUDED.priority,
        sla_minutes = EXCLUDED.sla_minutes,
        expires_at = EXCLUDED.expires_at,
-       resolved_at = CASE WHEN hitl_requests.status IN ('approved', 'rejected') THEN hitl_requests.resolved_at ELSE NULL END,
-       reviewer_id = CASE WHEN hitl_requests.status IN ('approved', 'rejected') THEN hitl_requests.reviewer_id ELSE NULL END,
-       review_note = CASE WHEN hitl_requests.status IN ('approved', 'rejected') THEN hitl_requests.review_note ELSE NULL END`,
+       resolved_at = NULL,
+       reviewer_id = NULL,
+       review_note = NULL`,
     [
       IDS.HANDOFF,
       tenantId,

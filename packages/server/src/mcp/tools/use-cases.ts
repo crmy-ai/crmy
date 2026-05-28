@@ -19,6 +19,7 @@ import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+import { assertOwnedObjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
 
 function runUseCaseOperation<T>(
   db: DbPool,
@@ -49,8 +50,10 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
           input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'use_case', input.custom_fields, { isCreate: true });
         }
+        const owner_id = await defaultOwnerForCreate(db, actor, input.owner_id);
         const uc = await ucRepo.createUseCase(db, actor.tenant_id, {
           ...input,
+          owner_id: owner_id ?? undefined,
           created_by: actor.actor_id,
         });
         const event_id = await emitEvent(db, {
@@ -86,6 +89,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       handler: async (input: z.infer<typeof useCaseGet>, actor: ActorContext) => {
         const uc = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!uc) throw notFound('UseCase', input.id);
+        await assertOwnedObjectAccess(db, actor, 'use_case', input.id);
         const contacts = await ucRepo.listContacts(db, input.id);
         return { use_case: uc, contacts };
       },
@@ -96,8 +100,10 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       description: 'Search use cases with flexible filters. Use account_id for a specific company, stage for lifecycle filtering, product_line for product segmentation, and query for text search. Returns paginated results sorted by recency.',
       inputSchema: useCaseSearch,
       handler: async (input: z.infer<typeof useCaseSearch>, actor: ActorContext) => {
+        const ownerFilter = await resolveOwnerFilter(db, actor, input.owner_id);
         const result = await ucRepo.searchUseCases(db, actor.tenant_id, {
           ...input,
+          ...ownerFilter,
           limit: input.limit ?? 20,
         });
         return { use_cases: result.data, next_cursor: result.next_cursor, total: result.total };
@@ -112,6 +118,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         return runUseCaseOperation(db, actor, 'use_case_update', input, async () => {
         const before = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!before) throw notFound('UseCase', input.id);
+        await assertOwnedObjectAccess(db, actor, 'use_case', input.id);
 
         if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
           input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'use_case', input.patch.custom_fields);
@@ -156,6 +163,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         return runUseCaseOperation(db, actor, 'use_case_delete', input, async () => {
         const uc = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!uc) throw notFound('UseCase', input.id);
+        await assertOwnedObjectAccess(db, actor, 'use_case', input.id);
 
         await ucRepo.deleteUseCase(db, actor.tenant_id, input.id, {
           expectedVersion: input.expected_version,
@@ -195,6 +203,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         return runUseCaseOperation(db, actor, 'use_case_advance_stage', input, async () => {
         const before = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!before) throw notFound('UseCase', input.id);
+        await assertOwnedObjectAccess(db, actor, 'use_case', input.id);
 
         const transition = await validateUseCaseTransition(
           db, actor.tenant_id, input.id, before.stage, input.stage,
@@ -246,6 +255,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         return runUseCaseOperation(db, actor, 'use_case_update_consumption', input, async () => {
         const before = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!before) throw notFound('UseCase', input.id);
+        await assertOwnedObjectAccess(db, actor, 'use_case', input.id);
 
         const uc = await ucRepo.updateUseCase(db, actor.tenant_id, input.id, {
           consumption_current: input.consumption_current,
@@ -290,6 +300,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         return runUseCaseOperation(db, actor, 'use_case_set_health', input, async () => {
         const before = await ucRepo.getUseCase(db, actor.tenant_id, input.id);
         if (!before) throw notFound('UseCase', input.id);
+        await assertOwnedObjectAccess(db, actor, 'use_case', input.id);
 
         const uc = await ucRepo.updateUseCase(db, actor.tenant_id, input.id, {
           health_score: input.score,
@@ -331,6 +342,8 @@ export function useCaseTools(db: DbPool): ToolDef[] {
         return runUseCaseOperation(db, actor, 'use_case_link_contact', input, async () => {
         const uc = await ucRepo.getUseCase(db, actor.tenant_id, input.use_case_id);
         if (!uc) throw notFound('UseCase', input.use_case_id);
+        await assertOwnedObjectAccess(db, actor, 'use_case', input.use_case_id);
+        await assertOwnedObjectAccess(db, actor, 'contact', input.contact_id);
 
         const link = await ucRepo.linkContact(db, input.use_case_id, input.contact_id, input.role);
 
@@ -363,6 +376,8 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       inputSchema: useCaseUnlinkContact,
       handler: async (input: z.infer<typeof useCaseUnlinkContact>, actor: ActorContext) => {
         return runUseCaseOperation(db, actor, 'use_case_unlink_contact', input, async () => {
+        await assertOwnedObjectAccess(db, actor, 'use_case', input.use_case_id);
+        await assertOwnedObjectAccess(db, actor, 'contact', input.contact_id);
         const removed = await ucRepo.unlinkContact(db, input.use_case_id, input.contact_id);
         if (!removed) throw notFound('UseCaseContact', `${input.use_case_id}/${input.contact_id}`);
 
@@ -393,6 +408,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       description: 'List all contacts linked to a use case, including their roles. Returns contact profiles with their relationship to the use case.',
       inputSchema: useCaseListContacts,
       handler: async (input: z.infer<typeof useCaseListContacts>, actor: ActorContext) => {
+        await assertOwnedObjectAccess(db, actor, 'use_case', input.use_case_id);
         const contacts = await ucRepo.listContacts(db, input.use_case_id);
         return { contacts };
       },
@@ -403,6 +419,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       description: 'Get a chronological activity timeline for a use case. Returns all activities linked to this use case sorted by occurred_at descending.',
       inputSchema: useCaseGetTimeline,
       handler: async (input: z.infer<typeof useCaseGetTimeline>, actor: ActorContext) => {
+        await assertOwnedObjectAccess(db, actor, 'use_case', input.id);
         const activities = await ucRepo.getUseCaseTimeline(db, actor.tenant_id, input.id, {
           limit: input.limit ?? 50,
           types: input.types,

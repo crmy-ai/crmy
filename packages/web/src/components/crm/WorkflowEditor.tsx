@@ -20,7 +20,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   useCreateWorkflow, useUpdateWorkflow, useTestWorkflow, useTestDraftWorkflow, useDraftWorkflowContentPreview, useSequences, useWorkflow,
-  useSystemsOfRecord, useSystemMappings,
+  useSystemsOfRecord, useSystemMappings, useWhoAmI,
 } from '@/api/hooks';
 import {
   Dialog, DialogContent, DialogTitle,
@@ -295,18 +295,22 @@ function ActionCard({
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mappings: any[] = allMappings.filter((m: any) => !action.config.system_id || m.system_id === action.config.system_id);
+  const { data: whoami } = useWhoAmI() as any;
+  const isAdminUser = whoami?.user?.role === 'admin' || whoami?.user?.role === 'owner';
   const agentReady = agentEnabled && Boolean(agentConfig?.model && agentConfig?.base_url) && connectivity !== 'offline';
   const canPreviewAi = action.config.ai_generate === 'true' && (action.type === 'send_email' || action.type === 'send_notification');
 
   function promptConfigureAgent() {
     toast({
-      title: 'Configure the Local Workspace Agent',
-      description: 'AI-generated trigger messages need an enabled model in Model Settings.',
-      action: (
+      title: isAdminUser ? 'Configure the Local Workspace Agent' : 'Workspace Agent needs admin setup',
+      description: isAdminUser
+        ? 'AI-generated trigger messages need an enabled model in Model Settings.'
+        : 'Ask an admin to enable the Workspace Agent before using AI-generated trigger messages.',
+      action: isAdminUser ? (
         <ToastAction altText="Open Model Settings" onClick={() => navigate('/settings/model')}>
           Configure
         </ToastAction>
-      ),
+      ) : undefined,
     });
   }
 
@@ -595,7 +599,7 @@ function ActionCard({
                           ? <><Loader2 className="h-3 w-3 animate-spin" /> Generating preview…</>
                           : <><Sparkles className="h-3 w-3" /> Preview AI content</>}
                       </button>
-                      {!agentReady && (
+                      {!agentReady && isAdminUser && (
                         <button
                           type="button"
                           onClick={() => navigate('/settings/model')}

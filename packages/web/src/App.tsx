@@ -54,6 +54,7 @@ import InboundInboxPage from '@/pages/InboundInbox';
 import AuditLogPage from '@/pages/AuditLog';
 import OperationsPage from '@/pages/Operations';
 import { SearchResultsPage } from '@/pages/SearchResults';
+import { getUser } from '@/api/client';
 
 function ThemeApplier() {
   const { darkVariant } = useAppStore();
@@ -75,6 +76,14 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem('crmy_token');
   if (!token) {
     return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
+}
+
+function AdminGuard({ children }: { children: React.ReactNode }) {
+  const role = getUser()?.role;
+  if (role !== 'admin' && role !== 'owner') {
+    return <Navigate to="/" replace />;
   }
   return <>{children}</>;
 }
@@ -101,11 +110,11 @@ function AnimatedRoutes() {
           <Route path="/activities" element={<Activities />} />
           <Route path="/handoffs" element={<InboxPage />} />
           <Route path="/context" element={<ContextPage />} />
-          <Route path="/automations" element={<AutomationsPage />} />
+          <Route path="/automations" element={<AdminGuard><AutomationsPage /></AdminGuard>} />
           <Route path="/emails" element={<EmailsPage />} />
           <Route path="/contacts/:id/graph" element={<MemoryGraphPage />} />
-          <Route path="/operations" element={<OperationsPage />} />
-          <Route path="/audit-log" element={<AuditLogPage />} />
+          <Route path="/operations" element={<AdminGuard><OperationsPage /></AdminGuard>} />
+          <Route path="/audit-log" element={<AdminGuard><AuditLogPage /></AdminGuard>} />
           <Route path="/search" element={<SearchResultsPage />} />
           <Route path="/accounts/:id/graph" element={<MemoryGraphPage />} />
           <Route path="/companies/:id/graph" element={<MemoryGraphPage />} />

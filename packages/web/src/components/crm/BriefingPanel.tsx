@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { useBriefing, useBriefingSummary } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { FileText, ChevronDown, ChevronUp, AlertTriangle, ClipboardList, Brain, X, Phone, Mail, Calendar, Monitor, CheckSquare, Activity, Swords, Sparkles, Loader2, Network, Gauge, EyeOff } from 'lucide-react';
+import { FileText, ChevronDown, ChevronUp, AlertTriangle, ClipboardList, Brain, X, Phone, Mail, Calendar, Monitor, CheckSquare, Activity, Swords, Sparkles, Loader2, Network, Gauge, EyeOff, Bot } from 'lucide-react';
 import { ACTIVITY_COLORS } from './GraphSidebar';
 import { TYPE_COLORS } from './ContextPanel';
 import { toast } from '@/components/ui/use-toast';
@@ -230,9 +230,9 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
                   openAIWithContext({ type: storeType as 'contact' | 'account' | 'opportunity' | 'use-case', id: subjectId, name: subjectName });
                   navigate('/agent');
                 }}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500/10 text-violet-500 text-xs font-medium hover:bg-violet-500/20 transition-colors"
               >
-                <Sparkles className="w-3 h-3" /> Chat with Agent
+                <Bot className="w-3 h-3" /> Chat with Agent
               </button>
             )}
           </div>

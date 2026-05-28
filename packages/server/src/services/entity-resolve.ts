@@ -78,6 +78,7 @@ export interface ResolveInput {
     email?: string;
   };
   actor_id?: UUID;
+  owner_ids?: UUID[];
   limit?: number;
 }
 
@@ -515,6 +516,34 @@ function canAutoResolveWithAffinity(candidates: ResolveCandidate[]): boolean {
   return top.affinity_score > 0 && mediums.every((c) => c.affinity_score <= top.affinity_score);
 }
 
+async function filterCandidatesByOwners(
+  db: DbPool,
+  tenantId: UUID,
+  candidates: ResolveCandidate[],
+  ownerIds?: UUID[],
+): Promise<ResolveCandidate[]> {
+  if (!ownerIds) return candidates;
+  if (ownerIds.length === 0 || candidates.length === 0) return [];
+  const contactIds = candidates.filter(c => c.entity_type === 'contact').map(c => c.id);
+  const accountIds = candidates.filter(c => c.entity_type === 'account').map(c => c.id);
+  const visible = new Set<string>();
+  if (contactIds.length > 0) {
+    const rows = await db.query(
+      `SELECT id FROM contacts WHERE tenant_id = $1 AND id = ANY($2::uuid[]) AND owner_id = ANY($3::uuid[])`,
+      [tenantId, contactIds, ownerIds],
+    );
+    for (const row of rows.rows) visible.add(row.id);
+  }
+  if (accountIds.length > 0) {
+    const rows = await db.query(
+      `SELECT id FROM accounts WHERE tenant_id = $1 AND id = ANY($2::uuid[]) AND owner_id = ANY($3::uuid[])`,
+      [tenantId, accountIds, ownerIds],
+    );
+    for (const row of rows.rows) visible.add(row.id);
+  }
+  return candidates.filter(candidate => visible.has(candidate.id));
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────
 
 export async function entityResolve(
@@ -527,6 +556,7 @@ export async function entityResolve(
     entity_type = 'any',
     context_hints,
     actor_id,
+    owner_ids,
     limit: inputLimit = 5,
   } = input;
 
@@ -546,7 +576,7 @@ export async function entityResolve(
       : Promise.resolve([]),
   ]);
 
-  let all = [...contactCandidates, ...accountCandidates];
+  let all = await filterCandidatesByOwners(db, tenantId, [...contactCandidates, ...accountCandidates], owner_ids);
 
   // ── Actor affinity enrichment ─────────────────────────────────────────────
   if (actor_id && all.length > 0) {

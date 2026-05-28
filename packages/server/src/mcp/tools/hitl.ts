@@ -5,12 +5,15 @@ import { z } from 'zod';
 import { hitlSubmit, hitlCheckStatus, hitlListPending, hitlResolve } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext, UUID } from '@crmy/shared';
+import { withTransaction } from '../../db/transaction.js';
 import * as hitlRepo from '../../db/repos/hitl.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, validationError } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
 import { runToolOperation } from '../tool-operation.js';
 import { mutationReceipt } from '../mutation-receipt.js';
+import { assertHITLAccess, assertHITLPayloadAccess, filterVisibleHITLRequests } from '../../services/access-control.js';
+import { applyApprovedRecordCreation } from '../../services/record-proposals.js';
 
 export function hitlTools(db: DbPool): ToolDef[] {
   return [
@@ -21,6 +24,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
       inputSchema: hitlSubmit,
       handler: async (input: z.infer<typeof hitlSubmit>, actor: ActorContext) => {
         return runToolOperation(db, actor, 'hitl_submit_request', input, async () => {
+        await assertHITLPayloadAccess(db, actor, input.action_payload, undefined);
         const request = await hitlRepo.createHITLRequest(db, actor.tenant_id, {
           agent_id: actor.actor_id,
           action_type: input.action_type,
@@ -64,6 +68,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
       handler: async (input: z.infer<typeof hitlCheckStatus>, actor: ActorContext) => {
         const request = await hitlRepo.getHITLRequest(db, actor.tenant_id, input.request_id);
         if (!request) throw notFound('HITL Request', input.request_id);
+        await assertHITLAccess(db, actor, request);
         return { status: request.status, review_note: request.review_note };
       },
     },
@@ -73,7 +78,12 @@ export function hitlTools(db: DbPool): ToolDef[] {
       description: 'List all pending HITL approval requests awaiting human review. Use this to check your queue of outstanding requests or to see what other agents are waiting on. Returns requests sorted by creation time with action summaries and auto-approve deadlines.',
       inputSchema: hitlListPending,
       handler: async (input: z.infer<typeof hitlListPending>, actor: ActorContext) => {
-        const requests = await hitlRepo.listPendingHITL(db, actor.tenant_id, input.limit ?? 20);
+        const limit = input.limit ?? 20;
+        const candidates = await hitlRepo.listHITLRequests(db, actor.tenant_id, {
+          status: 'pending',
+          limit: Math.min(500, Math.max(limit * 10, limit)),
+        });
+        const requests = await filterVisibleHITLRequests(db, actor, candidates, limit);
         return { requests };
       },
     },
@@ -84,28 +94,38 @@ export function hitlTools(db: DbPool): ToolDef[] {
       inputSchema: hitlResolve,
       handler: async (input: z.infer<typeof hitlResolve>, actor: ActorContext) => {
         return runToolOperation(db, actor, 'hitl_resolve', input, async () => {
-        const request = await hitlRepo.resolveHITLRequest(
-          db,
-          actor.tenant_id,
-          input.request_id,
-          input.decision,
-          actor.actor_id,
-          input.note,
-        );
-        if (!request) throw notFound('HITL Request (or already resolved)', input.request_id);
+        const before = await hitlRepo.getHITLRequest(db, actor.tenant_id, input.request_id);
+        if (!before) throw notFound('HITL Request (or already resolved)', input.request_id);
+        await assertHITLAccess(db, actor, before);
+        const { request, created_record, event_id } = await withTransaction(db, async tx => {
+          const request = await hitlRepo.resolveHITLRequest(
+            tx,
+            actor.tenant_id,
+            input.request_id,
+            input.decision,
+            actor.actor_id,
+            input.note,
+          );
+          if (!request) throw notFound('HITL Request (or already resolved)', input.request_id);
+          const created_record = input.decision === 'approved'
+            ? await applyApprovedRecordCreation(tx, actor, request)
+            : null;
 
-        const event_id = await emitEvent(db, {
-          tenantId: actor.tenant_id,
-          eventType: input.decision === 'approved' ? 'hitl.approved' : 'hitl.rejected',
-          actorId: actor.actor_id,
-          actorType: actor.actor_type,
-          objectType: 'hitl_request',
-          objectId: request.id,
-          afterData: request,
+          const event_id = await emitEvent(tx, {
+            tenantId: actor.tenant_id,
+            eventType: input.decision === 'approved' ? 'hitl.approved' : 'hitl.rejected',
+            actorId: actor.actor_id,
+            actorType: actor.actor_type,
+            objectType: 'hitl_request',
+            objectId: request.id,
+            afterData: request,
+          });
+          return { request, created_record, event_id };
         });
 
         return {
           request,
+          ...(created_record ? { created_record } : {}),
           event_id,
           mutation: mutationReceipt(actor, {
             objectType: 'hitl_request',

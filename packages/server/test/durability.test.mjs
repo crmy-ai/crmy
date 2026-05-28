@@ -14,7 +14,8 @@ import { runIdempotent } from '../dist/db/repos/idempotency.js';
 import { searchContextEntries } from '../dist/db/repos/context-entries.js';
 import { withTransaction } from '../dist/db/transaction.js';
 import { encryptSecret, decryptSecret, redactSecrets } from '../dist/lib/secrets.js';
-import { shouldAutoPromoteSignal } from '../dist/agent/extraction.js';
+import { parseExtractionOutput, parseExtractionResponse, shouldAutoPromoteSignal } from '../dist/agent/extraction.js';
+import { detectRawContextSubjects } from '../dist/services/raw-context-subjects.js';
 import { hubspotAdapter } from '../dist/services/systems-of-record/hubspot.js';
 import { salesforceAdapter } from '../dist/services/systems-of-record/salesforce.js';
 import { databricksAdapter } from '../dist/services/systems-of-record/databricks.js';
@@ -26,6 +27,7 @@ import { resolveSequenceGoalContactId } from '../dist/services/sequence-executor
 import { createWorkflowEngine, dryRunWorkflowDefinition, matchesFilter } from '../dist/workflows/engine.js';
 import { buildVariableContext, interpolate } from '../dist/workflows/variables.js';
 import { __testSignalGrouping } from '../dist/services/signal-groups.js';
+import { evaluateMemoryReadiness } from '../dist/services/memory-readiness.js';
 
 const baseInput = {
   tenantId: '11111111-1111-4111-8111-111111111111',
@@ -304,6 +306,129 @@ test('signal auto-promotion requires evidence and configured confidence threshol
   assert.equal(shouldAutoPromoteSignal({ confidence: 0.84, threshold: 0.85, evidenceCount: 1 }), false);
   assert.equal(shouldAutoPromoteSignal({ confidence: 0.95, threshold: 0.85, evidenceCount: 0 }), false);
   assert.equal(shouldAutoPromoteSignal({ threshold: 0.85, evidenceCount: 1 }), false);
+  assert.equal(shouldAutoPromoteSignal({ confidence: 0.95, threshold: 0.85, evidenceCount: 1, speculative: true }), false);
+});
+
+test('memory readiness keeps incomplete typed Signals reviewable without dropping details', () => {
+  const readiness = evaluateMemoryReadiness({
+    person_name: 'Maya Patel',
+    influence: 'Champion',
+    observed_note: 'She is pushing the evaluation internally.',
+  }, {
+    type: 'object',
+    properties: {
+      person_name: { type: 'string' },
+      role: { type: 'string' },
+      influence: { type: 'string', enum: ['decision_maker', 'influencer', 'champion'] },
+    },
+    required: ['person_name', 'role', 'influence'],
+  });
+
+  assert.equal(readiness.readiness_status, 'needs_more_detail');
+  assert.deepEqual(readiness.missing_details, ['Role']);
+  assert.equal(readiness.normalized_structured_data.influence, 'champion');
+  assert.deepEqual(readiness.normalized_structured_data.unmapped_details, {
+    observed_note: 'She is pushing the evaluation internally.',
+  });
+  assert.equal(readiness.extraction_completeness, 0.67);
+});
+
+test('extraction parser recovers common local-model JSON formatting issues', () => {
+  const fenced = `Here is the JSON:\n\`\`\`json\n{\n  "context_entries": [\n    {\n      "context_type": "next_step",\n      "title": "Workshop follow-up",\n      "body": "Maya asked for a follow-up workshop.",\n      "confidence": 0.9,\n      "structured_data": {},\n      "evidence": [{ "source_type": "add_context", "snippet": "Maya asked for a follow-up workshop.", }],\n    },\n  ],\n}\n\`\`\``;
+  const entries = parseExtractionResponse(fenced);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].context_type, 'next_step');
+
+  const arrayOnly = `[
+    {
+      "context_type": "deal_risk",
+      "title": "Budget risk",
+      "body": "Finance approval is still pending
+before the deal can move forward.",
+      "confidence": 0.76
+    }
+  ]`;
+  const arrayEntries = parseExtractionResponse(arrayOnly);
+  assert.equal(arrayEntries.length, 1);
+  assert.equal(arrayEntries[0].title, 'Budget risk');
+
+  const signalsEnvelope = parseExtractionResponse('{"signals":[{"context_type":"stakeholder","title":"Maya sponsor","body":"Maya may sponsor the evaluation."}]}');
+  assert.equal(signalsEnvelope.length, 1);
+
+  const proposalEnvelope = parseExtractionOutput(`{
+    "context_entries": [],
+    "record_proposals": [{
+      "record_type": "opportunity",
+      "name": "Acme workshop evaluation",
+      "confidence": 0.82,
+      "reason": "The source says Acme is ready for a demo and workshop.",
+      "fields": { "account_name": "Acme Corporation", "stage": "qualification" }
+    }]
+  }`);
+  assert.equal(proposalEnvelope.entries.length, 0);
+  assert.equal(proposalEnvelope.proposedRecords.length, 1);
+  assert.equal(proposalEnvelope.proposedRecords[0].record_type, 'opportunity');
+});
+
+class FakeRawSubjectDb {
+  accounts = [
+    { id: 'acct-nike', name: 'Nike', domain: 'nike.example', industry: 'Retail' },
+    { id: 'acct-acme', name: 'Acme Corporation', domain: 'acme.example', industry: 'Manufacturing' },
+  ];
+
+  contacts = [
+    { id: 'contact-nike-jacob', first_name: 'Jacob', last_name: 'Lee', name: 'Jacob Lee', email: 'jacob.lee@nike.example', title: 'Director', company_name: 'Nike', account_id: 'acct-nike', account_domain: 'nike.example' },
+    { id: 'contact-acme-jacob', first_name: 'Jacob', last_name: 'Smith', name: 'Jacob Smith', email: 'jacob.smith@acme.example', title: 'VP Ops', company_name: 'Acme Corporation', account_id: 'acct-acme', account_domain: 'acme.example' },
+  ];
+
+  opportunities = [
+    { id: 'opp-nike-pegasus', name: 'Pegasus expansion', account_id: 'acct-nike', account_name: 'Nike', contact_id: 'contact-nike-jacob', contact_name: 'Jacob Lee', stage: 'evaluation', close_date: '2026-06-30' },
+    { id: 'opp-acme-pegasus', name: 'Pegasus expansion', account_id: 'acct-acme', account_name: 'Acme Corporation', contact_id: 'contact-acme-jacob', contact_name: 'Jacob Smith', stage: 'qualification', close_date: '2026-07-15' },
+  ];
+
+  useCases = [
+    { id: 'uc-nike-forecasting', name: 'Forecast automation', account_id: 'acct-nike', account_name: 'Nike', opportunity_id: 'opp-nike-pegasus', opportunity_name: 'Pegasus expansion', stage: 'validation' },
+    { id: 'uc-acme-forecasting', name: 'Forecast automation', account_id: 'acct-acme', account_name: 'Acme Corporation', opportunity_id: 'opp-acme-pegasus', opportunity_name: 'Pegasus expansion', stage: 'discovery' },
+  ];
+
+  async query(sql) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    if (text.includes('FROM contacts c') && text.includes('LEFT JOIN accounts a')) return { rows: this.contacts, rowCount: this.contacts.length };
+    if (text.includes('FROM accounts') && text.includes('ORDER BY updated_at')) return { rows: this.accounts, rowCount: this.accounts.length };
+    if (text.includes('FROM opportunities o')) return { rows: this.opportunities, rowCount: this.opportunities.length };
+    if (text.includes('FROM use_cases uc')) return { rows: this.useCases, rowCount: this.useCases.length };
+    throw new Error(`Unexpected query: ${text}`);
+  }
+}
+
+test('Raw Context subject detection narrows child records to the matched account', async () => {
+  const detected = await detectRawContextSubjects(
+    new FakeRawSubjectDb(),
+    baseInput.tenantId,
+    'We are working with Nike on the Pegasus expansion. Jacob can join the workshop next week.',
+    { limit: 10 },
+  );
+
+  assert.ok(detected.subjects.some(subject => subject.type === 'account' && subject.id === 'acct-nike'));
+  assert.ok(detected.subjects.some(subject => subject.type === 'opportunity' && subject.id === 'opp-nike-pegasus'));
+  assert.ok(detected.subjects.some(subject => subject.type === 'contact' && subject.id === 'contact-nike-jacob'));
+  assert.equal(detected.subjects.some(subject => subject.id === 'opp-acme-pegasus'), false);
+  assert.equal(detected.subjects.some(subject => subject.id === 'contact-acme-jacob'), false);
+  assert.equal(detected.account_scope[0].opportunities_checked, 1);
+  assert.match(detected.resolution_summary, /Matched Nike/);
+});
+
+test('Raw Context subject detection scopes use cases under the matched account', async () => {
+  const detected = await detectRawContextSubjects(
+    new FakeRawSubjectDb(),
+    baseInput.tenantId,
+    'Nike wants the Forecast automation use case reviewed before the next workshop.',
+    { limit: 10 },
+  );
+
+  assert.ok(detected.subjects.some(subject => subject.type === 'use_case' && subject.id === 'uc-nike-forecasting'));
+  assert.equal(detected.subjects.some(subject => subject.id === 'uc-acme-forecasting'), false);
+  assert.equal(detected.account_scope[0].use_cases_checked, 1);
 });
 
 test('Signal grouping recognizes semantically related GTM claims beyond token overlap', () => {

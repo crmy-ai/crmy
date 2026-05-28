@@ -334,7 +334,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
     <Sheet open={open} onOpenChange={v => { if (!v) onClose(); }}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-lg flex flex-col gap-0 p-0 overflow-hidden"
+        className="w-full sm:max-w-2xl flex flex-col gap-0 p-0 overflow-hidden"
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
         <SheetHeader className="px-5 pt-5 pb-4 border-b border-border flex-shrink-0">

@@ -12,24 +12,56 @@ export interface RawContextResolvedSubject {
   name: string;
   confidence: string;
   match_tier: string;
+  account_id?: string;
+  account_name?: string;
+  scope_reason?: string;
+  parent_subject?: { type: string; id: string; name: string };
 }
 
 export interface RawContextSubjectDetection {
   candidates: string[];
   subjects: RawContextResolvedSubject[];
   skipped: Array<{ name: string; reason: string }>;
+  proposed_records?: RawContextRecordProposal[];
+  account_scope?: RawContextAccountScope[];
+  records_examined?: {
+    accounts: number;
+    contacts: number;
+    opportunities: number;
+    use_cases: number;
+  };
+  resolution_summary?: string;
+}
+
+export interface RawContextRecordProposal {
+  record_type: 'contact' | 'account' | 'opportunity' | 'use_case';
+  name: string;
+  confidence: number;
+  reason: string;
+  fields: Record<string, unknown>;
+  duplicate_candidates?: Array<{
+    record_type: string;
+    id: string;
+    name: string;
+    confidence?: string;
+    reason?: string;
+  }>;
 }
 
 const CONFIDENCE_RANK: Record<string, number> = { high: 1, medium: 0.67, low: 0.33 };
+const RAW_CONTEXT_SUBJECT_MATCH_TIMEOUT_MS = Number(process.env.RAW_CONTEXT_SUBJECT_MATCH_TIMEOUT_MS ?? 15_000);
 
 interface ModelSubjectCandidate {
   name: string;
-  entity_type?: 'contact' | 'account' | 'unknown';
+  entity_type?: 'contact' | 'account' | 'opportunity' | 'use_case' | 'unknown';
   record_id?: string;
   email?: string;
   company_name?: string;
+  account_name?: string;
   domain?: string;
   title?: string;
+  stage?: string;
+  description?: string;
   confidence?: number;
   rationale?: string;
 }
@@ -53,9 +85,41 @@ interface DirectoryAccount {
   industry?: string | null;
 }
 
+interface DirectoryOpportunity {
+  id: string;
+  name: string;
+  account_id?: string | null;
+  account_name?: string | null;
+  contact_id?: string | null;
+  contact_name?: string | null;
+  stage?: string | null;
+  close_date?: string | null;
+}
+
+interface DirectoryUseCase {
+  id: string;
+  name: string;
+  account_id?: string | null;
+  account_name?: string | null;
+  opportunity_id?: string | null;
+  opportunity_name?: string | null;
+  stage?: string | null;
+  status?: string | null;
+}
+
+export interface RawContextAccountScope {
+  account_id: string;
+  account_name: string;
+  contacts_checked: number;
+  opportunities_checked: number;
+  use_cases_checked: number;
+}
+
 interface SubjectResolutionDirectory {
   contacts: DirectoryContact[];
   accounts: DirectoryAccount[];
+  opportunities: DirectoryOpportunity[];
+  use_cases: DirectoryUseCase[];
 }
 
 function cleanString(value: unknown, max = 160): string | undefined {
@@ -70,7 +134,7 @@ function normalizeCandidate(raw: unknown): ModelSubjectCandidate | null {
   const domain = cleanString(obj.domain);
   const recordId = cleanString(obj.record_id);
   if (!name && !email && !domain && !recordId) return null;
-  const entityType = obj.entity_type === 'contact' || obj.entity_type === 'account'
+  const entityType = obj.entity_type === 'contact' || obj.entity_type === 'account' || obj.entity_type === 'opportunity' || obj.entity_type === 'use_case'
     ? obj.entity_type
     : 'unknown';
   const confidence = typeof obj.confidence === 'number'
@@ -82,22 +146,30 @@ function normalizeCandidate(raw: unknown): ModelSubjectCandidate | null {
     record_id: recordId,
     email,
     company_name: cleanString(obj.company_name),
+    account_name: cleanString(obj.account_name),
     domain,
     title: cleanString(obj.title),
+    stage: cleanString(obj.stage),
+    description: cleanString(obj.description, 1000),
     confidence,
     rationale: cleanString(obj.rationale, 500),
   };
 }
 
 function parseCandidateResponse(raw: string, limit: number): ModelSubjectCandidate[] {
-  const cleaned = raw.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
+  const cleaned = raw
+    .replace(/^\uFEFF/, '')
+    .replace(/^```(?:json|JSON)?\n?/m, '')
+    .replace(/\n?```$/m, '')
+    .trim();
   let parsed: unknown;
+  const parseJson = (value: string) => JSON.parse(value.replace(/,\s*([}\]])/g, '$1'));
   try {
-    parsed = JSON.parse(cleaned);
+    parsed = parseJson(cleaned);
   } catch {
     const match = cleaned.match(/\{[\s\S]*\}/);
     if (!match) throw new Error('Subject detection response was not valid JSON.');
-    parsed = JSON.parse(match[0]);
+    parsed = parseJson(match[0]);
   }
   const candidates = (parsed as Record<string, unknown>)?.candidates;
   if (!Array.isArray(candidates)) {
@@ -124,9 +196,15 @@ async function loadSubjectResolutionDirectory(
   db: DbPool,
   tenantId: string,
   limit: number,
+  ownerIds?: string[],
 ): Promise<SubjectResolutionDirectory> {
   const perType = Math.min(Math.max(limit, 25), 120);
-  const [contacts, accounts] = await Promise.all([
+  const contactOwnerFilter = ownerIds ? 'AND c.owner_id = ANY($3::uuid[])' : '';
+  const accountOwnerFilter = ownerIds ? 'AND owner_id = ANY($3::uuid[])' : '';
+  const opportunityOwnerFilter = ownerIds ? 'AND o.owner_id = ANY($3::uuid[])' : '';
+  const useCaseOwnerFilter = ownerIds ? 'AND uc.owner_id = ANY($3::uuid[])' : '';
+  const params = ownerIds ? [tenantId, perType, ownerIds] : [tenantId, perType];
+  const [contacts, accounts, opportunities, useCases] = await Promise.all([
     db.query(
       `SELECT c.id, c.first_name || ' ' || c.last_name AS name, c.first_name, c.last_name,
               c.email, c.title, COALESCE(a.name, c.company_name) AS company_name,
@@ -134,17 +212,44 @@ async function loadSubjectResolutionDirectory(
        FROM contacts c
        LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
        WHERE c.tenant_id = $1
+         ${contactOwnerFilter}
        ORDER BY c.updated_at DESC
        LIMIT $2`,
-      [tenantId, perType],
+      params,
     ),
     db.query(
       `SELECT id, name, domain, industry
        FROM accounts
        WHERE tenant_id = $1
+         ${accountOwnerFilter}
        ORDER BY updated_at DESC
+      LIMIT $2`,
+      params,
+    ),
+    db.query(
+      `SELECT o.id, o.name, o.account_id, a.name AS account_name, o.contact_id,
+              NULLIF(TRIM(COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '')), '') AS contact_name,
+              o.stage, o.close_date
+       FROM opportunities o
+       LEFT JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
+       LEFT JOIN contacts c ON c.id = o.contact_id AND c.tenant_id = o.tenant_id
+       WHERE o.tenant_id = $1
+         ${opportunityOwnerFilter}
+       ORDER BY o.updated_at DESC
        LIMIT $2`,
-      [tenantId, perType],
+      params,
+    ),
+    db.query(
+      `SELECT uc.id, uc.name, uc.account_id, a.name AS account_name, uc.opportunity_id,
+              o.name AS opportunity_name, uc.stage
+       FROM use_cases uc
+       LEFT JOIN accounts a ON a.id = uc.account_id AND a.tenant_id = uc.tenant_id
+       LEFT JOIN opportunities o ON o.id = uc.opportunity_id AND o.tenant_id = uc.tenant_id
+       WHERE uc.tenant_id = $1
+         ${useCaseOwnerFilter}
+       ORDER BY uc.updated_at DESC
+       LIMIT $2`,
+      params,
     ),
   ]);
   return {
@@ -164,6 +269,26 @@ async function loadSubjectResolutionDirectory(
       name: row.name,
       domain: row.domain,
       industry: row.industry,
+    })),
+    opportunities: opportunities.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      account_id: row.account_id,
+      account_name: row.account_name,
+      contact_id: row.contact_id,
+      contact_name: row.contact_name,
+      stage: row.stage,
+      close_date: row.close_date,
+    })),
+    use_cases: useCases.rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      account_id: row.account_id,
+      account_name: row.account_name,
+      opportunity_id: row.opportunity_id,
+      opportunity_name: row.opportunity_name,
+      stage: row.stage,
+      status: row.stage,
     })),
   };
 }
@@ -219,7 +344,53 @@ function matchVariants(...values: Array<string | null | undefined>): string[] {
 
 function containsPhrase(normalizedText: string, phrase: string): boolean {
   if (phrase.length < 3) return false;
-  return ` ${normalizedText} `.includes(` ${phrase} `);
+  const padded = ` ${normalizedText} `;
+  if (padded.includes(` ${phrase} `)) return true;
+  return ` ${normalizedText.replace(/[.]+/g, ' ')} `.includes(` ${phrase.replace(/[.]+/g, ' ')} `);
+}
+
+function resolutionRecordsExamined(directory: SubjectResolutionDirectory): NonNullable<RawContextSubjectDetection['records_examined']> {
+  return {
+    accounts: directory.accounts.length,
+    contacts: directory.contacts.length,
+    opportunities: directory.opportunities.length,
+    use_cases: directory.use_cases.length,
+  };
+}
+
+function buildAccountScope(
+  directory: SubjectResolutionDirectory,
+  accountIds: Set<string>,
+): RawContextAccountScope[] {
+  return [...accountIds].map(accountId => {
+    const account = directory.accounts.find(item => item.id === accountId);
+    return {
+      account_id: accountId,
+      account_name: account?.name ?? accountId,
+      contacts_checked: directory.contacts.filter(item => item.account_id === accountId).length,
+      opportunities_checked: directory.opportunities.filter(item => item.account_id === accountId).length,
+      use_cases_checked: directory.use_cases.filter(item => item.account_id === accountId).length,
+    };
+  });
+}
+
+function summarizeResolution(
+  subjects: RawContextResolvedSubject[],
+  accountScope: RawContextAccountScope[] = [],
+  proposals: RawContextRecordProposal[] = [],
+): string | undefined {
+  if (accountScope.length > 0) {
+    const names = accountScope.map(scope => scope.account_name).slice(0, 3).join(', ');
+    const contacts = accountScope.reduce((sum, scope) => sum + scope.contacts_checked, 0);
+    const opportunities = accountScope.reduce((sum, scope) => sum + scope.opportunities_checked, 0);
+    const useCases = accountScope.reduce((sum, scope) => sum + scope.use_cases_checked, 0);
+    const created = subjects.filter(subject => subject.type !== 'account').length;
+    const proposalText = proposals.length > 0 ? ` ${proposals.length} possible new ${proposals.length === 1 ? 'record needs' : 'records need'} review.` : '';
+    return `Matched ${names}. Checked ${contacts} contacts, ${opportunities} opportunities, and ${useCases} use cases.${created > 0 ? ` Matched ${created} related ${created === 1 ? 'record' : 'records'}.` : ''}${proposalText}`;
+  }
+  if (subjects.length > 0) return `Matched ${subjects.length} customer ${subjects.length === 1 ? 'record' : 'records'}.`;
+  if (proposals.length > 0) return `${proposals.length} possible new ${proposals.length === 1 ? 'record needs' : 'records need'} review.`;
+  return undefined;
 }
 
 function deterministicSubjectMatches(
@@ -233,6 +404,12 @@ function deterministicSubjectMatches(
   const seen = new Set<string>();
   const mentionedAccountIds = new Set<string>();
   const mentionedCompanyVariants = new Set<string>();
+  const pushSubject = (subject: RawContextResolvedSubject) => {
+    const key = `${subject.type}:${subject.id}`;
+    if (seen.has(key) || subjects.length >= limit) return;
+    seen.add(key);
+    subjects.push(subject);
+  };
 
   for (const account of directory.accounts) {
     const variants = matchVariants(account.name, account.domain);
@@ -240,16 +417,14 @@ function deterministicSubjectMatches(
       candidates.add(account.name);
       mentionedAccountIds.add(account.id);
       variants.forEach(variant => mentionedCompanyVariants.add(variant));
-      if (!seen.has(account.id) && subjects.length < limit) {
-        seen.add(account.id);
-        subjects.push({
-          type: 'account',
-          id: account.id,
-          name: account.name,
-          confidence: 'high',
-          match_tier: 'deterministic_account_mention',
-        });
-      }
+      pushSubject({
+        type: 'account',
+        id: account.id,
+        name: account.name,
+        confidence: 'high',
+        match_tier: 'deterministic_account_mention',
+        scope_reason: 'Account mention created the customer scope.',
+      });
     }
   }
 
@@ -267,24 +442,84 @@ function deterministicSubjectMatches(
     const fullMatch = containsPhrase(normalizedText, fullName) || (email.includes('@') && normalizedText.includes(email));
     const companyMatch = (contact.account_id && mentionedAccountIds.has(contact.account_id))
       || companyVariants.some(variant => mentionedCompanyVariants.has(variant) || containsPhrase(normalizedText, variant));
-    const uniqueFirstName = firstName.length >= 3 && firstNameCounts.get(firstName) === 1;
+    const scopedFirstNameCount = contact.account_id
+      ? directory.contacts.filter(item => item.account_id === contact.account_id && normalizeForMatch(item.first_name ?? item.name.split(/\s+/)[0] ?? '') === firstName).length
+      : firstNameCounts.get(firstName) ?? 0;
+    const uniqueFirstName = firstName.length >= 3 && (companyMatch ? scopedFirstNameCount === 1 : firstNameCounts.get(firstName) === 1);
     const firstNameWithCompany = uniqueFirstName && containsPhrase(normalizedText, firstName) && companyMatch;
 
     if (!fullMatch && !firstNameWithCompany) continue;
     candidates.add(contact.name);
-    if (!seen.has(contact.id) && subjects.length < limit) {
-      seen.add(contact.id);
-      subjects.push({
-        type: 'contact',
-        id: contact.id,
-        name: contact.name,
-        confidence: fullMatch ? 'high' : 'medium',
-        match_tier: fullMatch ? 'deterministic_contact_mention' : 'deterministic_contact_company_hint',
-      });
-    }
+    pushSubject({
+      type: 'contact',
+      id: contact.id,
+      name: contact.name,
+      confidence: fullMatch ? 'high' : 'medium',
+      match_tier: fullMatch ? 'deterministic_contact_mention' : 'deterministic_contact_company_hint',
+      account_id: contact.account_id ?? undefined,
+      account_name: contact.company_name ?? undefined,
+      scope_reason: contact.account_id && mentionedAccountIds.has(contact.account_id)
+        ? 'Contact matched inside the account scope.'
+        : undefined,
+      parent_subject: contact.account_id && contact.company_name
+        ? { type: 'account', id: contact.account_id, name: contact.company_name }
+        : undefined,
+    });
   }
 
-  return { candidates: [...candidates], subjects, skipped: [] };
+  for (const opportunity of directory.opportunities) {
+    const variants = matchVariants(opportunity.name);
+    const accountScoped = Boolean(opportunity.account_id && mentionedAccountIds.has(opportunity.account_id));
+    const nameMatch = variants.some(variant => containsPhrase(normalizedText, variant));
+    if (mentionedAccountIds.size > 0 && !accountScoped) continue;
+    if (!nameMatch) continue;
+    candidates.add(opportunity.name);
+    pushSubject({
+      type: 'opportunity',
+      id: opportunity.id,
+      name: opportunity.name,
+      confidence: accountScoped ? 'high' : 'medium',
+      match_tier: accountScoped ? 'deterministic_opportunity_account_scope' : 'deterministic_opportunity_mention',
+      account_id: opportunity.account_id ?? undefined,
+      account_name: opportunity.account_name ?? undefined,
+      scope_reason: accountScoped ? 'Opportunity matched inside the account scope.' : undefined,
+      parent_subject: opportunity.account_id && opportunity.account_name
+        ? { type: 'account', id: opportunity.account_id, name: opportunity.account_name }
+        : undefined,
+    });
+  }
+
+  for (const useCase of directory.use_cases) {
+    const variants = matchVariants(useCase.name);
+    const accountScoped = Boolean(useCase.account_id && mentionedAccountIds.has(useCase.account_id));
+    const nameMatch = variants.some(variant => containsPhrase(normalizedText, variant));
+    if (mentionedAccountIds.size > 0 && !accountScoped) continue;
+    if (!nameMatch) continue;
+    candidates.add(useCase.name);
+    pushSubject({
+      type: 'use_case',
+      id: useCase.id,
+      name: useCase.name,
+      confidence: accountScoped ? 'high' : 'medium',
+      match_tier: accountScoped ? 'deterministic_use_case_account_scope' : 'deterministic_use_case_mention',
+      account_id: useCase.account_id ?? undefined,
+      account_name: useCase.account_name ?? undefined,
+      scope_reason: accountScoped ? 'Use case matched inside the account scope.' : undefined,
+      parent_subject: useCase.account_id && useCase.account_name
+        ? { type: 'account', id: useCase.account_id, name: useCase.account_name }
+        : undefined,
+    });
+  }
+
+  const accountScope = buildAccountScope(directory, mentionedAccountIds);
+  return {
+    candidates: [...candidates],
+    subjects,
+    skipped: [],
+    account_scope: accountScope,
+    records_examined: resolutionRecordsExamined(directory),
+    resolution_summary: summarizeResolution(subjects, accountScope),
+  };
 }
 
 async function extractRawContextSubjectCandidates(
@@ -308,16 +543,18 @@ async function extractRawContextSubjectCandidates(
   const system = `You identify customer records mentioned in messy go-to-market context.
 
 Return JSON only:
-{"candidates":[{"name":"...", "entity_type":"contact|account|unknown", "record_id":"...", "email":"...", "company_name":"...", "domain":"...", "title":"...", "confidence":0.0, "rationale":"..."}]}
+{"candidates":[{"name":"...", "entity_type":"contact|account|opportunity|use_case|unknown", "record_id":"...", "email":"...", "company_name":"...", "account_name":"...", "domain":"...", "title":"...", "stage":"...", "description":"...", "confidence":0.0, "rationale":"..."}]}
 
 Rules:
-1. Extract only people or companies that could map to CRMy contacts or companies/accounts.
+1. Extract only people, companies/accounts, opportunities/deals, or use cases that could map to CRMy records.
 2. Do not extract generic departments, job titles, products, dates, topics, or internal CRMy concepts as records.
-3. Include useful hints such as email, company_name, domain, and title when present or clearly implied.
+3. Include useful hints such as email, company_name, account_name, domain, title, stage, and description when present or clearly implied.
 4. Prefer high recall: include plausible customer/company references, but set confidence below 0.6 when uncertain.
-5. Use the known customer record directory when it matches the Raw Context. If a listed record matches, include its record_id exactly.
-6. Never invent IDs or facts. Only copy record_id values from the known customer record directory.
-7. Return at most ${limit} candidates.`;
+5. Resolve accounts first. When a known account is mentioned, prefer contacts, opportunities, and use cases listed under that account before considering anything new.
+6. Use the known customer record directory when it matches the Raw Context. If a listed record matches, include its record_id exactly.
+7. If a contact, opportunity, or use case appears net-new under a matched account, include account_name/company_name so CRMy can route it for review.
+8. Never invent IDs or facts. Only copy record_id values from the known customer record directory.
+9. Return at most ${limit} candidates.`;
 
   const user = `Known customer records:
 ${JSON.stringify(directory, null, 2)}
@@ -328,6 +565,8 @@ ${text.slice(0, 60_000)}`;
     system,
     user,
     maxTokens: 1200,
+    timeoutMs: RAW_CONTEXT_SUBJECT_MATCH_TIMEOUT_MS,
+    responseFormat: 'json_object',
   });
   return parseCandidateResponse(response, limit);
 }
@@ -336,17 +575,20 @@ async function resolveCandidateByRecordId(
   db: DbPool,
   tenantId: string,
   candidate: ModelSubjectCandidate,
+  ownerIds?: string[],
 ): Promise<RawContextResolvedSubject | null> {
   if (!candidate.record_id) return null;
-  const allowedTypes = candidate.entity_type === 'contact' || candidate.entity_type === 'account'
+  const ownerFilter = ownerIds ? 'AND owner_id = ANY($3::uuid[])' : '';
+  const params = ownerIds ? [tenantId, candidate.record_id, ownerIds] : [tenantId, candidate.record_id];
+  const allowedTypes = candidate.entity_type === 'contact' || candidate.entity_type === 'account' || candidate.entity_type === 'opportunity' || candidate.entity_type === 'use_case'
     ? [candidate.entity_type]
-    : ['contact', 'account'];
+    : ['contact', 'account', 'opportunity', 'use_case'];
   if (allowedTypes.includes('contact')) {
     const result = await db.query(
       `SELECT c.id, c.first_name || ' ' || c.last_name AS name
        FROM contacts c
-       WHERE c.tenant_id = $1 AND c.id = $2`,
-      [tenantId, candidate.record_id],
+       WHERE c.tenant_id = $1 AND c.id = $2 ${ownerFilter}`,
+      params,
     );
     if (result.rows[0]) {
       return {
@@ -362,8 +604,8 @@ async function resolveCandidateByRecordId(
     const result = await db.query(
       `SELECT id, name
        FROM accounts
-       WHERE tenant_id = $1 AND id = $2`,
-      [tenantId, candidate.record_id],
+       WHERE tenant_id = $1 AND id = $2 ${ownerFilter}`,
+      params,
     );
     if (result.rows[0]) {
       return {
@@ -372,6 +614,52 @@ async function resolveCandidateByRecordId(
         name: result.rows[0].name,
         confidence: 'high',
         match_tier: 'model_directory_match',
+      };
+    }
+  }
+  if (allowedTypes.includes('opportunity')) {
+    const result = await db.query(
+      `SELECT o.id, o.name, o.account_id, a.name AS account_name
+       FROM opportunities o
+       LEFT JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
+       WHERE o.tenant_id = $1 AND o.id = $2 ${ownerFilter.replace('owner_id', 'o.owner_id')}`,
+      params,
+    );
+    if (result.rows[0]) {
+      return {
+        type: 'opportunity',
+        id: result.rows[0].id,
+        name: result.rows[0].name,
+        confidence: 'high',
+        match_tier: 'model_directory_match',
+        account_id: result.rows[0].account_id ?? undefined,
+        account_name: result.rows[0].account_name ?? undefined,
+        parent_subject: result.rows[0].account_id && result.rows[0].account_name
+          ? { type: 'account', id: result.rows[0].account_id, name: result.rows[0].account_name }
+          : undefined,
+      };
+    }
+  }
+  if (allowedTypes.includes('use_case')) {
+    const result = await db.query(
+      `SELECT uc.id, uc.name, uc.account_id, a.name AS account_name
+       FROM use_cases uc
+       LEFT JOIN accounts a ON a.id = uc.account_id AND a.tenant_id = uc.tenant_id
+       WHERE uc.tenant_id = $1 AND uc.id = $2 ${ownerFilter.replace('owner_id', 'uc.owner_id')}`,
+      params,
+    );
+    if (result.rows[0]) {
+      return {
+        type: 'use_case',
+        id: result.rows[0].id,
+        name: result.rows[0].name,
+        confidence: 'high',
+        match_tier: 'model_directory_match',
+        account_id: result.rows[0].account_id ?? undefined,
+        account_name: result.rows[0].account_name ?? undefined,
+        parent_subject: result.rows[0].account_id && result.rows[0].account_name
+          ? { type: 'account', id: result.rows[0].account_id, name: result.rows[0].account_name }
+          : undefined,
       };
     }
   }
@@ -394,37 +682,216 @@ function entityType(candidate: ModelSubjectCandidate): 'contact' | 'account' | '
   return 'any';
 }
 
+function proposalFromCandidate(
+  candidate: ModelSubjectCandidate,
+  reason: string,
+  duplicateCandidates: RawContextRecordProposal['duplicate_candidates'] = [],
+  scopedAccount?: DirectoryAccount | RawContextResolvedSubject,
+): RawContextRecordProposal | null {
+  if (
+    candidate.entity_type !== 'contact' &&
+    candidate.entity_type !== 'account' &&
+    candidate.entity_type !== 'opportunity' &&
+    candidate.entity_type !== 'use_case'
+  ) {
+    return null;
+  }
+  const fields: Record<string, unknown> = {};
+  if (candidate.entity_type === 'contact') {
+    fields.name = candidate.name;
+    if (candidate.email) fields.email = candidate.email;
+    if (candidate.title) fields.title = candidate.title;
+    if (candidate.company_name ?? scopedAccount?.name) fields.company_name = candidate.company_name ?? scopedAccount?.name;
+    if (scopedAccount?.id) fields.account_id = scopedAccount.id;
+  } else if (candidate.entity_type === 'account') {
+    fields.name = candidate.name;
+    if (candidate.domain) fields.domain = candidate.domain;
+  } else if (candidate.entity_type === 'opportunity') {
+    fields.name = candidate.name;
+    if (candidate.account_name ?? candidate.company_name ?? scopedAccount?.name) fields.account_name = candidate.account_name ?? candidate.company_name ?? scopedAccount?.name;
+    if (scopedAccount?.id) fields.account_id = scopedAccount.id;
+    if (candidate.stage) fields.stage = candidate.stage;
+    if (candidate.description ?? candidate.rationale) fields.description = candidate.description ?? candidate.rationale;
+  } else if (candidate.entity_type === 'use_case') {
+    fields.name = candidate.name;
+    if (candidate.account_name ?? candidate.company_name ?? scopedAccount?.name) fields.account_name = candidate.account_name ?? candidate.company_name ?? scopedAccount?.name;
+    if (scopedAccount?.id) fields.account_id = scopedAccount.id;
+    if (candidate.stage) fields.stage = candidate.stage;
+    if (candidate.description ?? candidate.rationale) fields.description = candidate.description ?? candidate.rationale;
+  }
+  if (!fields.name || String(fields.name).trim().length < 2) return null;
+  return {
+    record_type: candidate.entity_type,
+    name: candidate.name,
+    confidence: candidate.confidence ?? 0.5,
+    reason: candidate.rationale ?? reason,
+    fields,
+    ...(duplicateCandidates.length > 0 ? { duplicate_candidates: duplicateCandidates } : {}),
+  };
+}
+
+function candidateAccountName(candidate: ModelSubjectCandidate): string | undefined {
+  return candidate.account_name ?? candidate.company_name ?? (candidate.entity_type === 'account' ? candidate.name : undefined);
+}
+
+function findScopedAccount(
+  candidate: ModelSubjectCandidate,
+  directory: SubjectResolutionDirectory,
+  accountSubjects: RawContextResolvedSubject[],
+): DirectoryAccount | undefined {
+  const accountName = candidateAccountName(candidate);
+  const candidateVariants = matchVariants(accountName);
+  const fromCandidate = accountName
+    ? directory.accounts.find(account =>
+      matchVariants(account.name, account.domain).some(variant => candidateVariants.includes(variant)))
+    : undefined;
+  if (fromCandidate) return fromCandidate;
+  if (accountSubjects.length === 1) {
+    return directory.accounts.find(account => account.id === accountSubjects[0].id);
+  }
+  return undefined;
+}
+
+function recordVariants(value: string | null | undefined): string[] {
+  return matchVariants(value).filter(variant => variant.length >= 3);
+}
+
+function candidateMatchesRecord(candidate: ModelSubjectCandidate, recordName: string): boolean {
+  const candidateVariants = recordVariants(candidate.name);
+  const recordNameVariants = recordVariants(recordName);
+  return candidateVariants.some(candidateVariant =>
+    recordNameVariants.includes(candidateVariant) ||
+    recordNameVariants.some(recordVariant => recordVariant.includes(candidateVariant) || candidateVariant.includes(recordVariant)));
+}
+
+function resolveScopedChildCandidate(
+  candidate: ModelSubjectCandidate,
+  directory: SubjectResolutionDirectory,
+  accountSubjects: RawContextResolvedSubject[],
+): RawContextResolvedSubject | null {
+  const scopedAccount = findScopedAccount(candidate, directory, accountSubjects);
+  const accountIds = scopedAccount
+    ? new Set([scopedAccount.id])
+    : new Set(accountSubjects.map(subject => subject.id));
+  if (candidate.entity_type === 'contact' || candidate.email) {
+    const byEmail = candidate.email
+      ? directory.contacts.find(contact => contact.email?.toLowerCase() === candidate.email?.toLowerCase())
+      : undefined;
+    const match = byEmail ?? directory.contacts.find(contact =>
+      (!accountIds.size || (contact.account_id && accountIds.has(contact.account_id))) &&
+      candidateMatchesRecord(candidate, contact.name));
+    if (!match) return null;
+    return {
+      type: 'contact',
+      id: match.id,
+      name: match.name,
+      confidence: byEmail ? 'high' : accountIds.size ? 'high' : 'medium',
+      match_tier: byEmail ? 'email_exact' : accountIds.size ? 'scoped_contact_match' : 'contact_name_match',
+      account_id: match.account_id ?? undefined,
+      account_name: match.company_name ?? undefined,
+      scope_reason: accountIds.size ? 'Contact resolved inside the matched account scope.' : undefined,
+      parent_subject: match.account_id && match.company_name
+        ? { type: 'account', id: match.account_id, name: match.company_name }
+        : undefined,
+    };
+  }
+  if (candidate.entity_type === 'opportunity') {
+    const match = directory.opportunities.find(opportunity =>
+      (!accountIds.size || (opportunity.account_id && accountIds.has(opportunity.account_id))) &&
+      candidateMatchesRecord(candidate, opportunity.name));
+    if (!match) return null;
+    return {
+      type: 'opportunity',
+      id: match.id,
+      name: match.name,
+      confidence: accountIds.size ? 'high' : 'medium',
+      match_tier: accountIds.size ? 'scoped_opportunity_match' : 'opportunity_name_match',
+      account_id: match.account_id ?? undefined,
+      account_name: match.account_name ?? undefined,
+      scope_reason: accountIds.size ? 'Opportunity resolved inside the matched account scope.' : undefined,
+      parent_subject: match.account_id && match.account_name
+        ? { type: 'account', id: match.account_id, name: match.account_name }
+        : undefined,
+    };
+  }
+  if (candidate.entity_type === 'use_case') {
+    const match = directory.use_cases.find(useCase =>
+      (!accountIds.size || (useCase.account_id && accountIds.has(useCase.account_id))) &&
+      candidateMatchesRecord(candidate, useCase.name));
+    if (!match) return null;
+    return {
+      type: 'use_case',
+      id: match.id,
+      name: match.name,
+      confidence: accountIds.size ? 'high' : 'medium',
+      match_tier: accountIds.size ? 'scoped_use_case_match' : 'use_case_name_match',
+      account_id: match.account_id ?? undefined,
+      account_name: match.account_name ?? undefined,
+      scope_reason: accountIds.size ? 'Use case resolved inside the matched account scope.' : undefined,
+      parent_subject: match.account_id && match.account_name
+        ? { type: 'account', id: match.account_id, name: match.account_name }
+        : undefined,
+    };
+  }
+  return null;
+}
+
 export async function detectRawContextSubjects(
   db: DbPool,
   tenantId: string,
   text: string,
-  options: { limit?: number; confidenceThreshold?: number; actorId?: string } = {},
+  options: { limit?: number; confidenceThreshold?: number; actorId?: string; ownerIds?: string[] } = {},
 ): Promise<RawContextSubjectDetection> {
   const limit = options.limit ?? 20;
-  const directory = await loadSubjectResolutionDirectory(db, tenantId, limit * 8);
+  const directory = await loadSubjectResolutionDirectory(db, tenantId, limit * 8, options.ownerIds);
   const deterministic = deterministicSubjectMatches(text, directory, limit);
-  if (deterministic.subjects.length > 0) {
-    return deterministic;
-  }
-
-  const modelCandidates = await extractRawContextSubjectCandidates(db, tenantId, text, limit, directory);
-  const candidates = modelCandidates.map(candidate => candidate.name);
   const threshold = options.confidenceThreshold ?? 0.67;
-
   const seen = new Set<string>();
   const subjects: RawContextResolvedSubject[] = [];
   const skipped: Array<{ name: string; reason: string }> = [];
+  const proposals: RawContextRecordProposal[] = [];
+  const addSubject = (subject: RawContextResolvedSubject) => {
+    const key = `${subject.type}:${subject.id}`;
+    if (seen.has(key) || subjects.length >= limit) return;
+    seen.add(key);
+    subjects.push(subject);
+  };
+  deterministic.subjects.forEach(addSubject);
+
+  const deterministicAccountSubjects = subjects.filter(subject => subject.type === 'account');
+  const canResolveWithoutModel = deterministic.subjects.length > 0;
+  let modelCandidates: ModelSubjectCandidate[] = [];
+  if (!canResolveWithoutModel) {
+    modelCandidates = await extractRawContextSubjectCandidates(db, tenantId, text, limit, directory);
+  }
+
+  const candidates = Array.from(new Set([
+    ...deterministic.candidates,
+    ...modelCandidates.map(candidate => candidate.name),
+  ]));
 
   for (const candidate of modelCandidates) {
+    const accountSubjects = subjects.filter(subject => subject.type === 'account');
+    const scopedAccount = findScopedAccount(candidate, directory, accountSubjects);
     if ((candidate.confidence ?? 1) < Math.max(0.25, threshold - 0.35)) {
       skipped.push({ name: candidate.name, reason: 'model_low_confidence' });
+      const proposal = proposalFromCandidate(candidate, 'model_low_confidence', [], scopedAccount);
+      if (proposal) proposals.push(proposal);
       continue;
     }
-    const directoryResolved = await resolveCandidateByRecordId(db, tenantId, candidate);
+    const directoryResolved = await resolveCandidateByRecordId(db, tenantId, candidate, options.ownerIds);
     if (directoryResolved) {
-      if (seen.has(directoryResolved.id)) continue;
-      seen.add(directoryResolved.id);
-      subjects.push(directoryResolved);
+      addSubject(directoryResolved);
+      continue;
+    }
+    const scopedResolved = resolveScopedChildCandidate(candidate, directory, accountSubjects);
+    if (scopedResolved) {
+      addSubject(scopedResolved);
+      continue;
+    }
+    if (candidate.entity_type === 'opportunity' || candidate.entity_type === 'use_case') {
+      const proposal = proposalFromCandidate(candidate, scopedAccount ? 'new_scoped_record_candidate' : 'new_record_candidate', [], scopedAccount);
+      if (proposal) proposals.push(proposal);
       continue;
     }
     let resolved = null as Awaited<ReturnType<typeof entityResolve>>['resolved'] | null;
@@ -440,6 +907,7 @@ export async function detectRawContextSubjects(
           title: candidate.title,
         },
         actor_id: options.actorId,
+        owner_ids: options.ownerIds,
         limit: 3,
       });
       lastStatus = result.status;
@@ -450,16 +918,24 @@ export async function detectRawContextSubjects(
     }
     if (!resolved) {
       skipped.push({ name: candidate.name, reason: lastStatus === 'ambiguous' ? 'ambiguous' : 'unresolved' });
+      const proposal = proposalFromCandidate(candidate, lastStatus === 'ambiguous' ? 'ambiguous' : 'unresolved', [], scopedAccount);
+      if (proposal) proposals.push(proposal);
       continue;
     }
     const score = CONFIDENCE_RANK[resolved.confidence] ?? 0;
     if (score < threshold) {
       skipped.push({ name: candidate.name, reason: `confidence_${resolved.confidence}` });
+      const proposal = proposalFromCandidate(candidate, `confidence_${resolved.confidence}`, [{
+        record_type: resolved.entity_type,
+        id: resolved.id,
+        name: resolved.name,
+        confidence: resolved.confidence,
+        reason: resolved.match_reason,
+      }], scopedAccount);
+      if (proposal) proposals.push(proposal);
       continue;
     }
-    if (seen.has(resolved.id)) continue;
-    seen.add(resolved.id);
-    subjects.push({
+    addSubject({
       type: resolved.entity_type,
       id: resolved.id,
       name: resolved.name,
@@ -468,5 +944,27 @@ export async function detectRawContextSubjects(
     });
   }
 
-  return { candidates, subjects, skipped };
+  const proposalKeys = new Set<string>();
+  const dedupedProposals = proposals.filter(proposal => {
+    const key = `${proposal.record_type}:${proposal.name.toLowerCase()}`;
+    if (proposalKeys.has(key)) return false;
+    proposalKeys.add(key);
+    return true;
+  });
+  const accountIds = new Set([
+    ...deterministicAccountSubjects.map(subject => subject.id),
+    ...subjects.filter(subject => subject.type === 'account').map(subject => subject.id),
+    ...subjects.map(subject => subject.account_id).filter((id): id is string => Boolean(id)),
+  ]);
+  const accountScope = buildAccountScope(directory, accountIds);
+
+  return {
+    candidates,
+    subjects,
+    skipped,
+    ...(dedupedProposals.length > 0 ? { proposed_records: dedupedProposals } : {}),
+    account_scope: accountScope,
+    records_examined: resolutionRecordsExamined(directory),
+    resolution_summary: summarizeResolution(subjects, accountScope, dedupedProposals),
+  };
 }

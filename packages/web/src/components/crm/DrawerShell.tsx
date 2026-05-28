@@ -29,7 +29,7 @@ export function DrawerShell({ children, title }: DrawerShellProps) {
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="hidden md:flex fixed right-0 top-0 h-full w-[480px] z-[70] bg-card border-l border-border shadow-2xl flex-col rounded-l-2xl"
+            className="hidden md:flex fixed right-0 top-0 h-full w-full max-w-2xl z-[70] bg-background border-l border-border shadow-2xl flex-col"
           >
             <div className="flex items-center justify-between h-14 px-5 border-b border-border">
               {title && <h2 className="font-display font-bold text-foreground">{title}</h2>}

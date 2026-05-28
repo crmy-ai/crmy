@@ -12,6 +12,7 @@ import {
   type FilterCounts,
 } from '@/components/crm/GraphSidebar';
 import { useContacts, useAccounts, useOpportunities, useUseCases } from '@/api/hooks';
+import { useSlashSearchFocus } from '@/hooks/useSlashSearchFocus';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -90,6 +91,8 @@ function SubjectPicker({
   const [query, setQuery] = useState('');
   const [open, setOpen]   = useState(false);
   const containerRef      = useRef<HTMLDivElement>(null);
+  const inputRef          = useRef<HTMLInputElement>(null);
+  useSlashSearchFocus(inputRef);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: cData }  = useContacts({ q: query || undefined, limit: 5 }) as any;
@@ -158,6 +161,7 @@ function SubjectPicker({
       >
         <Search className={`text-muted-foreground flex-shrink-0 ${isLarge ? 'w-4 h-4' : 'w-3.5 h-3.5'}`} />
         <input
+          ref={inputRef}
           type="text"
           value={query}
           onChange={e => { setQuery(e.target.value); setOpen(true); }}
@@ -169,6 +173,11 @@ function SubjectPicker({
           <button onClick={() => setQuery('')} className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors">
             <X className="w-3 h-3" />
           </button>
+        )}
+        {!query && (
+          <kbd className="hidden rounded-md border border-border bg-background px-1.5 py-0.5 font-mono text-xs text-muted-foreground/50 md:inline-flex">
+            /
+          </kbd>
         )}
       </div>
 

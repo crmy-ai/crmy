@@ -3,18 +3,12 @@
 
 /**
  * Provider and model definitions for the Local Workspace Agent.
- * Add new providers here — AgentSettings.tsx picks them up automatically.
+ * Provider defaults for the Local Workspace Agent.
  *
- * Model IDs must match the provider's API exactly.
- * Verify against provider docs when updating:
- *   Anthropic  → https://docs.anthropic.com/en/docs/about-claude/models
- *   OpenAI     → https://platform.openai.com/docs/models
- *   OpenRouter → https://openrouter.ai/models
- *   Ollama     → https://ollama.com/library
- *
- * Pricing is in USD per million tokens (input / output).
- * Set to undefined for local/free models or models with variable pricing.
- * Prices are approximate and may lag behind provider announcements.
+ * Do not maintain static model menus here. Provider model catalogs change too
+ * quickly, and stale model lists make setup feel broken. AgentSettings asks the
+ * admin to paste the exact model ID from their provider or local runtime, then
+ * the server verifies that the model is reachable and supports tool calls.
  */
 
 export type ProviderId = 'anthropic' | 'openai' | 'openrouter' | 'ollama' | 'custom';
@@ -22,10 +16,6 @@ export type ProviderId = 'anthropic' | 'openai' | 'openrouter' | 'ollama' | 'cus
 export interface ModelDef {
   id: string;
   label: string;
-  /** USD per million INPUT tokens. Undefined = free / unknown / variable. */
-  inputPricePerM?: number;
-  /** USD per million OUTPUT tokens. Undefined = free / unknown / variable. */
-  outputPricePerM?: number;
 }
 
 export interface ProviderDef {
@@ -60,12 +50,8 @@ export const PROVIDERS: ProviderDef[] = [
     dotColor: 'bg-orange-400',
     requiresKey: true,
     isAnthropicFormat: true,
-    supportsThinking: true,
-    models: [
-      { id: 'claude-opus-4-20250514',    label: 'Claude Opus 4',    inputPricePerM: 15,   outputPricePerM: 75   },
-      { id: 'claude-sonnet-4-20250514',  label: 'Claude Sonnet 4',  inputPricePerM: 3,    outputPricePerM: 15   },
-      { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5', inputPricePerM: 0.80, outputPricePerM: 4    },
-    ],
+  supportsThinking: true,
+    models: [],
   },
   {
     id: 'openai',
@@ -75,13 +61,7 @@ export const PROVIDERS: ProviderDef[] = [
     requiresKey: true,
     isAnthropicFormat: false,
     supportsThinking: false,
-    models: [
-      { id: 'gpt-4o',      label: 'GPT-4o',       inputPricePerM: 2.50,  outputPricePerM: 10   },
-      { id: 'gpt-4o-mini', label: 'GPT-4o mini',  inputPricePerM: 0.15,  outputPricePerM: 0.60 },
-      { id: 'o3-mini',     label: 'o3-mini',       inputPricePerM: 1.10,  outputPricePerM: 4.40 },
-      { id: 'o1',          label: 'o1',            inputPricePerM: 15,    outputPricePerM: 60   },
-      { id: 'o1-mini',     label: 'o1-mini',       inputPricePerM: 3,     outputPricePerM: 12   },
-    ],
+    models: [],
   },
   {
     id: 'openrouter',
@@ -91,17 +71,7 @@ export const PROVIDERS: ProviderDef[] = [
     requiresKey: true,
     isAnthropicFormat: false,
     supportsThinking: false,
-    models: [
-      // Pricing is fetched live from openrouter.ai/api/v1/models when this provider is active.
-      // Fallback static prices are provided here for offline / initial render.
-      { id: 'openrouter/auto',                    label: 'Auto (best available)'                                                      },
-      { id: 'anthropic/claude-sonnet-4',          label: 'Claude Sonnet 4',   inputPricePerM: 3,    outputPricePerM: 15   },
-      { id: 'anthropic/claude-opus-4',            label: 'Claude Opus 4',     inputPricePerM: 15,   outputPricePerM: 75   },
-      { id: 'openai/gpt-4o',                      label: 'GPT-4o',            inputPricePerM: 2.50, outputPricePerM: 10   },
-      { id: 'google/gemini-2.0-flash',            label: 'Gemini 2.0 Flash',  inputPricePerM: 0.10, outputPricePerM: 0.40 },
-      { id: 'deepseek/deepseek-chat',             label: 'DeepSeek V3',       inputPricePerM: 0.27, outputPricePerM: 1.10 },
-      { id: 'meta-llama/llama-3.3-70b-instruct',  label: 'Llama 3.3 70B',    inputPricePerM: 0.12, outputPricePerM: 0.30 },
-    ],
+    models: [],
   },
   {
     id: 'ollama',
@@ -111,19 +81,7 @@ export const PROVIDERS: ProviderDef[] = [
     requiresKey: false,
     isAnthropicFormat: false,
     supportsThinking: false,
-    models: [
-      // Ollama runs locally — no token cost.
-      // Tool calling works with models that support it (e.g. llama3.2, mistral-nemo).
-      // Use `ollama list` to see what's pulled, then enter the name under "Custom model ID".
-      { id: 'llama3.2',          label: 'Llama 3.2 (8B)',      inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'llama3.2:1b',       label: 'Llama 3.2 (1B)',      inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'mistral-nemo',      label: 'Mistral Nemo (12B)',   inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'mistral',           label: 'Mistral 7B',           inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'phi3',              label: 'Phi-3 Mini',           inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'gemma2',            label: 'Gemma 2 (9B)',         inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'deepseek-r1:8b',    label: 'DeepSeek R1 (8B)',     inputPricePerM: 0, outputPricePerM: 0 },
-      { id: 'qwen2.5:7b',        label: 'Qwen 2.5 (7B)',        inputPricePerM: 0, outputPricePerM: 0 },
-    ],
+    models: [],
   },
   {
     id: 'custom',
@@ -142,12 +100,4 @@ export const CUSTOM_MODEL_SENTINEL = '__custom__';
 
 export function getProvider(id: ProviderId | string): ProviderDef {
   return PROVIDERS.find(p => p.id === id) ?? PROVIDERS[PROVIDERS.length - 1];
-}
-
-/** Look up static pricing for a known model. Returns undefined if not found. */
-export function getModelPricing(provider: string, modelId: string): { inputPricePerM: number; outputPricePerM: number } | undefined {
-  const prov = getProvider(provider);
-  const model = prov.models.find(m => m.id === modelId);
-  if (!model || model.inputPricePerM === undefined || model.outputPricePerM === undefined) return undefined;
-  return { inputPricePerM: model.inputPricePerM, outputPricePerM: model.outputPricePerM };
 }

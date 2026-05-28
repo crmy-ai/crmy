@@ -13,7 +13,7 @@ export function buildSpec() {
     openapi: '3.1.0',
     info: {
       title: 'CRMy API',
-      version: '0.8.0',
+      version: '0.8.2',
       description:
         'The operational customer context backend for AI agents. MCP-native, PostgreSQL-backed, open source. ' +
         'All endpoints require `Authorization: Bearer <jwt-or-api-key>` except `/auth/register` and `/auth/login`.',

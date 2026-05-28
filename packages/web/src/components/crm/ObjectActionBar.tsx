@@ -3,7 +3,7 @@
 
 import type { ElementType } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Brain, FileText, ScrollText, Sparkles } from 'lucide-react';
+import { Activity, Brain, Bot, FileText, ScrollText } from 'lucide-react';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { useAppStore, type AIContextEntity } from '@/store/appStore';
 
@@ -58,9 +58,9 @@ export function ObjectActionBar({
         )}
         {agentEnabled && (
           <ActionButton
-            icon={Sparkles}
+            icon={Bot}
             label="Ask Agent"
-            iconClassName="text-accent"
+            iconClassName="text-violet-500"
             onClick={() => {
               openAIWithContext(context);
               closeDrawer();
@@ -85,7 +85,7 @@ export function ObjectActionBar({
           iconClassName="text-sky-500"
           onClick={() => {
             closeDrawer();
-            navigate('/context');
+            navigate('/context?tab=observations&add=context');
           }}
         />
         <ActionButton

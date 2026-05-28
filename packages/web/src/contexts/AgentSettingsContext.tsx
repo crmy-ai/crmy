@@ -20,6 +20,8 @@ export interface AgentSettings {
    * 'offline' = last probe failed.
    */
   connectivity: AgentConnectivity;
+  connectivityStatus?: string;
+  connectivityError?: string;
 }
 
 const AgentSettingsContext = createContext<AgentSettings>({
@@ -27,6 +29,8 @@ const AgentSettingsContext = createContext<AgentSettings>({
   config: null,
   loading: true,
   connectivity: 'unknown',
+  connectivityStatus: undefined,
+  connectivityError: undefined,
 });
 
 const PROBE_INTERVAL_MS = 5 * 60 * 1000; // re-probe every 5 minutes
@@ -38,12 +42,16 @@ export function AgentSettingsProvider({ children }: { children: React.ReactNode 
   const enabled = config?.enabled ?? false;
 
   const [connectivity, setConnectivity] = useState<AgentConnectivity>('unknown');
+  const [connectivityStatus, setConnectivityStatus] = useState<string | undefined>();
+  const [connectivityError, setConnectivityError] = useState<string | undefined>();
   const lastProbeRef = useRef<number>(0);
 
   useEffect(() => {
     // Only probe when the agent is enabled and configured
     if (!enabled || !config?.model || !config?.base_url) {
       setConnectivity('unknown');
+      setConnectivityStatus(undefined);
+      setConnectivityError(undefined);
       return;
     }
 
@@ -59,14 +67,14 @@ export function AgentSettingsProvider({ children }: { children: React.ReactNode 
           // Send empty body — the endpoint will use stored config values
           body: JSON.stringify({}),
         });
-        if (res.ok) {
-          const json = await res.json();
-          setConnectivity(json.ok ? 'online' : 'offline');
-        } else {
-          setConnectivity('offline');
-        }
+        const json = await res.json().catch(() => ({}));
+        setConnectivityStatus(typeof json.status === 'string' ? json.status : undefined);
+        setConnectivityError(typeof json.error === 'string' ? json.error : undefined);
+        setConnectivity(res.ok && json.ok ? 'online' : 'offline');
       } catch {
         setConnectivity('offline');
+        setConnectivityStatus('offline');
+        setConnectivityError('Could not reach the Workspace Agent test endpoint.');
       }
       lastProbeRef.current = Date.now();
     };
@@ -78,7 +86,7 @@ export function AgentSettingsProvider({ children }: { children: React.ReactNode 
   }, [enabled, config?.model, config?.base_url, config?.provider]);
 
   return (
-    <AgentSettingsContext.Provider value={{ enabled, config, loading: isLoading, connectivity }}>
+    <AgentSettingsContext.Provider value={{ enabled, config, loading: isLoading, connectivity, connectivityStatus, connectivityError }}>
       {children}
     </AgentSettingsContext.Provider>
   );

@@ -15,6 +15,7 @@ import { triggerExtraction } from '../../agent/extraction.js';
 import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+import { assertActivityAccess, assertSubjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
 
 export function activityTools(db: DbPool): ToolDef[] {
   return [
@@ -38,8 +39,11 @@ export function activityTools(db: DbPool): ToolDef[] {
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
           input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'activity', input.custom_fields, { isCreate: true });
         }
+        await assertSubjectAccess(db, actor, input.subject_type, input.subject_id);
+        const owner_id = await defaultOwnerForCreate(db, actor, input.owner_id);
         const activity = await activityRepo.createActivity(db, actor.tenant_id, {
           ...input,
+          owner_id: owner_id ?? undefined,
           source_agent: actor.actor_type === 'agent' ? actor.actor_id : undefined,
           created_by: actor.actor_id,
         });
@@ -82,6 +86,7 @@ export function activityTools(db: DbPool): ToolDef[] {
       handler: async (input: { id: string }, actor: ActorContext) => {
         const activity = await activityRepo.getActivity(db, actor.tenant_id, input.id);
         if (!activity) throw notFound('Activity', input.id);
+        await assertActivityAccess(db, actor, input.id);
         return { activity };
       },
     },
@@ -91,8 +96,10 @@ export function activityTools(db: DbPool): ToolDef[] {
       description: 'Search activities across the CRM with flexible filters. Use type to filter by activity kind (outreach_email, meeting_held, stage_change, etc.), performed_by to see a specific actor contributions, outcome to find activities with a particular result, or subject_type/subject_id to scope to a specific CRM record. Returns paginated results sorted by occurred_at descending.',
       inputSchema: activitySearch,
       handler: async (input: z.infer<typeof activitySearch>, actor: ActorContext) => {
+        const ownerFilter = await resolveOwnerFilter(db, actor);
         const result = await activityRepo.searchActivities(db, actor.tenant_id, {
           ...input,
+          owner_ids: ownerFilter.owner_ids,
           limit: input.limit ?? 20,
         });
         return { activities: result.data, next_cursor: result.next_cursor, total: result.total };
@@ -113,6 +120,7 @@ export function activityTools(db: DbPool): ToolDef[] {
         }, async () => {
         const before = await activityRepo.getActivity(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Activity', input.id);
+        await assertActivityAccess(db, actor, input.id);
 
         const activity = await activityRepo.completeActivity(
           db,
@@ -173,6 +181,7 @@ export function activityTools(db: DbPool): ToolDef[] {
         }, async () => {
         const before = await activityRepo.getActivity(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Activity', input.id);
+        await assertActivityAccess(db, actor, input.id);
 
         if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
           input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'activity', input.patch.custom_fields);
@@ -219,6 +228,7 @@ export function activityTools(db: DbPool): ToolDef[] {
       description: 'Get a chronological activity timeline for any customer record (contact, account, opportunity, or use_case) via polymorphic subject_type and subject_id. Optionally filter by activity types to see only specific kinds of activities. Returns activities sorted by occurred_at descending with the total count for pagination.',
       inputSchema: activityGetTimeline,
       handler: async (input: z.infer<typeof activityGetTimeline>, actor: ActorContext) => {
+        await assertSubjectAccess(db, actor, input.subject_type, input.subject_id);
         const result = await activityRepo.getSubjectTimeline(
           db,
           actor.tenant_id,

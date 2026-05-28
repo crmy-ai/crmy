@@ -11,7 +11,7 @@ import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { RecordMemoryIndicator } from '@/components/crm/RecordMemoryIndicator';
 import { motion } from 'framer-motion';
-import { LayoutGrid, List, ChevronUp, ChevronDown, Sparkles, Globe, DollarSign, Heart, Building2, FileText } from 'lucide-react';
+import { LayoutGrid, List, ChevronUp, ChevronDown, Bot, Globe, DollarSign, Heart, Building2, FileText } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useRecordMemoryCounts } from '@/hooks/useRecordMemoryCounts';
@@ -183,9 +183,11 @@ export default function Accounts() {
           allAccounts.length === 0 && !search && Object.keys(activeFilters).length === 0 ? (
             <OnboardingEmptyState
               icon={Building2}
-              title="Add your first account"
+              title="No accounts yet"
               description="Accounts connect stakeholders, opportunities, activities, and context."
-              primary={{ label: 'New Account', onClick: () => openQuickAdd('account') }}
+              showSampleData={false}
+              iconClassName="text-[#8b5cf6]"
+              iconBgClassName="bg-[#8b5cf6]/15"
             />
           ) : (
             <OnboardingEmptyState
@@ -194,6 +196,8 @@ export default function Accounts() {
               description="Adjust the search or filters to find the account you need."
               primary={{ label: 'Clear filters', onClick: () => { setSearch(''); setActiveFilters({}); } }}
               showSampleData={false}
+              iconClassName="text-[#8b5cf6]"
+              iconBgClassName="bg-[#8b5cf6]/15"
             />
           )
         ) : effectiveView === 'table' ? (
@@ -235,8 +239,8 @@ export default function Accounts() {
                           </button>
                           {agentEnabled && (
                             <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'account', id: a.id as string, name: a.name as string, detail: a.industry as string }); navigate('/agent'); }}
-                              className="p-1.5 rounded-lg hover:bg-accent/10 transition-colors">
-                              <Sparkles className="w-3.5 h-3.5 text-accent" />
+                              className="p-1.5 rounded-lg hover:bg-violet-500/10 transition-colors">
+                              <Bot className="w-3.5 h-3.5 text-violet-500" />
                             </button>
                           )}
                         </div>
@@ -264,8 +268,8 @@ export default function Accounts() {
                   </button>
                   {agentEnabled && (
                     <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'account', id: a.id as string, name: a.name as string, detail: a.industry as string }); navigate('/agent'); }}
-                      className="p-1.5 rounded-lg hover:bg-accent/10 transition-colors">
-                      <Sparkles className="w-3.5 h-3.5 text-accent" />
+                      className="p-1.5 rounded-lg hover:bg-violet-500/10 transition-colors">
+                      <Bot className="w-3.5 h-3.5 text-violet-500" />
                     </button>
                   )}
                 </div>

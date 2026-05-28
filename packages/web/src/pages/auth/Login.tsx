@@ -7,10 +7,13 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card';
-import { auth, setToken, setUser } from '../../api/client';
+import { ApiError, auth, setToken, setUser } from '../../api/client';
 import crMyLogo from '../../assets/crmy-logo.png';
-import { X, Check, Sun, Moon } from 'lucide-react';
+import { X, Check, Sun, Moon, ChevronDown } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
+
+const TAGLINE = 'Operational customer context for AI agents.';
+const RELEASE_NOTES_URL = 'https://github.com/codycharris/crmy#whats-in-082';
 
 const PASSWORD_RULES = [
   { label: 'At least 8 characters', test: (p: string) => p.length >= 8 },
@@ -20,11 +23,23 @@ const PASSWORD_RULES = [
 ];
 
 function isValidEmail(email: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
 function isValidPassword(password: string) {
   return PASSWORD_RULES.every((r) => r.test(password));
+}
+
+function loginErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message === 'Unauthorized') {
+    return 'Email or password did not match. Check the email address and try again.';
+  }
+  if (err instanceof ApiError) {
+    if (err.status === 422) return 'Enter a valid email address.';
+    if (err.status === 429) return 'Too many login attempts. Please wait a bit and try again.';
+    return (err.body.detail as string | undefined) ?? 'Authentication failed. Please try again.';
+  }
+  return err instanceof Error ? err.message : 'Authentication failed. Please try again.';
 }
 
 
@@ -45,8 +60,13 @@ export function LoginPage() {
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
   const [dbStatus, setDbStatus] = useState<{
     status: 'ok' | 'db_error' | 'api_error' | 'loading';
-    db_host?: string;
-    db_name?: string;
+    environment?: string;
+    setup?: {
+      has_users: boolean;
+      bootstrap_required: boolean;
+      public_registration_enabled: boolean;
+      registration_open: boolean;
+    };
     version?: string;
   }>({ status: 'loading' });
 
@@ -60,13 +80,21 @@ export function LoginPage() {
         }
         setDbStatus({
           status: d.db === 'ok' ? 'ok' : 'db_error',
-          db_host: d.db_host,
-          db_name: d.db_name,
+          environment: d.environment,
+          setup: d.setup,
           version: d.version,
         });
       })
       .catch(() => setDbStatus({ status: 'api_error' }));
   }, []);
+
+  useEffect(() => {
+    if (mode === 'register' && dbStatus.status === 'ok' && dbStatus.setup?.registration_open === false) {
+      setMode('login');
+      setTouched({});
+      setError('');
+    }
+  }, [dbStatus.setup?.registration_open, dbStatus.status, mode]);
 
   const toggleTheme = () => {
     const next = !isDark;
@@ -81,7 +109,8 @@ export function LoginPage() {
 
   const touch = (field: string) => setTouched((t) => ({ ...t, [field]: true }));
 
-  const emailError = touched.email && !isValidEmail(email) ? 'Enter a valid email address' : '';
+  const normalizedEmail = email.trim();
+  const emailError = touched.email && !isValidEmail(normalizedEmail) ? 'Enter a valid email address' : '';
   const passwordError =
     touched.password && mode === 'register' && !isValidPassword(password)
       ? 'Password does not meet requirements'
@@ -95,8 +124,9 @@ export function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setTouched({ email: true, password: true, name: true, tenantName: true });
+    setEmail(normalizedEmail);
 
-    if (!isValidEmail(email)) return;
+    if (!isValidEmail(normalizedEmail)) return;
     if (!password) return;
     if (mode === 'register') {
       if (!isValidPassword(password) || !name.trim() || !tenantName.trim()) return;
@@ -107,14 +137,14 @@ export function LoginPage() {
     try {
       const result =
         mode === 'login'
-          ? await auth.login(email, password)
-          : await auth.register({ email, password, name, tenant_name: tenantName });
+          ? await auth.login(normalizedEmail, password)
+          : await auth.register({ email: normalizedEmail, password, name: name.trim(), tenant_name: tenantName.trim() });
       setToken(result.token);
       setUser(result.user);
       await queryClient.invalidateQueries({ queryKey: ['agent-config'] });
       navigate('/');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication failed');
+      setError(loginErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -126,45 +156,77 @@ export function LoginPage() {
     setError('');
   };
 
-  // Page background matches the app's background in both modes
-  const pageBg = 'bg-background';
-
   // Card wrapper: in dark mode render as dark panel variant; in light mode use default light styles
   const cardClass = isDark ? (isCharcoal ? 'dark charcoal' : 'dark') : '';
+  const registrationOpen = dbStatus.status === 'ok' && dbStatus.setup?.registration_open === true;
+  const isFirstRun = dbStatus.status === 'ok' && dbStatus.setup?.bootstrap_required === true;
+  const statusLabel =
+    dbStatus.status === 'loading'
+      ? 'Checking CRMy server...'
+      : dbStatus.status === 'ok'
+        ? 'Server ready'
+        : dbStatus.status === 'db_error'
+          ? 'Database unavailable'
+          : 'Server unreachable';
+  const databaseLabel =
+    dbStatus.status === 'loading'
+      ? 'Checking'
+      : dbStatus.status === 'ok'
+        ? 'Connected'
+        : dbStatus.status === 'db_error'
+          ? 'Unavailable'
+          : 'Unknown';
+  const setupLabel = dbStatus.status === 'ok'
+    ? isFirstRun
+      ? 'First workspace setup open'
+      : registrationOpen
+        ? 'Public registration enabled'
+        : 'Sign-in only'
+    : 'Unavailable';
 
   return (
-    <div className={`flex min-h-screen items-center justify-center p-4 ${pageBg}`}>
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,hsl(var(--primary)/0.16),transparent_34rem)]" />
       <button
         onClick={toggleTheme}
-        className="fixed top-4 right-4 p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        className="fixed right-4 top-4 z-10 rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         aria-label="Toggle theme"
       >
         {isDark ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
       </button>
-      <div className={`${cardClass} w-full max-w-md`}>
-      <Card className="w-full">
-        <CardHeader className="text-left">
-          <div className="flex items-center gap-3 mb-1">
-            <img src={crMyLogo} alt="CRMy" className="h-14 w-14 object-contain" />
-            <CardTitle className="font-brand font-bold text-2xl flex-1">
+      <div className={`${cardClass} relative flex w-full max-w-md flex-col items-center`}>
+      <img
+        src={crMyLogo}
+        alt="CRMy"
+        className="-mb-2 h-32 w-32 object-contain sm:-mb-3 sm:h-40 sm:w-40"
+      />
+      <Card className="w-full border-border/80 shadow-xl shadow-black/5">
+        <CardHeader className="relative items-center text-center">
+          {mode === 'register' && (
+            <button
+              onClick={() => switchMode('login')}
+              className="absolute right-5 top-5 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              aria-label="Back to sign in"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+          <div className="space-y-1">
+            <CardTitle className="font-brand text-2xl font-bold tracking-normal">
               {mode === 'login' ? (
                 <>Sign in to <span className="text-primary">CRMy</span></>
               ) : (
-                <>Create your account</>
+                <>{isFirstRun ? 'Create your workspace' : 'Create your account'}</>
               )}
             </CardTitle>
-            {mode === 'register' && (
-              <button
-                onClick={() => switchMode('login')}
-                className="ml-auto p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                aria-label="Back to sign in"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            )}
+            <CardDescription>{TAGLINE}</CardDescription>
           </div>
           {mode === 'register' && (
-            <CardDescription className="text-center">Set up a new tenant and admin account</CardDescription>
+            <p className="pt-2 text-xs text-muted-foreground">
+              {isFirstRun
+                ? 'Set up the first workspace and owner account.'
+                : 'Create a new workspace and owner account.'}
+            </p>
           )}
         </CardHeader>
         <CardContent>
@@ -199,7 +261,9 @@ export function LoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                onBlur={() => touch('email')}
+                onBlur={() => { setEmail((value) => value.trim()); touch('email'); }}
+                autoComplete="email"
+                placeholder="you@example.com"
                 aria-invalid={!!emailError}
               />
               {emailError && <p className="mt-1 text-xs text-destructive">{emailError}</p>}
@@ -211,6 +275,7 @@ export function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 onBlur={() => touch('password')}
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                 aria-invalid={!!passwordError}
               />
               {passwordError && mode !== 'register' && (
@@ -230,19 +295,27 @@ export function LoginPage() {
                 </ul>
               )}
             </div>
-            {error && <p className="text-sm text-destructive">{error}</p>}
+            {error && (
+              <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </div>
+            )}
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
             </Button>
           </form>
           <div className="mt-4 text-center text-sm text-muted-foreground">
             {mode === 'login' ? (
-              <>
-                Don't have an account?{' '}
-                <button className="text-primary hover:underline" onClick={() => switchMode('register')}>
-                  Register
-                </button>
-              </>
+              registrationOpen ? (
+                <>
+                  {isFirstRun ? 'New self-hosted install? ' : "Don't have an account? "}
+                  <button className="text-primary hover:underline" onClick={() => switchMode('register')}>
+                    {isFirstRun ? 'Create workspace' : 'Register'}
+                  </button>
+                </>
+              ) : (
+                <span>Need access? Ask an admin to invite or create your account.</span>
+              )
             ) : (
               <>
                 Already have an account?{' '}
@@ -252,38 +325,67 @@ export function LoginPage() {
               </>
             )}
           </div>
-          <div className="mt-6 pt-4 border-t border-border flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="mt-6 flex items-center gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
             <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
               dbStatus.status === 'ok' ? 'bg-green-500' : dbStatus.status === 'loading' ? 'bg-gray-400' : 'bg-red-500'
             }`} />
             {dbStatus.status === 'loading' && <span>Checking CRMy server…</span>}
             {dbStatus.status === 'ok' && (
-              <span className="truncate">
-                {dbStatus.db_name && <span className="font-medium text-foreground/70">{dbStatus.db_name}</span>}
-                {dbStatus.db_name && dbStatus.db_host && <span className="mx-1">@</span>}
-                {dbStatus.db_host}
-              </span>
+              <span className="truncate">Server ready</span>
             )}
             {dbStatus.status === 'db_error' && (
               <span className="text-destructive">
                 Database unavailable
-                {(dbStatus.db_name || dbStatus.db_host) && (
-                  <span className="text-muted-foreground">
-                    {' '}({[dbStatus.db_name, dbStatus.db_host].filter(Boolean).join(' @ ')})
-                  </span>
-                )}
+                <span className="text-muted-foreground"> — check Postgres, then refresh.</span>
               </span>
             )}
             {dbStatus.status === 'api_error' && (
               <span className="text-destructive">
-                CRMy API not reachable
-                <span className="text-muted-foreground"> — start the server, then confirm Postgres is running.</span>
+                Server unreachable
+                <span className="text-muted-foreground"> — start CRMy, then refresh.</span>
               </span>
             )}
             {dbStatus.version && (
-              <span className="ml-auto flex-shrink-0">v{dbStatus.version}</span>
+              <a
+                href={RELEASE_NOTES_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="ml-auto flex-shrink-0 text-inherit hover:underline"
+              >
+                v{dbStatus.version}
+              </a>
             )}
           </div>
+          <details className="group -mb-4 mt-1 border-t border-border/60 text-xs text-muted-foreground">
+            <summary className="mx-auto flex h-4 w-8 cursor-pointer list-none items-center justify-center rounded-b-md text-muted-foreground/60 transition-colors hover:text-muted-foreground [&::-webkit-details-marker]:hidden">
+              <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
+              <span className="sr-only">System details</span>
+            </summary>
+            <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 rounded-lg bg-muted/20 px-3 py-2">
+              <dt>Server</dt>
+              <dd className={dbStatus.status === 'ok' ? 'text-success' : dbStatus.status === 'loading' ? '' : 'text-destructive'}>
+                {statusLabel}
+              </dd>
+              <dt>Database</dt>
+              <dd className={dbStatus.status === 'ok' ? 'text-success' : dbStatus.status === 'db_error' ? 'text-destructive' : ''}>
+                {databaseLabel}
+              </dd>
+              <dt>Setup</dt>
+              <dd>{setupLabel}</dd>
+              {dbStatus.environment && (
+                <>
+                  <dt>Environment</dt>
+                  <dd>{dbStatus.environment}</dd>
+                </>
+              )}
+              {dbStatus.version && (
+                <>
+                  <dt>Version</dt>
+                  <dd>v{dbStatus.version}</dd>
+                </>
+              )}
+            </dl>
+          </details>
         </CardContent>
       </Card>
       </div>

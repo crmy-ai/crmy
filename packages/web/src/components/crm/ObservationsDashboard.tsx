@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertCircle,
@@ -24,6 +24,7 @@ import {
 } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { toast } from '@/hooks/use-toast';
+import { useSlashSearchFocus } from '@/hooks/useSlashSearchFocus';
 
 type ObservationStatus = 'Processed' | 'Needs review' | 'No context found' | 'Failed';
 type ObservationSource = 'activity' | 'inbound_email' | 'outbound_email' | 'system_sync' | 'add_context' | 'mcp' | 'context_api';
@@ -34,7 +35,7 @@ const SOURCE_OPTIONS: Array<{ value: ObservationSource; label: string; color: st
   { value: 'inbound_email',  label: 'Inbound emails',  color: 'bg-blue-500' },
   { value: 'outbound_email', label: 'Outbound emails', color: 'bg-indigo-500' },
   { value: 'system_sync',    label: 'System syncs',    color: 'bg-amber-500' },
-  { value: 'add_context',    label: 'Add Context',     color: 'bg-violet-500' },
+  { value: 'add_context',    label: 'Add Context',     color: 'bg-[#0ea5e9]' },
   { value: 'mcp',            label: 'Agent/MCP',       color: 'bg-fuchsia-500' },
   { value: 'context_api',    label: 'Context API',     color: 'bg-slate-500' },
 ];
@@ -216,6 +217,7 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
   const [sourceFilter, setSourceFilter] = useState<'all' | ObservationSource>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | ObservationStatus>('all');
   const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
   const reprocessSource = useReprocessRawContextSource();
   const activitiesQ = useActivities({ limit: 100 }) as any;
   const outboundQ = useEmails({ limit: 100 }) as any;
@@ -415,6 +417,7 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
   const signalReviewTotal = Number(signalGroupsQ.data?.total ?? 0);
   const isLoading = activitiesQ.isLoading || outboundQ.isLoading || rawSourcesQ.isLoading || memoryQ.isLoading || signalsQ.isLoading || signalGroupsQ.isLoading;
   const hasFilters = sourceFilter !== 'all' || statusFilter !== 'all' || query.trim().length > 0;
+  useSlashSearchFocus(searchRef);
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6 space-y-4 md:space-y-6">
@@ -492,11 +495,17 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
+              ref={searchRef}
               value={query}
               onChange={event => setQuery(event.target.value)}
               placeholder="Search recent sources..."
-              className="h-9 w-full rounded-lg border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
+              className="h-9 w-full rounded-lg border border-border bg-background pl-9 pr-8 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring"
             />
+            {!query && (
+              <kbd className="absolute right-2.5 top-1/2 hidden -translate-y-1/2 items-center rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground/50 md:inline-flex">
+                /
+              </kbd>
+            )}
           </div>
           <select
             value={sourceFilter}
@@ -539,18 +548,6 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
                 ? 'Add notes, transcripts, emails, connect a system of record, or let an agent send context through MCP to start building Signals and Memory.'
                 : 'Adjust the source, status, or search filters to broaden the list.'}
             </p>
-            {rows.length === 0 && (
-              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                <button
-                  type="button"
-                  onClick={onAddContext}
-                  className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-[#0ea5e9] px-3 text-sm font-semibold text-white transition-colors hover:bg-[#0284c7]"
-                >
-                  <Plus className="h-4 w-4" />
-                  Add Context
-                </button>
-              </div>
-            )}
           </div>
         ) : (
           <div className="space-y-2">

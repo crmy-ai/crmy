@@ -13,6 +13,7 @@ import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { DatePicker } from '@/components/ui/date-picker';
 import { headerDescription } from '@/lib/headerCopy';
+import { ENTITY_COLORS } from '@/lib/entityColors';
 
 const BUILT_IN_TYPE_OPTIONS = [
   { value: 'call', label: 'Call' },
@@ -273,9 +274,11 @@ export default function Activities() {
           allActivities.length === 0 && !search && Object.keys(activeFilters).length === 0 ? (
             <OnboardingEmptyState
               icon={ActivityIcon}
-              title="Log your first activity"
+              title="No activities yet"
               description="Activities capture interactions and the latest customer state."
-              primary={{ label: 'Log Activity', onClick: () => openQuickAdd('activity') }}
+              showSampleData={false}
+              iconClassName={ENTITY_COLORS.activities.text}
+              iconBgClassName={ENTITY_COLORS.activities.bg}
             />
           ) : (
             <div className="flex flex-col items-center justify-center py-16 text-center">

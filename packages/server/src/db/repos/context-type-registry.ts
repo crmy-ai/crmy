@@ -313,6 +313,143 @@ const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
   },
 
   {
+    type_name: 'methodology_gap',
+    label: 'Methodology Gap',
+    description: 'Missing or unclear GTM qualification detail that should be resolved before agents rely on the deal context',
+    is_default: true,
+    is_extractable: true,
+    priority_weight: 1.7,
+    confidence_half_life_days: 45,
+    extraction_prompt: 'Extract missing or unclear qualification details that matter to the revenue process — unknown buyer, unclear process, missing decision criteria, unresolved budget, security, legal, procurement, timeline, or success criteria. Use this when the source reveals a gap rather than a confirmed fact.',
+    json_schema: {
+      type: 'object',
+      properties: {
+        gap_area: {
+          type: 'string',
+          enum: ['buyer', 'process', 'criteria', 'budget', 'timeline', 'security', 'legal', 'procurement', 'success_criteria', 'other'],
+          description: 'The area where GTM context is missing or unclear',
+        },
+        description: {
+          type: 'string',
+          description: 'What is missing, unclear, or needs verification',
+        },
+        needed_from: {
+          type: 'string',
+          description: 'Who or what team can clarify the gap, if known',
+        },
+        impact: {
+          type: 'string',
+          description: 'Why this gap matters for the account, opportunity, or customer workflow',
+        },
+      },
+      required: ['gap_area', 'description'],
+    },
+  },
+
+  {
+    type_name: 'success_criteria',
+    label: 'Success Criteria',
+    description: 'Customer-defined outcomes, evaluation criteria, or value measures',
+    is_default: true,
+    is_extractable: true,
+    priority_weight: 1.8,
+    confidence_half_life_days: 120,
+    extraction_prompt: 'Extract explicit customer success criteria, desired outcomes, evaluation requirements, measurable value targets, or acceptance criteria. Only include criteria stated by or attributed to the customer.',
+    json_schema: {
+      type: 'object',
+      properties: {
+        criterion: {
+          type: 'string',
+          description: 'The outcome, requirement, or value measure the customer cares about',
+        },
+        owner: {
+          type: 'string',
+          description: 'Person or team that owns or cares about this criterion',
+        },
+        measurement: {
+          type: 'string',
+          description: 'How success will be measured, if stated',
+        },
+        priority: {
+          type: 'string',
+          enum: ['critical', 'high', 'medium', 'low'],
+          description: 'How important this criterion appears to be',
+        },
+      },
+      required: ['criterion'],
+    },
+  },
+
+  {
+    type_name: 'buying_process',
+    label: 'Buying Process',
+    description: 'Decision path, approval process, procurement, legal, security, and committee dynamics',
+    is_default: true,
+    is_extractable: true,
+    priority_weight: 1.9,
+    confidence_half_life_days: 90,
+    extraction_prompt: 'Extract information about how the customer will buy, approve, or evaluate the solution — decision process, procurement, legal, security, approval steps, buying committee, timeline gates, or required reviews.',
+    json_schema: {
+      type: 'object',
+      properties: {
+        process_step: {
+          type: 'string',
+          description: 'The buying, approval, review, or evaluation step',
+        },
+        owner: {
+          type: 'string',
+          description: 'Person, role, or team responsible for this step',
+        },
+        status: {
+          type: 'string',
+          enum: ['not_started', 'in_progress', 'blocked', 'completed', 'unknown'],
+          description: 'Current status of the process step',
+        },
+        due_date: {
+          type: 'string',
+          description: 'When this step should happen or complete',
+        },
+      },
+      required: ['process_step', 'status'],
+    },
+  },
+
+  {
+    type_name: 'forecast_signal',
+    label: 'Forecast Signal',
+    description: 'Timing, confidence, push/pull, close risk, or forecast-relevant change',
+    is_default: true,
+    is_extractable: true,
+    priority_weight: 2.0,
+    confidence_half_life_days: 30,
+    extraction_prompt: 'Extract forecast-relevant changes such as a deal pulling forward, slipping, close confidence increasing/decreasing, buyer urgency, timing risk, or changes that could affect forecast category. Treat these as Signals that usually need review before affecting forecast.',
+    json_schema: {
+      type: 'object',
+      properties: {
+        signal_type: {
+          type: 'string',
+          enum: ['pull_forward', 'push_out', 'confidence_up', 'confidence_down', 'timing_risk', 'scope_change', 'other'],
+          description: 'Type of forecast-relevant signal',
+        },
+        direction: {
+          type: 'string',
+          enum: ['positive', 'negative', 'neutral', 'unknown'],
+          description: 'Whether the signal improves, hurts, or does not clearly change forecast confidence',
+        },
+        reason: {
+          type: 'string',
+          description: 'Why this affects forecast or timing',
+        },
+        effective_date: {
+          type: 'string',
+          description: 'Relevant date or period, if stated',
+        },
+      },
+      required: ['signal_type', 'direction', 'reason'],
+    },
+  },
+
+  {
     type_name: 'meeting_notes',
     label: 'Meeting Notes',
     description: 'Structured takeaways from a meeting (distinct from raw transcript)',
@@ -367,10 +504,35 @@ export async function seedDefaults(db: DbPool, tenantId: UUID): Promise<void> {
   }
 }
 
+export async function ensureDefaultContextTypes(db: DbPool, tenantId: UUID): Promise<void> {
+  for (const entry of DEFAULT_CONTEXT_TYPES) {
+    await db.query(
+      `INSERT INTO context_type_registry
+       (type_name, tenant_id, label, description, is_default, json_schema,
+        extraction_prompt, is_extractable, priority_weight, confidence_half_life_days)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (tenant_id, type_name) DO NOTHING`,
+      [
+        entry.type_name,
+        tenantId,
+        entry.label,
+        entry.description ?? null,
+        true,
+        entry.json_schema ? JSON.stringify(entry.json_schema) : null,
+        entry.extraction_prompt ?? null,
+        entry.is_extractable,
+        entry.priority_weight,
+        entry.confidence_half_life_days ?? null,
+      ],
+    );
+  }
+}
+
 export async function listContextTypes(
   db: DbPool,
   tenantId: UUID,
 ): Promise<ContextTypeRegistryEntry[]> {
+  await ensureDefaultContextTypes(db, tenantId);
   let result = await db.query(
     'SELECT * FROM context_type_registry WHERE tenant_id = $1 ORDER BY type_name',
     [tenantId],
@@ -390,6 +552,7 @@ export async function getExtractableTypes(
   db: DbPool,
   tenantId: UUID,
 ): Promise<(ContextTypeRegistryEntry & { json_schema: Record<string, unknown> | null; extraction_prompt: string | null })[]> {
+  await ensureDefaultContextTypes(db, tenantId);
   let result = await db.query(
     `SELECT * FROM context_type_registry
      WHERE tenant_id = $1 AND is_extractable = true

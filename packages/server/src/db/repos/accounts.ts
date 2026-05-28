@@ -95,6 +95,7 @@ export async function searchAccounts(
     query?: string;
     industry?: string;
     owner_id?: UUID;
+    owner_ids?: UUID[];
     min_revenue?: number;
     tags?: string[];
     limit: number;
@@ -122,6 +123,14 @@ export async function searchAccounts(
     conditions.push(`a.owner_id = $${idx}`);
     params.push(filters.owner_id);
     idx++;
+  } else if (filters.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`a.owner_id = ANY($${idx}::uuid[])`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
   }
   if (filters.min_revenue != null) {
     conditions.push(`a.annual_revenue >= $${idx}`);

@@ -16,6 +16,7 @@ import { runIdempotent } from '../../db/repos/idempotency.js';
 import { withTransaction } from '../../db/transaction.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+import { assertOwnedObjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
 
 function runAccountOperation<T>(
   db: DbPool,
@@ -79,7 +80,8 @@ export function accountTools(db: DbPool): ToolDef[] {
           if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
             input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'account', input.custom_fields, { isCreate: true });
           }
-          const account = await accountRepo.createAccount(db, actor.tenant_id, { ...input, created_by: actor.actor_id });
+          const owner_id = await defaultOwnerForCreate(db, actor, input.owner_id);
+          const account = await accountRepo.createAccount(db, actor.tenant_id, { ...input, owner_id: owner_id ?? undefined, created_by: actor.actor_id });
           const event_id = await emitEvent(db, {
             tenantId: actor.tenant_id, eventType: 'account.created',
             actorId: actor.actor_id, actorType: actor.actor_type,
@@ -105,7 +107,8 @@ export function accountTools(db: DbPool): ToolDef[] {
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
           input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'account', input.custom_fields, { isCreate: true });
         }
-        const account = await accountRepo.createAccount(db, actor.tenant_id, { ...input, created_by: actor.actor_id });
+        const owner_id = await defaultOwnerForCreate(db, actor, input.owner_id);
+        const account = await accountRepo.createAccount(db, actor.tenant_id, { ...input, owner_id: owner_id ?? undefined, created_by: actor.actor_id });
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id, eventType: 'account.created',
           actorId: actor.actor_id, actorType: actor.actor_type,
@@ -138,6 +141,7 @@ export function accountTools(db: DbPool): ToolDef[] {
       handler: async (input: { id: string; include_context_entries?: boolean }, actor: ActorContext) => {
         const account = await accountRepo.getAccount(db, actor.tenant_id, input.id);
         if (!account) throw notFound('Account', input.id);
+        await assertOwnedObjectAccess(db, actor, 'account', input.id);
 
         const [contacts, open_opportunities] = await Promise.all([
           accountRepo.getAccountContacts(db, actor.tenant_id, input.id),
@@ -157,8 +161,10 @@ export function accountTools(db: DbPool): ToolDef[] {
       description: 'Search companies with flexible filters. Use query to search by name or domain, industry to filter by sector, owner_id for companies owned by a specific user, min_revenue for revenue thresholds, and tags for custom categorization. Returns paginated results with cursor-based pagination.',
       inputSchema: accountSearch,
       handler: async (input: z.infer<typeof accountSearch>, actor: ActorContext) => {
+        const ownerFilter = await resolveOwnerFilter(db, actor, input.owner_id);
         const result = await accountRepo.searchAccounts(db, actor.tenant_id, {
           ...input,
+          ...ownerFilter,
           limit: input.limit ?? 20,
         });
         return { accounts: result.data, next_cursor: result.next_cursor, total: result.total };
@@ -173,6 +179,7 @@ export function accountTools(db: DbPool): ToolDef[] {
         return runAccountOperation(db, actor, 'account_update', input, async () => {
         const before = await accountRepo.getAccount(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Account', input.id);
+        await assertOwnedObjectAccess(db, actor, 'account', input.id);
 
         if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
           input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'account', input.patch.custom_fields);
@@ -217,6 +224,7 @@ export function accountTools(db: DbPool): ToolDef[] {
         return runAccountOperation(db, actor, 'account_set_health_score', input, async () => {
         const before = await accountRepo.getAccount(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Account', input.id);
+        await assertOwnedObjectAccess(db, actor, 'account', input.id);
 
         const account = await accountRepo.updateAccount(db, actor.tenant_id, input.id, {
           health_score: input.score,
@@ -260,6 +268,7 @@ export function accountTools(db: DbPool): ToolDef[] {
       handler: async (input: { id: string }, actor: ActorContext) => {
         const result = await accountRepo.getAccountHierarchy(db, actor.tenant_id, input.id);
         if (!result) throw notFound('Account', input.id);
+        await assertOwnedObjectAccess(db, actor, 'account', input.id);
         return result;
       },
     },
@@ -279,6 +288,7 @@ export function accountTools(db: DbPool): ToolDef[] {
         }
         const before = await accountRepo.getAccount(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Account', input.id);
+        await assertOwnedObjectAccess(db, actor, 'account', input.id);
 
         await accountRepo.deleteAccount(db, actor.tenant_id, input.id, {
           expectedVersion: input.expected_version,
@@ -339,6 +349,8 @@ export function accountTools(db: DbPool): ToolDef[] {
         ]);
         if (!primary) throw notFound('Account', input.primary_id);
         if (!secondary) throw notFound('Account', input.secondary_id);
+        await assertOwnedObjectAccess(db, actor, 'account', input.primary_id);
+        await assertOwnedObjectAccess(db, actor, 'account', input.secondary_id);
 
         const sec = secondary as unknown as AccountRow;
         const pri = primary as unknown as AccountRow;

@@ -17,7 +17,7 @@ import {
   useDeleteSequence, useSequenceEnrollments,
   useUnenrollFromSequence, useContacts, useSequenceAnalytics,
   useEnrollmentActivities, useEnrollmentContext, useEnrollInSequenceWithObjective,
-  useDraftSequencePreview,
+  useDraftSequencePreview, useWhoAmI,
 } from '@/api/hooks';
 import {
   ListOrdered, Plus, Trash2, Pencil, Power, PowerOff, ChevronDown, ChevronUp,
@@ -345,6 +345,8 @@ function EmailStepFields({
 }) {
   const navigate = useNavigate();
   const { enabled: agentEnabled, config: agentConfig, connectivity } = useAgentSettings();
+  const { data: whoami } = useWhoAmI() as any;
+  const isAdminUser = whoami?.user?.role === 'admin' || whoami?.user?.role === 'owner';
   type DraftState = { subject: string; body_text: string } | null;
   const [draft, setDraft] = useState<DraftState>(null);
   const draftMutation = useDraftSequencePreview();
@@ -354,15 +356,17 @@ function EmailStepFields({
 
   const promptConfigureAgent = useCallback(() => {
     toast({
-      title: 'Configure the Local Workspace Agent',
-      description: 'AI-generated sequence content needs an enabled model in Model Settings.',
-      action: (
+      title: isAdminUser ? 'Configure the Local Workspace Agent' : 'Workspace Agent needs admin setup',
+      description: isAdminUser
+        ? 'AI-generated sequence content needs an enabled model in Model Settings.'
+        : 'Ask an admin to enable the Workspace Agent before using AI-generated sequence content.',
+      action: isAdminUser ? (
         <ToastAction altText="Open Model Settings" onClick={() => navigate('/settings/model')}>
           Configure
         </ToastAction>
-      ),
+      ) : undefined,
     });
-  }, [navigate]);
+  }, [isAdminUser, navigate]);
 
   const handlePreview = useCallback(async () => {
     if (!agentReady) {
@@ -412,7 +416,7 @@ function EmailStepFields({
             <p className="mt-0.5 text-xs text-muted-foreground">
               Requires the Local Workspace Agent.
             </p>
-            {!agentReady && (
+            {!agentReady && isAdminUser && (
               <button
                 type="button"
                 onClick={() => navigate('/settings/model')}

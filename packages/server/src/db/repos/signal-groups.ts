@@ -58,55 +58,46 @@ export async function listCandidateGroups(
   input: { subject_type: string; subject_id: string; context_type: string },
 ): Promise<SignalGroup[]> {
   const result = await db.query(
-    `SELECT * FROM signal_groups
-     WHERE tenant_id = $1
-       AND context_type = $4
-       AND status NOT IN ('dismissed', 'merged')
-       AND merged_into_signal_group_id IS NULL
+    `WITH subject_scope AS (
+       SELECT CASE
+         WHEN $2 = 'account' THEN $3::uuid
+         WHEN $2 = 'contact' THEN (
+           SELECT account_id FROM contacts WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
+         )
+         WHEN $2 = 'opportunity' THEN (
+           SELECT account_id FROM opportunities WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
+         )
+         WHEN $2 = 'use_case' THEN (
+           SELECT account_id FROM use_cases WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
+         )
+       END AS account_id
+     )
+     SELECT sg.*
+     FROM signal_groups sg
+     CROSS JOIN subject_scope ss
+     WHERE sg.tenant_id = $1
+       AND sg.context_type = $4
+       AND sg.status NOT IN ('dismissed', 'merged')
+       AND sg.merged_into_signal_group_id IS NULL
        AND (
-         (subject_type = $2 AND subject_id = $3)
+         (sg.subject_type = $2 AND sg.subject_id = $3)
          OR (
-           $2 = 'contact'
-           AND subject_type = 'account'
-           AND subject_id = (
-             SELECT account_id FROM contacts
-             WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
-           )
-         )
-         OR (
-           $2 = 'account'
-           AND subject_type = 'contact'
-           AND subject_id IN (
-             SELECT id FROM contacts
-             WHERE tenant_id = $1 AND account_id = $3
-           )
-         )
-         OR (
-           $2 = 'account'
-           AND subject_type = 'opportunity'
-           AND subject_id IN (
-             SELECT id FROM opportunities
-             WHERE tenant_id = $1 AND account_id = $3
-           )
-         )
-         OR (
-           $2 = 'account'
-           AND subject_type = 'use_case'
-           AND subject_id IN (
-             SELECT id FROM use_cases
-             WHERE tenant_id = $1 AND account_id = $3
-           )
-         )
-         OR (
-           $2 IN ('opportunity', 'use_case')
-           AND subject_type = 'account'
-           AND subject_id = COALESCE(
-             (SELECT account_id FROM opportunities WHERE tenant_id = $1 AND id = $3),
-             (SELECT account_id FROM use_cases WHERE tenant_id = $1 AND id = $3)
+           ss.account_id IS NOT NULL
+           AND (
+             (sg.subject_type = 'account' AND sg.subject_id = ss.account_id)
+             OR (sg.subject_type = 'contact' AND sg.subject_id IN (
+               SELECT id FROM contacts WHERE tenant_id = $1 AND account_id = ss.account_id
+             ))
+             OR (sg.subject_type = 'opportunity' AND sg.subject_id IN (
+               SELECT id FROM opportunities WHERE tenant_id = $1 AND account_id = ss.account_id
+             ))
+             OR (sg.subject_type = 'use_case' AND sg.subject_id IN (
+               SELECT id FROM use_cases WHERE tenant_id = $1 AND account_id = ss.account_id
+             ))
            )
          )
        )
-     ORDER BY updated_at DESC
+     ORDER BY sg.updated_at DESC
      LIMIT 50`,
     [tenantId, input.subject_type, input.subject_id, input.context_type],
   );
@@ -125,9 +116,24 @@ export async function semanticCandidateGroups(
   },
 ): Promise<Array<SignalGroup & { vector_similarity: number }>> {
   const result = await db.query(
-    `SELECT sg.*,
+    `WITH subject_scope AS (
+       SELECT CASE
+         WHEN $2 = 'account' THEN $3::uuid
+         WHEN $2 = 'contact' THEN (
+           SELECT account_id FROM contacts WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
+         )
+         WHEN $2 = 'opportunity' THEN (
+           SELECT account_id FROM opportunities WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
+         )
+         WHEN $2 = 'use_case' THEN (
+           SELECT account_id FROM use_cases WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
+         )
+       END AS account_id
+     )
+     SELECT sg.*,
        1 - (sg.embedding <=> $5::vector) AS vector_similarity
      FROM signal_groups sg
+     CROSS JOIN subject_scope ss
      WHERE sg.tenant_id = $1
        AND sg.context_type = $4
        AND sg.status NOT IN ('dismissed', 'merged')
@@ -136,43 +142,18 @@ export async function semanticCandidateGroups(
        AND (
          (sg.subject_type = $2 AND sg.subject_id = $3)
          OR (
-           $2 = 'contact'
-           AND sg.subject_type = 'account'
-           AND sg.subject_id = (
-             SELECT account_id FROM contacts
-             WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
-           )
-         )
-         OR (
-           $2 = 'account'
-           AND sg.subject_type = 'contact'
-           AND sg.subject_id IN (
-             SELECT id FROM contacts
-             WHERE tenant_id = $1 AND account_id = $3
-           )
-         )
-         OR (
-           $2 = 'account'
-           AND sg.subject_type = 'opportunity'
-           AND sg.subject_id IN (
-             SELECT id FROM opportunities
-             WHERE tenant_id = $1 AND account_id = $3
-           )
-         )
-         OR (
-           $2 = 'account'
-           AND sg.subject_type = 'use_case'
-           AND sg.subject_id IN (
-             SELECT id FROM use_cases
-             WHERE tenant_id = $1 AND account_id = $3
-           )
-         )
-         OR (
-           $2 IN ('opportunity', 'use_case')
-           AND sg.subject_type = 'account'
-           AND sg.subject_id = COALESCE(
-             (SELECT account_id FROM opportunities WHERE tenant_id = $1 AND id = $3),
-             (SELECT account_id FROM use_cases WHERE tenant_id = $1 AND id = $3)
+           ss.account_id IS NOT NULL
+           AND (
+             (sg.subject_type = 'account' AND sg.subject_id = ss.account_id)
+             OR (sg.subject_type = 'contact' AND sg.subject_id IN (
+               SELECT id FROM contacts WHERE tenant_id = $1 AND account_id = ss.account_id
+             ))
+             OR (sg.subject_type = 'opportunity' AND sg.subject_id IN (
+               SELECT id FROM opportunities WHERE tenant_id = $1 AND account_id = ss.account_id
+             ))
+             OR (sg.subject_type = 'use_case' AND sg.subject_id IN (
+               SELECT id FROM use_cases WHERE tenant_id = $1 AND account_id = ss.account_id
+             ))
            )
          )
        )
@@ -338,42 +319,57 @@ export async function listSignalGroups(
     subject_id?: string;
     context_type?: string;
     attention_only?: boolean;
+    owner_ids?: string[];
     limit: number;
     cursor?: string;
   },
 ): Promise<PaginatedResponse<SignalGroup>> {
-  const conditions = ['tenant_id = $1'];
+  const conditions = ['sg.tenant_id = $1'];
   const params: unknown[] = [tenantId];
   let idx = 2;
 
   if (filters.status) {
-    conditions.push(`status = $${idx++}`);
+    conditions.push(`sg.status = $${idx++}`);
     params.push(filters.status);
   } else {
-    conditions.push(`status <> 'merged'`);
+    conditions.push(`sg.status <> 'merged'`);
   }
   if (filters.subject_type) {
-    conditions.push(`subject_type = $${idx++}`);
+    conditions.push(`sg.subject_type = $${idx++}`);
     params.push(filters.subject_type);
   }
   if (filters.subject_id) {
-    conditions.push(`subject_id = $${idx++}`);
+    conditions.push(`sg.subject_id = $${idx++}`);
     params.push(filters.subject_id);
   }
   if (filters.context_type) {
-    conditions.push(`context_type = $${idx++}`);
+    conditions.push(`sg.context_type = $${idx++}`);
     params.push(filters.context_type);
   }
   if (filters.attention_only) {
-    conditions.push(`status IN ('ready', 'blocked', 'conflicting')`);
+    conditions.push(`sg.status IN ('ready', 'blocked', 'conflicting')`);
+  }
+  if (filters.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`(
+        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = sg.tenant_id AND sg.subject_type = 'account' AND a.id = sg.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM contacts c WHERE c.tenant_id = sg.tenant_id AND sg.subject_type = 'contact' AND c.id = sg.subject_id AND c.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = sg.tenant_id AND sg.subject_type = 'opportunity' AND o.id = sg.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = sg.tenant_id AND sg.subject_type = 'use_case' AND uc.id = sg.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
+      )`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
   }
   if (filters.cursor) {
-    conditions.push(`updated_at < $${idx++}`);
+    conditions.push(`sg.updated_at < $${idx++}`);
     params.push(filters.cursor);
   }
 
   const where = conditions.join(' AND ');
-  const count = await db.query(`SELECT count(*)::int AS total FROM signal_groups WHERE ${where}`, params);
+  const count = await db.query(`SELECT count(*)::int AS total FROM signal_groups sg WHERE ${where}`, params);
   params.push(filters.limit + 1);
   const rows = await db.query(
     `SELECT sg.*,
@@ -386,8 +382,8 @@ export async function listSignalGroups(
      FROM signal_groups sg
      WHERE ${where}
        ORDER BY
-         CASE status WHEN 'conflicting' THEN 0 WHEN 'blocked' THEN 1 WHEN 'ready' THEN 2 WHEN 'gathering' THEN 3 ELSE 4 END,
-       updated_at DESC
+         CASE sg.status WHEN 'conflicting' THEN 0 WHEN 'blocked' THEN 1 WHEN 'ready' THEN 2 WHEN 'gathering' THEN 3 ELSE 4 END,
+       sg.updated_at DESC
      LIMIT $${idx}`,
     params,
   );
@@ -551,7 +547,7 @@ export async function dismissSignalGroup(
     `UPDATE signal_groups
      SET status = 'dismissed',
          dismissed_at = now(),
-         dismissed_by = $3,
+         dismissed_by = (SELECT id FROM actors WHERE id = $3 AND tenant_id = $1),
          blocked_reason = $4,
          updated_at = now()
      WHERE tenant_id = $1 AND id = $2

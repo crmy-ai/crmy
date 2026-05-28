@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CRMy API",
-    "version": "0.8.0",
+    "version": "0.8.2",
     "description": "The operational customer context backend for AI agents. MCP-native, PostgreSQL-backed, open source. All endpoints require `Authorization: Bearer <jwt-or-api-key>` except `/auth/register` and `/auth/login`.",
     "license": {
       "name": "Apache-2.0"
@@ -734,6 +734,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "owner_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "lifecycle_stage": {
             "type": "string",
             "enum": [
@@ -959,6 +963,10 @@
             "type": "string",
             "format": "uuid"
           },
+          "owner_id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "aliases": {
             "type": "array",
             "items": {
@@ -1141,6 +1149,10 @@
             "format": "uuid"
           },
           "contact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "owner_id": {
             "type": "string",
             "format": "uuid"
           },
@@ -1405,6 +1417,10 @@
             "format": "uuid"
           },
           "use_case_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "owner_id": {
             "type": "string",
             "format": "uuid"
           },
@@ -1681,6 +1697,10 @@
             "type": "string"
           },
           "opportunity_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "owner_id": {
             "type": "string",
             "format": "uuid"
           },
@@ -8638,6 +8658,98 @@
                     "type": "number",
                     "minimum": 0,
                     "maximum": 1
+                  },
+                  "subjects": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "contact",
+                            "account",
+                            "opportunity",
+                            "use_case"
+                          ]
+                        },
+                        "id": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "id"
+                      ]
+                    }
+                  },
+                  "proposed_records": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "record_type": {
+                          "type": "string",
+                          "enum": [
+                            "contact",
+                            "account",
+                            "opportunity",
+                            "use_case"
+                          ]
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "confidence": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "fields": {
+                          "type": "object",
+                          "additionalProperties": {}
+                        },
+                        "duplicate_candidates": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "record_type": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "confidence": {
+                                "type": "string"
+                              },
+                              "reason": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "record_type",
+                              "id",
+                              "name"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "record_type",
+                        "name"
+                      ]
+                    }
                   }
                 }
               }

@@ -18,6 +18,17 @@
  *   EMBEDDING_DIMENSIONS Vector dimension (must match model). Default: 1536.
  */
 
+const EMBEDDING_FETCH_TIMEOUT_MS = Number(process.env.EMBEDDING_FETCH_TIMEOUT_MS ?? 30_000);
+
+function timeoutSignal(timeoutMs = EMBEDDING_FETCH_TIMEOUT_MS): { signal: AbortSignal; done: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return {
+    signal: controller.signal,
+    done: () => clearTimeout(timer),
+  };
+}
+
 export interface EmbeddingConfig {
   provider: 'openai' | 'openrouter' | 'ollama' | 'custom';
   baseUrl: string;
@@ -68,11 +79,18 @@ export async function embedText(
     body.dimensions = config.dimensions;
   }
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
+  const timeout = timeoutSignal();
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal: timeout.signal,
+    });
+  } finally {
+    timeout.done();
+  }
 
   if (!res.ok) {
     const errBody = await res.text();

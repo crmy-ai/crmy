@@ -24,9 +24,12 @@ const SENSITIVE_CONTEXT_TYPES = new Set([
   'deal_risk',
   'forecast',
   'forecast_risk',
+  'forecast_signal',
   'commitment',
   'next_step',
   'methodology_gap',
+  'buying_process',
+  'success_criteria',
   'buyer_role',
   'approval',
 ]);
@@ -40,11 +43,12 @@ const STOPWORDS = new Set([
 const GTM_CONCEPTS: Record<string, string[]> = {
   budget: ['budget', 'finance', 'financial', 'approval', 'approved', 'procurement', 'commercial', 'business case', 'roi', 'cost', 'pricing'],
   security: ['security', 'compliance', 'data residency', 'residency', 'privacy', 'legal', 'risk review', 'vendor review', 'infosec'],
+  process: ['procurement', 'legal', 'approval path', 'buying process', 'decision process', 'security review', 'vendor review'],
   next_step: ['next step', 'follow up', 'workshop', 'demo', 'meeting', 'schedule', 'send', 'review', 'pilot', 'trial'],
   stakeholder: ['champion', 'economic buyer', 'buyer', 'sponsor', 'decision maker', 'influencer', 'stakeholder', 'approver'],
   competitor: ['competitor', 'competitive', 'vendor', 'alternative', 'evaluating', 'shortlist'],
-  value: ['value', 'outcome', 'reduce', 'save', 'manual', 'efficiency', 'productivity', 'business impact'],
-  timing: ['timeline', 'date', 'deadline', 'quarter', 'q1', 'q2', 'q3', 'q4', 'next week', 'next month'],
+  value: ['value', 'outcome', 'success criteria', 'criteria', 'reduce', 'save', 'manual', 'efficiency', 'productivity', 'business impact'],
+  timing: ['timeline', 'date', 'deadline', 'quarter', 'q1', 'q2', 'q3', 'q4', 'next week', 'next month', 'forecast', 'close date', 'slip'],
 };
 
 function words(text: string): string[] {
@@ -237,6 +241,32 @@ function aggregateConfidence(entries: ContextEntry[], independentSources: number
   return confidenceComponents(entries, independentSources, conflictCount).score;
 }
 
+async function resolveCustomerScope(
+  db: DbPool,
+  tenantId: UUID | string,
+  subjectType: string,
+  subjectId: UUID | string,
+): Promise<{ account_id?: string; account_name?: string }> {
+  const result = await db.query(
+    `SELECT scope.account_id, a.name AS account_name
+     FROM (
+       SELECT CASE
+         WHEN $2 = 'account' THEN $3::uuid
+         WHEN $2 = 'contact' THEN (SELECT account_id FROM contacts WHERE tenant_id = $1 AND id = $3)
+         WHEN $2 = 'opportunity' THEN (SELECT account_id FROM opportunities WHERE tenant_id = $1 AND id = $3)
+         WHEN $2 = 'use_case' THEN (SELECT account_id FROM use_cases WHERE tenant_id = $1 AND id = $3)
+       END AS account_id
+     ) scope
+     LEFT JOIN accounts a ON a.tenant_id = $1 AND a.id = scope.account_id`,
+    [tenantId, subjectType, subjectId],
+  );
+  const row = result.rows[0] as { account_id?: string | null; account_name?: string | null } | undefined;
+  return {
+    account_id: row?.account_id ?? undefined,
+    account_name: row?.account_name ?? undefined,
+  };
+}
+
 function groupStatus(input: {
   confidence: number;
   threshold: number;
@@ -245,9 +275,11 @@ function groupStatus(input: {
   conflictCount: number;
   sensitive: boolean;
   convergenceBlocked: boolean;
+  readinessBlocked: boolean;
 }): { status: signalGroupRepo.SignalGroupStatus; blockedReason?: string } {
   if (input.conflictCount > 0) return { status: 'conflicting', blockedReason: 'Conflicting evidence needs review.' };
   if (input.convergenceBlocked) return { status: 'blocked', blockedReason: 'Similar or conflicting Memory already exists.' };
+  if (input.readinessBlocked) return { status: 'blocked', blockedReason: 'Needs more detail before agents can rely on it as Memory.' };
   if (input.confidence < input.threshold) return { status: 'gathering', blockedReason: 'Waiting for stronger evidence.' };
   if (input.sensitive && input.independentSourceCount < 2) {
     return { status: 'blocked', blockedReason: 'Sensitive context needs corroboration or approval before becoming Memory.' };
@@ -271,6 +303,14 @@ async function recomputeGroup(
   const independentSources = new Set(supporting.map(sourceKey)).size;
   const evidenceCount = supporting.reduce((sum, entry) => sum + evidenceItems(entry).length, 0);
   const confidence = aggregateConfidence(supporting, independentSources, conflictCount);
+  const readinessBlockers = supporting.flatMap(entry => {
+    const data = entry.structured_data ?? {};
+    return Array.isArray(data.readiness_blockers) ? data.readiness_blockers.map(String) : [];
+  });
+  const missingDetails = Array.from(new Set(supporting.flatMap(entry => {
+    const data = entry.structured_data ?? {};
+    return Array.isArray(data.missing_details) ? data.missing_details.map(String) : [];
+  })));
   const latest = supporting[0] ?? null;
   const convergence = latest
     ? await checkContextConvergence(db, tenantId as UUID, {
@@ -291,11 +331,13 @@ async function recomputeGroup(
     conflictCount,
     sensitive,
     convergenceBlocked: Boolean(convergence.should_block),
+    readinessBlocked: readinessBlockers.length > 0,
   });
   const components = confidenceComponents(supporting, independentSources, conflictCount);
   const promotionBlockers = [
     ...(conflictCount > 0 ? ['Conflicting evidence needs review.'] : []),
     ...(Boolean(convergence.should_block) ? ['Similar or conflicting Memory already exists.'] : []),
+    ...Array.from(new Set(readinessBlockers)),
     ...(confidence < threshold ? [`Trust score is ${Math.round(confidence * 100)}%, below the ${Math.round(threshold * 100)}% auto-promotion threshold.`] : []),
     ...(sensitive && independentSources < 2 ? ['Sensitive context needs corroboration or approval before becoming Memory.'] : []),
   ];
@@ -314,11 +356,12 @@ async function recomputeGroup(
       trust_score: confidence,
       confidence_components: components,
       promotion_blockers: promotionBlockers,
+      missing_details: missingDetails,
       promotion_reason: promotionBlockers.length === 0
         ? 'This Signal has enough evidence, source independence, and confidence to become Memory.'
         : 'This Signal needs review or more support before automatic promotion.',
       requires_corroboration: sensitive && independentSources < 2,
-      can_promote_manually: conflictCount === 0 && state.status !== 'blocked',
+      can_promote_manually: conflictCount === 0 && !Boolean(convergence.should_block),
       suggested_action: (convergence as { suggested_action?: string }).suggested_action,
     },
   });
@@ -413,6 +456,7 @@ export async function attachSignalToGroup(
 }> {
   const normalized = normalizeClaim(entry);
   const entryWords = words(normalized);
+  const customerScope = await resolveCustomerScope(db, tenantId, entry.subject_type, entry.subject_id);
   const candidates = await retrieveSignalGroupCandidates(db, tenantId, {
     subject_type: entry.subject_type,
     subject_id: entry.subject_id,
@@ -475,6 +519,7 @@ export async function attachSignalToGroup(
         metadata: {
           created_from_signal_id: entry.id,
           grouping_method: 'new_group',
+          customer_scope: customerScope,
         },
       }),
     };
@@ -504,6 +549,7 @@ export async function attachSignalToGroup(
       semantic_score: selected.semantic,
       vector_similarity: selected.vector,
       rationale: relationDecision?.rationale,
+      customer_scope: customerScope,
       decided_at: new Date().toISOString(),
     },
   });
@@ -540,7 +586,15 @@ export async function promoteSignalGroup(
     throw validationError('This Signal has conflicting evidence. Send it to Handoff before promoting it to Memory.');
   }
   if (group.status === 'blocked') {
-    throw validationError(group.blocked_reason ?? 'This Signal needs approval before becoming Memory.');
+    const blockers = Array.isArray(group.metadata?.promotion_blockers)
+      ? group.metadata.promotion_blockers.map(String)
+      : group.blocked_reason
+        ? [group.blocked_reason]
+        : [];
+    const unresolvedBlockers = blockers.filter(blocker => !blocker.toLowerCase().includes('needs corroboration or approval'));
+    if (actor?.actor_type !== 'user' || unresolvedBlockers.length > 0) {
+      throw validationError(group.blocked_reason ?? 'This Signal needs approval before becoming Memory.');
+    }
   }
   if (group.status === 'promoted' || group.status === 'dismissed') {
     throw validationError(`This Signal is already ${group.status}.`);
@@ -617,9 +671,16 @@ export async function dismissSignalGroup(
   await signalGroupRepo.dismissSignalGroup(db, tenantId, groupId, actorId, reason);
   const group = await signalGroupRepo.getSignalGroup(db, tenantId, groupId);
   if (!group) return null;
-  await Promise.all(group.members
+  const results = await Promise.allSettled(group.members
     .filter(member => member.relation === 'supports' && member.context_entry?.memory_status === 'signal')
     .map(member => contextRepo.rejectSignal(db, tenantId as UUID, member.context_entry_id as UUID, actorId as UUID, reason)));
+  const failed = results.filter(result => result.status === 'rejected');
+  if (failed.length > 0) {
+    console.warn('[signal-groups] Failed to reject one or more dismissed signal entries', {
+      group_id: groupId,
+      failed_count: failed.length,
+    });
+  }
   return signalGroupRepo.getSignalGroup(db, tenantId, groupId);
 }
 
@@ -629,7 +690,7 @@ export async function createSignalGroupHandoff(
   groupId: UUID | string,
   actorId: UUID | string,
   actor?: ActorContext,
-): Promise<{ signal_group: signalGroupRepo.SignalGroupWithMembers; hitl_request: unknown }> {
+): Promise<{ signal_group: signalGroupRepo.SignalGroupWithMembers; hitl_request: unknown; reused_existing: boolean }> {
   const group = await signalGroupRepo.getSignalGroup(db, tenantId, groupId);
   if (!group) throw validationError('Signal not found.');
 
@@ -649,6 +710,12 @@ export async function createSignalGroupHandoff(
       ? [group.blocked_reason]
       : [];
   const subjectLabel = group.subject_name ?? `${group.subject_type} ${String(group.subject_id).slice(0, 8)}`;
+  const existing = await hitlRepo.findPendingHITLByPayload(db, tenantId as UUID, 'context.signal_review', {
+    signal_group_id: group.id,
+  });
+  if (existing) {
+    return { signal_group: group, hitl_request: existing, reused_existing: true };
+  }
   const hitl = await hitlRepo.createHITLRequest(db, tenantId as UUID, {
     agent_id: actor?.actor_id ?? String(actorId),
     action_type: 'context.signal_review',
@@ -702,7 +769,7 @@ export async function createSignalGroupHandoff(
       trust_score: group.aggregate_confidence,
     },
   });
-  return { signal_group: group, hitl_request: hitl };
+  return { signal_group: group, hitl_request: hitl, reused_existing: false };
 }
 
 export const __testSignalGrouping = {

@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { TopBar } from '@/components/layout/TopBar';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { CheckCircle2, FileText, GitBranch, Library, Network, Search, Sparkles } from 'lucide-react';
+import { CheckCircle2, FileText, GitBranch, LayoutGrid, Library, List, Network, Search, Sparkles } from 'lucide-react';
 import { ContextBrowser } from '@/components/crm/ContextBrowser';
 import { ContextLineageView } from '@/components/crm/ContextLineageView';
 import { ObservationsDashboard } from '@/components/crm/ObservationsDashboard';
@@ -13,9 +14,41 @@ import { headerDescription } from '@/lib/headerCopy';
 import { GraphTab } from './GraphExplorerPage';
 
 type ContextTab = 'observations' | 'browser' | 'signals' | 'graph' | 'lineage';
+type ViewMode = 'cards' | 'table';
+
+function HeaderViewToggle({
+  value,
+  onChange,
+}: {
+  value: ViewMode;
+  onChange: (mode: ViewMode) => void;
+}) {
+  return (
+    <div className="hidden h-9 rounded-xl border border-border bg-muted p-0.5 md:inline-flex md:mr-2">
+      <button
+        type="button"
+        onClick={() => onChange('cards')}
+        className={`rounded-lg p-1.5 transition-all ${value === 'cards' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+        aria-label="Card view"
+      >
+        <LayoutGrid className="h-4 w-4" />
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange('table')}
+        className={`rounded-lg p-1.5 transition-all ${value === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+        aria-label="Table view"
+      >
+        <List className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
 
 export default function ContextPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const [signalViewMode, setSignalViewMode] = useState<ViewMode>('cards');
+  const [memoryViewMode, setMemoryViewMode] = useState<ViewMode>('cards');
   const rawTab = searchParams.get('tab');
   const normalizedTab = rawTab === 'signal-groups' ? 'signals' : rawTab === 'governance' ? 'browser' : rawTab ?? 'browser';
   const tab: ContextTab = ['observations', 'browser', 'signals', 'graph', 'lineage'].includes(normalizedTab)
@@ -73,7 +106,10 @@ export default function ContextPage() {
             {pgvectorEnabled ? 'Semantic search ready' : 'Keyword search fallback'}
           </span>
         )}
-      />
+      >
+        {tab === 'signals' && <HeaderViewToggle value={signalViewMode} onChange={setSignalViewMode} />}
+        {tab === 'browser' && <HeaderViewToggle value={memoryViewMode} onChange={setMemoryViewMode} />}
+      </TopBar>
 
       <div className="flex items-center gap-1 overflow-x-auto px-4 md:px-6 pt-4 border-b border-border pb-0">
         {tabs.map(({ key, label, Icon, activeBorder }) => (
@@ -100,12 +136,12 @@ export default function ContextPage() {
           </>
         )
         : tab === 'signals'
-        ? <SignalGroupsBrowser />
+        ? <SignalGroupsBrowser viewMode={signalViewMode} />
         : tab === 'graph'
         ? <GraphTab />
         : tab === 'lineage'
         ? <ContextLineageView />
-        : <ContextBrowser memoryStatus="active" allowAddContext={false} />}
+        : <ContextBrowser memoryStatus="active" allowAddContext={false} viewMode={memoryViewMode} />}
     </div>
   );
 }

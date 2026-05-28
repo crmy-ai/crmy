@@ -40,7 +40,7 @@ export function authMiddleware(db: DbPool, jwtSecret: string) {
           tenant_id: payload.tenant_id as string,
           actor_id: payload.sub as string,
           actor_type: 'user',
-          role: payload.role as 'owner' | 'admin' | 'member',
+          role: payload.role as 'owner' | 'admin' | 'manager' | 'member',
         };
         return next();
       } catch {

@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { useInboxCounts } from '@/api/hooks';
+import { getUser } from '@/api/client';
 import crmyLogo from '@/assets/crmy-logo.png';
 import { ENTITY_COLORS } from '@/lib/entityColors';
 
@@ -51,6 +52,10 @@ const bottomItems = [
   { icon: Database,    label: 'Reliability', path: '/operations' },
   { icon: ScrollText,  label: 'Audit Log',   path: '/audit-log', color: { text: 'text-violet-400', bg: 'bg-violet-500/15', bar: 'bg-violet-500' } },
 ];
+
+function isAdminRole(role?: string | null) {
+  return role === 'admin' || role === 'owner';
+}
 
 interface NavItemDef {
   icon: React.ElementType;
@@ -115,6 +120,14 @@ export function Sidebar() {
   const location = useLocation();
   const { sidebarExpanded, setSidebarExpanded } = useAppStore();
   const { hitlCount, assignCount } = useInboxCounts();
+  const user = getUser();
+  const admin = isAdminRole(user?.role);
+  const visibleAgentNavItems = admin
+    ? agentNavItems
+    : agentNavItems.filter(item => item.path !== '/automations');
+  const visibleBottomItems = admin
+    ? bottomItems
+    : bottomItems.filter(item => item.path === '/settings');
 
   function isActive(path: string) {
     return path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
@@ -154,7 +167,7 @@ export function Sidebar() {
       {/* Nav */}
       <nav className="flex-1 flex flex-col py-3 gap-1 px-2 overflow-y-auto overflow-x-hidden">
         {/* Agent-facing tier */}
-        {agentNavItems.map((item) => (
+        {visibleAgentNavItems.map((item) => (
           <NavItem key={item.path} item={item} active={isActive(item.path)} badge={badge(item.path)} />
         ))}
 
@@ -183,7 +196,7 @@ export function Sidebar() {
 
       {/* Bottom */}
       <div className="flex flex-col gap-1 px-2 pb-3 border-t border-sidebar-border pt-3">
-        {bottomItems.map((item) => {
+        {visibleBottomItems.map((item) => {
           const active = location.pathname.startsWith(item.path);
           return (
             <Link

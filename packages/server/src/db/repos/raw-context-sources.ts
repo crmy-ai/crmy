@@ -215,40 +215,56 @@ export async function listRawContextSources(
     status?: RawContextSourceStatus;
     subject_type?: string;
     subject_id?: string;
+    owner_ids?: string[];
     limit: number;
     cursor?: string;
   },
 ): Promise<PaginatedResponse<RawContextSource>> {
-  const conditions = ['tenant_id = $1'];
+  const conditions = ['r.tenant_id = $1'];
   const params: unknown[] = [tenantId];
   let idx = 2;
 
   if (filters.source_type) {
-    conditions.push(`source_type = $${idx++}`);
+    conditions.push(`r.source_type = $${idx++}`);
     params.push(filters.source_type);
   }
   if (filters.status) {
-    conditions.push(`status = $${idx++}`);
+    conditions.push(`r.status = $${idx++}`);
     params.push(filters.status);
   }
   if (filters.subject_type) {
-    conditions.push(`subject_type = $${idx++}`);
+    conditions.push(`r.subject_type = $${idx++}`);
     params.push(filters.subject_type);
   }
   if (filters.subject_id) {
-    conditions.push(`subject_id = $${idx++}`);
+    conditions.push(`r.subject_id = $${idx++}`);
     params.push(filters.subject_id);
   }
   if (filters.cursor) {
-    conditions.push(`created_at < $${idx++}`);
+    conditions.push(`r.created_at < $${idx++}`);
     params.push(filters.cursor);
+  }
+  if (filters.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`(
+        r.subject_id IS NULL
+        OR EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = r.tenant_id AND r.subject_type = 'account' AND a.id = r.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM contacts c WHERE c.tenant_id = r.tenant_id AND r.subject_type = 'contact' AND c.id = r.subject_id AND c.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = r.tenant_id AND r.subject_type = 'opportunity' AND o.id = r.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = r.tenant_id AND r.subject_type = 'use_case' AND uc.id = r.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
+      )`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
   }
 
   const where = conditions.join(' AND ');
-  const count = await db.query(`SELECT count(*)::int AS total FROM raw_context_sources WHERE ${where}`, params);
+  const count = await db.query(`SELECT count(*)::int AS total FROM raw_context_sources r WHERE ${where}`, params);
   params.push(filters.limit + 1);
   const rows = await db.query(
-    `SELECT * FROM raw_context_sources WHERE ${where} ORDER BY created_at DESC LIMIT $${idx}`,
+    `SELECT r.* FROM raw_context_sources r WHERE ${where} ORDER BY r.created_at DESC LIMIT $${idx}`,
     params,
   );
   const data = rows.rows as RawContextSource[];

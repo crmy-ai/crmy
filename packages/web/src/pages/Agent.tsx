@@ -14,14 +14,15 @@ import {
   useCreateContextEntry,
   useDeleteAgentSession,
   useRenameAgentSession,
+  useWhoAmI,
   type AgentSessionSummary,
 } from '@/api/hooks';
 import {
   Send, X, User, Briefcase, Building, Layers, Clock, Loader2, Wrench,
   ChevronDown, ChevronRight, Pencil, Trash2, Check, MessageSquare,
-  Brain, Eye, EyeOff, RotateCcw, WifiOff, ClipboardList, ShieldCheck,
+  Bot, Brain, Eye, EyeOff, RotateCcw, WifiOff, ClipboardList, ShieldCheck,
   Database, CheckCircle2, Circle, AlertTriangle, FileCheck2,
-  GitPullRequestArrow, Sparkles, PanelRightClose, PanelRightOpen,
+  GitPullRequestArrow, PanelRightClose, PanelRightOpen,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -475,7 +476,9 @@ export default function Agent() {
   });
 
   const { aiContext } = useAppStore();
-  const { enabled, loading: configLoading, connectivity, config } = useAgentSettings();
+  const { enabled, loading: configLoading, connectivity, config, connectivityError } = useAgentSettings();
+  const { data: whoami } = useWhoAmI() as any;
+  const isAdminUser = whoami?.role === 'admin' || whoami?.role === 'owner';
   const { data: sessionsData, refetch: refetchSessions } = useAgentSessions();
   const createSession = useCreateAgentSession();
   const renameSession = useRenameAgentSession();
@@ -918,14 +921,14 @@ export default function Agent() {
 
   const connectivityLabel =
     connectivity === 'online'  ? 'Workspace Agent online' :
-    connectivity === 'offline' ? 'Agent offline' :
+    connectivity === 'offline' ? (isAdminUser ? 'Configured but unreachable · check Model Settings' : 'Configured but unreachable · ask an admin to check Model Settings') :
     'Workspace Agent';
 
   // ── Loading state — wait for config before deciding enabled/disabled ──
   if (configLoading) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="Workspace Agent" icon={Sparkles} iconClassName={agentIconClassName} description={agentDescription} />
+        <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription} />
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground/40" />
         </div>
@@ -937,20 +940,24 @@ export default function Agent() {
   if (!enabled) {
     return (
       <div className="flex flex-col h-full">
-        <TopBar title="Workspace Agent" icon={Sparkles} iconClassName={agentIconClassName} description={agentDescription} />
+        <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription} />
         <div className="flex-1 flex items-center justify-center p-8">
           <div className="text-center max-w-md space-y-3">
-            <Sparkles className="w-12 h-12 mx-auto text-muted-foreground/40" />
+            <Bot className="w-12 h-12 mx-auto text-muted-foreground/40" />
             <h2 className="text-lg font-display font-bold text-foreground">Workspace Agent is not enabled</h2>
             <p className="text-sm text-muted-foreground">
-              Enable it in <span className="text-foreground font-medium">Settings → Model Settings</span> to let the app reason over local customer context, call scoped tools, and keep sensitive workspace state under your control.
+              {isAdminUser
+                ? <>Enable it in <span className="text-foreground font-medium">Settings → Model Settings</span> to let the app reason over local customer context, call scoped tools, and keep sensitive workspace state under your control.</>
+                : <>Ask an admin to enable the shared Workspace Agent. Once enabled, it will use your normal book-of-business permissions.</>}
             </p>
-            <Link
-              to="/settings/model"
-              className="inline-flex items-center justify-center h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
-            >
-              Configure Workspace Agent
-            </Link>
+            {isAdminUser && (
+              <Link
+                to="/settings/model"
+                className="inline-flex items-center justify-center h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"
+              >
+                Configure Workspace Agent
+              </Link>
+            )}
           </div>
         </div>
       </div>
@@ -959,7 +966,7 @@ export default function Agent() {
 
   return (
     <div className="flex flex-col h-full">
-      <TopBar title="Workspace Agent" icon={Sparkles} iconClassName={agentIconClassName} description={agentDescription} />
+      <TopBar title="Workspace Agent" icon={Bot} iconClassName={agentIconClassName} description={agentDescription} />
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
 
         {/* ── Chat panel ── */}
@@ -972,6 +979,11 @@ export default function Agent() {
               <span className={`text-sm font-display font-bold ${connectivity === 'offline' ? 'text-destructive' : 'text-foreground'}`}>
                 {connectivityLabel}
               </span>
+              {connectivity === 'offline' && connectivityError && (
+                <span className="hidden md:inline text-xs text-muted-foreground truncate max-w-[28rem]" title={connectivityError}>
+                  {connectivityError}
+                </span>
+              )}
               {streaming && (
                 <span className="flex items-center gap-1 text-xs text-primary ml-2">
                   <Loader2 className="w-3 h-3 animate-spin" /> Thinking…
@@ -1112,7 +1124,7 @@ export default function Agent() {
                   </>
                 ) : (
                   <>
-                    <Sparkles className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                    <Bot className="w-10 h-10 mx-auto mb-3 opacity-40" />
                     <p className="text-sm">Ask about customer context, revenue objects, handoffs, or safe next actions.</p>
                   </>
                 )}
@@ -1532,7 +1544,7 @@ function TypingIndicator() {
       className="flex justify-start"
     >
       <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mr-2 flex-shrink-0 mt-1">
-        <Sparkles className="w-4 h-4 text-primary" />
+        <Bot className="w-4 h-4 text-violet-500" />
       </div>
       <div className="bg-card border border-border rounded-2xl rounded-bl-md px-4 py-3.5 shadow-sm flex items-center gap-1.5">
         <span className="w-2 h-2 rounded-full bg-primary/50 animate-bounce [animation-delay:0ms]" />
@@ -1739,7 +1751,7 @@ function MessageBubble({ item, index, showProcess, onRetry }: { item: RenderItem
     >
       {!isUser && (
         <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center mr-2 flex-shrink-0 mt-1">
-          <Sparkles className="w-4 h-4 text-primary" />
+          <Bot className="w-4 h-4 text-violet-500" />
         </div>
       )}
       <div

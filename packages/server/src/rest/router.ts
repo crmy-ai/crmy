@@ -31,6 +31,14 @@ import { resumeEnrollmentAfterHITL } from '../services/sequence-executor.js';
 import { getSampleDataStatus, seedSampleData } from '../services/sample-data.js';
 import { hashPassword } from '../auth/password.js';
 import { buildSetupUrl, createUserAuthToken, sendAuthLifecycleEmail } from '../services/auth-lifecycle.js';
+import {
+  assertActivityAccess,
+  assertHITLAccess,
+  assertHITLPayloadAccess,
+  assertSubjectAccess,
+  filterVisibleHITLRequests,
+  resolveOwnerFilter,
+} from '../services/access-control.js';
 import { z } from 'zod';
 
 function getActor(req: Request): ActorContext {
@@ -144,11 +152,12 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireScopes(actor, 'contacts:read');
+      const ownerFilter = await resolveOwnerFilter(db, actor, qs(req.query.owner_id));
       const result = await contactRepo.searchContacts(db, actor.tenant_id, {
         query: qs(req.query.q),
         lifecycle_stage: qs(req.query.stage),
         account_id: qs(req.query.account_id),
-        owner_id: qs(req.query.owner_id),
+        ...ownerFilter,
         limit: Math.min(qn(req.query.limit, 20), 100),
         cursor: qs(req.query.cursor),
       });
@@ -218,10 +227,11 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireScopes(actor, 'accounts:read');
+      const ownerFilter = await resolveOwnerFilter(db, actor, qs(req.query.owner_id));
       const result = await accountRepo.searchAccounts(db, actor.tenant_id, {
         query: qs(req.query.q),
         industry: qs(req.query.industry),
-        owner_id: qs(req.query.owner_id),
+        ...ownerFilter,
         limit: Math.min(qn(req.query.limit, 20), 100),
         cursor: qs(req.query.cursor),
       });
@@ -270,10 +280,14 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireScopes(actor, 'opportunities:read');
+      const ownerFilter = await resolveOwnerFilter(db, actor, qs(req.query.owner_id));
       const result = await oppRepo.searchOpportunities(db, actor.tenant_id, {
         query: qs(req.query.q),
         stage: qs(req.query.stage),
-        owner_id: qs(req.query.owner_id),
+        forecast_cat: qs(req.query.forecast_cat),
+        close_date_before: qs(req.query.close_date_before),
+        close_date_after: qs(req.query.close_date_after),
+        ...ownerFilter,
         account_id: qs(req.query.account_id),
         limit: Math.min(qn(req.query.limit, 20), 100),
         cursor: qs(req.query.cursor),
@@ -341,6 +355,7 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireScopes(actor, 'activities:read');
+      const ownerFilter = await resolveOwnerFilter(db, actor);
       const result = await activityRepo.searchActivities(db, actor.tenant_id, {
         contact_id: qs(req.query.contact_id),
         account_id: qs(req.query.account_id),
@@ -351,6 +366,7 @@ export function apiRouter(db: DbPool): Router {
         subject_id: qs(req.query.subject_id),
         performed_by: qs(req.query.performed_by),
         outcome: qs(req.query.outcome),
+        owner_ids: ownerFilter.owner_ids,
         limit: Math.min(qn(req.query.limit, 20), 100),
         cursor: qs(req.query.cursor),
       });
@@ -367,6 +383,7 @@ export function apiRouter(db: DbPool): Router {
         res.status(404).json({ error: 'Activity not found' });
         return;
       }
+      await assertActivityAccess(db, actor, p(req, 'id'));
       res.json({ data: activity });
     } catch (err) { handleError(res, err); }
   });
@@ -394,8 +411,9 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       const handler = toolHandler(db, 'pipeline_summary');
+      const ownerFilter = await resolveOwnerFilter(db, actor, qs(req.query.owner_id));
       const result = await handler({
-        owner_id: qs(req.query.owner_id),
+        ...ownerFilter,
         group_by: qs(req.query.group_by) ?? 'stage',
       }, actor);
       res.json(result);
@@ -406,9 +424,10 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       const handler = toolHandler(db, 'pipeline_forecast');
+      const ownerFilter = await resolveOwnerFilter(db, actor, qs(req.query.owner_id));
       const result = await handler({
         period: qs(req.query.period) ?? 'quarter',
-        owner_id: qs(req.query.owner_id),
+        ...ownerFilter,
       }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
@@ -418,7 +437,16 @@ export function apiRouter(db: DbPool): Router {
   router.get('/hitl', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      const requests = await hitlRepo.listPendingHITL(db, actor.tenant_id, qn(req.query.limit, 20));
+      const limit = qn(req.query.limit, 20);
+      const statusParam = qs(req.query.status);
+      const status = ['pending', 'approved', 'rejected', 'expired', 'auto_approved', 'all'].includes(statusParam ?? '')
+        ? statusParam as 'pending' | 'approved' | 'rejected' | 'expired' | 'auto_approved' | 'all'
+        : 'pending';
+      const candidates = await hitlRepo.listHITLRequests(db, actor.tenant_id, {
+        status,
+        limit: Math.min(500, Math.max(limit * 10, limit)),
+      });
+      const requests = await filterVisibleHITLRequests(db, actor, candidates, limit);
       res.json({ data: requests });
     } catch (err) { handleError(res, err); }
   });
@@ -426,6 +454,7 @@ export function apiRouter(db: DbPool): Router {
   router.post('/hitl', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      await assertHITLPayloadAccess(db, actor, req.body?.action_payload, req.body?.session_id);
       const handler = toolHandler(db, 'hitl_submit_request');
       const result = await handler(req.body, actor);
       res.status(201).json(result);
@@ -435,15 +464,71 @@ export function apiRouter(db: DbPool): Router {
   router.get('/hitl/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      const handler = toolHandler(db, 'hitl_check_status');
-      const result = await handler({ request_id: p(req, 'id') }, actor);
-      res.json(result);
+      const request = await hitlRepo.getHITLRequest(db, actor.tenant_id, p(req, 'id') as UUID);
+      if (!request) return res.status(404).json({ error: 'Handoff not found' });
+      await assertHITLAccess(db, actor, request);
+      res.json({ status: request.status, review_note: request.review_note, request });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/hitl/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const before = await hitlRepo.getHITLRequest(db, actor.tenant_id, p(req, 'id') as UUID);
+      if (!before) return res.status(404).json({ error: 'Pending handoff not found or already resolved' });
+      await assertHITLAccess(db, actor, before);
+      const body = req.body ?? {};
+      const priority = typeof body.priority === 'string' && ['low', 'normal', 'high', 'urgent'].includes(body.priority)
+        ? body.priority as 'low' | 'normal' | 'high' | 'urgent'
+        : undefined;
+      const slaMinutes = body.sla_minutes === null
+        ? null
+        : Number.isFinite(Number(body.sla_minutes))
+          ? Math.max(1, Math.round(Number(body.sla_minutes)))
+          : undefined;
+      const escalateToId = body.escalate_to_id === null
+        ? null
+        : typeof body.escalate_to_id === 'string' && body.escalate_to_id.trim()
+          ? body.escalate_to_id.trim() as UUID
+          : undefined;
+      if (escalateToId) {
+        const assignee = await actorRepo.getActor(db, actor.tenant_id, escalateToId);
+        if (!assignee || !assignee.is_active) return res.status(400).json({ error: 'Choose an active reviewer for this handoff' });
+      }
+      const updated = await hitlRepo.updatePendingHITLRequest(db, actor.tenant_id, p(req, 'id'), {
+        action_summary: typeof body.action_summary === 'string' && body.action_summary.trim()
+          ? body.action_summary.trim()
+          : undefined,
+        priority,
+        sla_minutes: slaMinutes,
+        escalate_to_id: escalateToId,
+      });
+      if (!updated) return res.status(404).json({ error: 'Pending handoff not found or already resolved' });
+      await emitEvent(db, {
+        tenantId: actor.tenant_id,
+        eventType: before.escalate_to_id !== updated.escalate_to_id ? 'hitl.reassigned' : 'hitl.updated',
+        actorId: actor.actor_id,
+        actorType: actor.actor_type,
+        objectType: 'hitl_request',
+        objectId: updated.id,
+        beforeData: before,
+        afterData: updated,
+        metadata: {
+          reassigned: before.escalate_to_id !== updated.escalate_to_id,
+          previous_reviewer_id: before.escalate_to_id ?? null,
+          reviewer_id: updated.escalate_to_id ?? null,
+        },
+      });
+      res.json({ request: updated });
     } catch (err) { handleError(res, err); }
   });
 
   router.post('/hitl/:id/resolve', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      const before = await hitlRepo.getHITLRequest(db, actor.tenant_id, p(req, 'id') as UUID);
+      if (!before) return res.status(404).json({ error: 'Handoff not found' });
+      await assertHITLAccess(db, actor, before);
       const handler = toolHandler(db, 'hitl_resolve');
       const result = await handler({ request_id: p(req, 'id'), ...req.body }, actor);
 
@@ -498,10 +583,11 @@ export function apiRouter(db: DbPool): Router {
   router.get('/use-cases', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      const ownerFilter = await resolveOwnerFilter(db, actor, qs(req.query.owner_id));
       const result = await ucRepo.searchUseCases(db, actor.tenant_id, {
         account_id: qs(req.query.account_id),
         stage: qs(req.query.stage),
-        owner_id: qs(req.query.owner_id),
+        ...ownerFilter,
         query: qs(req.query.q),
         limit: Math.min(qn(req.query.limit, 20), 100),
         cursor: qs(req.query.cursor),
@@ -750,6 +836,15 @@ export function apiRouter(db: DbPool): Router {
       const { getSnapshot } = await import('../db/repos/handoff-snapshots.js');
       const snapshot = await getSnapshot(db, actor.tenant_id, p(req, 'id'));
       if (!snapshot) { res.status(404).json({ error: 'Snapshot not found' }); return; }
+      const request = await hitlRepo.getHITLRequestBySnapshot(db, actor.tenant_id, snapshot.id);
+      if (request) {
+        await assertHITLAccess(db, actor, request);
+      } else if (snapshot.subject_type && snapshot.subject_id) {
+        await assertSubjectAccess(db, actor, snapshot.subject_type, snapshot.subject_id);
+      } else if (snapshot.actor_id !== actor.actor_id && actor.role !== 'admin' && actor.role !== 'owner') {
+        res.status(404).json({ error: 'Snapshot not found' });
+        return;
+      }
       res.json(snapshot);
     } catch (err) { handleError(res, err); }
   });
@@ -1141,6 +1236,7 @@ export function apiRouter(db: DbPool): Router {
   // --- Workflows ---
   router.get('/workflows', async (req: Request, res: Response) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const handler = toolHandler(db, 'workflow_list');
       const result = await handler({
@@ -1158,6 +1254,7 @@ export function apiRouter(db: DbPool): Router {
 
   router.post('/workflows', async (req: Request, res: Response) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const handler = toolHandler(db, 'workflow_create');
       const result = await handler(req.body, actor);
@@ -1167,6 +1264,7 @@ export function apiRouter(db: DbPool): Router {
 
   router.post('/workflows/test-draft', async (req: Request, res: Response) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       requireScopes(actor, 'workflows:read');
       const draftSchema = z.object({
@@ -1194,6 +1292,7 @@ export function apiRouter(db: DbPool): Router {
 
   router.post('/workflows/draft-content-preview', async (req: Request, res: Response) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       requireScopes(actor, 'workflows:read');
       const previewSchema = z.object({
@@ -1217,6 +1316,7 @@ export function apiRouter(db: DbPool): Router {
 
   router.get('/workflows/:id', async (req: Request, res: Response) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const handler = toolHandler(db, 'workflow_get');
       const result = await handler({ id: p(req, 'id') }, actor);
@@ -1226,6 +1326,7 @@ export function apiRouter(db: DbPool): Router {
 
   router.patch('/workflows/:id', async (req: Request, res: Response) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const handler = toolHandler(db, 'workflow_update');
       const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
@@ -1235,6 +1336,7 @@ export function apiRouter(db: DbPool): Router {
 
   router.delete('/workflows/:id', async (req: Request, res: Response) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const handler = toolHandler(db, 'workflow_delete');
       const result = await handler({ id: p(req, 'id') }, actor);
@@ -1244,6 +1346,7 @@ export function apiRouter(db: DbPool): Router {
 
   router.get('/workflows/:id/runs', async (req: Request, res: Response) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const handler = toolHandler(db, 'workflow_run_list');
       const result = await handler({
@@ -1258,6 +1361,7 @@ export function apiRouter(db: DbPool): Router {
 
   router.post('/workflows/:id/test', async (req: Request, res: Response) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const handler = toolHandler(db, 'workflow_test');
       const result = await handler({
@@ -1270,6 +1374,7 @@ export function apiRouter(db: DbPool): Router {
 
   router.post('/workflows/:id/clone', async (req: Request, res: Response) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const handler = toolHandler(db, 'workflow_clone');
       const result = await handler({
@@ -1282,6 +1387,7 @@ export function apiRouter(db: DbPool): Router {
 
   router.post('/workflows/:id/trigger', async (req: Request, res: Response) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
 
       // Validate the trigger body before handing off to the engine
@@ -1807,11 +1913,13 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireScopes(actor, 'context:read');
+      const ownerFilter = await resolveOwnerFilter(db, actor);
       const result = await rawContextRepo.listRawContextSources(db, actor.tenant_id, {
         source_type: qs(req.query.source_type),
         status: qs(req.query.status) as any,
         subject_type: qs(req.query.subject_type),
         subject_id: qs(req.query.subject_id),
+        owner_ids: 'owner_ids' in ownerFilter ? ownerFilter.owner_ids : undefined,
         limit: Math.min(qn(req.query.limit, 50), 200),
         cursor: qs(req.query.cursor),
       });
@@ -1825,6 +1933,7 @@ export function apiRouter(db: DbPool): Router {
       requireScopes(actor, 'context:read');
       const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, p(req, 'id'));
       if (!source) throw new CrmyError('NOT_FOUND', 'Raw Context source not found', 404);
+      await assertSubjectAccess(db, actor, source.subject_type, source.subject_id);
       res.json({ raw_context_source: source });
     } catch (err) { handleError(res, err); }
   });
@@ -1836,6 +1945,7 @@ export function apiRouter(db: DbPool): Router {
       requireScopes(actor, 'context:write');
       source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, p(req, 'id'));
       if (!source) throw new CrmyError('NOT_FOUND', 'Raw Context source not found', 404);
+      await assertSubjectAccess(db, actor, source.subject_type, source.subject_id);
 
       await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
         status: 'processing',
@@ -2004,6 +2114,8 @@ export function apiRouter(db: DbPool): Router {
         source_label: req.body.source ?? req.body.source_label,
         context_type: req.body.context_type,
         confidence_threshold: req.body.confidence_threshold,
+        subjects: req.body.subjects,
+        proposed_records: req.body.proposed_records,
       }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
@@ -2017,14 +2129,24 @@ export function apiRouter(db: DbPool): Router {
       const actor = getActor(req);
       const text: string = req.body.text ?? '';
       if (!text.trim()) return res.json({ subjects: [] });
+      const ownerFilter = await resolveOwnerFilter(db, actor);
 
       const detection = await detectRawContextSubjects(db, actor.tenant_id, text, {
         limit: 15,
         confidenceThreshold: 0.67,
         actorId: actor.actor_id,
+        ownerIds: 'owner_ids' in ownerFilter ? ownerFilter.owner_ids : undefined,
       });
 
-      return res.json({ subjects: detection.subjects, skipped: detection.skipped, candidates: detection.candidates });
+      return res.json({
+        subjects: detection.subjects,
+        skipped: detection.skipped,
+        candidates: detection.candidates,
+        proposed_records: detection.proposed_records ?? [],
+        account_scope: detection.account_scope ?? [],
+        records_examined: detection.records_examined,
+        resolution_summary: detection.resolution_summary,
+      });
     } catch (err) { handleError(res, err); }
   });
 
@@ -2054,10 +2176,12 @@ export function apiRouter(db: DbPool): Router {
       let detection: Awaited<ReturnType<typeof detectRawContextSubjects>> = { candidates: [], subjects: [], skipped: [] };
       let subjectDetectionError: string | undefined;
       try {
+        const ownerFilter = await resolveOwnerFilter(db, actor);
         detection = await detectRawContextSubjects(db, actor.tenant_id, text, {
           limit: 15,
           confidenceThreshold: 0.67,
           actorId: actor.actor_id,
+          ownerIds: 'owner_ids' in ownerFilter ? ownerFilter.owner_ids : undefined,
         });
       } catch (err) {
         subjectDetectionError = err instanceof Error
@@ -2073,6 +2197,10 @@ export function apiRouter(db: DbPool): Router {
         skipped: detection.skipped,
         candidates: detection.candidates,
         subject_detection_error: subjectDetectionError,
+        proposed_records: detection.proposed_records ?? [],
+        account_scope: detection.account_scope ?? [],
+        records_examined: detection.records_examined,
+        resolution_summary: detection.resolution_summary,
         filename,
         format,
         source_label: source_label ?? filename,
@@ -2217,6 +2345,7 @@ export function apiRouter(db: DbPool): Router {
       const actor = getActor(req);
       const subjectType = p(req, 'subject_type');
       const subjectId = p(req, 'subject_id');
+      await assertSubjectAccess(db, actor, subjectType, subjectId);
 
       // Assemble briefing directly (same data as GET endpoint)
       const { assembleBriefing } = await import('../services/briefing.js');
@@ -2307,6 +2436,7 @@ export function apiRouter(db: DbPool): Router {
   // --- Events ---
   router.get('/events', async (req: Request, res: Response) => {
     try {
+      if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const result = await eventRepo.searchEvents(db, actor.tenant_id, {
         object_type: qs(req.query.object_type),
@@ -2328,7 +2458,7 @@ export function apiRouter(db: DbPool): Router {
         type: 'https://crmy.ai/errors/permission_denied',
         title: 'Permission Denied',
         status: 403,
-        detail: 'Only admins can access database configuration',
+        detail: 'Only admins can access this administrative area',
       });
       return false;
     }
@@ -2432,7 +2562,7 @@ export function apiRouter(db: DbPool): Router {
   });
 
   // --- Admin: User Management ---
-  const VALID_ROLES = ['member', 'admin', 'owner'];
+  const VALID_ROLES = ['member', 'manager', 'admin', 'owner'];
 
   async function issueUserAuthLink(
     req: Request,
@@ -2514,7 +2644,7 @@ export function apiRouter(db: DbPool): Router {
       if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const result = await db.query(
-        `SELECT id, email, name, role, is_active, invited_at, password_set_at, last_login_at, created_at, updated_at
+        `SELECT id, email, name, role, manager_id, is_active, invited_at, password_set_at, last_login_at, created_at, updated_at
          FROM users WHERE tenant_id = $1 ORDER BY created_at ASC`,
         [actor.tenant_id],
       );
@@ -2526,12 +2656,13 @@ export function apiRouter(db: DbPool): Router {
     try {
       if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
-      const { name, email, phone, password, role, send_invite, metadata } = req.body as {
+      const { name, email, phone, password, role, manager_id, send_invite, metadata } = req.body as {
         name?: string;
         email?: string;
         phone?: string;
         password?: string;
         role?: string;
+        manager_id?: string | null;
         send_invite?: boolean;
         metadata?: Record<string, unknown>;
       };
@@ -2549,7 +2680,7 @@ export function apiRouter(db: DbPool): Router {
         return;
       }
       if (!role || !VALID_ROLES.includes(role)) {
-        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Role must be member, admin, or owner' });
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Role must be member, manager, admin, or owner' });
         return;
       }
       if (role === 'owner' && actor.role !== 'owner') {
@@ -2557,11 +2688,22 @@ export function apiRouter(db: DbPool): Router {
         return;
       }
 
+      if (manager_id) {
+        const manager = await db.query(
+          `SELECT id FROM users WHERE tenant_id = $1 AND id = $2 AND role IN ('manager', 'admin', 'owner') AND is_active IS NOT FALSE`,
+          [actor.tenant_id, manager_id],
+        );
+        if (manager.rows.length === 0) {
+          res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Manager must be an active manager, admin, or owner in this workspace' });
+          return;
+        }
+      }
+
       const result = await db.query(
-        `INSERT INTO users (tenant_id, email, name, role, password_hash, is_active, invited_at, password_set_at)
-         VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $7 THEN now() ELSE NULL END, CASE WHEN $7 THEN NULL ELSE now() END)
-         RETURNING id, tenant_id, email, name, role, is_active, invited_at, password_set_at, created_at`,
-        [actor.tenant_id, email.trim(), name.trim(), role, send_invite ? null : hashPassword(password!), !send_invite, Boolean(send_invite)],
+        `INSERT INTO users (tenant_id, email, name, role, manager_id, password_hash, is_active, invited_at, password_set_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, CASE WHEN $8 THEN now() ELSE NULL END, CASE WHEN $8 THEN NULL ELSE now() END)
+         RETURNING id, tenant_id, email, name, role, manager_id, is_active, invited_at, password_set_at, created_at`,
+        [actor.tenant_id, email.trim(), name.trim(), role, manager_id ?? null, send_invite ? null : hashPassword(password!), !send_invite, Boolean(send_invite)],
       );
 
       // Auto-create linked actor
@@ -2584,7 +2726,7 @@ export function apiRouter(db: DbPool): Router {
         actorType: actor.actor_type,
         objectType: 'user',
         objectId: result.rows[0].id,
-        afterData: { email: email.trim(), name: name.trim(), role, invited: Boolean(send_invite) },
+        afterData: { email: email.trim(), name: name.trim(), role, manager_id: manager_id ?? null, invited: Boolean(send_invite) },
       });
 
       const invite = send_invite
@@ -2607,8 +2749,8 @@ export function apiRouter(db: DbPool): Router {
       if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const userId = p(req, 'id');
-      const { name, email, role, password, is_active } = req.body as {
-        name?: string; email?: string; role?: string; password?: string; is_active?: boolean;
+      const { name, email, role, manager_id, password, is_active } = req.body as {
+        name?: string; email?: string; role?: string; manager_id?: string | null; password?: string; is_active?: boolean;
       };
 
       const existing = await db.query(
@@ -2621,7 +2763,7 @@ export function apiRouter(db: DbPool): Router {
       }
 
       if (role && !VALID_ROLES.includes(role)) {
-        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Role must be member, admin, or owner' });
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Role must be member, manager, admin, or owner' });
         return;
       }
       if (role === 'owner' && actor.role !== 'owner') {
@@ -2650,12 +2792,27 @@ export function apiRouter(db: DbPool): Router {
         res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Password must be at least 8 characters' });
         return;
       }
+      if (manager_id !== undefined && manager_id !== null) {
+        if (manager_id === userId) {
+          res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'A user cannot report to themselves' });
+          return;
+        }
+        const manager = await db.query(
+          `SELECT id FROM users WHERE tenant_id = $1 AND id = $2 AND role IN ('manager', 'admin', 'owner') AND is_active IS NOT FALSE`,
+          [actor.tenant_id, manager_id],
+        );
+        if (manager.rows.length === 0) {
+          res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Manager must be an active manager, admin, or owner in this workspace' });
+          return;
+        }
+      }
 
       const cols: string[] = ['updated_at = now()'];
       const vals: unknown[] = [];
       if (name?.trim()) { cols.push(`name = $${vals.length + 1}`); vals.push(name.trim()); }
       if (email) { cols.push(`email = $${vals.length + 1}`); vals.push(email.trim()); }
       if (role) { cols.push(`role = $${vals.length + 1}`); vals.push(role); }
+      if (manager_id !== undefined) { cols.push(`manager_id = $${vals.length + 1}`); vals.push(manager_id); }
       if (is_active !== undefined) { cols.push(`is_active = $${vals.length + 1}`); vals.push(is_active); }
       if (password) {
         cols.push(`password_hash = $${vals.length + 1}`);
@@ -2667,7 +2824,7 @@ export function apiRouter(db: DbPool): Router {
       const result = await db.query(
         `UPDATE users SET ${cols.join(', ')}
          WHERE id = $${vals.length - 1} AND tenant_id = $${vals.length}
-         RETURNING id, email, name, role, is_active, invited_at, password_set_at, last_login_at, created_at, updated_at`,
+         RETURNING id, email, name, role, manager_id, is_active, invited_at, password_set_at, last_login_at, created_at, updated_at`,
         vals,
       );
 
@@ -2857,11 +3014,13 @@ export function apiRouter(db: DbPool): Router {
         });
         return;
       }
+      const ownerFilter = await resolveOwnerFilter(db, actor);
       const result = await entityResolve(db, actor.tenant_id, {
         query,
         entity_type: entity_type ?? 'any',
         context_hints,
         actor_id: actor.actor_id,
+        owner_ids: 'owner_ids' in ownerFilter ? ownerFilter.owner_ids : undefined,
         limit: limit ? Math.min(Math.max(Number(limit), 1), 10) : 5,
       });
       res.json(result);

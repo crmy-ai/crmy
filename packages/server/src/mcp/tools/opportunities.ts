@@ -18,6 +18,7 @@ import { checkOpportunityDuplicate } from '../../services/deduplication.js';
 import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+import { assertOwnedObjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
 
 function runOpportunityOperation<T>(
   db: DbPool,
@@ -82,7 +83,8 @@ export function opportunityTools(db: DbPool): ToolDef[] {
           if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
             input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'opportunity', input.custom_fields, { isCreate: true });
           }
-          const opportunity = await oppRepo.createOpportunity(db, actor.tenant_id, { ...input, created_by: actor.actor_id });
+          const owner_id = await defaultOwnerForCreate(db, actor, input.owner_id);
+          const opportunity = await oppRepo.createOpportunity(db, actor.tenant_id, { ...input, owner_id: owner_id ?? undefined, created_by: actor.actor_id });
           const event_id = await emitEvent(db, {
             tenantId: actor.tenant_id, eventType: 'opportunity.created',
             actorId: actor.actor_id, actorType: actor.actor_type,
@@ -108,7 +110,8 @@ export function opportunityTools(db: DbPool): ToolDef[] {
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
           input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'opportunity', input.custom_fields, { isCreate: true });
         }
-        const opportunity = await oppRepo.createOpportunity(db, actor.tenant_id, { ...input, created_by: actor.actor_id });
+        const owner_id = await defaultOwnerForCreate(db, actor, input.owner_id);
+        const opportunity = await oppRepo.createOpportunity(db, actor.tenant_id, { ...input, owner_id: owner_id ?? undefined, created_by: actor.actor_id });
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id, eventType: 'opportunity.created',
           actorId: actor.actor_id, actorType: actor.actor_type,
@@ -141,6 +144,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
       handler: async (input: { id: string; include_context_entries?: boolean }, actor: ActorContext) => {
         const opportunity = await oppRepo.getOpportunity(db, actor.tenant_id, input.id);
         if (!opportunity) throw notFound('Opportunity', input.id);
+        await assertOwnedObjectAccess(db, actor, 'opportunity', input.id);
 
         const activities = await oppRepo.getOpportunityActivities(db, actor.tenant_id, input.id);
         if (input.include_context_entries) {
@@ -156,8 +160,10 @@ export function opportunityTools(db: DbPool): ToolDef[] {
       description: 'Search opportunities with flexible filters. Use stage to find deals at a specific pipeline stage (e.g. "Negotiation"), account_id for a specific company, forecast_cat for pipeline categorization, and date range to find deals closing within a window. Useful for pipeline reviews and identifying at-risk deals approaching their close_date.',
       inputSchema: opportunitySearch,
       handler: async (input: z.infer<typeof opportunitySearch>, actor: ActorContext) => {
+        const ownerFilter = await resolveOwnerFilter(db, actor, input.owner_id);
         const result = await oppRepo.searchOpportunities(db, actor.tenant_id, {
           ...input,
+          ...ownerFilter,
           limit: input.limit ?? 20,
         });
         return { opportunities: result.data, next_cursor: result.next_cursor, total: result.total };
@@ -176,6 +182,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
 
         const before = await oppRepo.getOpportunity(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Opportunity', input.id);
+        await assertOwnedObjectAccess(db, actor, 'opportunity', input.id);
 
         const transition = await validateOpportunityTransition(
           db, actor.tenant_id, input.id, before.stage, input.stage,
@@ -238,6 +245,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
         return runOpportunityOperation(db, actor, 'opportunity_update', input, async () => {
         const before = await oppRepo.getOpportunity(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Opportunity', input.id);
+        await assertOwnedObjectAccess(db, actor, 'opportunity', input.id);
 
         if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
           input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'opportunity', input.patch.custom_fields);
@@ -287,8 +295,9 @@ export function opportunityTools(db: DbPool): ToolDef[] {
       description: 'Get a pipeline summary showing total deal count, amount, and weighted value grouped by stage, owner, or forecast category. Use this for high-level pipeline snapshots in reports and reviews. For deeper pipeline analytics with win rates and cycle time, use pipeline_forecast instead.',
       inputSchema: pipelineSummary,
       handler: async (input: z.infer<typeof pipelineSummary>, actor: ActorContext) => {
+        const ownerFilter = await resolveOwnerFilter(db, actor, input.owner_id);
         return oppRepo.getPipelineSummary(db, actor.tenant_id, {
-          owner_id: input.owner_id,
+          ...ownerFilter,
           group_by: input.group_by ?? 'stage',
         });
       },
@@ -309,6 +318,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
         }
         const before = await oppRepo.getOpportunity(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Opportunity', input.id);
+        await assertOwnedObjectAccess(db, actor, 'opportunity', input.id);
 
         await oppRepo.deleteOpportunity(db, actor.tenant_id, input.id, {
           expectedVersion: input.expected_version,
@@ -351,6 +361,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
         return runOpportunityOperation(db, actor, 'opportunity_health_score', input, async () => {
         const before = await oppRepo.getOpportunity(db, actor.tenant_id, input.opportunity_id);
         if (!before) throw notFound('Opportunity', input.opportunity_id);
+        await assertOwnedObjectAccess(db, actor, 'opportunity', input.opportunity_id);
         const { score, breakdown, risk_factors } = await computeDealHealthScore(db, actor.tenant_id, input.opportunity_id);
         // Persist score
         const params: unknown[] = [score, input.opportunity_id, actor.tenant_id];

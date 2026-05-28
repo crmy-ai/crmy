@@ -52,40 +52,40 @@ Merge a duplicate contact into a primary contact.
 - **Input**: `primary_id` (required), `secondary_id` (required), `idempotency_key`, `primary_expected_version`, `secondary_expected_version`
 - **Output**: `{ primary, secondary_id, merged_count, event_id, mutation }`
 
-## Company Tools
+## Account Tools
 
 ### account_create
-Create a new company.
+Create a new account.
 - **Input**: `name` (required), `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `aliases`, `tags`, `custom_fields`
 - **Output**: `{ account, event_id }`
 
 ### account_get
-Get a company with its contacts and open opportunities.
+Get an account with its contacts and open opportunities.
 - **Input**: `id` (required)
 - **Output**: `{ account, contacts, open_opportunities }`
 
 ### account_search
-Search companies.
+Search accounts.
 - **Input**: `query`, `industry`, `owner_id`, `min_revenue`, `tags`, `limit`, `cursor`
 - **Output**: `{ accounts, next_cursor, total }`
 
 ### account_update
-Update a company.
+Update an account.
 - **Input**: `id` (required), `patch` (object with fields to update, including `aliases: string[]`)
 - **Output**: `{ account, event_id }`
 
 ### account_set_health_score
-Set company health score (0-100).
+Set account health score (0-100).
 - **Input**: `id` (required), `score` (required), `rationale`
 - **Output**: `{ account, event_id }`
 
 ### account_get_hierarchy
-Get parent/child hierarchy for a company.
+Get parent/child hierarchy for an account.
 - **Input**: `id` (required)
 - **Output**: `{ root, children, depth }`
 
 ### account_delete
-Delete a company (admin/owner only).
+Delete an account (admin/owner only).
 - **Input**: `id` (required)
 - **Output**: `{ deleted: true, event_id }`
 
@@ -655,7 +655,7 @@ Ingest Raw Context (transcript, email, meeting notes, etc.) and auto-extract str
 - **Output**: `{ extracted_count, memory_created, signals_created, skipped, signals, memory_entries, context_entries, activity_id, raw_context_source, processing_receipt }`
 
 ### context_ingest_auto
-Ingest Raw Context and automatically resolve mentioned contacts/accounts before extraction. Requires the configured Workspace Agent: the model identifies likely people and companies, then CRMy grounds them against existing records before creating Signals or Memory.
+Ingest Raw Context and automatically resolve mentioned contacts/accounts before extraction. Requires the configured Workspace Agent: the model identifies likely people and accounts, then CRMy grounds them against existing records before creating Signals or Memory.
 - **Input**: `document` (required), `source_label`, `context_type`, `confidence_threshold`
 - **Output**: `{ subjects_resolved, entries_created, memory_created, signals_created, skipped, processing_receipts, low_confidence_skipped }`
 

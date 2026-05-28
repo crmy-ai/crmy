@@ -17,7 +17,7 @@ export const activityType = z.enum([
   'meeting_held', 'meeting_scheduled', 'note_added', 'research_completed', 'stage_change',
 ]);
 export const direction = z.enum(['inbound', 'outbound']);
-export const userRole = z.enum(['owner', 'admin', 'member']);
+export const userRole = z.enum(['owner', 'admin', 'manager', 'member']);
 export const subjectType = z.enum(['contact', 'account', 'opportunity', 'use_case']);
 export const systemOfRecordType = z.enum(['hubspot', 'salesforce', 'databricks', 'snowflake']);
 export const externalOrigin = z.enum(['crmy', 'crm_sync', 'warehouse_sync', 'agent', 'workflow', 'sequence']);
@@ -51,6 +51,7 @@ export const contactCreate = z.object({
   title: z.string().optional(),
   company_name: z.string().optional(),
   account_id: uuid.optional(),
+  owner_id: uuid.optional(),
   lifecycle_stage: lifecycleStage.default('lead'),
   aliases: z.array(z.string()).default([]),
   tags,
@@ -116,6 +117,7 @@ export const accountCreate = z.object({
   currency_code: z.string().length(3).default('USD'),
   website: z.string().url().optional(),
   parent_id: uuid.optional(),
+  owner_id: uuid.optional(),
   aliases: z.array(z.string()).default([]),
   tags,
   custom_fields: customFields,
@@ -167,6 +169,7 @@ export const opportunityCreate = z.object({
   name: z.string().min(1),
   account_id: uuid.optional(),
   contact_id: uuid.optional(),
+  owner_id: uuid.optional(),
   amount: z.number().optional(),
   currency_code: z.string().length(3).default('USD'),
   close_date: z.string().optional(),
@@ -232,6 +235,7 @@ export const activityCreate = z.object({
   account_id: uuid.optional(),
   opportunity_id: uuid.optional(),
   use_case_id: uuid.optional(),
+  owner_id: uuid.optional(),
   due_at: z.string().optional(),
   direction: direction.optional(),
   custom_fields: customFields,
@@ -536,14 +540,14 @@ export const sorWritebackStatus = z.object({
 // -- Auth schemas --
 
 export const authRegister = z.object({
-  name: z.string().min(1),
-  email: z.string().email(),
+  name: z.string().trim().min(1),
+  email: z.string().trim().email(),
   password: z.string().min(8),
-  tenant_name: z.string().min(1),
+  tenant_name: z.string().trim().min(1),
 });
 
 export const authLogin = z.object({
-  email: z.string().email(),
+  email: z.string().trim().email(),
   password: z.string(),
 });
 
@@ -564,6 +568,7 @@ export const useCaseCreate = z.object({
   stage: useCaseStage.default('discovery'),
   description: z.string().optional(),
   opportunity_id: uuid.optional(),
+  owner_id: uuid.optional(),
   unit_label: z.string().optional(),
   consumption_unit: z.string().optional(),
   consumption_capacity: z.number().int().optional(),

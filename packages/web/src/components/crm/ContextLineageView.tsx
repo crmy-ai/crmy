@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Activity,
@@ -24,6 +24,7 @@ import { useAccounts, useContacts, useContextLineage, useOpportunities, useUseCa
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { useSlashSearchFocus } from '@/hooks/useSlashSearchFocus';
 
 type SubjectType = 'contact' | 'account' | 'opportunity' | 'use_case';
 type LineagePhase = 'sources' | 'signals' | 'memory' | 'actions' | 'audit';
@@ -249,7 +250,7 @@ function NodeDetailSheet({
 
   return (
     <Sheet open={Boolean(node)} onOpenChange={open => { if (!open) onClose(); }}>
-      <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
+      <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
         {node && (
           <>
             <SheetHeader className="border-b border-border px-5 pb-4 pt-5 text-left">
@@ -331,6 +332,7 @@ function ConnectionRow({ edge, other, direction }: { edge: ContextLineageEdge; o
 export function ContextLineageView() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
   const [subject, setSubject] = useState<{ type: SubjectType; id: string; name: string } | null>(null);
   const [phases, setPhases] = useState<Set<LineagePhase>>(() => new Set(PHASES.map(phase => phase.key)));
   const [viewMode, setViewMode] = useState<'path' | 'events'>('path');
@@ -403,6 +405,7 @@ export function ContextLineageView() {
   };
   const lifecycleEdges = visibleEdges.filter(edge => edge.relation !== 'about_record');
   const hasGaps = visibleData && nonRecordNodes.length > 1 && lifecycleEdges.length === 0;
+  useSlashSearchFocus(searchRef);
 
   function togglePhase(phase: LineagePhase) {
     setPhases(prev => {
@@ -428,6 +431,7 @@ export function ContextLineageView() {
           <div className="relative min-w-0 max-w-sm flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
+              ref={searchRef}
               value={query}
               onChange={event => setQuery(event.target.value)}
               placeholder={selectedRecordLabel || 'Search records...'}
@@ -437,6 +441,11 @@ export function ContextLineageView() {
               <button onClick={() => setQuery('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1">
                 <X className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
               </button>
+            )}
+            {!query && (
+              <kbd className="absolute right-2.5 top-1/2 hidden -translate-y-1/2 items-center rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground/50 md:inline-flex">
+                /
+              </kbd>
             )}
             {results.length > 0 && (
               <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-border bg-popover shadow-lg">

@@ -12,7 +12,7 @@ import { ListToolbar, type FilterConfig, type SortOption } from '@/components/cr
 import { RecordMemoryIndicator } from '@/components/crm/RecordMemoryIndicator';
 import { DatePicker } from '@/components/ui/date-picker';
 import { motion } from 'framer-motion';
-import { Columns3, List, BarChart3, Plus, Sparkles, ChevronUp, ChevronDown, FolderKanban } from 'lucide-react';
+import { Columns3, List, BarChart3, Plus, Bot, ChevronUp, ChevronDown, FolderKanban } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useRecordMemoryCounts } from '@/hooks/useRecordMemoryCounts';
 import { useCaseStageConfig } from '@/lib/stageConfig';
@@ -246,8 +246,8 @@ export default function UseCases() {
                               </div>
                               {agentEnabled && (
                                 <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'use-case', id: uc.id as string, name: uc.name as string, detail: client }); navigate('/agent'); }}
-                                  className="p-0.5 rounded-lg md:opacity-0 md:group-hover:opacity-100 hover:bg-accent/10 transition-all">
-                                  <Sparkles className="w-3.5 h-3.5 text-accent" />
+                                  className="p-0.5 rounded-lg md:opacity-0 md:group-hover:opacity-100 hover:bg-violet-500/10 transition-all">
+                                  <Bot className="w-3.5 h-3.5 text-violet-500" />
                                 </button>
                               )}
                             </div>
@@ -283,9 +283,11 @@ export default function UseCases() {
               allUseCases.length === 0 && !search && Object.keys(activeFilters).length === 0 ? (
                 <OnboardingEmptyState
                   icon={FolderKanban}
-                  title="Create your first use case"
+                  title="No use cases yet"
                   description="Use cases connect goals, stage, health, and adoption context."
-                  primary={{ label: 'New Use Case', onClick: () => openQuickAdd('use-case') }}
+                  showSampleData={false}
+                  iconClassName="text-success"
+                  iconBgClassName="bg-success/15"
                 />
               ) : (
                 <OnboardingEmptyState
@@ -294,6 +296,8 @@ export default function UseCases() {
                   description="Adjust the search, filters, or production date to find the use case you need."
                   primary={{ label: 'Clear filters', onClick: () => { setSearch(''); setActiveFilters({}); setProdDate('all'); } }}
                   showSampleData={false}
+                  iconClassName="text-success"
+                  iconBgClassName="bg-success/15"
                 />
               )
             ) : (
@@ -355,8 +359,8 @@ export default function UseCases() {
                             {agentEnabled && (
                               <td className="px-2 py-3">
                                 <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'use-case', id: uc.id as string, name: uc.name as string, detail: client }); navigate('/agent'); }}
-                                  className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-accent/10 transition-all">
-                                  <Sparkles className="w-3.5 h-3.5 text-accent" />
+                                  className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-violet-500/10 transition-all">
+                                  <Bot className="w-3.5 h-3.5 text-violet-500" />
                                 </button>
                               </td>
                             )}

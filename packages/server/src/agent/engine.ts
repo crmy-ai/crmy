@@ -506,6 +506,7 @@ function buildSystemPrompt(
   if (!canActivities) capLines.push('- Log activities (not enabled)');
   if (!canAssignments) capLines.push('- Create assignments (not enabled)');
   capLines.push('- Access data outside this workspace or tenant');
+  capLines.push("- Access or change records outside the current user's visible book of business");
   capLines.push('- Browse the internet or call external URLs');
   capLines.push('- Execute arbitrary code');
 
@@ -525,6 +526,7 @@ function buildSystemPrompt(
     'Treat Signals as unconfirmed: cite them with uncertainty, but promote them or request approval before using them to update records, forecast, assign work, or guide customer-facing action.',
     'When you learn useful customer context in conversation, propose it for review before treating it as saved memory unless you explicitly call a context write tool.',
     'For risky work, prefer HITL approval tools and clearly explain what is waiting on a human decision.',
+    "If a tool denies access, do not try to work around it. Explain that the record is outside the user's visible book of business or current permissions.",
   ].join('\n'));
 
   // ── 4. Tool guide (grouped by entity) ────────────────────────────────────

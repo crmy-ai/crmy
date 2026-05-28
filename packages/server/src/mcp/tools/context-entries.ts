@@ -12,6 +12,7 @@ import {
 import { detectRawContextSubjects } from '../../services/raw-context-subjects.js';
 import { loadEmbeddingConfig, embedText } from '../../agent/providers/embeddings.js';
 import { ensureEmbeddingBestEffort } from '../../services/embedding-service.js';
+import { evaluateMemoryReadiness } from '../../services/memory-readiness.js';
 import { getContextLineage } from '../../services/context-lineage.js';
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext, SubjectType, UUID } from '@crmy/shared';
@@ -22,6 +23,7 @@ import * as outboxRepo from '../../db/repos/context-outbox.js';
 import * as rawContextRepo from '../../db/repos/raw-context-sources.js';
 import * as signalGroupRepo from '../../db/repos/signal-groups.js';
 import * as governorLimits from '../../db/repos/governor-limits.js';
+import * as hitlRepo from '../../db/repos/hitl.js';
 import { assembleBriefing, formatBriefingText } from '../../services/briefing.js';
 import { processStaleEntriesForTenant } from '../../services/staleness.js';
 import { emitEvent } from '../../events/emitter.js';
@@ -34,38 +36,36 @@ import { createContradictionReviewAssignments } from '../../services/context-rev
 import { assertActionPolicyAllowsMutation, evaluateActionPolicy } from '../../services/action-policy.js';
 import { attachSignalToGroup, createSignalGroupHandoff, dismissSignalGroup, promoteSignalGroup } from '../../services/signal-groups.js';
 import { ensureActorRecordForContext } from '../../services/actor-identity.js';
+import { assertActivityAccess, assertSubjectAccess, resolveOwnerFilter } from '../../services/access-control.js';
 import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+import type { RawContextRecordProposal } from '../../services/raw-context-subjects.js';
 
-/**
- * Soft-validate structured_data against a JSON Schema.
- * Returns a list of warning strings (missing required fields).
- * Does not throw — agents get warnings, not errors, so they can iterate.
- */
-function validateAgainstSchema(
-  data: Record<string, unknown>,
-  schema: Record<string, unknown>,
-): string[] {
-  const warnings: string[] = [];
-  const props = schema.properties as Record<string, unknown> | undefined;
-  const required = schema.required as string[] | undefined;
+async function visibleOwnerIds(db: DbPool, actor: ActorContext): Promise<UUID[] | undefined> {
+  const filter = await resolveOwnerFilter(db, actor);
+  return 'owner_ids' in filter ? filter.owner_ids as UUID[] : undefined;
+}
 
-  if (!props || !required) return warnings;
-
-  for (const field of required) {
-    if (data[field] === undefined || data[field] === null || data[field] === '') {
-      warnings.push(`structured_data is missing required field '${field}'`);
-    }
+async function assertLineageAccess(db: DbPool, actor: ActorContext, input: z.infer<typeof contextLineageGet>): Promise<void> {
+  if (input.subject_type && input.subject_id) {
+    await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
   }
-
-  for (const [key] of Object.entries(data)) {
-    if (!props[key]) {
-      warnings.push(`structured_data contains unknown field '${key}' (not in schema)`);
-    }
+  if (input.context_entry_id) {
+    const entry = await contextRepo.getContextEntry(db, actor.tenant_id, input.context_entry_id);
+    if (!entry) throw notFound('ContextEntry', input.context_entry_id);
+    await assertSubjectAccess(db, actor, entry.subject_type as SubjectType, entry.subject_id);
   }
-
-  return warnings;
+  if (input.signal_group_id) {
+    const group = await signalGroupRepo.getSignalGroup(db, actor.tenant_id, input.signal_group_id);
+    if (!group) throw notFound('Signal', input.signal_group_id);
+    await assertSubjectAccess(db, actor, group.subject_type as SubjectType, group.subject_id);
+  }
+  if (input.raw_context_source_id) {
+    const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.raw_context_source_id);
+    if (!source) throw notFound('RawContextSource', input.raw_context_source_id);
+    await assertSubjectAccess(db, actor, source.subject_type as SubjectType | undefined, source.subject_id as string | undefined);
+  }
 }
 
 function processingNextAction(input: {
@@ -101,6 +101,71 @@ function processingReceipt(source: rawContextRepo.RawContextSource | null, fallb
   };
 }
 
+function proposalDedupeKey(proposal: RawContextRecordProposal): string {
+  const fieldKey = String(
+    proposal.fields.email
+      ?? proposal.fields.domain
+      ?? proposal.fields.name
+      ?? proposal.name,
+  ).trim().toLowerCase();
+  return `${proposal.record_type}:${fieldKey}`;
+}
+
+function mergeRecordProposals(...groups: Array<RawContextRecordProposal[] | undefined>): RawContextRecordProposal[] {
+  const merged = new Map<string, RawContextRecordProposal>();
+  for (const group of groups) {
+    for (const proposal of group ?? []) {
+      const key = proposalDedupeKey(proposal);
+      if (!merged.has(key)) merged.set(key, proposal);
+    }
+  }
+  return [...merged.values()];
+}
+
+async function createRecordProposalHandoffs(
+  db: DbPool,
+  actor: ActorContext,
+  input: {
+    actorRecordId: string;
+    sourceRef: string;
+    rawContextSourceId?: string;
+    rawExcerpt: string;
+    proposals: RawContextRecordProposal[];
+  },
+): Promise<Array<{ request_id: string; proposal: RawContextRecordProposal; status: string }>> {
+  const created: Array<{ request_id: string; proposal: RawContextRecordProposal; status: string }> = [];
+  for (const proposal of input.proposals.slice(0, 8)) {
+    if (proposal.confidence < 0.45) continue;
+    const dedupeKey = proposalDedupeKey(proposal);
+    const existing = await hitlRepo.findPendingHITLByPayload(db, actor.tenant_id, 'record.create.review', {
+      dedupe_key: dedupeKey,
+    });
+    if (existing) {
+      created.push({ request_id: existing.id, proposal, status: existing.status });
+      continue;
+    }
+
+    const request = await hitlRepo.createHITLRequest(db, actor.tenant_id, {
+      agent_id: actor.actor_id,
+      action_type: 'record.create.review',
+      action_summary: `Review new ${proposal.record_type.replace('_', ' ')}: ${proposal.name}`,
+      priority: proposal.duplicate_candidates?.length ? 'normal' : 'low',
+      sla_minutes: 1440,
+      action_payload: {
+        dedupe_key: dedupeKey,
+        requested_decision: 'create_record_or_link_existing',
+        proposed_record: proposal,
+        raw_context_source_id: input.rawContextSourceId,
+        source_ref: input.sourceRef,
+        evidence_summary: proposal.reason,
+        raw_excerpt: input.rawExcerpt.slice(0, 1000),
+      },
+    });
+    created.push({ request_id: request.id, proposal, status: request.status });
+  }
+  return created;
+}
+
 export function contextEntryTools(db: DbPool): ToolDef[] {
   return [
     {
@@ -116,6 +181,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+        await assertSubjectAccess(db, actor, input.subject_type, input.subject_id);
         // Enforce governor limit on context entry count
         const entryCount = await governorLimits.countContextEntries(db, actor.tenant_id);
         await governorLimits.enforceLimit(db, actor.tenant_id, 'context_entries_max', entryCount);
@@ -231,11 +297,10 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         outboxRepo.insertJob(db, actor.tenant_id, 'context_entry', entry.id, entry as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[outbox] context_add enqueue ${entry.id}: ${(err as Error).message}`));
 
-        // Soft-validate structured_data against the context type's JSON Schema
+        // Check whether the typed details are complete enough for Memory.
         const schema = await contextTypeRepo.getContextTypeSchema(db, actor.tenant_id, input.context_type);
-        const schema_warnings = schema && input.structured_data
-          ? validateAgainstSchema(input.structured_data as Record<string, unknown>, schema)
-          : [];
+        const readiness = evaluateMemoryReadiness(input.structured_data as Record<string, unknown> | undefined, schema);
+        const schema_warnings = readiness.validation_warnings;
         const validation_warnings = [...lifecycle_warnings, ...schema_warnings];
         return {
           context_entry: entry,
@@ -265,6 +330,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       handler: async (input: z.infer<typeof contextEntryGet>, actor: ActorContext) => {
         const entry = await contextRepo.getContextEntry(db, actor.tenant_id, input.id);
         if (!entry) throw notFound('ContextEntry', input.id);
+        await assertSubjectAccess(db, actor, entry.subject_type as SubjectType, entry.subject_id);
         return { context_entry: entry };
       },
     },
@@ -274,12 +340,17 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'List Current Memory and Signals attached to a customer record with flexible filters. Use memory_status="active" for Current Memory and memory_status="signal" for reviewable Signals. Use subject_type and subject_id to scope to a specific record, context_type to filter by category (e.g. "objection", "preference"), authored_by to see what a specific actor contributed, and is_current to exclude superseded entries. The structured_data_filter parameter supports typed JSONB queries for domain-specific searches like finding all open objections or critical deal risks. Returns entries sorted by recency.',
       inputSchema: contextEntrySearch,
       handler: async (input: z.infer<typeof contextEntrySearch>, actor: ActorContext) => {
+        if (input.subject_type && input.subject_id) {
+          await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
+        }
+        const ownerIds = await visibleOwnerIds(db, actor);
         const result = await contextRepo.searchContextEntries(db, actor.tenant_id, {
           ...input,
           memory_status: input.memory_status,
           structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
           visibility: input.visibility,
           pinned: input.pinned,
+          owner_ids: ownerIds,
           limit: input.limit ?? 20,
         });
         return { context_entries: result.data, next_cursor: result.next_cursor, total: result.total };
@@ -308,11 +379,16 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         },
         actor: ActorContext,
       ) => {
+        const ownerIds = await visibleOwnerIds(db, actor);
+        if (input.subject_type && input.subject_id) {
+          await assertSubjectAccess(db, actor, input.subject_type, input.subject_id);
+        }
         const result = await rawContextRepo.listRawContextSources(db, actor.tenant_id, {
           source_type: input.source_type,
           status: input.status,
           subject_type: input.subject_type,
           subject_id: input.subject_id,
+          owner_ids: ownerIds,
           limit: input.limit ?? 50,
           cursor: input.cursor,
         });
@@ -329,6 +405,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       handler: async (input: { id: string }, actor: ActorContext) => {
         const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.id);
         if (!source) throw notFound('RawContextSource', input.id);
+        await assertSubjectAccess(db, actor, source.subject_type as SubjectType | undefined, source.subject_id as string | undefined);
         return { raw_context_source: source };
       },
     },
@@ -342,6 +419,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       handler: async (input: { id: string }, actor: ActorContext) => {
         const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.id);
         if (!source) throw notFound('RawContextSource', input.id);
+        await assertSubjectAccess(db, actor, source.subject_type as SubjectType | undefined, source.subject_id as string | undefined);
         const actorRecordId = await ensureActorRecordForContext(db, actor);
 
         await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
@@ -375,6 +453,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
               limit: 20,
               confidenceThreshold: 0.6,
               actorId: actor.actor_id,
+              ownerIds: await visibleOwnerIds(db, actor),
             });
             if (detected.subjects.length === 0) {
               await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
@@ -454,6 +533,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         }, async () => {
           const before = await contextRepo.getContextEntry(db, actor.tenant_id, input.id);
           if (!before) throw notFound('Signal', input.id);
+          await assertSubjectAccess(db, actor, before.subject_type as SubjectType, before.subject_id);
           if (before.memory_status !== 'signal' || before.is_current === false) {
             throw validationError('Only current Signals can be promoted to Current Memory.');
           }
@@ -514,6 +594,9 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+          const before = await contextRepo.getContextEntry(db, actor.tenant_id, input.id);
+          if (!before) throw notFound('Signal', input.id);
+          await assertSubjectAccess(db, actor, before.subject_type as SubjectType, before.subject_id);
           const actorRecordId = await ensureActorRecordForContext(db, actor);
           const entry = await contextRepo.rejectSignal(db, actor.tenant_id, input.id, actorRecordId, input.reason);
           if (!entry) throw notFound('Signal', input.id);
@@ -560,7 +643,11 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         limit: number;
         cursor?: string;
       }, actor: ActorContext) => {
-        const result = await signalGroupRepo.listSignalGroups(db, actor.tenant_id, input);
+        if (input.subject_type && input.subject_id) {
+          await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
+        }
+        const ownerIds = await visibleOwnerIds(db, actor);
+        const result = await signalGroupRepo.listSignalGroups(db, actor.tenant_id, { ...input, owner_ids: ownerIds });
         return { signal_groups: result.data, data: result.data, next_cursor: result.next_cursor, total: result.total };
       },
     },
@@ -572,6 +659,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       handler: async (input: { id: string }, actor: ActorContext) => {
         const group = await signalGroupRepo.getSignalGroup(db, actor.tenant_id, input.id);
         if (!group) throw notFound('Signal', input.id);
+        await assertSubjectAccess(db, actor, group.subject_type as SubjectType, group.subject_id);
         return { signal_group: group };
       },
     },
@@ -581,6 +669,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'Read the lineage behind Raw Context, Signals, Memory, Handoffs, writebacks, and audit events for a customer record or context artifact.',
       inputSchema: contextLineageGet,
       handler: async (input: z.infer<typeof contextLineageGet>, actor: ActorContext) => {
+        await assertLineageAccess(db, actor, input);
         return {
           lineage: await getContextLineage(db, actor.tenant_id, input),
         };
@@ -599,6 +688,9 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+          const group = await signalGroupRepo.getSignalGroup(db, actor.tenant_id, input.id);
+          if (!group) throw notFound('Signal', input.id);
+          await assertSubjectAccess(db, actor, group.subject_type as SubjectType, group.subject_id);
           const actorRecordId = await ensureActorRecordForContext(db, actor);
           const result = await promoteSignalGroup(db, actor.tenant_id, input.id, actorRecordId, actor);
           if (!result.context_entry) {
@@ -628,6 +720,9 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+          const group = await signalGroupRepo.getSignalGroup(db, actor.tenant_id, input.id);
+          if (!group) throw notFound('Signal', input.id);
+          await assertSubjectAccess(db, actor, group.subject_type as SubjectType, group.subject_id);
           const actorRecordId = await ensureActorRecordForContext(db, actor);
           const result = await createSignalGroupHandoff(db, actor.tenant_id, input.id, actorRecordId, actor);
           return {
@@ -658,6 +753,9 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+          const existingGroup = await signalGroupRepo.getSignalGroup(db, actor.tenant_id, input.id);
+          if (!existingGroup) throw notFound('Signal', input.id);
+          await assertSubjectAccess(db, actor, existingGroup.subject_type as SubjectType, existingGroup.subject_id);
           const actorRecordId = await ensureActorRecordForContext(db, actor);
           const group = await dismissSignalGroup(db, actor.tenant_id, input.id, actorRecordId, input.reason);
           if (!group) throw notFound('Signal', input.id);
@@ -687,6 +785,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         }, async () => {
         const existing = await contextRepo.getContextEntry(db, actor.tenant_id, input.id);
         if (!existing) throw notFound('ContextEntry', input.id);
+        await assertSubjectAccess(db, actor, existing.subject_type as SubjectType, existing.subject_id);
 
         const actorRecordId = await ensureActorRecordForContext(db, actor);
         const result = await contextRepo.supersedeContextEntry(
@@ -740,6 +839,10 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'Full-text search across all context entries using PostgreSQL GIN index — useful for cross-cutting queries like "what do we know about procurement concerns across all accounts" or "find every competitive intel mention of HubSpot." Returns results ranked by relevance with highlighted matches. Supports structured_data_filter for typed JSONB queries. Use this when you need to find information across multiple subjects rather than within a single record.',
       inputSchema: contextSearch,
       handler: async (input: z.infer<typeof contextSearch>, actor: ActorContext) => {
+        if (input.subject_type && input.subject_id) {
+          await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
+        }
+        const ownerIds = await visibleOwnerIds(db, actor);
         const entries = await contextRepo.fullTextSearch(db, actor.tenant_id, input.query, {
           subject_type: input.subject_type,
           subject_id: input.subject_id,
@@ -749,6 +852,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           memory_status: input.memory_status,
           limit: input.limit,
           structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
+          owner_ids: ownerIds,
         });
         return { context_entries: entries, total: entries.length };
       },
@@ -793,9 +897,14 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'List Current Memory that needs review because valid_until has passed. These entries may be outdated and should be reverified before an agent acts. Use this as a recurring Memory Health check to identify competitive intel, org chart details, next steps, or research that may have decayed. Optionally filter by subject_type to scope the check to a specific entity type.',
       inputSchema: contextStaleList,
       handler: async (input: z.infer<typeof contextStaleList>, actor: ActorContext) => {
+        if (input.subject_type && input.subject_id) {
+          await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
+        }
+        const ownerIds = await visibleOwnerIds(db, actor);
         const entries = await contextRepo.listStaleEntries(db, actor.tenant_id, {
           subject_type: input.subject_type,
           subject_id: input.subject_id,
+          owner_ids: ownerIds,
           limit: input.limit,
         });
         return { stale_entries: entries, total: entries.length };
@@ -817,6 +926,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+        await assertActivityAccess(db, actor, input.activity_id);
         const outcome = await extractContextFromActivity(db, actor.tenant_id, input.activity_id);
         return {
           ...outcome,
@@ -835,6 +945,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'Get a unified briefing for any customer record — the single most important tool in CRMy. Call this before every agent action that needs current state. It assembles the full record, related entities, recent activity timeline, open assignments, Current Memory, Signals, Memory that needs review, and contradiction warnings in one response. Set context_radius to "direct" for single-contact outreach, "adjacent" to include related accounts and opportunities, or "account_wide" for deal reviews that need the full picture. Set token_budget (integer, token count) to tell CRMy how much space you have — it packs the highest-priority context to fit. Check stale_warnings before acting; they identify Memory past its valid_until date that should be reverified. Works on contacts, accounts, opportunities, and use_cases.',
       inputSchema: briefingGet,
       handler: async (input: z.infer<typeof briefingGet>, actor: ActorContext) => {
+        await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
         const briefing = await assembleBriefing(
           db,
           actor.tenant_id,
@@ -904,6 +1015,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+        await assertSubjectAccess(db, actor, input.subject_type, input.subject_id);
         // Enforce body length limit
         const maxChars = await governorLimits.getLimit(db, actor.tenant_id, 'context_body_max_chars');
         if (input.document.length > maxChars * 2) {
@@ -977,10 +1089,37 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         context_type: z.string().optional().describe('Override the context type for all extracted entries (e.g. "meeting_notes")'),
         confidence_threshold: z.number().min(0).max(1).default(0.6)
           .describe('Minimum entity resolution confidence to link an entry. 0.6 = medium+high (default). Set lower to include more speculative matches.'),
+        subjects: z.array(z.object({
+          type: z.enum(['contact', 'account', 'opportunity', 'use_case']),
+          id: z.string().uuid(),
+          name: z.string().optional(),
+        })).max(20).optional().describe('Optional already-resolved customer records. When provided, CRMy skips subject detection and extracts once across this matched subject set.'),
+        proposed_records: z.array(z.object({
+          record_type: z.enum(['contact', 'account', 'opportunity', 'use_case']),
+          name: z.string(),
+          confidence: z.number().min(0).max(1).default(0.5),
+          reason: z.string().optional().default('Extracted from Raw Context.'),
+          fields: z.record(z.string(), z.unknown()).default({}),
+          duplicate_candidates: z.array(z.object({
+            record_type: z.string(),
+            id: z.string(),
+            name: z.string(),
+            confidence: z.string().optional(),
+            reason: z.string().optional(),
+          })).optional(),
+        })).max(20).optional().describe('Optional proposed net-new records from prior subject detection. CRMy routes these to Handoffs instead of auto-creating them.'),
         idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (
-        input: { document: string; source_label?: string; context_type?: string; confidence_threshold: number; idempotency_key?: string },
+        input: {
+          document: string;
+          source_label?: string;
+          context_type?: string;
+          confidence_threshold: number;
+          subjects?: Array<{ type: 'contact' | 'account' | 'opportunity' | 'use_case'; id: string; name?: string }>;
+          proposed_records?: RawContextRecordProposal[];
+          idempotency_key?: string;
+        },
         actor: ActorContext,
       ) => {
         return runIdempotent(db, {
@@ -1006,35 +1145,124 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           },
         });
 
-        const detected = await detectRawContextSubjects(db, actor.tenant_id, input.document, {
-          limit: 20,
-          confidenceThreshold: input.confidence_threshold,
-          actorId: actor.actor_id,
-        });
-        const resolvedSubjects = detected.subjects.map(subject => ({
-          entity_type: subject.type,
-          id: subject.id,
-          name: subject.name,
-          confidence: subject.confidence,
-        }));
-        const skipped = detected.skipped.map(item => item.name);
+        let resolvedSubjects: Array<{
+          entity_type: string;
+          id: string;
+          name: string;
+          confidence: string;
+          account_id?: string;
+          account_name?: string;
+          scope_reason?: string;
+          parent_subject?: { type: string; id: string; name: string };
+        }>;
+        let skipped: string[];
+        let detectedCandidates: string[];
+        let detectedSkipped: Array<{ name: string; reason: string }>;
+        let proposedRecords: RawContextRecordProposal[];
+        let accountScope: Awaited<ReturnType<typeof detectRawContextSubjects>>['account_scope'] = [];
+        let recordsExamined: Awaited<ReturnType<typeof detectRawContextSubjects>>['records_examined'];
+        let resolutionSummary: string | undefined;
+        const scopedOwnerIds = await visibleOwnerIds(db, actor);
+        if (input.subjects?.length) {
+          for (const subject of input.subjects) {
+            await assertSubjectAccess(db, actor, subject.type, subject.id);
+          }
+          resolvedSubjects = input.subjects.map(subject => ({
+            entity_type: subject.type,
+            id: subject.id,
+            name: subject.name ?? subject.id,
+            confidence: 'high',
+          }));
+          skipped = [];
+          detectedCandidates = resolvedSubjects.map(subject => subject.name);
+          detectedSkipped = [];
+          proposedRecords = input.proposed_records ?? [];
+          resolutionSummary = `Using ${resolvedSubjects.length} selected customer ${resolvedSubjects.length === 1 ? 'record' : 'records'}.`;
+        } else if (input.proposed_records?.length) {
+          resolvedSubjects = [];
+          skipped = [];
+          detectedCandidates = input.proposed_records.map(proposal => proposal.name);
+          detectedSkipped = [];
+          proposedRecords = input.proposed_records;
+          resolutionSummary = `${proposedRecords.length} possible new ${proposedRecords.length === 1 ? 'record needs' : 'records need'} review.`;
+        } else {
+          const detected = await detectRawContextSubjects(db, actor.tenant_id, input.document, {
+            limit: 20,
+            confidenceThreshold: input.confidence_threshold,
+            actorId: actor.actor_id,
+            ownerIds: scopedOwnerIds,
+          });
+          resolvedSubjects = detected.subjects.map(subject => ({
+            entity_type: subject.type,
+            id: subject.id,
+            name: subject.name,
+            confidence: subject.confidence,
+            account_id: subject.account_id,
+            account_name: subject.account_name,
+            scope_reason: subject.scope_reason,
+            parent_subject: subject.parent_subject,
+          }));
+          skipped = detected.skipped.map(item => item.name);
+          detectedCandidates = detected.candidates;
+          detectedSkipped = detected.skipped;
+          proposedRecords = mergeRecordProposals(detected.proposed_records, input.proposed_records);
+          accountScope = detected.account_scope ?? [];
+          recordsExamined = detected.records_examined;
+          resolutionSummary = detected.resolution_summary;
+        }
 
         if (resolvedSubjects.length === 0) {
+          const currentSource = await rawContextRepo.getRawContextSourceByRef(
+            db,
+            actor.tenant_id,
+            actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+            sourceRef,
+          );
+          const proposalHandoffs = proposedRecords.length > 0
+            ? await createRecordProposalHandoffs(db, actor, {
+              actorRecordId,
+              sourceRef,
+              rawContextSourceId: currentSource?.id,
+              rawExcerpt: input.document,
+              proposals: proposedRecords,
+            })
+            : [];
           await rawContextRepo.updateRawContextSource(
             db,
             actor.tenant_id,
             actor.actor_type === 'agent' ? 'mcp' : 'add_context',
             sourceRef,
             {
-              status: 'skipped',
+              status: proposalHandoffs.length > 0 ? 'needs_review' : 'skipped',
               stage: 'resolve_subjects',
-              skipped: 1,
+              skipped: proposalHandoffs.length > 0 ? 0 : 1,
               detected_subjects: [
-                ...detected.candidates.map(name => ({ name, status: skipped.includes(name) ? 'unresolved' : 'candidate' })),
-                ...detected.skipped.map(item => ({ name: item.name, status: 'skipped', reason: item.reason })),
+                ...detectedCandidates.map(name => ({ name, status: skipped.includes(name) ? 'unresolved' : 'candidate' })),
+                ...detectedSkipped.map(item => ({ name: item.name, status: 'skipped', reason: item.reason })),
+                ...proposedRecords.map(proposal => ({
+                  name: proposal.name,
+                  status: proposalHandoffs.some(handoff => handoff.proposal.name === proposal.name) ? 'proposed_record_review' : 'proposed_record',
+                  record_type: proposal.record_type,
+                  confidence: proposal.confidence,
+                  reason: proposal.reason,
+                })),
               ],
-              failure_reason: 'No customer records could be confidently identified in the source.',
+              failure_reason: proposalHandoffs.length > 0
+                ? `${proposalHandoffs.length} possible new ${proposalHandoffs.length === 1 ? 'record needs' : 'records need'} review before CRMy creates anything.`
+                : 'No customer records could be confidently identified in the source.',
+              metadata: proposalHandoffs.length > 0 ? {
+                proposed_records: proposedRecords,
+                handoff_request_ids: proposalHandoffs.map(item => item.request_id),
+              } : {
+                proposed_records: proposedRecords,
+              },
             },
+          );
+          const updatedSource = await rawContextRepo.getRawContextSourceByRef(
+            db,
+            actor.tenant_id,
+            actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+            sourceRef,
           );
           return {
             subjects_resolved: [],
@@ -1042,19 +1270,23 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             extracted_count: 0,
             memory_created: 0,
             signals_created: 0,
-            skipped: 1,
-            raw_context_source: await rawContextRepo.getRawContextSourceByRef(
-              db,
-              actor.tenant_id,
-              actor.actor_type === 'agent' ? 'mcp' : 'add_context',
-              sourceRef,
-            ) ?? undefined,
+            skipped: proposalHandoffs.length > 0 ? 0 : 1,
+            raw_context_source: updatedSource ?? undefined,
             low_confidence_skipped: skipped,
-            message: 'No customer records could be confidently identified in the document. Try adding contacts/accounts with matching names or aliases, or lower confidence_threshold.',
+            proposed_records: proposedRecords,
+            handoff_requests: proposalHandoffs,
+            account_scope: accountScope,
+            records_examined: recordsExamined,
+            resolution_summary: resolutionSummary,
+            message: proposalHandoffs.length > 0
+              ? `${proposalHandoffs.length} possible new ${proposalHandoffs.length === 1 ? 'record was' : 'records were'} sent to Handoffs for review.`
+              : 'No customer records could be confidently identified in the document. Try adding contacts/accounts with matching names or aliases, or lower confidence_threshold.',
           };
         }
 
-        // Step 3: ingest for each resolved subject
+        // Step 3: run one extraction pass for the whole source. The model may
+        // assign each Signal to one of the matched subjects, but CRMy only
+        // accepts IDs from the resolved subject list.
         let totalCreated = 0;
         let memoryCreated = 0;
         let signalsCreated = 0;
@@ -1064,6 +1296,10 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           id: string;
           name: string;
           confidence: string;
+          account_id?: string;
+          account_name?: string;
+          scope_reason?: string;
+          parent_subject?: { type: string; id: string; name: string };
           entries_created: number;
           memory_created: number;
           signals_created: number;
@@ -1075,41 +1311,70 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           skipped_reasons?: string[];
         }[] = [];
 
-        for (const subject of resolvedSubjects) {
-          try {
-            const activity = await activityRepo.createActivity(db, actor.tenant_id, {
-              type: 'note',
-              subject: input.source_label ?? 'Auto-ingested document',
-              body: input.document,
-              subject_type: subject.entity_type as 'contact' | 'account',
-              subject_id: subject.id,
-              performed_by: actorRecordId,
-              source_agent: 'context_ingest_auto',
-              occurred_at: new Date().toISOString(),
-            });
-            const extracted = await extractContextFromActivity(db, actor.tenant_id, activity.id);
-            const rawSource = await rawContextRepo.getRawContextSourceByRef(
-              db,
-              actor.tenant_id,
-              'add_context',
-              activity.id,
-            ) ?? await rawContextRepo.getRawContextSourceByRef(
-              db,
-              actor.tenant_id,
-              'activity',
-              activity.id,
-            );
-            const receipt = processingReceipt(rawSource, extracted);
-            totalCreated += extracted.extracted_count;
-            memoryCreated += extracted.memory_created;
-            signalsCreated += extracted.signals_created;
-            skippedCount += extracted.skipped;
+        const primarySubject = resolvedSubjects.find(subject => subject.entity_type === 'account') ?? resolvedSubjects[0];
+        let activityId = '';
+        let rawSource = null as rawContextRepo.RawContextSource | null;
+        let extractionFailure: string | undefined;
+        try {
+          const activity = await activityRepo.createActivity(db, actor.tenant_id, {
+            type: 'note',
+            subject: input.source_label ?? 'Auto-ingested document',
+            body: input.document,
+            subject_type: primarySubject.entity_type as SubjectType,
+            subject_id: primarySubject.id,
+            performed_by: actorRecordId,
+            source_agent: 'context_ingest_auto',
+            occurred_at: new Date().toISOString(),
+          });
+          activityId = activity.id;
+          const extracted = await extractContextFromActivity(db, actor.tenant_id, activity.id, {
+            targetSubjects: resolvedSubjects.map(subject => ({
+              type: subject.entity_type,
+              id: subject.id,
+              name: subject.name,
+            })),
+            ownerIds: scopedOwnerIds,
+          });
+          proposedRecords = mergeRecordProposals(proposedRecords, extracted.proposed_records);
+          rawSource = await rawContextRepo.getRawContextSourceByRef(
+            db,
+            actor.tenant_id,
+            'add_context',
+            activity.id,
+          ) ?? await rawContextRepo.getRawContextSourceByRef(
+            db,
+            actor.tenant_id,
+            'activity',
+            activity.id,
+          );
+          const allProducedEntries = await db.query(
+            `SELECT subject_type, subject_id, memory_status, count(*)::int AS count
+             FROM context_entries
+             WHERE tenant_id = $1 AND source_activity_id = $2
+             GROUP BY subject_type, subject_id, memory_status`,
+            [actor.tenant_id, activity.id],
+          );
+          totalCreated += extracted.extracted_count;
+          memoryCreated += extracted.memory_created;
+          signalsCreated += extracted.signals_created;
+          skippedCount += extracted.skipped;
+          const counts = new Map<string, { active: number; signal: number }>();
+          for (const row of allProducedEntries.rows as { subject_type: string; subject_id: string; memory_status: string; count: number }[]) {
+            const key = `${row.subject_type}:${row.subject_id}`;
+            const current = counts.get(key) ?? { active: 0, signal: 0 };
+            if (row.memory_status === 'active') current.active += Number(row.count ?? 0);
+            if (row.memory_status === 'signal') current.signal += Number(row.count ?? 0);
+            counts.set(key, current);
+          }
+          const receipt = processingReceipt(rawSource, extracted);
+          for (const subject of resolvedSubjects) {
+            const count = counts.get(`${subject.entity_type}:${subject.id}`) ?? { active: 0, signal: 0 };
             subjectResults.push({
               ...subject,
-              entries_created: extracted.extracted_count,
-              memory_created: extracted.memory_created,
-              signals_created: extracted.signals_created,
-              skipped: extracted.skipped,
+              entries_created: count.active + count.signal,
+              memory_created: count.active,
+              signals_created: count.signal,
+              skipped: count.active + count.signal > 0 ? 0 : 1,
               activity_id: activity.id,
               raw_context_source_id: rawSource?.id,
               processing_receipt: receipt,
@@ -1118,37 +1383,51 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
                 ? rawSource.metadata.skipped_reasons.map(String)
                 : undefined,
             });
-          } catch (err) {
-            console.error(`[context_ingest_auto] Failed for subject ${subject.id}:`, err);
-            skippedCount++;
+          }
+        } catch (err) {
+          extractionFailure = err instanceof Error ? err.message : 'Extraction failed for this source.';
+          console.error('[context_ingest_auto] Failed multi-subject extraction:', err);
+          skippedCount += resolvedSubjects.length;
+          for (const subject of resolvedSubjects) {
             subjectResults.push({
               ...subject,
               entries_created: 0,
               memory_created: 0,
               signals_created: 0,
               skipped: 1,
-              activity_id: '',
-              failure_reason: err instanceof Error ? err.message : 'Extraction failed for this subject.',
+              activity_id: activityId,
+              failure_reason: extractionFailure,
             });
           }
         }
 
-        const parentStatus = signalsCreated > 0
-          ? 'needs_review'
-          : totalCreated > 0
-            ? 'processed'
-            : skippedCount > 0
-              ? 'skipped'
-              : 'processed';
         const noExtractionReasons = subjectResults
           .flatMap(subject => [
             subject.failure_reason,
             ...(subject.skipped_reasons ?? []),
           ])
           .filter((reason): reason is string => Boolean(reason?.trim()));
+        const proposalHandoffs = proposedRecords.length > 0
+          ? await createRecordProposalHandoffs(db, actor, {
+            actorRecordId,
+            sourceRef,
+            rawContextSourceId: rawSource?.id,
+            rawExcerpt: input.document,
+            proposals: proposedRecords,
+          })
+          : [];
+        const parentStatus = signalsCreated > 0 || proposalHandoffs.length > 0
+          ? 'needs_review'
+          : totalCreated > 0
+            ? 'processed'
+            : skippedCount > 0
+              ? 'skipped'
+              : 'processed';
         const noExtractionReason = noExtractionReasons.length > 0
           ? Array.from(new Set(noExtractionReasons)).slice(0, 3).join('; ')
-          : 'Subjects were matched, but the Workspace Agent did not find customer-specific Signals to save.';
+          : extractionFailure ?? (accountScope.length > 0
+            ? 'Matched the account scope, but no existing child record produced an extractable Signal. Review any proposed records or add more specific customer context.'
+            : 'Subjects were matched, but the Workspace Agent did not find customer-specific Signals to save.');
 
         await rawContextRepo.updateRawContextSource(
           db,
@@ -1164,18 +1443,34 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
                 subject_id: subject.id,
                 name: subject.name,
                 confidence: subject.confidence,
+                account_id: subject.account_id,
+                account_name: subject.account_name,
+                scope_reason: subject.scope_reason,
+                parent_subject: subject.parent_subject,
                 entries_created: subject.entries_created,
                 memory_created: subject.memory_created,
                 signals_created: subject.signals_created,
               })),
               ...skipped.map(name => ({ name, status: 'unresolved' })),
+              ...proposedRecords.map(proposal => ({
+                name: proposal.name,
+                status: proposalHandoffs.some(handoff => handoff.proposal.name === proposal.name) ? 'proposed_record_review' : 'proposed_record',
+                record_type: proposal.record_type,
+                confidence: proposal.confidence,
+                reason: proposal.reason,
+              })),
             ],
             signals_created: signalsCreated,
             memory_created: memoryCreated,
             skipped: skippedCount,
-            failure_reason: totalCreated === 0 ? noExtractionReason : null,
+            failure_reason: totalCreated === 0 && proposalHandoffs.length === 0 ? noExtractionReason : null,
             metadata: {
               no_extraction_reasons: noExtractionReasons.slice(0, 10),
+              account_scope: accountScope,
+              records_examined: recordsExamined,
+              resolution_summary: resolutionSummary,
+              ...(proposedRecords.length > 0 ? { proposed_records: proposedRecords } : {}),
+              ...(proposalHandoffs.length > 0 ? { handoff_request_ids: proposalHandoffs.map(item => item.request_id) } : {}),
             },
           },
         );
@@ -1199,6 +1494,11 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             actor.actor_type === 'agent' ? 'mcp' : 'add_context',
             sourceRef,
           ) ?? undefined,
+          proposed_records: proposedRecords.length > 0 ? proposedRecords : undefined,
+          handoff_requests: proposalHandoffs.length > 0 ? proposalHandoffs : undefined,
+          account_scope: accountScope,
+          records_examined: recordsExamined,
+          resolution_summary: resolutionSummary,
           low_confidence_skipped: skipped.length > 0 ? skipped : undefined,
           mutation: mutationReceipt(actor, {
             objectType: 'context_entry',
@@ -1246,6 +1546,9 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'Semantic (vector) search over context entries using embedding similarity — finds entries that are conceptually related to your query even when no keywords match. Use this when context_search returns poor results for natural language queries like "budget concerns", "team friction", or "implementation challenges". Requires ENABLE_PGVECTOR=true and EMBEDDING_PROVIDER to be configured on the server. Returns entries ranked by similarity score (0.0–1.0). If embeddings are not configured, returns a structured error with fallback_available: true — retry with context_search in that case.',
       inputSchema: contextSemanticSearch,
       handler: async (input: z.infer<typeof contextSemanticSearch>, actor: ActorContext) => {
+        if (input.subject_type && input.subject_id) {
+          await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
+        }
         const embConfig = loadEmbeddingConfig();
         if (!embConfig) {
           return {
@@ -1266,6 +1569,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           };
         }
 
+        const ownerIds = await visibleOwnerIds(db, actor);
         const entries = await contextRepo.semanticSearch(db, actor.tenant_id, queryEmbedding, {
           subject_type: input.subject_type,
           subject_id: input.subject_id,
@@ -1275,6 +1579,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           memory_status: input.memory_status,
           limit: input.limit,
           structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
+          owner_ids: ownerIds,
         });
 
         return { context_entries: entries, total: entries.length, semantic_search: true };
@@ -1296,6 +1601,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         input: { subject_type: SubjectType; subject_id: string; context_type?: string },
         actor: ActorContext,
       ) => {
+        await assertSubjectAccess(db, actor, input.subject_type, input.subject_id);
         const warnings = await detectContradictions(
           db, actor.tenant_id, input.subject_type, input.subject_id, input.context_type,
         );
@@ -1332,6 +1638,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+          await assertSubjectAccess(db, actor, input.subject_type, input.subject_id);
           const actorRecordId = await ensureActorRecordForContext(db, actor);
           const result = await createContradictionReviewAssignments(
             db,
@@ -1386,6 +1693,10 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         // Fetch the entry to keep so we can supersede with its content
         const keepEntry = await contextRepo.getContextEntry(db, actor.tenant_id, input.keep_entry_id);
         if (!keepEntry) return notFound('context_entry', input.keep_entry_id);
+        await assertSubjectAccess(db, actor, keepEntry.subject_type as SubjectType, keepEntry.subject_id);
+        const supersededEntry = await contextRepo.getContextEntry(db, actor.tenant_id, input.supersede_entry_id);
+        if (!supersededEntry) return notFound('context_entry', input.supersede_entry_id);
+        await assertSubjectAccess(db, actor, supersededEntry.subject_type as SubjectType, supersededEntry.subject_id);
 
         // Supersede the incorrect entry with the kept entry's content + resolution note
         const actorRecordId = await ensureActorRecordForContext(db, actor);
@@ -1451,6 +1762,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+        await assertSubjectAccess(db, actor, input.subject_type, input.subject_id);
         const actorRecordId = await ensureActorRecordForContext(db, actor);
         const result = await consolidateContextEntries(
           db,

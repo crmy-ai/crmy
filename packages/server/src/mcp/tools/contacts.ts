@@ -19,6 +19,7 @@ import { runIdempotent } from '../../db/repos/idempotency.js';
 import { withTransaction } from '../../db/transaction.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+import { assertOwnedObjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
 
 function runContactOperation<T>(
   db: DbPool,
@@ -85,7 +86,8 @@ export function contactTools(db: DbPool): ToolDef[] {
           if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
             input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'contact', input.custom_fields, { isCreate: true });
           }
-          const contact = await contactRepo.createContact(db, actor.tenant_id, { ...input, created_by: actor.actor_id });
+          const owner_id = await defaultOwnerForCreate(db, actor, input.owner_id);
+          const contact = await contactRepo.createContact(db, actor.tenant_id, { ...input, owner_id: owner_id ?? undefined, created_by: actor.actor_id });
           const event_id = await emitEvent(db, {
             tenantId: actor.tenant_id, eventType: 'contact.created',
             actorId: actor.actor_id, actorType: actor.actor_type,
@@ -111,7 +113,8 @@ export function contactTools(db: DbPool): ToolDef[] {
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
           input.custom_fields = await validateCustomFields(db, actor.tenant_id, 'contact', input.custom_fields, { isCreate: true });
         }
-        const contact = await contactRepo.createContact(db, actor.tenant_id, { ...input, created_by: actor.actor_id });
+        const owner_id = await defaultOwnerForCreate(db, actor, input.owner_id);
+        const contact = await contactRepo.createContact(db, actor.tenant_id, { ...input, owner_id: owner_id ?? undefined, created_by: actor.actor_id });
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id, eventType: 'contact.created',
           actorId: actor.actor_id, actorType: actor.actor_type,
@@ -144,6 +147,7 @@ export function contactTools(db: DbPool): ToolDef[] {
       handler: async (input: { id: string; include_context_entries?: boolean }, actor: ActorContext) => {
         const contact = await contactRepo.getContact(db, actor.tenant_id, input.id);
         if (!contact) throw notFound('Contact', input.id);
+        await assertOwnedObjectAccess(db, actor, 'contact', input.id);
         if (input.include_context_entries) {
           const context_entries = await contextRepo.getContextForSubject(db, actor.tenant_id, 'contact', input.id);
           return { contact, context_entries };
@@ -163,6 +167,7 @@ export function contactTools(db: DbPool): ToolDef[] {
       handler: async (input: { contact_id: string; stage?: string; limit?: number }, actor: ActorContext) => {
         const contact = await contactRepo.getContact(db, actor.tenant_id, input.contact_id);
         if (!contact) throw notFound('Contact', input.contact_id);
+        await assertOwnedObjectAccess(db, actor, 'contact', input.contact_id);
         const result = await oppRepo.searchOpportunities(db, actor.tenant_id, {
           contact_id: input.contact_id as never,
           stage: input.stage,
@@ -177,8 +182,10 @@ export function contactTools(db: DbPool): ToolDef[] {
       description: 'Search contacts with flexible filters. The query parameter searches across name, email, and company fields simultaneously. Filter by lifecycle_stage to find prospects or champions, account_id to see contacts at a specific company, owner_id for contacts owned by a specific rep, and tags for custom categorization. Returns paginated results.',
       inputSchema: contactSearch,
       handler: async (input: z.infer<typeof contactSearch>, actor: ActorContext) => {
+        const ownerFilter = await resolveOwnerFilter(db, actor, input.owner_id);
         const result = await contactRepo.searchContacts(db, actor.tenant_id, {
           ...input,
+          ...ownerFilter,
           limit: input.limit ?? 20,
         });
         return { contacts: result.data, next_cursor: result.next_cursor, total: result.total };
@@ -193,6 +200,7 @@ export function contactTools(db: DbPool): ToolDef[] {
         return runContactOperation(db, actor, 'contact_update', input, async () => {
         const before = await contactRepo.getContact(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Contact', input.id);
+        await assertOwnedObjectAccess(db, actor, 'contact', input.id);
 
         if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
           input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'contact', input.patch.custom_fields);
@@ -237,6 +245,7 @@ export function contactTools(db: DbPool): ToolDef[] {
         return runContactOperation(db, actor, 'contact_set_lifecycle', input, async () => {
         const before = await contactRepo.getContact(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Contact', input.id);
+        await assertOwnedObjectAccess(db, actor, 'contact', input.id);
 
         const contact = await contactRepo.updateContact(db, actor.tenant_id, input.id, {
           lifecycle_stage: input.lifecycle_stage,
@@ -404,6 +413,8 @@ export function contactTools(db: DbPool): ToolDef[] {
         ]);
         if (!primary) throw notFound('Contact', input.primary_id);
         if (!secondary) throw notFound('Contact', input.secondary_id);
+        await assertOwnedObjectAccess(db, actor, 'contact', input.primary_id);
+        await assertOwnedObjectAccess(db, actor, 'contact', input.secondary_id);
         const sec = secondary as unknown as ContactRow;
         const pri = primary as unknown as ContactRow;
         if (sec.merged_into) {

@@ -21,7 +21,7 @@ const HELP_TEXT = `
 
   Customer State
     contacts            Manage contacts (list, get, create, update, delete)
-    accounts            Manage companies/accounts (list, get, create, update, delete)
+    accounts            Manage accounts (list, get, create, update, delete)
     opps                Manage opportunities (list, get, create, update, delete)
     pipeline            View and manage the sales pipeline
     context             Manage Signals and Memory attached to customer records

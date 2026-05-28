@@ -9,7 +9,7 @@ import {
   Users, Briefcase, LayoutDashboard, FolderKanban, Activity, Settings, Search,
   Building2, ClipboardList, Zap, ListOrdered, Plus, Database, Bot, Mail,
   ScrollText, ShieldCheck, Network, KeyRound, Tags, MessageSquare, Palette,
-  Webhook, SlidersHorizontal, Sparkles, Loader2, FileText, Server, type LucideIcon,
+  Webhook, Sparkles, Loader2, FileText, Server, type LucideIcon,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { cn } from '@/lib/utils';
@@ -72,7 +72,6 @@ const DESTINATIONS: DestinationCommand[] = [
   { label: 'Registries',      icon: Tags,            path: '/settings/registries',      color: null, keywords: 'registries activity types context types taxonomy' },
   { label: 'Messaging',       icon: MessageSquare,   path: '/settings/messaging',       color: null, keywords: 'messaging email provider smtp resend sendgrid' },
   { label: 'Action Policies', icon: ShieldCheck,     path: '/settings/hitl-rules',      color: ENTITY_COLORS.assignments, keywords: 'hitl rules approval handoff policy action policies' },
-  { label: 'Automation Settings', icon: SlidersHorizontal, path: '/settings/automations', color: ENTITY_COLORS.workflows, keywords: 'automation settings limits sequences workflows' },
 ];
 
 function useDebouncedValue(value: string, delayMs: number) {

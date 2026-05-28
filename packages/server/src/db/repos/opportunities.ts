@@ -72,6 +72,7 @@ export async function searchOpportunities(
     query?: string;
     stage?: string;
     owner_id?: UUID;
+    owner_ids?: UUID[];
     account_id?: UUID;
     contact_id?: UUID;
     forecast_cat?: string;
@@ -99,6 +100,14 @@ export async function searchOpportunities(
     conditions.push(`o.owner_id = $${idx}`);
     params.push(filters.owner_id);
     idx++;
+  } else if (filters.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`o.owner_id = ANY($${idx}::uuid[])`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
   }
   if (filters.account_id) {
     conditions.push(`o.account_id = $${idx}`);
@@ -214,7 +223,7 @@ export async function updateOpportunity(
 export async function getPipelineSummary(
   db: DbPool,
   tenantId: UUID,
-  filters: { owner_id?: UUID; group_by: string },
+  filters: { owner_id?: UUID; owner_ids?: UUID[]; group_by: string },
 ): Promise<{ total_value: number; count: number; by_stage: { stage: string; value: number; count: number }[] }> {
   const conditions: string[] = [
     'tenant_id = $1',
@@ -227,6 +236,14 @@ export async function getPipelineSummary(
     conditions.push(`owner_id = $${idx}`);
     params.push(filters.owner_id);
     idx++;
+  } else if (filters.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`owner_id = ANY($${idx}::uuid[])`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
   }
 
   const where = conditions.join(' AND ');
@@ -260,7 +277,7 @@ export async function getPipelineSummary(
 export async function getPipelineForecast(
   db: DbPool,
   tenantId: UUID,
-  filters: { period: string; owner_id?: UUID },
+  filters: { period: string; owner_id?: UUID; owner_ids?: UUID[] },
 ): Promise<{
   committed: number;
   best_case: number;
@@ -277,6 +294,14 @@ export async function getPipelineForecast(
     conditions.push(`owner_id = $${idx}`);
     params.push(filters.owner_id);
     idx++;
+  } else if (filters.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`owner_id = ANY($${idx}::uuid[])`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
   }
 
   // Date filter based on period

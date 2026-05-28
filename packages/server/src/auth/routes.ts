@@ -54,7 +54,11 @@ function clientIp(req: Request): string {
   );
 }
 
-export function authRouter(db: DbPool, jwtSecret: string): Router {
+export function authRouter(
+  db: DbPool,
+  jwtSecret: string,
+  options: { allowPublicRegistration?: boolean } = {},
+): Router {
   const router = Router();
   const secret = new TextEncoder().encode(jwtSecret);
 
@@ -73,6 +77,18 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
 
     const client = await db.connect();
     try {
+      const userCountResult = await client.query('SELECT COUNT(*)::int AS count FROM users');
+      const hasUsers = Number(userCountResult.rows[0]?.count ?? 0) > 0;
+      if (hasUsers && !options.allowPublicRegistration) {
+        res.status(403).json({
+          type: 'https://crmy.ai/errors/registration_closed',
+          title: 'Registration Closed',
+          status: 403,
+          detail: 'Registration is closed for this workspace. Ask an admin to invite or create your account.',
+        });
+        return;
+      }
+
       const data = authRegister.parse(req.body);
       const passwordHash = hashPassword(data.password);
 
@@ -123,7 +139,7 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
 
       res.status(201).json({
         token,
-        user: { id: user.id, email: user.email, name: user.name, role: user.role, tenant_id: tenant.id },
+        user: { id: user.id, email: user.email, name: user.name, role: user.role, manager_id: user.manager_id, tenant_id: tenant.id },
       });
     } catch (err: unknown) {
       await client.query('ROLLBACK').catch(() => {});
@@ -220,7 +236,7 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
 
       res.json({
         token,
-        user: { id: user.id, email: user.email, name: user.name, role: user.role, tenant_id: user.tenant_id },
+        user: { id: user.id, email: user.email, name: user.name, role: user.role, manager_id: user.manager_id, tenant_id: user.tenant_id },
       });
     } catch (err) {
       if (err && typeof err === 'object' && 'name' in err && err.name === 'ZodError') {

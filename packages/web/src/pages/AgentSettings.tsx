@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Sparkles, KeyRound, Users, TriangleAlert, Eye, EyeOff, X,
+  Sparkles, Bot, KeyRound, Users, TriangleAlert, Eye, EyeOff, X,
   ActivitySquare, ArrowRight, CheckCircle2, XCircle,
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
@@ -26,7 +26,6 @@ import {
   PROVIDERS,
   CUSTOM_MODEL_SENTINEL,
   getProvider,
-  getModelPricing,
   type ProviderId,
 } from '@/lib/agentProviders';
 
@@ -101,7 +100,7 @@ export default function AgentSettings() {
   const [priceSource, setPriceSource] = useState<'default' | 'openrouter' | 'user' | 'free' | 'unknown'>('unknown');
 
   // ── Test status ──────────────────────────────────────────────────────────
-  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'fail'>('idle');
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'ok' | 'warn' | 'fail'>('idle');
   const [testError,  setTestError]  = useState('');
 
   // ── Section 3 — Per-User Behaviour ──────────────────────────────────────
@@ -131,16 +130,8 @@ export default function AgentSettings() {
     setKeyConfigured(config.api_key_configured ?? false);
     setKeyHint(config.api_key_hint ?? null);
 
-    // Resolve model: check if it's in the known list for this provider
-    const providerDef = getProvider(config.provider);
-    const known = providerDef.models.find(m => m.id === config.model);
-    if (known) {
-      setModelId(config.model);
-      setCustomModel('');
-    } else {
-      setModelId(CUSTOM_MODEL_SENTINEL);
-      setCustomModel(config.model ?? '');
-    }
+    setModelId(CUSTOM_MODEL_SENTINEL);
+    setCustomModel(config.model ?? '');
 
     setHistoryRetention(config.history_retention_days);
     setSystemPrompt(config.system_prompt ?? defaultSystemPrompt);
@@ -159,12 +150,10 @@ export default function AgentSettings() {
     if (editingPrompt && textareaRef.current) textareaRef.current.focus();
   }, [editingPrompt]);
 
-  // Auto-populate token prices when the selected model changes.
-  // For OpenRouter: attempts a live fetch from their public models API.
-  // For all others: uses static pricing from agentProviders.ts.
+  // Auto-populate token prices only when a reliable source is available.
+  // Static model catalogs go stale quickly, so admins enter model IDs directly.
   useEffect(() => {
-    const _isCustomModel = modelId === CUSTOM_MODEL_SENTINEL || provider === 'custom';
-    const modelKey = _isCustomModel ? customModel : modelId;
+    const modelKey = customModel;
     if (!modelKey) { setPriceSource('unknown'); return; }
 
     // Ollama / free models
@@ -175,18 +164,9 @@ export default function AgentSettings() {
       return;
     }
 
-    // Try static defaults first (instant, no network)
-    const staticPricing = getModelPricing(provider, modelKey);
-    if (staticPricing) {
-      setInputPricePerM(String(staticPricing.inputPricePerM));
-      setOutputPricePerM(String(staticPricing.outputPricePerM));
-      setPriceSource(provider === 'openrouter' ? 'openrouter' : 'default');
-    } else {
-      setPriceSource('unknown');
-    }
+    setPriceSource('unknown');
 
-    // For OpenRouter: supplement with live pricing regardless of static match
-    if (provider === 'openrouter' && modelKey !== 'openrouter/auto') {
+    if (provider === 'openrouter') {
       let cancelled = false;
       fetch('https://openrouter.ai/api/v1/models')
         .then(r => r.ok ? r.json() : null)
@@ -210,9 +190,8 @@ export default function AgentSettings() {
 
   // ── Derived values ────────────────────────────────────────────────────────
   const providerDef = getProvider(provider);
-  const isCustomModel = modelId === CUSTOM_MODEL_SENTINEL || provider === 'custom';
   /** The actual model string to send to the API. */
-  const resolvedModel = isCustomModel ? customModel : modelId;
+  const resolvedModel = customModel.trim();
 
   /**
    * Whether the enable toggle is interactive.
@@ -220,7 +199,29 @@ export default function AgentSettings() {
    */
   const canEnable = !providerDef.requiresKey
     ? Boolean(resolvedModel && baseUrl)
-    : Boolean(keyConfigured && resolvedModel && baseUrl);
+    : Boolean((keyConfigured || newApiKey.trim()) && resolvedModel && baseUrl);
+
+  const buildConfigPayload = (overrides: Record<string, unknown> = {}) => {
+    const payload: Record<string, unknown> = {
+      provider,
+      base_url:               baseUrl,
+      model:                  resolvedModel,
+      system_prompt:          systemPrompt,
+      max_tokens_per_turn:    maxTokens,
+      history_retention_days: historyRetention,
+      can_write_objects:      canWriteObjects,
+      can_log_activities:     canLogActivities,
+      can_create_assignments: canCreateAssignments,
+      auto_extract_context:   autoExtractContext,
+      auto_promote_signals:   autoPromoteSignals,
+      signal_auto_promote_threshold: signalPromotionThreshold,
+      ...overrides,
+    };
+    if (newApiKey.trim()) {
+      payload.api_key = newApiKey.trim();
+    }
+    return payload;
+  };
 
   /** Reset test status whenever any config-sensitive field changes. */
   const resetTest = () => { setTestStatus('idle'); setTestError(''); };
@@ -231,8 +232,7 @@ export default function AgentSettings() {
     setProvider(p);
     const def = getProvider(p);
     setBaseUrl(def.baseUrl);
-    const firstModel = def.models[0]?.id ?? '';
-    setModelId(firstModel || CUSTOM_MODEL_SENTINEL);
+    setModelId(CUSTOM_MODEL_SENTINEL);
     setCustomModel('');
     setNewApiKey('');
     resetTest();
@@ -242,7 +242,12 @@ export default function AgentSettings() {
     if (val && !canEnable) return; // guard
     setEnabled(val);
     try {
-      await saveConfig.mutateAsync({ enabled: val });
+      await saveConfig.mutateAsync(
+        val
+          ? buildConfigPayload({ enabled: true })
+          : { enabled: false },
+      );
+      if (val && newApiKey.trim()) setNewApiKey('');
       toast({ title: val ? 'Agent enabled' : 'Agent disabled' });
     } catch {
       setEnabled(!val);
@@ -264,7 +269,12 @@ export default function AgentSettings() {
 
       const result = await testConnection.mutateAsync(payload);
       if (result.ok) {
-        setTestStatus('ok');
+        if (result.status === 'tool_calling_unverified' || result.tool_calling_verified === false) {
+          setTestStatus('warn');
+          setTestError(result.warning ?? 'Connection works, but tool calling could not be verified from this provider response.');
+        } else {
+          setTestStatus('ok');
+        }
       } else {
         setTestStatus('fail');
         setTestError(result.error ?? 'Check your settings and try again.');
@@ -276,29 +286,17 @@ export default function AgentSettings() {
   };
 
   const handleSaveProvider = async () => {
-    const payload: Record<string, unknown> = {
-      provider,
-      base_url:               baseUrl,
-      model:                  resolvedModel,
-      system_prompt:          systemPrompt,
-      max_tokens_per_turn:    maxTokens,
-      history_retention_days: historyRetention,
-      can_write_objects:      canWriteObjects,
-      can_log_activities:     canLogActivities,
-      can_create_assignments: canCreateAssignments,
-      auto_extract_context:   autoExtractContext,
-      auto_promote_signals:   autoPromoteSignals,
-      signal_auto_promote_threshold: signalPromotionThreshold,
-    };
-    // Only send api_key if the user entered a new one
-    if (newApiKey.trim()) {
-      payload.api_key = newApiKey.trim();
-    }
     try {
-      await saveConfig.mutateAsync(payload);
+      await saveConfig.mutateAsync(buildConfigPayload({ enabled: true }));
+      setEnabled(true);
       // After save, the key is now stored — update hint state from response
       setNewApiKey('');  // clear the new-key input
-      toast({ title: 'Settings saved', description: 'Agent configuration updated.' });
+      toast({
+        title: 'Workspace Agent enabled',
+        description: testStatus === 'warn'
+          ? 'Connection passed. Tool calling could not be verified in the readiness test, so watch the first agent run closely.'
+          : 'The saved model passed connection and tool-call checks.',
+      });
     } catch {
       toast({ title: 'Save failed', variant: 'destructive' });
     }
@@ -381,8 +379,8 @@ export default function AgentSettings() {
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center">
-              <Sparkles className="w-4 h-4 text-amber-500" />
+            <div className="w-9 h-9 rounded-xl bg-violet-500/10 flex items-center justify-center">
+              <Bot className="w-4 h-4 text-violet-500" />
             </div>
             <div>
               <h3 className="text-sm font-semibold text-foreground">Enable Local Workspace Agent</h3>
@@ -457,27 +455,14 @@ export default function AgentSettings() {
           </div>
 
           {/* Provider capability notices */}
-          {!providerDef.isAnthropicFormat && (
-            <div className="py-3 space-y-1.5">
-              <div className="p-3 rounded-lg bg-blue-500/8 border border-blue-500/20 space-y-1.5">
-                {provider === 'ollama' ? (
-                  <>
-                    <p className="text-xs font-medium text-blue-700 dark:text-blue-400">Ollama — local model</p>
-                    <p className="text-xs text-blue-700/80 dark:text-blue-400/80">
-                      Tool calling works with models that support function calling (e.g. <code className="font-mono">llama3.2</code>, <code className="font-mono">mistral-nemo</code>). Models without tool support will still chat but cannot take CRMy actions. Extended reasoning is not available.
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-xs font-medium text-blue-700 dark:text-blue-400">OpenAI-compatible provider</p>
-                    <p className="text-xs text-blue-700/80 dark:text-blue-400/80">
-                      Tool calling works with models that support function calling. Extended reasoning / thinking blocks are only available with Anthropic models — the agent will not show reasoning steps for this provider.
-                    </p>
-                  </>
-                )}
-              </div>
+          <div className="py-3 space-y-1.5">
+            <div className="p-3 rounded-lg bg-violet-500/8 border border-violet-500/20 space-y-1.5">
+              <p className="text-xs font-medium text-violet-700 dark:text-violet-300">Model requirements</p>
+              <p className="text-xs text-violet-700/80 dark:text-violet-300/80">
+                Enter the exact model ID from your provider or local runtime. CRMy requires tool/function calling so the Workspace Agent can use scoped tools safely. Reasoning-capable models are recommended, but not required.
+              </p>
             </div>
-          )}
+          </div>
 
           {/* Base URL */}
           <div className="py-4 space-y-1.5">
@@ -533,44 +518,15 @@ export default function AgentSettings() {
           {/* Model */}
           <div className="py-4 space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Model</label>
-            {provider === 'custom' ? (
-              <input
-                value={customModel}
-                onChange={e => { setCustomModel(e.target.value); resetTest(); }}
-                placeholder="e.g. my-custom-model"
-                className={inputCls}
-              />
-            ) : (
-              <div className="space-y-2">
-                <Select
-                  value={modelId}
-                  onValueChange={v => { setModelId(v); if (v !== CUSTOM_MODEL_SENTINEL) setCustomModel(''); resetTest(); }}
-                >
-                  <SelectTrigger className="w-full h-9 text-sm">
-                    <SelectValue placeholder="Select model…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {providerDef.models.map(m => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.label}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value={CUSTOM_MODEL_SENTINEL}>
-                      <span className="text-muted-foreground italic">Custom model ID…</span>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                {isCustomModel && (
-                  <input
-                    value={customModel}
-                    onChange={e => { setCustomModel(e.target.value); resetTest(); }}
-                    placeholder="Enter model ID exactly as required by the API"
-                    className={inputCls}
-                    autoFocus
-                  />
-                )}
-              </div>
-            )}
+            <input
+              value={customModel}
+              onChange={e => { setModelId(CUSTOM_MODEL_SENTINEL); setCustomModel(e.target.value); resetTest(); }}
+              placeholder={provider === 'ollama' ? 'e.g. llama3.2 or your local model name' : 'Enter the provider model ID exactly'}
+              className={inputCls}
+            />
+            <p className="text-xs text-muted-foreground">
+              CRMy does not show a static model list because provider catalogs change frequently. Test verifies the model is reachable and can call tools before saving.
+            </p>
           </div>
 
           {/* Actions + inline test status */}
@@ -585,11 +541,11 @@ export default function AgentSettings() {
               </button>
               <button
                 onClick={handleSaveProvider}
-                disabled={testStatus !== 'ok' || saveConfig.isPending}
+                disabled={(testStatus !== 'ok' && testStatus !== 'warn') || saveConfig.isPending}
                 className={primaryBtn}
-                title={testStatus !== 'ok' ? 'Run a successful test first' : undefined}
+                title={(testStatus !== 'ok' && testStatus !== 'warn') ? 'Run a successful connection test first' : undefined}
               >
-                {saveConfig.isPending ? 'Saving…' : 'Save changes'}
+                {saveConfig.isPending ? 'Saving…' : 'Save and enable'}
               </button>
             </div>
 
@@ -597,7 +553,13 @@ export default function AgentSettings() {
             {testStatus === 'ok' && (
               <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Connected successfully — you can now save.</span>
+                <span>Connection and tool calling verified — you can save and enable.</span>
+              </div>
+            )}
+            {testStatus === 'warn' && (
+              <div className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-300">
+                <TriangleAlert className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                <span>{testError || 'Connection works. Tool calling could not be verified by this readiness response, but you can save if this model supports tools.'}</span>
               </div>
             )}
             {testStatus === 'fail' && (
@@ -691,9 +653,6 @@ export default function AgentSettings() {
                 {priceSource === 'openrouter' && (
                   <span className="text-xs text-violet-500 font-medium">Live from OpenRouter</span>
                 )}
-                {priceSource === 'default' && (
-                  <span className="text-xs text-muted-foreground">Default for model</span>
-                )}
                 {priceSource === 'user' && (
                   <span className="text-xs text-primary font-medium">Custom</span>
                 )}
@@ -742,7 +701,7 @@ export default function AgentSettings() {
               )}
               {priceSource === 'unknown' && inputPricePerM === '' && (
                 <p className="text-xs text-muted-foreground">
-                  Select a known model above to auto-fill prices, or enter them manually.
+                  Enter pricing manually if you want usage estimates for this model.
                 </p>
               )}
             </div>

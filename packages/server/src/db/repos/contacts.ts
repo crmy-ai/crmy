@@ -81,6 +81,7 @@ export async function searchContacts(
     lifecycle_stage?: string;
     account_id?: UUID;
     owner_id?: UUID;
+    owner_ids?: UUID[];
     tags?: string[];
     limit: number;
     cursor?: string;
@@ -112,6 +113,14 @@ export async function searchContacts(
     conditions.push(`c.owner_id = $${idx}`);
     params.push(filters.owner_id);
     idx++;
+  } else if (filters.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`c.owner_id = ANY($${idx}::uuid[])`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
   }
   if (filters.tags && filters.tags.length > 0) {
     conditions.push(`c.tags && $${idx}`);

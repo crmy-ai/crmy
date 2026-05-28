@@ -3,7 +3,7 @@
 
 import { Router, type Request, type Response } from 'express';
 import type { DbPool } from '../db/pool.js';
-import type { ActorContext } from '@crmy/shared';
+import type { ActorContext, UUID } from '@crmy/shared';
 import { CrmyError, permissionDenied } from '@crmy/shared';
 import * as agentRepo from '../db/repos/agent.js';
 import * as activityRepo from '../db/repos/agent-activity.js';
@@ -14,6 +14,7 @@ import { trimForPersistence, estimateHistoryChars } from './compaction.js';
 import type { AgentEvent, ConversationMessage } from './types.js';
 import { getToolsForActor } from '../mcp/server.js';
 import { getToolScopeRequirements } from '../auth/scopes.js';
+import { assertSubjectAccess } from '../services/access-control.js';
 
 function getActor(req: Request): ActorContext {
   return req.actor!;
@@ -28,6 +29,183 @@ function redactSensitive(value: string): string {
 function safeErrorMessage(err: unknown, fallback = 'Agent request failed'): string {
   if (process.env.NODE_ENV === 'production') return fallback;
   return redactSensitive(err instanceof Error ? err.message : fallback);
+}
+
+const AGENT_READINESS_TTL_MS = Number(process.env.AGENT_READINESS_TTL_MS ?? 60_000);
+const AGENT_READINESS_TIMEOUT_MS = Number(process.env.AGENT_READINESS_TIMEOUT_MS ?? 10_000);
+type ReadinessResult = {
+  ok: boolean;
+  status: string;
+  error?: string;
+  warning?: string;
+  tool_calling_verified?: boolean;
+};
+const readinessCache = new Map<string, { expiresAt: number; result: ReadinessResult }>();
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = AGENT_READINESS_TIMEOUT_MS): Promise<globalThis.Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function responseIncludesToolCall(value: unknown, toolName: string): boolean {
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some(item => responseIncludesToolCall(item, toolName));
+  const record = value as Record<string, unknown>;
+
+  if (record.type === 'tool_use' && record.name === toolName) return true;
+  if (record.type === 'function' && record.name === toolName) return true;
+  if (record.name === toolName && ('arguments' in record || 'input' in record)) return true;
+  if (record.function && typeof record.function === 'object') {
+    const fn = record.function as Record<string, unknown>;
+    if (fn.name === toolName) return true;
+  }
+  if (record.function_call && typeof record.function_call === 'object') {
+    const fn = record.function_call as Record<string, unknown>;
+    if (fn.name === toolName) return true;
+  }
+
+  return Object.values(record).some(child => responseIncludesToolCall(child, toolName));
+}
+
+function unverifiedToolCallResult(): ReadinessResult {
+  return {
+    ok: true,
+    status: 'tool_calling_unverified',
+    tool_calling_verified: false,
+    warning: 'CRMy reached the model, but could not verify tool/function calling from this provider response. You can save if you know this model or gateway supports tool calls; CRMy will still enforce scoped tool use at runtime.',
+  };
+}
+
+async function verifyPlainModelReachability(input: {
+  provider: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  headers?: Record<string, string>;
+}): Promise<ReadinessResult> {
+  if (input.provider === 'anthropic') {
+    const res = await fetchWithTimeout(`${input.baseUrl}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': input.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: input.model,
+        max_tokens: 16,
+        messages: [{ role: 'user', content: 'Reply with ok.' }],
+      }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      return { ok: false, status: 'offline', error: `${res.status}: ${err.slice(0, 200)}` };
+    }
+    return { ok: true, status: 'online' };
+  }
+
+  const res = await fetchWithTimeout(`${input.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: input.headers ?? { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: input.model,
+      max_tokens: 16,
+      messages: [{ role: 'user', content: 'Reply with ok.' }],
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    return { ok: false, status: 'offline', error: `${res.status}: ${err.slice(0, 200)}` };
+  }
+  return { ok: true, status: 'online' };
+}
+
+async function verifyAgentToolCalling(input: {
+  provider: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  headers?: Record<string, string>;
+}): Promise<ReadinessResult> {
+  const toolName = 'crmy_readiness_check';
+  const parameters = {
+    type: 'object',
+    properties: {
+      ok: { type: 'boolean', description: 'Always true for this readiness check.' },
+    },
+    required: ['ok'],
+    additionalProperties: false,
+  };
+
+  if (input.provider === 'anthropic') {
+    const testRes = await fetchWithTimeout(`${input.baseUrl}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': input.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: input.model,
+        max_tokens: 64,
+        messages: [{ role: 'user', content: 'Use the readiness tool now.' }],
+        tools: [{
+          name: toolName,
+          description: 'Confirms the selected model can call CRMy tools.',
+          input_schema: parameters,
+        }],
+        tool_choice: { type: 'tool', name: toolName },
+      }),
+    });
+    if (!testRes.ok) {
+      const reachable = await verifyPlainModelReachability(input);
+      return reachable.ok ? unverifiedToolCallResult() : reachable;
+    }
+    const json = await testRes.json().catch(() => null);
+    const called = responseIncludesToolCall(json, toolName);
+    return called
+      ? { ok: true, status: 'online', tool_calling_verified: true }
+      : unverifiedToolCallResult();
+  }
+
+  const testRes = await fetchWithTimeout(`${input.baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: input.headers ?? { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: input.model,
+      max_tokens: 64,
+      messages: [{ role: 'user', content: 'Use the readiness tool now.' }],
+      tools: [{
+        type: 'function',
+        function: {
+          name: toolName,
+          description: 'Confirms the selected model can call CRMy tools.',
+          parameters,
+        },
+      }],
+      tool_choice: { type: 'function', function: { name: toolName } },
+    }),
+  });
+  if (!testRes.ok) {
+    const reachable = await verifyPlainModelReachability(input);
+    return reachable.ok ? unverifiedToolCallResult() : reachable;
+  }
+  const json = await testRes.json().catch(() => null);
+  const called = responseIncludesToolCall(json, toolName);
+  return called
+    ? { ok: true, status: 'online', tool_calling_verified: true }
+    : unverifiedToolCallResult();
+}
+
+function readinessError(actor: ActorContext, error: string): string {
+  return isAdmin(actor)
+    ? redactSensitive(error)
+    : 'Workspace Agent is configured but unreachable. Ask an admin to check Model Settings.';
 }
 
 function handleError(res: Response, err: unknown): void {
@@ -46,6 +224,34 @@ function handleError(res: Response, err: unknown): void {
 function requireAdmin(actor: ActorContext): void {
   if (actor.role !== 'owner' && actor.role !== 'admin') {
     throw permissionDenied('Admin role required');
+  }
+}
+
+function isAdmin(actor: ActorContext): boolean {
+  return actor.role === 'owner' || actor.role === 'admin';
+}
+
+function normalizeAgentContextType(contextType?: string | null): 'account' | 'contact' | 'opportunity' | 'use_case' | null {
+  if (!contextType) return null;
+  if (contextType === 'account' || contextType === 'contact' || contextType === 'opportunity' || contextType === 'use_case') return contextType;
+  if (contextType === 'use-case' || contextType === 'useCase') return 'use_case';
+  return null;
+}
+
+async function canAccessAgentContext(
+  db: DbPool,
+  actor: ActorContext,
+  contextType?: string | null,
+  contextId?: string | null,
+): Promise<boolean> {
+  if (!contextType && !contextId) return true;
+  const subjectType = normalizeAgentContextType(contextType);
+  if (!subjectType || !contextId) return false;
+  try {
+    await assertSubjectAccess(db, actor, subjectType, contextId as UUID);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -298,7 +504,10 @@ export function agentRouter(db: DbPool): Router {
       }
       // Never return the ciphertext — send only a hint (last 4 chars)
       const { api_key_enc: _enc, ...rest } = config;
-      res.json({ data: { ...rest, ...buildKeyMeta(_enc) } });
+      const keyMeta = isAdmin(actor)
+        ? buildKeyMeta(_enc)
+        : { api_key_configured: Boolean(_enc), api_key_hint: null };
+      res.json({ data: { ...rest, ...keyMeta } });
     } catch (err) { handleError(res, err); }
   });
 
@@ -344,57 +553,75 @@ export function agentRouter(db: DbPool): Router {
   /** POST /agent/config/test — test LLM connection.
    *
    * Accepts optional body overrides so the UI can test *current form values*
-   * before the user has saved. Falls back to the stored config for any field
-   * not supplied. Works regardless of whether the agent is enabled.
+   * before the user has saved. Non-admin users can only probe the saved
+   * workspace config, which lets them use the shared agent without seeing or
+   * overriding provider secrets.
    */
   router.post('/config/test', async (req: Request, res: Response) => {
+    const actor = getActor(req);
     try {
-      const actor = getActor(req);
-      requireAdmin(actor);
-
       const config = await agentRepo.getConfig(db, actor.tenant_id);
 
       // Merge form values (not-yet-saved) over stored config
       const body = req.body as { provider?: string; base_url?: string; api_key?: string; model?: string };
+      const bodyKeys = Object.keys(body ?? {});
+      const testingOverrides = bodyKeys.some(key => ['provider', 'base_url', 'api_key', 'model'].includes(key));
+      if (!isAdmin(actor) && testingOverrides) {
+        res.status(403).json({
+          ok: false,
+          status: 'forbidden',
+          error: 'Only admins can test unsaved model settings. You can still use the saved Workspace Agent configuration.',
+        });
+        return;
+      }
 
-      const provider = body.provider ?? config?.provider;
-      const rawUrl   = body.base_url  ?? config?.base_url ?? '';
-      const model    = body.model     ?? config?.model    ?? '';
+      const provider = isAdmin(actor) ? body.provider ?? config?.provider : config?.provider;
+      const rawUrl   = isAdmin(actor) ? body.base_url  ?? config?.base_url ?? '' : config?.base_url ?? '';
+      const model    = isAdmin(actor) ? body.model     ?? config?.model    ?? '' : config?.model ?? '';
       const baseUrl  = rawUrl.replace(/\/+$/, '');
 
       // If caller sent an api_key, use it directly (trimmed). Otherwise decrypt the stored one.
       let apiKey = '';
-      if (typeof body.api_key === 'string' && body.api_key.trim()) {
+      if (isAdmin(actor) && typeof body.api_key === 'string' && body.api_key.trim()) {
         apiKey = body.api_key.trim();
       } else if (config?.api_key_enc) {
         apiKey = decrypt(config.api_key_enc).trim();
       }
 
+      if (!config && !isAdmin(actor)) {
+        res.json({ ok: false, status: 'not_configured', error: 'Workspace Agent is not configured. Ask an admin to enable it in Model Settings.' });
+        return;
+      }
+      if (config && !config.enabled && !isAdmin(actor)) {
+        res.json({ ok: false, status: 'not_configured', error: 'Workspace Agent is disabled. Ask an admin to enable it in Model Settings.' });
+        return;
+      }
       if (!provider || !baseUrl || !model) {
-        res.json({ ok: false, error: 'Provider, base URL, and model are required' });
+        res.json({ ok: false, status: 'not_configured', error: 'Provider, base URL, and model are required' });
         return;
       }
 
-      // Attempt a minimal LLM call
-      if (provider === 'anthropic') {
-        const testRes = await fetch(`${baseUrl}/messages`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey,
-            'anthropic-version': '2023-06-01',
-          },
-          body: JSON.stringify({
-            model,
-            max_tokens: 10,
-            messages: [{ role: 'user', content: 'Hi' }],
-          }),
-        });
-        if (!testRes.ok) {
-          const err = await testRes.text();
-          res.json({ ok: false, error: `${testRes.status}: ${err.slice(0, 200)}` });
+      const cacheKey = `${actor.tenant_id}:${provider}:${baseUrl}:${model}`;
+      if (!testingOverrides) {
+        const cached = readinessCache.get(cacheKey);
+        if (cached && cached.expiresAt > Date.now()) {
+          res.json(cached.result);
           return;
         }
+      }
+
+      const finish = (result: ReadinessResult) => {
+        if (!testingOverrides) readinessCache.set(cacheKey, { expiresAt: Date.now() + AGENT_READINESS_TTL_MS, result });
+        res.json(result);
+      };
+
+      // Verify connectivity first, then try to verify tool calls. Some gateways
+      // support runtime tool calls but do not return the exact forced test shape,
+      // so tool-call verification is a warning rather than a hard connectivity
+      // failure.
+      let readinessResult: ReadinessResult;
+      if (provider === 'anthropic') {
+        readinessResult = await verifyAgentToolCalling({ provider, baseUrl, model, apiKey });
       } else {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
@@ -403,26 +630,18 @@ export function agentRouter(db: DbPool): Router {
           headers['X-Title'] = 'CRMy';
         }
 
-        const testRes = await fetch(`${baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            model,
-            max_tokens: 10,
-            messages: [{ role: 'user', content: 'Hi' }],
-          }),
-        });
-        if (!testRes.ok) {
-          const err = await testRes.text();
-          res.json({ ok: false, error: `${testRes.status}: ${err.slice(0, 200)}` });
-          return;
-        }
+        readinessResult = await verifyAgentToolCalling({ provider, baseUrl, model, apiKey, headers });
       }
 
-      res.json({ ok: true });
+      if (!readinessResult.ok) {
+        finish({ ...readinessResult, error: readinessError(actor, readinessResult.error ?? 'The selected model could not be reached.') });
+        return;
+      }
+
+      finish(readinessResult);
     } catch (err) {
-      const message = safeErrorMessage(err, 'Connection failed. Check the model provider URL, model name, and API key.');
-      res.json({ ok: false, error: message });
+      const message = readinessError(actor, safeErrorMessage(err, 'Connection failed. Check the model provider URL, model name, and API key.'));
+      res.json({ ok: false, status: 'offline', error: message });
     }
   });
 
@@ -504,7 +723,13 @@ export function agentRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       const sessions = await agentRepo.listSessions(db, actor.tenant_id, actor.actor_id);
-      res.json({ data: sessions });
+      const visible = [];
+      for (const session of sessions) {
+        if (await canAccessAgentContext(db, actor, session.context_type, session.context_id)) {
+          visible.push(session);
+        }
+      }
+      res.json({ data: visible });
     } catch (err) { handleError(res, err); }
   });
 
@@ -513,6 +738,10 @@ export function agentRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       const body = req.body as { context_type?: string; context_id?: string; context_name?: string; reuse_context?: boolean };
+      if (!(await canAccessAgentContext(db, actor, body.context_type, body.context_id))) {
+        res.status(404).json({ error: 'Record not found' });
+        return;
+      }
       if (body.reuse_context && body.context_type && body.context_id) {
         const existing = await agentRepo.getLatestSessionForContext(
           db,
@@ -522,6 +751,10 @@ export function agentRouter(db: DbPool): Router {
           body.context_id,
         );
         if (existing) {
+          if (!(await canAccessAgentContext(db, actor, existing.context_type, existing.context_id))) {
+            res.status(404).json({ error: 'Session not found' });
+            return;
+          }
           res.json({ data: existing });
           return;
         }
@@ -540,6 +773,10 @@ export function agentRouter(db: DbPool): Router {
         res.status(404).json({ error: 'Session not found' });
         return;
       }
+      if (!(await canAccessAgentContext(db, actor, session.context_type, session.context_id))) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
       res.json({ data: session });
     } catch (err) { handleError(res, err); }
   });
@@ -553,6 +790,10 @@ export function agentRouter(db: DbPool): Router {
         res.status(404).json({ error: 'Session not found' });
         return;
       }
+      if (!(await canAccessAgentContext(db, actor, session.context_type, session.context_id))) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
       const { label } = req.body as { label?: string };
       const updated = await agentRepo.updateSession(db, actor.tenant_id, session.id, { label: label ?? undefined });
       res.json({ data: updated });
@@ -563,7 +804,16 @@ export function agentRouter(db: DbPool): Router {
   router.delete('/sessions/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      await agentRepo.deleteSession(db, actor.tenant_id, String(req.params.id));
+      const session = await agentRepo.getSession(db, actor.tenant_id, String(req.params.id));
+      if (!session || session.user_id !== actor.actor_id) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      if (!(await canAccessAgentContext(db, actor, session.context_type, session.context_id))) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+      await agentRepo.deleteSession(db, actor.tenant_id, session.id);
       res.status(204).end();
     } catch (err) { handleError(res, err); }
   });
@@ -607,6 +857,10 @@ export function agentRouter(db: DbPool): Router {
     // Load or verify session
     let session = await agentRepo.getSession(db, actor.tenant_id, String(req.params.id));
     if (!session || session.user_id !== actor.actor_id) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    if (!(await canAccessAgentContext(db, actor, session.context_type, session.context_id))) {
       res.status(404).json({ error: 'Session not found' });
       return;
     }
@@ -732,6 +986,10 @@ export function agentRouter(db: DbPool): Router {
     // Non-admins can only view their own sessions
     if (actor.role !== 'admin' && session.user_id !== actor.actor_id) {
       res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    if (!await canAccessAgentContext(db, actor, session.context_type, session.context_id)) {
+      res.status(404).json({ error: 'Session not found' });
       return;
     }
     const activity = await activityRepo.getSessionActivity(db, actor.tenant_id, session.id);

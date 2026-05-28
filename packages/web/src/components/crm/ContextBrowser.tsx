@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import {
   useContextEntriesInfinite,
@@ -75,7 +75,6 @@ import {
 } from '@/components/ui/sheet';
 import { toast } from '@/hooks/use-toast';
 import { ContextEntryDrawer } from '@/components/crm/ContextEntryDrawer';
-import { CompactList } from '@/components/crm/CompactList';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -460,10 +459,12 @@ export function ContextBrowser({
   memoryStatus = 'active',
   drawerOnly = false,
   allowAddContext = true,
+  viewMode: controlledViewMode,
 }: {
   memoryStatus?: 'signal' | 'active';
   drawerOnly?: boolean;
   allowAddContext?: boolean;
+  viewMode?: 'cards' | 'table';
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const isSignalMode = memoryStatus === 'signal';
@@ -479,13 +480,25 @@ export function ContextBrowser({
   const [q,          setQ]          = useState('');
   const [sort,       setSort]       = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [searchMode, setSearchMode] = useState<'keyword' | 'semantic'>('keyword');
+  const [localViewMode]             = useState<'cards' | 'table'>('cards');
+  const viewMode = controlledViewMode ?? localViewMode;
 
   // Ingest dialog state
   type IngestSubject = { type: string; id: string; label: string; auto?: boolean; confidence?: string };
+  type IngestProposal = {
+    record_type: string;
+    name: string;
+    confidence?: number;
+    reason?: string;
+    fields?: Record<string, unknown>;
+    duplicate_candidates?: unknown[];
+  };
   const [ingestOpen,        setIngestOpen]        = useState(false);
   const [ingestTab,         setIngestTab]          = useState<'text' | 'file'>('text');
   const [ingestText,        setIngestText]         = useState('');
   const [ingestSubjects,    setIngestSubjects]     = useState<IngestSubject[]>([]);
+  const [ingestProposals,   setIngestProposals]    = useState<IngestProposal[]>([]);
+  const [ingestResolutionSummary, setIngestResolutionSummary] = useState<string | null>(null);
   const [ingestSource,      setIngestSource]       = useState('');
   const [autoResolveIngest, setAutoResolveIngest]  = useState(true);
   const [ingesting,         setIngesting]          = useState(false);
@@ -498,6 +511,8 @@ export function ContextBrowser({
   const [uploadPreview,     setUploadPreview]      = useState('');
   const [uploadTruncated,   setUploadTruncated]    = useState(false);
   const [uploadSubjects,    setUploadSubjects]     = useState<IngestSubject[]>([]);
+  const [uploadProposals,   setUploadProposals]    = useState<IngestProposal[]>([]);
+  const [uploadResolutionSummary, setUploadResolutionSummary] = useState<string | null>(null);
   const [uploadSource,      setUploadSource]       = useState('');
   const [uploadParsing,     setUploadParsing]      = useState(false);
   const [uploadDragging,    setUploadDragging]     = useState(false);
@@ -566,7 +581,10 @@ export function ContextBrowser({
           auto: true,
           confidence: s.confidence,
         }));
+        const proposals: IngestProposal[] = result?.proposed_records ?? [];
         if (targetTab === 'text') {
+          setIngestProposals(proposals);
+          setIngestResolutionSummary(result?.resolution_summary ?? null);
           setIngestSubjects(prev => {
             // Merge auto-detected with any existing manual entries
             const manual = prev.filter(s => !s.auto);
@@ -575,6 +593,8 @@ export function ContextBrowser({
             return [...detected, ...keptManual];
           });
         } else {
+          setUploadProposals(proposals);
+          setUploadResolutionSummary(result?.resolution_summary ?? null);
           setUploadSubjects(detected);
         }
       } catch (err) {
@@ -620,6 +640,8 @@ export function ContextBrowser({
         type: s.type, id: s.id, label: s.name, auto: true, confidence: s.confidence,
       }));
       setUploadSubjects(detected);
+      setUploadProposals(result.proposed_records ?? []);
+      setUploadResolutionSummary(result.resolution_summary ?? null);
     } catch (err) {
       toast({ title: 'File parsing failed', description: err instanceof Error ? err.message : 'Try a different file.', variant: 'destructive' });
       setUploadFile(null);
@@ -633,6 +655,8 @@ export function ContextBrowser({
     setIngestOpen(false);
     setIngestText('');
     setIngestSubjects([]);
+    setIngestProposals([]);
+    setIngestResolutionSummary(null);
     setIngestSource('');
     setAutoResolveIngest(true);
     setIngestTab('text');
@@ -640,6 +664,8 @@ export function ContextBrowser({
     setUploadText('');
     setUploadPreview('');
     setUploadSubjects([]);
+    setUploadProposals([]);
+    setUploadResolutionSummary(null);
     setUploadSource('');
     setClipboardBanner(null);
     setDetectError(null);
@@ -809,6 +835,7 @@ export function ContextBrowser({
   const handleIngest = useCallback(async () => {
     const activeText = ingestTab === 'file' ? uploadText : ingestText;
     const activeSubjects = ingestTab === 'file' ? uploadSubjects : ingestSubjects;
+    const activeProposals = ingestTab === 'file' ? uploadProposals : ingestProposals;
     const activeSource = ingestTab === 'file' ? uploadSource : ingestSource;
 
     const validSubjects = activeSubjects.filter(s => s.type && s.id);
@@ -825,19 +852,30 @@ export function ContextBrowser({
     setIngesting(true);
     try {
       const useResolvedSubjects = validSubjects.length > 0;
-      const results = autoResolveIngest && !useResolvedSubjects
+      const results = autoResolveIngest
         ? [await ingestAutoMut.mutateAsync({
             text: activeText,
             source: activeSource || undefined,
+            subjects: useResolvedSubjects
+              ? validSubjects.map(subject => ({
+                  type: subject.type,
+                  id: subject.id,
+                  name: subject.label,
+                }))
+              : undefined,
+            proposed_records: activeProposals.length > 0 ? activeProposals : undefined,
           })]
-        : await Promise.all(validSubjects.map(s =>
-            ingestMutation.mutateAsync({
+        : [];
+      if (!autoResolveIngest) {
+        for (const subject of validSubjects) {
+          results.push(await ingestMutation.mutateAsync({
               text:         activeText,
-              subject_type: s.type,
-              subject_id:   s.id,
+              subject_type: subject.type,
+              subject_id:   subject.id,
               source:       activeSource || undefined,
-            }),
-          ));
+          }));
+        }
+      }
       const totalExtracted: number = results.reduce((sum: number, r: any) => sum + (r?.extracted_count ?? 0), 0);
       const memoryCreated = results.reduce((sum: number, r: any) => sum + Number(r?.memory_created ?? r?.memory_entries?.length ?? 0), 0);
       const signalsCreated = results.reduce((sum: number, r: any) => sum + Number(r?.signals_created ?? r?.signals?.length ?? 0), 0);
@@ -845,11 +883,22 @@ export function ContextBrowser({
         const explicit = Number(r?.skipped ?? 0);
         return sum + (explicit > 0 ? explicit : r?.subjects_resolved?.length === 0 && totalExtracted === 0 ? 1 : 0);
       }, 0);
+      const proposedRecords = results.reduce((sum: number, r: any) => sum + Number(r?.proposed_records?.length ?? 0), 0);
+      const handoffRequests = results.reduce((sum: number, r: any) => sum + Number(r?.handoff_requests?.length ?? 0), 0);
+      const resolutionSummary = (results.find((r: any) => typeof r?.resolution_summary === 'string') as any)?.resolution_summary;
       setIngestSummary({ memoryCreated, signalsCreated, skipped });
       if (totalExtracted > 0) {
         toast({
           title: 'Context processed',
-          description: `${memoryCreated} Memory created, ${signalsCreated} ${signalsCreated === 1 ? 'Signal needs' : 'Signals need'} review, ${skipped} skipped.`,
+          description: `${resolutionSummary ? `${resolutionSummary} ` : ''}${memoryCreated} Memory created, ${signalsCreated} ${signalsCreated === 1 ? 'Signal needs' : 'Signals need'} review${handoffRequests > 0 ? `, ${handoffRequests} record ${handoffRequests === 1 ? 'proposal' : 'proposals'} sent to Handoffs` : ''}, ${skipped} skipped.`,
+        });
+        closeIngestDialog();
+      } else if (handoffRequests > 0 || proposedRecords > 0) {
+        toast({
+          title: 'Record review created',
+          description: handoffRequests > 0
+            ? `${handoffRequests} possible new ${handoffRequests === 1 ? 'record was' : 'records were'} sent to Handoffs for review.`
+            : `${proposedRecords} possible new ${proposedRecords === 1 ? 'record needs' : 'records need'} review before CRMy creates anything.`,
         });
         closeIngestDialog();
       } else {
@@ -877,7 +926,7 @@ export function ContextBrowser({
     } finally {
       setIngesting(false);
     }
-  }, [autoResolveIngest, ingestTab, ingestText, ingestSubjects, ingestSource, uploadText, uploadSubjects, uploadSource, ingestAutoMut, ingestMutation, closeIngestDialog]);
+  }, [autoResolveIngest, ingestTab, ingestText, ingestSubjects, ingestProposals, ingestSource, uploadText, uploadSubjects, uploadProposals, uploadSource, ingestAutoMut, ingestMutation, closeIngestDialog]);
 
   // Handle manual entry creation
   const handleAddEntry = useCallback(async () => {
@@ -1090,152 +1139,199 @@ export function ContextBrowser({
               </Button>
             )}
           </motion.div>
+        ) : viewMode === 'table' ? (
+          <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-surface-sunken/50">
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Memory</th>
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Subject</th>
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Type</th>
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Confidence</th>
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Updated</th>
+                    <th className="px-4 py-3 text-right text-xs font-display font-semibold text-muted-foreground">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((entry: any, index: number) => {
+                    const expired = entry.valid_until ? isPast(new Date(entry.valid_until)) : false;
+                    return (
+                      <tr
+                        key={entry.id}
+                        onClick={() => openEntryDrawer(entry)}
+                        className={`cursor-pointer border-b border-border transition-colors hover:bg-primary/5 last:border-0 ${index % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}
+                      >
+                        <td className="max-w-[30rem] px-4 py-3">
+                          <div className="font-semibold text-foreground line-clamp-1">{entry.title || entry.body || 'Untitled Memory'}</div>
+                          {entry.body && <div className="mt-0.5 text-xs text-muted-foreground line-clamp-1">{entry.body}</div>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <SubjectChip subjectType={entry.subject_type} subjectId={entry.subject_id} subjectName={entry.subject_name} />
+                        </td>
+                        <td className="px-4 py-3 capitalize text-muted-foreground">{String(entry.context_type ?? 'context').replace(/_/g, ' ')}</td>
+                        <td className="px-4 py-3"><ConfidencePill value={entry.confidence_score} /></td>
+                        <td className="px-4 py-3">
+                          {entry.is_current === false ? (
+                            <Badge variant="outline" className="text-xs text-muted-foreground border-muted">Superseded</Badge>
+                          ) : expired ? (
+                            <Badge className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">Needs review</Badge>
+                          ) : (
+                            <Badge className="text-xs bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">Current</Badge>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(entry.updated_at ?? entry.created_at), { addSuffix: true })}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openEntryDrawer(entry);
+                            }}
+                          >
+                            Details
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : (
-          <CompactList className="space-y-1">
-            {filtered.map((entry: any, i: number) => {
-              const expired = entry.valid_until ? isPast(new Date(entry.valid_until)) : false;
-              return (
-                <motion.div
-                  key={entry.id}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.02 }}
-                  className={`group rounded-xl p-3 transition-colors cursor-pointer hover:bg-muted/40 ${
-                    expired
-                      ? 'ring-1 ring-destructive/30'
-                      : searchMode === 'semantic'
-                      ? 'border-l-2 border-l-violet-500/60'
-                      : ''
-                  }`}
-                  onClick={() => openEntryDrawer(entry)}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap mb-1">
-                        {entry.title && (
-                          <span className="text-sm font-semibold text-foreground truncate max-w-xs">
-                            {entry.title}
-                          </span>
-                        )}
-                        {entry.context_type && (
-                          <Badge variant="outline" className="text-xs capitalize">
-                            {entry.context_type.replace(/_/g, ' ')}
-                          </Badge>
-                        )}
-                        {entry.memory_status === 'signal' && (
-                          <Badge className="text-xs bg-violet-600/10 text-violet-700 dark:text-violet-300 border border-violet-500/20">
-                            Signal
-                          </Badge>
-                        )}
-                        {expired && entry.memory_status !== 'signal' && (
-                          <Badge className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">
-                            Needs review
-                          </Badge>
-                        )}
-                        <SubjectChip
-                          subjectType={entry.subject_type}
-                          subjectId={entry.subject_id}
-                          subjectName={entry.subject_name}
-                        />
-                        {entry.is_current === false && (
-                          <Badge variant="outline" className="text-xs text-muted-foreground border-muted">
-                            Superseded
-                          </Badge>
-                        )}
-                        <ConfidencePill value={entry.confidence_score} />
-                        {Array.isArray(entry.evidence) && entry.evidence.length > 0 && (
-                          <Badge variant="outline" className="text-xs gap-1 border-emerald-500/25 text-emerald-700 dark:text-emerald-300">
-                            <FileText className="w-3 h-3" />
-                            {entry.evidence.length} evidence
-                          </Badge>
-                        )}
-                        {searchMode === 'semantic' && <SimilarityPill value={entry.similarity} />}
+          <>
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {filtered.map((entry: any, i: number) => {
+                const expired = entry.valid_until ? isPast(new Date(entry.valid_until)) : false;
+                const isSignal = entry.memory_status === 'signal';
+                const isSuperseded = entry.is_current === false;
+                return (
+                  <motion.article
+                    key={entry.id}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.02 }}
+                    className={`group flex min-h-[14rem] cursor-pointer flex-col overflow-hidden rounded-2xl border bg-card shadow-sm transition-colors hover:border-primary/30 hover:bg-card/95 ${
+                      expired ? 'border-amber-500/30' : searchMode === 'semantic' ? 'border-violet-500/30' : 'border-border'
+                    }`}
+                    onClick={() => openEntryDrawer(entry)}
+                  >
+                    <div className="flex flex-1 items-start gap-3 p-4">
+                      <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-500">
+                        <FileText className="h-4 w-4" />
                       </div>
-                      {entry.body && (
-	                        <p className="text-sm text-muted-foreground line-clamp-2 mb-2">{entry.body}</p>
-                      )}
-                      <div className="flex items-center gap-3 flex-wrap">
-                        {entry.tags?.length > 0 && (
-                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <Tag className="w-3 h-3" />
-                            {entry.tags.slice(0, 4).join(', ')}
-                            {entry.tags.length > 4 && ` +${entry.tags.length - 4}`}
-                          </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                          {isSignal ? (
+                            <Badge className="text-xs bg-violet-600/10 text-violet-700 dark:text-violet-300 border border-violet-500/20">Signal</Badge>
+                          ) : isSuperseded ? (
+                            <Badge variant="outline" className="text-xs text-muted-foreground border-muted">Superseded</Badge>
+                          ) : expired ? (
+                            <Badge className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20">Needs review</Badge>
+                          ) : (
+                            <Badge className="text-xs bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">Current</Badge>
+                          )}
+                          {entry.context_type && (
+                            <Badge variant="outline" className="text-xs capitalize">
+                              {entry.context_type.replace(/_/g, ' ')}
+                            </Badge>
+                          )}
+                          {searchMode === 'semantic' && <SimilarityPill value={entry.similarity} />}
+                        </div>
+                        <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">
+                          {entry.title || entry.body || 'Untitled Memory'}
+                        </h3>
+                        {entry.body && (
+                          <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{entry.body}</p>
                         )}
-                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <Clock className="w-3 h-3" />
-                          {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
-                        </span>
-                        <ValidUntilBadge date={entry.valid_until} />
+                        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <SubjectChip subjectType={entry.subject_type} subjectId={entry.subject_id} subjectName={entry.subject_name} />
+                          <ConfidencePill value={entry.confidence_score} />
+                          {Array.isArray(entry.evidence) && entry.evidence.length > 0 && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-700 dark:text-emerald-300">
+                              <FileText className="h-3 w-3" />
+                              {entry.evidence.length} evidence
+                            </span>
+                          )}
+                          {entry.tags?.length > 0 && (
+                            <span className="inline-flex items-center gap-1">
+                              <Tag className="h-3 w-3" />
+                              {entry.tags.slice(0, 3).join(', ')}
+                              {entry.tags.length > 3 && ` +${entry.tags.length - 3}`}
+                            </span>
+                          )}
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
+                          </span>
+                          <ValidUntilBadge date={entry.valid_until} />
+                        </div>
                       </div>
                     </div>
-                    {/* Right-side actions */}
-                    <div
-                      className="flex items-center gap-1.5 flex-shrink-0"
-                      onClick={e => e.stopPropagation()}
-                    >
+                    <div className="flex flex-wrap gap-2 border-t border-border bg-surface-sunken/30 px-3 py-2" onClick={event => event.stopPropagation()}>
+                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openEntryDrawer(entry)}>
+                        <Edit3 className="mr-1 h-3.5 w-3.5" />
+                        Details
+                      </Button>
                       {expired && (
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-6 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
-                          onClick={(e) => { e.stopPropagation(); reviewEntry.mutate(entry.id); }}
+                          className="h-7 text-xs text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
+                          onClick={() => reviewEntry.mutate(entry.id)}
                           disabled={reviewEntry.isPending}
                         >
+                          <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
                           Mark reviewed
                         </Button>
                       )}
-                      {!expired && entry.is_current && entry.memory_status !== 'signal' && (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+                      {isSignal && (
+                        <Button
+                          size="sm"
+                          className="h-7 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
+                          onClick={() => promoteSignal.mutate(
+                            { id: entry.id },
+                            { onSuccess: () => toast({ title: 'Promoted to Memory', description: 'Agents can now use this as confirmed operational context.' }) },
+                          )}
+                          disabled={promoteSignal.isPending}
+                        >
+                          <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                          Confirm Signal
+                        </Button>
                       )}
-                      {entry.memory_status === 'signal' && (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-6 text-xs"
-                            onClick={() => promoteSignal.mutate(
-                              { id: entry.id },
-                              { onSuccess: () => toast({ title: 'Promoted to Memory', description: 'Agents can now use this as confirmed operational context.' }) },
-                            )}
-                            disabled={promoteSignal.isPending}
-                          >
-                            Promote to Memory
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 text-xs text-muted-foreground"
-                            onClick={() => rejectSignal.mutate(
-                              { id: entry.id, reason: 'Rejected from Signals review' },
-                              { onSuccess: () => toast({ title: 'Signal dismissed', description: 'It will stay out of Memory.' }) },
-                            )}
-                            disabled={rejectSignal.isPending}
-                          >
-                            Dismiss
-                          </Button>
-                        </>
+                      {!isSignal && (
+                        <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
+                          <Link to={`/context?tab=lineage&context_entry_id=${entry.id}`}>
+                            View Lineage
+                          </Link>
+                        </Button>
                       )}
-                      {/* Kebab menu */}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 focus:opacity-100"
-                            aria-label="Entry actions"
-                          >
-                            <MoreHorizontal className="w-3.5 h-3.5" />
+                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground" aria-label="Entry actions">
+                            <MoreHorizontal className="h-3.5 w-3.5" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-44">
-                          <DropdownMenuItem onClick={() => openEntryDrawer(entry)}>
-                            <Edit3 className="w-3.5 h-3.5 mr-2" />
-                            View details
-                          </DropdownMenuItem>
+                          {isSignal && (
+                            <DropdownMenuItem
+                              onClick={() => rejectSignal.mutate(
+                                { id: entry.id, reason: 'Rejected from Signals review' },
+                                { onSuccess: () => toast({ title: 'Signal dismissed', description: 'It will stay out of Memory.' }) },
+                              )}
+                            >
+                              <X className="mr-2 h-3.5 w-3.5" />
+                              Dismiss Signal
+                            </DropdownMenuItem>
+                          )}
                           {expired && (
                             <DropdownMenuItem onClick={() => reviewEntry.mutate(entry.id)}>
-                              <CheckCircle2 className="w-3.5 h-3.5 mr-2" />
+                              <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
                               Mark reviewed
                             </DropdownMenuItem>
                           )}
@@ -1250,16 +1346,16 @@ export function ContextBrowser({
                               );
                             }}
                           >
-                            <Trash2 className="w-3.5 h-3.5 mr-2" />
+                            <Trash2 className="mr-2 h-3.5 w-3.5" />
                             Forget / Invalidate
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </div>
-                  </div>
-                </motion.div>
-              );
-            })}
+                  </motion.article>
+                );
+              })}
+            </div>
             {!staleOnly && searchMode === 'keyword' && hasNextPage && (
               <div className="flex justify-center pt-4 pb-2">
                 <Button
@@ -1274,7 +1370,7 @@ export function ContextBrowser({
                 </Button>
               </div>
             )}
-          </CompactList>
+          </>
         )}
       </div>
 
@@ -1289,7 +1385,7 @@ export function ContextBrowser({
 
       {/* ── Add Context Drawer ─────────────────────────────────────────────── */}
       <Sheet open={ingestOpen} onOpenChange={(open) => { if (!open) closeIngestDialog(); else setIngestOpen(true); }}>
-        <SheetContent side="right" className="flex h-full w-full flex-col gap-0 p-0 sm:max-w-xl">
+        <SheetContent side="right" className="flex h-full w-full flex-col gap-0 p-0 sm:max-w-2xl">
           <SheetHeader className="border-b border-border px-5 pb-4 pt-5 text-left">
             <SheetTitle className="flex items-center gap-2 text-base">
               <FileText className="w-5 h-5 text-[#0ea5e9]" />
@@ -1364,7 +1460,7 @@ export function ContextBrowser({
                     </span>
                     {autoResolveIngest && ingestSubjects.length > 0 && (
                       <span className="mt-2 block text-xs text-muted-foreground">
-                        Detected {ingestSubjects.length} possible {ingestSubjects.length === 1 ? 'subject' : 'subjects'} for matching.
+                        {ingestResolutionSummary ?? `Detected ${ingestSubjects.length} possible ${ingestSubjects.length === 1 ? 'subject' : 'subjects'} for matching.`}
                       </span>
                     )}
                   </span>
@@ -1430,7 +1526,7 @@ export function ContextBrowser({
                     <FileText className="w-4 h-4 text-primary flex-shrink-0" />
                     <span className="text-sm font-medium text-foreground flex-1 truncate">{uploadFile.name}</span>
                     <span className="text-xs text-muted-foreground">{(uploadFile.size / 1024).toFixed(0)} KB</span>
-                    <button onClick={() => { setUploadFile(null); setUploadText(''); setUploadPreview(''); setUploadSubjects([]); }} className="text-muted-foreground hover:text-foreground">
+                    <button onClick={() => { setUploadFile(null); setUploadText(''); setUploadPreview(''); setUploadSubjects([]); setUploadProposals([]); }} className="text-muted-foreground hover:text-foreground">
                       <X className="w-4 h-4" />
                     </button>
                   </div>
@@ -1462,7 +1558,7 @@ export function ContextBrowser({
                     </span>
                     {autoResolveIngest && uploadSubjects.length > 0 && (
                       <span className="mt-2 block text-xs text-muted-foreground">
-                        Detected {uploadSubjects.length} possible {uploadSubjects.length === 1 ? 'subject' : 'subjects'} for matching.
+                        {uploadResolutionSummary ?? `Detected ${uploadSubjects.length} possible ${uploadSubjects.length === 1 ? 'subject' : 'subjects'} for matching.`}
                       </span>
                     )}
                   </span>

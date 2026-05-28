@@ -9,6 +9,7 @@ import * as oppRepo from '../../db/repos/opportunities.js';
 import { notFound } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
 import type { z } from 'zod';
+import { assertOwnedObjectAccess, resolveOwnerFilter } from '../../services/access-control.js';
 
 export function analyticsTools(db: DbPool): ToolDef[] {
   return [
@@ -18,7 +19,8 @@ export function analyticsTools(db: DbPool): ToolDef[] {
       description: 'Search across all customer records — contacts, accounts, and opportunities — with a single query string. Returns results grouped by entity type, ranked by relevance. Use this for broad discovery when you do not know which entity type holds the information you need.',
       inputSchema: crmSearch,
       handler: async (input: z.infer<typeof crmSearch>, actor: ActorContext) => {
-        return searchRepo.crmSearch(db, actor.tenant_id, input.query, input.limit ?? 10);
+        const ownerFilter = await resolveOwnerFilter(db, actor);
+        return searchRepo.crmSearch(db, actor.tenant_id, input.query, input.limit ?? 10, ownerFilter.owner_ids);
       },
     },
     {
@@ -27,9 +29,10 @@ export function analyticsTools(db: DbPool): ToolDef[] {
       description: 'Get a weighted pipeline forecast showing projected ARR by stage across all open opportunities, along with historical win rates, average deal size, and sales cycle time. Use this for weekly pipeline reviews, board reporting, and identifying gaps in pipeline coverage. Returns both raw totals and probability-weighted values.',
       inputSchema: pipelineForecast,
       handler: async (input: z.infer<typeof pipelineForecast>, actor: ActorContext) => {
+        const ownerFilter = await resolveOwnerFilter(db, actor, input.owner_id);
         return oppRepo.getPipelineForecast(db, actor.tenant_id, {
           period: input.period ?? 'quarter',
-          owner_id: input.owner_id,
+          ...ownerFilter,
         });
       },
     },
@@ -39,6 +42,7 @@ export function analyticsTools(db: DbPool): ToolDef[] {
       description: 'Get a comprehensive health report for an account showing open opportunities, recent activity metrics, contact count, health score trend, and engagement indicators. Use this to surface accounts with declining health scores that need proactive attention or to prepare for account reviews.',
       inputSchema: accountHealthReport,
       handler: async (input: z.infer<typeof accountHealthReport>, actor: ActorContext) => {
+        await assertOwnedObjectAccess(db, actor, 'account', input.account_id);
         const report = await searchRepo.getAccountHealthReport(db, actor.tenant_id, input.account_id);
         if (report.health_score === 0 && report.contact_count === 0 && report.open_opps === 0) {
           // Check if account even exists

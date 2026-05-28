@@ -4,6 +4,30 @@
 import type { DbPool } from '../pool.js';
 import type { Actor, UUID, PaginatedResponse } from '@crmy/shared';
 
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: string }).code === '23505';
+}
+
+async function refetchActorByIdentity(
+  db: DbPool,
+  tenantId: UUID,
+  data: Partial<Actor>,
+): Promise<Actor | null> {
+  if (data.email) {
+    const existing = await findByEmail(db, tenantId, data.email);
+    if (existing) return existing;
+  }
+  if (data.user_id) {
+    const existing = await findByUserId(db, tenantId, data.user_id);
+    if (existing) return existing;
+  }
+  if (data.agent_identifier) {
+    const existing = await findByAgentIdentifier(db, tenantId, data.agent_identifier);
+    if (existing) return existing;
+  }
+  return null;
+}
+
 export async function createActor(
   db: DbPool,
   tenantId: UUID,
@@ -75,19 +99,18 @@ export async function ensureActor(
   data: Partial<Actor> & { actor_type: string; display_name: string },
 ): Promise<Actor> {
   // Try to find by email or agent_identifier first
-  if (data.email) {
-    const existing = await findByEmail(db, tenantId, data.email);
-    if (existing) return existing;
+  const existing = await refetchActorByIdentity(db, tenantId, data);
+  if (existing) return existing;
+
+  try {
+    return await createActor(db, tenantId, data);
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      const racedActor = await refetchActorByIdentity(db, tenantId, data);
+      if (racedActor) return racedActor;
+    }
+    throw err;
   }
-  if (data.user_id) {
-    const existing = await findByUserId(db, tenantId, data.user_id);
-    if (existing) return existing;
-  }
-  if (data.agent_identifier) {
-    const existing = await findByAgentIdentifier(db, tenantId, data.agent_identifier);
-    if (existing) return existing;
-  }
-  return createActor(db, tenantId, data);
 }
 
 export async function updateActor(

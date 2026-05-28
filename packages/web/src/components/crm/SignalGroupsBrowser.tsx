@@ -1,15 +1,14 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   CheckCircle2,
   Eye,
   FileText,
   GitBranch,
-  Settings,
   Loader2,
   ShieldCheck,
   Sparkles,
@@ -34,7 +33,6 @@ import {
 } from '@/components/ui/sheet';
 import { toast } from '@/hooks/use-toast';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
-import { CompactList } from '@/components/crm/CompactList';
 
 function pct(value: number | null | undefined) {
   return `${Math.round(Number(value ?? 0) * 100)}%`;
@@ -122,7 +120,7 @@ function trustExplanation(group: SignalGroup) {
     return 'The model was confident, but this source type is weighted as medium trust.';
   }
   if (group.independent_source_count < 2 && group.aggregate_confidence < promotionThreshold(group)) {
-    return 'Add another independent source or manually promote this Signal.';
+    return 'Add another independent source or confirm this Signal when the evidence is enough.';
   }
   if (group.conflict_count > 0) {
     return 'Conflicting evidence lowers trust and blocks automatic promotion.';
@@ -136,7 +134,7 @@ function trustExplanation(group: SignalGroup) {
 function promotionStatusText(group: SignalGroup) {
   if (group.status === 'promoted') return 'Memory created';
   if (group.status === 'conflicting') return 'Blocked by conflict';
-  if (group.status === 'blocked') return 'Needs approval';
+  if (group.status === 'blocked') return canPromote(group) ? 'Needs your confirmation' : 'Needs approval';
   if (group.aggregate_confidence >= promotionThreshold(group)) return 'Will become Memory automatically';
   return 'Below threshold';
 }
@@ -147,8 +145,35 @@ function promotionBlockers(group: SignalGroup) {
   return group.blocked_reason ? [group.blocked_reason] : [];
 }
 
+function friendlyPromotionBlocker(group: SignalGroup, blocker: string) {
+  if (blocker.toLowerCase().includes('needs corroboration or approval')) {
+    return canPromote(group)
+      ? 'This is a sensitive customer claim, so CRMy will not confirm it automatically from one source. You can confirm it now if the evidence is enough.'
+      : 'This is a sensitive customer claim and needs another trusted source or an approval before agents rely on it.';
+  }
+  if (blocker.toLowerCase().startsWith('trust score is')) {
+    return `${blocker} You can still confirm this Signal when the evidence is enough.`;
+  }
+  return blocker;
+}
+
 function canPromote(group: SignalGroup) {
+  const blockers = promotionBlockers(group);
+  const onlyHumanConfirmationBlocker = blockers.length > 0
+    && blockers.every(blocker => blocker.toLowerCase().includes('needs corroboration or approval'));
+  if (group.status === 'blocked' && onlyHumanConfirmationBlocker) return true;
+  const explicit = metadata(group).can_promote_manually;
+  if (typeof explicit === 'boolean') return explicit && !['conflicting', 'promoted', 'dismissed'].includes(group.status);
   return !['blocked', 'conflicting', 'promoted', 'dismissed'].includes(group.status);
+}
+
+function signalActionClass(color: 'success' | 'warning' | 'ghost') {
+  const colorMap = {
+    success: 'bg-success text-white hover:bg-success/90',
+    warning: 'border border-amber-500/30 text-amber-600 hover:bg-amber-500/10',
+    ghost: 'border border-border text-muted-foreground hover:bg-muted/50',
+  };
+  return `h-7 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 ${colorMap[color]}`;
 }
 
 function sourceTypes(group: SignalGroup) {
@@ -205,14 +230,24 @@ function evidenceItemCount(group: SignalGroup) {
   return evidenceItems(group).filter(item => item.snippet || item.sourceLabel || item.evidence?.source_id || item.evidence?.source_ref).length;
 }
 
-export function SignalGroupsBrowser() {
+type SignalViewMode = 'cards' | 'table';
+
+export function SignalGroupsBrowser({
+  viewMode: controlledViewMode,
+}: {
+  viewMode?: SignalViewMode;
+} = {}) {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [attentionOnly, setAttentionOnly] = useState(true);
+  const [localViewMode] = useState<SignalViewMode>('cards');
+  const viewMode = controlledViewMode ?? localViewMode;
   const [q, setQ] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerView, setDrawerView] = useState<'details' | 'evidence'>('details');
+  const [confirmDismiss, setConfirmDismiss] = useState(false);
   const { data, isLoading } = useSignalGroups({ attention_only: attentionOnly, limit: 50 }) as any;
   const groups: SignalGroup[] = data?.data ?? [];
   const selected = groups.find(g => g.id === selectedId) ?? null;
@@ -221,6 +256,33 @@ export function SignalGroupsBrowser() {
   const promote = usePromoteSignalGroup();
   const reject = useRejectSignalGroup();
   const handoff = useSendSignalGroupToHandoff();
+  const selectedParam = searchParams.get('signal_group_id');
+
+  const openSignal = (id: string) => {
+    setSelectedId(id);
+    setDrawerView('details');
+    setConfirmDismiss(false);
+    const next = new URLSearchParams(searchParams);
+    next.set('signal_group_id', id);
+    setSearchParams(next, { replace: true });
+  };
+
+  useEffect(() => {
+    if (!selectedParam) return;
+    setSelectedId(selectedParam);
+    setDrawerView('details');
+  }, [selectedParam]);
+
+  const closeSignalDrawer = () => {
+    setSelectedId(null);
+    setDrawerView('details');
+    setConfirmDismiss(false);
+    if (searchParams.has('signal_group_id')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('signal_group_id');
+      setSearchParams(next, { replace: true });
+    }
+  };
 
   const filterConfigs: FilterConfig[] = useMemo(() => {
     const contextTypes = Array.from(new Set(groups.map(group => group.context_type).filter(Boolean))).sort();
@@ -328,10 +390,10 @@ export function SignalGroupsBrowser() {
   const onPromote = async (id: string) => {
     try {
       await promote.mutateAsync(id);
-      toast({ title: 'Memory created', description: 'The Signal was promoted with its supporting evidence.' });
-      setSelectedId(null);
+      toast({ title: 'Signal confirmed', description: 'Agents can now rely on this customer context with its supporting evidence.' });
+      closeSignalDrawer();
     } catch (err) {
-      toast({ title: 'Could not promote Signal', description: err instanceof Error ? err.message : 'Review the evidence and try again.', variant: 'destructive' });
+      toast({ title: 'Could not confirm Signal', description: err instanceof Error ? err.message : 'Review the evidence and try again.', variant: 'destructive' });
     }
   };
 
@@ -339,7 +401,7 @@ export function SignalGroupsBrowser() {
     try {
       await reject.mutateAsync({ id, reason: 'Dismissed from Signals review.' });
       toast({ title: 'Signal dismissed', description: 'CRMy will not promote this Signal to Memory. Evidence is preserved for audit.' });
-      setSelectedId(null);
+      closeSignalDrawer();
     } catch (err) {
       toast({ title: 'Could not dismiss Signal', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' });
     }
@@ -349,8 +411,13 @@ export function SignalGroupsBrowser() {
     try {
       const result = await handoff.mutateAsync(id) as any;
       const requestId = result?.hitl_request?.id;
-      toast({ title: 'Handoff created', description: 'A human review request was added for this Signal.' });
-      setSelectedId(null);
+      toast({
+        title: result?.reused_existing ? 'Review already exists' : 'Review requested',
+        description: result?.reused_existing
+          ? 'Opening the existing pending handoff for this Signal.'
+          : 'A human review request was added for this Signal.',
+      });
+      closeSignalDrawer();
       navigate(requestId ? `/handoffs?hitl=${requestId}` : '/handoffs');
     } catch (err) {
       toast({ title: 'Could not create handoff', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' });
@@ -419,43 +486,97 @@ export function SignalGroupsBrowser() {
                 : 'Reviewable Signals appear here when Raw Context creates inferred customer context.'}
             </p>
           </div>
+        ) : viewMode === 'table' ? (
+          <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-surface-sunken/50">
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Signal</th>
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Subject</th>
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Trust</th>
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Evidence</th>
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Updated</th>
+                    <th className="px-4 py-3 text-right text-xs font-display font-semibold text-muted-foreground"><span className="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupedByStatus.map((group, index) => (
+                    <tr
+                      key={group.id}
+                      onClick={() => openSignal(group.id)}
+                      className={`cursor-pointer border-b border-border transition-colors hover:bg-primary/5 last:border-0 ${index % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}
+                    >
+                      <td className="max-w-[28rem] px-4 py-3">
+                        <div className="font-semibold text-foreground line-clamp-1">{group.title || group.normalized_claim}</div>
+                        <div className="text-xs text-muted-foreground line-clamp-1">{group.context_type.replace(/_/g, ' ')}</div>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">{subjectLabel(group)}</td>
+                      <td className="px-4 py-3 font-semibold text-foreground">{pct(group.aggregate_confidence)}</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {evidenceItemCount(group)} item{evidenceItemCount(group) === 1 ? '' : 's'} · {independentSourceCount(group)} source{independentSourceCount(group) === 1 ? '' : 's'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant="outline" className={statusTone(group.status)}>
+                          {statusLabel(group.status)}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {new Date(group.updated_at ?? group.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          type="button"
+                          className={signalActionClass('ghost')}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openSignal(group.id);
+                          }}
+                        >
+                          Details
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : (
-          <CompactList className="space-y-1">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {groupedByStatus.map(group => {
+              const canAct = !['promoted', 'dismissed'].includes(group.status);
               return (
-                <button
+                <article
                   key={group.id}
-                  onClick={() => {
-                    setSelectedId(group.id);
-                    setDrawerView('details');
-                  }}
-                  className="group w-full rounded-xl p-3 text-left transition-colors hover:bg-muted/40"
+                  onClick={() => openSignal(group.id)}
+                  className="group flex min-h-[14rem] cursor-pointer flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-colors hover:border-primary/30 hover:bg-card/95"
                 >
-                  <div className="flex items-start gap-3">
-                    <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-violet-500/15 text-violet-500">
+                  <div className="flex flex-1 items-start gap-3 p-4">
+                    <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-violet-500/15 text-violet-500">
                       <Sparkles className="h-4 w-4" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="mb-1 flex flex-wrap items-center gap-2">
-                        <h3 className="max-w-xl truncate text-sm font-semibold text-foreground">
-                          {group.title || group.normalized_claim}
-                        </h3>
+                      <div className="mb-2 flex flex-wrap items-center gap-1.5">
                         <Badge variant="outline" className={statusTone(group.status)}>
                           {statusLabel(group.status)}
                         </Badge>
                         <Badge variant="outline" className="text-xs capitalize">
                           {group.context_type.replace(/_/g, ' ')}
                         </Badge>
-                        <span className="text-xs font-medium text-muted-foreground">{subjectLabel(group)}</span>
                       </div>
-                      <p className="line-clamp-2 text-sm text-muted-foreground">{group.normalized_claim}</p>
-                      <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                        <span className="font-semibold text-foreground">
-                          {pct(group.aggregate_confidence)} Trust score
+                      <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">
+                        {group.title || group.normalized_claim}
+                      </h3>
+                      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{group.normalized_claim}</p>
+                      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground">{subjectLabel(group)}</span>
+                        <span className="rounded-full bg-violet-500/10 px-2 py-0.5 font-semibold text-violet-600 dark:text-violet-300">
+                          {pct(group.aggregate_confidence)} trust
                         </span>
-                        <span>{supportingSignalCount(group)} supporting Signal{supportingSignalCount(group) === 1 ? '' : 's'}</span>
-                        <span>{independentSourceCount(group)} independent source{independentSourceCount(group) === 1 ? '' : 's'}</span>
-                        <span>{evidenceItemCount(group)} evidence item{evidenceItemCount(group) === 1 ? '' : 's'}</span>
+                        <span>{evidenceItemCount(group)} evidence</span>
+                        <span>{independentSourceCount(group)} source{independentSourceCount(group) === 1 ? '' : 's'}</span>
                         {group.conflict_count > 0 && (
                           <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
                             <AlertTriangle className="h-3 w-3" />
@@ -465,15 +586,33 @@ export function SignalGroupsBrowser() {
                       </div>
                     </div>
                   </div>
-                </button>
+                  <div className="flex flex-wrap gap-2 border-t border-border bg-surface-sunken/30 px-3 py-2" onClick={event => event.stopPropagation()}>
+                    <button type="button" className={signalActionClass('ghost')} onClick={() => openSignal(group.id)}>
+                      <Eye className="mr-1 h-3.5 w-3.5" />
+                      Details
+                    </button>
+                    {canPromote(group) && (
+                      <button type="button" className={signalActionClass('success')} onClick={() => onPromote(group.id)} disabled={promote.isPending}>
+                        {promote.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
+                        Confirm Signal
+                      </button>
+                    )}
+                    {canAct && (
+                      <button type="button" className={signalActionClass('warning')} onClick={() => onHandoff(group.id)} disabled={handoff.isPending}>
+                        {handoff.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="mr-1 h-3.5 w-3.5" />}
+                        Ask for Review
+                      </button>
+                    )}
+                  </div>
+                </article>
               );
             })}
-          </CompactList>
+          </div>
         )}
       </div>
 
-      <Sheet open={!!selectedId} onOpenChange={open => { if (!open) setSelectedId(null); }}>
-        <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl">
+      <Sheet open={!!selectedId} onOpenChange={open => { if (!open) closeSignalDrawer(); }}>
+        <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
           {detailedGroup ? (
             <>
               <SheetHeader className="border-b border-border px-5 pb-4 pt-5 text-left">
@@ -498,7 +637,7 @@ export function SignalGroupsBrowser() {
                 <SheetDescription>
                   {drawerView === 'evidence'
                     ? 'Source lineage and confidence for each supporting or conflicting item.'
-                    : 'Review the evidence, trust score, and Memory readiness for this Signal.'}
+                    : 'Confirm this Signal when you trust the evidence, or send it for review when it needs another decision.'}
                 </SheetDescription>
               </SheetHeader>
 
@@ -511,19 +650,13 @@ export function SignalGroupsBrowser() {
                           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Trust score</p>
                           <p className="mt-1 text-3xl font-bold text-foreground">{pct(detailedGroup.aggregate_confidence)}</p>
                         </div>
-                        <Sparkles className="h-8 w-8 text-[#0ea5e9]" />
+                        <Sparkles className="h-8 w-8 text-violet-500" />
                       </div>
                       <p className="mt-3 text-sm text-muted-foreground">{detailedGroup.normalized_claim}</p>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <Button variant="outline" size="sm" onClick={() => setDrawerView('evidence')}>
                           <Eye className="mr-1 h-3.5 w-3.5" />
                           View Evidence
-                        </Button>
-                        <Button variant="ghost" size="sm" asChild>
-                          <Link to="/settings/model">
-                            <Settings className="mr-1 h-3.5 w-3.5" />
-                            Signal promotion controls
-                          </Link>
                         </Button>
                         <Button variant="ghost" size="sm" asChild>
                           <Link to={`/context?tab=lineage&signal_group_id=${detailedGroup.id}`}>
@@ -550,7 +683,7 @@ export function SignalGroupsBrowser() {
                     </div>
 
                     <div className="rounded-2xl border border-border bg-card p-4">
-                      <p className="text-sm font-semibold text-foreground">Memory readiness</p>
+                      <p className="text-sm font-semibold text-foreground">Can this become Memory?</p>
                       <div className="mt-2 rounded-xl bg-muted p-3 text-sm">
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-muted-foreground">Promotion state</span>
@@ -566,13 +699,13 @@ export function SignalGroupsBrowser() {
                           {promotionBlockers(detailedGroup).map(blocker => (
                             <li key={blocker} className="flex gap-2">
                               <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
-                              <span>{blocker}</span>
+                              <span>{friendlyPromotionBlocker(detailedGroup, blocker)}</span>
                             </li>
                           ))}
                         </ul>
                       ) : (
                         <p className="mt-2 text-sm text-muted-foreground">
-                          This Signal has enough evidence to become Memory.
+                          This Signal can be confirmed as Memory.
                         </p>
                       )}
                     </div>
@@ -632,6 +765,7 @@ export function SignalGroupsBrowser() {
                               onClick={() => {
                                 setSelectedId(group.id);
                                 setDrawerView('details');
+                                setConfirmDismiss(false);
                               }}
                               className="w-full rounded-xl bg-muted p-3 text-left transition-colors hover:bg-muted/80"
                             >
@@ -684,9 +818,10 @@ export function SignalGroupsBrowser() {
                 <Button
                   onClick={() => onPromote(detailedGroup.id)}
                   disabled={promote.isPending || !canPromote(detailedGroup)}
+                  className="bg-emerald-600 text-white hover:bg-emerald-500 disabled:bg-emerald-600"
                 >
                   {promote.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
-                  Promote to Memory
+                  Confirm Signal
                 </Button>
                 <Button
                   variant="outline"
@@ -694,16 +829,22 @@ export function SignalGroupsBrowser() {
                   disabled={handoff.isPending || detailedGroup.status === 'promoted' || detailedGroup.status === 'dismissed'}
                 >
                   {handoff.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="mr-1 h-3.5 w-3.5" />}
-                  Send to Handoff
+                  Ask for Review
                 </Button>
                 <Button
-                  variant="outline"
-                  onClick={() => onDismiss(detailedGroup.id)}
+                  variant={confirmDismiss ? 'destructive' : 'outline'}
+                  onClick={() => {
+                    if (confirmDismiss) onDismiss(detailedGroup.id);
+                    else setConfirmDismiss(true);
+                  }}
                   disabled={reject.isPending || detailedGroup.status === 'promoted' || detailedGroup.status === 'dismissed'}
                   title="Dismiss this Signal so it will not become Memory. Evidence is preserved for audit."
+                  className={confirmDismiss
+                    ? 'bg-rose-600 text-white hover:bg-rose-500'
+                    : 'border-rose-500/30 text-rose-600 hover:bg-rose-500/10 hover:text-rose-600 dark:text-rose-400'}
                 >
-                  <X className="mr-1 h-3.5 w-3.5" />
-                  Dismiss Signal
+                  {reject.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <X className="mr-1 h-3.5 w-3.5" />}
+                  {confirmDismiss ? 'Confirm Dismiss' : 'Dismiss Signal'}
                 </Button>
                 <Button variant="outline" onClick={() => setDrawerView(drawerView === 'evidence' ? 'details' : 'evidence')}>
                   <Eye className="mr-1 h-3.5 w-3.5" />

@@ -142,6 +142,7 @@ export async function searchUseCases(
     account_id?: UUID;
     stage?: string;
     owner_id?: UUID;
+    owner_ids?: UUID[];
     product_line?: string;
     tags?: string[];
     query?: string;
@@ -167,6 +168,14 @@ export async function searchUseCases(
     conditions.push(`u.owner_id = $${idx}`);
     params.push(filters.owner_id);
     idx++;
+  } else if (filters.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`u.owner_id = ANY($${idx}::uuid[])`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
   }
   if (filters.product_line) {
     conditions.push(`u.unit_label = $${idx}`);

@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { Search, Filter, X, ChevronDown, Plus, ArrowUpDown } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ENTITY_GRADIENTS } from '@/lib/entityColors';
+import { useSlashSearchFocus } from '@/hooks/useSlashSearchFocus';
 
 export type FilterConfig = {
   key: string;
@@ -56,18 +57,7 @@ export function ListToolbar({
   const searchRef = useRef<HTMLInputElement>(null);
   const activeFilterCount = Object.values(activeFilters).reduce((sum, arr) => sum + arr.length, 0);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
-      if (e.key === '/' && !isInput) {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
+  useSlashSearchFocus(searchRef);
 
   return (
     <div className="flex flex-col gap-2 px-4 md:px-6 py-2 md:py-3">

@@ -54,6 +54,7 @@ export interface ServerConfig {
   jwtSecret: string;
   port: number;
   tenantSlug: string;
+  allowPublicRegistration: boolean;
   plugins?: PluginConfig[];
   /** Optional progress callback for CLI startup UI */
   onProgress?: (step: ProgressStep, status: ProgressStatus, detail?: string) => void;
@@ -81,6 +82,7 @@ export function loadConfig(): ServerConfig {
     jwtSecret,
     port: parseInt(process.env.PORT ?? '3000', 10),
     tenantSlug: process.env.CRMY_TENANT_ID ?? 'default',
+    allowPublicRegistration: process.env.CRMY_ALLOW_PUBLIC_REGISTRATION === 'true',
   };
 }
 
@@ -140,28 +142,37 @@ export async function createApp(config: ServerConfig) {
   // MCP tool calls may include context blobs — 1 MB is generous but bounded.
   app.use(express.json({ limit: '1mb' }));
 
-  // Parse DB host/name once for the health endpoint (no credentials exposed)
-  const dbInfo = (() => {
-    try {
-      const u = new URL(config.databaseUrl);
-      return { host: u.hostname, name: u.pathname.replace(/^\//, '') };
-    } catch {
-      return { host: 'unknown', name: 'unknown' };
-    }
-  })();
-
   // Health check (no auth)
   app.get('/health', async (_req, res) => {
     try {
       await db.query('SELECT 1');
-      res.json({ status: 'ok', db: 'ok', version: SERVER_VERSION, db_host: dbInfo.host, db_name: dbInfo.name });
+      const userCountResult = await db.query('SELECT COUNT(*)::int AS count FROM users');
+      const userCount = Number(userCountResult.rows[0]?.count ?? 0);
+      const hasUsers = userCount > 0;
+      res.json({
+        status: 'ok',
+        db: 'ok',
+        version: SERVER_VERSION,
+        environment: process.env.NODE_ENV ?? 'development',
+        setup: {
+          has_users: hasUsers,
+          bootstrap_required: !hasUsers,
+          public_registration_enabled: config.allowPublicRegistration,
+          registration_open: !hasUsers || config.allowPublicRegistration,
+        },
+      });
     } catch {
-      res.status(503).json({ status: 'error', db: 'error', version: SERVER_VERSION, db_host: dbInfo.host, db_name: dbInfo.name });
+      res.status(503).json({
+        status: 'error',
+        db: 'error',
+        version: SERVER_VERSION,
+        environment: process.env.NODE_ENV ?? 'development',
+      });
     }
   });
 
   // Auth routes (no /api/v1 prefix)
-  app.use('/auth', authRouter(db, config.jwtSecret));
+  app.use('/auth', authRouter(db, config.jwtSecret, { allowPublicRegistration: config.allowPublicRegistration }));
 
   // Inbound webhook routes (no auth — provider HMAC-signed)
   app.use('/api/v1', inboundRouter(db));
@@ -280,12 +291,29 @@ export async function createApp(config: ServerConfig) {
   const workflowEngine = createWorkflowEngine(db);
   let backgroundWorkerRunning = false;
   const BACKGROUND_WORKER_LOCK_KEY = 8444219208;
+  const BACKGROUND_TASK_TIMEOUT_MS = Number(process.env.BACKGROUND_TASK_TIMEOUT_MS ?? 45_000);
   async function tryAcquireBackgroundLock(): Promise<boolean> {
     const result = await db.query('SELECT pg_try_advisory_lock($1::bigint) AS locked', [BACKGROUND_WORKER_LOCK_KEY]);
     return result.rows[0]?.locked === true;
   }
   async function releaseBackgroundLock(): Promise<void> {
     await db.query('SELECT pg_advisory_unlock($1::bigint)', [BACKGROUND_WORKER_LOCK_KEY]);
+  }
+  async function runBackgroundTask(name: string, task: () => Promise<unknown>, failures: string[]): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        task(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`${name} timed out after ${BACKGROUND_TASK_TIMEOUT_MS}ms`)), BACKGROUND_TASK_TIMEOUT_MS);
+        }),
+      ]);
+    } catch (err) {
+      failures.push(name);
+      console.error(`[background] ${name} failed:`, err);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
   const hitlInterval = setInterval(async () => {
     if (backgroundWorkerRunning) return;
@@ -294,27 +322,32 @@ export async function createApp(config: ServerConfig) {
       backgroundWorkerRunning = true;
       lockHeld = await tryAcquireBackgroundLock();
       if (!lockHeld) return;
-      await autoApproveExpired(db);
-      await expireOldRequests(db);
-      await checkHitlSlaExpiry(db);
-      await cleanExpiredSessions(db);
-      await processPendingExtractions(db);
-      await processStaleEntries(db);
-      await processWebhookRetries(db);
-      await processContextOutbox(db);
-      await processEmbeddingJobs(db);
-      await refreshStaleScores(db);
+      const failures: string[] = [];
+      await runBackgroundTask('hitl_auto_approve_expired', () => autoApproveExpired(db), failures);
+      await runBackgroundTask('hitl_expire_old_requests', () => expireOldRequests(db), failures);
+      await runBackgroundTask('hitl_sla_expiry', () => checkHitlSlaExpiry(db), failures);
+      await runBackgroundTask('agent_session_cleanup', () => cleanExpiredSessions(db), failures);
+      await runBackgroundTask('context_pending_extractions', () => processPendingExtractions(db), failures);
+      await runBackgroundTask('context_stale_entries', () => processStaleEntries(db), failures);
+      await runBackgroundTask('webhook_retries', () => processWebhookRetries(db), failures);
+      await runBackgroundTask('context_outbox', () => processContextOutbox(db), failures);
+      await runBackgroundTask('context_embedding_jobs', () => processEmbeddingJobs(db), failures);
+      await runBackgroundTask('context_stale_scores', () => refreshStaleScores(db), failures);
       // Purge workflow run history older than 90 days
-      await purgeOldWorkflowRuns(db);
+      await runBackgroundTask('workflow_run_purge', () => purgeOldWorkflowRuns(db), failures);
       // Catch up workflow events that were persisted but missed by in-process delivery
-      await workflowEngine.processBacklog(100);
+      await runBackgroundTask('workflow_backlog', () => workflowEngine.processBacklog(100), failures);
       // Process due sequence enrollments
-      await processSequenceDue(db);
+      await runBackgroundTask('sequence_due_steps', () => processSequenceDue(db), failures);
       // Refresh sequence analytics rollup
-      await refreshSequenceAnalytics(db);
+      await runBackgroundTask('sequence_analytics', () => refreshSequenceAnalytics(db), failures);
       // Evict idle MCP sessions (30-minute TTL)
       evictStaleMcpSessions();
-      markBackgroundTickSuccess();
+      if (failures.length > 0) {
+        markBackgroundTickFailure(new Error(`Background tasks failed: ${failures.join(', ')}`));
+      } else {
+        markBackgroundTickSuccess();
+      }
     } catch (err) {
       // Log the error but keep the interval running — a transient DB error
       // should not permanently disable all background maintenance tasks.

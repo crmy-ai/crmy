@@ -9,6 +9,7 @@ export async function crmSearch(
   tenantId: UUID,
   query: string,
   limit: number,
+  ownerIds?: UUID[],
 ): Promise<{
   contacts: Contact[];
   accounts: Account[];
@@ -18,6 +19,9 @@ export async function crmSearch(
   assignments: Record<string, unknown>[];
   contextEntries: Record<string, unknown>[];
 }> {
+  if (ownerIds) {
+    return fallbackCrmSearch(db, tenantId, query, limit, ownerIds);
+  }
   // ── Unified index path ────────────────────────────────────────────────────
   // Query the search_index table using PostgreSQL full-text search.
   // Falls back to direct ILIKE scans when:
@@ -57,7 +61,7 @@ export async function crmSearch(
         }
       }
 
-      const fallback = await fallbackCrmSearch(db, tenantId, query, limit);
+      const fallback = await fallbackCrmSearch(db, tenantId, query, limit, ownerIds);
       return {
         contacts:      mergeById(contacts, fallback.contacts, limit),
         accounts:      mergeById(accounts, fallback.accounts, limit),
@@ -72,7 +76,7 @@ export async function crmSearch(
     // Table not yet created (migration pending) — fall through to ILIKE.
   }
 
-  return fallbackCrmSearch(db, tenantId, query, limit);
+  return fallbackCrmSearch(db, tenantId, query, limit, ownerIds);
 }
 
 function mergeById<T extends { id?: unknown }>(primary: T[], fallback: T[], limit: number): T[] {
@@ -93,6 +97,7 @@ async function fallbackCrmSearch(
   tenantId: UUID,
   query: string,
   limit: number,
+  ownerIds?: UUID[],
 ): Promise<{
   contacts: Contact[];
   accounts: Account[];
@@ -106,6 +111,22 @@ async function fallbackCrmSearch(
   // Used during the migration window before search_index is populated, or when
   // a query returns zero results from the index (e.g. new tenant, no docs yet).
   const pattern = `%${query}%`;
+  const ownerClause = ownerIds
+    ? ownerIds.length === 0
+      ? ' AND FALSE'
+      : ' AND owner_id = ANY($4::uuid[])'
+    : '';
+  const subjectOwnerClause = ownerIds
+    ? ownerIds.length === 0
+      ? ' AND FALSE'
+      : ` AND (
+          (subject_type = 'contact' AND EXISTS (SELECT 1 FROM contacts c WHERE c.tenant_id = $1 AND c.id = subject_id AND c.owner_id = ANY($4::uuid[])))
+       OR (subject_type = 'account' AND EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = $1 AND a.id = subject_id AND a.owner_id = ANY($4::uuid[])))
+       OR (subject_type = 'opportunity' AND EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = $1 AND o.id = subject_id AND o.owner_id = ANY($4::uuid[])))
+       OR (subject_type = 'use_case' AND EXISTS (SELECT 1 FROM use_cases u WHERE u.tenant_id = $1 AND u.id = subject_id AND u.owner_id = ANY($4::uuid[])))
+      )`
+    : '';
+  const ownerParams = ownerIds ? [tenantId, pattern, limit, ownerIds] : [tenantId, pattern, limit];
 
   const [contacts, accounts, opportunities, activities, useCases, assignments, contextEntries] = await Promise.all([
     db.query(
@@ -113,44 +134,50 @@ async function fallbackCrmSearch(
        WHERE tenant_id = $1
          AND (first_name ILIKE $2 OR last_name ILIKE $2 OR email ILIKE $2 OR company_name ILIKE $2
               OR EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE _a ILIKE $2))
+         ${ownerClause}
        ORDER BY updated_at DESC LIMIT $3`,
-      [tenantId, pattern, limit],
+      ownerParams,
     ),
     db.query(
       `SELECT * FROM accounts
        WHERE tenant_id = $1
          AND (name ILIKE $2 OR domain ILIKE $2
               OR EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE _a ILIKE $2))
+         ${ownerClause}
        ORDER BY updated_at DESC LIMIT $3`,
-      [tenantId, pattern, limit],
+      ownerParams,
     ),
     db.query(
       `SELECT * FROM opportunities
        WHERE tenant_id = $1
          AND name ILIKE $2
+         ${ownerClause}
        ORDER BY updated_at DESC LIMIT $3`,
-      [tenantId, pattern, limit],
+      ownerParams,
     ),
     db.query(
       `SELECT * FROM activities
        WHERE tenant_id = $1
          AND body ILIKE $2
+         ${ownerClause}
        ORDER BY created_at DESC LIMIT $3`,
-      [tenantId, pattern, limit],
+      ownerParams,
     ),
     db.query(
       `SELECT * FROM use_cases
        WHERE tenant_id = $1
          AND (name ILIKE $2 OR description ILIKE $2)
+         ${ownerClause}
        ORDER BY updated_at DESC LIMIT $3`,
-      [tenantId, pattern, limit],
+      ownerParams,
     ),
     db.query(
       `SELECT * FROM assignments
        WHERE tenant_id = $1
          AND (title ILIKE $2 OR description ILIKE $2)
+         ${subjectOwnerClause}
        ORDER BY created_at DESC LIMIT $3`,
-      [tenantId, pattern, limit],
+      ownerParams,
     ),
     db.query(
       `SELECT * FROM context_entries
@@ -158,8 +185,9 @@ async function fallbackCrmSearch(
          AND is_current = true
          AND (title ILIKE $2 OR body ILIKE $2 OR context_type ILIKE $2
               OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(tags) _t WHERE _t ILIKE $2))
+         ${subjectOwnerClause}
        ORDER BY updated_at DESC LIMIT $3`,
-      [tenantId, pattern, limit],
+      ownerParams,
     ),
   ]);
 

@@ -122,6 +122,34 @@ export async function getHITLRequest(db: DbPool, tenantId: UUID, id: UUID): Prom
   return (result.rows[0] as HITLRequest) ?? null;
 }
 
+export async function getHITLRequestBySnapshot(db: DbPool, tenantId: UUID, snapshotId: UUID): Promise<HITLRequest | null> {
+  const result = await db.query(
+    'SELECT * FROM hitl_requests WHERE handoff_snapshot_id = $1 AND tenant_id = $2 ORDER BY created_at DESC LIMIT 1',
+    [snapshotId, tenantId],
+  );
+  return (result.rows[0] as HITLRequest) ?? null;
+}
+
+export async function findPendingHITLByPayload(
+  db: DbPool,
+  tenantId: UUID,
+  actionType: string,
+  payload: Record<string, unknown>,
+): Promise<HITLRequest | null> {
+  const result = await db.query(
+    `SELECT *
+     FROM hitl_requests
+     WHERE tenant_id = $1
+       AND action_type = $2
+       AND status = 'pending'
+       AND action_payload @> $3::jsonb
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [tenantId, actionType, JSON.stringify(payload)],
+  );
+  return (result.rows[0] as HITLRequest | undefined) ?? null;
+}
+
 export async function listPendingHITL(
   db: DbPool,
   tenantId: UUID,
@@ -135,6 +163,65 @@ export async function listPendingHITL(
     [tenantId, limit],
   );
   return result.rows as HITLRequest[];
+}
+
+export async function listHITLRequests(
+  db: DbPool,
+  tenantId: UUID,
+  options: {
+    status?: 'pending' | 'approved' | 'rejected' | 'expired' | 'auto_approved' | 'all';
+    limit: number;
+  },
+): Promise<HITLRequest[]> {
+  const params: unknown[] = [tenantId];
+  const conditions = ['tenant_id = $1'];
+  if (options.status && options.status !== 'all') {
+    params.push(options.status);
+    conditions.push(`status = $${params.length}`);
+  }
+  params.push(options.limit);
+  const result = await db.query(
+    `SELECT *
+     FROM hitl_requests
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY created_at DESC
+     LIMIT $${params.length}`,
+    params,
+  );
+  return result.rows as HITLRequest[];
+}
+
+export async function updatePendingHITLRequest(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  patch: {
+    action_summary?: string;
+    priority?: 'low' | 'normal' | 'high' | 'urgent';
+    sla_minutes?: number | null;
+    escalate_to_id?: UUID | null;
+  },
+): Promise<HITLRequest | null> {
+  const result = await db.query(
+    `UPDATE hitl_requests
+     SET action_summary = COALESCE($3, action_summary),
+         priority = COALESCE($4, priority),
+         sla_minutes = CASE WHEN $6 THEN $5 ELSE sla_minutes END,
+         escalate_to_id = CASE WHEN $8 THEN $7 ELSE escalate_to_id END
+     WHERE id = $1 AND tenant_id = $2 AND status = 'pending'
+     RETURNING *`,
+    [
+      id,
+      tenantId,
+      patch.action_summary ?? null,
+      patch.priority ?? null,
+      patch.sla_minutes ?? null,
+      patch.sla_minutes !== undefined,
+      patch.escalate_to_id ?? null,
+      patch.escalate_to_id !== undefined,
+    ],
+  );
+  return (result.rows[0] as HITLRequest | undefined) ?? null;
 }
 
 export async function resolveHITLRequest(

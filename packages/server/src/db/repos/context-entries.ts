@@ -223,6 +223,7 @@ export async function fullTextSearch(
     memory_status?: 'signal' | 'active' | 'rejected' | 'superseded';
     limit?: number;
     structured_data_filter?: Record<string, unknown>;
+    owner_ids?: UUID[];
   },
 ): Promise<ContextEntry[]> {
   const conditions: string[] = [
@@ -267,6 +268,20 @@ export async function fullTextSearch(
     conditions.push(`c.structured_data @> $${idx}::jsonb`);
     params.push(JSON.stringify(filters.structured_data_filter));
     idx++;
+  }
+  if (filters?.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`(
+        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = c.tenant_id AND c.subject_type = 'account' AND a.id = c.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.tenant_id = c.tenant_id AND c.subject_type = 'contact' AND ct.id = c.subject_id AND ct.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = c.tenant_id AND c.subject_type = 'opportunity' AND o.id = c.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = c.tenant_id AND c.subject_type = 'use_case' AND uc.id = c.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
+      )`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
   }
 
   const lim = filters?.limit ?? 20;
@@ -494,7 +509,7 @@ export async function rejectSignal(
     `UPDATE context_entries
      SET memory_status = 'rejected',
          rejected_at = now(),
-         rejected_by = $3,
+         rejected_by = (SELECT id FROM actors WHERE id = $3 AND tenant_id = $2),
          rejection_reason = $4,
          updated_at = now()
      WHERE id = $1 AND tenant_id = $2 AND memory_status = 'signal'
@@ -510,35 +525,49 @@ export async function rejectSignal(
 export async function listStaleEntries(
   db: DbPool,
   tenantId: UUID,
-  filters?: { subject_type?: string; subject_id?: UUID; limit?: number },
+  filters?: { subject_type?: string; subject_id?: UUID; owner_ids?: UUID[]; limit?: number },
 ): Promise<ContextEntry[]> {
   const conditions: string[] = [
-    'tenant_id = $1',
-    'valid_until < now()',
-    'is_current = TRUE',
-    "memory_status = 'active'",
+    'c.tenant_id = $1',
+    'c.valid_until < now()',
+    'c.is_current = TRUE',
+    "c.memory_status = 'active'",
   ];
   const params: unknown[] = [tenantId];
   let idx = 2;
 
   if (filters?.subject_type) {
-    conditions.push(`subject_type = $${idx}`);
+    conditions.push(`c.subject_type = $${idx}`);
     params.push(filters.subject_type);
     idx++;
   }
   if (filters?.subject_id) {
-    conditions.push(`subject_id = $${idx}`);
+    conditions.push(`c.subject_id = $${idx}`);
     params.push(filters.subject_id);
     idx++;
+  }
+  if (filters?.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`(
+        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = c.tenant_id AND c.subject_type = 'account' AND a.id = c.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.tenant_id = c.tenant_id AND c.subject_type = 'contact' AND ct.id = c.subject_id AND ct.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = c.tenant_id AND c.subject_type = 'opportunity' AND o.id = c.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = c.tenant_id AND c.subject_type = 'use_case' AND uc.id = c.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
+      )`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
   }
 
   const lim = filters?.limit ?? 20;
   params.push(lim);
 
   const result = await db.query(
-    `SELECT * FROM context_entries
+    `SELECT c.* FROM context_entries c
      WHERE ${conditions.join(' AND ')}
-     ORDER BY valid_until ASC
+     ORDER BY c.valid_until ASC
      LIMIT $${idx}`,
     params,
   );
@@ -560,6 +589,7 @@ export async function searchContextEntries(
     structured_data_filter?: Record<string, unknown>;
     visibility?: 'internal' | 'external';
     pinned?: boolean;
+    owner_ids?: UUID[];
     limit: number;
     cursor?: string;
   },
@@ -624,6 +654,20 @@ export async function searchContextEntries(
     conditions.push(`c.pinned = $${idx}`);
     params.push(filters.pinned);
     idx++;
+  }
+  if (filters.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`(
+        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = c.tenant_id AND c.subject_type = 'account' AND a.id = c.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.tenant_id = c.tenant_id AND c.subject_type = 'contact' AND ct.id = c.subject_id AND ct.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = c.tenant_id AND c.subject_type = 'opportunity' AND o.id = c.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = c.tenant_id AND c.subject_type = 'use_case' AND uc.id = c.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
+      )`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
   }
   if (filters.cursor) {
     conditions.push(`c.created_at < $${idx}`);
@@ -702,6 +746,7 @@ export async function semanticSearch(
     memory_status?: 'signal' | 'active' | 'rejected' | 'superseded';
     limit?: number;
     structured_data_filter?: Record<string, unknown>;
+    owner_ids?: UUID[];
   },
 ): Promise<Array<ContextEntry & { similarity: number }>> {
   const conditions: string[] = [
@@ -739,6 +784,20 @@ export async function semanticSearch(
   if (filters?.structured_data_filter) {
     conditions.push(`c.structured_data @> $${idx++}::jsonb`);
     params.push(JSON.stringify(filters.structured_data_filter));
+  }
+  if (filters?.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`(
+        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = c.tenant_id AND c.subject_type = 'account' AND a.id = c.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.tenant_id = c.tenant_id AND c.subject_type = 'contact' AND ct.id = c.subject_id AND ct.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = c.tenant_id AND c.subject_type = 'opportunity' AND o.id = c.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
+        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = c.tenant_id AND c.subject_type = 'use_case' AND uc.id = c.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
+      )`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
   }
 
   const lim = filters?.limit ?? 20;

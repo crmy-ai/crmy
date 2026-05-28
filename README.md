@@ -1,12 +1,12 @@
 # CRMy
 
-Operational customer context for AI agents.
+Typed operational Memory for GTM agents.
 
-CRMy is a local-first operational state layer that gives agents typed revenue objects, persistent context, scoped tools, and retry-safe writes through MCP, REST, and CLI.
+CRMy gives sales and revenue agents typed operational Memory for accounts, opportunities, stakeholders, risks, commitments, and next steps — with evidence, lifecycle, approvals, scoped tools, and governed writeback to systems of record.
 
-Instead of rebuilding customer state from raw CRM queries, notes, emails, and prior tool calls every run, agents call `briefing_get`, act through structured tools, escalate to humans when judgment is needed, and leave behind auditable, versioned state.
+Agents can capture context from calls, emails, CRM changes, support notes, product signals, docs, and MCP/REST inputs. CRMy turns that messy Raw Context into evidence-backed Signals, promotes trusted Signals into Memory, and gates risky action through Handoffs and policy.
 
-Use CRMy when your agent needs to:
+Use CRMy when your GTM agent needs to:
 
 - remember customers across runs
 - reason over current and historical customer state
@@ -19,6 +19,22 @@ MCP-native. PostgreSQL-backed. Open source.
 
 ---
 
+## Three Pillars
+
+### Observe Broadly
+
+Capture messy GTM context from meetings, notes, emails, CRM and warehouse changes, support cases, product usage, docs, and agent inputs.
+
+### Remember Operationally
+
+Store typed GTM Memory with evidence, confidence, freshness, ownership, lifecycle, and scoped access.
+
+### Act Safely
+
+Brief agents before action, coordinate Handoffs, request approval when needed, and write back to CRM or warehouse systems through governed policy.
+
+---
+
 ## What CRMy is
 
 CRMy is the agent-native layer between messy GTM context and revenue-system action.
@@ -26,14 +42,14 @@ CRMy is the agent-native layer between messy GTM context and revenue-system acti
 It does not replace your CRM. Your CRM, warehouse, or customer platform remains the system of record. CRMy makes that state agent-operable by giving agents a trusted workflow:
 
 ```text
-Raw Context → Signals → Memory → Handoffs → Systems of Record
+Raw Context → Signals → Memory → Handoffs / Writeback
 ```
 
 - **Raw Context**: transcripts, emails, notes, CRM changes, support updates, product usage, research, and MCP/REST/CLI inputs.
-- **Signals**: inferred GTM claims with evidence, confidence, and source lineage.
-- **Memory**: confirmed account, opportunity, stakeholder, risk, commitment, and next-action context agents can rely on.
+- **Signals**: inferred GTM claims with evidence, confidence, source lineage, and Memory readiness.
+- **Memory**: confirmed typed account, opportunity, stakeholder, risk, commitment, and next-action context agents can rely on.
 - **Handoffs**: human review for sensitive or uncertain decisions.
-- **Systems of Record**: governed writeback to CRM and warehouse targets through preview, policy, audit, and approval.
+- **Writeback**: governed updates to CRM and warehouse targets through preview, policy, audit, and approval.
 
 The goal is simple: let agents observe customer work, understand what is true now, coordinate the next step, and safely prepare or execute revenue-system updates.
 
@@ -50,7 +66,9 @@ Think of **Active Context** as the agent's working desk and **Memory** as the fi
 - **Raw Context** is incoming source material before extraction: calls, emails, transcripts, notes, systems-of-record changes, documents, and MCP/REST/CLI inputs.
 - **Retrieval** is how CRMy moves the right filing-cabinet entries onto the working desk. Agents use `briefing_get`, `context_search`, semantic search, Context Graph, and Lineage to load relevant Memory into Active Context before they act.
 
-This separation is the reason CRMy can let agents reason over messy GTM work without treating every inference as truth. Raw Context creates Signals, trusted Signals become Memory, and Memory is retrieved into Active Context when an agent needs to coordinate work, request a Handoff, or prepare system-of-record writeback.
+This separation is the reason CRMy can let agents reason over messy GTM work without treating every inference as truth. Raw Context creates Signals, CRMy scores and groups those Signals, policy decides what can become trusted Memory, and Memory is retrieved into Active Context when an agent needs to coordinate work, request a Handoff, or prepare system-of-record writeback.
+
+CRMy intentionally keeps extraction high-recall. A transcript can create an incomplete but useful Signal such as “procurement path is unclear” or “Maya appears to be the champion.” Before that Signal becomes Memory, CRMy checks whether it has enough typed detail, evidence, confidence, and policy clearance for agents to act on it. Incomplete Signals stay reviewable instead of being lost.
 
 ---
 
@@ -152,7 +170,7 @@ With demo data loaded, try these to see CRMy in action:
 npx @crmy/cli briefing contact:d0000000-0000-4000-c000-000000000101       # Maya Patel at Northstar Labs
 npx @crmy/cli briefing account:d0000000-0000-4000-b000-000000000101       # Northstar Labs account context
 npx @crmy/cli context raw-sources                                         # Raw Context processing receipts
-npx @crmy/cli context signal-groups                                       # Evidence-backed Signals that need attention
+npx @crmy/cli context signals                                             # Evidence-backed Signals that need attention
 npx @crmy/cli hitl list                                                   # Pending governed Handoff
 ```
 
@@ -272,7 +290,7 @@ Response:
 }
 ```
 
-Works on contacts, companies, opportunities, and use cases.
+Works on contacts, accounts, opportunities, and use cases.
 
 ---
 
@@ -318,7 +336,7 @@ Four primitives that form the agent's shared workspace:
 
 | Primitive | What it does |
 |-----------|-------------|
-| **Actors** | First-class identity for humans and AI agents. Every action is attributed to an actor. Agents self-register — no admin setup. Query `actor_expertise` to route reviews to the person who knows most about a company. |
+| **Actors** | First-class identity for humans and AI agents. Every action is attributed to an actor. Agents self-register — no admin setup. Query `actor_expertise` to route reviews to the person who knows most about an account. |
 | **Activities** | Raw Context: everything CRMy receives before it becomes Signals or Memory — calls, emails, meetings, notes, transcripts, external changes, support/product signals, MCP/REST/CLI writes, and documents. Structured `detail` payloads, polymorphic subjects, retroactive `occurred_at` timestamps, and auto-extraction into Signals. Bulk-ingest raw documents with `context_ingest`. |
 | **Assignments** | Structured handoffs. Agents create assignments for humans; humans create assignments for agents. Stateful lifecycle: `pending → accepted → in_progress → completed`. Stale context entries automatically generate review assignments, and handoff snapshots preserve context for the next actor. |
 | **Signals** | Inferred, evidence-backed context extracted from Raw Context. Signals include confidence, source evidence, and review state. They are useful for discovery, but they are not Current Memory and should not drive writeback, forecast, task assignment, or customer-facing action without promotion or approval. |
@@ -365,7 +383,7 @@ CRMy has a broad tool catalog because it supports everyday agent work, admin set
 The MCP server uses **scoped exposure**:
 
 - **Default revenue agents** should use high-level tools first: `briefing_get`, `entity_resolve`, `crm_search`, `context_ingest_auto`, `context_signal_group_list`, `context_signal_group_promote`, `activity_create`, compound actions, assignments, and HITL. Reserve `context_add` for advanced direct Memory or evidence-backed Signal writes.
-- **Signals are evidence-backed by design.** Inferred context starts as `memory_status="signal"` with source evidence. CRMy combines related Signals so calls, emails, system changes, support notes, product signals, or MCP writes can reinforce or challenge the same claim.
+- **Signals are evidence-backed by design.** Inferred context starts as `memory_status="signal"` with source evidence. CRMy combines related Signals behind the scenes so calls, emails, system changes, support notes, product signals, or MCP writes can reinforce or challenge the same claim.
 - **Evidence is a Memory primitive.** Context entries store typed evidence references with source, snippet, speaker, observed timestamp, confidence, rationale, and verification metadata so agents can show the proof behind important claims.
 - **Memory Health is explicit.** Current Memory can become Needs Review when `valid_until` passes, can be reconfirmed with `context_review`, or can be superseded when fresher evidence arrives.
 - **Raw Context has a processing trail.** Inputs are tracked with source type, reference, stage, status, extracted Signal count, Memory count, skipped count, and failure reason so operators can see why messy context did or did not become usable agent memory.
@@ -386,7 +404,7 @@ The MCP server uses **scoped exposure**:
 | **Agent Handoff** | `agent_capture_handoff`, `agent_resume_handoff` |
 | Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
 | Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_get_timeline`, `contact_get_opportunities`, `contact_score`, `contact_merge`, `contact_delete` |
-| Companies | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_health_report`, `account_merge`, `account_delete` |
+| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_health_report`, `account_merge`, `account_delete` |
 | Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_health_score`, `opportunity_delete` |
 | Messaging | `message_channel_create`, `message_channel_update`, `message_channel_get`, `message_channel_delete`, `message_channel_list`, `message_send`, `message_delivery_get`, `message_delivery_search` |
 | Analytics | `pipeline_summary`, `pipeline_forecast`, `crm_search`, `account_health_report`, `tenant_get_stats` |
@@ -429,10 +447,10 @@ Contacts
   crmy contacts get <id>                 Get contact details
   crmy contacts delete <id>              Delete (admin/owner only)
 
-Companies
-  crmy accounts list                     List companies
+Accounts
+  crmy accounts list                     List accounts
   crmy accounts create                   Interactive create
-  crmy accounts get <id>                 Get company + contacts + opps
+  crmy accounts get <id>                 Get account + contacts + opps
   crmy accounts delete <id>              Delete (admin/owner only)
 
 Opportunities
@@ -485,7 +503,7 @@ Context
   crmy context ingest [--file <path>]    Add Raw Context and extract Signals/Memory
   crmy context raw-sources               List Raw Context processing receipts
   crmy context signals                   List Signals that need review
-  crmy context signal-groups             List Signals with combined source support
+  crmy context signal-groups             Advanced: inspect combined Signal evidence
   crmy context promote <id>              Promote a Signal to Memory
   crmy context reject <id>               Reject a Signal
   crmy context promote-group <id>        Promote a corroborated Signal to Memory
@@ -549,12 +567,12 @@ Available at `/app` when the server is running. The web UI provides full CRUD fo
 | Section | Pages |
 |---------|-------|
 | **Agent Hub** | Overview, Workspace Agent, Context, Automations, Handoffs |
-| **Customer State** | Contacts, Companies, Opportunities, Use Cases, Activities, Emails |
+| **Customer State** | Contacts, Accounts, Opportunities, Use Cases, Activities, Emails |
 | **System** | Settings (Profile, Appearance, API Keys, Webhooks, Custom Fields, Actors, Registries, Workspace Agent, Database, Systems of Record) |
 
 **Key features:**
 - **Overview** — command-center flow showing Raw Context → Signals → Memory → Handoffs, plus the next items that need attention and a Memory Health tab for review work
-- **Contact/Company drawers** — Detail, Brief, and Graph tabs; Brief surfaces a full structured briefing inline; Graph opens a full-page Obsidian-style context graph
+- **Contact/Account drawers** — Detail, Brief, and Graph tabs; Brief surfaces a full structured briefing inline; Graph opens a full-page Context Graph
 - **Context Graph** — dark canvas visualization showing entity nodes, context clusters, related records, activities, and assignments in a concentric radial layout; sidebar for category filtering; click any node to open a detail Sheet drawer
 - **Context page** — inspect Raw Context, review Signals, browse Current Memory, explore the Context Graph, and trace Memory Lineage; inline keyword/semantic search toggle; semantic fallback to keyword when pgvector is unavailable; **Add Context** flow for pasted notes, transcripts, emails, or files; 15 MB upload guard with clear error
 - **Context import** — paste text or upload a file (PDF, DOCX, TXT, MD); subjects are auto-detected from the document using entity resolution; extracted Raw Context becomes Signals until promoted to Memory
@@ -672,12 +690,17 @@ docs/roadmap-0.8-1.0.md    Enterprise systems-of-record roadmap
 | `CRMY_TENANT_ID` | No | `default` | Tenant slug |
 | `CRMY_ADMIN_EMAIL` | No | — | Auto-create admin on first boot |
 | `CRMY_ADMIN_PASSWORD` | No | — | Admin password (min 12 chars) |
+| `CRMY_ALLOW_PUBLIC_REGISTRATION` | No | — | Set `true` to keep unauthenticated registration open after the first user exists |
 | `CRMY_SEED_DEMO` | No | — | Set `true` to seed demo data on startup |
 | `ENABLE_PGVECTOR` | No | — | Set `true` to enable semantic search migration |
 | `EMBEDDING_PROVIDER` | No | — | Embedding service (`openai` or compatible) |
 | `EMBEDDING_API_KEY` | No | — | API key for embedding provider |
 | `NODE_ENV` | No | — | Set `production` to enable security hardening |
-| `LLM_TIMEOUT_MS` | No | `30000` | Hard timeout (ms) for LLM extraction calls |
+| `LLM_TIMEOUT_MS` | No | `30000` | Hard timeout (ms) for general background LLM calls |
+| `CONTEXT_EXTRACTION_LLM_TIMEOUT_MS` | No | `90000` | Hard timeout (ms) for Raw Context → Signals extraction |
+| `CONTEXT_EXTRACTION_RECOVERY_TIMEOUT_MS` | No | `45000` | Fallback extraction timeout after an empty valid response |
+| `CONTEXT_EXTRACTION_REPAIR_TIMEOUT_MS` | No | `30000` | JSON repair timeout after malformed model output |
+| `RAW_CONTEXT_SUBJECT_MATCH_TIMEOUT_MS` | No | `15000` | Hard timeout (ms) for automatic Raw Context record matching |
 | `WORKFLOW_FAILURE_ALERT_THRESHOLD` | No | `3` | Consecutive failures before a HITL escalation fires |
 
 See [`.env.example`](.env.example) for the full reference with descriptions.
@@ -788,16 +811,19 @@ CRMy's 0.8-1.0 roadmap focuses on becoming the enterprise context and execution 
 
 ---
 
-## What's in 0.8.0
+## What's in 0.8.2
 
-0.8.0 introduces the Systems of Record overlay: governed connections to CRM and warehouse sources, typed-object sync, source metadata for Automations and Sequences, conflict review, and approval-safe external writeback.
+0.8.2 completes the 0.8 release candidate around agent-operable revenue systems: Raw Context ingestion, evidence-backed Signals, trusted Memory, scoped human workspaces, Handoffs, and governed writeback all use the same operating model.
 
+- **Raw Context to trusted Memory** — paste transcripts, emails, notes, or files; CRMy resolves visible customer records, extracts evidence-backed Signals with the Workspace Agent, combines supporting evidence, and promotes trusted Signals to Memory.
+- **Scoped GTM workspaces** — members see their own book of business, managers see their team, and admins/owners keep tenant-wide Command Center, Memory Health, Settings, Operations, and Audit access.
+- **Handoffs as the action boundary** — sensitive or blocked work routes through decision packets with linked records, policy reasons, evidence, reviewer routing, reassignment, and audit receipts.
 - **Systems of Record settings** — connect HubSpot, Salesforce, Databricks, or Snowflake with encrypted credentials, setup guidance, schema discovery, mappings, sync runs, conflicts, and writebacks. HubSpot is the first certified 0.8 connector path; Salesforce and warehouse adapters share the same governed framework and require live environment validation before production rollout.
 - **Governed connector framework** — adapters validate config, test connectivity, discover schema, pull changes, preview writes, execute approved writes, and redact secrets from errors.
-- **Typed sync into CRMy** — external contacts, companies, deals, activities, and warehouse rows map into typed CRMy records while preserving external references and watermarks. Context-entry mappings are reserved for a follow-up connector-author flow and currently surface as sync conflicts instead of silently creating memory.
+- **Typed sync into CRMy** — external contacts, accounts, deals, activities, and warehouse rows map into typed CRMy records while preserving external references and watermarks. Context-entry mappings are reserved for a follow-up connector-author flow and currently surface as sync conflicts instead of silently creating Memory.
 - **Automation and sequence integration** — sync events carry origin, system, record, changed-field, confidence, conflict, and sync-mode metadata; replayed sync events are audit-safe and do not re-run workflows by default.
 - **Writeback safety** — external writes require mappings, allowed fields, writeback modes, idempotency, previews, policy results, HITL-compatible approval, execution receipts, and audit events.
-- **Operator UX polish** — Systems of Record setup is source-agnostic, advanced controls are collapsible, empty states guide the next step, and CLI/MCP docs explain scoped tool exposure.
+- **Operator UX polish** — Systems of Record setup is source-agnostic, advanced controls are collapsible, record pages use consistent detail drawers, Context has Graph and Lineage views, and CLI/MCP docs explain scoped tool exposure.
 
 ## Historical release notes
 
@@ -819,7 +845,7 @@ CRMy's local-first context layer now has the safety rails expected for repeated 
 The extraction pipeline, briefing service, and semantic search layer have been hardened for production multi-agent deployments:
 
 - **Concurrent extraction** — activities are now extracted in parallel (`Promise.allSettled`). A batch of 20 activities drops from ~100s to ~10s.
-- **LLM timeout guard** — all LLM calls have a 30-second hard timeout via `AbortController`. Set `LLM_TIMEOUT_MS` to customize.
+- **LLM timeout guard** — background LLM calls have a 30-second hard timeout via `AbortController`. Raw Context extraction uses a longer 90-second default because it builds a richer context packet before creating Signals. Set `LLM_TIMEOUT_MS`, `CONTEXT_EXTRACTION_LLM_TIMEOUT_MS`, or `RAW_CONTEXT_SUBJECT_MATCH_TIMEOUT_MS` to customize.
 - **Orphaned-entry prevention** — activities with no `subject_type`/`subject_id` are now marked `skipped` instead of writing entries with a corrupted subject.
 - **SQL injection fix** — the `extend_days` parameter in context entry review was string-interpolated into SQL; it is now fully parameterized.
 - **`dropped_entries` in briefings** — when the token budget is exhausted, the briefing response now tells agents exactly what was cut, so they can request it explicitly.
@@ -860,7 +886,7 @@ context_bulk_mark_stale { entry_ids: [...200], reason: "outdated" }
 
 Context is the core value of CRMy. The 0.7 release line made adding it easier:
 
-- **Model-backed subject detection** — paste any text and CRMy uses the configured Workspace Agent to identify likely contacts and companies, then grounds those candidates with entity resolution. No manual subject selection required when records can be confidently matched.
+- **Model-backed subject detection** — paste any text and CRMy uses the configured Workspace Agent to identify likely contacts and accounts, then grounds those candidates with entity resolution. No manual subject selection required when records can be confidently matched.
 - **File upload** — drag and drop PDF, DOCX, TXT, or Markdown files. Text is extracted server-side (`pdf-parse` + `mammoth`) and subjects are detected automatically from the content.
 - **Smart clipboard paste** — when you open the import dialog with an empty body, CRMy checks your clipboard. If it contains >100 characters, a banner offers to use it immediately.
 - **MCP tool: `context_ingest_auto`** — for agents and CLI workflows, this tool ingests a document and resolves subjects automatically with the Workspace Agent plus entity resolution. No subject IDs needed. Pass a `confidence_threshold` to control how aggressively it links to customer records.
@@ -878,7 +904,7 @@ context_ingest_auto {
 
 #### Context Graph — full redesign
 
-The entity context graph (`/contacts/:id/graph`, `/companies/:id/graph`) is now an Obsidian-style dark canvas visualization:
+The entity context graph (`/contacts/:id/graph`, `/accounts/:id/graph`) is now an Obsidian-style dark canvas visualization:
 
 - **6 node types**: entity center, related objects, context type clusters, individual context entries, activities, and assignments
 - **5-zone concentric radial layout**: related records on the right arc, context clusters on the left, leaf entries orbiting their cluster, activities and assignments in the lower arcs
@@ -888,7 +914,7 @@ The entity context graph (`/contacts/:id/graph`, `/companies/:id/graph`) is now 
 
 #### UI simplifications
 
-- **Companies list**: removed the initials circle avatar — companies are organizations, not people
+- **Accounts list**: removed the initials circle avatar — accounts are organizations, not people
 - **Context page**: keyword/semantic search toggle moved inline with the search bar
 - **Dashboard**: Overview now summarizes Raw Context, Signals, Memory, and governed Handoffs; full Memory browsing moved to the dedicated Context page
 - **BriefingPanel**: larger fonts, colored activity-type icons, activity count pill

@@ -4,6 +4,27 @@ All notable changes to CRMy are documented here.
 
 ---
 
+## [0.8.2] — 2026-05-28
+
+### Release Focus
+
+0.8.2 is the release-candidate polish pass for CRMy as an agent-native GTM context and execution layer. It tightens the Raw Context → Signals → Memory → Handoffs flow, improves scoped user workspaces, hardens handoff-backed record creation, and updates package/OpenAPI metadata for the 0.8.2 push.
+
+### Highlights
+
+- **Clearer context lifecycle**: Raw Context ingestion, grouped Signals, trusted Memory, Context Graph, and Memory Lineage now use simpler product language and route users to the right review/action surface.
+- **Scoped human workspaces**: members land on a daily Overview for their book of business, managers see team work, and admins keep the Command Center, Memory Health, Operations, Audit Log, and full Settings.
+- **Action-oriented Handoffs**: decision packets, reassignment, friendlier SLA presets, card/table consistency, and clearer approve/reject behavior make policy-gated work easier to complete.
+- **Workspace Agent safety**: non-admin users can use the admin-configured model without seeing secrets, while sessions and tools stay bounded to the current user’s visible records.
+- **Raw Context extraction resilience**: extraction uses richer context packets, JSON-mode model calls where available, longer bounded timeouts, repair parsing, single-pass multi-subject extraction, and record-proposal handoffs for likely new accounts, contacts, opportunities, or use cases.
+- **Release hardening**: approved record-proposal handoffs now create records with the linked human owner and resolve atomically so failed record creation cannot leave an approval half-applied.
+
+### Notes
+
+Live connector certification remains environment-dependent. HubSpot is the primary certified path; Salesforce, Databricks, and Snowflake share the governed connector framework and should be smoke-tested against real tenant credentials before a production claim.
+
+---
+
 ## [0.7.0] — 2026-04-25
 
 ### Highlights

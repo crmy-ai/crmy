@@ -63,6 +63,8 @@ export function OnboardingEmptyState({
   primary,
   secondary,
   showSampleData = true,
+  iconClassName = 'text-primary',
+  iconBgClassName = 'bg-primary/10',
 }: {
   icon: LucideIcon;
   title: string;
@@ -70,11 +72,13 @@ export function OnboardingEmptyState({
   primary?: EmptyAction;
   secondary?: EmptyAction;
   showSampleData?: boolean;
+  iconClassName?: string;
+  iconBgClassName?: string;
 }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
-        <Icon className="w-7 h-7 text-primary" />
+      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-4 ${iconBgClassName}`}>
+        <Icon className={`w-7 h-7 ${iconClassName}`} />
       </div>
       <h2 className="text-base font-display font-semibold text-foreground mb-1">{title}</h2>
       <p className="text-sm text-muted-foreground max-w-md">{description}</p>

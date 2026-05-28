@@ -1,0 +1,135 @@
+CRMy Raw Context Test Fixture
+Source type: call transcript
+Suggested source label: Northstar pilot planning call
+Suggested subject records: Northstar Labs, Maya Patel, Northstar Agent Context Rollout
+Occurred at: 2026-05-27T18:00:00Z
+
+Use this transcript to test Add Context. It is designed to produce Signals for
+stakeholders, risks, commitments, next steps, evaluation criteria, timeline,
+business impact, and governed writeback readiness.
+
+---
+
+[00:00] Cody Harris, CRMy:
+Thanks for making time, Maya. I want to make sure we are focused on the parts of
+the Northstar Agent Context Rollout that matter before the pilot decision. Last
+time you mentioned governed writebacks, scoped agent tools, and human approval
+before anything reaches HubSpot or Salesforce.
+
+[00:21] Maya Patel, Northstar Labs:
+That is still the core evaluation. Our revenue leadership wants agents to help
+the team keep customer context current, but nobody is comfortable with agents
+writing directly into Salesforce without a clear review step.
+
+[00:42] Cody:
+Understood. Should we treat safe writeback governance as a required pilot
+criterion?
+
+[00:49] Maya:
+Yes. If CRMy can show that raw customer context becomes evidence-backed Signals,
+and only trusted Memory can drive writeback requests, that would answer a big
+concern. The approval trail matters too. Finance and RevOps will ask who
+approved each change and what evidence supported it.
+
+[01:18] Cody:
+Who else needs to be part of that review?
+
+[01:23] Maya:
+Elena Ramirez from Security needs to review the data residency story. She is not
+blocking the pilot yet, but she will block production if we cannot keep customer
+context in our environment or prove that secrets are never exposed in logs.
+
+[01:47] Cody:
+So Elena is the security reviewer, and data residency plus secret handling are
+the main risk areas.
+
+[01:55] Maya:
+Correct. Also, David Kim in Finance needs to see a business case. He is asking
+whether this saves seller time or just creates another admin surface. If we can
+show fewer manual CRM updates and faster follow-up after customer calls, I think
+he will support the pilot budget.
+
+[02:25] Cody:
+Is David the budget approver?
+
+[02:30] Maya:
+Not final approver. He can recommend approval, but the final pilot spend needs
+sign-off from Priya Shah, our CRO. I can sponsor the evaluation internally, but
+Priya owns the final go/no-go.
+
+[02:54] Cody:
+That distinction helps. Maya is evaluation sponsor, David influences Finance,
+and Priya is final executive approval.
+
+[03:02] Maya:
+Yes, that is right. Please do not mark me as the economic buyer. I can push the
+evaluation, but Priya owns the buying decision.
+
+[03:18] Cody:
+Got it. What would make the workshop successful next week?
+
+[03:24] Maya:
+Bring a live example with Northstar data. Show a call transcript creating
+Signals, show two sources supporting the same Signal, then confirm it as Memory.
+After that, show a governed writeback request that updates Salesforce only after
+a human approval. That is the story our team needs.
+
+[03:58] Cody:
+We can do that. Would Thursday, June 4, 2026 work for the workshop?
+
+[04:04] Maya:
+Yes, June 4 works. I can do 10:00 AM Pacific for 60 minutes. Please include our
+RevOps lead, Sam Torres, and Elena from Security. David may join if you include
+the business impact section.
+
+[04:29] Cody:
+I will send a follow-up with the agenda today and include Sam, Elena, and David.
+We will prepare a Northstar-specific demo showing Raw Context to Signals,
+Signals to Memory, Handoff approval, and Salesforce writeback.
+
+[04:48] Maya:
+Perfect. One more thing: we are comparing this against a generic agent memory
+prototype that our data team built in Databricks. It stores summaries, but it
+does not have record ownership, evidence, or approval gates. If CRMy can show
+the operational layer between agent inference and CRM action, that is the
+stronger case.
+
+[05:20] Cody:
+That is useful. So the competitive point is not generic memory. It is trusted
+operational memory with evidence, policy, and writeback controls.
+
+[05:31] Maya:
+Exactly. I want the system to help reps act quickly, but I also need RevOps to
+trust that agents are not inventing CRM truth. If a claim is uncertain, keep it
+as a Signal. If it is supported and confirmed, make it Memory. If it affects
+forecast, budget, security, or CRM writeback, route it through a handoff.
+
+[06:04] Cody:
+That maps cleanly to CRMy. Anything else that could block the pilot?
+
+[06:11] Maya:
+Timeline could become an issue. We want to decide by June 20, 2026 because Q3
+planning starts the following week. If the workshop slips, the pilot probably
+moves to July.
+
+[06:34] Cody:
+I will treat June 20 as the target decision date and June 4 as the required
+workshop date.
+
+[06:41] Maya:
+Yes. Also, please send the security architecture overview before the workshop.
+Elena will not join cold.
+
+[06:52] Cody:
+I will send that by Friday, May 29, 2026.
+
+[06:57] Maya:
+Great. If you send the agenda and security overview, I will forward it to Priya
+and David with my recommendation that we proceed to the pilot workshop.
+
+[07:12] Cody:
+Thanks, Maya. I will follow up today with the meeting invite, agenda, security
+overview owner, and demo plan.
+
+[07:20] Maya:
+Thanks. This is promising if the governance pieces are real.
