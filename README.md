@@ -728,7 +728,8 @@ Step-by-step guides for building agents on CRMy, each with MCP tool calls, CLI e
 - [**Outreach Agent**](docs/recipes/outreach-agent.md) — Briefing-driven outreach with HITL approval flow
 - [**Pipeline Review Agent**](docs/recipes/pipeline-review-agent.md) — Weekly pipeline forecast, Memory Health review, and at-risk deal identification
 - [**Renewal Risk Agent**](docs/recipes/renewal-risk-agent.md) — Account-wide risk review with semantic memory search and HITL escalation
-- [**Memory Health Agent**](docs/recipes/context-governance-agent.md) — Memory review, contradiction detection, and context consolidation
+- [**Context Governance Agent**](docs/recipes/context-governance-agent.md) — Stale review, contradiction detection, and context consolidation
+- [**Public Signal Research Agent**](docs/recipes/public-signal-research-agent.md) - Source-linked public X/Twitter research with TweetClaw
 
 ---
 
@@ -875,7 +876,7 @@ The entity memory graph (`/contacts/:id/graph`, `/companies/:id/graph`) is now a
 - **JWT secret enforcement** — server rejects known-bad secrets in production
 
 ### Documentation
-- **3 agent recipe tutorials** with full MCP tool call sequences
+- **6 agent recipe tutorials** with full MCP tool call sequences
 - **CONTRIBUTING.md** — architecture overview, local dev setup, conventions
 - **`.env.example`** — comprehensive reference for all environment variables
 
