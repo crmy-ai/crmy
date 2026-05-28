@@ -20,6 +20,7 @@
  */
 
 import type { DbPool } from '../../db/pool.js';
+import { CrmyError } from '@crmy/shared';
 
 /** Default timeout for background LLM calls (30 seconds). */
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? 30_000);
@@ -53,6 +54,18 @@ export interface LLMCallOptions {
   maxTokens?: number;
   /** If provided, prefers this model over the one in AgentConfig */
   modelOverride?: string;
+}
+
+export async function requireTenantLLMConfig(db: DbPool, tenantId: string): Promise<void> {
+  const config = await loadConfig(db, tenantId);
+  if (!config?.enabled || !config.model || !config.base_url) {
+    throw new CrmyError(
+      'VALIDATION_ERROR',
+      'Local Workspace Agent is not configured. Configure and enable a model in Model Settings before using AI-generated workflow or sequence content.',
+      412,
+      { reason: 'agent_config_required' },
+    );
+  }
 }
 
 /**

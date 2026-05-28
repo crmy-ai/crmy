@@ -8,15 +8,17 @@ import * as path from 'node:path';
 import crypto from 'node:crypto';
 import type { DbPool } from '../db/pool.js';
 import type { ActorContext, UUID } from '@crmy/shared';
-import { CrmyError } from '@crmy/shared';
+import { CrmyError, workflowAction } from '@crmy/shared';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as accountRepo from '../db/repos/accounts.js';
 import * as oppRepo from '../db/repos/opportunities.js';
 import * as activityRepo from '../db/repos/activities.js';
+import * as rawContextRepo from '../db/repos/raw-context-sources.js';
 import * as hitlRepo from '../db/repos/hitl.js';
 import * as eventRepo from '../db/repos/events.js';
 import * as searchRepo from '../db/repos/search.js';
 import { entityResolve } from '../services/entity-resolve.js';
+import { detectRawContextSubjects } from '../services/raw-context-subjects.js';
 import * as ucRepo from '../db/repos/use-cases.js';
 import * as actorRepo from '../db/repos/actors.js';
 import { emitEvent } from '../events/emitter.js';
@@ -1017,7 +1019,8 @@ export function apiRouter(db: DbPool): Router {
         subject?: string; body_text?: string; ai_prompt?: string; ai_persona?: string;
       };
 
-      const { callLLM } = await import('../agent/providers/llm.js');
+      const { callLLM, requireTenantLLMConfig } = await import('../agent/providers/llm.js');
+      await requireTenantLLMConfig(db, actor.tenant_id);
       const systemPrompt = ai_persona?.trim() ||
         'You are a sales assistant drafting personalized outreach emails. Return JSON: {"subject":"...","body_text":"..."}';
       const userPrompt = [
@@ -1135,88 +1138,6 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
-  // --- Notes (deprecated — proxied to context_entries with context_type=note) ---
-  // These routes are preserved for backward compatibility. New clients should use /context-entries.
-  router.get('/notes', async (req: Request, res: Response) => {
-    try {
-      const actor = getActor(req);
-      const objectType = qs(req.query.object_type);
-      const objectId = qs(req.query.object_id);
-      if (!objectType || !objectId) {
-        res.status(400).json({
-          type: 'https://crmy.ai/errors/validation',
-          title: 'Validation Error',
-          status: 400,
-          detail: 'object_type and object_id parameters are required',
-        });
-        return;
-      }
-      const handler = toolHandler(db, 'context_list');
-      const result = await handler({
-        subject_type: objectType,
-        subject_id: objectId,
-        context_type: 'note',
-        visibility: qs(req.query.visibility),
-        pinned: req.query.pinned !== undefined ? req.query.pinned === 'true' : undefined,
-        limit: Math.min(qn(req.query.limit, 20), 100),
-        cursor: qs(req.query.cursor),
-      }, actor);
-      res.json(result);
-    } catch (err) { handleError(res, err); }
-  });
-
-  router.post('/notes', async (req: Request, res: Response) => {
-    try {
-      const actor = getActor(req);
-      const handler = toolHandler(db, 'context_add');
-      const body = req.body as Record<string, unknown>;
-      // Map legacy note fields to context_entry fields
-      const result = await handler({
-        subject_type: body.object_type,
-        subject_id: body.object_id,
-        context_type: 'note',
-        body: body.body,
-        title: typeof body.body === 'string' ? (body.body as string).slice(0, 120) : undefined,
-        parent_id: body.parent_id,
-        visibility: body.visibility ?? 'internal',
-        mentions: body.mentions ?? [],
-        pinned: body.pinned ?? false,
-      }, actor);
-      res.status(201).json(result);
-    } catch (err) { handleError(res, err); }
-  });
-
-  router.get('/notes/:id', async (req: Request, res: Response) => {
-    try {
-      const actor = getActor(req);
-      const handler = toolHandler(db, 'context_get');
-      const result = await handler({ id: p(req, 'id') }, actor);
-      res.json(result);
-    } catch (err) { handleError(res, err); }
-  });
-
-  router.patch('/notes/:id', async (req: Request, res: Response) => {
-    try {
-      res.status(410).json({
-        type: 'https://crmy.ai/errors/gone',
-        title: 'Notes API removed',
-        status: 410,
-        detail: 'The /notes PATCH endpoint has been removed. Use /context-entries/:id via context_supersede instead.',
-      });
-    } catch (err) { handleError(res, err); }
-  });
-
-  router.delete('/notes/:id', async (req: Request, res: Response) => {
-    try {
-      res.status(410).json({
-        type: 'https://crmy.ai/errors/gone',
-        title: 'Notes API removed',
-        status: 410,
-        detail: 'The /notes DELETE endpoint has been removed. Context entries are immutable — use context_supersede to replace content.',
-      });
-    } catch (err) { handleError(res, err); }
-  });
-
   // --- Workflows ---
   router.get('/workflows', async (req: Request, res: Response) => {
     try {
@@ -1241,6 +1162,56 @@ export function apiRouter(db: DbPool): Router {
       const handler = toolHandler(db, 'workflow_create');
       const result = await handler(req.body, actor);
       res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/workflows/test-draft', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireScopes(actor, 'workflows:read');
+      const draftSchema = z.object({
+        workflow: z.object({
+          name: z.string().optional(),
+          trigger_event: z.string().min(1),
+          trigger_filter: z.record(z.unknown()).default({}),
+          actions: z.array(workflowAction).min(1).max(20),
+          is_active: z.boolean().optional(),
+        }),
+        sample_payload: z.unknown().optional(),
+      });
+      const parsed = draftSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Invalid draft trigger',
+          details: parsed.error.flatten().fieldErrors,
+        });
+        return;
+      }
+      const { dryRunWorkflowDefinition } = await import('../workflows/engine.js');
+      res.json(dryRunWorkflowDefinition(parsed.data.workflow, parsed.data.sample_payload ?? {}));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/workflows/draft-content-preview', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireScopes(actor, 'workflows:read');
+      const previewSchema = z.object({
+        action_type: z.enum(['send_email', 'send_notification']),
+        config: z.record(z.unknown()).default({}),
+        sample_payload: z.unknown().optional(),
+      });
+      const parsed = previewSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Invalid trigger content preview',
+          details: parsed.error.flatten().fieldErrors,
+        });
+        return;
+      }
+      const { previewWorkflowContent } = await import('../workflows/engine.js');
+      const draft = await previewWorkflowContent(db, actor.tenant_id, parsed.data);
+      res.json(draft);
     } catch (err) { handleError(res, err); }
   });
 
@@ -1725,6 +1696,7 @@ export function apiRouter(db: DbPool): Router {
         subject_id: qs(req.query.subject_id),
         context_type: qs(req.query.context_type),
         authored_by: qs(req.query.authored_by),
+        memory_status: qs(req.query.memory_status),
         is_current: req.query.is_current !== undefined ? req.query.is_current === 'true' : undefined,
         query: qs(req.query.q),
         limit: Math.min(qn(req.query.limit, 20), 100),
@@ -1741,6 +1713,229 @@ export function apiRouter(db: DbPool): Router {
       const handler = toolHandler(db, 'context_add');
       const result = await handler(req.body, actor);
       res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/:id/promote', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_signal_promote');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/:id/reject', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_signal_reject');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/context/signal-groups', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_signal_group_list');
+      const result = await handler({
+        status: qs(req.query.status),
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        context_type: qs(req.query.context_type),
+        attention_only: req.query.attention_only === 'true',
+        limit: Math.min(qn(req.query.limit, 20), 100),
+        cursor: qs(req.query.cursor),
+      }, actor);
+      const r = result as { data?: unknown[]; signal_groups?: unknown[]; next_cursor?: string; total: number };
+      res.json({ data: r.data ?? r.signal_groups ?? [], next_cursor: r.next_cursor, total: r.total });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/context/signal-groups/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_signal_group_get');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/signal-groups/:id/promote', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_signal_group_promote');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/signal-groups/:id/reject', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_signal_group_reject');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/context/raw-sources', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireScopes(actor, 'context:read');
+      const result = await rawContextRepo.listRawContextSources(db, actor.tenant_id, {
+        source_type: qs(req.query.source_type),
+        status: qs(req.query.status) as any,
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        limit: Math.min(qn(req.query.limit, 50), 200),
+        cursor: qs(req.query.cursor),
+      });
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/context/raw-sources/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireScopes(actor, 'context:read');
+      const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, p(req, 'id'));
+      if (!source) throw new CrmyError('NOT_FOUND', 'Raw Context source not found', 404);
+      res.json({ raw_context_source: source });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context/raw-sources/:id/reprocess', async (req: Request, res: Response) => {
+    let source: rawContextRepo.RawContextSource | null = null;
+    try {
+      const actor = getActor(req);
+      requireScopes(actor, 'context:write');
+      source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, p(req, 'id'));
+      if (!source) throw new CrmyError('NOT_FOUND', 'Raw Context source not found', 404);
+
+      await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
+        status: 'processing',
+        stage: 'reprocess',
+        failure_reason: null,
+        metadata: {
+          reprocess_requested_at: new Date().toISOString(),
+          reprocess_requested_by: actor.actor_id,
+        },
+      });
+
+      const sourceRefLooksLikeActivity = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(source.source_ref);
+      const canRetryActivity = sourceRefLooksLikeActivity
+        && (source.source_type === 'activity' || source.source_type === 'add_context' || source.source_type.includes('email'));
+
+      let result: unknown;
+      if (canRetryActivity) {
+        const handler = toolHandler(db, 'context_extract');
+        result = await handler({ activity_id: source.source_ref }, actor);
+      } else if (source.raw_excerpt?.trim()) {
+        const handler = toolHandler(db, 'context_ingest_auto');
+        result = await handler({
+          document: source.raw_excerpt,
+          source_label: source.source_label ?? 'Reprocessed Raw Context',
+          confidence_threshold: 0.6,
+        }, actor);
+
+        const r = result as { extracted_count?: number; memory_created?: number; signals_created?: number; skipped?: number };
+        await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
+          status: Number(r.signals_created ?? 0) > 0
+            ? 'needs_review'
+            : Number(r.extracted_count ?? 0) > 0
+              ? 'processed'
+              : 'skipped',
+          stage: 'reprocessed',
+          memory_created: Number(r.memory_created ?? 0),
+          signals_created: Number(r.signals_created ?? 0),
+          skipped: Number(r.skipped ?? 0),
+          failure_reason: Number(r.extracted_count ?? 0) > 0 ? null : 'Reprocess completed but no extractable context was found.',
+        });
+      } else {
+        throw new CrmyError(
+          'VALIDATION_ERROR',
+          'This Raw Context source cannot be reprocessed because CRMy does not have the original activity or source excerpt.',
+          400,
+        );
+      }
+
+      const updated = await rawContextRepo.getRawContextSource(db, actor.tenant_id, source.id);
+      res.json({ raw_context_source: updated, result });
+    } catch (err) {
+      if (source) {
+        const actor = req.actor;
+        await rawContextRepo.updateRawContextSource(db, source.tenant_id, source.source_type, source.source_ref, {
+          status: 'failed',
+          stage: 'reprocess',
+          failure_reason: err instanceof Error ? err.message : 'Reprocess failed.',
+          metadata: actor ? { reprocess_failed_by: actor.actor_id } : undefined,
+        }).catch(() => {});
+      }
+      handleError(res, err);
+    }
+  });
+
+  // Specific read routes must be registered before /context/:id.
+  router.get('/context/search', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_search');
+      const result = await handler({
+        query: qs(req.query.q) ?? '',
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        context_type: qs(req.query.context_type),
+        tag: qs(req.query.tag),
+        current_only: req.query.current_only !== 'false',
+        memory_status: qs(req.query.memory_status),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/context/semantic-search', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_semantic_search');
+      const result = await handler({
+        query: qs(req.query.q) ?? '',
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        context_type: qs(req.query.context_type),
+        tag: qs(req.query.tag),
+        current_only: req.query.current_only !== 'false',
+        memory_status: qs(req.query.memory_status),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/context/stale', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_stale');
+      const result = await handler({
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        limit: Math.min(qn(req.query.limit, 20), 100),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/context/contradictions', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_detect_contradictions');
+      const result = await handler({
+        subject_type: qs(req.query.subject_type),
+        subject_id: qs(req.query.subject_id),
+        context_type: qs(req.query.context_type),
+      }, actor);
+      res.json(result);
     } catch (err) { handleError(res, err); }
   });
 
@@ -1762,41 +1957,6 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
-  // --- Context: Search, Review, Stale ---
-  router.get('/context/search', async (req: Request, res: Response) => {
-    try {
-      const actor = getActor(req);
-      const handler = toolHandler(db, 'context_search');
-      const result = await handler({
-        query: qs(req.query.q) ?? '',
-        subject_type: qs(req.query.subject_type),
-        subject_id: qs(req.query.subject_id),
-        context_type: qs(req.query.context_type),
-        tag: qs(req.query.tag),
-        current_only: req.query.current_only !== 'false',
-        limit: Math.min(qn(req.query.limit, 20), 100),
-      }, actor);
-      res.json(result);
-    } catch (err) { handleError(res, err); }
-  });
-
-  router.get('/context/semantic-search', async (req: Request, res: Response) => {
-    try {
-      const actor = getActor(req);
-      const handler = toolHandler(db, 'context_semantic_search');
-      const result = await handler({
-        query: qs(req.query.q) ?? '',
-        subject_type: qs(req.query.subject_type),
-        subject_id: qs(req.query.subject_id),
-        context_type: qs(req.query.context_type),
-        tag: qs(req.query.tag),
-        current_only: req.query.current_only !== 'false',
-        limit: Math.min(qn(req.query.limit, 20), 100),
-      }, actor);
-      res.json(result);
-    } catch (err) { handleError(res, err); }
-  });
-
   router.post('/context/ingest', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
@@ -1811,77 +1971,36 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
-  // Detect entity subjects mentioned in a block of free text (no LLM required).
-  // Extracts capitalized candidate names via regex, resolves each against the
-  // contacts + accounts tables, and returns resolved matches above medium confidence.
+  router.post('/context/ingest-auto', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_ingest_auto');
+      const result = await handler({
+        document: req.body.text ?? req.body.document,
+        source_label: req.body.source ?? req.body.source_label,
+        context_type: req.body.context_type,
+        confidence_threshold: req.body.confidence_threshold,
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // Detect customer records mentioned in a block of free text.
+  // The Workspace Agent extracts candidate people/companies, then entity resolution
+  // grounds those candidates against contacts + accounts.
   router.post('/context/detect-subjects', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
       const text: string = req.body.text ?? '';
       if (!text.trim()) return res.json({ subjects: [] });
 
-      // Extract candidate names: capitalized 1–4 word phrases, email addresses, domains
-      const candidates = new Set<string>();
+      const detection = await detectRawContextSubjects(db, actor.tenant_id, text, {
+        limit: 15,
+        confidenceThreshold: 0.67,
+        actorId: actor.actor_id,
+      });
 
-      // Multi-word proper nouns (e.g. "Acme Corp", "John Smith", "Salesforce Inc")
-      const phraseRe = /\b([A-Z][a-zA-Z]{1,}(?:\s+[A-Z][a-zA-Z]{1,}){0,3})\b/g;
-      let m: RegExpExecArray | null;
-      while ((m = phraseRe.exec(text)) !== null) {
-        candidates.add(m[1]);
-      }
-      // Email addresses → resolve as contacts
-      const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-      while ((m = emailRe.exec(text)) !== null) {
-        candidates.add(m[0]);
-      }
-
-      // Common English words to skip
-      const STOP = new Set([
-        'The', 'This', 'That', 'These', 'Those', 'With', 'From', 'They', 'Their',
-        'There', 'Here', 'When', 'Where', 'What', 'Which', 'While', 'After',
-        'Before', 'During', 'About', 'Above', 'Below', 'Between', 'Through',
-        'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
-        'January', 'February', 'March', 'April', 'June', 'July', 'August',
-        'September', 'October', 'November', 'December',
-        'Please', 'Thank', 'Thanks', 'Hello', 'Also', 'However', 'Therefore',
-        'Because', 'Since', 'Until', 'Although', 'Unless',
-        'CRM', 'CEO', 'CTO', 'CFO', 'COO', 'VP', 'SVP', 'EVP',
-      ]);
-
-      const filtered = [...candidates].filter(c => {
-        if (c.length < 2) return false;
-        const words = c.split(/\s+/);
-        if (words.every(w => STOP.has(w))) return false;
-        return true;
-      }).slice(0, 15); // cap at 15 candidates to avoid N+1 overload
-
-      // Resolve each candidate
-      const settled = await Promise.allSettled(
-        filtered.map(name =>
-          entityResolve(db, actor.tenant_id, { query: name, entity_type: 'any', limit: 1 }),
-        ),
-      );
-
-      const seen = new Set<string>();
-      const subjects: { type: string; id: string; name: string; confidence: string; match_tier: string }[] = [];
-
-      for (const result of settled) {
-        if (result.status !== 'fulfilled') continue;
-        const r = result.value;
-        if (r.status !== 'resolved' || !r.resolved) continue;
-        if (r.resolved.confidence === 'low') continue;
-        if (seen.has(r.resolved.id)) continue;
-        seen.add(r.resolved.id);
-        subjects.push({
-          type: r.resolved.entity_type,
-          id: r.resolved.id,
-          name: r.resolved.name,
-          confidence: r.resolved.confidence,
-          match_tier: r.resolved.match_reason,
-        });
-      }
-
-      return res.json({ subjects });
+      return res.json({ subjects: detection.subjects, skipped: detection.skipped, candidates: detection.candidates });
     } catch (err) { handleError(res, err); }
   });
 
@@ -1908,56 +2027,28 @@ export function apiRouter(db: DbPool): Router {
         return res.json({ text_preview: '', truncated: false, subjects: [], filename, format });
       }
 
-      // Auto-detect subjects from the extracted text
-      const candidates = new Set<string>();
-      const phraseRe = /\b([A-Z][a-zA-Z]{1,}(?:\s+[A-Z][a-zA-Z]{1,}){0,3})\b/g;
-      let m: RegExpExecArray | null;
-      while ((m = phraseRe.exec(text)) !== null) candidates.add(m[1]);
-      const emailRe = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-      while ((m = emailRe.exec(text)) !== null) candidates.add(m[0]);
-
-      const STOP = new Set([
-        'The', 'This', 'That', 'These', 'Those', 'With', 'From', 'They', 'Their',
-        'There', 'Here', 'When', 'Where', 'What', 'Which', 'While', 'After',
-        'Before', 'During', 'About', 'Above', 'Below', 'Between', 'Through',
-        'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
-        'January', 'February', 'March', 'April', 'June', 'July', 'August',
-        'September', 'October', 'November', 'December',
-        'Please', 'Thank', 'Thanks', 'Hello', 'Also', 'However', 'Therefore',
-        'Because', 'Since', 'Until', 'Although', 'Unless',
-      ]);
-      const filtered = [...candidates].filter(c => {
-        if (c.length < 2) return false;
-        return !c.split(/\s+/).every(w => STOP.has(w));
-      }).slice(0, 15);
-
-      const settled = await Promise.allSettled(
-        filtered.map(name => entityResolve(db, actor.tenant_id, { query: name, entity_type: 'any', limit: 1 })),
-      );
-
-      const seen = new Set<string>();
-      const subjects: { type: string; id: string; name: string; confidence: string; match_tier: string }[] = [];
-      for (const result of settled) {
-        if (result.status !== 'fulfilled') continue;
-        const r = result.value;
-        if (r.status !== 'resolved' || !r.resolved) continue;
-        if (r.resolved.confidence === 'low') continue;
-        if (seen.has(r.resolved.id)) continue;
-        seen.add(r.resolved.id);
-        subjects.push({
-          type: r.resolved.entity_type,
-          id: r.resolved.id,
-          name: r.resolved.name,
-          confidence: r.resolved.confidence,
-          match_tier: r.resolved.match_reason,
+      let detection: Awaited<ReturnType<typeof detectRawContextSubjects>> = { candidates: [], subjects: [], skipped: [] };
+      let subjectDetectionError: string | undefined;
+      try {
+        detection = await detectRawContextSubjects(db, actor.tenant_id, text, {
+          limit: 15,
+          confidenceThreshold: 0.67,
+          actorId: actor.actor_id,
         });
+      } catch (err) {
+        subjectDetectionError = err instanceof Error
+          ? err.message
+          : 'Could not match this file to customer records automatically.';
       }
 
       return res.json({
         text_preview: text.slice(0, 600),
         full_text: text,
         truncated,
-        subjects,
+        subjects: detection.subjects,
+        skipped: detection.skipped,
+        candidates: detection.candidates,
+        subject_detection_error: subjectDetectionError,
         filename,
         format,
         source_label: source_label ?? filename,
@@ -1997,32 +2088,6 @@ export function apiRouter(db: DbPool): Router {
       const actor = getActor(req);
       const handler = toolHandler(db, 'context_consolidate');
       const result = await handler(req.body, actor);
-      res.json(result);
-    } catch (err) { handleError(res, err); }
-  });
-
-  router.get('/context/stale', async (req: Request, res: Response) => {
-    try {
-      const actor = getActor(req);
-      const handler = toolHandler(db, 'context_stale');
-      const result = await handler({
-        subject_type: qs(req.query.subject_type),
-        subject_id: qs(req.query.subject_id),
-        limit: Math.min(qn(req.query.limit, 20), 100),
-      }, actor);
-      res.json(result);
-    } catch (err) { handleError(res, err); }
-  });
-
-  router.get('/context/contradictions', async (req: Request, res: Response) => {
-    try {
-      const actor = getActor(req);
-      const handler = toolHandler(db, 'context_detect_contradictions');
-      const result = await handler({
-        subject_type: qs(req.query.subject_type),
-        subject_id: qs(req.query.subject_id),
-        context_type: qs(req.query.context_type),
-      }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -2338,7 +2403,7 @@ export function apiRouter(db: DbPool): Router {
         return;
       }
       const result = await seedSampleData(db, actor.tenant_id);
-      res.json({ success: true, message: 'Sample data added. Existing records were left unchanged.', sample_data: result });
+      res.json({ success: true, message: 'Sample data added. Demo records were refreshed; your existing records were left unchanged.', sample_data: result });
     } catch (err) { handleError(res, err); }
   });
 

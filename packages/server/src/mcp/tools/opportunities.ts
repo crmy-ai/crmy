@@ -10,6 +10,7 @@ import * as contextRepo from '../../db/repos/context-entries.js';
 import { emitEvent } from '../../events/emitter.js';
 import { CrmyError, notFound, validationError, permissionDenied, duplicateError } from '@crmy/shared';
 import { validateOpportunityTransition } from '../../services/state-machine.js';
+import { assertActionPolicyAllowsMutation, evaluateActionPolicy } from '../../services/action-policy.js';
 import { indexDocument, removeDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import { computeDealHealthScore } from '../../services/scoring.js';
@@ -241,6 +242,13 @@ export function opportunityTools(db: DbPool): ToolDef[] {
         if (input.patch.custom_fields && Object.keys(input.patch.custom_fields).length > 0) {
           input.patch.custom_fields = await validateCustomFields(db, actor.tenant_id, 'opportunity', input.patch.custom_fields);
         }
+        const policy = evaluateActionPolicy({
+          action_type: 'opportunity.update',
+          object_type: 'opportunity',
+          field_names: Object.keys(input.patch),
+          actor,
+        });
+        assertActionPolicyAllowsMutation(policy);
         const opportunity = await oppRepo.updateOpportunity(db, actor.tenant_id, input.id, input.patch, {
           expectedVersion: input.expected_version,
         });
@@ -255,6 +263,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
           objectId: opportunity.id,
           beforeData: before,
           afterData: opportunity,
+          metadata: { action_policy: policy },
         });
         indexDocument(db, 'opportunity', opportunity as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] opportunity index ${opportunity.id}: ${(err as Error).message}`));

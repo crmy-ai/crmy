@@ -22,7 +22,7 @@ export function workflowTools(db: DbPool): ToolDef[] {
     {
       name: 'workflow_create',
       tier: 'admin',
-      description: 'Create an automation workflow triggered by a CRM event (e.g. "contact.created", "opportunity.stage_changed"). Define the trigger event, optional filter conditions, and a sequence of up to 20 typed actions. Supports {{variable}} interpolation in action config fields. Set max_runs_per_hour to rate-limit high-frequency triggers.',
+      description: 'Create an automation trigger that reacts to customer/system events and coordinates governed actions. Triggers can route approvals, update Memory, enroll sequences, run syncs, and request governed writebacks to systems of record. Define the trigger event, optional filters, and up to 20 typed actions. Supports {{variable}} interpolation in action config fields. Use is_active=false to save a paused draft.',
       inputSchema: workflowCreate,
       handler: async (input: z.infer<typeof workflowCreate>, actor: ActorContext) => {
         return runToolOperation(db, actor, 'workflow_create', input, async () => {

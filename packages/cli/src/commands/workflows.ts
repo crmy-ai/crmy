@@ -66,17 +66,20 @@ export function workflowsCommand(): Command {
       const actionAnswers = await inquirer.prompt([
         {
           type: 'list', name: 'type', message: 'Action type:',
-          choices: ['send_notification', 'create_activity', 'create_note', 'add_tag', 'webhook'],
+          choices: ['send_notification', 'create_activity', 'create_context_entry', 'add_tag', 'webhook'],
         },
         { type: 'input', name: 'message', message: 'Action message/body:' },
       ]);
 
       const client = await getClient();
+      const config = actionAnswers.type === 'create_context_entry'
+        ? { body: actionAnswers.message, context_type: 'note' }
+        : { message: actionAnswers.message };
       const result = await client.call('workflow_create', {
         name: answers.name,
         description: answers.description || undefined,
         trigger_event: answers.trigger_event,
-        actions: [{ type: actionAnswers.type, config: { message: actionAnswers.message } }],
+        actions: [{ type: actionAnswers.type, config }],
       });
       const data = JSON.parse(result);
       console.log(`\n  Created workflow: ${data.workflow.id}\n`);

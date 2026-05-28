@@ -1,14 +1,17 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useId } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { TopBar } from '@/components/layout/TopBar';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { VariableAwareField } from '@/components/crm/VariableAwareField';
 import { toast } from '@/hooks/use-toast';
+import { ToastAction } from '@/components/ui/toast';
 import { useAppStore } from '@/store/appStore';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import {
   useSequences, useUpdateSequence,
   useDeleteSequence, useSequenceEnrollments,
@@ -24,6 +27,7 @@ import {
   ChevronRight, MessageSquare, Lightbulb, Variable, Target, Sparkles, Check,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { headerDescription } from '@/lib/headerCopy';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -133,7 +137,7 @@ export const SEQUENCE_TRIGGER_EVENTS = [
 
 const inputCls = 'w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const textareaCls = 'w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring resize-none';
-const btnPrimary = 'px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors';
+const btnPrimary = 'px-4 py-2 rounded-lg bg-yellow-400 text-slate-950 text-sm font-semibold hover:bg-yellow-300 disabled:opacity-40 transition-colors';
 const btnOutline = 'px-3 py-1.5 rounded-lg border border-border text-sm font-medium text-foreground hover:bg-muted transition-colors';
 
 const ENROLLMENT_STATUS: Record<string, { label: string; cls: string; icon: typeof Mail }> = {
@@ -142,6 +146,166 @@ const ENROLLMENT_STATUS: Record<string, { label: string; cls: string; icon: type
   paused:    { label: 'Paused',    cls: 'text-amber-500 bg-amber-500/10 border-amber-500/20',       icon: Clock },
   cancelled: { label: 'Cancelled', cls: 'text-muted-foreground bg-muted border-border',             icon: XCircle },
 };
+
+function SequenceGuidancePanel() {
+  const lanes = [
+    { title: 'Plan', body: 'Define timed outreach, tasks, waits, and branch conditions around the customer goal.', Icon: Target },
+    { title: 'Personalize', body: 'Use Memory and variables so actors can draft relevant messages without manual prompt work.', Icon: Sparkles },
+    { title: 'Advance', body: 'Pause for approvals, react to replies or goals, and keep engagement coordinated over time.', Icon: Check },
+  ];
+
+  return (
+    <div className="grid gap-3 md:grid-cols-3 mb-3">
+      {lanes.map(({ title, body, Icon }) => (
+        <div key={title} className="rounded-xl border border-border bg-card px-3 py-3 flex gap-3 items-start">
+          <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
+            <Icon className="w-4 h-4 text-amber-500" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">{title}</p>
+            <p className="text-sm text-muted-foreground leading-snug">{body}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const SEQUENCE_TEMPLATES: Array<{
+  label: string;
+  description: string;
+  sequence: Partial<Sequence>;
+}> = [
+  {
+    label: 'Meeting follow-up',
+    description: 'Draft a contextual follow-up, wait for reply, then create a next-step task.',
+    sequence: {
+      name: 'Meeting follow-up',
+      description: 'Context-aware follow-up after calls or meetings.',
+      is_active: false,
+      goal_event: 'email.replied',
+      exit_on_reply: true,
+      ai_persona: 'Write concise, specific follow-up that references confirmed Memory and asks for one clear next step.',
+      steps: [
+        { type: 'email', delay_hours: 2, subject: 'Following up on {{account.name}}', body_text: '', ai_generate: true, ai_prompt: 'Draft a follow-up using recent activities, confirmed Memory, open Signals, and the next best action.', require_approval: true },
+        { type: 'wait', delay_days: 3, wait_for: 'reply' },
+        { type: 'task', delay_days: 0, title: 'Review follow-up status for {{contact.first_name}}', due_in_days: 1 },
+      ],
+    },
+  },
+  {
+    label: 'Renewal risk follow-up',
+    description: 'Notify the team, draft a customer touch, and gate risky outreach for approval.',
+    sequence: {
+      name: 'Renewal risk follow-up',
+      description: 'Coordinated engagement for accounts with renewal risk.',
+      is_active: false,
+      goal_event: 'opportunity.stage_changed',
+      exit_on_reply: true,
+      ai_persona: 'Write customer-success outreach that is calm, evidence-backed, and oriented around risk resolution.',
+      steps: [
+        { type: 'notification', delay_hours: 0, title: 'Renewal risk sequence started', body: 'Review Memory and Signals before outreach.' },
+        { type: 'email', delay_days: 1, subject: 'Checking in on next steps', body_text: '', ai_generate: true, ai_prompt: 'Draft a renewal-risk check-in using confirmed Memory, risks, commitments, and recent activity.', require_approval: true },
+        { type: 'task', delay_days: 2, title: 'Confirm risk owner and resolution plan', due_in_days: 2 },
+      ],
+    },
+  },
+  {
+    label: 'Champion engagement',
+    description: 'Keep a champion warm with useful context and a clear internal ask.',
+    sequence: {
+      name: 'Champion engagement',
+      description: 'Light-touch engagement for identified champions.',
+      is_active: false,
+      goal_event: 'email.replied',
+      exit_on_reply: true,
+      ai_persona: 'Write short, useful notes that help a champion move an internal process forward.',
+      steps: [
+        { type: 'email', delay_days: 0, subject: 'Helpful context for {{account.name}}', body_text: '', ai_generate: true, ai_prompt: 'Draft a champion note based on current Memory, known priorities, and open methodology gaps.', require_approval: true },
+        { type: 'wait', delay_days: 5, wait_for: 'reply' },
+        { type: 'task', delay_days: 0, title: 'Refresh champion status and next action', due_in_days: 1 },
+      ],
+    },
+  },
+  {
+    label: 'Handoff prep',
+    description: 'Prepare a human handoff with Memory, Signals, and a recommended next move.',
+    sequence: {
+      name: 'Handoff prep',
+      description: 'Prepare internal context before a human-owned follow-up.',
+      is_active: false,
+      goal_event: 'hitl.resolved',
+      exit_on_reply: true,
+      ai_persona: 'Summarize only evidence-backed customer context and clearly label unconfirmed Signals.',
+      steps: [
+        { type: 'ai_action', delay_hours: 0, prompt: 'Prepare a handoff brief using confirmed Memory, open Signals, recent activity, risks, commitments, and recommended next action.', output_variable: 'handoff_brief', require_approval: true },
+        { type: 'task', delay_hours: 1, title: 'Complete customer handoff review', due_in_days: 1 },
+        { type: 'notification', delay_hours: 0, title: 'Handoff brief ready', body: '{{variables.handoff_brief}}' },
+      ],
+    },
+  },
+];
+
+function SequenceTemplatesPanel() {
+  const { openSequenceEditor } = useAppStore();
+  const [hidden, setHidden] = useState(() => localStorage.getItem('crmy_hide_sequence_templates') === 'true');
+
+  const hide = () => {
+    localStorage.setItem('crmy_hide_sequence_templates', 'true');
+    setHidden(true);
+  };
+  const show = () => {
+    localStorage.removeItem('crmy_hide_sequence_templates');
+    setHidden(false);
+  };
+
+  if (hidden) {
+    return (
+      <div className="mb-3 flex justify-end">
+        <button
+          type="button"
+          onClick={show}
+          className="text-xs font-medium text-muted-foreground hover:text-foreground"
+        >
+          Show sequence templates
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-muted/20 p-3 mb-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Suggested sequence templates</p>
+          <p className="text-sm text-muted-foreground">Start paused, then tune the goal, timing, approval steps, and actor instructions before enrollment.</p>
+        </div>
+        <button
+          type="button"
+          onClick={hide}
+          className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Hide suggested sequence templates"
+          title="Hide templates"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        {SEQUENCE_TEMPLATES.map(template => (
+          <button
+            key={template.label}
+            type="button"
+            onClick={() => openSequenceEditor(null, template.sequence as unknown as Record<string, unknown>)}
+            className="text-left rounded-lg border border-border bg-card px-3 py-2 hover:border-amber-500/40 hover:bg-muted/30 transition-colors"
+          >
+            <p className="text-sm font-semibold text-foreground leading-snug">{template.label}</p>
+            <p className="text-xs text-muted-foreground mt-1 leading-snug">{template.description}</p>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function stepIcon(type: StepType) {
   return STEP_TYPES.find(s => s.value === type)?.icon ?? Mail;
@@ -179,11 +343,32 @@ function EmailStepFields({
   onChange: (patch: Record<string, unknown>) => void;
   vaf: (extra?: Record<string, unknown>) => { extraVariables?: Record<string, unknown> };
 }) {
+  const navigate = useNavigate();
+  const { enabled: agentEnabled, config: agentConfig, connectivity } = useAgentSettings();
   type DraftState = { subject: string; body_text: string } | null;
   const [draft, setDraft] = useState<DraftState>(null);
   const draftMutation = useDraftSequencePreview();
+  const agentReady = agentEnabled && Boolean(agentConfig?.model && agentConfig?.base_url) && connectivity !== 'offline';
+  const aiToggleId = useId();
+  const approvalToggleId = useId();
+
+  const promptConfigureAgent = useCallback(() => {
+    toast({
+      title: 'Configure the Local Workspace Agent',
+      description: 'AI-generated sequence content needs an enabled model in Model Settings.',
+      action: (
+        <ToastAction altText="Open Model Settings" onClick={() => navigate('/settings/model')}>
+          Configure
+        </ToastAction>
+      ),
+    });
+  }, [navigate]);
 
   const handlePreview = useCallback(async () => {
+    if (!agentReady) {
+      promptConfigureAgent();
+      return;
+    }
     setDraft(null);
     try {
       const result = await draftMutation.mutateAsync({
@@ -195,7 +380,7 @@ function EmailStepFields({
     } catch {
       toast({ title: 'Preview failed', description: 'Could not generate draft — check agent configuration.', variant: 'destructive' });
     }
-  }, [draftMutation, step.subject, step.body_text, step.ai_prompt]);
+  }, [agentReady, draftMutation, promptConfigureAgent, step.subject, step.body_text, step.ai_prompt]);
 
   return (
     <div className="space-y-2">
@@ -206,26 +391,54 @@ function EmailStepFields({
         placeholder="e.g. Following up, {{contact.first_name}}"
         {...vaf()}
       />
-      <VariableAwareField
-        as="textarea"
-        label="Body"
-        value={step.body_text ?? ''}
-        onChange={v => onChange({ body_text: v })}
-        placeholder="Email body — supports {{variables}}"
-        rows={4}
-        {...vaf()}
-      />
-      <div className="flex items-center gap-4 flex-wrap">
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={!!step.ai_generate} onChange={e => onChange({ ai_generate: e.target.checked })}
-            className="w-4 h-4 rounded border-border accent-primary" />
-          <span className="text-xs font-medium text-foreground">AI generate content</span>
-        </label>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={!!step.require_approval} onChange={e => onChange({ require_approval: e.target.checked })}
-            className="w-4 h-4 rounded border-border accent-primary" />
-          <span className="text-xs font-medium text-foreground">Require approval before send</span>
-        </label>
+      <div className="grid gap-3 rounded-xl border border-border bg-muted/20 p-3 sm:grid-cols-2">
+        <div className="flex items-start gap-3">
+          <Switch
+            id={aiToggleId}
+            checked={!!step.ai_generate}
+            onCheckedChange={checked => {
+              if (checked && !agentReady) {
+                promptConfigureAgent();
+                return;
+              }
+              onChange({ ai_generate: checked });
+            }}
+            className="mt-0.5 shrink-0"
+          />
+          <div>
+            <label htmlFor={aiToggleId} className="cursor-pointer text-xs font-medium text-foreground">
+              AI generate content
+            </label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Requires the Local Workspace Agent.
+            </p>
+            {!agentReady && (
+              <button
+                type="button"
+                onClick={() => navigate('/settings/model')}
+                className="mt-1 text-xs font-medium text-primary hover:underline"
+              >
+                Configure Model Settings
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex items-start gap-3">
+          <Switch
+            id={approvalToggleId}
+            checked={!!step.require_approval}
+            onCheckedChange={checked => onChange({ require_approval: checked })}
+            className="mt-0.5 shrink-0"
+          />
+          <div>
+            <label htmlFor={approvalToggleId} className="cursor-pointer text-xs font-medium text-foreground">
+              Require approval before send
+            </label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Creates a Handoff before the email is delivered.
+            </p>
+          </div>
+        </div>
       </div>
       {step.ai_generate && (
         <>
@@ -234,14 +447,17 @@ function EmailStepFields({
             label="AI prompt"
             value={step.ai_prompt ?? ''}
             onChange={v => onChange({ ai_prompt: v })}
-            placeholder="Describe what to write, or leave blank for contact-aware generation"
+            placeholder="Describe what to write. CRMy will generate the final body from this prompt, Memory, Signals, and contact context."
             rows={2}
             {...vaf()}
           />
+          <p className="text-xs text-muted-foreground">
+            The email body is generated dynamically when this step runs. Preview helps you test the prompt, but the final send uses the latest context.
+          </p>
           <button
             onClick={handlePreview}
             disabled={draftMutation.isPending}
-            className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 hover:text-amber-500 transition-colors disabled:opacity-50"
           >
             {draftMutation.isPending
               ? <><Loader2 className="w-3 h-3 animate-spin" /> Generating preview…</>
@@ -276,6 +492,22 @@ function EmailStepFields({
             </div>
           )}
         </>
+      )}
+      <VariableAwareField
+        as="textarea"
+        label="Body"
+        value={step.body_text ?? ''}
+        onChange={v => onChange({ body_text: v })}
+        placeholder={step.ai_generate ? 'Dynamic body generated from the AI prompt at run time' : 'Email body — supports {{variables}}'}
+        rows={4}
+        disabled={!!step.ai_generate}
+        className={step.ai_generate ? 'bg-muted/60 border-dashed text-muted-foreground' : undefined}
+        {...vaf()}
+      />
+      {step.ai_generate && (
+        <p className="text-xs text-muted-foreground -mt-1">
+          Turn off AI generate content to write a fixed body manually.
+        </p>
       )}
     </div>
   );
@@ -612,7 +844,7 @@ function EnrollmentSandbox({ enrollment, totalSteps }: { enrollment: Enrollment 
             <button key={t.key} onClick={() => setSandboxTab(t.key)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-t-md text-xs font-medium transition-colors border-b-2 ${
                 sandboxTab === t.key
-                  ? 'border-orange-500 text-orange-500 bg-orange-500/5'
+                  ? 'border-amber-500 text-amber-500 bg-amber-500/5'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}>
               <Icon className="w-3 h-3" />
@@ -635,7 +867,7 @@ function EnrollmentSandbox({ enrollment, totalSteps }: { enrollment: Enrollment 
           ) : (
             activities.map((a: any) => (
               <div key={a.id} className="flex gap-2 items-start">
-                <div className="w-1.5 h-1.5 rounded-full bg-orange-500/60 mt-1.5 shrink-0" />
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500/60 mt-1.5 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-foreground truncate">{a.subject}</p>
                   <p className="text-xs text-muted-foreground">
@@ -805,7 +1037,7 @@ function EnrollmentTab({ sequence }: { sequence: Sequence }) {
                       {e.next_send_at && ` · Next ${new Date(e.next_send_at).toLocaleDateString()}`}
                       {e.exit_reason && ` · ${e.exit_reason.replace(/_/g, ' ')}`}
                       {e.objective && (
-                        <span className="ml-1 text-orange-500 font-medium">· "{e.objective}"</span>
+                        <span className="ml-1 text-amber-500 font-medium">· "{e.objective}"</span>
                       )}
                     </p>
                   </div>
@@ -1200,8 +1432,8 @@ export default function SequencesPage({ embedded }: { embedded?: boolean } = {})
         <TopBar
           title="Sequences"
           icon={Zap}
-          iconClassName="text-orange-500"
-          description={`${headerDescription('Manage multi-step outreach', filtered.length, 'sequence')} • ${active.toLocaleString()} active`}
+          iconClassName="text-amber-500"
+          description={`${headerDescription('Coordinate multi-step customer engagement', filtered.length, 'sequence')} • ${active.toLocaleString()} active`}
         />
       )}
 
@@ -1214,16 +1446,18 @@ export default function SequencesPage({ embedded }: { embedded?: boolean } = {})
       />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pt-2 pb-24 md:pb-6">
+        <SequenceGuidancePanel />
+        <SequenceTemplatesPanel />
         {isLoading ? (
           <div className="space-y-3">{[1, 2, 3].map(i => <div key={i} className="h-16 rounded-xl bg-muted/50 animate-pulse" />)}</div>
         ) : sequences.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
-              <Zap className="w-8 h-8 text-primary" />
+            <div className="w-16 h-16 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-4">
+              <Zap className="w-8 h-8 text-amber-500" />
             </div>
             <h2 className="text-lg font-display font-semibold text-foreground mb-1">No sequences yet</h2>
             <p className="text-sm text-muted-foreground max-w-sm mb-4">
-              Build multi-channel, AI-personalized sequences with email, tasks, webhooks, branches, and AI actions.
+              Sequences coordinate multi-step engagement with timed outreach, tasks, approvals, branching, and context-aware follow-up.
             </p>
             <button onClick={() => openSequenceEditor(null)} className={btnPrimary}>
               <span className="flex items-center gap-1.5"><Plus className="w-4 h-4" /> Create your first sequence</span>

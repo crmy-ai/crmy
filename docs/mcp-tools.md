@@ -210,33 +210,6 @@ Update assignment fields.
 - **Input**: `id` (required), `patch` (title, instructions, due_at, priority)
 - **Output**: `{ assignment, event_id }`
 
-## Note Tools
-
-### note_create
-Add a threaded note to any customer record.
-- **Input**: `object_type` (required: contact|account|opportunity|activity|use_case), `object_id` (required), `body` (required), `parent_id`, `visibility` (internal|external), `mentions`, `pinned`
-- **Output**: `{ note }`
-
-### note_get
-Get a note with its threaded replies.
-- **Input**: `id` (required)
-- **Output**: `{ note, replies }`
-
-### note_list
-List notes for a customer record. Pinned notes appear first.
-- **Input**: `object_type` (required), `object_id` (required), `visibility`, `pinned`, `limit`, `cursor`
-- **Output**: `{ notes, next_cursor, total }`
-
-### note_update
-Update a note's body, visibility, or pinned status.
-- **Input**: `id` (required), `body`, `visibility`, `pinned`
-- **Output**: `{ note }`
-
-### note_delete
-Delete a note and its replies.
-- **Input**: `id` (required)
-- **Output**: `{ deleted: true }`
-
 ## Use Case Tools
 
 ### use_case_create
@@ -530,7 +503,15 @@ Get health report for an account.
 - **Input**: `account_id` (required)
 - **Output**: `{ health_score, open_opps, open_opp_value, last_activity_days, contact_count, activity_count_30d }`
 
-## HITL Tools
+## Action Policy And HITL Tools
+
+CRMy is the policy boundary between agent inference and operational change. Signals can be inferred freely, but writes that affect forecast, customer engagement, assignments, Current Memory, or systems of record pass through scoped tools, Action Policies, HITL approvals, and audit receipts.
+
+Built-in Action Policies protect high-risk operations even before custom HITL rules run:
+- Forecast category changes require approval for non-user actors.
+- Signal promotion requires evidence and may require approval when confidence is low.
+- External writebacks evaluate source authority, allowed fields, writeback mode, idempotency, and object write scopes.
+- Workflow field updates create approval requests instead of directly mutating sensitive fields.
 
 ### hitl_submit_request
 Submit an approval request before high-impact actions.
@@ -555,9 +536,11 @@ Approve or reject a request.
 ## Context Engine Tools
 
 ### context_add
-Store context/knowledge about a customer record.
-- **Input**: `subject_type` (required), `subject_id` (required), `context_type` (required), `body` (required), `title`, `confidence` (0.0–1.0), `tags`, `valid_until`, `structured_data`, `source_activity_id`, `source`, `source_ref`
+Advanced direct write for Current Memory or an evidence-backed Signal about a customer record. For raw transcripts, emails, meeting notes, research, or other messy input, use `context_ingest_auto` or `context_ingest` so CRMy records Raw Context, extracts Signals, and promotes high-confidence Memory.
+- **Input**: `subject_type` (required), `subject_id` (required), `context_type` (required), `body` (required), `title`, `confidence` (0.0–1.0), `memory_status`, `evidence`, `tags`, `valid_until`, `structured_data`, `source_activity_id`, `source`, `source_ref`
 - **Output**: `{ context_entry, event_id, validation_warnings? }`
+- **Lifecycle**: `active` is Current Memory. `signal` is inferred context and requires evidence. Memory past `valid_until` needs review before agents rely on it. Use `context_review` to reconfirm, `context_signal_reject` to dismiss Signals, and `context_supersede` for `superseded` states instead of creating those states directly.
+- **Evidence shape**: each item should include `source_type` plus at least one of `source_id`, `source_ref`, `source_url`, or `snippet`. Prefer `snippet`, `speaker`, `observed_at`, `confidence`, and `rationale` for important claims.
 
 ### context_get
 Get a context entry by ID.
@@ -565,15 +548,57 @@ Get a context entry by ID.
 - **Output**: `{ context_entry }`
 
 ### context_list
-List context entries with filters.
-- **Input**: `subject_type`, `subject_id`, `context_type`, `authored_by`, `is_current`, `tag`, `query`, `structured_data_filter`, `limit`, `cursor`
+List Current Memory or Signals with filters.
+- **Input**: `subject_type`, `subject_id`, `context_type`, `authored_by`, `memory_status` (`active` by default, or `signal`), `is_current`, `tag`, `query`, `structured_data_filter`, `limit`, `cursor`
 - **Output**: `{ context_entries, next_cursor, total }`
 - **Note**: `structured_data_filter` is a JSONB containment filter — e.g. `{ "status": "open" }` finds entries whose `structured_data` contains that key/value pair.
 
+### context_raw_source_list
+List Raw Context processing records.
+- **Input**: `source_type`, `status`, `subject_type`, `subject_id`, `limit`, `cursor`
+- **Output**: `{ raw_context_sources, next_cursor, total }`
+- **Use when**: an agent needs to explain where context came from, whether ingestion succeeded, how many Signals or Memory entries were produced, or why a source failed/skipped.
+
+### context_raw_source_get
+Get one Raw Context processing record.
+- **Input**: `id` (required)
+- **Output**: `{ raw_context_source }`
+
 ### context_search
-Full-text search across context entries using PostgreSQL GIN index.
-- **Input**: `query` (required), `subject_type`, `subject_id`, `context_type`, `tag`, `current_only`, `limit`, `structured_data_filter`
+Full-text search across Memory by default using PostgreSQL GIN index.
+- **Input**: `query` (required), `subject_type`, `subject_id`, `context_type`, `tag`, `current_only`, `memory_status`, `limit`, `structured_data_filter`
 - **Output**: `{ context_entries, total }` — results ranked by relevance
+
+### context_signal_group_list
+List corroborated Signals: evidence-backed claims assembled from related Signals.
+- **Input**: `status`, `subject_type`, `subject_id`, `context_type`, `attention_only`, `limit`, `cursor`
+- **Output**: `{ signal_groups, next_cursor, total }`
+- **Use when**: an agent needs to know which inferred claims are ready for Memory, blocked by policy, or challenged by conflicting evidence.
+
+### context_signal_group_get
+Inspect one corroborated Signal with supporting/conflicting source evidence.
+- **Input**: `id` (required)
+- **Output**: `{ signal_group }`
+
+### context_signal_group_promote
+Promote a trusted corroborated Signal into Current Memory.
+- **Input**: `id` (required)
+- **Output**: `{ signal_group, context_entry, mutation }`
+
+### context_signal_group_reject
+Dismiss a corroborated Signal while preserving evidence for audit.
+- **Input**: `id` (required), `reason`
+- **Output**: `{ signal_group, mutation }`
+
+### context_signal_promote
+Promote an evidence-backed Signal into Current Memory.
+- **Input**: `id` (required), optional edits: `body`, `title`, `structured_data`, `confidence`, `tags`
+- **Output**: `{ context_entry, event_id }`
+
+### context_signal_reject
+Reject a Signal while preserving its evidence for audit.
+- **Input**: `id` (required), `reason`
+- **Output**: `{ context_entry, event_id }`
 
 ### context_supersede
 Supersede an existing context entry with updated content. Marks the old entry as `is_current = false`.
@@ -596,7 +621,7 @@ Invalidate up to 200 context entries in a single parameterized UPDATE. Sets `val
 - **Output**: `{ updated, not_found_or_already_stale, reason, message }`
 
 ### context_stale
-List stale context entries where `valid_until` has passed but `is_current` is still `true`.
+List Current Memory where `valid_until` has passed and the claim needs review before use.
 - **Input**: `subject_type`, `subject_id`, `limit`
 - **Output**: `{ stale_entries, total }`
 
@@ -606,9 +631,14 @@ Catch-up diff for a customer record — shows what changed since a given timesta
 - **Output**: `{ subject_type, subject_id, since, new_entries, superseded_entries, newly_stale, resolved_entries, summary: { new, superseded, newly_stale, resolved } }`
 
 ### context_ingest
-Ingest a raw document (transcript, email, meeting notes, etc.) and auto-extract all structured context entries. Creates an activity as provenance and runs the full extraction pipeline.
+Ingest Raw Context (transcript, email, meeting notes, etc.) and auto-extract structured Signals. Creates an activity as provenance and runs the full extraction pipeline.
 - **Input**: `subject_type` (required), `subject_id` (required), `document` (required), `source_label`
-- **Output**: `{ extracted_count, context_entries, activity_id }`
+- **Output**: `{ extracted_count, memory_created, signals_created, skipped, signals, memory_entries, context_entries, activity_id, raw_context_source, processing_receipt }`
+
+### context_ingest_auto
+Ingest Raw Context and automatically resolve mentioned contacts/accounts before extraction. Requires the configured Workspace Agent: the model identifies likely people and companies, then CRMy grounds them against existing records before creating Signals or Memory.
+- **Input**: `document` (required), `source_label`, `context_type`, `confidence_threshold`
+- **Output**: `{ subjects_resolved, entries_created, memory_created, signals_created, skipped, processing_receipts, low_confidence_skipped }`
 
 ### context_extract
 Re-run the automatic context extraction pipeline on a specific activity. Useful for backfilling or retrying after an error.
@@ -616,12 +646,12 @@ Re-run the automatic context extraction pipeline on a specific activity. Useful 
 - **Output**: `{ extracted_count }`
 
 ### context_stale_assign
-Trigger the stale context review loop for the current tenant on-demand. Normally runs automatically every 60 seconds.
+Trigger the Memory Health review loop for the current tenant on-demand. Normally runs automatically every 60 seconds.
 - **Input**: `limit` (1–100, default 20)
 - **Output**: `{ assignments_created }`
 
 ### briefing_get
-Get a unified briefing for any customer record — assembles the record, related objects, activity timeline, open assignments, context entries, and staleness warnings in one call.
+Get a unified briefing for any customer record — assembles the record, related objects, activity timeline, open assignments, Current Memory, separate unconfirmed Signals, and Memory Health warnings in one call.
 - **Input**: `subject_type` (required), `subject_id` (required), `since`, `context_types`, `include_stale`, `format` (`"json"` | `"text"`), `context_radius` (`"direct"` | `"adjacent"` | `"account_wide"`, default `"direct"`), `token_budget`
 - **Output (json)**: `{ briefing: { record, related, activities, open_assignments, context, stale_warnings, adjacent_context?, token_estimate, truncated?, dropped_entries? } }`
 - **Output (text)**: `{ briefing_text }` — a formatted string ready for prompt injection
@@ -655,7 +685,7 @@ Return the current actor identity based on the authenticated session. Always all
 - **Output**: `{ tenant_id, actor_id, actor_type, role }`
 
 ### actor_expertise
-Query actor knowledge contributions. Two modes:
+Query actor Memory contributions. Two modes:
 - **Mode 1** — pass `actor_id` to see which subjects this actor has contributed context about (ordered by contribution count). Useful for routing reviews.
 - **Mode 2** — pass `subject_type` + `subject_id` to find the actors who know most about that entity.
 - **Input**: `actor_id`, `subject_type`, `subject_id`, `limit` (at least one of actor_id or subject_type+subject_id required)
@@ -743,6 +773,7 @@ Resolve a conflict by choosing local, choosing external, or ignoring it.
 Preview an external writeback before creating a request.
 - **Input**: `system_id` (required), `mapping_id`, `object_type` (required), `external_object` (required), `external_record_id`, `operation` (required), `writeback_mode` (required), `payload`
 - **Output**: `{ preview }`
+- **Policy**: preview includes allowed/blocked status, approval requirement, warnings, mapping source authority, and the Action Policy decision.
 
 ### sor_writeback_request
 Create a governed external writeback request. High-risk writes enter approval-required status.

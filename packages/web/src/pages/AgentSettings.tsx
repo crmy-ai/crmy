@@ -114,6 +114,8 @@ export default function AgentSettings() {
   const [canLogActivities,    setCanLogActivities]    = useState(true);
   const [canWriteObjects,     setCanWriteObjects]     = useState(false);
   const [autoExtractContext,  setAutoExtractContext]  = useState(true);
+  const [autoPromoteSignals,  setAutoPromoteSignals]  = useState(true);
+  const [signalPromotionThreshold, setSignalPromotionThreshold] = useState(0.85);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // ── Danger Zone ──────────────────────────────────────────────────────────
@@ -148,6 +150,8 @@ export default function AgentSettings() {
     setCanLogActivities(config.can_log_activities);
     setCanWriteObjects(config.can_write_objects);
     setAutoExtractContext(config.auto_extract_context !== false); // default true
+    setAutoPromoteSignals(config.auto_promote_signals !== false);
+    setSignalPromotionThreshold(Number(config.signal_auto_promote_threshold ?? 0.85));
   }, [config]);
 
   // Focus textarea when prompt editor opens
@@ -283,6 +287,8 @@ export default function AgentSettings() {
       can_log_activities:     canLogActivities,
       can_create_assignments: canCreateAssignments,
       auto_extract_context:   autoExtractContext,
+      auto_promote_signals:   autoPromoteSignals,
+      signal_auto_promote_threshold: signalPromotionThreshold,
     };
     // Only send api_key if the user entered a new one
     if (newApiKey.trim()) {
@@ -788,7 +794,7 @@ export default function AgentSettings() {
           <div className="flex items-center justify-between py-3 border-t border-border">
             <div>
               <p className="text-sm font-medium text-foreground">Auto-extract context from activities</p>
-              <p className="text-xs text-muted-foreground">Automatically analyzes new activities and writes structured context entries</p>
+              <p className="text-xs text-muted-foreground">Analyzes calls, emails, notes, and transcripts to find Signals</p>
             </div>
             <Switch
               checked={autoExtractContext}
@@ -803,6 +809,80 @@ export default function AgentSettings() {
               }}
               aria-label="Auto-extract context from activities"
             />
+          </div>
+
+          {/* Auto-promote high-confidence signals */}
+          <div className="py-3 border-t border-border space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-foreground">Auto-promote high-confidence Signals</p>
+                <p className="text-xs text-muted-foreground">CRMy can turn very confident extracted Signals into Memory automatically.</p>
+              </div>
+              <Switch
+                checked={autoPromoteSignals}
+                onCheckedChange={async (v) => {
+                  setAutoPromoteSignals(v);
+                  try {
+                    await saveConfig.mutateAsync({ auto_promote_signals: v });
+                  } catch {
+                    setAutoPromoteSignals(!v);
+                    toast({ title: 'Failed to save', variant: 'destructive' });
+                  }
+                }}
+                aria-label="Auto-promote high-confidence Signals"
+              />
+            </div>
+            {autoPromoteSignals && (
+              <div className="rounded-xl border border-border bg-muted/25 p-3 space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">Promotion threshold</p>
+                    <p className="text-xs text-muted-foreground">
+                      Lower is faster. Higher is safer. Items below this stay in Signals for review.
+                    </p>
+                  </div>
+                  <span className="text-sm font-semibold text-primary tabular-nums">{Math.round(signalPromotionThreshold * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.7"
+                  max="0.98"
+                  step="0.01"
+                  value={signalPromotionThreshold}
+                  onChange={(e) => setSignalPromotionThreshold(Number(e.target.value))}
+                  onMouseUp={async (e) => {
+                    const value = Number((e.target as HTMLInputElement).value);
+                    try {
+                      await saveConfig.mutateAsync({ signal_auto_promote_threshold: value });
+                    } catch {
+                      toast({ title: 'Failed to save threshold', variant: 'destructive' });
+                    }
+                  }}
+                  onTouchEnd={async (e) => {
+                    const value = Number((e.target as HTMLInputElement).value);
+                    try {
+                      await saveConfig.mutateAsync({ signal_auto_promote_threshold: value });
+                    } catch {
+                      toast({ title: 'Failed to save threshold', variant: 'destructive' });
+                    }
+                  }}
+                  onBlur={async (e) => {
+                    const value = Number(e.target.value);
+                    try {
+                      await saveConfig.mutateAsync({ signal_auto_promote_threshold: value });
+                    } catch {
+                      toast({ title: 'Failed to save threshold', variant: 'destructive' });
+                    }
+                  }}
+                  className="w-full accent-primary"
+                  aria-label="Signal auto-promotion threshold"
+                />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Faster</span>
+                  <span>Safer</span>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Can write objects */}

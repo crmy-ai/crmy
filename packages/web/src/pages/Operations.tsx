@@ -55,8 +55,8 @@ const DATA_QUALITY_COPY: Record<string, { label: string; description: string }> 
     description: 'Open human handoffs or assignments point to an actor that no longer resolves.',
   },
   current_context_missing_search_index: {
-    label: 'Current context missing search index',
-    description: 'Current memory exists but is missing search rows, so agents may fail to retrieve it.',
+    label: 'Current Memory missing search index',
+    description: 'Current Memory exists but is missing search rows, so agents may fail to retrieve it.',
   },
   stuck_context_outbox_processing: {
     label: 'Stuck context indexing work',
@@ -304,6 +304,7 @@ export default function OperationsPage() {
   const syncRuns: any[] = syncRunsQ.data?.data ?? [];
   const conflicts: any[] = conflictsQ.data?.data ?? [];
   const writebacks: any[] = writebacksQ.data?.data ?? [];
+  const schedulerHealth = statusQ.data?.scheduler_health;
 
   const queueSummary = useMemo(() => {
     const unavailable = queues.filter(q => q.available === false).length;
@@ -422,6 +423,39 @@ export default function OperationsPage() {
                 {queues.map(queue => <QueueCard key={queue.name} queue={queue} />)}
               </div>
             </section>
+
+            {schedulerHealth && (
+              <section>
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-sm font-display font-bold text-foreground">Automation Scheduler</h2>
+                  <span className="text-xs text-muted-foreground">
+                    {schedulerHealth.last_successful_tick_at
+                      ? `Last tick ${new Date(schedulerHealth.last_successful_tick_at).toLocaleTimeString()}`
+                      : 'Waiting for first tick'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                  {[
+                    ['Due sequence steps', schedulerHealth.due_sequence_backlog],
+                    ['Workflow catch-up', schedulerHealth.workflow_catchup_backlog],
+                    ['Failed workflow runs', schedulerHealth.recent_failed_workflow_runs],
+                    ['Failed sequence steps', schedulerHealth.recent_failed_sequence_steps],
+                  ].map(([label, value]) => (
+                    <div key={String(label)} className="rounded-xl border border-border bg-card p-4">
+                      <p className="text-xs text-muted-foreground">{String(label)}</p>
+                      <p className={`mt-1 text-2xl font-display font-bold ${Number(value) > 0 ? 'text-warning' : 'text-foreground'}`}>
+                        {Number(value)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                {schedulerHealth.last_tick_error && (
+                  <div className="mt-3 rounded-xl border border-warning/30 bg-warning/5 p-3 text-sm text-warning">
+                    Last scheduler error: {schedulerHealth.last_tick_error}
+                  </div>
+                )}
+              </section>
+            )}
 
             <section>
               <div className="mb-3 flex items-center justify-between">

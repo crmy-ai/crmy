@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Staleness service — automatically creates assignments for stale context entries.
+ * Memory Health service — automatically creates assignments for Memory that needs review.
  *
- * When a context entry's valid_until has passed, it means the information may be
+ * When Current Memory's valid_until has passed, it means the information may be
  * outdated and needs human or agent verification. This service finds those entries,
  * identifies the actor most knowledgeable about the subject, and creates a review
- * assignment so the stale memory gets actively refreshed rather than silently decaying.
+ * assignment so aging Memory gets actively refreshed rather than silently decaying.
  *
  * Deduplication: uses metadata.stale_context_entry_id to avoid creating duplicate
  * assignments for the same entry.
@@ -52,7 +52,7 @@ async function findBestReviewActor(
 }
 
 /**
- * Check whether an open stale-review assignment already exists for this context entry,
+ * Check whether an open Memory review assignment already exists for this context entry,
  * OR if the entry was reviewed within the last 24 hours (avoids infinite re-trigger loop).
  */
 async function staleAssignmentExists(
@@ -97,6 +97,7 @@ export async function processStaleEntriesForTenant(
      WHERE tenant_id = $1
        AND valid_until < now()
        AND is_current = true
+       AND memory_status = 'active'
      ORDER BY valid_until ASC
      LIMIT $2`,
     [tenantId, limit],
@@ -119,8 +120,8 @@ export async function processStaleEntriesForTenant(
     });
 
     await assignmentRepo.createAssignment(db, tenantId, {
-      title: `Review stale context: ${entry.context_type}`,
-      description: `This ${entry.context_type} entry expired on ${expired} and needs review.\n\n"${snippet}${snippet.length >= 120 ? '...' : ''}"`,
+      title: `Review Memory: ${entry.context_type}`,
+      description: `This ${entry.context_type} Memory reached its review date on ${expired}.\n\n"${snippet}${snippet.length >= 120 ? '...' : ''}"`,
       assignment_type: 'stale_context_review',
       assigned_by: entry.authored_by,
       assigned_to: assignTo,
@@ -138,13 +139,13 @@ export async function processStaleEntriesForTenant(
 }
 
 /**
- * Background worker: process stale context entries across all tenants.
+ * Background worker: process Memory entries that need review across all tenants.
  * Called from the 60s interval worker in index.ts.
  */
 export async function processStaleEntries(db: DbPool, limit = 10): Promise<void> {
   const tenantsResult = await db.query(
     `SELECT DISTINCT tenant_id FROM context_entries
-     WHERE valid_until < now() AND is_current = true
+     WHERE valid_until < now() AND is_current = true AND memory_status = 'active'
      LIMIT 50`,
   );
 

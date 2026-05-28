@@ -45,7 +45,7 @@
     },
     {
       "name": "Context",
-      "description": "Typed, versioned knowledge attached to any customer record"
+      "description": "Raw Context, Signals, and confirmed Memory attached to customer records"
     },
     {
       "name": "Assignments",
@@ -70,10 +70,6 @@
     {
       "name": "Custom Fields",
       "description": "Per-tenant field definitions for any object type"
-    },
-    {
-      "name": "Notes",
-      "description": "Threaded notes on any customer record"
     },
     {
       "name": "Workflows",
@@ -2429,6 +2425,84 @@
             "minimum": 0,
             "maximum": 1
           },
+          "memory_status": {
+            "type": "string",
+            "enum": [
+              "signal",
+              "active",
+              "rejected",
+              "superseded"
+            ],
+            "default": "active"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "source_type": {
+                  "type": "string",
+                  "minLength": 1,
+                  "default": "raw_context",
+                  "description": "Where the evidence came from, such as activity, email, transcript, mcp, context_api, crm_sync, warehouse_sync, support, product_usage, slack, or research."
+                },
+                "source_id": {
+                  "type": "string",
+                  "description": "CRMy record ID for the source when available."
+                },
+                "source_ref": {
+                  "type": "string",
+                  "description": "External or human-readable source reference."
+                },
+                "source_url": {
+                  "type": "string",
+                  "description": "URL or deep link to the source system when available."
+                },
+                "source_label": {
+                  "type": "string",
+                  "description": "Human-readable source label, such as the meeting title or email subject."
+                },
+                "speaker": {
+                  "type": "string",
+                  "description": "Speaker or author for quoted evidence when known."
+                },
+                "snippet": {
+                  "type": "string",
+                  "maxLength": 5000,
+                  "description": "Short quote or excerpt supporting the claim."
+                },
+                "observed_at": {
+                  "type": "string",
+                  "description": "When the source event happened."
+                },
+                "captured_at": {
+                  "type": "string",
+                  "description": "When CRMy captured or processed the source."
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "How strongly this evidence supports the claim."
+                },
+                "rationale": {
+                  "type": "string",
+                  "maxLength": 2000,
+                  "description": "Why this evidence supports the claim."
+                },
+                "verified_at": {
+                  "type": "string",
+                  "description": "When a human or policy last verified this evidence."
+                },
+                "verified_by": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Actor who verified this evidence."
+                }
+              }
+            },
+            "default": []
+          },
           "tags": {
             "type": "array",
             "items": {
@@ -2562,6 +2636,15 @@
             "type": "boolean",
             "default": true
           },
+          "memory_status": {
+            "type": "string",
+            "enum": [
+              "signal",
+              "active",
+              "rejected",
+              "superseded"
+            ]
+          },
           "limit": {
             "type": "integer",
             "minimum": 1,
@@ -2599,6 +2682,15 @@
           "authored_by": {
             "type": "string",
             "format": "uuid"
+          },
+          "memory_status": {
+            "type": "string",
+            "enum": [
+              "signal",
+              "active",
+              "rejected",
+              "superseded"
+            ]
           },
           "is_current": {
             "type": "boolean"
@@ -2969,33 +3061,25 @@
           "trigger_filter": {
             "type": "object",
             "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "op": {
-                      "type": "string",
-                      "enum": [
-                        "eq",
-                        "neq",
-                        "contains",
-                        "starts_with",
-                        "gt",
-                        "lt",
-                        "exists",
-                        "not_exists"
-                      ]
-                    },
-                    "value": {}
-                  },
-                  "required": [
-                    "op"
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "eq",
+                    "neq",
+                    "contains",
+                    "starts_with",
+                    "gt",
+                    "lt",
+                    "exists",
+                    "not_exists"
                   ]
                 },
-                {},
-                {
-                  "type": "null"
-                }
+                "value": {}
+              },
+              "required": [
+                "op"
               ]
             },
             "default": {}
@@ -3020,8 +3104,7 @@
                           "properties": {
                             "message": {
                               "type": "string",
-                              "minLength": 1,
-                              "description": "Notification message body"
+                              "description": "Notification message body. Required unless ai_generate is true."
                             },
                             "channel_id": {
                               "type": "string",
@@ -3035,11 +3118,14 @@
                             "subject": {
                               "type": "string",
                               "description": "Optional subject/title"
+                            },
+                            "ai_generate": {
+                              "type": "boolean"
+                            },
+                            "ai_prompt": {
+                              "type": "string"
                             }
-                          },
-                          "required": [
-                            "message"
-                          ]
+                          }
                         }
                       },
                       "required": [
@@ -3071,8 +3157,7 @@
                             },
                             "body_text": {
                               "type": "string",
-                              "minLength": 1,
-                              "description": "Plain-text email body. Supports {{variables}}."
+                              "description": "Plain-text email body. Supports {{variables}}. Required unless ai_generate is true."
                             },
                             "body_html": {
                               "type": "string",
@@ -3083,23 +3168,25 @@
                               "default": true,
                               "description": "If true, creates a HITL request before sending"
                             },
+                            "ai_generate": {
+                              "type": "boolean"
+                            },
+                            "ai_prompt": {
+                              "type": "string"
+                            },
                             "contact_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             },
                             "account_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             },
                             "opportunity_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             }
                           },
                           "required": [
                             "to_address",
-                            "subject",
-                            "body_text"
+                            "subject"
                           ]
                         }
                       },
@@ -3131,8 +3218,7 @@
                             },
                             "object_id": {
                               "type": "string",
-                              "format": "uuid",
-                              "description": "Entity UUID (defaults to triggered entity ID)"
+                              "description": "Entity UUID or variable (defaults to triggered entity ID)"
                             },
                             "field": {
                               "type": "string",
@@ -3180,12 +3266,10 @@
                               "description": "Activity body/notes. Supports {{variables}}."
                             },
                             "contact_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             },
                             "account_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -3225,8 +3309,7 @@
                               ]
                             },
                             "object_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -3265,8 +3348,7 @@
                               ]
                             },
                             "object_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -3293,8 +3375,8 @@
                           "properties": {
                             "owner_id": {
                               "type": "string",
-                              "format": "uuid",
-                              "description": "UUID of the actor to assign as owner"
+                              "minLength": 1,
+                              "description": "UUID of the actor to assign as owner. Supports {{variables}}."
                             },
                             "object_type": {
                               "type": "string",
@@ -3305,8 +3387,7 @@
                               ]
                             },
                             "object_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -3364,9 +3445,7 @@
                           "type": "object",
                           "properties": {
                             "seconds": {
-                              "type": "integer",
-                              "minimum": 1,
-                              "maximum": 300,
+                              "type": "number",
                               "description": "Delay in seconds (max 300)"
                             }
                           },
@@ -3394,12 +3473,11 @@
                           "properties": {
                             "sequence_id": {
                               "type": "string",
-                              "format": "uuid",
+                              "minLength": 1,
                               "description": "UUID of the sequence to enroll the contact into"
                             },
                             "contact_id": {
                               "type": "string",
-                              "format": "uuid",
                               "description": "Contact UUID override; auto-resolved from event subject if omitted"
                             },
                             "objective": {
@@ -3458,6 +3536,222 @@
                         "type",
                         "config"
                       ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "request_external_writeback"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "system_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "System of record UUID"
+                            },
+                            "mapping_id": {
+                              "type": "string",
+                              "description": "Optional external object mapping UUID"
+                            },
+                            "object_type": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "CRMy object type, e.g. contact or opportunity"
+                            },
+                            "object_id": {
+                              "type": "string",
+                              "description": "Optional CRMy object UUID or variable; defaults to the event subject when omitted"
+                            },
+                            "external_object": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "External object, table, or endpoint name"
+                            },
+                            "external_record_id": {
+                              "type": "string",
+                              "description": "Optional external record identifier"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "enum": [
+                                "create",
+                                "update",
+                                "upsert",
+                                "append_event",
+                                "stored_procedure"
+                              ],
+                              "default": "upsert"
+                            },
+                            "writeback_mode": {
+                              "type": "string",
+                              "enum": [
+                                "append_event",
+                                "mapped_upsert",
+                                "stored_procedure"
+                              ],
+                              "default": "mapped_upsert"
+                            },
+                            "payload": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              ],
+                              "description": "JSON object or templated JSON string"
+                            },
+                            "require_approval": {
+                              "type": "boolean"
+                            },
+                            "allow_source_loop": {
+                              "type": "boolean"
+                            },
+                            "idempotency_key": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "system_id",
+                            "object_type",
+                            "external_object",
+                            "payload"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "run_system_sync"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "system_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "System of record UUID"
+                            },
+                            "mapping_id": {
+                              "type": "string",
+                              "description": "Optional mapping UUID"
+                            },
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "test",
+                                "full",
+                                "incremental",
+                                "replay"
+                              ],
+                              "default": "incremental"
+                            }
+                          },
+                          "required": [
+                            "system_id"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "create_sync_conflict_review"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Review title shown in Handoffs"
+                            },
+                            "instructions": {
+                              "type": "string"
+                            },
+                            "priority": {
+                              "type": "string",
+                              "enum": [
+                                "low",
+                                "normal",
+                                "high",
+                                "urgent"
+                              ],
+                              "default": "normal"
+                            }
+                          },
+                          "required": [
+                            "title"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "create_context_from_external_change"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "subject_type": {
+                              "type": "string"
+                            },
+                            "subject_id": {
+                              "type": "string"
+                            },
+                            "context_type": {
+                              "type": "string",
+                              "default": "note"
+                            },
+                            "body": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Context body. Supports {{variables}}."
+                            }
+                          },
+                          "required": [
+                            "body"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
                     }
                   ]
                 },
@@ -3465,19 +3759,9 @@
                   "type": "object",
                   "properties": {
                     "type": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "create_context_entry"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "create_note"
-                          ]
-                        }
+                      "type": "string",
+                      "enum": [
+                        "create_context_entry"
                       ]
                     },
                     "config": {
@@ -3497,8 +3781,7 @@
                           "type": "string"
                         },
                         "object_id": {
-                          "type": "string",
-                          "format": "uuid"
+                          "type": "string"
                         },
                         "visibility": {
                           "type": "string",
@@ -3565,33 +3848,25 @@
           "trigger_filter": {
             "type": "object",
             "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "object",
-                  "properties": {
-                    "op": {
-                      "type": "string",
-                      "enum": [
-                        "eq",
-                        "neq",
-                        "contains",
-                        "starts_with",
-                        "gt",
-                        "lt",
-                        "exists",
-                        "not_exists"
-                      ]
-                    },
-                    "value": {}
-                  },
-                  "required": [
-                    "op"
+              "type": "object",
+              "properties": {
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "eq",
+                    "neq",
+                    "contains",
+                    "starts_with",
+                    "gt",
+                    "lt",
+                    "exists",
+                    "not_exists"
                   ]
                 },
-                {},
-                {
-                  "type": "null"
-                }
+                "value": {}
+              },
+              "required": [
+                "op"
               ]
             }
           },
@@ -3615,8 +3890,7 @@
                           "properties": {
                             "message": {
                               "type": "string",
-                              "minLength": 1,
-                              "description": "Notification message body"
+                              "description": "Notification message body. Required unless ai_generate is true."
                             },
                             "channel_id": {
                               "type": "string",
@@ -3630,11 +3904,14 @@
                             "subject": {
                               "type": "string",
                               "description": "Optional subject/title"
+                            },
+                            "ai_generate": {
+                              "type": "boolean"
+                            },
+                            "ai_prompt": {
+                              "type": "string"
                             }
-                          },
-                          "required": [
-                            "message"
-                          ]
+                          }
                         }
                       },
                       "required": [
@@ -3666,8 +3943,7 @@
                             },
                             "body_text": {
                               "type": "string",
-                              "minLength": 1,
-                              "description": "Plain-text email body. Supports {{variables}}."
+                              "description": "Plain-text email body. Supports {{variables}}. Required unless ai_generate is true."
                             },
                             "body_html": {
                               "type": "string",
@@ -3678,23 +3954,25 @@
                               "default": true,
                               "description": "If true, creates a HITL request before sending"
                             },
+                            "ai_generate": {
+                              "type": "boolean"
+                            },
+                            "ai_prompt": {
+                              "type": "string"
+                            },
                             "contact_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             },
                             "account_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             },
                             "opportunity_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             }
                           },
                           "required": [
                             "to_address",
-                            "subject",
-                            "body_text"
+                            "subject"
                           ]
                         }
                       },
@@ -3726,8 +4004,7 @@
                             },
                             "object_id": {
                               "type": "string",
-                              "format": "uuid",
-                              "description": "Entity UUID (defaults to triggered entity ID)"
+                              "description": "Entity UUID or variable (defaults to triggered entity ID)"
                             },
                             "field": {
                               "type": "string",
@@ -3775,12 +4052,10 @@
                               "description": "Activity body/notes. Supports {{variables}}."
                             },
                             "contact_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             },
                             "account_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -3820,8 +4095,7 @@
                               ]
                             },
                             "object_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -3860,8 +4134,7 @@
                               ]
                             },
                             "object_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -3888,8 +4161,8 @@
                           "properties": {
                             "owner_id": {
                               "type": "string",
-                              "format": "uuid",
-                              "description": "UUID of the actor to assign as owner"
+                              "minLength": 1,
+                              "description": "UUID of the actor to assign as owner. Supports {{variables}}."
                             },
                             "object_type": {
                               "type": "string",
@@ -3900,8 +4173,7 @@
                               ]
                             },
                             "object_id": {
-                              "type": "string",
-                              "format": "uuid"
+                              "type": "string"
                             }
                           },
                           "required": [
@@ -3959,9 +4231,7 @@
                           "type": "object",
                           "properties": {
                             "seconds": {
-                              "type": "integer",
-                              "minimum": 1,
-                              "maximum": 300,
+                              "type": "number",
                               "description": "Delay in seconds (max 300)"
                             }
                           },
@@ -3989,12 +4259,11 @@
                           "properties": {
                             "sequence_id": {
                               "type": "string",
-                              "format": "uuid",
+                              "minLength": 1,
                               "description": "UUID of the sequence to enroll the contact into"
                             },
                             "contact_id": {
                               "type": "string",
-                              "format": "uuid",
                               "description": "Contact UUID override; auto-resolved from event subject if omitted"
                             },
                             "objective": {
@@ -4053,6 +4322,222 @@
                         "type",
                         "config"
                       ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "request_external_writeback"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "system_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "System of record UUID"
+                            },
+                            "mapping_id": {
+                              "type": "string",
+                              "description": "Optional external object mapping UUID"
+                            },
+                            "object_type": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "CRMy object type, e.g. contact or opportunity"
+                            },
+                            "object_id": {
+                              "type": "string",
+                              "description": "Optional CRMy object UUID or variable; defaults to the event subject when omitted"
+                            },
+                            "external_object": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "External object, table, or endpoint name"
+                            },
+                            "external_record_id": {
+                              "type": "string",
+                              "description": "Optional external record identifier"
+                            },
+                            "operation": {
+                              "type": "string",
+                              "enum": [
+                                "create",
+                                "update",
+                                "upsert",
+                                "append_event",
+                                "stored_procedure"
+                              ],
+                              "default": "upsert"
+                            },
+                            "writeback_mode": {
+                              "type": "string",
+                              "enum": [
+                                "append_event",
+                                "mapped_upsert",
+                                "stored_procedure"
+                              ],
+                              "default": "mapped_upsert"
+                            },
+                            "payload": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "additionalProperties": {}
+                                },
+                                {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              ],
+                              "description": "JSON object or templated JSON string"
+                            },
+                            "require_approval": {
+                              "type": "boolean"
+                            },
+                            "allow_source_loop": {
+                              "type": "boolean"
+                            },
+                            "idempotency_key": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "system_id",
+                            "object_type",
+                            "external_object",
+                            "payload"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "run_system_sync"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "system_id": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "System of record UUID"
+                            },
+                            "mapping_id": {
+                              "type": "string",
+                              "description": "Optional mapping UUID"
+                            },
+                            "mode": {
+                              "type": "string",
+                              "enum": [
+                                "test",
+                                "full",
+                                "incremental",
+                                "replay"
+                              ],
+                              "default": "incremental"
+                            }
+                          },
+                          "required": [
+                            "system_id"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "create_sync_conflict_review"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Review title shown in Handoffs"
+                            },
+                            "instructions": {
+                              "type": "string"
+                            },
+                            "priority": {
+                              "type": "string",
+                              "enum": [
+                                "low",
+                                "normal",
+                                "high",
+                                "urgent"
+                              ],
+                              "default": "normal"
+                            }
+                          },
+                          "required": [
+                            "title"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "create_context_from_external_change"
+                          ]
+                        },
+                        "config": {
+                          "type": "object",
+                          "properties": {
+                            "subject_type": {
+                              "type": "string"
+                            },
+                            "subject_id": {
+                              "type": "string"
+                            },
+                            "context_type": {
+                              "type": "string",
+                              "default": "note"
+                            },
+                            "body": {
+                              "type": "string",
+                              "minLength": 1,
+                              "description": "Context body. Supports {{variables}}."
+                            }
+                          },
+                          "required": [
+                            "body"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "config"
+                      ]
                     }
                   ]
                 },
@@ -4060,19 +4545,9 @@
                   "type": "object",
                   "properties": {
                     "type": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "enum": [
-                            "create_context_entry"
-                          ]
-                        },
-                        {
-                          "type": "string",
-                          "enum": [
-                            "create_note"
-                          ]
-                        }
+                      "type": "string",
+                      "enum": [
+                        "create_context_entry"
                       ]
                     },
                     "config": {
@@ -4092,8 +4567,7 @@
                           "type": "string"
                         },
                         "object_id": {
-                          "type": "string",
-                          "format": "uuid"
+                          "type": "string"
                         },
                         "visibility": {
                           "type": "string",
@@ -7709,7 +8183,7 @@
         "tags": [
           "Context"
         ],
-        "summary": "List context entries",
+        "summary": "List Current Memory and reviewable Signals",
         "security": [
           {
             "BearerAuth": []
@@ -7754,6 +8228,20 @@
             },
             "required": false,
             "name": "authored_by",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "signal",
+                "active",
+                "rejected",
+                "superseded"
+              ]
+            },
+            "required": false,
+            "name": "memory_status",
             "in": "query"
           },
           {
@@ -7848,7 +8336,7 @@
         "tags": [
           "Context"
         ],
-        "summary": "Add a context entry",
+        "summary": "Advanced direct Memory or evidence-backed Signal write",
         "security": [
           {
             "BearerAuth": []
@@ -7888,12 +8376,304 @@
         }
       }
     },
+    "/context/raw-sources": {
+      "get": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "List Raw Context processing records",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "source_type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "processing",
+                "processed",
+                "needs_review",
+                "failed",
+                "skipped"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "contact",
+                "account",
+                "opportunity",
+                "use_case"
+              ]
+            },
+            "required": false,
+            "name": "subject_type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "subject_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context/raw-sources/{id}": {
+      "get": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "Get a Raw Context processing record",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context/ingest": {
+      "post": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "Ingest Raw Context for a known record",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "document": {
+                    "type": "string"
+                  },
+                  "subject_type": {
+                    "type": "string",
+                    "enum": [
+                      "contact",
+                      "account",
+                      "opportunity",
+                      "use_case"
+                    ]
+                  },
+                  "subject_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "source_label": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "subject_type",
+                  "subject_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context/ingest-auto": {
+      "post": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "Ingest Raw Context and automatically resolve mentioned records",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "document": {
+                    "type": "string"
+                  },
+                  "source_label": {
+                    "type": "string"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "context_type": {
+                    "type": "string"
+                  },
+                  "confidence_threshold": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/context/search": {
       "get": {
         "tags": [
           "Context"
         ],
-        "summary": "Full-text search across context entries",
+        "summary": "Full-text search across Memory and Signals",
         "security": [
           {
             "BearerAuth": []
@@ -7959,6 +8739,20 @@
           },
           {
             "schema": {
+              "type": "string",
+              "enum": [
+                "signal",
+                "active",
+                "rejected",
+                "superseded"
+              ]
+            },
+            "required": false,
+            "name": "memory_status",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "integer",
               "minimum": 1,
               "maximum": 100,
@@ -8007,7 +8801,7 @@
         "tags": [
           "Context"
         ],
-        "summary": "List context entries past their valid_until date",
+        "summary": "List Current Memory that needs review",
         "security": [
           {
             "BearerAuth": []
@@ -8062,6 +8856,313 @@
           },
           "401": {
             "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context/signal-groups": {
+      "get": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "List Signal Groups",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "gathering",
+                "ready",
+                "promoted",
+                "blocked",
+                "dismissed",
+                "conflicting"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "contact",
+                "account",
+                "opportunity",
+                "use_case"
+              ]
+            },
+            "required": false,
+            "name": "subject_type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "subject_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "context_type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "required": false,
+            "name": "attention_only",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context/signal-groups/{id}": {
+      "get": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "Get a Signal Group with evidence",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context/signal-groups/{id}/promote": {
+      "post": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "Promote a Signal Group into Current Memory",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "idempotency_key": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context/signal-groups/{id}/reject": {
+      "post": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "Dismiss a Signal Group while preserving evidence",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "idempotency_key": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -8149,6 +9250,174 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ContextEntrySupersede"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextEntryRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context/{id}/promote": {
+      "post": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "Promote an evidence-backed Signal into Current Memory",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "structured_data": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  },
+                  "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "idempotency_key": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContextEntryRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context/{id}/reject": {
+      "post": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "Reject a Signal while preserving evidence for audit",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "idempotency_key": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }

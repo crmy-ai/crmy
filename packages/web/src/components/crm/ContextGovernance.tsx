@@ -60,9 +60,9 @@ function confidence(entry: ContextEntry) {
 function daysStale(entry: ContextEntry) {
   if (!entry.valid_until) return 'No expiry';
   const ms = Date.now() - new Date(entry.valid_until).getTime();
-  if (!Number.isFinite(ms)) return 'Expired';
+  if (!Number.isFinite(ms)) return 'Needs review';
   const days = Math.max(0, Math.floor(ms / 86400000));
-  return days === 0 ? 'Expired today' : `${days}d stale`;
+  return days === 0 ? 'Needs review today' : `${days}d past review`;
 }
 
 function entryTitle(entry: ContextEntry) {
@@ -154,11 +154,11 @@ export function ContextGovernance() {
     if (entryIds.length === 0) return;
     try {
       await markStale.mutateAsync({ entry_ids: entryIds, reason: markReason.trim() || undefined });
-      toast({ title: 'Entries marked stale', description: `${entryIds.length} entries queued for reverification.` });
+      toast({ title: 'Memory marked for review', description: `${entryIds.length} entries queued for reverification.` });
       setMarkIds('');
       setMarkReason('');
     } catch (err) {
-      toast({ title: 'Mark stale failed', description: err instanceof Error ? err.message : 'Could not mark entries stale.', variant: 'destructive' });
+      toast({ title: 'Could not mark Memory for review', description: err instanceof Error ? err.message : 'Could not update entries.', variant: 'destructive' });
     }
   };
 
@@ -195,10 +195,10 @@ export function ContextGovernance() {
   return (
     <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-10 space-y-5">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4">
-        <StatCard icon={<AlertTriangle className="w-4 h-4" />} label="Stale context" value={stats.total} tone={stats.total > 0 ? 'warning' : 'normal'} />
+        <StatCard icon={<AlertTriangle className="w-4 h-4" />} label="Needs Review" value={stats.total} tone={stats.total > 0 ? 'warning' : 'normal'} />
         <StatCard icon={<ClipboardCheck className="w-4 h-4" />} label="Selected for review" value={stats.selected} />
         <div className="rounded-xl border border-border bg-card p-3">
-          <p className="text-xs font-semibold text-muted-foreground mb-2">Noisiest stale types</p>
+          <p className="text-xs font-semibold text-muted-foreground mb-2">Noisiest Memory types</p>
           {stats.noisyTypes.length === 0 ? (
             <p className="text-sm text-foreground">All current</p>
           ) : (
@@ -214,8 +214,8 @@ export function ContextGovernance() {
       <section className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-foreground">Stale Review Queue</p>
-            <p className="text-xs text-muted-foreground">Reconfirm context before agents rely on it.</p>
+            <p className="text-sm font-semibold text-foreground">Memory Review Queue</p>
+            <p className="text-xs text-muted-foreground">Reconfirm or supersede expired Memory before agents rely on it.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={selectAll} disabled={staleEntries.length === 0} className="h-8 px-3 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:bg-muted/50 disabled:opacity-40">Select all</button>
@@ -226,7 +226,7 @@ export function ContextGovernance() {
         {staleQ.isLoading ? (
           <LoadingRow />
         ) : staleEntries.length === 0 ? (
-          <EmptyQueue title="No stale context" subtitle="Current customer memory is inside its validity window." />
+          <EmptyQueue title="No Memory needs review" subtitle="Current Memory is inside its validity window." />
         ) : (
           <div className="divide-y divide-border">
 	            {paginatedStaleEntries.map(entry => (
@@ -266,7 +266,7 @@ export function ContextGovernance() {
       <section className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="px-4 py-3 border-b border-border">
           <p className="text-sm font-semibold text-foreground">Contradiction Scanner</p>
-          <p className="text-xs text-muted-foreground">Scan a customer object for conflicting current context and resolve or assign review.</p>
+          <p className="text-xs text-muted-foreground">Find conflicting Current Memory and resolve it before agents act.</p>
         </div>
         <div className="p-4 grid grid-cols-1 lg:grid-cols-[160px_1fr_220px_auto] gap-3 items-end">
           <label className="space-y-1.5">
@@ -299,7 +299,7 @@ export function ContextGovernance() {
             {contradictionQ.isLoading ? (
               <LoadingRow />
             ) : warnings.length === 0 ? (
-              <EmptyQueue title="No contradictions found" subtitle="Current context for this object is internally consistent." />
+              <EmptyQueue title="No contradictions found" subtitle="Current Memory for this object is internally consistent." />
             ) : (
               <div className="space-y-3">
                 {warnings.map((warning, index) => (
@@ -318,15 +318,15 @@ export function ContextGovernance() {
       </section>
 
       <section className="rounded-xl border border-border bg-card p-4">
-        <p className="text-sm font-semibold text-foreground mb-1">Mark Known-Bad Context Stale</p>
-        <p className="text-xs text-muted-foreground mb-3">Paste entry IDs when a source event invalidates existing memory.</p>
+        <p className="text-sm font-semibold text-foreground mb-1">Mark Memory For Review</p>
+        <p className="text-xs text-muted-foreground mb-3">Paste entry IDs when a source event invalidates existing Memory.</p>
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px_auto] gap-3 items-end">
           <textarea value={markIds} onChange={e => setMarkIds(e.target.value)} rows={3} placeholder="Entry IDs separated by spaces, commas, or new lines" className="w-full px-3 py-2 rounded-md border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground resize-none" />
           <label className="space-y-1.5">
             <span className="text-xs font-medium text-muted-foreground">Reason</span>
             <input value={markReason} onChange={e => setMarkReason(e.target.value)} placeholder="e.g. Contact changed roles" className="w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground" />
           </label>
-          <button onClick={markExplicitIdsStale} disabled={!markIds.trim() || markStale.isPending} className="h-10 px-3 rounded-lg border border-amber-500/30 text-amber-600 text-xs font-semibold hover:bg-amber-500/10 disabled:opacity-40">Mark stale</button>
+          <button onClick={markExplicitIdsStale} disabled={!markIds.trim() || markStale.isPending} className="h-10 px-3 rounded-lg border border-amber-500/30 text-amber-600 text-xs font-semibold hover:bg-amber-500/10 disabled:opacity-40">Needs review</button>
         </div>
       </section>
     </div>

@@ -33,6 +33,7 @@ export interface Contact {
   phone?: string;
   title?: string;
   company_name?: string;
+  account_name?: string;
   account_id?: UUID;
   owner_id?: UUID;
   lifecycle_stage: 'lead' | 'prospect' | 'customer' | 'churned';
@@ -530,7 +531,12 @@ export type WorkflowActionType =
   | 'remove_tag'
   | 'assign_owner'
   | 'create_context_entry'
-  | 'create_note'  // deprecated alias for create_context_entry
+  | 'enroll_in_sequence'
+  | 'hitl_checkpoint'
+  | 'request_external_writeback'
+  | 'run_system_sync'
+  | 'create_sync_conflict_review'
+  | 'create_context_from_external_change'
   | 'webhook'
   | 'wait';
 
@@ -685,6 +691,9 @@ export interface ContextEntry {
   structured_data: Record<string, unknown>;
   tags: string[];
   confidence?: number;
+  /** signal = inferred/unconfirmed; active = confirmed memory. */
+  memory_status?: 'signal' | 'active' | 'rejected' | 'superseded';
+  evidence?: ContextEvidence[];
   is_current: boolean;
   supersedes_id?: UUID;
   source?: string;
@@ -692,6 +701,90 @@ export interface ContextEntry {
   source_activity_id?: UUID;
   valid_until?: string;
   reviewed_at?: string;
+  promoted_at?: string;
+  promoted_by?: UUID;
+  rejected_at?: string;
+  rejected_by?: UUID;
+  rejection_reason?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SignalGroupMember {
+  id: UUID;
+  tenant_id: UUID;
+  signal_group_id: UUID;
+  context_entry_id: UUID;
+  relation: 'supports' | 'conflicts' | 'supersedes';
+  similarity_score: number;
+  evidence_weight: number;
+  source_key?: string;
+  created_at: string;
+  context_entry?: ContextEntry;
+}
+
+export interface SignalGroup {
+  id: UUID;
+  tenant_id: UUID;
+  subject_type: SubjectType;
+  subject_id: UUID;
+  context_type: string;
+  claim_key: string;
+  title?: string | null;
+  normalized_claim: string;
+  status: 'gathering' | 'ready' | 'promoted' | 'blocked' | 'dismissed' | 'conflicting';
+  aggregate_confidence: number;
+  support_count: number;
+  independent_source_count: number;
+  conflict_count: number;
+  evidence_count: number;
+  latest_signal_id?: UUID | null;
+  promoted_context_entry_id?: UUID | null;
+  blocked_reason?: string | null;
+  metadata: Record<string, unknown>;
+  dismissed_at?: string | null;
+  dismissed_by?: UUID | null;
+  created_at: string;
+  updated_at: string;
+  members?: SignalGroupMember[];
+}
+
+export interface ContextEvidence {
+  source_type: string;
+  source_id?: string;
+  source_ref?: string;
+  source_url?: string;
+  source_label?: string;
+  speaker?: string;
+  snippet?: string;
+  observed_at?: string;
+  captured_at?: string;
+  confidence?: number;
+  rationale?: string;
+  verified_at?: string;
+  verified_by?: UUID;
+  [key: string]: unknown;
+}
+
+export interface RawContextSource {
+  id: UUID;
+  tenant_id: UUID;
+  source_type: string;
+  source_ref: string;
+  source_label?: string;
+  subject_type?: SubjectType;
+  subject_id?: UUID;
+  actor_id?: UUID;
+  status: 'pending' | 'processing' | 'processed' | 'needs_review' | 'failed' | 'skipped';
+  stage: string;
+  raw_excerpt?: string;
+  detected_subjects: Array<Record<string, unknown>>;
+  signals_created: number;
+  memory_created: number;
+  skipped: number;
+  failure_reason?: string;
+  metadata: Record<string, unknown>;
+  processed_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -846,6 +939,10 @@ export interface Briefing {
   activities: Activity[];
   open_assignments: Assignment[];
   context_entries: Record<string, ContextEntry[]>;
+  /** Inferred, unconfirmed signals. Agents may cite these as uncertain, but should not act on them without promotion or approval. */
+  signals?: Record<string, ContextEntry[]>;
+  /** Grouped inferred claims with aggregated evidence support. */
+  signal_groups?: SignalGroup[];
   staleness_warnings: ContextEntry[];
   /** Active sequence enrollments for this contact (shows agents what campaigns are running). */
   active_sequences?: ActiveSequenceEnrollment[];

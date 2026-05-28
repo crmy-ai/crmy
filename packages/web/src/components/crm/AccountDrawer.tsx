@@ -19,7 +19,11 @@ const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-backgrou
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
 
 function HealthBadge({ score }: { score: number }) {
-  const color = score >= 80 ? 'text-green-400 bg-green-500/15' : score >= 50 ? 'text-yellow-400 bg-yellow-500/15' : 'text-red-400 bg-red-500/15';
+  const color = score >= 80
+    ? 'text-green-400 bg-green-500/15'
+    : score >= 50
+      ? 'text-yellow-400 bg-yellow-500/15'
+      : 'text-destructive bg-destructive/15';
   return (
     <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold ${color}`}>
       <Heart className="w-3 h-3" /> {score}

@@ -13,15 +13,11 @@ export function hashPassword(password: string): string {
 }
 
 export function verifyPassword(password: string, stored: string): boolean {
-  if (stored.startsWith('scrypt:')) {
-    const parts = stored.split(':');
-    if (parts.length !== 3) return false;
-    const salt = Buffer.from(parts[1], 'hex');
-    const expected = Buffer.from(parts[2], 'hex');
-    const derived = crypto.scryptSync(password, salt, SCRYPT_KEYLEN, SCRYPT_PARAMS);
-    return expected.length === derived.length && crypto.timingSafeEqual(derived, expected);
-  }
-
-  const legacy = crypto.createHash('sha256').update(password).digest('hex');
-  return legacy === stored;
+  if (!stored.startsWith('scrypt:')) return false;
+  const parts = stored.split(':');
+  if (parts.length !== 3) return false;
+  const salt = Buffer.from(parts[1], 'hex');
+  const expected = Buffer.from(parts[2], 'hex');
+  const derived = crypto.scryptSync(password, salt, SCRYPT_KEYLEN, SCRYPT_PARAMS);
+  return expected.length === derived.length && crypto.timingSafeEqual(derived, expected);
 }

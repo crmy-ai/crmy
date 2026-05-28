@@ -9,6 +9,7 @@ import * as ucRepo from '../db/repos/use-cases.js';
 import * as activityRepo from '../db/repos/activities.js';
 import * as assignmentRepo from '../db/repos/assignments.js';
 import * as contextRepo from '../db/repos/context-entries.js';
+import * as signalGroupRepo from '../db/repos/signal-groups.js';
 import * as contextTypeRepo from '../db/repos/context-type-registry.js';
 import { detectContradictions } from './contradictions.js';
 
@@ -123,6 +124,21 @@ function groupByType(entries: ContextEntry[]): Record<string, ContextEntry[]> {
     grouped[e.context_type].push(e);
   }
   return grouped;
+}
+
+function summarizeEvidence(entry: ContextEntry): string | undefined {
+  const evidence = entry.evidence ?? [];
+  if (evidence.length === 0) return undefined;
+  const first = evidence[0];
+  const source = first.source_label ?? first.source_type ?? first.source_ref ?? 'source';
+  const speaker = first.speaker ? `${first.speaker}: ` : '';
+  const snippet = first.snippet
+    ? String(first.snippet).replace(/\s+/g, ' ').slice(0, 180)
+    : undefined;
+  const confidence = first.confidence != null ? `, ${Math.round(Number(first.confidence) * 100)}% support` : '';
+  return snippet
+    ? `Evidence: ${source}${confidence} — "${speaker}${snippet}"`
+    : `Evidence: ${source}${confidence}`;
 }
 
 /** Map plural related-object keys to SubjectType values. */
@@ -244,13 +260,28 @@ export async function assembleBriefing(
   // 6. Subject's own context entries
   const rawContext = await contextRepo.getContextForSubject(db, tenantId, subjectType, subjectId, {
     current_only: !options?.include_stale,
+    memory_status: 'active',
     limit: 200,
+  });
+  const rawSignals = await contextRepo.getContextForSubject(db, tenantId, subjectType, subjectId, {
+    current_only: true,
+    memory_status: 'signal',
+    limit: 50,
+  });
+  const signalGroups = await signalGroupRepo.listSignalGroups(db, tenantId, {
+    subject_type: subjectType,
+    subject_id: subjectId,
+    attention_only: false,
+    limit: 20,
   });
 
   // Filter by requested context types
   const ownEntries = options?.context_types?.length
     ? rawContext.filter(e => options.context_types!.includes(e.context_type))
     : rawContext;
+  const ownSignals = options?.context_types?.length
+    ? rawSignals.filter(e => options.context_types!.includes(e.context_type))
+    : rawSignals;
 
   // 7. Adjacent / account-wide context (priority 2)
   let adjacent_context: AdjacentContext[] | undefined;
@@ -260,7 +291,7 @@ export async function assembleBriefing(
     );
     if (radiusSubjects.length > 0) {
       const allAdjacent = await contextRepo.getContextForSubjectList(
-        db, tenantId, radiusSubjects, { current_only: !options?.include_stale, limit: 500 },
+        db, tenantId, radiusSubjects, { current_only: !options?.include_stale, memory_status: 'active', limit: 500 },
       );
       // Filter by context_types if specified
       const filtered = options?.context_types?.length
@@ -367,6 +398,8 @@ export async function assembleBriefing(
     activities,
     open_assignments,
     context_entries,
+    ...(signalGroups.data.length > 0 ? { signal_groups: signalGroups.data } : {}),
+    ...(ownSignals.length > 0 ? { signals: groupByType(ownSignals) } : {}),
     staleness_warnings,
     ...(active_sequences?.length ? { active_sequences } : {}),
     ...(contradiction_warnings?.length ? { contradiction_warnings } : {}),
@@ -537,7 +570,7 @@ export function formatBriefingText(briefing: Briefing): string {
   }
 
   if (Object.keys(briefing.context_entries).length > 0) {
-    lines.push('--- Context ---');
+    lines.push('--- Memory ---');
     for (const [type, entries] of Object.entries(briefing.context_entries)) {
       lines.push(`  [${type}]`);
       for (const e of entries) {
@@ -545,7 +578,39 @@ export function formatBriefingText(briefing: Briefing): string {
         const title = e.title ? `${e.title}: ` : '';
         const body = e.body.length > 500 ? e.body.slice(0, 500) + '...' : e.body;
         lines.push(`    ${title}${body}${conf}`);
+        const evidence = summarizeEvidence(e);
+        if (evidence) lines.push(`      ${evidence}`);
       }
+    }
+    lines.push('');
+  }
+
+  if (briefing.signals && Object.keys(briefing.signals).length > 0) {
+    lines.push('--- Signals (unconfirmed) ---');
+    lines.push('  Treat these as evidence-backed Signals, not Current Memory.');
+    for (const [type, entries] of Object.entries(briefing.signals)) {
+      lines.push(`  [${type}]`);
+      for (const e of entries) {
+        const conf = e.confidence != null ? ` (${Math.round(e.confidence * 100)}%)` : '';
+        const title = e.title ? `${e.title}: ` : '';
+        const body = e.body.length > 300 ? e.body.slice(0, 300) + '...' : e.body;
+        lines.push(`    ${title}${body}${conf}`);
+        const evidence = summarizeEvidence(e);
+        if (evidence) lines.push(`      ${evidence}`);
+      }
+    }
+    lines.push('');
+  }
+
+  if (briefing.signal_groups?.length) {
+    lines.push('--- Signals with Combined Evidence ---');
+    lines.push('  These are inferred claims where CRMy has combined supporting or conflicting evidence. Do not use unpromoted Signals for writeback or forecast changes without approval.');
+    for (const group of briefing.signal_groups) {
+      const conf = `${Math.round(group.aggregate_confidence * 100)}%`;
+      const title = group.title ?? group.normalized_claim.slice(0, 80);
+      const status = group.status.replace(/_/g, ' ');
+      lines.push(`  [${status}] ${title} (${conf}, ${group.support_count} signals, ${group.independent_source_count} sources)`);
+      if (group.blocked_reason) lines.push(`      ${group.blocked_reason}`);
     }
     lines.push('');
   }
@@ -561,6 +626,8 @@ export function formatBriefingText(briefing: Briefing): string {
           const title = e.title ? `${e.title}: ` : '';
           const body = e.body.length > 300 ? e.body.slice(0, 300) + '...' : e.body;
           lines.push(`      ${title}${body}${conf}`);
+          const evidence = summarizeEvidence(e);
+          if (evidence) lines.push(`        ${evidence}`);
         }
       }
     }

@@ -93,7 +93,8 @@ export async function computeLeadScore(
   const ctxResult = await db.query(
     `SELECT COUNT(*) as cnt FROM context_entries
      WHERE tenant_id = $1 AND subject_type = 'contact' AND subject_id = $2
-       AND is_current = true AND (confidence IS NULL OR confidence >= 0.7)
+       AND is_current = true AND memory_status = 'active'
+       AND (confidence IS NULL OR confidence >= 0.7)
        AND (valid_until IS NULL OR valid_until > now())`,
     [tenantId, contactId],
   );
@@ -187,7 +188,8 @@ export async function computeDealHealthScore(
   const ctxResult = await db.query(
     `SELECT DISTINCT context_type FROM context_entries
      WHERE tenant_id = $1 AND subject_type = 'opportunity' AND subject_id = $2
-       AND is_current = true AND context_type IN ('commitment','stakeholder','next_step')`,
+       AND is_current = true AND memory_status = 'active'
+       AND context_type IN ('commitment','stakeholder','next_step')`,
     [tenantId, opportunityId],
   );
   const foundTypes = new Set((ctxResult.rows as { context_type: string }[]).map(r => r.context_type));
@@ -208,7 +210,7 @@ export async function computeDealHealthScore(
   const riskResult = await db.query(
     `SELECT id, body FROM context_entries
      WHERE tenant_id = $1 AND subject_type = 'opportunity' AND subject_id = $2
-       AND is_current = true AND context_type = 'deal_risk'`,
+       AND is_current = true AND memory_status = 'active' AND context_type = 'deal_risk'`,
     [tenantId, opportunityId],
   );
   const riskCount = riskResult.rows.length;
@@ -250,6 +252,7 @@ export async function refreshStaleScores(db: DbPool): Promise<void> {
      UNION
      SELECT DISTINCT subject_id as id, tenant_id FROM context_entries
      WHERE subject_type = 'contact'
+       AND memory_status = 'active'
        AND updated_at > now() - interval '${REFRESH_WINDOW_MINUTES} minutes'
      LIMIT $1`,
     [REFRESH_BATCH],
@@ -273,6 +276,7 @@ export async function refreshStaleScores(db: DbPool): Promise<void> {
      UNION
      SELECT DISTINCT subject_id as id, tenant_id FROM context_entries
      WHERE subject_type = 'opportunity'
+       AND memory_status = 'active'
        AND updated_at > now() - interval '${REFRESH_WINDOW_MINUTES} minutes'
      LIMIT $1`,
     [REFRESH_BATCH],

@@ -24,7 +24,7 @@ import * as assignmentRepo from '../db/repos/assignments.js';
 import * as activityRepo from '../db/repos/activities.js';
 import { deliverEmail } from '../email/delivery.js';
 import { interpolate, buildVariableContext } from '../workflows/variables.js';
-import { callLLM } from '../agent/providers/llm.js';
+import { callLLM, requireTenantLLMConfig } from '../agent/providers/llm.js';
 import { triggerExtraction } from '../agent/extraction.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -99,10 +99,14 @@ type SequenceStep = EmailStep | NotificationStep | TaskStep | WebhookStep | Wait
 
 // ── Main pump ──────────────────────────────────────────────────────────────────
 
+const inFlightEnrollments = new Set<string>();
+
 /** Called from the 60-second background tick in index.ts */
 export async function processSequenceDue(db: DbPool): Promise<void> {
   const enrollments = await seqRepo.getDueEnrollments(db, 50);
   for (const enrollment of enrollments) {
+    if (inFlightEnrollments.has(enrollment.id)) continue;
+    inFlightEnrollments.add(enrollment.id);
     try {
       await processEnrollment(db, enrollment);
     } catch (err) {
@@ -116,6 +120,8 @@ export async function processSequenceDue(db: DbPool): Promise<void> {
         status: 'failed',
         error: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      inFlightEnrollments.delete(enrollment.id);
     }
   }
 }
@@ -149,6 +155,21 @@ async function executeStep(
   stepIndex: number,
 ): Promise<void> {
   const stepType = (step as { type?: string }).type ?? 'email';
+  const stepEventPayload = {
+    enrollment_id: enrollment.id,
+    sequence_id: sequence.id,
+    step_index: stepIndex,
+    step_type: stepType,
+  };
+  await emitEvent(db, {
+    tenantId: enrollment.tenant_id,
+    eventType: 'sequence.step.started',
+    actorType: 'system',
+    objectType: 'sequence_enrollment',
+    objectId: enrollment.id,
+    afterData: stepEventPayload,
+  });
+  let skippedStep = false;
 
   // Build variable context from contact data
   const contact = await contactRepo.getContact(db, enrollment.tenant_id, enrollment.contact_id);
@@ -187,9 +208,25 @@ async function executeStep(
         break;
       case 'wait':
         await executeWaitStep(db, enrollment, step as WaitStep, stepIndex);
+        await emitEvent(db, {
+          tenantId: enrollment.tenant_id,
+          eventType: 'sequence.step.completed',
+          actorType: 'system',
+          objectType: 'sequence_enrollment',
+          objectId: enrollment.id,
+          afterData: { ...stepEventPayload, next_step: null },
+        });
         return; // Wait steps reschedule without advancing
       case 'branch':
         await executeBranchStep(db, enrollment, sequence, step as BranchStep, stepIndex);
+        await emitEvent(db, {
+          tenantId: enrollment.tenant_id,
+          eventType: 'sequence.step.completed',
+          actorType: 'system',
+          objectType: 'sequence_enrollment',
+          objectId: enrollment.id,
+          afterData: { ...stepEventPayload, next_step: null },
+        });
         return; // Branch steps handle their own advancement
       case 'ai_action':
         await executeAiActionStep(db, enrollment, sequence, step as AiActionStep, stepIndex, varContext, contact);
@@ -203,6 +240,7 @@ async function executeStep(
           status: 'skipped',
           error: `Unknown step type: ${stepType}`,
         });
+        skippedStep = true;
     }
 
     // Advance to next step
@@ -226,6 +264,18 @@ async function executeStep(
       const nextSendAt = new Date(Date.now() + delayMs).toISOString();
       await seqRepo.setCurrentStep(db, enrollment.id, nextIndex, nextSendAt);
     }
+    await emitEvent(db, {
+      tenantId: enrollment.tenant_id,
+      eventType: skippedStep ? 'sequence.step.skipped' : 'sequence.step.completed',
+      actorType: 'system',
+      objectType: 'sequence_enrollment',
+      objectId: enrollment.id,
+      afterData: {
+        ...stepEventPayload,
+        next_step: nextIndex >= steps.length ? null : nextIndex,
+        ...(skippedStep ? { reason: `Unknown step type: ${stepType}` } : {}),
+      },
+    });
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     await seqRepo.logStepExecution(db, {
@@ -252,6 +302,14 @@ async function executeStep(
         [retryAt, retries + 1, enrollment.id],
       );
     }
+    await emitEvent(db, {
+      tenantId: enrollment.tenant_id,
+      eventType: 'sequence.step.failed',
+      actorType: 'system',
+      objectType: 'sequence_enrollment',
+      objectId: enrollment.id,
+      afterData: { ...stepEventPayload, error: errMsg },
+    });
     throw err;
   }
 }
@@ -772,15 +830,11 @@ async function executeAiActionStep(
     enrollment_variables: (enrollment as any).variables ?? {},
   }, null, 2);
 
-  let result = `[AI action executed for contact ${enrollment.contact_id}]`;
-  try {
-    result = await callLLM(db, enrollment.tenant_id, {
-      system: (sequence as any).ai_persona ?? 'You are a helpful sales assistant.',
-      user: `Context:\n${contextSummary}\n\nTask: ${prompt}`,
-    }) ?? result;
-  } catch (err) {
-    console.warn('[sequences] AI action LLM call failed:', err);
-  }
+  await requireTenantLLMConfig(db, enrollment.tenant_id);
+  const result = await callLLM(db, enrollment.tenant_id, {
+    system: (sequence as any).ai_persona ?? 'You are a helpful sales assistant.',
+    user: `Context:\n${contextSummary}\n\nTask: ${prompt}`,
+  });
 
   // Create Activity for the AI action — this also triggers context extraction
   const activity = await activityRepo.createActivity(db, enrollment.tenant_id, {
@@ -833,6 +887,7 @@ async function generateEmailContent(
   contact: any,
 ): Promise<{ subject?: string; body_text?: string } | null> {
   try {
+    await requireTenantLLMConfig(_db, _enrollment.tenant_id);
     const contactInfo = JSON.stringify({
       name: [(contact as any)?.first_name, (contact as any)?.last_name].filter(Boolean).join(' '),
       email: (contact as any)?.email,
@@ -860,6 +915,9 @@ async function generateEmailContent(
       }
     }
   } catch (err) {
+    if (err && typeof err === 'object' && 'details' in err && (err as { details?: { reason?: unknown } }).details?.reason === 'agent_config_required') {
+      throw err;
+    }
     console.warn('[sequences] AI generation failed, using template:', err);
   }
   return null;

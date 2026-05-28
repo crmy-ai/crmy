@@ -44,7 +44,6 @@ function ContactEditForm({
     last_name: contact.last_name ?? '',
     email: contact.email ?? '',
     phone: contact.phone ?? '',
-    company_name: contact.company_name ?? '',
     title: contact.title ?? '',
     lifecycle_stage: contact.lifecycle_stage ?? 'lead',
     source: contact.source ?? '',
@@ -123,7 +122,22 @@ function ContactEditForm({
         {[
           { key: 'email', label: 'Email', type: 'email', placeholder: 'email@example.com' },
           { key: 'phone', label: 'Phone', type: 'tel', placeholder: '(555) 123-4567' },
-          { key: 'company_name', label: 'Company', type: 'text', placeholder: 'Company name' },
+        ].map(f => (
+          <div key={f.key} className="space-y-1.5">
+            <label className={labelClass}>{f.label}</label>
+            <input type={f.type} value={fields[f.key]} onChange={e => set(f.key, e.target.value)} placeholder={f.placeholder} className={inputClass} />
+          </div>
+        ))}
+        <div className="space-y-1.5">
+          <label className={labelClass}>Company</label>
+          <EntityCombobox
+            entityType="account"
+            value={fields.account_id}
+            onChange={v => set('account_id', v)}
+            placeholder="Search companies…"
+          />
+        </div>
+        {[
           { key: 'title', label: 'Title', type: 'text', placeholder: 'Job title' },
           { key: 'source', label: 'Source', type: 'text', placeholder: 'e.g. inbound, referral' },
         ].map(f => (
@@ -150,17 +164,6 @@ function ContactEditForm({
             </select>
           </div>
         )}
-        {/* Account association */}
-        <div className="space-y-1.5">
-          <label className={labelClass}>Company</label>
-          <EntityCombobox
-            entityType="account"
-            value={fields.account_id}
-            onChange={v => set('account_id', v)}
-            placeholder="Search companies…"
-          />
-        </div>
-
         {fieldDefs.length > 0 && (
           <>
             <div className="border-t border-border pt-2">
@@ -270,7 +273,7 @@ export function ContactDrawer() {
 
   const contact = contactData.contact;
   const name: string = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || contact.email || '';
-  const company: string = contact.company_name ?? '';
+  const company: string = contact.account_name ?? contact.company_name ?? '';
   const stage: string = contact.lifecycle_stage ?? '';
   const leadScore: number = contact.lead_score ?? 0;
 

@@ -2,54 +2,104 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Command } from 'commander';
+import { readFile } from 'node:fs/promises';
 import { getClient } from '../client.js';
 
+function parseSubject(subject?: string): { subject_type?: string; subject_id?: string } {
+  if (!subject) return {};
+  const [subject_type, subject_id] = subject.split(':');
+  return { subject_type, subject_id };
+}
+
+function printEntries(entries: Record<string, unknown>[], total?: number, limit = 20): void {
+  if (entries.length === 0) {
+    console.log('No context entries found.');
+    return;
+  }
+  console.table(entries.map((c) => ({
+    id: (c.id as string).slice(0, 8),
+    status: c.memory_status ?? 'active',
+    type: c.context_type,
+    title: ((c.title as string) ?? '').slice(0, 40),
+    subject: `${c.subject_type}:${((c.subject_id as string) ?? '').slice(0, 8)}`,
+    confidence: c.confidence ?? '—',
+    current: c.is_current ? 'yes' : 'no',
+  })));
+  if (total && total > limit) console.log(`\n  Showing ${limit} of ${total} entries`);
+}
+
+function printProcessingReceipt(data: Record<string, unknown>): void {
+  const receipt = data.processing_receipt as Record<string, unknown> | undefined;
+  console.log('\n  Context processed');
+  console.log(`  Memory created:  ${data.memory_created ?? 0}`);
+  console.log(`  Signals created: ${data.signals_created ?? 0}`);
+  console.log(`  Skipped:         ${data.skipped ?? 0}`);
+  if (receipt?.raw_context_source_id) console.log(`  Raw Context:     ${receipt.raw_context_source_id}`);
+  if (receipt?.status) console.log(`  Status:          ${receipt.status}`);
+  if (receipt?.next_action) console.log(`  Next:            ${receipt.next_action}`);
+  console.log('');
+}
+
+function printSignalGroups(groups: Record<string, unknown>[], total?: number, limit = 20): void {
+  if (groups.length === 0) {
+    console.log('No Signal Groups found.');
+    return;
+  }
+  console.table(groups.map((g) => ({
+    id: (g.id as string).slice(0, 8),
+    status: g.status,
+    type: g.context_type,
+    claim: String(g.title ?? g.normalized_claim ?? '').slice(0, 44),
+    confidence: `${Math.round(Number(g.aggregate_confidence ?? 0) * 100)}%`,
+    signals: g.support_count ?? 0,
+    sources: g.independent_source_count ?? 0,
+    conflicts: g.conflict_count ?? 0,
+  })));
+  if (total && total > limit) console.log(`\n  Showing ${limit} of ${total} groups`);
+}
+
 export function contextCommand(): Command {
-  const cmd = new Command('context').description('Manage context entries (knowledge & memory)');
+  const cmd = new Command('context').description('Manage Raw Context, Signals, and Memory');
 
   cmd.command('list')
-    .option('--subject-type <type>', 'Filter by subject type (contact, account, opportunity, use_case)')
-    .option('--subject-id <id>', 'Filter by subject ID')
+    .description('List confirmed Memory and reviewable Signals')
+    .option('--subject <type:id>', 'Filter by subject (contact:UUID, account:UUID, opportunity:UUID, use_case:UUID)')
     .option('--type <contextType>', 'Filter by context type (note, research, objection, etc.)')
-    .option('--current-only', 'Only show current entries (default behavior)')
+    .option('--status <status>', 'Filter by lifecycle status (active, signal, rejected, superseded)')
+    .option('--include-superseded', 'Include non-current entries')
+    .option('--limit <n>', 'Max results', '20')
     .action(async (opts) => {
       const client = await getClient();
+      const subject = parseSubject(opts.subject);
+      const limit = parseInt(opts.limit, 10);
       const result = await client.call('context_list', {
-        subject_type: opts.subjectType,
-        subject_id: opts.subjectId,
+        subject_type: subject.subject_type,
+        subject_id: subject.subject_id,
         context_type: opts.type,
-        is_current: opts.currentOnly ? true : undefined,
-        limit: 20,
+        memory_status: opts.status,
+        is_current: opts.includeSuperseded ? undefined : true,
+        limit,
       });
       const data = JSON.parse(result);
-      if (data.context_entries?.length === 0) {
-        console.log('No context entries found.');
-        return;
-      }
-      console.table(data.context_entries?.map((c: Record<string, unknown>) => ({
-        id: (c.id as string).slice(0, 8),
-        type: c.context_type,
-        title: ((c.title as string) ?? '').slice(0, 40),
-        subject: `${c.subject_type}:${(c.subject_id as string).slice(0, 8)}`,
-        confidence: c.confidence ?? '—',
-        current: c.is_current ? '✓' : '✗',
-      })));
-      if (data.total > 20) console.log(`\n  Showing 20 of ${data.total} entries`);
+      printEntries(data.context_entries ?? data.data ?? [], data.total, limit);
       await client.close();
     });
 
   cmd.command('add')
-    .description('Add context about a customer record')
+    .description('Advanced: write confirmed Memory or an evidence-backed Signal directly')
     .action(async () => {
       const { default: inquirer } = await import('inquirer');
+      console.log('\n  For transcripts, emails, notes, or research, use `crmy context ingest` so CRMy creates Raw Context, extracts Signals, and promotes high-confidence Memory.\n');
       const answers = await inquirer.prompt([
         { type: 'list', name: 'subject_type', message: 'Subject type:', choices: ['contact', 'account', 'opportunity', 'use_case'] },
         { type: 'input', name: 'subject_id', message: 'Subject ID (UUID):' },
         { type: 'list', name: 'context_type', message: 'Context type:', choices: ['note', 'transcript', 'summary', 'research', 'preference', 'objection', 'competitive_intel', 'relationship_map', 'meeting_notes', 'agent_reasoning'] },
+        { type: 'list', name: 'memory_status', message: 'Lifecycle:', choices: [{ name: 'Confirmed Memory', value: 'active' }, { name: 'Signal needing review', value: 'signal' }] },
         { type: 'input', name: 'title', message: 'Title (optional):' },
         { type: 'editor', name: 'body', message: 'Body:' },
         { type: 'input', name: 'confidence', message: 'Confidence (0.0–1.0, optional):' },
         { type: 'input', name: 'source', message: 'Source (e.g. manual, call_transcript, agent_research):' },
+        { type: 'input', name: 'evidence_snippet', message: 'Evidence snippet (required for Signals):', when: (a) => a.memory_status === 'signal' },
       ]);
 
       const client = await getClient();
@@ -59,11 +109,196 @@ export function contextCommand(): Command {
         context_type: answers.context_type,
         title: answers.title || undefined,
         body: answers.body,
+        memory_status: answers.memory_status,
         confidence: answers.confidence ? parseFloat(answers.confidence) : undefined,
         source: answers.source || undefined,
+        evidence: answers.memory_status === 'signal'
+          ? [{ source: answers.source || 'manual', snippet: answers.evidence_snippet || answers.body.slice(0, 500) }]
+          : undefined,
       });
       const data = JSON.parse(result);
-      console.log(`\n  Added context: ${data.context_entry.id}\n`);
+      console.log(`\n  Added ${data.context_entry.memory_status === 'signal' ? 'Signal' : 'Memory'}: ${data.context_entry.id}\n`);
+      await client.close();
+    });
+
+  cmd.command('ingest')
+    .description('Add messy Raw Context and let CRMy extract Signals and Memory')
+    .option('-f, --file <path>', 'Read source text from a file')
+    .option('--subject <type:id>', 'Known subject to attach to, such as contact:UUID')
+    .option('--source <label>', 'Human-readable source label')
+    .option('--auto', 'Resolve mentioned contacts/accounts automatically')
+    .option('--threshold <n>', 'Auto subject resolution confidence threshold for --auto', '0.6')
+    .action(async (opts) => {
+      const { default: inquirer } = await import('inquirer');
+      let document = '';
+      if (opts.file) {
+        document = await readFile(opts.file, 'utf8');
+      } else {
+        const answers = await inquirer.prompt([
+          { type: 'editor', name: 'document', message: 'Paste transcripts, emails, meeting notes, support updates, or research:' },
+        ]);
+        document = answers.document;
+      }
+      const subject = parseSubject(opts.subject);
+      const client = await getClient();
+      const result = await client.call(opts.auto || !subject.subject_type ? 'context_ingest_auto' : 'context_ingest', {
+        document,
+        text: document,
+        subject_type: subject.subject_type,
+        subject_id: subject.subject_id,
+        source_label: opts.source,
+        source: opts.source,
+        confidence_threshold: parseFloat(opts.threshold),
+      });
+      const data = JSON.parse(result);
+      if (data.subjects_resolved) {
+        console.log(`\n  Resolved subjects: ${data.subjects_resolved.length}`);
+        console.table(data.subjects_resolved.map((s: Record<string, unknown>) => ({
+          subject: `${s.entity_type}:${((s.id as string) ?? '').slice(0, 8)}`,
+          name: s.name,
+          memory: s.memory_created ?? 0,
+          signals: s.signals_created ?? 0,
+          status: (s.processing_receipt as Record<string, unknown> | undefined)?.status ?? '—',
+        })));
+      }
+      printProcessingReceipt(data);
+      await client.close();
+    });
+
+  cmd.command('signals')
+    .description('List Signals that need review')
+    .option('--subject <type:id>', 'Filter by subject')
+    .option('--limit <n>', 'Max results', '20')
+    .action(async (opts) => {
+      const client = await getClient();
+      const subject = parseSubject(opts.subject);
+      const limit = parseInt(opts.limit, 10);
+      const result = await client.call('context_list', {
+        subject_type: subject.subject_type,
+        subject_id: subject.subject_id,
+        memory_status: 'signal',
+        is_current: true,
+        limit,
+      });
+      const data = JSON.parse(result);
+      printEntries(data.context_entries ?? data.data ?? [], data.total, limit);
+      await client.close();
+    });
+
+  cmd.command('signal-groups')
+    .description('List grouped, evidence-backed Signal claims')
+    .option('--subject <type:id>', 'Filter by subject')
+    .option('--status <status>', 'Filter by status (gathering, ready, blocked, conflicting, promoted, dismissed)')
+    .option('--all', 'Include groups that do not need attention')
+    .option('--limit <n>', 'Max results', '20')
+    .action(async (opts) => {
+      const client = await getClient();
+      const subject = parseSubject(opts.subject);
+      const limit = parseInt(opts.limit, 10);
+      const result = await client.call('context_signal_group_list', {
+        subject_type: subject.subject_type,
+        subject_id: subject.subject_id,
+        status: opts.status,
+        attention_only: !opts.all,
+        limit,
+      });
+      const data = JSON.parse(result);
+      printSignalGroups(data.signal_groups ?? data.data ?? [], data.total, limit);
+      await client.close();
+    });
+
+  cmd.command('promote-group <id>')
+    .description('Promote a trusted Signal Group into confirmed Memory')
+    .action(async (id) => {
+      const client = await getClient();
+      const result = await client.call('context_signal_group_promote', { id });
+      const data = JSON.parse(result);
+      console.log(`\n  Promoted Signal Group to Memory: ${data.context_entry?.id ?? id}\n`);
+      await client.close();
+    });
+
+  cmd.command('reject-group <id>')
+    .description('Dismiss a Signal Group while preserving evidence for audit')
+    .option('-r, --reason <reason>', 'Reason for rejection')
+    .action(async (id, opts) => {
+      const client = await getClient();
+      await client.call('context_signal_group_reject', { id, reason: opts.reason });
+      console.log(`\n  Rejected Signal Group: ${id}\n`);
+      await client.close();
+    });
+
+  cmd.command('promote <id>')
+    .description('Promote a reviewed Signal into confirmed Memory')
+    .option('-b, --body <body>', 'Edited Memory body')
+    .option('-t, --title <title>', 'Edited title')
+    .option('-c, --confidence <n>', 'Updated confidence')
+    .action(async (id, opts) => {
+      const client = await getClient();
+      const result = await client.call('context_signal_promote', {
+        id,
+        body: opts.body,
+        title: opts.title,
+        confidence: opts.confidence ? parseFloat(opts.confidence) : undefined,
+      });
+      const data = JSON.parse(result);
+      console.log(`\n  Promoted Signal to Memory: ${data.context_entry.id}\n`);
+      await client.close();
+    });
+
+  cmd.command('reject <id>')
+    .description('Reject a Signal while preserving evidence for audit')
+    .option('-r, --reason <reason>', 'Reason for rejection')
+    .action(async (id, opts) => {
+      const client = await getClient();
+      const result = await client.call('context_signal_reject', { id, reason: opts.reason });
+      const data = JSON.parse(result);
+      console.log(`\n  Rejected Signal: ${data.context_entry.id}\n`);
+      await client.close();
+    });
+
+  cmd.command('raw-sources')
+    .description('List Raw Context processing records')
+    .option('--source-type <type>', 'Filter by source type, such as activity, add_context, mcp, context_api')
+    .option('--status <status>', 'Filter by status (processed, needs_review, failed, skipped)')
+    .option('--subject <type:id>', 'Filter by subject')
+    .option('--limit <n>', 'Max results', '50')
+    .action(async (opts) => {
+      const client = await getClient();
+      const subject = parseSubject(opts.subject);
+      const limit = parseInt(opts.limit, 10);
+      const result = await client.call('context_raw_source_list', {
+        source_type: opts.sourceType,
+        status: opts.status,
+        subject_type: subject.subject_type,
+        subject_id: subject.subject_id,
+        limit,
+      });
+      const data = JSON.parse(result);
+      const sources = data.raw_context_sources ?? data.data ?? [];
+      if (sources.length === 0) {
+        console.log('No Raw Context sources found.');
+      } else {
+        console.table(sources.map((s: Record<string, unknown>) => ({
+          id: (s.id as string).slice(0, 8),
+          source: s.source_type,
+          label: ((s.source_label as string) ?? '').slice(0, 34),
+          status: s.status,
+          stage: s.stage,
+          memory: s.memory_created ?? 0,
+          signals: s.signals_created ?? 0,
+          skipped: s.skipped ?? 0,
+        })));
+      }
+      if (data.total > limit) console.log(`\n  Showing ${limit} of ${data.total} sources`);
+      await client.close();
+    });
+
+  cmd.command('raw-source <id>')
+    .description('Show one Raw Context processing record')
+    .action(async (id) => {
+      const client = await getClient();
+      const result = await client.call('context_raw_source_get', { id });
+      console.log(JSON.parse(result));
       await client.close();
     });
 
@@ -101,7 +336,7 @@ export function contextCommand(): Command {
     });
 
   cmd.command('search <query>')
-    .description('Full-text search across context entries')
+    .description('Full-text search across Memory and Signals')
     .option('--subject <subject>', 'Filter by subject (type:UUID)')
     .option('--type <contextType>', 'Filter by context type')
     .option('--tag <tag>', 'Filter by tag')
@@ -126,6 +361,7 @@ export function contextCommand(): Command {
       const data = JSON.parse(result);
       if (data.context_entries?.length === 0) {
         console.log('No results found.');
+        await client.close();
         return;
       }
       console.table(data.context_entries?.map((c: Record<string, unknown>) => ({
@@ -165,6 +401,7 @@ export function contextCommand(): Command {
       const data = JSON.parse(result);
       if (data.stale_entries?.length === 0) {
         console.log('No stale entries found.');
+        await client.close();
         return;
       }
       console.table(data.stale_entries?.map((c: Record<string, unknown>) => ({

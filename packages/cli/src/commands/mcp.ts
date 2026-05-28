@@ -16,6 +16,23 @@ export function mcpCommand(): Command {
   return new Command('mcp')
     .description('Start the local stdio MCP server for agents and IDEs')
     .option('--config <path>', 'Explicit path to a .crmy.json config file')
+    .addHelpText('after', `
+
+Examples:
+  $ crmy init --yes
+  $ crmy doctor
+  $ claude mcp add crmy -- npx @crmy/cli mcp
+
+Configuration lookup order:
+  1. --config <path>
+  2. ./.crmy.json
+  3. ~/.crmy/config.json
+  4. DATABASE_URL and CRMY_API_KEY environment variables
+
+Agent guidance:
+  Use context_ingest_auto for messy transcripts, emails, notes, and research.
+  Use context_add only for advanced direct Memory or evidence-backed Signal writes.
+`)
     .action(async (opts) => {
       // IMPORTANT: stdout is the MCP protocol pipe — all diagnostic output MUST
       // go to stderr so it does not corrupt the binary MCP framing.

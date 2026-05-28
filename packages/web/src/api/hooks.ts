@@ -717,7 +717,19 @@ export function useDbConfig() {
       user: string;
       ssl: string | null;
       pgvector_enabled?: boolean;
-      sample_data?: { seeded: boolean; counts: { accounts: number; contacts: number; opportunities: number; context_entries: number } };
+      sample_data?: {
+        seeded: boolean;
+        counts: {
+          accounts: number;
+          contacts: number;
+          opportunities: number;
+          context_entries: number;
+          signals?: number;
+          memory?: number;
+          raw_context_sources?: number;
+          handoffs?: number;
+        };
+      };
     }>('admin/db-config'),
   });
 }
@@ -747,19 +759,12 @@ export function useSeedSampleData() {
       qc.invalidateQueries({ queryKey: ['use-cases'] });
       qc.invalidateQueries({ queryKey: ['activities'] });
       qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['signal-groups'] });
+      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
+      qc.invalidateQueries({ queryKey: ['hitl'] });
+      qc.invalidateQueries({ queryKey: ['hitl-requests'] });
+      qc.invalidateQueries({ queryKey: ['assignments'] });
     },
-  });
-}
-
-// Notes
-export function useNotes(params: { object_type: string; object_id: string }) {
-  return useList('notes', 'notes', params);
-}
-export function useCreateNote() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (data: Record<string, unknown>) => api.post('notes', data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['notes'] }),
   });
 }
 
@@ -899,6 +904,7 @@ export function useContextEntries(params?: {
   subject_type?: string;
   subject_id?: string;
   context_type?: string;
+  memory_status?: 'signal' | 'active' | 'rejected' | 'superseded';
   is_current?: boolean;
   limit?: number;
 }) {
@@ -906,7 +912,9 @@ export function useContextEntries(params?: {
 }
 export function useContextEntriesInfinite(params?: {
   subject_type?: string;
+  subject_id?: string;
   context_type?: string;
+  memory_status?: 'signal' | 'active' | 'rejected' | 'superseded';
   is_current?: boolean;
   limit?: number;
 }) {
@@ -916,7 +924,9 @@ export function useContextEntriesInfinite(params?: {
     queryFn: ({ pageParam }) => {
       const query = new URLSearchParams();
       if (params?.subject_type) query.set('subject_type', params.subject_type);
+      if (params?.subject_id) query.set('subject_id', params.subject_id);
       if (params?.context_type) query.set('context_type', params.context_type);
+      if (params?.memory_status) query.set('memory_status', params.memory_status);
       if (params?.is_current !== undefined) query.set('is_current', String(params.is_current));
       query.set('limit', String(limit));
       if (pageParam) query.set('cursor', pageParam as string);
@@ -928,6 +938,107 @@ export function useContextEntriesInfinite(params?: {
 }
 export function useContextEntry(id: string) {
   return useQuery({ queryKey: ['context-entry', id], queryFn: () => api.get(`context/${id}`), enabled: !!id });
+}
+export interface SignalGroup {
+  id: string;
+  subject_type: string;
+  subject_id: string;
+  context_type: string;
+  title?: string | null;
+  normalized_claim: string;
+  status: 'gathering' | 'ready' | 'promoted' | 'blocked' | 'dismissed' | 'conflicting';
+  aggregate_confidence: number;
+  support_count: number;
+  independent_source_count: number;
+  conflict_count: number;
+  evidence_count: number;
+  latest_signal_id?: string | null;
+  promoted_context_entry_id?: string | null;
+  blocked_reason?: string | null;
+  metadata?: Record<string, unknown>;
+  updated_at: string;
+  created_at: string;
+  members?: Array<Record<string, unknown>>;
+}
+export function useSignalGroups(params?: {
+  status?: string;
+  subject_type?: string;
+  subject_id?: string;
+  context_type?: string;
+  attention_only?: boolean;
+  limit?: number;
+}) {
+  return useList<SignalGroup>('signal-groups', 'context/signal-groups', params);
+}
+export function useSignalGroup(id: string | null) {
+  return useQuery<{ signal_group: SignalGroup }>({
+    queryKey: ['signal-group', id],
+    queryFn: () => api.get(`context/signal-groups/${id}`),
+    enabled: !!id,
+  });
+}
+export function usePromoteSignalGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`context/signal-groups/${id}/promote`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['signal-groups'] });
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+    },
+  });
+}
+export function useRejectSignalGroup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      api.post(`context/signal-groups/${id}/reject`, { reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['signal-groups'] });
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+    },
+  });
+}
+export interface RawContextSource {
+  id: string;
+  source_type: string;
+  source_ref: string;
+  source_label?: string | null;
+  subject_type?: string | null;
+  subject_id?: string | null;
+  status: 'pending' | 'processing' | 'processed' | 'needs_review' | 'failed' | 'skipped';
+  stage: string;
+  raw_excerpt?: string | null;
+  detected_subjects?: Array<Record<string, unknown>>;
+  signals_created: number;
+  memory_created: number;
+  skipped: number;
+  failure_reason?: string | null;
+  metadata?: Record<string, unknown>;
+  processed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export function useRawContextSources(params?: {
+  source_type?: string;
+  status?: string;
+  subject_type?: string;
+  subject_id?: string;
+  limit?: number;
+}) {
+  return useList<RawContextSource>('raw-context-sources', 'context/raw-sources', params);
+}
+export function useReprocessRawContextSource() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`context/raw-sources/${id}/reprocess`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+    },
+  });
 }
 export function useCreateContextEntry() {
   const qc = useQueryClient();
@@ -944,9 +1055,31 @@ export function useSupersedeContextEntry() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['context-entries'] }),
   });
 }
-export function useContextSearch(query: string, params?: { subject_type?: string; subject_id?: string; context_type?: string; tag?: string; current_only?: boolean; limit?: number }) {
+export function usePromoteSignal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; body?: string; title?: string; confidence?: number; reason?: string }) =>
+      api.post(`context/${id}/promote`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+    },
+  });
+}
+export function useRejectSignal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      api.post(`context/${id}/reject`, { reason }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+    },
+  });
+}
+export function useContextSearch(query: string, params?: { subject_type?: string; subject_id?: string; context_type?: string; tag?: string; current_only?: boolean; memory_status?: 'signal' | 'active' | 'rejected' | 'superseded'; limit?: number }) {
   const searchParams = new URLSearchParams();
-  searchParams.set('query', query);
+  searchParams.set('q', query);
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
       if (v !== undefined && v !== '') searchParams.set(k, String(v));
@@ -1162,6 +1295,22 @@ export function useTestWorkflow() {
       api.post(`workflows/${id}/test`, { sample_payload }),
   });
 }
+export function useTestDraftWorkflow() {
+  return useMutation({
+    mutationFn: ({ workflow, sample_payload }: { workflow: Record<string, unknown>; sample_payload: Record<string, unknown> }) =>
+      api.post('workflows/test-draft', { workflow, sample_payload }),
+  });
+}
+export function useDraftWorkflowContentPreview() {
+  return useMutation({
+    mutationFn: (data: {
+      action_type: 'send_email' | 'send_notification';
+      config: Record<string, unknown>;
+      sample_payload?: Record<string, unknown>;
+    }) =>
+      api.post<{ subject?: string; body_text?: string; message?: string }>('workflows/draft-content-preview', data),
+  });
+}
 export function useCloneWorkflow() {
   const qc = useQueryClient();
   return useMutation({
@@ -1196,7 +1345,7 @@ export function useWebhookDeliveries(webhookId: string, params?: { limit?: numbe
 }
 
 // Semantic Search
-export function useSemanticSearch(query: string, params?: { subject_type?: string; subject_id?: string; context_type?: string; tag?: string; current_only?: boolean; limit?: number }) {
+export function useSemanticSearch(query: string, params?: { subject_type?: string; subject_id?: string; context_type?: string; tag?: string; current_only?: boolean; memory_status?: 'signal' | 'active' | 'rejected' | 'superseded'; limit?: number }) {
   const searchParams = new URLSearchParams();
   searchParams.set('q', query);
   if (params) {
@@ -1221,11 +1370,25 @@ export function useContextIngest() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['context-entries'] });
       qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
     },
   });
 }
 
-// Auto-detect subjects mentioned in free text (no LLM, regex + entity-resolve)
+export function useContextIngestAuto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { text: string; source?: string; confidence_threshold?: number }) =>
+      api.post('context/ingest-auto', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
+    },
+  });
+}
+
+// Auto-detect subjects mentioned in free text with the Workspace Agent, then entity-resolve them.
 export function useDetectSubjects() {
   return useMutation({
     mutationFn: (text: string) => api.post('context/detect-subjects', { text }),
@@ -1241,6 +1404,7 @@ export function useIngestFile() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['context-entries'] });
       qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
     },
   });
 }
@@ -1341,6 +1505,8 @@ export interface AgentConfigData {
   can_log_activities: boolean;
   can_create_assignments: boolean;
   auto_extract_context: boolean;
+  auto_promote_signals: boolean;
+  signal_auto_promote_threshold: number;
 }
 
 export interface AgentSessionSummary {

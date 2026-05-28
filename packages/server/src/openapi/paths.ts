@@ -539,7 +539,7 @@ for (const [action, schema, summary] of [
 registry.registerPath({
   method: 'get', path: '/context',
   tags: ['Context'],
-  summary: 'List context entries',
+  summary: 'List Current Memory and reviewable Signals',
   security: bearer,
   request: { query: Req.ContextEntrySearch },
   responses: { 200: ok(GenericList), 401: err401 },
@@ -548,16 +548,79 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/context',
   tags: ['Context'],
-  summary: 'Add a context entry',
+  summary: 'Advanced direct Memory or evidence-backed Signal write',
   security: bearer,
   request: { body: jsonBody(Req.ContextEntryCreate) },
   responses: { 201: created(ContextEntryRecord), 400: err400 },
 });
 
 registry.registerPath({
+  method: 'get', path: '/context/raw-sources',
+  tags: ['Context'],
+  summary: 'List Raw Context processing records',
+  security: bearer,
+  request: {
+    query: z.object({
+      source_type: z.string().optional(),
+      status: z.enum(['pending', 'processing', 'processed', 'needs_review', 'failed', 'skipped']).optional(),
+      subject_type: S.subjectType.optional(),
+      subject_id: S.uuid.optional(),
+      limit: z.coerce.number().int().min(1).max(200).optional(),
+      cursor: z.string().optional(),
+    }),
+  },
+  responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/context/raw-sources/{id}',
+  tags: ['Context'],
+  summary: 'Get a Raw Context processing record',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/ingest',
+  tags: ['Context'],
+  summary: 'Ingest Raw Context for a known record',
+  security: bearer,
+  request: {
+    body: jsonBody(z.object({
+      text: z.string().optional(),
+      document: z.string().optional(),
+      subject_type: S.subjectType,
+      subject_id: S.uuid,
+      source_label: z.string().optional(),
+      source: z.string().optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/ingest-auto',
+  tags: ['Context'],
+  summary: 'Ingest Raw Context and automatically resolve mentioned records',
+  security: bearer,
+  request: {
+    body: jsonBody(z.object({
+      text: z.string().optional(),
+      document: z.string().optional(),
+      source_label: z.string().optional(),
+      source: z.string().optional(),
+      context_type: z.string().optional(),
+      confidence_threshold: z.number().min(0).max(1).optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400 },
+});
+
+registry.registerPath({
   method: 'get', path: '/context/search',
   tags: ['Context'],
-  summary: 'Full-text search across context entries',
+  summary: 'Full-text search across Memory and Signals',
   security: bearer,
   request: { query: Req.ContextSearch },
   responses: { 200: ok(GenericList), 401: err401 },
@@ -566,10 +629,62 @@ registry.registerPath({
 registry.registerPath({
   method: 'get', path: '/context/stale',
   tags: ['Context'],
-  summary: 'List context entries past their valid_until date',
+  summary: 'List Current Memory that needs review',
   security: bearer,
   request: { query: Req.ContextStaleList },
   responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/context/signal-groups',
+  tags: ['Context'],
+  summary: 'List Signal Groups',
+  security: bearer,
+  request: {
+    query: z.object({
+      status: z.enum(['gathering', 'ready', 'promoted', 'blocked', 'dismissed', 'conflicting']).optional(),
+      subject_type: S.subjectType.optional(),
+      subject_id: S.uuid.optional(),
+      context_type: z.string().optional(),
+      attention_only: z.coerce.boolean().optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+      cursor: z.string().optional(),
+    }),
+  },
+  responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/context/signal-groups/{id}',
+  tags: ['Context'],
+  summary: 'Get a Signal Group with evidence',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/signal-groups/{id}/promote',
+  tags: ['Context'],
+  summary: 'Promote a Signal Group into Current Memory',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(z.object({ idempotency_key: z.string().optional() }), false) },
+  responses: { 200: ok(GenericObject), 400: err400, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/signal-groups/{id}/reject',
+  tags: ['Context'],
+  summary: 'Dismiss a Signal Group while preserving evidence',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      reason: z.string().optional(),
+      idempotency_key: z.string().optional(),
+    }), false),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 404: err404 },
 });
 
 registry.registerPath({
@@ -587,6 +702,40 @@ registry.registerPath({
   summary: 'Supersede a context entry with updated content',
   security: bearer,
   request: { params: idParam, body: jsonBody(Req.ContextEntrySupersede) },
+  responses: { 200: ok(ContextEntryRecord), 400: err400, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/{id}/promote',
+  tags: ['Context'],
+  summary: 'Promote an evidence-backed Signal into Current Memory',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      body: z.string().optional(),
+      title: z.string().optional(),
+      structured_data: z.record(z.unknown()).optional(),
+      confidence: z.number().min(0).max(1).optional(),
+      tags: z.array(z.string()).optional(),
+      idempotency_key: z.string().optional(),
+    }), false),
+  },
+  responses: { 200: ok(ContextEntryRecord), 400: err400, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/{id}/reject',
+  tags: ['Context'],
+  summary: 'Reject a Signal while preserving evidence for audit',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      reason: z.string().optional(),
+      idempotency_key: z.string().optional(),
+    }), false),
+  },
   responses: { 200: ok(ContextEntryRecord), 400: err400, 404: err404 },
 });
 

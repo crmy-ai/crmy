@@ -139,7 +139,7 @@ export function actorTools(db: DbPool): ToolDef[] {
                     max(created_at) AS last_authored_at,
                     array_agg(DISTINCT context_type) AS context_types
              FROM context_entries
-             WHERE tenant_id = $1 AND authored_by = $2 AND is_current = true
+             WHERE tenant_id = $1 AND authored_by = $2 AND is_current = true AND memory_status = 'active'
              GROUP BY subject_type, subject_id
              ORDER BY entry_count DESC, last_authored_at DESC
              LIMIT $3`,
@@ -149,7 +149,7 @@ export function actorTools(db: DbPool): ToolDef[] {
           const typesResult = await db.query(
             `SELECT context_type, count(*)::int AS count
              FROM context_entries
-             WHERE tenant_id = $1 AND authored_by = $2 AND is_current = true
+             WHERE tenant_id = $1 AND authored_by = $2 AND is_current = true AND memory_status = 'active'
              GROUP BY context_type
              ORDER BY count DESC
              LIMIT 10`,
@@ -158,7 +158,7 @@ export function actorTools(db: DbPool): ToolDef[] {
 
           const totalResult = await db.query(
             `SELECT count(*)::int AS total FROM context_entries
-             WHERE tenant_id = $1 AND authored_by = $2 AND is_current = true`,
+             WHERE tenant_id = $1 AND authored_by = $2 AND is_current = true AND memory_status = 'active'`,
             [actor.tenant_id, input.actor_id],
           );
 
@@ -175,7 +175,7 @@ export function actorTools(db: DbPool): ToolDef[] {
             `SELECT authored_by AS actor_id, count(*)::int AS entry_count,
                     max(created_at) AS last_authored_at
              FROM context_entries
-             WHERE tenant_id = $1 AND subject_type = $2 AND subject_id = $3 AND is_current = true
+             WHERE tenant_id = $1 AND subject_type = $2 AND subject_id = $3 AND is_current = true AND memory_status = 'active'
              GROUP BY authored_by
              ORDER BY entry_count DESC, last_authored_at DESC
              LIMIT $4`,

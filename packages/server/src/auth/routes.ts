@@ -199,14 +199,6 @@ export function authRouter(db: DbPool, jwtSecret: string): Router {
         return;
       }
 
-      // Opportunistically upgrade legacy SHA-256 hash to scrypt on successful login
-      if (user.password_hash && !user.password_hash.startsWith('scrypt:')) {
-        db.query(
-          'UPDATE users SET password_hash = $1 WHERE id = $2',
-          [hashPassword(data.password), user.id],
-        ).catch(() => {});
-      }
-
       db.query('UPDATE users SET last_login_at = now() WHERE id = $1', [user.id]).catch(() => {});
 
       const token = await new jose.SignJWT({

@@ -24,7 +24,7 @@ const HELP_TEXT = `
     accounts            Manage companies/accounts (list, get, create, update, delete)
     opps                Manage opportunities (list, get, create, update, delete)
     pipeline            View and manage the sales pipeline
-    notes               Manage notes on customer records
+    context             Manage Signals and Memory attached to customer records
     custom-fields       Manage custom field definitions
     search              Search across contacts, accounts, and opportunities
 

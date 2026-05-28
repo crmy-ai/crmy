@@ -47,13 +47,15 @@ interface AppState {
   openAIWithContext: (context: AIContextEntity) => void;
 
   workflowEditorId: string | null;   // null = create mode, string = edit mode
+  workflowEditorDraft: Record<string, unknown> | null;
   workflowEditorOpen: boolean;
-  openWorkflowEditor: (id: string | null) => void;
+  openWorkflowEditor: (id: string | null, draft?: Record<string, unknown> | null) => void;
   closeWorkflowEditor: () => void;
 
   sequenceEditorId: string | null;   // null = create mode, string = edit mode
+  sequenceEditorDraft: Record<string, unknown> | null;
   sequenceEditorOpen: boolean;
-  openSequenceEditor: (id: string | null) => void;
+  openSequenceEditor: (id: string | null, draft?: Record<string, unknown> | null) => void;
   closeSequenceEditor: () => void;
 }
 
@@ -103,14 +105,16 @@ export const useAppStore = create<AppState>()(
       openAIWithContext: (context) => set({ aiContext: context }),
 
       workflowEditorId: null,
+      workflowEditorDraft: null,
       workflowEditorOpen: false,
-      openWorkflowEditor: (id) => set({ workflowEditorOpen: true, workflowEditorId: id }),
-      closeWorkflowEditor: () => set({ workflowEditorOpen: false, workflowEditorId: null }),
+      openWorkflowEditor: (id, draft = null) => set({ workflowEditorOpen: true, workflowEditorId: id, workflowEditorDraft: draft }),
+      closeWorkflowEditor: () => set({ workflowEditorOpen: false, workflowEditorId: null, workflowEditorDraft: null }),
 
       sequenceEditorId: null,
+      sequenceEditorDraft: null,
       sequenceEditorOpen: false,
-      openSequenceEditor: (id) => set({ sequenceEditorOpen: true, sequenceEditorId: id }),
-      closeSequenceEditor: () => set({ sequenceEditorOpen: false, sequenceEditorId: null }),
+      openSequenceEditor: (id, draft = null) => set({ sequenceEditorOpen: true, sequenceEditorId: id, sequenceEditorDraft: draft }),
+      closeSequenceEditor: () => set({ sequenceEditorOpen: false, sequenceEditorId: null, sequenceEditorDraft: null }),
 
       darkVariant: 'charcoal',
       setDarkVariant: (variant) => set({ darkVariant: variant }),

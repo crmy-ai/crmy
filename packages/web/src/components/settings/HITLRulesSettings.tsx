@@ -9,7 +9,7 @@ import {
 } from '@/api/hooks';
 import {
   ShieldCheck, Plus, Trash2, Power, PowerOff, X, ChevronDown, ChevronUp,
-  CheckCircle2, XCircle, GripVertical,
+  CheckCircle2, XCircle, GripVertical, AlertTriangle, Database, GitBranch, Sparkles,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -45,6 +45,33 @@ const OPS = [
 const inputCls = 'w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const btnPrimary = 'px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40';
 const btnOutline = 'px-3 py-1.5 rounded-lg border border-border text-sm font-medium text-foreground hover:bg-muted';
+
+const BUILT_IN_POLICIES = [
+  {
+    title: 'Forecast changes',
+    description: 'Agents and automation must request approval before changing forecast category.',
+    icon: AlertTriangle,
+    tone: 'border-warning/30 bg-warning/10 text-warning',
+  },
+  {
+    title: 'Signal promotion',
+    description: 'Signals need evidence before becoming Memory. Low-confidence Signals stay in review.',
+    icon: Sparkles,
+    tone: 'border-primary/30 bg-primary/10 text-primary',
+  },
+  {
+    title: 'External writeback',
+    description: 'Systems of Record writes check scopes, mappings, source authority, and idempotency.',
+    icon: Database,
+    tone: 'border-info/30 bg-info/10 text-info',
+  },
+  {
+    title: 'Workflow field updates',
+    description: 'Sensitive automation changes pause for approval instead of writing directly.',
+    icon: GitBranch,
+    tone: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600',
+  },
+] as const;
 
 function conditionsToArray(cond: ApprovalRule['condition']): RuleCondition[] {
   if (!cond || Object.keys(cond).length === 0) return [];
@@ -119,7 +146,7 @@ function ConditionBuilder({
         Add condition
       </button>
       {conditions.length === 0 && (
-        <p className="text-xs text-muted-foreground">No conditions — rule matches all requests of this type.</p>
+        <p className="text-xs text-muted-foreground">No conditions — policy matches all requests of this type.</p>
       )}
     </div>
   );
@@ -142,7 +169,7 @@ function RuleRow({ rule }: { rule: ApprovalRule }) {
     try {
       await update.mutateAsync({ is_active: !rule.is_active });
     } catch {
-      toast({ title: 'Failed to update rule', variant: 'destructive' });
+      toast({ title: 'Failed to update policy', variant: 'destructive' });
     }
   };
 
@@ -156,18 +183,18 @@ function RuleRow({ rule }: { rule: ApprovalRule }) {
         priority: parseInt(priority) || 0,
       });
       setExpanded(false);
-      toast({ title: 'Rule updated' });
+      toast({ title: 'Policy updated' });
     } catch {
-      toast({ title: 'Failed to save rule', variant: 'destructive' });
+      toast({ title: 'Failed to save policy', variant: 'destructive' });
     }
   };
 
   const handleDelete = async () => {
     try {
       await del.mutateAsync();
-      toast({ title: 'Rule deleted' });
+      toast({ title: 'Policy deleted' });
     } catch {
-      toast({ title: 'Failed to delete rule', variant: 'destructive' });
+      toast({ title: 'Failed to delete policy', variant: 'destructive' });
     }
   };
 
@@ -261,7 +288,7 @@ function RuleRow({ rule }: { rule: ApprovalRule }) {
             <div className="px-4 py-4 border-t border-border bg-muted/20 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="space-y-1 sm:col-span-2">
-                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Rule Name</label>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Policy Name</label>
                   <input type="text" value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
                 </div>
                 <div className="space-y-1">
@@ -298,7 +325,7 @@ function RuleRow({ rule }: { rule: ApprovalRule }) {
               <div className="flex justify-end gap-2">
                 <button onClick={() => setExpanded(false)} className={btnOutline}>Cancel</button>
                 <button onClick={handleSave} disabled={update.isPending} className={btnPrimary}>
-                  {update.isPending ? 'Saving…' : 'Save Rule'}
+                  {update.isPending ? 'Saving…' : 'Save Policy'}
                 </button>
               </div>
             </div>
@@ -321,7 +348,7 @@ function CreateRuleForm({ onClose }: { onClose: () => void }) {
 
   const handleCreate = async () => {
     if (!name.trim()) {
-      toast({ title: 'Rule name is required', variant: 'destructive' });
+      toast({ title: 'Policy name is required', variant: 'destructive' });
       return;
     }
     try {
@@ -332,10 +359,10 @@ function CreateRuleForm({ onClose }: { onClose: () => void }) {
         decision,
         priority: parseInt(priority) || 0,
       });
-      toast({ title: 'Rule created' });
+      toast({ title: 'Policy created' });
       onClose();
     } catch {
-      toast({ title: 'Failed to create rule', variant: 'destructive' });
+      toast({ title: 'Failed to create policy', variant: 'destructive' });
     }
   };
 
@@ -343,7 +370,7 @@ function CreateRuleForm({ onClose }: { onClose: () => void }) {
     <div className="rounded-lg border border-primary/30 bg-card p-4 space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="space-y-1 sm:col-span-2">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Rule Name</label>
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Policy Name</label>
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Auto-approve low-value actions" className={inputCls} />
         </div>
         <div className="space-y-1">
@@ -381,7 +408,7 @@ function CreateRuleForm({ onClose }: { onClose: () => void }) {
       <div className="flex justify-end gap-2">
         <button onClick={onClose} className={btnOutline}>Cancel</button>
         <button onClick={handleCreate} disabled={create.isPending || !name.trim()} className={btnPrimary}>
-          {create.isPending ? 'Creating…' : 'Create Rule'}
+          {create.isPending ? 'Creating…' : 'Create Policy'}
         </button>
       </div>
     </div>
@@ -398,11 +425,38 @@ export default function HITLRulesSettings() {
   return (
     <div className="space-y-8 max-w-3xl">
       <div>
-        <h2 className="font-display font-bold text-lg text-foreground mb-1">Auto-Approval Rules</h2>
+        <h2 className="font-display font-bold text-lg text-foreground mb-1">Action Policies</h2>
         <p className="text-sm text-muted-foreground">
-          Define rules that automatically approve or reject agent action requests without human review.
-          Rules are evaluated in descending priority order — the first match wins.
+          Control what agents may change, what requires approval, and what should be rejected before it touches operational state.
+          Policies are evaluated in descending priority order — the first match wins.
         </p>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Built-in safety boundaries</h3>
+          <p className="text-sm text-muted-foreground mt-1">
+            These guardrails are always active. Custom policies below add workspace-specific auto-approval or rejection rules.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {BUILT_IN_POLICIES.map(item => {
+            const Icon = item.icon;
+            return (
+              <div key={item.title} className="rounded-lg border border-border bg-card p-3">
+                <div className="flex items-start gap-3">
+                  <div className={`w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 ${item.tone}`}>
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                    <p className="text-sm text-muted-foreground mt-1">{item.description}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -411,11 +465,11 @@ export default function HITLRulesSettings() {
             <ShieldCheck className="w-5 h-5 text-emerald-500" />
           </div>
           <div className="flex-1">
-            <h3 className="text-sm font-semibold text-foreground">Rules</h3>
+            <h3 className="text-sm font-semibold text-foreground">Policies</h3>
             <p className="text-xs text-muted-foreground">
               {rules.length === 0
-                ? 'No rules configured — all HITL requests require manual review.'
-                : `${rules.filter(r => r.is_active).length} active rule${rules.filter(r => r.is_active).length !== 1 ? 's' : ''}`}
+                ? 'No custom policies configured — built-in safety boundaries still apply.'
+                : `${rules.filter(r => r.is_active).length} active polic${rules.filter(r => r.is_active).length !== 1 ? 'ies' : 'y'}`}
             </p>
           </div>
           <button
@@ -423,7 +477,7 @@ export default function HITLRulesSettings() {
             className={`${btnOutline} flex items-center gap-1.5 shrink-0`}
           >
             {showCreate ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-            {showCreate ? 'Cancel' : 'Add Rule'}
+            {showCreate ? 'Cancel' : 'Add Policy'}
           </button>
         </div>
 
@@ -445,9 +499,9 @@ export default function HITLRulesSettings() {
         ) : rules.length === 0 && !showCreate ? (
           <div className="rounded-lg border border-border bg-card p-8 text-center">
             <ShieldCheck className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
-            <p className="text-sm font-semibold text-foreground mb-1">No rules configured</p>
+            <p className="text-sm font-semibold text-foreground mb-1">No custom policies configured</p>
             <p className="text-xs text-muted-foreground max-w-xs mx-auto">
-              Add rules to automatically approve routine agent actions or reject risky ones without human review.
+              Add policies to automatically approve routine agent actions or reject risky ones without human review.
             </p>
           </div>
         ) : (
@@ -460,10 +514,10 @@ export default function HITLRulesSettings() {
       </div>
 
       <div className="rounded-lg border border-border bg-muted/30 p-4">
-        <p className="text-xs font-semibold text-foreground mb-1">How rules work</p>
+        <p className="text-xs font-semibold text-foreground mb-1">How action policies work</p>
         <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
-          <li>Rules are checked in descending <strong className="text-foreground">priority</strong> order — higher number runs first</li>
-          <li>The <strong className="text-foreground">first matching rule</strong> wins; remaining rules are not evaluated</li>
+          <li>Policies are checked in descending <strong className="text-foreground">priority</strong> order — higher number runs first</li>
+          <li>The <strong className="text-foreground">first matching policy</strong> wins; remaining policies are not evaluated</li>
           <li>Use <strong className="text-foreground">Action Type</strong> to target a specific agent action (e.g. <code className="bg-muted px-1 rounded">send_email</code>)</li>
           <li>Leave Action Type blank to match any action type</li>
           <li>Multiple conditions use <strong className="text-foreground">AND</strong> logic — all must be satisfied</li>

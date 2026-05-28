@@ -9,6 +9,7 @@ import * as hitlRepo from '../db/repos/hitl.js';
 import { emitEvent } from '../events/emitter.js';
 import { interpolate, buildVariableContext, resolveConfig } from './variables.js';
 import { resolveSequenceGoalContactId } from '../services/sequence-executor.js';
+import { evaluateActionPolicy } from '../services/action-policy.js';
 
 /** How many consecutive failures trigger a Handoffs alert (configurable via env) */
 const FAILURE_ALERT_THRESHOLD = Number(process.env.WORKFLOW_FAILURE_ALERT_THRESHOLD ?? 3);
@@ -17,6 +18,47 @@ const FAILURE_ALERT_THRESHOLD = Number(process.env.WORKFLOW_FAILURE_ALERT_THRESH
 
 /** Default per-action execution timeout (30 seconds) */
 const ACTION_TIMEOUT_MS = 30_000;
+
+async function generateWorkflowContent(
+  db: DbPool,
+  tenantId: UUID,
+  kind: 'email' | 'notification',
+  cfg: Record<string, unknown>,
+  payload: unknown,
+  variableContext: Record<string, unknown>,
+): Promise<{ subject?: string; body_text?: string; message?: string }> {
+  const { callLLM, requireTenantLLMConfig } = await import('../agent/providers/llm.js');
+  await requireTenantLLMConfig(db, tenantId);
+  const prompt = interpolate(
+    String(cfg.ai_prompt || (
+      kind === 'email'
+        ? 'Draft concise, context-aware customer email content.'
+        : 'Draft a concise internal notification message.'
+    )),
+    variableContext,
+  );
+  const subject = String(cfg.subject ?? '');
+  const body = kind === 'email' ? String(cfg.body_text ?? '') : String(cfg.message ?? '');
+  const system = kind === 'email'
+    ? 'You draft concise, evidence-aware revenue workflow emails. Return only valid JSON: {"subject":"...","body_text":"..."}'
+    : 'You draft concise internal workflow notifications for revenue teams. Return only valid JSON: {"message":"..."}';
+  const user = [
+    `Event payload: ${JSON.stringify(payload ?? {}).slice(0, 4000)}`,
+    `Template subject: ${subject || '(none)'}`,
+    `Template ${kind === 'email' ? 'body' : 'message'}: ${body || '(none)'}`,
+    `Instruction: ${prompt}`,
+    '',
+    kind === 'email'
+      ? 'Return ONLY valid JSON: {"subject":"...","body_text":"..."}'
+      : 'Return ONLY valid JSON: {"message":"..."}',
+  ].join('\n');
+
+  const raw = await callLLM(db, tenantId, { system, user, maxTokens: 1024 });
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('AI generation did not return valid JSON.');
+  const parsed = JSON.parse(match[0]) as { subject?: string; body_text?: string; message?: string };
+  return parsed;
+}
 
 // ── In-memory workflow cache ─────────────────────────────────────────────────
 
@@ -46,9 +88,183 @@ export function invalidateWorkflowCache(tenantId: string): void {
 
 export interface WorkflowEngine {
   processEvent(tenantId: UUID, eventType: string, eventId: number, payload: unknown): Promise<void>;
+  processBacklog(limit?: number): Promise<{ processed: number; skipped: number; failed: number }>;
 }
 
 export function createWorkflowEngine(db: DbPool): WorkflowEngine {
+  async function executeWorkflowForEvent(
+    workflow: WorkflowRow,
+    tenantId: UUID,
+    eventType: string,
+    eventId: number,
+    payload: unknown,
+  ): Promise<'processed' | 'skipped'> {
+    // Events created before a workflow existed are historical context, not
+    // missed automation work. Catch-up uses this same helper as live delivery.
+    if (workflow.created_at && eventId) {
+      const eventResult = await db.query(
+        'SELECT created_at FROM events WHERE id = $1 AND tenant_id = $2 LIMIT 1',
+        [eventId, tenantId],
+      );
+      const eventCreatedAt = eventResult.rows[0]?.created_at;
+      if (eventCreatedAt && new Date(eventCreatedAt).getTime() < new Date(workflow.created_at).getTime()) {
+        return 'skipped';
+      }
+    }
+
+    if (!matchesFilter(workflow.trigger_filter, payload)) return 'skipped';
+
+    if (eventId) {
+      const dup = await db.query(
+        `SELECT id FROM workflow_runs WHERE workflow_id = $1 AND event_id = $2 LIMIT 1`,
+        [workflow.id, eventId],
+      );
+      if (dup.rows.length > 0) {
+        console.info(`[workflow:dedup] Skipping duplicate event_id=${eventId} for workflow ${workflow.id}`);
+        return 'skipped';
+      }
+    }
+
+    if (workflow.max_runs_per_hour) {
+      const recentCount = await wfRepo.countRecentRuns(db, workflow.id, 1);
+      if (recentCount >= workflow.max_runs_per_hour) {
+        console.warn(`[workflow:rate-limit] Workflow ${workflow.id} (${workflow.name}) hit max_runs_per_hour=${workflow.max_runs_per_hour}`);
+        return 'skipped';
+      }
+    }
+
+    let run: wfRepo.WorkflowRunRow;
+    try {
+      run = await wfRepo.createRun(db, {
+        workflow_id: workflow.id,
+        event_id: eventId,
+        actions_total: workflow.actions.length,
+      });
+    } catch (err) {
+      if (err && typeof err === 'object' && 'code' in err && (err as { code?: string }).code === '23505') {
+        console.info(`[workflow:dedup] Skipping concurrently processed event_id=${eventId} for workflow ${workflow.id}`);
+        return 'skipped';
+      }
+      throw err;
+    }
+
+    await emitEvent(db, {
+      tenantId,
+      eventType: 'workflow.run.started',
+      actorType: 'system',
+      objectType: 'workflow_run',
+      objectId: run.id,
+      afterData: {
+        workflow_id: workflow.id,
+        workflow_name: workflow.name,
+        run_id: run.id,
+        event_id: eventId,
+        event_type: eventType,
+        actions_total: workflow.actions.length,
+      },
+    });
+
+    const variableContext = buildVariableContext(payload);
+    let actionsRun = 0;
+
+    try {
+      for (const action of workflow.actions as { type: string; config: Record<string, unknown> }[]) {
+        const actionStarted = new Date().toISOString();
+        const actionStart = Date.now();
+
+        try {
+          await executeWithTimeout(
+            () => executeAction(db, tenantId, action, payload, variableContext),
+            ACTION_TIMEOUT_MS,
+          );
+
+          actionsRun++;
+          const log = {
+            index: actionsRun - 1,
+            type: action.type,
+            status: 'completed' as const,
+            duration_ms: Date.now() - actionStart,
+            started_at: actionStarted,
+            resolved_config: resolveConfig(action.config, variableContext) as Record<string, unknown>,
+          };
+          await wfRepo.appendActionLog(db, run.id, log);
+          await wfRepo.updateRun(db, run.id, { actions_run: actionsRun });
+        } catch (actionErr) {
+          const message = actionErr instanceof Error ? actionErr.message : 'Unknown error';
+          const log = {
+            index: actionsRun,
+            type: action.type,
+            status: 'failed' as const,
+            error: message,
+            duration_ms: Date.now() - actionStart,
+            started_at: actionStarted,
+          };
+          await wfRepo.appendActionLog(db, run.id, log);
+          throw actionErr;
+        }
+      }
+
+      await wfRepo.updateRun(db, run.id, { status: 'completed', actions_run: actionsRun });
+      await wfRepo.incrementRunCount(db, workflow.id);
+      await emitEvent(db, {
+        tenantId,
+        eventType: 'workflow.run.completed',
+        actorType: 'system',
+        objectType: 'workflow_run',
+        objectId: run.id,
+        afterData: {
+          workflow_id: workflow.id,
+          workflow_name: workflow.name,
+          run_id: run.id,
+          event_id: eventId,
+          event_type: eventType,
+          actions_run: actionsRun,
+          actions_total: workflow.actions.length,
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      await wfRepo.updateRun(db, run.id, { status: 'failed', error: message });
+      const newErrorCount = await wfRepo.incrementErrorCount(db, workflow.id);
+      await emitEvent(db, {
+        tenantId,
+        eventType: 'workflow.run.failed',
+        actorType: 'system',
+        objectType: 'workflow_run',
+        objectId: run.id,
+        afterData: {
+          workflow_id: workflow.id,
+          workflow_name: workflow.name,
+          run_id: run.id,
+          event_id: eventId,
+          event_type: eventType,
+          actions_run: actionsRun,
+          actions_total: workflow.actions.length,
+          error: message,
+        },
+      });
+
+      if (newErrorCount >= FAILURE_ALERT_THRESHOLD) {
+        hitlRepo.createHITLRequest(db, tenantId, {
+          agent_id: 'system',
+          action_type: 'workflow.repeated_failure',
+          action_summary: `Workflow "${workflow.name}" has failed ${newErrorCount} consecutive time${newErrorCount !== 1 ? 's' : ''}`,
+          action_payload: {
+            workflow_id: workflow.id,
+            workflow_name: workflow.name,
+            error_count: newErrorCount,
+            last_error: message,
+            run_id: run.id,
+          },
+          priority: 'urgent',
+          sla_minutes: 240,
+        }).catch((e) => console.error('[workflow:failure-alert] Failed to create HITL request:', e));
+      }
+    }
+
+    return 'processed';
+  }
+
   return {
     async processEvent(tenantId, eventType, eventId, payload) {
       // Prevent recursive workflow triggers (workflow.* events don't re-trigger workflows)
@@ -56,6 +272,10 @@ export function createWorkflowEngine(db: DbPool): WorkflowEngine {
       const metadata = payload && typeof payload === 'object' && 'metadata' in payload
         ? (payload as { metadata?: unknown }).metadata
         : undefined;
+      if (metadata && typeof metadata === 'object' && (metadata as { origin?: unknown }).origin === 'workflow') {
+        console.info(`[workflow] Skipping workflow-originated event_id=${eventId} event_type=${eventType}`);
+        return;
+      }
       if (metadata && typeof metadata === 'object' && (metadata as { sync_mode?: unknown }).sync_mode === 'replay') {
         console.info(`[workflow] Skipping replayed sync event_id=${eventId} event_type=${eventType}`);
         return;
@@ -64,104 +284,97 @@ export function createWorkflowEngine(db: DbPool): WorkflowEngine {
       const workflows = await getCachedWorkflows(db, tenantId, eventType);
 
       for (const workflow of workflows) {
-        // Check trigger filter
-        if (!matchesFilter(workflow.trigger_filter, payload)) continue;
-
-        // Deduplication: skip if this event was already processed by this workflow
-        if (eventId) {
-          const dup = await db.query(
-            `SELECT id FROM workflow_runs WHERE workflow_id = $1 AND event_id = $2 LIMIT 1`,
-            [workflow.id, eventId],
-          );
-          if (dup.rows.length > 0) {
-            console.info(`[workflow:dedup] Skipping duplicate event_id=${eventId} for workflow ${workflow.id}`);
-            continue;
-          }
-        }
-
-        // Rate limiting: check runs in the last hour
-        if (workflow.max_runs_per_hour) {
-          const recentCount = await wfRepo.countRecentRuns(db, workflow.id, 1);
-          if (recentCount >= workflow.max_runs_per_hour) {
-            console.warn(`[workflow:rate-limit] Workflow ${workflow.id} (${workflow.name}) hit max_runs_per_hour=${workflow.max_runs_per_hour}`);
-            continue;
-          }
-        }
-
-        const run = await wfRepo.createRun(db, {
-          workflow_id: workflow.id,
-          event_id: eventId,
-          actions_total: workflow.actions.length,
-        });
-
-        const variableContext = buildVariableContext(payload);
-        let actionsRun = 0;
-
-        try {
-          for (const action of workflow.actions as { type: string; config: Record<string, unknown> }[]) {
-            const actionStarted = new Date().toISOString();
-            const actionStart = Date.now();
-
-            try {
-              await executeWithTimeout(
-                () => executeAction(db, tenantId, action, payload, variableContext),
-                ACTION_TIMEOUT_MS,
-              );
-
-              actionsRun++;
-              const log = {
-                index: actionsRun - 1,
-                type: action.type,
-                status: 'completed' as const,
-                duration_ms: Date.now() - actionStart,
-                started_at: actionStarted,
-                resolved_config: resolveConfig(action.config, variableContext) as Record<string, unknown>,
-              };
-              await wfRepo.appendActionLog(db, run.id, log);
-              await wfRepo.updateRun(db, run.id, { actions_run: actionsRun });
-            } catch (actionErr) {
-              const message = actionErr instanceof Error ? actionErr.message : 'Unknown error';
-              const log = {
-                index: actionsRun,
-                type: action.type,
-                status: 'failed' as const,
-                error: message,
-                duration_ms: Date.now() - actionStart,
-                started_at: actionStarted,
-              };
-              await wfRepo.appendActionLog(db, run.id, log);
-              throw actionErr; // re-throw to fail the run
-            }
-          }
-
-          await wfRepo.updateRun(db, run.id, { status: 'completed', actions_run: actionsRun });
-          await wfRepo.incrementRunCount(db, workflow.id);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : 'Unknown error';
-          await wfRepo.updateRun(db, run.id, { status: 'failed', error: message });
-          const newErrorCount = await wfRepo.incrementErrorCount(db, workflow.id);
-
-          // Surface repeated failures as a HITL escalation so humans are notified
-          if (newErrorCount >= FAILURE_ALERT_THRESHOLD) {
-            hitlRepo.createHITLRequest(db, tenantId, {
-              agent_id: 'system',
-              action_type: 'workflow.repeated_failure',
-              action_summary: `Workflow "${workflow.name}" has failed ${newErrorCount} consecutive time${newErrorCount !== 1 ? 's' : ''}`,
-              action_payload: {
-                workflow_id: workflow.id,
-                workflow_name: workflow.name,
-                error_count: newErrorCount,
-                last_error: message,
-                run_id: run.id,
-              },
-              priority: 'urgent',
-              sla_minutes: 240,
-            }).catch((e) => console.error('[workflow:failure-alert] Failed to create HITL request:', e));
-          }
-        }
+        await executeWorkflowForEvent(workflow, tenantId, eventType, eventId, payload);
       }
     },
+    async processBacklog(limit = 100) {
+      const result = await db.query(
+        `SELECT
+            e.id AS event_id,
+            e.tenant_id,
+            e.event_type,
+            e.object_type,
+            e.object_id,
+            e.after_data,
+            e.metadata,
+            w.id AS workflow_id
+         FROM events e
+         JOIN workflows w
+           ON w.tenant_id = e.tenant_id
+          AND w.trigger_event = e.event_type
+          AND w.is_active = true
+          AND e.created_at >= w.created_at
+         LEFT JOIN workflow_runs wr
+           ON wr.workflow_id = w.id
+          AND wr.event_id = e.id
+         WHERE wr.id IS NULL
+           AND e.event_type NOT LIKE 'workflow.%'
+           AND COALESCE(e.metadata->>'origin', '') <> 'workflow'
+           AND COALESCE(e.metadata->>'sync_mode', '') <> 'replay'
+         ORDER BY e.id ASC
+         LIMIT $1`,
+        [limit],
+      );
+
+      let processed = 0;
+      let skipped = 0;
+      let failed = 0;
+
+      for (const row of result.rows as Array<{
+        event_id: number; tenant_id: UUID; event_type: string; object_type?: string; object_id?: UUID;
+        after_data?: unknown; metadata?: Record<string, unknown>; workflow_id: UUID;
+      }>) {
+        const workflow = await wfRepo.getWorkflow(db, row.tenant_id, row.workflow_id);
+        if (!workflow || !workflow.is_active) {
+          skipped++;
+          continue;
+        }
+        const payload = {
+          ...((row.after_data && typeof row.after_data === 'object') ? row.after_data as Record<string, unknown> : { value: row.after_data }),
+          event_type: row.event_type,
+          event_id: row.event_id,
+          object_type: row.object_type,
+          object_id: row.object_id,
+          metadata: row.metadata ?? {},
+        };
+        try {
+          const outcome = await executeWorkflowForEvent(workflow, row.tenant_id, row.event_type, row.event_id, payload);
+          if (outcome === 'processed') processed++;
+          else skipped++;
+        } catch (err) {
+          failed++;
+          console.error('[workflow:catchup] Failed to process missed event:', {
+            eventId: row.event_id,
+            workflowId: row.workflow_id,
+            error: err instanceof Error ? err.message : err,
+          });
+        }
+      }
+
+      return { processed, skipped, failed };
+    },
   };
+}
+
+export async function previewWorkflowContent(
+  db: DbPool,
+  tenantId: UUID,
+  input: {
+    action_type: 'send_email' | 'send_notification';
+    config: Record<string, unknown>;
+    sample_payload?: unknown;
+  },
+): Promise<{ subject?: string; body_text?: string; message?: string }> {
+  const variableContext = buildVariableContext(input.sample_payload ?? {});
+  const resolved = resolveConfig(input.config, variableContext) as Record<string, unknown>;
+  return generateWorkflowContent(
+    db,
+    tenantId,
+    input.action_type === 'send_email' ? 'email' : 'notification',
+    resolved,
+    input.sample_payload ?? {},
+    variableContext,
+  );
 }
 
 // ── Dry-run / test ────────────────────────────────────────────────────────────
@@ -182,6 +395,11 @@ export interface DryRunResult {
   }>;
 }
 
+export interface WorkflowDryRunDefinition {
+  trigger_filter?: Record<string, unknown>;
+  actions: Array<{ type: string; config: Record<string, unknown> }>;
+}
+
 export async function dryRunWorkflow(
   db: DbPool,
   tenantId: UUID,
@@ -193,7 +411,17 @@ export async function dryRunWorkflow(
     throw Object.assign(new Error(`Workflow ${workflowId} not found`), { status: 404 });
   }
 
-  const filter = workflow.trigger_filter as Record<string, unknown>;
+  return dryRunWorkflowDefinition({
+    trigger_filter: workflow.trigger_filter as Record<string, unknown>,
+    actions: workflow.actions as Array<{ type: string; config: Record<string, unknown> }>,
+  }, samplePayload);
+}
+
+export function dryRunWorkflowDefinition(
+  workflow: WorkflowDryRunDefinition,
+  samplePayload: unknown,
+): DryRunResult {
+  const filter = workflow.trigger_filter ?? {};
   const mismatches: Array<{ field: string; expected: unknown; actual: unknown }> = [];
   const payload = (samplePayload ?? {}) as Record<string, unknown>;
 
@@ -231,7 +459,7 @@ export async function dryRunWorkflow(
   const matched = mismatches.length === 0;
   const variableContext = buildVariableContext(samplePayload);
 
-  const actions = (workflow.actions as { type: string; config: Record<string, unknown> }[]).map((action, idx) => {
+  const actions = workflow.actions.map((action, idx) => {
     const resolved = resolveConfig(action.config, variableContext) as Record<string, unknown>;
     let note: string | undefined;
     if (action.type === 'send_notification' && !resolved.channel_id) {
@@ -239,6 +467,12 @@ export async function dryRunWorkflow(
     }
     if (action.type === 'send_email' && resolved.require_approval !== false) {
       note = 'require_approval is true — would create a HITL request before sending';
+    }
+    if (action.type === 'request_external_writeback') {
+      note = 'Creates a governed writeback request; execution follows system policy and may require approval.';
+    }
+    if (action.type === 'run_system_sync') {
+      note = 'Starts a governed sync run for the configured system of record.';
     }
     return {
       index: idx,
@@ -332,20 +566,53 @@ async function executeAction(
   };
 
   switch (action.type) {
-    case 'create_context_entry':
-    case 'create_note': {
-      if (action.type === 'create_note') {
-        console.warn('[workflow] Action type "create_note" is deprecated. Update workflow to use "create_context_entry".');
-      }
+    case 'create_context_entry': {
       const { createContextEntry } = await import('../db/repos/context-entries.js');
-      await createContextEntry(db, tenantId, {
+      const actorRepo = await import('../db/repos/actors.js');
+      const rawContextRepo = await import('../db/repos/raw-context-sources.js');
+      const workflowActor = await actorRepo.ensureActor(db, tenantId, {
+        actor_type: 'agent',
+        display_name: 'Workflow Automation',
+        agent_identifier: 'workflow-automation',
+        agent_model: 'crmy-workflow',
+        scopes: ['read', 'write'],
+      } as Parameters<typeof actorRepo.ensureActor>[2]);
+      const entry = await createContextEntry(db, tenantId, {
         subject_type: cfg.object_type as string,
         subject_id: cfg.object_id as string,
         context_type: (cfg.context_type as string) ?? 'note',
+        title: cfg.title as string | undefined,
         body: cfg.body as string,
-        authored_by: 'system',
+        confidence: Number(cfg.confidence ?? 0.75),
+        memory_status: (cfg.memory_status as 'signal' | 'active' | undefined) ?? 'signal',
+        evidence: [{
+          source_type: 'workflow',
+          source_ref: String((payload as Record<string, unknown>)?.id ?? 'event'),
+          source_label: String(action.type),
+          snippet: String(cfg.body ?? '').slice(0, 1000),
+          captured_at: new Date().toISOString(),
+          confidence: Number(cfg.confidence ?? 0.75),
+          rationale: 'Created by workflow action from an event payload.',
+        }],
+        source: 'workflow',
+        source_ref: String((payload as Record<string, unknown>)?.id ?? action.type),
+        authored_by: workflowActor.id,
         visibility: (cfg.visibility as string) ?? 'internal',
       } as Parameters<typeof createContextEntry>[2]);
+      await rawContextRepo.upsertRawContextSource(db, tenantId, {
+        source_type: 'workflow',
+        source_ref: `workflow:${entry.id}`,
+        source_label: String(cfg.title ?? action.type),
+        subject_type: entry.subject_type,
+        subject_id: entry.subject_id,
+        actor_id: workflowActor.id,
+        status: entry.memory_status === 'signal' ? 'needs_review' : 'processed',
+        stage: entry.memory_status === 'signal' ? 'review_signals' : 'confirmed_memory',
+        raw_excerpt: entry.body.slice(0, 1000),
+        signals_created: entry.memory_status === 'signal' ? 1 : 0,
+        memory_created: entry.memory_status === 'active' ? 1 : 0,
+        metadata: { context_entry_id: entry.id, workflow_action: action.type },
+      });
       break;
     }
     case 'create_activity': {
@@ -361,6 +628,13 @@ async function executeAction(
     }
     case 'send_notification': {
       let channelId = cfg.channel_id as string | undefined;
+      let notificationSubject = cfg.subject as string | undefined;
+      let notificationBody = (cfg.message as string | undefined) ?? '';
+
+      if (cfg.ai_generate === true) {
+        const generated = await generateWorkflowContent(db, tenantId, 'notification', cfg, payload, variableContext);
+        notificationBody = generated.message || notificationBody;
+      }
 
       if (!channelId) {
         const { getDefaultChannel } = await import('../db/repos/messaging.js');
@@ -373,8 +647,8 @@ async function executeAction(
         const delivery = await sendMessage(db, tenantId, {
           channel_id: channelId,
           recipient: cfg.recipient as string | undefined,
-          subject: cfg.subject as string | undefined,
-          body: cfg.message as string,
+          subject: notificationSubject,
+          body: notificationBody,
           metadata: { workflow_run: true },
         });
 
@@ -388,7 +662,7 @@ async function executeAction(
             channel_id: channelId,
             delivery_id: delivery.id,
             status: delivery.status,
-            message: cfg.message,
+            message: notificationBody,
             recipient: cfg.recipient,
           },
         });
@@ -398,7 +672,7 @@ async function executeAction(
           eventType: 'workflow.notification',
           actorType: 'system',
           objectType: 'workflow',
-          afterData: { channel: 'internal', message: cfg.message, recipient: cfg.recipient },
+          afterData: { channel: 'internal', message: notificationBody, recipient: cfg.recipient },
         });
       }
       break;
@@ -408,11 +682,16 @@ async function executeAction(
       const hitlRepo = await import('../db/repos/hitl.js');
 
       const toAddress = cfg.to_address as string;
-      const subject = cfg.subject as string;
-      const bodyText = cfg.body_text as string;
+      let subject = cfg.subject as string;
+      let bodyText = (cfg.body_text as string | undefined) ?? '';
       const bodyHtml = cfg.body_html as string | undefined;
-      // Support both boolean and legacy string "false"
-      const requireApproval = cfg.require_approval !== false && cfg.require_approval !== 'false';
+      const requireApproval = cfg.require_approval !== false;
+
+      if (cfg.ai_generate === true) {
+        const generated = await generateWorkflowContent(db, tenantId, 'email', cfg, payload, variableContext);
+        subject = generated.subject || subject;
+        bodyText = generated.body_text || bodyText;
+      }
 
       let hitlRequestId: string | undefined;
       let status = 'draft';
@@ -449,6 +728,7 @@ async function executeAction(
         objectType: 'email',
         objectId: email.id,
         afterData: { id: email.id, to: email.to_email, subject: email.subject, status: email.status },
+        metadata: { origin: 'workflow' },
       });
 
       if (!requireApproval) {
@@ -464,6 +744,40 @@ async function executeAction(
       const value = cfg.value;
 
       if (objectType && objectId && field) {
+        const policy = evaluateActionPolicy({
+          action_type: 'workflow.update_field',
+          object_type: objectType,
+          field_names: [field],
+          actor: {
+            tenant_id: tenantId,
+            actor_id: 'workflow',
+            actor_type: 'system',
+            role: 'member',
+            scopes: ['workflows:write'],
+          },
+        });
+        if (policy.decision === 'blocked') {
+          throw new Error(`workflow update_field blocked by Action Policy: ${policy.reasons.join(' ')}`);
+        }
+        if (policy.decision === 'approval_required' && cfg.approved !== true) {
+          await hitlRepo.createHITLRequest(db, tenantId, {
+            agent_id: 'system',
+            action_type: 'workflow.update_field',
+            action_summary: `Approve workflow update to ${objectType}.${field}`,
+            action_payload: { object_type: objectType, object_id: objectId, field, value, policy },
+            priority: policy.risk_level === 'high' ? 'high' : 'normal',
+            sla_minutes: 1440,
+          });
+          await emitEvent(db, {
+            tenantId,
+            eventType: 'workflow.action.approval_required',
+            actorType: 'system',
+            objectType,
+            objectId,
+            afterData: { action: 'update_field', field, policy },
+          });
+          break;
+        }
         const repoMap: Record<string, string> = {
           contact: '../db/repos/contacts.js',
           account: '../db/repos/accounts.js',
@@ -677,6 +991,7 @@ async function executeAction(
         actorType: 'system',
         objectType: 'sequence_enrollment',
         afterData: { sequence_id: sequenceId, contact_id: contactId, via: 'workflow' },
+        metadata: { origin: 'workflow' },
       });
       break;
     }
@@ -767,16 +1082,51 @@ async function executeAction(
         agent_model: 'crmy-sync',
         scopes: ['read', 'write'],
       } as Parameters<typeof actorRepo.ensureActor>[2]);
-      await createContextEntry(db, tenantId, {
+      const metadata = payload && typeof payload === 'object' && 'metadata' in payload
+        ? ((payload as { metadata?: unknown }).metadata as Record<string, unknown> | undefined)
+        : undefined;
+      const entry = await createContextEntry(db, tenantId, {
         subject_type: String(cfg.subject_type ?? (payload as Record<string, unknown>)?.object_type),
         subject_id: String(cfg.subject_id ?? (payload as Record<string, unknown>)?.id),
         context_type: String(cfg.context_type ?? 'external_update'),
         title: cfg.title as string | undefined,
         body: String(cfg.body ?? cfg.message ?? 'External system update received.'),
         confidence: Number(cfg.confidence ?? 0.8),
+        memory_status: 'signal',
+        evidence: [{
+          source_type: String(metadata?.origin ?? 'external_sync'),
+          source_id: String(metadata?.external_record_id ?? metadata?.system_id ?? ''),
+          source_ref: String(metadata?.sync_run_id ?? metadata?.external_record_id ?? ''),
+          source_label: String(metadata?.system_type ?? 'System of Record'),
+          snippet: String(cfg.body ?? cfg.message ?? 'External system update received.').slice(0, 1000),
+          captured_at: new Date().toISOString(),
+          confidence: Number(cfg.confidence ?? 0.8),
+          rationale: 'Created from an external system change and requires review before becoming Memory.',
+        }],
         source: 'external_sync',
+        source_ref: String(metadata?.sync_run_id ?? metadata?.external_record_id ?? 'external_change'),
         authored_by: systemActor.id,
       } as Parameters<typeof createContextEntry>[2]);
+      const rawContextRepo = await import('../db/repos/raw-context-sources.js');
+      await rawContextRepo.upsertRawContextSource(db, tenantId, {
+        source_type: String(metadata?.origin ?? 'external_sync'),
+        source_ref: `workflow-external:${entry.id}`,
+        source_label: String(metadata?.system_type ?? cfg.title ?? 'External system update'),
+        subject_type: entry.subject_type,
+        subject_id: entry.subject_id,
+        actor_id: systemActor.id,
+        status: 'needs_review',
+        stage: 'review_signals',
+        raw_excerpt: entry.body.slice(0, 1000),
+        signals_created: 1,
+        metadata: {
+          context_entry_id: entry.id,
+          system_id: metadata?.system_id,
+          system_type: metadata?.system_type,
+          external_record_id: metadata?.external_record_id,
+          sync_run_id: metadata?.sync_run_id,
+        },
+      });
       break;
     }
     case 'hitl_checkpoint': {

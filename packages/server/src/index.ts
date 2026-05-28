@@ -3,7 +3,7 @@
 
 import express from 'express';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -20,6 +20,7 @@ import { autoApproveExpired, expireOldRequests } from './db/repos/hitl.js';
 import { cleanExpiredSessions } from './db/repos/agent.js';
 import { processPendingExtractions } from './agent/extraction.js';
 import { processStaleEntries } from './services/staleness.js';
+import { seedSampleData } from './services/sample-data.js';
 import { loadPlugins, shutdownPlugins, type PluginConfig } from './plugins/index.js';
 import { CrmyError, unauthorized, type ActorContext } from '@crmy/shared';
 
@@ -121,7 +122,13 @@ export async function createApp(config: ServerConfig) {
   // Seed demo data if requested via CRMY_SEED_DEMO=true (Docker / CI path)
   if (process.env.CRMY_SEED_DEMO === 'true') {
     try {
-      await seedDemoData(db);
+      const tenantRes = await db.query(
+        'SELECT id FROM tenants WHERE id::text = $1 OR slug = $1 ORDER BY created_at DESC LIMIT 1',
+        [config.tenantSlug],
+      );
+      if (tenantRes.rows.length > 0) {
+        await seedSampleData(db, tenantRes.rows[0].id as string);
+      }
       console.log('[crmy] Demo data seeded successfully');
     } catch (err) {
       console.warn('[crmy] Demo data seeding failed:', (err as Error).message);
@@ -267,8 +274,25 @@ export async function createApp(config: ServerConfig) {
   const { refreshStaleScores } = await import('./services/scoring.js');
   const { processSequenceDue, handleSequenceGoalEvent, resolveSequenceGoalContactId } = await import('./services/sequence-executor.js');
   const { refreshSequenceAnalytics } = await import('./services/sequence-analytics.js');
+  const { markBackgroundTickFailure, markBackgroundTickSuccess } = await import('./services/scheduler-health.js');
+  const { createWorkflowEngine } = await import('./workflows/engine.js');
+  const workflowEngine = createWorkflowEngine(db);
+  let backgroundWorkerRunning = false;
+  const BACKGROUND_WORKER_LOCK_KEY = 8444219208;
+  async function tryAcquireBackgroundLock(): Promise<boolean> {
+    const result = await db.query('SELECT pg_try_advisory_lock($1::bigint) AS locked', [BACKGROUND_WORKER_LOCK_KEY]);
+    return result.rows[0]?.locked === true;
+  }
+  async function releaseBackgroundLock(): Promise<void> {
+    await db.query('SELECT pg_advisory_unlock($1::bigint)', [BACKGROUND_WORKER_LOCK_KEY]);
+  }
   const hitlInterval = setInterval(async () => {
+    if (backgroundWorkerRunning) return;
+    let lockHeld = false;
     try {
+      backgroundWorkerRunning = true;
+      lockHeld = await tryAcquireBackgroundLock();
+      if (!lockHeld) return;
       await autoApproveExpired(db);
       await expireOldRequests(db);
       await checkHitlSlaExpiry(db);
@@ -280,16 +304,29 @@ export async function createApp(config: ServerConfig) {
       await refreshStaleScores(db);
       // Purge workflow run history older than 90 days
       await purgeOldWorkflowRuns(db);
+      // Catch up workflow events that were persisted but missed by in-process delivery
+      await workflowEngine.processBacklog(100);
       // Process due sequence enrollments
       await processSequenceDue(db);
       // Refresh sequence analytics rollup
       await refreshSequenceAnalytics(db);
       // Evict idle MCP sessions (30-minute TTL)
       evictStaleMcpSessions();
+      markBackgroundTickSuccess();
     } catch (err) {
       // Log the error but keep the interval running — a transient DB error
       // should not permanently disable all background maintenance tasks.
+      markBackgroundTickFailure(err);
       console.error('Background worker error:', err);
+    } finally {
+      if (lockHeld) {
+        try {
+          await releaseBackgroundLock();
+        } catch (err) {
+          console.warn('[background] Failed to release advisory lock:', err);
+        }
+      }
+      backgroundWorkerRunning = false;
     }
   }, 60_000);
 
@@ -311,8 +348,6 @@ export async function createApp(config: ServerConfig) {
   registerSystemsOfRecordHitlHandler(db);
 
   // Wire workflow engine to event bus — workflows trigger on emitted events
-  const { createWorkflowEngine } = await import('./workflows/engine.js');
-  const workflowEngine = createWorkflowEngine(db);
   eventBus.on('crmy:event', (event) => {
     // Skip workflow-generated events to prevent infinite loops
     if (event.eventType.startsWith('workflow.')) return;
@@ -455,63 +490,6 @@ async function seedDefaults(db: DbPool, tenantSlug: string): Promise<void> {
   }
 }
 
-/**
- * Seed demo data using the same stable UUIDs as scripts/seed-demo.ts.
- * Called when CRMY_SEED_DEMO=true (Docker / container startup).
- */
-async function seedDemoData(db: DbPool): Promise<void> {
-  const tenantRes = await db.query(`SELECT id FROM tenants LIMIT 1`);
-  if (tenantRes.rows.length === 0) return;
-  const tenantId = tenantRes.rows[0].id as string;
-
-  const IDS = {
-    ACTOR_CODY: 'd0000000-0000-4000-a000-000000000001',
-    ACTOR_SARAH_R: 'd0000000-0000-4000-a000-000000000002',
-    ACTOR_OUTREACH: 'd0000000-0000-4000-a000-000000000003',
-    ACTOR_RESEARCH: 'd0000000-0000-4000-a000-000000000004',
-    ACCT_ACME: 'd0000000-0000-4000-b000-000000000001',
-    ACCT_BRIGHTSIDE: 'd0000000-0000-4000-b000-000000000002',
-    ACCT_VERTEX: 'd0000000-0000-4000-b000-000000000003',
-    CT_SARAH_CHEN: 'd0000000-0000-4000-c000-000000000001',
-    CT_MARCUS_WEBB: 'd0000000-0000-4000-c000-000000000002',
-    CT_PRIYA_NAIR: 'd0000000-0000-4000-c000-000000000003',
-    CT_JORDAN_LIU: 'd0000000-0000-4000-c000-000000000004',
-    CT_TOMAS_RIVERA: 'd0000000-0000-4000-c000-000000000005',
-    CT_KEIKO_YAMAMOTO: 'd0000000-0000-4000-c000-000000000006',
-    OPP_ACME: 'd0000000-0000-4000-d000-000000000001',
-    OPP_BRIGHTSIDE: 'd0000000-0000-4000-d000-000000000002',
-    OPP_VERTEX: 'd0000000-0000-4000-d000-000000000003',
-  };
-
-  // Check if already seeded
-  const check = await db.query('SELECT id FROM actors WHERE id = $1', [IDS.ACTOR_CODY]);
-  if (check.rows.length > 0) return; // already seeded
-
-  // Actors
-  await db.query(`INSERT INTO actors (id, tenant_id, actor_type, display_name, email) VALUES ($1, $2, 'human', 'Cody Harris', 'cody@crmy.ai') ON CONFLICT (id) DO NOTHING`, [IDS.ACTOR_CODY, tenantId]);
-  await db.query(`INSERT INTO actors (id, tenant_id, actor_type, display_name, email) VALUES ($1, $2, 'human', 'Sarah Reeves', 'sarah@crmy.ai') ON CONFLICT (id) DO NOTHING`, [IDS.ACTOR_SARAH_R, tenantId]);
-  await db.query(`INSERT INTO actors (id, tenant_id, actor_type, display_name, email, agent_identifier, agent_model) VALUES ($1, $2, 'agent', 'Outreach Agent', NULL, 'outreach-v1', 'claude-sonnet-4-20250514') ON CONFLICT (id) DO NOTHING`, [IDS.ACTOR_OUTREACH, tenantId]);
-  await db.query(`INSERT INTO actors (id, tenant_id, actor_type, display_name, email, agent_identifier, agent_model) VALUES ($1, $2, 'agent', 'Research Agent', NULL, 'research-v1', 'claude-sonnet-4-20250514') ON CONFLICT (id) DO NOTHING`, [IDS.ACTOR_RESEARCH, tenantId]);
-
-  // Accounts
-  await db.query(`INSERT INTO accounts (id, tenant_id, name, industry, health_score, annual_revenue, domain, website) VALUES ($1, $2, 'Acme Corp', 'SaaS', 72, 180000, 'acme.com', 'https://acme.com') ON CONFLICT (id) DO NOTHING`, [IDS.ACCT_ACME, tenantId]);
-  await db.query(`INSERT INTO accounts (id, tenant_id, name, industry, health_score, annual_revenue, domain, website) VALUES ($1, $2, 'Brightside Health', 'Healthcare', 45, 96000, 'brightsidehealth.com', 'https://brightsidehealth.com') ON CONFLICT (id) DO NOTHING`, [IDS.ACCT_BRIGHTSIDE, tenantId]);
-  await db.query(`INSERT INTO accounts (id, tenant_id, name, industry, health_score, annual_revenue, domain, website) VALUES ($1, $2, 'Vertex Logistics', 'Logistics', 88, 240000, 'vertex.io', 'https://vertex.io') ON CONFLICT (id) DO NOTHING`, [IDS.ACCT_VERTEX, tenantId]);
-
-  // Contacts
-  await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Sarah', 'Chen', 'sarah.chen@acme.com', 'VP Engineering', $3, 'prospect') ON CONFLICT (id) DO NOTHING`, [IDS.CT_SARAH_CHEN, tenantId, IDS.ACCT_ACME]);
-  await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Marcus', 'Webb', 'marcus.webb@acme.com', 'CFO', $3, 'prospect') ON CONFLICT (id) DO NOTHING`, [IDS.CT_MARCUS_WEBB, tenantId, IDS.ACCT_ACME]);
-  await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Priya', 'Nair', 'p.nair@brightsidehealth.com', 'CTO', $3, 'customer') ON CONFLICT (id) DO NOTHING`, [IDS.CT_PRIYA_NAIR, tenantId, IDS.ACCT_BRIGHTSIDE]);
-  await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Jordan', 'Liu', 'j.liu@brightsidehealth.com', 'RevOps Lead', $3, 'customer') ON CONFLICT (id) DO NOTHING`, [IDS.CT_JORDAN_LIU, tenantId, IDS.ACCT_BRIGHTSIDE]);
-  await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Tomás', 'Rivera', 't.rivera@vertex.io', 'Head of Sales Ops', $3, 'customer') ON CONFLICT (id) DO NOTHING`, [IDS.CT_TOMAS_RIVERA, tenantId, IDS.ACCT_VERTEX]);
-  await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Keiko', 'Yamamoto', 'k.yamamoto@vertex.io', 'CEO', $3, 'customer') ON CONFLICT (id) DO NOTHING`, [IDS.CT_KEIKO_YAMAMOTO, tenantId, IDS.ACCT_VERTEX]);
-
-  // Opportunities
-  await db.query(`INSERT INTO opportunities (id, tenant_id, name, account_id, stage, amount, close_date) VALUES ($1, $2, 'Acme Corp Enterprise Deal', $3, 'Discovery', 180000, '2026-06-30') ON CONFLICT (id) DO NOTHING`, [IDS.OPP_ACME, tenantId, IDS.ACCT_ACME]);
-  await db.query(`INSERT INTO opportunities (id, tenant_id, name, account_id, stage, amount, close_date) VALUES ($1, $2, 'Brightside Health Platform Deal', $3, 'PoC', 96000, '2026-05-15') ON CONFLICT (id) DO NOTHING`, [IDS.OPP_BRIGHTSIDE, tenantId, IDS.ACCT_BRIGHTSIDE]);
-  await db.query(`INSERT INTO opportunities (id, tenant_id, name, account_id, stage, amount, close_date) VALUES ($1, $2, 'Vertex Logistics Expansion', $3, 'Negotiation', 240000, '2026-04-30') ON CONFLICT (id) DO NOTHING`, [IDS.OPP_VERTEX, tenantId, IDS.ACCT_VERTEX]);
-}
-
 // Direct startup
 async function main() {
   const config = loadConfig();
@@ -548,7 +526,9 @@ async function main() {
 }
 
 // Only run if this is the main module
-const isMain = !process.argv[1] || process.argv[1].includes('server') || process.argv[1].endsWith('index.js') || process.argv[1].endsWith('index.ts');
+const isMain = process.argv[1]
+  ? pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
+  : false;
 if (isMain && !process.env.CRMY_IMPORTED) {
   main().catch(err => {
     console.error('Failed to start:', err);
@@ -561,6 +541,7 @@ export { runMigrations, getMigrationStatus } from './db/migrate.js';
 export { createMcpServer, getAllTools } from './mcp/server.js';
 export { emitEvent } from './events/emitter.js';
 export { createWorkflowEngine } from './workflows/engine.js';
+export { getSampleDataStatus, resetSampleData, seedSampleData } from './services/sample-data.js';
 export { loadPlugins, shutdownPlugins } from './plugins/index.js';
 export type { CrmyPlugin, PluginConfig } from './plugins/index.js';
 export type { ToolDef } from './mcp/server.js';

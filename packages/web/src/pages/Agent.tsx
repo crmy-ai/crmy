@@ -215,14 +215,14 @@ function completeTask(task: AgentTaskState | null): AgentTaskState | null {
 function getWorkflowCommands(subject: AIContextEntity | null): WorkflowCommand[] {
   const target = subject ? `this ${typeLabels[subject.type].toLowerCase()} (${subject.name})` : 'the selected customer record';
   return [
-    { label: '/account brief', prompt: `Get a briefing for ${target}. Include current context, recent activity, risks, and recommended next action.` },
+    { label: '/account brief', prompt: `Get a briefing for ${target}. Include Current Memory, recent activity, risks, and recommended next action.` },
     { label: '/deal review', prompt: `Review the deal context for ${target}. Summarize stage fit, blockers, health, probability, and next steps.` },
-    { label: '/renewal risk', prompt: `Assess renewal risk for ${target}. Look for stale context, missing activity, objections, and handoff needs.` },
+    { label: '/renewal risk', prompt: `Assess renewal risk for ${target}. Look for Memory that needs review, missing activity, objections, and handoff needs.` },
     { label: '/next best action', prompt: `Recommend the next best action for ${target}. Explain the evidence and whether a handoff or write needs approval.` },
     { label: '/meeting prep', prompt: `Prepare meeting notes for ${target}. Include what changed, open questions, and suggested agenda.` },
     { label: '/follow-up summary', prompt: `Draft a follow-up summary for ${target}. Ground it in known context and call out assumptions.` },
     { label: '/handoff prep', prompt: `Prepare a human handoff for ${target}. Include urgency, owner, reasoning, and context the reviewer needs.` },
-    { label: '/stale context review', prompt: `Review stale or weak context for ${target}. Suggest what should be refreshed before action.` },
+    { label: '/memory health review', prompt: `Review Memory that needs review or weak context for ${target}. Suggest what should be refreshed before action.` },
     { label: '/data quality scan', prompt: `Scan data quality for ${target}. Identify missing relationships, weak fields, and conflicts that could affect agent work.` },
   ];
 }
@@ -984,7 +984,7 @@ export default function Agent() {
                       <IconComponent className="w-5 h-5 text-accent" />
                     </div>
                     <p className="text-sm font-medium text-foreground">Record context attached.</p>
-                    <p className="text-sm mt-1">Ask about this record or get a briefing when you need full current context.</p>
+                    <p className="text-sm mt-1">Ask about this record or get a briefing when you need full Current Memory.</p>
                   </>
                 ) : (
                   <>

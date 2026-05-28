@@ -9,7 +9,7 @@ import {
   Users, Briefcase, LayoutDashboard, FolderKanban, Activity, Settings, Search,
   Building2, ClipboardList, Zap, ListOrdered, Plus, Database, Bot, Mail,
   ScrollText, ShieldCheck, Network, KeyRound, Tags, MessageSquare, Palette,
-  Webhook, SlidersHorizontal, Sparkles, Loader2, FileText, type LucideIcon,
+  Webhook, SlidersHorizontal, Sparkles, Loader2, FileText, Server, type LucideIcon,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { cn } from '@/lib/utils';
@@ -41,7 +41,10 @@ interface ActionCommand {
 const DESTINATIONS: DestinationCommand[] = [
   { label: 'Overview',        icon: LayoutDashboard, path: '/',                         color: ENTITY_COLORS.dashboard, keywords: 'dashboard command center status activate setup home' },
   { label: 'Context',         icon: FileText,        path: '/context',                  color: ENTITY_COLORS.context, keywords: 'memory browser context entries customer memory' },
-  { label: 'Context Governance', icon: ShieldCheck,  path: '/context?tab=governance',   color: ENTITY_COLORS.context, keywords: 'governance stale review contradictions context quality' },
+  { label: 'Raw Context',     icon: FileText,        path: '/context?tab=observations', color: ENTITY_COLORS.context, keywords: 'raw context observations sources ingestion processing volume' },
+  { label: 'Signals',         icon: Sparkles,        path: '/context?tab=signals',      color: ENTITY_COLORS.context, keywords: 'signals inferred context review promote dismiss evidence confidence' },
+  { label: 'Memory',          icon: FileText,        path: '/context?tab=memory',       color: ENTITY_COLORS.context, keywords: 'memory confirmed context operational knowledge evidence' },
+  { label: 'Memory Health',   icon: ShieldCheck,     path: '/context?tab=governance',   color: ENTITY_COLORS.context, keywords: 'memory health review contradictions context quality' },
   { label: 'Memory Graph',    icon: Network,         path: '/?tab=graph',               color: ENTITY_COLORS.context, keywords: 'graph memory relationships network' },
   { label: 'Workspace Agent', icon: Bot,             path: '/agent',                    color: ENTITY_COLORS.agents, keywords: 'agent chat local model workspace reasoning' },
   { label: 'Agent Activity',  icon: Activity,        path: '/agent/activity',           color: ENTITY_COLORS.agents, keywords: 'agent activity tools mcp traces latency errors' },
@@ -61,12 +64,13 @@ const DESTINATIONS: DestinationCommand[] = [
   { label: 'Actors',          icon: Users,           path: '/settings/actors',          color: ENTITY_COLORS.agents, keywords: 'actors users agents scopes invites passwords api keys' },
   { label: 'Database Settings', icon: Database,      path: '/settings/database',        color: ENTITY_COLORS.operations, keywords: 'database postgres neon supabase rds lakebase pgvector sample data' },
   { label: 'Model Settings',  icon: Sparkles,        path: '/settings/model',           color: ENTITY_COLORS.agents, keywords: 'model local workspace agent llm openai ollama' },
+  { label: 'Systems of Record', icon: Server,        path: '/settings/systems',         color: ENTITY_COLORS.operations, keywords: 'systems of record hubspot salesforce snowflake databricks connectors sync mappings writebacks external systems' },
   { label: 'Appearance',      icon: Palette,         path: '/settings/appearance',      color: null, keywords: 'appearance theme charcoal color display' },
   { label: 'API Keys',        icon: KeyRound,        path: '/settings/api-keys',        color: null, keywords: 'api keys tokens access' },
   { label: 'Webhooks',        icon: Webhook,         path: '/settings/webhooks',        color: null, keywords: 'webhooks integrations outbound events' },
   { label: 'Registries',      icon: Tags,            path: '/settings/registries',      color: null, keywords: 'registries activity types context types taxonomy' },
   { label: 'Messaging',       icon: MessageSquare,   path: '/settings/messaging',       color: null, keywords: 'messaging email provider smtp resend sendgrid' },
-  { label: 'HITL Rules',      icon: ShieldCheck,     path: '/settings/hitl-rules',      color: ENTITY_COLORS.assignments, keywords: 'hitl rules approval handoff policy' },
+  { label: 'Action Policies', icon: ShieldCheck,     path: '/settings/hitl-rules',      color: ENTITY_COLORS.assignments, keywords: 'hitl rules approval handoff policy action policies' },
   { label: 'Automation Settings', icon: SlidersHorizontal, path: '/settings/automations', color: ENTITY_COLORS.workflows, keywords: 'automation settings limits sequences workflows' },
 ];
 
@@ -358,7 +362,7 @@ export function CommandPalette() {
         )}
 
         {contextEntries.length > 0 && (
-          <Command.Group heading="Context Memory" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
+          <Command.Group heading="Memory" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
             {contextEntries.slice(0, 5).map((entry) => (
               <Command.Item
                 key={entry.id as string}

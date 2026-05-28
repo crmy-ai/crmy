@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/popover';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
-import { useSupersedeContextEntry, useReviewContextEntry, useContextTypes } from '@/api/hooks';
+import { useSupersedeContextEntry, useReviewContextEntry, useContextTypes, usePromoteSignal, useRejectSignal } from '@/api/hooks';
 import {
   User, Building2, Briefcase, FolderKanban,
   Bot, UserCircle2, Clock, Tag, ExternalLink,
@@ -193,6 +193,8 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
   const openDrawer      = useAppStore(s => s.openDrawer);
   const supersedeEntry  = useSupersedeContextEntry();
   const reviewEntry     = useReviewContextEntry();
+  const promoteSignal   = usePromoteSignal();
+  const rejectSignal    = useRejectSignal();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: contextTypesData } = useContextTypes() as any;
@@ -222,6 +224,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
 
   const expired = entry.valid_until ? isPast(new Date(entry.valid_until)) : false;
   const isSuperseded = entry.is_current === false;
+  const isSignal = entry.memory_status === 'signal';
 
   const SubjectIcon = SUBJECT_ICONS[entry.subject_type] ?? User;
   const subjectColor = SUBJECT_COLORS[entry.subject_type] ?? '#94a3b8';
@@ -288,6 +291,36 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
     }
   }
 
+  async function handlePromoteSignal() {
+    if (!entry) return;
+    try {
+      await promoteSignal.mutateAsync({ id: entry.id });
+      toast({ title: 'Promoted to Memory', description: 'Agents can now use this as confirmed operational context.' });
+      onClose();
+    } catch (err) {
+      toast({
+        title: 'Could not promote signal',
+        description: err instanceof Error ? err.message : 'Review the signal and try again.',
+        variant: 'destructive',
+      });
+    }
+  }
+
+  async function handleRejectSignal() {
+    if (!entry) return;
+    try {
+      await rejectSignal.mutateAsync({ id: entry.id, reason: 'Rejected from signal drawer' });
+      toast({ title: 'Signal dismissed', description: 'It will stay out of Memory.' });
+      onClose();
+    } catch (err) {
+      toast({
+        title: 'Could not reject signal',
+        description: err instanceof Error ? err.message : 'Review the signal and try again.',
+        variant: 'destructive',
+      });
+    }
+  }
+
   function handleCopyId() {
     if (!entry) return;
     navigator.clipboard.writeText(entry.id).then(() => {
@@ -324,10 +357,13 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
             </button>
             {/* Status badges */}
             {isSuperseded && (
-              <Badge variant="outline" className="text-xs text-muted-foreground border-muted">superseded</Badge>
+              <Badge variant="outline" className="text-xs text-muted-foreground border-muted">Superseded</Badge>
+            )}
+            {isSignal && (
+              <Badge className="text-xs bg-violet-600/10 text-violet-700 dark:text-violet-300 border border-violet-500/20">Signal</Badge>
             )}
             {expired && !isSuperseded && (
-              <Badge variant="outline" className="text-xs text-destructive border-destructive/30">expired</Badge>
+              <Badge variant="outline" className="text-xs text-destructive border-destructive/30">Needs review</Badge>
             )}
           </div>
           <SheetTitle className="text-base font-semibold text-foreground text-left leading-snug">
@@ -353,15 +389,15 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
                 {!halfLife && (
                   <p className="text-xs text-muted-foreground flex items-center gap-1.5">
                     <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                    No decay — this knowledge type is treated as a permanent record.
+                    No decay — this Memory type is treated as a permanent record.
                   </p>
                 )}
               </div>
             </Section>
           )}
 
-          {/* Body */}
-          <Section title="Content" defaultOpen>
+          {/* Claim */}
+          <Section title={isSignal ? 'Claim (Signal)' : 'Claim (Memory)'} defaultOpen>
             <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{entry.body}</p>
             {structuredDataKeys.length > 0 && (
               <div className="mt-3 rounded-lg border border-border overflow-hidden">
@@ -437,6 +473,35 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
             </div>
           </Section>
 
+          {Array.isArray(entry.evidence) && entry.evidence.length > 0 && (
+            <Section title="Evidence" defaultOpen={isSignal}>
+              <div className="space-y-2">
+                {entry.evidence.map((item: Record<string, unknown>, idx: number) => (
+                  <div key={idx} className="rounded-lg border border-border bg-muted/20 p-3 text-xs space-y-1">
+                    <div className="flex items-center gap-2 text-muted-foreground flex-wrap">
+                      <Activity className="w-3.5 h-3.5" />
+                      <span className="font-medium text-foreground">{String(item.source_type ?? 'raw_context').replace(/_/g, ' ')}</span>
+                      {Boolean(item.speaker) && <span>Speaker: {String(item.speaker)}</span>}
+                      {Boolean(item.observed_at) && <span>{formatDistanceToNow(new Date(String(item.observed_at)), { addSuffix: true })}</span>}
+                      {typeof item.confidence === 'number' && <span>{Math.round(item.confidence * 100)}% support</span>}
+                    </div>
+                    {Boolean(item.snippet) && (
+                      <p className="text-foreground leading-relaxed whitespace-pre-wrap">{String(item.snippet)}</p>
+                    )}
+                    {Boolean(item.rationale) && (
+                      <p className="text-muted-foreground leading-relaxed">Why it supports the claim: {String(item.rationale)}</p>
+                    )}
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground">
+                      {Boolean(item.source_label) && <span>{String(item.source_label)}</span>}
+                      {Boolean(item.source_ref) && <span>Ref: {String(item.source_ref)}</span>}
+                      {Boolean(item.verified_at) && <span>Verified {formatDistanceToNow(new Date(String(item.verified_at)), { addSuffix: true })}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+
           {/* Tags */}
           {(entry.tags ?? []).length > 0 && (
             <Section title="Tags" defaultOpen>
@@ -461,7 +526,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
                 <div className={`flex items-center gap-2 text-xs ${expired ? 'text-destructive' : 'text-muted-foreground'}`}>
                   {expired && <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />}
                   <span>
-                    {expired ? 'Expired ' : 'Valid until '}
+                    {expired ? 'Needs review since ' : 'Review by '}
                     <span className="font-medium">
                       {format(new Date(entry.valid_until), 'MMM d, yyyy')}
                     </span>
@@ -507,7 +572,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
                 </button>
               </div>
               <Textarea
-                placeholder="Enter the updated knowledge (the old entry will be archived)…"
+                placeholder="Enter the updated claim (the old entry will be archived)…"
                 value={supersedeBody}
                 onChange={e => setSupersedeBody(e.target.value)}
                 className="text-sm min-h-[100px]"
@@ -556,8 +621,31 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
         {/* ── Sticky footer actions ───────────────────────────────────────── */}
         {!isSuperseded && (
           <div className="flex-shrink-0 border-t border-border px-5 py-3 bg-card flex items-center gap-2 flex-wrap">
+            {isSignal && (
+              <>
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5"
+                  onClick={handlePromoteSignal}
+                  disabled={promoteSignal.isPending}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Promote to Memory
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5"
+                  onClick={handleRejectSignal}
+                  disabled={rejectSignal.isPending}
+                >
+                  Dismiss
+                </Button>
+              </>
+            )}
             {/* Mark reviewed — highlighted if expired */}
-            {expired && (
+            {expired && !isSignal && (
               <Button
                 variant="outline"
                 size="sm"
@@ -571,7 +659,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
             )}
 
             {/* Supersede */}
-            {!supersedeOpen && (
+            {!supersedeOpen && !isSignal && (
               <Button
                 variant="outline"
                 size="sm"
@@ -584,7 +672,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
             )}
 
             {/* Forget / Invalidate */}
-            <Popover open={forgetOpen} onOpenChange={setForgetOpen}>
+            {!isSignal && <Popover open={forgetOpen} onOpenChange={setForgetOpen}>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
@@ -599,7 +687,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
                 <div>
                   <p className="text-sm font-semibold text-foreground mb-1">Forget this belief?</p>
                   <p className="text-xs text-muted-foreground leading-relaxed">
-                    The entry will be marked as intentionally forgotten and removed from active context.
+                    The entry will be marked as intentionally forgotten and removed from Current Memory.
                     The original record is preserved in audit history.
                   </p>
                 </div>
@@ -623,7 +711,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
                   </Button>
                 </div>
               </PopoverContent>
-            </Popover>
+            </Popover>}
 
             {/* Spacer */}
             <div className="flex-1" />
@@ -646,7 +734,7 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
           <div className="flex-shrink-0 border-t border-border px-5 py-3 bg-muted/30 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-muted-foreground flex-shrink-0" />
             <p className="text-xs text-muted-foreground">
-              This entry has been superseded and is no longer active. It is preserved for audit purposes.
+              This entry has been superseded and is no longer Current Memory. It is preserved for audit purposes.
             </p>
             <div className="flex-1" />
             <Button

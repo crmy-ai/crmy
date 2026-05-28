@@ -20,7 +20,7 @@ export async function crmSearch(
 }> {
   // ── Unified index path ────────────────────────────────────────────────────
   // Query the search_index table using PostgreSQL full-text search.
-  // Falls back to the legacy ILIKE multi-table scan when:
+  // Falls back to direct ILIKE scans when:
   //   a) the table doesn't exist yet (migration not yet applied), or
   //   b) the index is empty (no documents indexed yet for this tenant).
   try {
@@ -57,7 +57,7 @@ export async function crmSearch(
         }
       }
 
-      const fallback = await legacyCrmSearch(db, tenantId, query, limit);
+      const fallback = await fallbackCrmSearch(db, tenantId, query, limit);
       return {
         contacts:      mergeById(contacts, fallback.contacts, limit),
         accounts:      mergeById(accounts, fallback.accounts, limit),
@@ -72,7 +72,7 @@ export async function crmSearch(
     // Table not yet created (migration pending) — fall through to ILIKE.
   }
 
-  return legacyCrmSearch(db, tenantId, query, limit);
+  return fallbackCrmSearch(db, tenantId, query, limit);
 }
 
 function mergeById<T extends { id?: unknown }>(primary: T[], fallback: T[], limit: number): T[] {
@@ -88,7 +88,7 @@ function mergeById<T extends { id?: unknown }>(primary: T[], fallback: T[], limi
   return merged;
 }
 
-async function legacyCrmSearch(
+async function fallbackCrmSearch(
   db: DbPool,
   tenantId: UUID,
   query: string,
@@ -102,7 +102,7 @@ async function legacyCrmSearch(
   assignments: Record<string, unknown>[];
   contextEntries: Record<string, unknown>[];
 }> {
-  // ── Legacy fallback: parallel ILIKE scans ────────────────────────────────
+  // ── Direct fallback: parallel ILIKE scans ────────────────────────────────
   // Used during the migration window before search_index is populated, or when
   // a query returns zero results from the index (e.g. new tenant, no docs yet).
   const pattern = `%${query}%`;

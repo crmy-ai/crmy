@@ -44,17 +44,28 @@ export function LoginPage() {
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
   const [dbStatus, setDbStatus] = useState<{
-    db: 'ok' | 'error' | 'loading';
+    status: 'ok' | 'db_error' | 'api_error' | 'loading';
     db_host?: string;
     db_name?: string;
     version?: string;
-  }>({ db: 'loading' });
+  }>({ status: 'loading' });
 
   useEffect(() => {
     fetch('/health')
-      .then((r) => r.json())
-      .then((d) => setDbStatus({ db: d.db === 'ok' ? 'ok' : 'error', db_host: d.db_host, db_name: d.db_name, version: d.version }))
-      .catch(() => setDbStatus({ db: 'error' }));
+      .then(async (r) => {
+        const d = await r.json().catch(() => null);
+        if (!d) {
+          setDbStatus({ status: 'api_error' });
+          return;
+        }
+        setDbStatus({
+          status: d.db === 'ok' ? 'ok' : 'db_error',
+          db_host: d.db_host,
+          db_name: d.db_name,
+          version: d.version,
+        });
+      })
+      .catch(() => setDbStatus({ status: 'api_error' }));
   }, []);
 
   const toggleTheme = () => {
@@ -243,17 +254,32 @@ export function LoginPage() {
           </div>
           <div className="mt-6 pt-4 border-t border-border flex items-center gap-2 text-xs text-muted-foreground">
             <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-              dbStatus.db === 'ok' ? 'bg-green-500' : dbStatus.db === 'error' ? 'bg-red-500' : 'bg-gray-400'
+              dbStatus.status === 'ok' ? 'bg-green-500' : dbStatus.status === 'loading' ? 'bg-gray-400' : 'bg-red-500'
             }`} />
-            {dbStatus.db === 'loading' && <span>Connecting…</span>}
-            {dbStatus.db === 'ok' && (
+            {dbStatus.status === 'loading' && <span>Checking CRMy server…</span>}
+            {dbStatus.status === 'ok' && (
               <span className="truncate">
                 {dbStatus.db_name && <span className="font-medium text-foreground/70">{dbStatus.db_name}</span>}
                 {dbStatus.db_name && dbStatus.db_host && <span className="mx-1">@</span>}
                 {dbStatus.db_host}
               </span>
             )}
-            {dbStatus.db === 'error' && <span className="text-destructive">Server unreachable</span>}
+            {dbStatus.status === 'db_error' && (
+              <span className="text-destructive">
+                Database unavailable
+                {(dbStatus.db_name || dbStatus.db_host) && (
+                  <span className="text-muted-foreground">
+                    {' '}({[dbStatus.db_name, dbStatus.db_host].filter(Boolean).join(' @ ')})
+                  </span>
+                )}
+              </span>
+            )}
+            {dbStatus.status === 'api_error' && (
+              <span className="text-destructive">
+                CRMy API not reachable
+                <span className="text-muted-foreground"> — start the server, then confirm Postgres is running.</span>
+              </span>
+            )}
             {dbStatus.version && (
               <span className="ml-auto flex-shrink-0">v{dbStatus.version}</span>
             )}
