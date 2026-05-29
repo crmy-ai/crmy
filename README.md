@@ -1,10 +1,10 @@
 # CRMy
 
-Typed operational Memory for GTM agents.
+Operational customer context for AI agents.
 
-CRMy gives sales and revenue agents typed operational Memory for accounts, opportunities, stakeholders, risks, commitments, and next steps — with evidence, lifecycle, approvals, scoped tools, and governed writeback to systems of record.
+CRMy gives sales and revenue agents typed operational Memory for accounts, opportunities, stakeholders, risks, commitments, and next steps — with evidence, lifecycle, approvals, scoped tools, and governed system of record (e.g. CRM/warehouse) writeback.
 
-Agents can capture context from calls, emails, CRM changes, support notes, product signals, docs, and MCP/REST inputs. CRMy turns that messy Raw Context into evidence-backed Signals, promotes trusted Signals into Memory, and gates risky action through Handoffs and policy.
+Agents can infer context from calls, emails, CRM changes, Slack, support notes, product signals, docs, and MCP/REST inputs. CRMy decides what becomes trusted Memory, what needs review, and what is safe to write back.
 
 Use CRMy when your GTM agent needs to:
 
@@ -21,17 +21,17 @@ MCP-native. PostgreSQL-backed. Open source.
 
 ## Three Pillars
 
-### Observe Broadly
+### Observe Freely
 
-Capture messy GTM context from meetings, notes, emails, CRM and warehouse changes, support cases, product usage, docs, and agent inputs.
+Extract candidate context from messy GTM data: meetings, notes, emails, CRM changes, Slack, usage signals, support cases, docs, and agent inputs.
 
 ### Remember Operationally
 
-Store typed GTM Memory with evidence, confidence, freshness, ownership, lifecycle, and scoped access.
+Store typed GTM Memory with evidence, confidence, freshness, ownership, lifecycle, and scoped access so agents know what they can rely on.
 
 ### Act Safely
 
-Brief agents before action, coordinate Handoffs, request approval when needed, and write back to CRM or warehouse systems through governed policy.
+Brief agents before every action, coordinate Handoffs, request approval when needed, and write back to systems of record through governed policy.
 
 ---
 
@@ -55,7 +55,7 @@ The goal is simple: let agents observe customer work, understand what is true no
 
 Before any agent acts on a customer, CRMy can tell it what is true, what is stale, what is inferred, what is approved, what system owns the record, what action is allowed, and what proof/audit trail will exist afterward.
 
-CRMy is not a CRM replacement, a generic chatbot memory store, or a workflow toy. It is the operational context and policy boundary for GTM agents.
+CRMy is not a full CRM replacement, a generic chatbot memory store, or a workflow toy. It is the operational context and policy boundary for GTM agents.
 
 ---
 
@@ -322,7 +322,7 @@ Works on contacts, accounts, opportunities, and use cases.
 3. CRMy: "Security and data residency need review" and "Finance needs proof of workflow savings."
    → related Signals are combined, scored, and either promoted to Memory or held for review
 
-4. agent: "Prepare the next-best action and propose any CRM update."
+4. agent: "Prepare the next-best action and propose any system of record update."
    → Current Memory can guide the recommendation; uncertain Signals stay marked as unconfirmed
 
 5. CRMy: "Forecast/writeback needs approval."
