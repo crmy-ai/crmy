@@ -2,26 +2,26 @@
 
 import { Command } from 'commander';
 import { getClient } from '../client.js';
+import { resolveSubjectRef } from './subject-ref.js';
 
 export function briefingCommand(): Command {
   const cmd = new Command('briefing')
     .description('Get a unified briefing for any customer record before taking action')
-    .argument('<subject>', 'Subject as type:UUID (e.g. contact:550e8400-...)')
+    .argument('<subject>', 'Subject as type:name or type:id, e.g. account:Northstar Labs')
     .option('--format <fmt>', 'Output format (json or text)', 'text')
     .option('--since <duration>', 'Filter activities by duration (e.g. 7d, 24h)')
     .option('--context-types <types>', 'Comma-separated context types to include')
     .option('--include-stale', 'Include superseded context entries')
     .action(async (subject, opts) => {
-      const [subjectType, subjectId] = subject.split(':');
-      if (!subjectType || !subjectId) {
-        console.error('Subject must be in format type:UUID (e.g. contact:550e8400-...)');
+      const client = await getClient();
+      const resolved = await resolveSubjectRef(client, subject);
+      if (!resolved.subject_type || !resolved.subject_id) {
+        console.error('Subject must be type:name or type:id, for example account:Northstar Labs.');
         process.exit(1);
       }
-
-      const client = await getClient();
       const result = await client.call('briefing_get', {
-        subject_type: subjectType,
-        subject_id: subjectId,
+        subject_type: resolved.subject_type,
+        subject_id: resolved.subject_id,
         format: opts.format,
         since: opts.since,
         context_types: opts.contextTypes ? opts.contextTypes.split(',') : undefined,

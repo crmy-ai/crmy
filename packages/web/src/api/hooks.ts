@@ -5,7 +5,12 @@ import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tansta
 import { api, getUser } from './client';
 
 // Generic list hook with pagination
-function useList<T>(key: string, path: string, params?: Record<string, string | number | boolean | undefined>) {
+function useList<T>(
+  key: string,
+  path: string,
+  params?: Record<string, string | number | boolean | undefined>,
+  options?: { enabled?: boolean },
+) {
   const query = new URLSearchParams();
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
@@ -16,6 +21,7 @@ function useList<T>(key: string, path: string, params?: Record<string, string | 
   return useQuery<{ data: T[]; next_cursor?: string; total: number }>({
     queryKey: [key, params],
     queryFn: () => api.get(url),
+    enabled: options?.enabled ?? true,
   });
 }
 
@@ -236,13 +242,183 @@ export function useCreateActivity() {
   });
 }
 export function useExtractActivityDraft() {
-  return useMutation<{ data: Record<string, unknown>; source: 'agent' }, Error, { text: string }>({
+  return useMutation<{ data: Record<string, unknown>; source: 'agent'; resolution_summary?: string[]; unresolved_references?: string[] }, Error, { text: string }>({
     mutationFn: (payload) => api.post('agent/extract/activity', payload),
   });
 }
 export function useExtractRecordDraft() {
-  return useMutation<{ data: Record<string, unknown>; source: 'agent' }, Error, { text: string; object_type: string }>({
+  return useMutation<{
+    data: Record<string, unknown>;
+    draft?: Record<string, unknown>;
+    source: 'agent';
+    field_rows?: Array<{
+      field: string;
+      label: string;
+      value: unknown;
+      source: 'user' | 'model_knowledge' | 'matched_record' | 'provider' | 'required';
+      source_label: string;
+      confidence_label?: string;
+      requires_confirmation?: boolean;
+      status: 'ready' | 'missing' | 'linked' | 'optional';
+      required: boolean;
+    }>;
+    enrichment_suggestions?: Array<{
+      field: string;
+      label: string;
+      value: unknown;
+      source: 'model_knowledge' | 'provider';
+      source_label: string;
+      confidence_label: string;
+      requires_confirmation: boolean;
+    }>;
+    required_fields?: string[];
+    missing_fields?: string[];
+    linked_records?: Array<{ type: 'account' | 'contact' | 'opportunity' | 'use_case'; id: string; name: string; detail?: string | null }>;
+    duplicate_candidates?: Array<{ id: string; name: string; score: number; reasons: string[] }>;
+    resolution_summary?: string[];
+    unresolved_references?: string[];
+    work_log?: string[];
+    can_create?: boolean;
+  }, Error, { text: string; object_type: string; parent_subject_type?: string; parent_subject_id?: string; parent_subject_name?: string; defaults?: Record<string, unknown> }>({
     mutationFn: (payload) => api.post('agent/extract/record', payload),
+  });
+}
+
+// Calendar meetings and customer activity
+export function useCalendarConnections() {
+  return useQuery({
+    queryKey: ['calendar-connections'],
+    queryFn: () => api.get('calendar/connections'),
+  });
+}
+
+export function useStartCalendarConnection(provider: 'google' | 'microsoft') {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data?: Record<string, unknown>) => api.post(`calendar/connections/${provider}/start`, data ?? {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['calendar-connections'] }),
+  });
+}
+
+export function useSyncCalendarConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`calendar/connections/${id}/sync`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calendar-connections'] });
+      qc.invalidateQueries({ queryKey: ['calendar-events'] });
+    },
+  });
+}
+
+export function useDeleteCalendarConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`calendar/connections/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['calendar-connections'] }),
+  });
+}
+
+export function useCalendarEvents(params?: {
+  tab?: 'meetings' | 'needs_context' | 'all';
+  q?: string;
+  classification?: string;
+  validation_status?: string;
+  processing_status?: string;
+  contact_id?: string;
+  account_id?: string;
+  opportunity_id?: string;
+  use_case_id?: string;
+  include_internal?: boolean;
+  limit?: number;
+  cursor?: string;
+}) {
+  return useList('calendar-events', 'calendar-events', params as Record<string, string | number | boolean | undefined>);
+}
+
+export function useCalendarEvent(id: string | null) {
+  return useQuery({
+    queryKey: ['calendar-event', id],
+    queryFn: () => api.get(`calendar-events/${id}`),
+    enabled: !!id,
+  });
+}
+
+export function useUpdateCalendarEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & Record<string, unknown>) => api.patch(`calendar-events/${id}`, data),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['calendar-event', variables.id] });
+      qc.invalidateQueries({ queryKey: ['calendar-events'] });
+    },
+  });
+}
+
+export function useProcessCalendarEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`calendar-events/${id}/process`, {}),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['calendar-event', id] });
+      qc.invalidateQueries({ queryKey: ['calendar-events'] });
+      qc.invalidateQueries({ queryKey: ['activities'] });
+      qc.invalidateQueries({ queryKey: ['context'] });
+    },
+  });
+}
+
+export function useAddMeetingArtifact() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; artifact_type?: string; text_content?: string; source_label?: string; process?: boolean }) =>
+      api.post(`calendar-events/${id}/artifacts`, data),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['calendar-event', variables.id] });
+      qc.invalidateQueries({ queryKey: ['calendar-events'] });
+      qc.invalidateQueries({ queryKey: ['activities'] });
+      qc.invalidateQueries({ queryKey: ['context'] });
+    },
+  });
+}
+
+export function useIgnoreCalendarEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.post(`calendar-events/${id}/ignore`, { reason }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['calendar-event', variables.id] });
+      qc.invalidateQueries({ queryKey: ['calendar-events'] });
+    },
+  });
+}
+
+export function useMeetingClassifications(params?: { include_disabled?: boolean }) {
+  return useList('meeting-classifications', 'meeting-classifications', params as Record<string, string | number | boolean | undefined>);
+}
+
+export function useCreateMeetingClassification() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('meeting-classifications', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['meeting-classifications'] }),
+  });
+}
+
+export function useUpdateMeetingClassification() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ type_name, ...data }: { type_name: string } & Record<string, unknown>) =>
+      api.patch(`meeting-classifications/${type_name}`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['meeting-classifications'] }),
+  });
+}
+
+export function useDeleteMeetingClassification() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (typeName: string) => api.delete(`meeting-classifications/${typeName}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['meeting-classifications'] }),
   });
 }
 
@@ -485,7 +661,119 @@ export function useCreateEmail() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (data: Record<string, unknown>) => api.post('emails', data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['emails'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['emails'] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+    },
+  });
+}
+
+export function usePreviewEmailDraft() {
+  return useMutation<{
+    subject: string;
+    body_text: string;
+    context_used?: Record<string, unknown>;
+    warnings?: string[];
+    model_metadata?: Record<string, unknown>;
+  }, Error, Record<string, unknown>>({
+    mutationFn: (data) => api.post('emails/draft-preview', data),
+  });
+}
+
+export function useSaveEmailDraft() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('emails/drafts', data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['emails'] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+    },
+  });
+}
+
+export function useMailboxConnections() {
+  return useQuery({
+    queryKey: ['mailbox-connections'],
+    queryFn: () => api.get('mailbox/connections'),
+  });
+}
+
+export function useStartMailboxConnection(provider: 'google' | 'microsoft') {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data?: Record<string, unknown>) => api.post(`mailbox/connections/${provider}/start`, data ?? {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mailbox-connections'] }),
+  });
+}
+
+export function useSyncMailboxConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`mailbox/connections/${id}/sync`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mailbox-connections'] }),
+  });
+}
+
+export function useDeleteMailboxConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`mailbox/connections/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['mailbox-connections'] }),
+  });
+}
+
+export function useEmailMessages(params?: {
+  view?: 'customer' | 'review' | 'all';
+  q?: string;
+  direction?: 'inbound' | 'outbound';
+  classification?: string;
+  processing_status?: string;
+  include_internal?: boolean;
+  limit?: number;
+  cursor?: string;
+}) {
+  return useList('email-messages', 'email-messages', params as Record<string, string | number | boolean | undefined>);
+}
+
+export function useEmailMessage(id: string | null) {
+  return useQuery({
+    queryKey: ['email-message', id],
+    queryFn: () => api.get(`email-messages/${id}`),
+    enabled: !!id,
+  });
+}
+
+export function useUpdateEmailMessageClassification() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, classification }: { id: string; classification: string }) =>
+      api.patch(`email-messages/${id}/classification`, { classification }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['email-message', variables.id] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+    },
+  });
+}
+
+export function useProcessEmailMessage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`email-messages/${id}/process`, {}),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['email-message', id] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+    },
+  });
+}
+
+export function useIgnoreEmailMessage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.post(`email-messages/${id}/ignore`, { reason }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['email-message', variables.id] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+    },
   });
 }
 
@@ -509,8 +797,8 @@ export function useSequenceEnrollments(params?: { sequence_id?: string; contact_
 }
 
 // Sequences (new canonical hooks)
-export function useSequences(params?: { is_active?: boolean; tags?: string[]; limit?: number }) {
-  return useList('sequences', 'sequences', params as Record<string, string | number | boolean | undefined>);
+export function useSequences(params?: { is_active?: boolean; tags?: string[]; limit?: number }, options?: { enabled?: boolean }) {
+  return useList('sequences', 'sequences', params as Record<string, string | number | boolean | undefined>, options);
 }
 export function useSequence(id: string) {
   return useQuery({ queryKey: ['sequence', id], queryFn: () => api.get(`sequences/${id}`), enabled: !!id });
@@ -744,6 +1032,12 @@ export function useDbConfig() {
       user: string;
       ssl: string | null;
       pgvector_enabled?: boolean;
+      pgvector_column_ready?: boolean;
+      pgvector_env_enabled?: boolean;
+      embedding_configured?: boolean;
+      embedding_provider?: string | null;
+      embedding_model?: string | null;
+      ready?: boolean;
       sample_data?: {
         seeded: boolean;
         counts: {
@@ -1320,8 +1614,8 @@ export function useDeleteContextType() {
 }
 
 // Workflows
-export function useWorkflows(params?: { q?: string; enabled?: boolean; limit?: number }) {
-  return useList('workflows', 'workflows', params);
+export function useWorkflows(params?: { q?: string; enabled?: boolean; limit?: number }, options?: { enabled?: boolean }) {
+  return useList('workflows', 'workflows', params, options);
 }
 export function useWorkflow(id: string) {
   return useQuery({ queryKey: ['workflow', id], queryFn: () => api.get(`workflows/${id}`), enabled: !!id });

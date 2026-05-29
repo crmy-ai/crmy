@@ -65,7 +65,7 @@ export async function requireTenantLLMConfig(db: DbPool, tenantId: string): Prom
   if (!config?.enabled || !config.model || !config.base_url) {
     throw new CrmyError(
       'VALIDATION_ERROR',
-      'Local Workspace Agent is not configured. Configure and enable a model in Model Settings before using AI-generated workflow or sequence content.',
+      'Workspace Agent is not configured. Configure and enable a model in Model Settings before using AI-generated workflow or sequence content.',
       412,
       { reason: 'agent_config_required' },
     );

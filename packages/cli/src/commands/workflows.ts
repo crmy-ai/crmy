@@ -3,6 +3,7 @@
 
 import { Command } from 'commander';
 import { getClient } from '../client.js';
+import { resolveSubjectRef } from './subject-ref.js';
 
 export function workflowsCommand(): Command {
   const cmd = new Command('workflows').description('Manage automation workflows');
@@ -90,6 +91,64 @@ export function workflowsCommand(): Command {
     .action(async (id) => {
       const client = await getClient();
       const result = await client.call('workflow_delete', { id });
+      console.log(JSON.parse(result));
+      await client.close();
+    });
+
+  cmd.command('update <id>')
+    .description('Update workflow metadata or active state')
+    .option('--name <name>', 'Workflow name')
+    .option('--description <description>', 'Workflow description')
+    .option('--active', 'Mark active')
+    .option('--inactive', 'Mark inactive')
+    .action(async (id, opts) => {
+      const patch: Record<string, unknown> = {};
+      if (opts.name) patch.name = opts.name;
+      if (opts.description) patch.description = opts.description;
+      if (opts.active) patch.is_active = true;
+      if (opts.inactive) patch.is_active = false;
+      const client = await getClient();
+      const result = await client.call('workflow_update', { id, patch });
+      console.log(JSON.parse(result));
+      await client.close();
+    });
+
+  cmd.command('test <id>')
+    .description('Dry-run a workflow with optional sample payload')
+    .option('--payload <json>', 'Sample payload JSON', '{}')
+    .action(async (id, opts) => {
+      const sample_payload = JSON.parse(opts.payload);
+      const client = await getClient();
+      const result = await client.call('workflow_test', { id, sample_payload });
+      console.log(JSON.parse(result));
+      await client.close();
+    });
+
+  cmd.command('clone <id>')
+    .description('Clone a workflow')
+    .option('--name <name>', 'Name for the clone')
+    .action(async (id, opts) => {
+      const client = await getClient();
+      const result = await client.call('workflow_clone', { id, name: opts.name });
+      console.log(JSON.parse(result));
+      await client.close();
+    });
+
+  cmd.command('trigger <id>')
+    .description('Trigger a workflow manually')
+    .option('--subject <type:name|type:id>', 'Subject record')
+    .option('--objective <text>', 'Run objective')
+    .option('--variables <json>', 'Variables JSON', '{}')
+    .action(async (id, opts) => {
+      const client = await getClient();
+      const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
+      const result = await client.call('workflow_trigger', {
+        id,
+        subject_type: subject.subject_type,
+        subject_id: subject.subject_id,
+        objective: opts.objective,
+        variables: JSON.parse(opts.variables),
+      });
       console.log(JSON.parse(result));
       await client.close();
     });

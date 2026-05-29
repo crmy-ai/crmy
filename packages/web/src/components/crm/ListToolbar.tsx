@@ -59,6 +59,9 @@ export function ListToolbar({
 
   useSlashSearchFocus(searchRef);
 
+  const hasFilters = filters.length > 0;
+  const hasSortOptions = sortOptions.length > 0;
+
   return (
     <div className="flex flex-col gap-2 px-4 md:px-6 py-2 md:py-3">
       {/* Single row: search + filter + sort + add */}
@@ -87,70 +90,74 @@ export function ListToolbar({
         {searchSuffix}
 
         {/* Filter */}
-        <Popover>
-          <PopoverTrigger asChild>
-            <button className="h-9 px-3 flex items-center gap-1.5 rounded-xl border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all flex-shrink-0 press-scale">
-              <Filter className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Filter</span>
-              {activeFilterCount > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground text-xs font-semibold">
-                  {activeFilterCount}
-                </span>
-              )}
-            </button>
-          </PopoverTrigger>
-          <PopoverContent className="w-72 p-0 rounded-xl" align="start">
-            <div className="p-3 border-b border-border flex items-center justify-between">
-              <span className="text-sm font-display font-bold text-foreground">Filters</span>
-              {activeFilterCount > 0 && (
-                <button onClick={onClearFilters} className="text-xs text-muted-foreground hover:text-foreground">
-                  Clear all
-                </button>
-              )}
-            </div>
-            <div className="p-2 max-h-80 overflow-y-auto space-y-1">
-              {filters.map((filter) => (
-                <FilterSection
-                  key={filter.key}
-                  filter={filter}
-                  selected={activeFilters[filter.key] || []}
-                  onChange={(values) => onFilterChange(filter.key, values)}
-                />
-              ))}
-            </div>
-          </PopoverContent>
-        </Popover>
-
-        {/* Sort */}
-        <Popover>
-          <PopoverTrigger asChild>
-            <button className="h-9 px-3 flex items-center gap-1.5 rounded-xl border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all flex-shrink-0 press-scale">
-              <ArrowUpDown className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">
-                {currentSort ? sortOptions.find(s => s.key === currentSort.key)?.label || 'Sort' : 'Sort'}
-              </span>
-              {currentSort && (
-                <span className="text-xs font-mono">{currentSort.dir === 'asc' ? '↑' : '↓'}</span>
-              )}
-            </button>
-          </PopoverTrigger>
-          <PopoverContent className="w-48 p-1 rounded-xl" align="start">
-            {sortOptions.map((opt) => (
-              <button
-                key={opt.key}
-                onClick={() => onSortChange(opt.key)}
-                className={`w-full text-left px-3 py-2.5 text-sm rounded-lg transition-colors ${
-                  currentSort?.key === opt.key ? 'bg-muted text-foreground font-medium' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-                }`}
-              >
-                {opt.label}
-                {currentSort?.key === opt.key && (
-                  <span className="ml-auto float-right text-xs font-mono">{currentSort.dir === 'asc' ? '↑' : '↓'}</span>
+        {hasFilters && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button className="h-9 px-3 flex items-center gap-1.5 rounded-xl border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all flex-shrink-0 press-scale">
+                <Filter className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Filter</span>
+                {activeFilterCount > 0 && (
+                  <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground text-xs font-semibold">
+                    {activeFilterCount}
+                  </span>
                 )}
               </button>
-            ))}
-          </PopoverContent>
-        </Popover>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-0 rounded-xl" align="start">
+              <div className="p-3 border-b border-border flex items-center justify-between">
+                <span className="text-sm font-display font-bold text-foreground">Filters</span>
+                {activeFilterCount > 0 && (
+                  <button onClick={onClearFilters} className="text-xs text-muted-foreground hover:text-foreground">
+                    Clear all
+                  </button>
+                )}
+              </div>
+              <div className="p-2 max-h-80 overflow-y-auto space-y-1">
+                {filters.map((filter) => (
+                  <FilterSection
+                    key={filter.key}
+                    filter={filter}
+                    selected={activeFilters[filter.key] || []}
+                    onChange={(values) => onFilterChange(filter.key, values)}
+                  />
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
+
+        {/* Sort */}
+        {hasSortOptions && (
+          <Popover>
+            <PopoverTrigger asChild>
+              <button className="h-9 px-3 flex items-center gap-1.5 rounded-xl border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all flex-shrink-0 press-scale">
+                <ArrowUpDown className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">
+                  {currentSort ? sortOptions.find(s => s.key === currentSort.key)?.label || 'Sort' : 'Sort'}
+                </span>
+                {currentSort && (
+                  <span className="text-xs font-mono">{currentSort.dir === 'asc' ? '↑' : '↓'}</span>
+                )}
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-48 p-1 rounded-xl" align="start">
+              {sortOptions.map((opt) => (
+                <button
+                  key={opt.key}
+                  onClick={() => onSortChange(opt.key)}
+                  className={`w-full text-left px-3 py-2.5 text-sm rounded-lg transition-colors ${
+                    currentSort?.key === opt.key ? 'bg-muted text-foreground font-medium' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                  }`}
+                >
+                  {opt.label}
+                  {currentSort?.key === opt.key && (
+                    <span className="ml-auto float-right text-xs font-mono">{currentSort.dir === 'asc' ? '↑' : '↓'}</span>
+                  )}
+                </button>
+              ))}
+            </PopoverContent>
+          </Popover>
+        )}
 
         {/* Add New */}
         {onSecondaryAdd && secondaryAddLabel && (

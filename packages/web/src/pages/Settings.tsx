@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Palette, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -12,7 +12,7 @@ import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
-import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useSystemsOfRecord, useCreateSystemOfRecord, useUpdateSystemOfRecord, useDeleteSystemOfRecord, useTestSystemOfRecord, useRunSystemSync, useDiscoverSystemOfRecord, useSystemMappings, useUpsertSystemMapping, useDeleteSystemMapping, useSystemSyncRuns, useSystemConflicts, useResolveSystemConflict, useSystemWritebacks, usePreviewSystemWriteback, useRequestSystemWriteback, useExecuteSystemWriteback, useReviewSystemWriteback } from '@/api/hooks';
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useMeetingClassifications, useCreateMeetingClassification, useUpdateMeetingClassification, useDeleteMeetingClassification, useSystemsOfRecord, useCreateSystemOfRecord, useUpdateSystemOfRecord, useDeleteSystemOfRecord, useTestSystemOfRecord, useRunSystemSync, useDiscoverSystemOfRecord, useSystemMappings, useUpsertSystemMapping, useDeleteSystemMapping, useSystemSyncRuns, useSystemConflicts, useResolveSystemConflict, useSystemWritebacks, usePreviewSystemWriteback, useRequestSystemWriteback, useExecuteSystemWriteback, useReviewSystemWriteback } from '@/api/hooks';
 import type { SystemMapping, SystemOfRecord } from '@/api/hooks';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import AgentSettings from '@/pages/AgentSettings';
@@ -24,7 +24,6 @@ type NavRole = 'member' | 'manager' | 'admin' | 'owner';
 
 const settingsNavConfig: { icon: React.ElementType; label: string; path: string; roles: NavRole[] }[] = [
   { icon: CircleUser, label: 'Profile',       path: '/settings',              roles: ['member', 'manager', 'admin', 'owner'] },
-  { icon: Palette,    label: 'Appearance',    path: '/settings/appearance',   roles: ['member', 'manager', 'admin', 'owner'] },
   { icon: Lock,       label: 'API Keys',      path: '/settings/api-keys',     roles: ['member', 'manager', 'admin', 'owner'] },
   { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'] },
   { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
@@ -176,11 +175,11 @@ function ProfileSettings() {
   };
 
   return (
-    <div className="max-w-lg">
+    <div className="max-w-2xl">
       <h2 className="font-display font-bold text-lg text-foreground mb-1">Profile</h2>
-      <p className="text-sm text-muted-foreground mb-6">Update your name, email, and password.</p>
+      <p className="text-sm text-muted-foreground mb-6">Update your name, email, password, and preferred appearance.</p>
 
-      <div className="space-y-5">
+      <div className="space-y-5 max-w-lg">
         {/* Read-only: Role */}
         <div className="space-y-1.5">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Role</label>
@@ -247,6 +246,10 @@ function ProfileSettings() {
           </button>
           {saved && <span className="text-xs text-success flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Saved</span>}
         </div>
+      </div>
+
+      <div className="mt-8 pt-6 border-t border-border">
+        <AppearanceSettings />
       </div>
     </div>
   );
@@ -2392,7 +2395,9 @@ function SystemsOfRecordSettings() {
   const executeWriteback = useExecuteSystemWriteback();
   const reviewWriteback = useReviewSystemWriteback();
 
-  const [tab, setTab] = useState<'connections' | 'mappings' | 'runs' | 'conflicts' | 'writebacks'>('connections');
+  const [tab, setTab] = useState<'systems' | 'mappings' | 'activity' | 'advanced'>('systems');
+  const [addWizardStep, setAddWizardStep] = useState(0);
+  const [setupReadObjects, setSetupReadObjects] = useState<string[]>(['account', 'contact', 'opportunity']);
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState('');
   const [systemType, setSystemType] = useState('');
@@ -2560,6 +2565,73 @@ function SystemsOfRecordSettings() {
     return 'System';
   };
 
+  const connectorOptions = [
+    { type: 'hubspot', label: 'HubSpot', fit: 'CRM contacts, accounts, deals, and activity notes.', auth: 'OAuth app recommended' },
+    { type: 'salesforce', label: 'Salesforce', fit: 'CRM accounts, contacts, opportunities, and tasks.', auth: 'Connected app OAuth' },
+    { type: 'databricks', label: 'Databricks', fit: 'Warehouse tables and governed SQL templates.', auth: 'SQL Warehouse token' },
+    { type: 'snowflake', label: 'Snowflake', fit: 'Warehouse views, tables, and controlled write templates.', auth: 'SQL API token' },
+    { type: 'other', label: 'Other', fit: 'Use the CRMy API/MCP tools for custom connectors today.', auth: 'Coming soon in UI' },
+  ];
+
+  const objectOptions = [
+    { key: 'account', label: 'Accounts', description: 'Companies or customer organizations.' },
+    { key: 'contact', label: 'Contacts', description: 'People tied to customer work.' },
+    { key: 'opportunity', label: 'Opportunities', description: 'Deals, renewals, expansions, or pipeline.' },
+    { key: 'activity', label: 'Activities', description: 'Notes, tasks, calls, emails, or events.' },
+    { key: 'use_case', label: 'Use Cases', description: 'Customer outcomes and adoption work.', limited: true },
+  ];
+
+  const selectedReadOptions = objectOptions.filter(option => setupReadObjects.includes(option.key));
+
+  const mappingFieldPairs = useMemo(() => {
+    try {
+      return Object.entries(parseJson('Field mapping', mappingFieldJson))
+        .map(([crmyField, externalField]) => [crmyField, String(externalField)] as const)
+        .filter(([, externalField]) => externalField.trim());
+    } catch {
+      return [] as Array<readonly [string, string]>;
+    }
+  }, [mappingFieldJson]);
+
+  const writableFieldSet = useMemo(() => new Set(parseCsvList(mappingWritableFields)), [mappingWritableFields]);
+
+  const toggleReadObject = (key: string) => {
+    setSetupReadObjects(current => current.includes(key)
+      ? current.filter(item => item !== key)
+      : [...current, key]);
+  };
+
+  const setCsvValue = (value: string, nextItem: string, checked: boolean) => {
+    const current = new Set(parseCsvList(value));
+    if (checked) current.add(nextItem);
+    else current.delete(nextItem);
+    return Array.from(current).join(', ');
+  };
+
+  const toggleWritableField = (externalField: string, checked: boolean) => {
+    setMappingWritableFields(current => setCsvValue(current, externalField, checked));
+    if (checked && !mappingWritebackMode) setMappingWritebackMode('mapped_upsert');
+  };
+
+  const updateMappedField = (crmyField: string, externalField: string) => {
+    try {
+      const current = parseJson('Field mapping', mappingFieldJson);
+      setMappingFieldJson(JSON.stringify({ ...current, [crmyField]: externalField }, null, 2));
+    } catch (err) {
+      toast({ title: 'Fix field mapping first', description: err instanceof Error ? err.message : 'Mapping JSON must be valid.', variant: 'destructive' });
+    }
+  };
+
+  const removeMappedField = (crmyField: string) => {
+    try {
+      const current = parseJson('Field mapping', mappingFieldJson);
+      delete current[crmyField];
+      setMappingFieldJson(JSON.stringify(current, null, 2));
+    } catch (err) {
+      toast({ title: 'Fix field mapping first', description: err instanceof Error ? err.message : 'Mapping JSON must be valid.', variant: 'destructive' });
+    }
+  };
+
   const credentialPlaceholder = (type: string) => {
     if (type === 'salesforce') {
       return '{\n  "instance_url": "https://your-domain.my.salesforce.com",\n  "refresh_token": "...",\n  "client_id": "...",\n  "client_secret": "..."\n}';
@@ -2714,7 +2786,7 @@ function SystemsOfRecordSettings() {
       if (systemType !== 'hubspot' && !credentialInput.trim()) {
         throw new Error(`Enter ${systemLabel(systemType)} credentials JSON before creating the connection.`);
       }
-      await createSystem.mutateAsync({
+      const created = await createSystem.mutateAsync({
         name: name.trim(),
         system_type: systemType,
         auth_type: authType,
@@ -2729,18 +2801,28 @@ function SystemsOfRecordSettings() {
           : parseJson('Config', configInput),
         sync_settings: parseJson('Sync settings', syncInput),
       });
+      const createdSystem = ((created as { system?: SystemOfRecord }).system ?? created) as SystemOfRecord;
+      const createdSystemId = createdSystem?.id;
+      const presetMappings = createdSystemId
+        ? connectorPresetMappings(systemType, createdSystemId).filter(preset => setupReadObjects.includes(preset.object_type))
+        : [];
+      for (const preset of presetMappings) {
+        await upsertMapping.mutateAsync(preset);
+      }
       setShowCreate(false);
+      setAddWizardStep(0);
       setName('');
       setCredentialInput('');
       setHubSpotAppId('');
       setHubSpotClientId('');
       setHubSpotClientSecret('');
       setHubSpotInstallUrl('');
+      setTab(presetMappings.length > 0 ? 'mappings' : 'systems');
       toast({
-        title: authType === 'oauth_app' ? 'HubSpot OAuth app saved' : 'System connected',
+        title: authType === 'oauth_app' ? 'HubSpot OAuth app saved' : 'System added',
         description: authType === 'oauth_app'
-          ? 'OAuth app credentials were encrypted. Next, open the Sample install URL/Test URL and finish OAuth from this connection.'
-          : 'Credentials were encrypted before storage.',
+          ? `OAuth app credentials were encrypted${presetMappings.length ? ` and ${presetMappings.length} read mapping${presetMappings.length !== 1 ? 's' : ''} were added` : ''}. Next, install the app from the system card.`
+          : `Credentials were encrypted before storage${presetMappings.length ? ` and ${presetMappings.length} read mapping${presetMappings.length !== 1 ? 's' : ''} were added.` : '.'}`,
       });
     } catch (err) {
       toast({ title: 'Could not create system', description: err instanceof Error ? err.message : 'Check the connection fields and try again.', variant: 'destructive' });
@@ -3007,9 +3089,9 @@ function SystemsOfRecordSettings() {
         lifecycle_stage: 'lifecyclestage',
       },
       readable_fields: ['hs_lastmodifieddate'],
-      writable_fields: ['firstname', 'lastname', 'email', 'phone', 'jobtitle', 'company', 'lifecyclestage'],
+      writable_fields: [],
       source_authority: 'external',
-      writeback_mode: 'mapped_upsert',
+      writeback_mode: undefined,
     },
     {
       system_id: systemId,
@@ -3026,9 +3108,9 @@ function SystemsOfRecordSettings() {
         website: 'website',
       },
       readable_fields: ['hs_lastmodifieddate'],
-      writable_fields: ['name', 'domain', 'industry', 'numberofemployees', 'annualrevenue', 'website'],
+      writable_fields: [],
       source_authority: 'external',
-      writeback_mode: 'mapped_upsert',
+      writeback_mode: undefined,
     },
     {
       system_id: systemId,
@@ -3043,9 +3125,9 @@ function SystemsOfRecordSettings() {
         close_date: 'closedate',
       },
       readable_fields: ['pipeline', 'dealtype', 'hs_lastmodifieddate'],
-      writable_fields: ['dealname', 'amount', 'dealstage', 'closedate'],
+      writable_fields: [],
       source_authority: 'external',
-      writeback_mode: 'mapped_upsert',
+      writeback_mode: undefined,
     },
     {
       system_id: systemId,
@@ -3058,11 +3140,91 @@ function SystemsOfRecordSettings() {
         body: 'hs_note_body',
       },
       readable_fields: ['hs_timestamp', 'hs_lastmodifieddate'],
-      writable_fields: ['hs_note_body', 'hs_timestamp'],
+      writable_fields: [],
       source_authority: 'external',
-      writeback_mode: 'append_event',
+      writeback_mode: undefined,
     },
   ];
+
+  const salesforcePresetMappings = (systemId: string) => [
+    {
+      system_id: systemId,
+      object_type: 'contact',
+      external_object: 'Contact',
+      external_id_field: 'Id',
+      watermark_field: 'LastModifiedDate',
+      field_mapping: {
+        first_name: 'FirstName',
+        last_name: 'LastName',
+        email: 'Email',
+        phone: 'Phone',
+        title: 'Title',
+        company_name: 'Account.Name',
+      },
+      readable_fields: ['LastModifiedDate', 'AccountId'],
+      writable_fields: [],
+      source_authority: 'external',
+      writeback_mode: undefined,
+    },
+    {
+      system_id: systemId,
+      object_type: 'account',
+      external_object: 'Account',
+      external_id_field: 'Id',
+      watermark_field: 'LastModifiedDate',
+      field_mapping: {
+        name: 'Name',
+        domain: 'Website',
+        industry: 'Industry',
+        annual_revenue: 'AnnualRevenue',
+        employee_count: 'NumberOfEmployees',
+      },
+      readable_fields: ['LastModifiedDate', 'OwnerId'],
+      writable_fields: [],
+      source_authority: 'external',
+      writeback_mode: undefined,
+    },
+    {
+      system_id: systemId,
+      object_type: 'opportunity',
+      external_object: 'Opportunity',
+      external_id_field: 'Id',
+      watermark_field: 'LastModifiedDate',
+      field_mapping: {
+        name: 'Name',
+        amount: 'Amount',
+        stage: 'StageName',
+        probability: 'Probability',
+        close_date: 'CloseDate',
+      },
+      readable_fields: ['LastModifiedDate', 'AccountId'],
+      writable_fields: [],
+      source_authority: 'external',
+      writeback_mode: undefined,
+    },
+    {
+      system_id: systemId,
+      object_type: 'activity',
+      external_object: 'Task',
+      external_id_field: 'Id',
+      watermark_field: 'LastModifiedDate',
+      field_mapping: {
+        subject: 'Subject',
+        body: 'Description',
+        occurred_at: 'ActivityDate',
+      },
+      readable_fields: ['LastModifiedDate', 'WhoId', 'WhatId'],
+      writable_fields: [],
+      source_authority: 'external',
+      writeback_mode: undefined,
+    },
+  ];
+
+  const connectorPresetMappings = (type: string, systemId: string) => {
+    if (type === 'hubspot') return hubSpotPresetMappings(systemId);
+    if (type === 'salesforce') return salesforcePresetMappings(systemId);
+    return [];
+  };
 
   const handleApplyHubSpotPresets = async (systemId: string) => {
     try {
@@ -3070,7 +3232,7 @@ function SystemsOfRecordSettings() {
         await upsertMapping.mutateAsync(preset);
       }
       setTab('mappings');
-      toast({ title: 'HubSpot mappings added', description: 'Contacts, accounts, deals, and notes are ready to sync.' });
+      toast({ title: 'HubSpot read mappings added', description: 'Contacts, accounts, deals, and notes are ready to sync. Writeback stays disabled until you choose writable fields.' });
     } catch (err) {
       toast({ title: 'Could not apply presets', description: err instanceof Error ? err.message : 'Review the connection and try again.', variant: 'destructive' });
     }
@@ -3220,7 +3382,7 @@ function SystemsOfRecordSettings() {
               : syncRunSummary(run),
             variant: run.status === 'failed' ? 'destructive' : undefined,
           });
-          setTab('runs');
+          setTab('activity');
         },
         onError: err => toast({
           title: 'Sync failed',
@@ -3235,11 +3397,10 @@ function SystemsOfRecordSettings() {
   const textAreaCls = 'w-full min-h-24 px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring font-mono';
 
   const tabs = [
-    { key: 'connections', label: 'Connections', count: systems.length },
+    { key: 'systems', label: 'Systems', count: systems.length },
     { key: 'mappings', label: 'Mappings', count: mappings.length },
-    { key: 'runs', label: 'Sync Runs', count: runs.length },
-    { key: 'conflicts', label: 'Conflicts', count: conflicts.length },
-    { key: 'writebacks', label: 'Writebacks', count: writebacks.length },
+    { key: 'activity', label: 'Activity', count: runs.length + conflicts.length + writebacks.length },
+    { key: 'advanced', label: 'Advanced', count: writebacks.length },
   ] as const;
 
   const hubSpotScopes = [
@@ -3647,70 +3808,238 @@ function SystemsOfRecordSettings() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h2 className="font-display font-bold text-lg text-foreground">Systems of Record</h2>
-          <p className="text-sm text-muted-foreground mt-0.5">Connect CRMy to the systems that store customer data, then control sync, mappings, and governed writeback.</p>
+          <p className="text-sm text-muted-foreground mt-0.5">Give agents trusted customer records to reason from, then govern what can be updated back to your CRM or warehouse.</p>
         </div>
         <button
-          onClick={() => setShowCreate(v => !v)}
+          onClick={() => { setShowCreate(true); setAddWizardStep(0); }}
           className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors inline-flex items-center gap-2"
         >
-          <Plus className="w-4 h-4" /> New Connection
+          <Plus className="w-4 h-4" /> Add System
         </button>
       </div>
 
       {showCreate && (
-        <div className={`${cardCls} space-y-4`}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Connection name" className={inputCls} />
-            <select value={systemType} onChange={e => handleSystemTypeChange(e.target.value)} className={inputCls}>
-              <option value="">Choose system type</option>
-              <option value="hubspot">HubSpot</option>
-              <option value="salesforce">Salesforce</option>
-              <option value="databricks">Databricks</option>
-              <option value="snowflake">Snowflake</option>
-            </select>
-            {renderAuthTypeField()}
-            {renderCredentialFields()}
-          </div>
-          {!systemType && (
-            <div className="rounded-xl border border-border bg-muted/30 p-4">
-              <p className="text-sm font-semibold text-foreground">Choose the source system first</p>
-              <p className="text-sm text-muted-foreground mt-1">
-                CRMy supports CRM and warehouse sources through the same governed setup flow: connect, test, map, sync, then enable writeback only when needed.
-              </p>
+        <div className="fixed inset-0 z-50 flex justify-end bg-background/70 backdrop-blur-sm">
+          <div className="h-full w-full max-w-3xl border-l border-border bg-card shadow-2xl flex flex-col">
+            <div className="border-b border-border px-5 py-4 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold text-primary uppercase tracking-wider">Guided setup</p>
+                <h3 className="font-display font-bold text-lg text-foreground">Add System of Record</h3>
+                <p className="text-sm text-muted-foreground mt-0.5">Bring trusted customer records into CRMy so agents can brief, detect changes, and request safe updates back to the source.</p>
+              </div>
+              <button aria-label="Close add system" onClick={() => setShowCreate(false)} className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted">
+                <X className="w-4 h-4" />
+              </button>
             </div>
-          )}
-          {systemType && (
-            <details className="rounded-xl border border-border bg-muted/20">
-              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-foreground flex items-center justify-between gap-3">
-                Setup guide for {systemLabel(systemType)}
-                <ChevronDown className="w-4 h-4 text-muted-foreground" />
-              </summary>
-              <div className="px-4 pb-4">
-                {systemType === 'hubspot' ? <HubSpotGuide /> : <ConnectorGuide />}
-              </div>
-            </details>
-          )}
-          <details className="rounded-xl border border-border bg-muted/20">
-            <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-foreground flex items-center justify-between gap-3">
-              Advanced connection settings
-              <ChevronDown className="w-4 h-4 text-muted-foreground" />
-            </summary>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 px-4 pb-4">
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Config JSON</label>
-                <textarea value={configInput} onChange={e => setConfigInput(e.target.value)} className={textAreaCls} />
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sync Settings JSON</label>
-                <textarea value={syncInput} onChange={e => setSyncInput(e.target.value)} className={textAreaCls} />
+            <div className="border-b border-border px-5 py-3">
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+                {['Choose', 'Connect', 'Read', 'Map', 'Write', 'Activate'].map((label, index) => (
+                  <button
+                    key={label}
+                    onClick={() => setAddWizardStep(index)}
+                    className={`rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${addWizardStep === index ? 'border-primary bg-primary/10 text-primary' : index < addWizardStep ? 'border-success/30 bg-success/10 text-success' : 'border-border bg-background text-muted-foreground hover:text-foreground'}`}
+                  >
+                    <span className="block text-[10px] opacity-70">Step {index + 1}</span>
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
-          </details>
-          <div className="flex justify-end gap-2 mt-3">
-            <button onClick={() => setShowCreate(false)} className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
-            <button onClick={handleCreateSystem} disabled={!name.trim() || !systemType || createSystem.isPending} className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
-              {createSystem.isPending ? 'Saving...' : systemType === 'hubspot' && authType === 'oauth_app' ? 'Save OAuth App' : 'Create Connection'}
-            </button>
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {addWizardStep === 0 && (
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Choose the system that owns this data</p>
+                    <p className="text-sm text-muted-foreground mt-1">Choose the system agents should use as trusted customer context before they brief, coordinate, or request updates.</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {connectorOptions.map(option => {
+                      const disabled = option.type === 'other';
+                      return (
+                        <button
+                          key={option.type}
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => { handleSystemTypeChange(option.type); if (!name.trim()) setName(`${option.label} connection`); setAddWizardStep(1); }}
+                          className={`text-left rounded-xl border p-4 transition-colors ${systemType === option.type ? 'border-primary bg-primary/10' : 'border-border bg-background hover:border-primary/40'} ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                        >
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">{option.label}</p>
+                            <p className="text-sm text-muted-foreground mt-1">{option.fit}</p>
+                            <div className="mt-3 inline-flex items-center rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground">
+                              {option.auth}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {addWizardStep === 1 && (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Connect securely</p>
+                    <p className="text-sm text-muted-foreground mt-1">Credentials are encrypted. OAuth is preferred where the external system supports it.</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <input value={name} onChange={e => setName(e.target.value)} placeholder="Connection name" className={inputCls} />
+                    <select value={systemType} onChange={e => handleSystemTypeChange(e.target.value)} className={inputCls}>
+                      <option value="">Choose system type</option>
+                      <option value="hubspot">HubSpot</option>
+                      <option value="salesforce">Salesforce</option>
+                      <option value="databricks">Databricks</option>
+                      <option value="snowflake">Snowflake</option>
+                    </select>
+                    {renderAuthTypeField()}
+                    {renderCredentialFields()}
+                  </div>
+                  {systemType && (
+                    <details className="rounded-xl border border-border bg-muted/20">
+                      <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-foreground flex items-center justify-between gap-3">
+                        Setup help for {systemLabel(systemType)}
+                        <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                      </summary>
+                      <div className="px-4 pb-4">
+                        {systemType === 'hubspot' ? <HubSpotGuide /> : <ConnectorGuide />}
+                      </div>
+                    </details>
+                  )}
+                  <details className="rounded-xl border border-border bg-muted/20">
+                    <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-foreground flex items-center justify-between gap-3">
+                      Advanced connection settings
+                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                    </summary>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 px-4 pb-4">
+                      <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Config JSON</label>
+                        <textarea value={configInput} onChange={e => setConfigInput(e.target.value)} className={textAreaCls} />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Sync Settings JSON</label>
+                        <textarea value={syncInput} onChange={e => setSyncInput(e.target.value)} className={textAreaCls} />
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              )}
+
+              {addWizardStep === 2 && (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Choose what CRMy should read</p>
+                    <p className="text-sm text-muted-foreground mt-1">These choices create conservative read mappings when presets exist. Use Cases remain review-only until a typed adapter is available.</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {objectOptions.map(option => (
+                      <label key={option.key} className={`rounded-xl border p-4 cursor-pointer transition-colors ${setupReadObjects.includes(option.key) ? 'border-primary bg-primary/10' : 'border-border bg-background hover:border-primary/40'}`}>
+                        <div className="flex items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={setupReadObjects.includes(option.key)}
+                            onChange={() => toggleReadObject(option.key)}
+                            className="mt-1 h-4 w-4 rounded border-border"
+                          />
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">{option.label}</p>
+                            <p className="text-sm text-muted-foreground mt-1">{option.description}</p>
+                            {option.limited && <p className="text-xs text-warning mt-2">Visible for review; direct sync requires a follow-up adapter.</p>}
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {addWizardStep === 3 && (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Map fields without writing anything yet</p>
+                    <p className="text-sm text-muted-foreground mt-1">Preset mappings read common fields. You can refine exact fields in the Mappings tab after saving.</p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-background p-4">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Selected read mappings</p>
+                    <div className="space-y-2">
+                      {selectedReadOptions.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">No record types selected yet.</p>
+                      ) : selectedReadOptions.map(option => (
+                        <div key={option.key} className="flex items-center justify-between gap-3 rounded-lg bg-muted/40 px-3 py-2">
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">{option.label}</p>
+                            <p className="text-xs text-muted-foreground">Read fields from {systemType ? systemLabel(systemType) : 'the system'} into typed CRMy records.</p>
+                          </div>
+                          <span className="rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-xs font-semibold text-success">Read only</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {addWizardStep === 4 && (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Review write access</p>
+                    <p className="text-sm text-muted-foreground mt-1">New mappings are read-only. Enable writeback later per object and field after reviewing policy.</p>
+                  </div>
+                  <div className="rounded-xl border border-success/30 bg-success/10 p-4 flex items-start gap-3">
+                    <ShieldCheck className="w-5 h-5 text-success shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Writeback disabled by default</p>
+                      <p className="text-sm text-muted-foreground mt-1">Agents and Automations can request governed writebacks only after you choose writable fields and approval behavior in Mappings.</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {addWizardStep === 5 && (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Test and activate</p>
+                    <p className="text-sm text-muted-foreground mt-1">Save the system, then test the connection and run the first sync from the system card.</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <p className="text-xs text-muted-foreground">System</p>
+                      <p className="text-sm font-semibold text-foreground mt-1">{systemType ? systemLabel(systemType) : 'Not selected'}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <p className="text-xs text-muted-foreground">Reads</p>
+                      <p className="text-sm font-semibold text-foreground mt-1">{selectedReadOptions.length ? selectedReadOptions.map(item => item.label).join(', ') : 'None selected'}</p>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <p className="text-xs text-muted-foreground">Writes</p>
+                      <p className="text-sm font-semibold text-foreground mt-1">Disabled</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="border-t border-border p-4 flex items-center justify-between gap-3">
+              <button
+                onClick={() => addWizardStep === 0 ? setShowCreate(false) : setAddWizardStep(step => Math.max(0, step - 1))}
+                className="h-9 px-3 rounded-lg border border-border text-sm font-semibold hover:bg-muted transition-colors"
+              >
+                {addWizardStep === 0 ? 'Cancel' : 'Back'}
+              </button>
+              <div className="flex items-center gap-2">
+                {addWizardStep < 5 ? (
+                  <button
+                    onClick={() => setAddWizardStep(step => Math.min(5, step + 1))}
+                    disabled={addWizardStep === 0 && !systemType}
+                    className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40"
+                  >
+                    Continue
+                  </button>
+                ) : (
+                  <button onClick={handleCreateSystem} disabled={!name.trim() || !systemType || createSystem.isPending || upsertMapping.isPending} className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                    {createSystem.isPending || upsertMapping.isPending ? 'Saving...' : 'Save System'}
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -3727,24 +4056,32 @@ function SystemsOfRecordSettings() {
         ))}
       </div>
 
-      {tab === 'connections' && (
+      {tab === 'systems' && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
           {systemsLoading ? <div className="h-28 rounded-xl bg-muted/50 animate-pulse" /> : systems.length === 0 ? (
             <div className={`${cardCls} xl:col-span-2 text-center py-10`}>
               <Server className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
               <p className="text-sm font-semibold text-foreground">No systems connected</p>
-              <p className="text-sm text-muted-foreground mt-1">Connect the system that currently owns or stores your customer data. CRMy uses one governed mapping model across CRMs and warehouses.</p>
+              <p className="text-sm text-muted-foreground mt-1">Connect the CRM or warehouse that owns customer data. CRMy reads mapped records first; writeback stays explicit and governed.</p>
               <button
-                onClick={() => setShowCreate(true)}
+                onClick={() => { setShowCreate(true); setAddWizardStep(0); }}
                 className="mt-4 h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 inline-flex items-center gap-2 mx-auto"
               >
-                <Plus className="w-4 h-4" /> Add Connection
+                <Plus className="w-4 h-4" /> Add System
               </button>
             </div>
           ) : systems.map(system => {
-            const mappedCount = mappings.filter(m => m.system_id === system.id).length;
+            const systemMappings = mappings.filter(m => m.system_id === system.id);
+            const mappedCount = systemMappings.length;
             const conflictCount = conflicts.filter(c => c.system_id === system.id && c.status === 'open').length;
             const writebackCount = writebacks.filter(w => w.system_id === system.id && w.status === 'approval_required').length;
+            const readLabels = systemMappings.map(mapping => mapping.object_type.replace('_', ' '));
+            const writableMappings = systemMappings.filter(mapping => mapping.writeback_mode && (mapping.writable_fields ?? []).length > 0);
+            const writeLabel = writableMappings.length === 0
+              ? 'Disabled'
+              : writableMappings.every(mapping => mapping.source_authority === 'approval_required')
+                ? 'Approval required'
+                : 'Selected fields only';
             const installUrl = hubSpotInstallHref(system);
             const actionState = systemActionState(system, mappedCount);
             const oauthIncomplete = system.system_type === 'hubspot'
@@ -3764,10 +4101,39 @@ function SystemsOfRecordSettings() {
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full border ${statusClass(system.status)}`}>{system.status}</span>
                 </div>
-                <div className="grid grid-cols-3 gap-2 mt-4 text-center">
+                <div className="mt-4 rounded-xl border border-border bg-muted/20 p-3">
+                  <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-muted-foreground">
+                    <span className="rounded-md bg-background px-2 py-1">{systemLabel(system.system_type)}</span>
+                    <span>→</span>
+                    <span className="rounded-md bg-background px-2 py-1">CRMy records</span>
+                    <span>→</span>
+                    <span className="rounded-md bg-background px-2 py-1">Signals & Memory</span>
+                    <span>→</span>
+                    <span className="rounded-md bg-background px-2 py-1">Handoffs / Automations</span>
+                    <span>→</span>
+                    <span className="rounded-md bg-background px-2 py-1">Governed writeback</span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    <span className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                      Reads: {readLabels.length ? readLabels.join(', ') : 'Not mapped yet'}
+                    </span>
+                    <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${writeLabel === 'Disabled' ? 'border-border bg-background text-muted-foreground' : 'border-warning/30 bg-warning/10 text-warning'}`}>
+                      Writes: {writeLabel}
+                    </span>
+                    <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs font-semibold text-muted-foreground">
+                      When: Manual sync
+                    </span>
+                    {writeLabel !== 'Disabled' && (
+                      <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs font-semibold text-muted-foreground">
+                        When: Approved handoff or Automation request
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mt-3 text-center">
                   <div className="rounded-lg bg-muted/50 p-2"><p className="text-sm font-semibold">{mappedCount}</p><p className="text-xs text-muted-foreground">Mappings</p></div>
                   <div className="rounded-lg bg-muted/50 p-2"><p className="text-sm font-semibold">{conflictCount}</p><p className="text-xs text-muted-foreground">Conflicts</p></div>
-                  <div className="rounded-lg bg-muted/50 p-2"><p className="text-sm font-semibold">{writebackCount}</p><p className="text-xs text-muted-foreground">Writebacks</p></div>
+                  <div className="rounded-lg bg-muted/50 p-2"><p className="text-sm font-semibold">{writebackCount}</p><p className="text-xs text-muted-foreground">Needs review</p></div>
                 </div>
                 <div className={`mt-3 rounded-xl border p-3 ${actionStateClass(actionState.tone)}`}>
                   <div className="flex items-start gap-2">
@@ -3889,7 +4255,7 @@ function SystemsOfRecordSettings() {
                     {runSync.isPending ? 'Syncing...' : 'Run Sync'}
                   </button>
                   {system.system_type === 'hubspot' && (
-                    <button onClick={() => handleApplyHubSpotPresets(system.id)} className="h-8 px-3 rounded-lg border border-border text-xs font-semibold hover:bg-muted">Apply Presets</button>
+                    <button onClick={() => handleApplyHubSpotPresets(system.id)} className="h-8 px-3 rounded-lg border border-border text-xs font-semibold hover:bg-muted">Apply read presets</button>
                   )}
                   <button onClick={() => deleteSystem.mutate(system.id, { onSuccess: () => toast({ title: 'Connection deleted' }) })} className="h-8 px-3 rounded-lg border border-destructive/30 text-xs font-semibold text-destructive hover:bg-destructive/10 ml-auto">Delete</button>
                 </div>
@@ -3900,13 +4266,16 @@ function SystemsOfRecordSettings() {
       )}
 
       {tab === 'mappings' && (
-        <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(520px,0.95fr)_1fr] gap-4">
           <div className={cardCls}>
             <div className="flex items-center justify-between gap-3 mb-3">
-              <h3 className="text-sm font-semibold text-foreground">{editingMappingId ? 'Edit Mapping' : 'Create Mapping'}</h3>
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">{editingMappingId ? 'Edit record mapping' : 'Map records'}</h3>
+                <p className="text-sm text-muted-foreground mt-0.5">Choose an external object, match the same record, then decide which fields can be read or written.</p>
+              </div>
               {editingMappingId && (
                 <button onClick={resetMappingForm} className="h-7 px-2 rounded-md border border-border text-xs font-semibold hover:bg-muted">
-                  New Mapping
+                  New mapping
                 </button>
               )}
             </div>
@@ -3919,18 +4288,24 @@ function SystemsOfRecordSettings() {
                   onClick={() => handleApplyHubSpotPresets(mappingSystemId)}
                   className="w-full h-9 rounded-lg border border-primary/30 bg-primary/5 text-primary text-sm font-semibold hover:bg-primary/10 transition-colors"
                 >
-                  Apply HubSpot Default Mappings
+                  Apply HubSpot read presets
                 </button>
               )}
               <div className="grid grid-cols-2 gap-2">
-                <select value={mappingObjectType} onChange={e => setMappingObjectType(e.target.value)} className={inputCls}>
-                  <option value="contact">Contact</option>
-                  <option value="account">Account</option>
-                  <option value="opportunity">Opportunity</option>
-                  <option value="activity">Activity</option>
-                  <option value="use_case">Use Case (conflict review only)</option>
-                </select>
-                <input value={mappingExternalObject} onChange={e => setMappingExternalObject(e.target.value)} placeholder="External object" className={inputCls} />
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">CRMy record</span>
+                  <select value={mappingObjectType} onChange={e => setMappingObjectType(e.target.value)} className={`${inputCls} w-full`}>
+                    <option value="contact">Contact</option>
+                    <option value="account">Account</option>
+                    <option value="opportunity">Opportunity</option>
+                    <option value="activity">Activity</option>
+                    <option value="use_case">Use Case (conflict review only)</option>
+                  </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">External object / table</span>
+                  <input value={mappingExternalObject} onChange={e => setMappingExternalObject(e.target.value)} placeholder="e.g. contacts, Account, customer_table" className={`${inputCls} w-full`} />
+                </label>
               </div>
               {mappingObjectType === 'use_case' && (
                 <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
@@ -3985,13 +4360,19 @@ function SystemsOfRecordSettings() {
                 )}
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <input value={mappingIdField} onChange={e => setMappingIdField(e.target.value)} placeholder="External ID field" className={inputCls} />
-                <input value={mappingWatermarkField} onChange={e => setMappingWatermarkField(e.target.value)} placeholder="Watermark field" className={inputCls} />
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">How CRMy matches the same record</span>
+                  <input value={mappingIdField} onChange={e => setMappingIdField(e.target.value)} placeholder="External ID field" className={`${inputCls} w-full`} />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">How CRMy detects changes</span>
+                  <input value={mappingWatermarkField} onChange={e => setMappingWatermarkField(e.target.value)} placeholder="Updated timestamp field" className={`${inputCls} w-full`} />
+                </label>
               </div>
               <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-2">
                 <div>
                   <p className="text-sm font-semibold text-foreground">Add field mapping</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">Map a CRMy field to the external field name. The JSON stays editable below.</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Map a CRMy field to the external field name. Mapped fields are read during sync; writeback is opt-in per field.</p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-2">
                   <select value={mappingCrmyField} onChange={e => setMappingCrmyField(e.target.value)} className={inputCls}>
@@ -4013,16 +4394,74 @@ function SystemsOfRecordSettings() {
                   </button>
                 </div>
               </div>
-              <textarea value={mappingFieldJson} onChange={e => setMappingFieldJson(e.target.value)} className={textAreaCls} />
+              <div className="rounded-xl border border-border bg-background overflow-hidden">
+                <div className="grid grid-cols-[1fr_1fr_72px_88px_44px] gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  <span>CRMy field</span>
+                  <span>External field</span>
+                  <span className="text-center">Read</span>
+                  <span className="text-center">Write</span>
+                  <span />
+                </div>
+                {mappingFieldPairs.length === 0 ? (
+                  <div className="px-3 py-6 text-sm text-muted-foreground text-center">No fields mapped yet. Add the first field above or apply a preset.</div>
+                ) : mappingFieldPairs.map(([crmyField, externalField]) => (
+                  <div key={crmyField} className="grid grid-cols-[1fr_1fr_72px_88px_44px] gap-2 items-center border-b border-border/70 px-3 py-2 last:border-b-0">
+                    <span className="text-sm font-medium text-foreground truncate">{mappingFieldOptions.find(field => field.value === crmyField)?.label ?? crmyField}</span>
+                    <input
+                      value={externalField}
+                      onChange={e => updateMappedField(crmyField, e.target.value)}
+                      className="h-8 rounded-md border border-border bg-card px-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    <span className="justify-self-center rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-xs font-semibold text-success">Yes</span>
+                    <label className="justify-self-center inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={writableFieldSet.has(externalField)}
+                        onChange={e => toggleWritableField(externalField, e.target.checked)}
+                        className="h-4 w-4 rounded border-border"
+                      />
+                      Allow
+                    </label>
+                    <button aria-label={`Remove ${crmyField} mapping`} onClick={() => removeMappedField(crmyField)} className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-xl border border-border bg-muted/20 p-3">
+                <p className="text-sm font-semibold text-foreground">Readiness</p>
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div className="flex items-start gap-2 rounded-lg bg-background p-2">
+                    {mappingIdField.trim() ? <CheckCircle2 className="w-4 h-4 text-success mt-0.5" /> : <AlertTriangle className="w-4 h-4 text-warning mt-0.5" />}
+                    <p className="text-sm text-muted-foreground">{mappingIdField.trim() ? 'Record matching is set.' : 'Choose the external ID field.'}</p>
+                  </div>
+                  <div className="flex items-start gap-2 rounded-lg bg-background p-2">
+                    {mappingWatermarkField.trim() ? <CheckCircle2 className="w-4 h-4 text-success mt-0.5" /> : <AlertTriangle className="w-4 h-4 text-warning mt-0.5" />}
+                    <p className="text-sm text-muted-foreground">{mappingWatermarkField.trim() ? 'Change detection is set.' : 'Add an updated timestamp when available.'}</p>
+                  </div>
+                  <div className="flex items-start gap-2 rounded-lg bg-background p-2">
+                    {mappingFieldPairs.length > 0 ? <CheckCircle2 className="w-4 h-4 text-success mt-0.5" /> : <AlertTriangle className="w-4 h-4 text-warning mt-0.5" />}
+                    <p className="text-sm text-muted-foreground">{mappingFieldPairs.length > 0 ? `${mappingFieldPairs.length} field${mappingFieldPairs.length !== 1 ? 's' : ''} will be read.` : 'Map at least one field.'}</p>
+                  </div>
+                  <div className="flex items-start gap-2 rounded-lg bg-background p-2">
+                    {mappingWritebackMode && parseCsvList(mappingWritableFields).length > 0 ? <ShieldCheck className="w-4 h-4 text-warning mt-0.5" /> : <CheckCircle2 className="w-4 h-4 text-success mt-0.5" />}
+                    <p className="text-sm text-muted-foreground">{mappingWritebackMode && parseCsvList(mappingWritableFields).length > 0 ? `${parseCsvList(mappingWritableFields).length} field${parseCsvList(mappingWritableFields).length !== 1 ? 's' : ''} may be written with policy checks.` : 'Writeback is disabled for this mapping.'}</p>
+                  </div>
+                </div>
+              </div>
               <details className="rounded-xl border border-border bg-muted/20">
                 <summary className="cursor-pointer list-none px-3 py-2 text-sm font-semibold text-foreground flex items-center justify-between gap-3">
-                  Advanced mapping policy
+                  Advanced mapping
                   <ChevronDown className="w-4 h-4 text-muted-foreground" />
                 </summary>
                 <div className="space-y-3 px-3 pb-3">
                   <p className="text-sm text-muted-foreground">
-                    Use these controls for scoped reads, governed writeback, conflict authority, and loop prevention. External authority can update CRMy directly; CRMy, read-only, and approval-required authority create conflicts instead of overwriting existing records.
+                    Use these controls for scoped reads, governed writeback, conflict authority, loop prevention, and raw JSON editing.
                   </p>
+                  <div>
+                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Field mapping JSON</label>
+                    <textarea value={mappingFieldJson} onChange={e => setMappingFieldJson(e.target.value)} className={`${textAreaCls} mt-1`} />
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                     <div>
                       <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Readable fields</label>
@@ -4034,7 +4473,7 @@ function SystemsOfRecordSettings() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Writable fields</label>
+                      <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Fields CRMy may update</label>
                       <input
                         value={mappingWritableFields}
                         onChange={e => setMappingWritableFields(e.target.value)}
@@ -4044,6 +4483,8 @@ function SystemsOfRecordSettings() {
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">When values differ</span>
                     <select value={mappingSourceAuthority} onChange={e => setMappingSourceAuthority(e.target.value)} className={`${inputCls} w-full`}>
                       <option value="external">External source wins</option>
                       <option value="crmy">CRMy source wins</option>
@@ -4051,12 +4492,16 @@ function SystemsOfRecordSettings() {
                       <option value="read_only">Read only</option>
                       <option value="approval_required">Approval required</option>
                     </select>
+                    </label>
+                    <label className="space-y-1">
+                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Writeback behavior</span>
                     <select value={mappingWritebackMode} onChange={e => setMappingWritebackMode(e.target.value)} className={`${inputCls} w-full`}>
                       <option value="">No writeback</option>
                       <option value="append_event">Append-only event</option>
                       <option value="mapped_upsert">Mapped upsert</option>
                       <option value="stored_procedure">Stored procedure</option>
                     </select>
+                    </label>
                   </div>
                   <div>
                     <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Writeback config JSON</label>
@@ -4172,8 +4617,14 @@ function SystemsOfRecordSettings() {
         </div>
       )}
 
-      {tab === 'runs' && (
+      {tab === 'activity' && (
         <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Sync activity</h3>
+              <p className="text-sm text-muted-foreground mt-0.5">See what CRMy read from connected systems and where sync needs attention.</p>
+            </div>
+          </div>
           {runs.length === 0 ? (
             <div className={`${cardCls} text-center py-10`}>
               <RefreshCw className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
@@ -4182,10 +4633,10 @@ function SystemsOfRecordSettings() {
                 Test a connection, add mappings, then run sync to bring external customer records into CRMy.
               </p>
               <button
-                onClick={() => setTab(systems.length === 0 ? 'connections' : mappings.length === 0 ? 'mappings' : 'connections')}
+                onClick={() => setTab(systems.length === 0 ? 'systems' : mappings.length === 0 ? 'mappings' : 'systems')}
                 className="mt-4 h-9 px-3 rounded-lg border border-border text-sm font-semibold hover:bg-muted"
               >
-                {systems.length === 0 ? 'Add Connection' : mappings.length === 0 ? 'Add Mapping' : 'Choose Connection'}
+                {systems.length === 0 ? 'Add System' : mappings.length === 0 ? 'Add Mapping' : 'Choose System'}
               </button>
             </div>
           ) : runs.map(run => (
@@ -4204,8 +4655,14 @@ function SystemsOfRecordSettings() {
         </div>
       )}
 
-      {tab === 'conflicts' && (
+      {tab === 'activity' && (
         <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3 pt-2">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Conflicts</h3>
+              <p className="text-sm text-muted-foreground mt-0.5">When CRMy and the system of record disagree, resolve the difference here.</p>
+            </div>
+          </div>
           {conflicts.length === 0 ? (
             <div className={`${cardCls} text-center py-10`}>
               <CheckCircle2 className="w-8 h-8 text-success/70 mx-auto mb-3" />
@@ -4237,13 +4694,46 @@ function SystemsOfRecordSettings() {
         </div>
       )}
 
-      {tab === 'writebacks' && (
+      {tab === 'activity' && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3 pt-2">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Writeback receipts</h3>
+              <p className="text-sm text-muted-foreground mt-0.5">Track governed requests from Handoffs, Automations, and the advanced test bench.</p>
+            </div>
+            <button onClick={() => setTab('advanced')} className="h-8 px-3 rounded-lg border border-border text-xs font-semibold hover:bg-muted">
+              Test writeback
+            </button>
+          </div>
+          {writebacks.length === 0 ? (
+            <div className={`${cardCls} text-center py-8`}>
+              <ShieldCheck className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
+              <p className="text-sm font-semibold text-foreground">No writebacks requested</p>
+              <p className="text-sm text-muted-foreground mt-1">Governed writes will appear here after approval or execution.</p>
+            </div>
+          ) : writebacks.map(writeback => (
+            <div key={String(writeback.id)} className={`${cardCls} flex items-center justify-between gap-3`}>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground truncate">
+                  {String(writeback.operation)} {String(writeback.object_type)} to {systems.find(s => s.id === writeback.system_id)?.name ?? String(writeback.system_id)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {String(writeback.writeback_mode)} • {fmtDate(writeback.created_at)}
+                </p>
+              </div>
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${statusClass(String(writeback.status ?? ''))}`}>{String(writeback.status)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'advanced' && (
         <div className="space-y-4">
           <div className={`${cardCls} grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-4`}>
             <div className="space-y-3">
               <div>
-                <p className="text-sm font-semibold text-foreground">New governed writeback</p>
-                <p className="text-sm text-muted-foreground mt-0.5">Preview policy, diff, and approval needs before writing to an external system.</p>
+                <p className="text-sm font-semibold text-foreground">Advanced: test writeback request</p>
+                <p className="text-sm text-muted-foreground mt-0.5">Use this admin test bench to preview policy and diff checks. Normal writebacks should come from Handoffs and Automations.</p>
               </div>
               <select value={writebackSystemId} onChange={e => { setWritebackSystemId(e.target.value); setWritebackMappingId(''); setWritebackPreview(null); }} className={`${inputCls} w-full`}>
                 <option value="">Select system</option>
@@ -4506,7 +4996,7 @@ function SystemsOfRecordSettings() {
   );
 }
 
-type DbProviderId = 'local' | 'neon' | 'lakebase' | 'supabase' | 'rds';
+type DbProviderId = 'local' | 'neon' | 'lakebase' | 'supabase' | 'rds' | 'other';
 
 const DB_PROVIDER_GUIDES: Record<DbProviderId, {
   label: string;
@@ -4570,15 +5060,27 @@ const DB_PROVIDER_GUIDES: Record<DbProviderId, {
     ],
     pgvector: 'Install/enable pgvector with CREATE EXTENSION IF NOT EXISTS vector after confirming your RDS engine version supports it.',
   },
+  other: {
+    label: 'Other',
+    fit: 'Use this for any PostgreSQL-compatible host CRMy can reach.',
+    placeholder: 'postgresql://user:password@postgres.example.com:5432/crmy?sslmode=require',
+    steps: [
+      'Copy the direct PostgreSQL connection string from your database provider.',
+      'Confirm the CRMy server can reach the database host and port.',
+      'Use sslmode=require for hosted databases unless your provider recommends a different SSL mode.',
+    ],
+    pgvector: 'If your provider supports pgvector, enable the vector extension and run migrations with ENABLE_PGVECTOR=true. Otherwise CRMy uses keyword search.',
+  },
 };
 
 function detectDbProvider(host?: string): DbProviderId {
   const h = (host ?? '').toLowerCase();
+  if (!h || h === 'localhost' || h === '127.0.0.1' || h === '::1') return 'local';
   if (h.includes('neon.tech')) return 'neon';
   if (h.includes('supabase.co')) return 'supabase';
   if (h.includes('rds.amazonaws.com')) return 'rds';
   if (h.includes('databricks') || h.includes('lakebase')) return 'lakebase';
-  return 'local';
+  return 'other';
 }
 
 function DatabaseSettings() {
@@ -4601,6 +5103,12 @@ function DatabaseSettings() {
     user: string;
     ssl: string | null;
     pgvector_enabled?: boolean;
+    pgvector_column_ready?: boolean;
+    pgvector_env_enabled?: boolean;
+    embedding_configured?: boolean;
+    embedding_provider?: string | null;
+    embedding_model?: string | null;
+    ready?: boolean;
     sample_data?: {
       seeded: boolean;
       counts: {
@@ -4619,6 +5127,7 @@ function DatabaseSettings() {
   const selectedGuide = DB_PROVIDER_GUIDES[provider];
   const sampleCounts = dbInfo?.sample_data?.counts;
   const hasWorkspaceData = !!sampleCounts && Object.values(sampleCounts).some(count => count > 0);
+  const semanticReady = Boolean(dbInfo?.ready);
 
   useEffect(() => {
     setProvider(currentProvider);
@@ -4689,8 +5198,8 @@ function DatabaseSettings() {
             Editing connection
           </span>
         )}
-        <span className={`h-9 inline-flex items-center px-3 rounded-xl border text-sm font-medium ${dbInfo?.pgvector_enabled ? 'border-success/30 bg-success/5 text-success' : 'border-amber-500/30 bg-amber-500/10 text-amber-700'}`}>
-          pgvector {dbInfo?.pgvector_enabled ? 'enabled' : 'not enabled'}
+        <span className={`h-9 inline-flex items-center px-3 rounded-xl border text-sm font-medium ${semanticReady ? 'border-success/30 bg-success/5 text-success' : 'border-amber-500/30 bg-amber-500/10 text-amber-700'}`}>
+          Semantic retrieval {semanticReady ? 'ready' : 'needs setup'}
         </span>
       </div>
 
@@ -4721,10 +5230,62 @@ function DatabaseSettings() {
               ))}
             </div>
             <div className="pt-3 mt-3 border-t border-border text-xs text-muted-foreground">
-              pgvector powers semantic context search and embedding similarity. Without it, CRMy still works, but semantic search falls back to keyword search.
+              Semantic retrieval helps CRMy find related Memory and Signals even when wording differs. Keyword search still works when semantic retrieval is not ready.
             </div>
           </div>
         )}
+
+        <div className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Semantic retrieval setup</h3>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Enable this when you want natural-language search and stronger related-context matching.
+              </p>
+            </div>
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${semanticReady ? 'border-success/30 bg-success/5 text-success' : 'border-warning/30 bg-warning/10 text-warning'}`}>
+              {semanticReady ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+              {semanticReady ? 'Ready' : 'Setup needed'}
+            </span>
+          </div>
+
+          <div className="grid gap-2 text-sm md:grid-cols-3">
+            <div className={`rounded-lg border px-3 py-2 ${dbInfo?.pgvector_env_enabled ? 'border-success/25 bg-success/5' : 'border-border bg-background'}`}>
+              <p className="font-medium text-foreground">1. Opt in</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Set <code className="rounded bg-muted px-1 py-0.5 font-mono">ENABLE_PGVECTOR=true</code> in the CRMy server environment.
+              </p>
+            </div>
+            <div className={`rounded-lg border px-3 py-2 ${dbInfo?.pgvector_enabled && dbInfo?.pgvector_column_ready ? 'border-success/25 bg-success/5' : 'border-border bg-background'}`}>
+              <p className="font-medium text-foreground">2. Run migration</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Enable the vector extension, then run migrations so CRMy adds embedding columns and indexes.
+              </p>
+            </div>
+            <div className={`rounded-lg border px-3 py-2 ${dbInfo?.embedding_configured ? 'border-success/25 bg-success/5' : 'border-border bg-background'}`}>
+              <p className="font-medium text-foreground">3. Add embeddings</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Configure <code className="rounded bg-muted px-1 py-0.5 font-mono">EMBEDDING_PROVIDER</code> and related embedding variables before restarting.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-border bg-background p-3">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Server environment</p>
+            <pre className="mt-2 overflow-x-auto rounded-md bg-muted/50 p-3 text-xs text-foreground"><code>{`ENABLE_PGVECTOR=true
+EMBEDDING_PROVIDER=openai
+EMBEDDING_API_KEY=sk-...
+EMBEDDING_MODEL=text-embedding-3-small`}</code></pre>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Model Settings controls the Workspace Agent. Embedding settings live in the server environment because CRMy uses them for background indexing and semantic retrieval.
+              {dbInfo?.embedding_configured && dbInfo.embedding_provider ? ` Current embedding provider: ${dbInfo.embedding_provider}${dbInfo.embedding_model ? ` · ${dbInfo.embedding_model}` : ''}.` : ''}
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            After changing these settings, restart the CRMy server and run migrations. Existing Memory can be embedded with the admin MCP tool <code className="rounded bg-muted px-1 py-0.5 font-mono">context_embed_backfill</code>.
+          </div>
+        </div>
 
         <div className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-sm">
           <div>
@@ -4924,6 +5485,10 @@ function RegistriesSettings() {
   const { data: actData, isLoading: actLoading } = useActivityTypes();
   const createActType = useCreateActivityType();
   const deleteActType = useDeleteActivityType();
+  const { data: meetingData, isLoading: meetingLoading } = useMeetingClassifications({ include_disabled: true });
+  const createMeetingClassification = useCreateMeetingClassification();
+  const updateMeetingClassification = useUpdateMeetingClassification();
+  const deleteMeetingClassification = useDeleteMeetingClassification();
 
   const [ctxName, setCtxName] = useState('');
   const [ctxLabel, setCtxLabel] = useState('');
@@ -4932,10 +5497,15 @@ function RegistriesSettings() {
   const [actLabel, setActLabel] = useState('');
   const [actCategory, setActCategory] = useState('');
   const [actDesc, setActDesc] = useState('');
+  const [meetingName, setMeetingName] = useState('');
+  const [meetingLabel, setMeetingLabel] = useState('');
+  const [meetingDesc, setMeetingDesc] = useState('');
+  const [meetingHints, setMeetingHints] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   const contextTypes = (ctxData as any)?.data ?? [];
   const activityTypes = (actData as any)?.data ?? [];
+  const meetingClassifications = (meetingData as any)?.data ?? [];
 
   const handleCreateCtx = async () => {
     if (!ctxName.trim() || !ctxLabel.trim()) return;
@@ -4953,6 +5523,28 @@ function RegistriesSettings() {
       setActName(''); setActLabel(''); setActCategory(''); setActDesc('');
       toast({ title: 'Activity type added' });
     } catch { toast({ title: 'Error', variant: 'destructive' }); }
+  };
+
+  const handleCreateMeetingClassification = async () => {
+    if (!meetingName.trim() || !meetingLabel.trim()) return;
+    try {
+      await createMeetingClassification.mutateAsync({
+        type_name: meetingName.trim(),
+        label: meetingLabel.trim(),
+        description: meetingDesc.trim() || undefined,
+        matching_hints: meetingHints.split(',').map(h => h.trim()).filter(Boolean),
+        mapped_activity_type: 'meeting_held',
+        required_record_types: ['account'],
+        required_artifact_types: ['notes'],
+        is_customer_facing: true,
+        auto_process_raw_context: true,
+        is_enabled: true,
+      });
+      setMeetingName(''); setMeetingLabel(''); setMeetingDesc(''); setMeetingHints('');
+      toast({ title: 'Meeting classification added' });
+    } catch (err) {
+      toast({ title: 'Could not add classification', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' });
+    }
   };
 
   const inputCls = 'h-8 px-3 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
@@ -5086,6 +5678,79 @@ function RegistriesSettings() {
           </button>
         </div>
       </div>
+
+      {/* Meeting Classifications */}
+      <div className="mt-8">
+        <h3 className="text-sm font-semibold text-foreground mb-2">Meeting Classifications</h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          Meeting classifications tell CRMy how to interpret calendar events, what customer records are required,
+          and whether notes or transcripts are needed before Raw Context can become Signals.
+        </p>
+        <div className="space-y-2 mb-3">
+          {meetingLoading ? (
+            <div className="h-10 bg-muted/50 rounded animate-pulse" />
+          ) : meetingClassifications.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">No meeting classifications configured yet.</p>
+          ) : meetingClassifications.map((classification: any) => (
+            <div key={classification.type_name} className="rounded-lg border border-border bg-card px-3 py-2">
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-foreground">{classification.label}</span>
+                    <span className="text-xs font-mono text-muted-foreground">{classification.type_name}</span>
+                    {classification.is_default && <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">Default</span>}
+                    {!classification.is_enabled && <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-destructive">Disabled</span>}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Requires {(classification.required_record_types ?? []).join(', ') || 'no specific record'}
+                    {(classification.required_artifact_types ?? []).length ? ` · Context: ${(classification.required_artifact_types ?? []).join(', ')}` : ''}
+                    {classification.auto_process_raw_context ? ' · Auto-processes Raw Context' : ' · Manual processing'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => updateMeetingClassification.mutate({
+                    type_name: classification.type_name,
+                    is_enabled: !classification.is_enabled,
+                  }, { onSuccess: () => toast({ title: classification.is_enabled ? 'Classification disabled' : 'Classification enabled' }) })}
+                  className="px-2 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  {classification.is_enabled ? 'Disable' : 'Enable'}
+                </button>
+                <button
+                  onClick={() => {
+                    if (classification.is_default) {
+                      toast({ title: 'Default classifications cannot be deleted', description: 'Disable it instead if you do not want CRMy to use it.', variant: 'destructive' });
+                      return;
+                    }
+                    if (confirmDelete === classification.type_name) {
+                      deleteMeetingClassification.mutate(classification.type_name, { onSuccess: () => { toast({ title: 'Removed' }); setConfirmDelete(null); } });
+                    } else {
+                      setConfirmDelete(classification.type_name);
+                      setTimeout(() => setConfirmDelete(null), 3000);
+                    }
+                  }}
+                  className="p-1 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input value={meetingName} onChange={e => setMeetingName(e.target.value)} placeholder="type_name (slug)" className={`${inputCls} w-36`} />
+          <input value={meetingLabel} onChange={e => setMeetingLabel(e.target.value)} placeholder="Label" className={`${inputCls} w-32`} />
+          <input value={meetingHints} onChange={e => setMeetingHints(e.target.value)} placeholder="Hints, comma-separated" className={`${inputCls} flex-1 min-w-[150px]`} />
+          <input value={meetingDesc} onChange={e => setMeetingDesc(e.target.value)} placeholder="Description (optional)" className={`${inputCls} flex-1 min-w-[150px]`} />
+          <button
+            onClick={handleCreateMeetingClassification}
+            disabled={!meetingName.trim() || !meetingLabel.trim() || createMeetingClassification.isPending}
+            className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors"
+          >
+            <Plus className="w-3 h-3 inline mr-1" />Add
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -5136,7 +5801,7 @@ export default function Settings() {
         <div className="flex-1 overflow-y-auto p-6 pb-20 md:pb-6">
           <Routes>
             <Route index element={<ProfileSettings />} />
-            <Route path="appearance" element={<AppearanceSettings />} />
+            <Route path="appearance" element={<Navigate to="/settings" replace />} />
             <Route path="api-keys" element={<ApiKeysSettings />} />
             <Route path="webhooks" element={<RequireRole roles={['admin', 'owner']}><WebhooksSettings /></RequireRole>} />
             <Route path="custom-fields" element={<RequireRole roles={['admin', 'owner']}><CustomFieldsSettings /></RequireRole>} />

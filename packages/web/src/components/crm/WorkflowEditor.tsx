@@ -302,7 +302,7 @@ function ActionCard({
 
   function promptConfigureAgent() {
     toast({
-      title: isAdminUser ? 'Configure the Local Workspace Agent' : 'Workspace Agent needs admin setup',
+      title: isAdminUser ? 'Configure the Workspace Agent' : 'Workspace Agent needs admin setup',
       description: isAdminUser
         ? 'AI-generated trigger messages need an enabled model in Model Settings.'
         : 'Ask an admin to enable the Workspace Agent before using AI-generated trigger messages.',

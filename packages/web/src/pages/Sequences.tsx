@@ -356,7 +356,7 @@ function EmailStepFields({
 
   const promptConfigureAgent = useCallback(() => {
     toast({
-      title: isAdminUser ? 'Configure the Local Workspace Agent' : 'Workspace Agent needs admin setup',
+      title: isAdminUser ? 'Configure the Workspace Agent' : 'Workspace Agent needs admin setup',
       description: isAdminUser
         ? 'AI-generated sequence content needs an enabled model in Model Settings.'
         : 'Ask an admin to enable the Workspace Agent before using AI-generated sequence content.',
@@ -414,7 +414,7 @@ function EmailStepFields({
               AI generate content
             </label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Requires the Local Workspace Agent.
+              Requires the Workspace Agent.
             </p>
             {!agentReady && isAdminUser && (
               <button

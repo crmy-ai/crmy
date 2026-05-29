@@ -12,6 +12,7 @@ import {
   Webhook, Sparkles, Loader2, FileText, Server, type LucideIcon,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
+import { getUser } from '@/api/client';
 import { cn } from '@/lib/utils';
 import { ContactAvatar } from './ContactAvatar';
 import { useSearch, useWorkflows, useSequences } from '@/api/hooks';
@@ -27,6 +28,7 @@ interface DestinationCommand {
   icon: LucideIcon;
   color?: Tone | null;
   keywords: string;
+  roles?: Array<'member' | 'manager' | 'admin' | 'owner'>;
 }
 
 interface ActionCommand {
@@ -36,43 +38,48 @@ interface ActionCommand {
   color: Tone;
   keywords: string;
   run: () => void;
+  roles?: Array<'member' | 'manager' | 'admin' | 'owner'>;
 }
 
 const DESTINATIONS: DestinationCommand[] = [
   { label: 'Overview',        icon: LayoutDashboard, path: '/',                         color: ENTITY_COLORS.dashboard, keywords: 'dashboard command center status activate setup home' },
-  { label: 'Context',         icon: FileText,        path: '/context',                  color: ENTITY_COLORS.context, keywords: 'memory browser context entries customer memory' },
-  { label: 'Raw Context',     icon: FileText,        path: '/context?tab=observations', color: ENTITY_COLORS.context, keywords: 'raw context observations sources ingestion processing volume' },
+  { label: 'Context',         icon: FileText,        path: '/context',                  color: ENTITY_COLORS.context, keywords: 'raw context observations sources ingestion processing volume signals memory browser context entries customer memory lineage graph' },
   { label: 'Signals',         icon: Sparkles,        path: '/context?tab=signals',      color: ENTITY_COLORS.context, keywords: 'signals inferred context review promote dismiss evidence confidence' },
   { label: 'Memory',          icon: FileText,        path: '/context?tab=browser',      color: ENTITY_COLORS.context, keywords: 'memory confirmed context operational knowledge evidence' },
-  { label: 'Memory Health',   icon: ShieldCheck,     path: '/?tab=health',              color: ENTITY_COLORS.context, keywords: 'memory health review contradictions context quality' },
+  { label: 'Memory Health',   icon: ShieldCheck,     path: '/?tab=health',              color: ENTITY_COLORS.context, keywords: 'memory health review contradictions context quality', roles: ['admin', 'owner'] },
   { label: 'Context Graph',   icon: Network,         path: '/context?tab=graph',        color: ENTITY_COLORS.context, keywords: 'graph context memory relationships briefing network' },
   { label: 'Memory Lineage',  icon: Network,         path: '/context?tab=lineage',      color: ENTITY_COLORS.context, keywords: 'lineage evidence sources signals memory handoffs writebacks audit' },
   { label: 'Workspace Agent', icon: Bot,             path: '/agent',                    color: ENTITY_COLORS.agents, keywords: 'agent chat local model workspace reasoning' },
-  { label: 'Agent Activity',  icon: Activity,        path: '/agent/activity',           color: ENTITY_COLORS.agents, keywords: 'agent activity tools mcp traces latency errors' },
+  { label: 'Agent Activity',  icon: Activity,        path: '/agent/activity',           color: ENTITY_COLORS.agents, keywords: 'agent activity tools mcp traces latency errors', roles: ['admin', 'owner'] },
   { label: 'Contacts',        icon: Users,           path: '/contacts',                 color: ENTITY_COLORS.contacts, keywords: 'people leads customers contacts' },
   { label: 'Accounts',        icon: Building2,       path: '/accounts',                 color: ENTITY_COLORS.accounts, keywords: 'accounts companies organizations domains' },
   { label: 'Opportunities',   icon: Briefcase,       path: '/opportunities',            color: ENTITY_COLORS.opportunities, keywords: 'deals pipeline revenue opportunities' },
   { label: 'Use Cases',       icon: FolderKanban,    path: '/use-cases',                color: ENTITY_COLORS.useCases, keywords: 'deployments products use cases outcomes' },
   { label: 'Activities',      icon: Activity,        path: '/activities',               color: ENTITY_COLORS.activities, keywords: 'calls notes meetings timeline activities' },
   { label: 'Emails',          icon: Mail,            path: '/emails',                   color: ENTITY_COLORS.emails, keywords: 'email inbox outbound inbound drafts approvals' },
-  { label: 'Automations',     icon: Zap,             path: '/automations',              color: ENTITY_COLORS.workflows, keywords: 'triggers workflows sequences automations' },
-  { label: 'Triggers',        icon: Zap,             path: '/automations?tab=triggers', color: ENTITY_COLORS.workflows, keywords: 'workflows triggers automations' },
-  { label: 'Sequences',       icon: ListOrdered,     path: '/automations?tab=sequences', color: ENTITY_COLORS.sequences, keywords: 'email sequences automations enrollment' },
+  { label: 'Automations',     icon: Zap,             path: '/automations',              color: ENTITY_COLORS.workflows, keywords: 'triggers workflows sequences automations', roles: ['admin', 'owner'] },
+  { label: 'Triggers',        icon: Zap,             path: '/automations?tab=triggers', color: ENTITY_COLORS.workflows, keywords: 'workflows triggers automations', roles: ['admin', 'owner'] },
+  { label: 'Sequences',       icon: ListOrdered,     path: '/automations?tab=sequences', color: ENTITY_COLORS.sequences, keywords: 'email sequences automations enrollment', roles: ['admin', 'owner'] },
   { label: 'Handoffs',        icon: ClipboardList,   path: '/handoffs',                 color: ENTITY_COLORS.assignments, keywords: 'hitl approvals inbox assignments handoffs human review' },
-  { label: 'Reliability',     icon: Database,        path: '/operations',               color: ENTITY_COLORS.operations, keywords: 'operations reliability health data quality system status' },
-  { label: 'Audit Log',       icon: ScrollText,      path: '/audit-log',                color: ENTITY_COLORS.auditLog, keywords: 'audit events history trail changes' },
+  { label: 'Reliability',     icon: Database,        path: '/operations',               color: ENTITY_COLORS.operations, keywords: 'operations reliability health data quality system status', roles: ['admin', 'owner'] },
+  { label: 'Audit Log',       icon: ScrollText,      path: '/audit-log',                color: ENTITY_COLORS.auditLog, keywords: 'audit events history trail changes', roles: ['admin', 'owner'] },
   { label: 'Settings',        icon: Settings,        path: '/settings',                 color: null, keywords: 'settings profile account' },
-  { label: 'Actors',          icon: Users,           path: '/settings/actors',          color: ENTITY_COLORS.agents, keywords: 'actors users agents scopes invites passwords api keys' },
-  { label: 'Database Settings', icon: Database,      path: '/settings/database',        color: ENTITY_COLORS.operations, keywords: 'database postgres neon supabase rds lakebase pgvector sample data' },
-  { label: 'Model Settings',  icon: Sparkles,        path: '/settings/model',           color: ENTITY_COLORS.agents, keywords: 'model local workspace agent llm openai ollama' },
-  { label: 'Systems of Record', icon: Server,        path: '/settings/systems',         color: ENTITY_COLORS.operations, keywords: 'systems of record hubspot salesforce snowflake databricks connectors sync mappings writebacks external systems' },
+  { label: 'Actors',          icon: Users,           path: '/settings/actors',          color: ENTITY_COLORS.agents, keywords: 'actors users agents scopes invites passwords api keys', roles: ['admin', 'owner'] },
+  { label: 'Database Settings', icon: Database,      path: '/settings/database',        color: ENTITY_COLORS.operations, keywords: 'database postgres neon supabase rds lakebase pgvector sample data', roles: ['admin', 'owner'] },
+  { label: 'Model Settings',  icon: Sparkles,        path: '/settings/model',           color: ENTITY_COLORS.agents, keywords: 'model local workspace agent llm openai ollama', roles: ['admin', 'owner'] },
+  { label: 'Systems of Record', icon: Server,        path: '/settings/systems',         color: ENTITY_COLORS.operations, keywords: 'systems of record hubspot salesforce snowflake databricks connectors sync mappings writebacks external systems', roles: ['admin', 'owner'] },
   { label: 'Appearance',      icon: Palette,         path: '/settings/appearance',      color: null, keywords: 'appearance theme charcoal color display' },
   { label: 'API Keys',        icon: KeyRound,        path: '/settings/api-keys',        color: null, keywords: 'api keys tokens access' },
-  { label: 'Webhooks',        icon: Webhook,         path: '/settings/webhooks',        color: null, keywords: 'webhooks integrations outbound events' },
-  { label: 'Registries',      icon: Tags,            path: '/settings/registries',      color: null, keywords: 'registries activity types context types taxonomy' },
-  { label: 'Messaging',       icon: MessageSquare,   path: '/settings/messaging',       color: null, keywords: 'messaging email provider smtp resend sendgrid' },
-  { label: 'Action Policies', icon: ShieldCheck,     path: '/settings/hitl-rules',      color: ENTITY_COLORS.assignments, keywords: 'hitl rules approval handoff policy action policies' },
+  { label: 'Webhooks',        icon: Webhook,         path: '/settings/webhooks',        color: null, keywords: 'webhooks integrations outbound events', roles: ['admin', 'owner'] },
+  { label: 'Custom Fields',   icon: Tags,            path: '/settings/custom-fields',   color: null, keywords: 'custom fields record fields schema typed memory fields', roles: ['admin', 'owner'] },
+  { label: 'Registries',      icon: Tags,            path: '/settings/registries',      color: null, keywords: 'registries activity types context types taxonomy', roles: ['admin', 'owner'] },
+  { label: 'Messaging',       icon: MessageSquare,   path: '/settings/messaging',       color: null, keywords: 'messaging email provider smtp resend sendgrid', roles: ['admin', 'owner'] },
+  { label: 'Action Policies', icon: ShieldCheck,     path: '/settings/hitl-rules',      color: ENTITY_COLORS.assignments, keywords: 'hitl rules approval handoff policy action policies', roles: ['admin', 'owner'] },
 ];
+
+function canUseCommand<T extends { roles?: Array<'member' | 'manager' | 'admin' | 'owner'> }>(command: T, role: string): boolean {
+  return !command.roles || command.roles.includes(role as 'member' | 'manager' | 'admin' | 'owner');
+}
 
 function useDebouncedValue(value: string, delayMs: number) {
   const [debounced, setDebounced] = useState(value);
@@ -113,6 +120,9 @@ export function CommandPalette() {
   const navigate = useNavigate();
   const inputRef = useRef<HTMLInputElement>(null);
   const isMobile = useIsMobile();
+  const user = getUser();
+  const role = user?.role ?? 'member';
+  const isAdmin = role === 'admin' || role === 'owner';
   const [query, setQuery] = useState('');
   const normalizedQuery = query.trim().toLowerCase();
   const searchQuery = useDebouncedValue(query.trim(), 180);
@@ -136,9 +146,9 @@ export function CommandPalette() {
 
   // Automations data for search-through
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: wfData } = useWorkflows({ limit: 100 }) as any;
+  const { data: wfData } = useWorkflows({ limit: 100 }, { enabled: isAdmin }) as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: seqData } = useSequences({ limit: 100 }) as any;
+  const { data: seqData } = useSequences({ limit: 100 }, { enabled: isAdmin }) as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const allWorkflows: any[] = wfData?.data ?? wfData?.workflows ?? [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -158,20 +168,24 @@ export function CommandPalette() {
     { label: 'New Opportunity', icon: Plus, color: ENTITY_COLORS.opportunities, keywords: 'create add deal pipeline opportunity', run: () => openQuickAdd('opportunity') },
     { label: 'New Use Case',    icon: Plus, color: ENTITY_COLORS.useCases,      keywords: 'create add use case deployment', run: () => openQuickAdd('use-case') },
     { label: 'Log Activity',    icon: Plus, color: ENTITY_COLORS.activities,    keywords: 'create add log call note meeting activity', run: () => openQuickAdd('activity') },
-    { label: 'New Assignment',  icon: Plus, color: ENTITY_COLORS.assignments,   keywords: 'create add handoff task assignment', run: () => openQuickAdd('assignment') },
-    { label: 'New Trigger',     icon: Plus, color: ENTITY_COLORS.workflows,     keywords: 'create add trigger workflow automation', run: () => { navigate('/automations?tab=triggers'); openWorkflowEditor(null); } },
-    { label: 'New Sequence',    icon: Plus, color: ENTITY_COLORS.sequences,     keywords: 'create add sequence email automation', run: () => { navigate('/automations?tab=sequences'); openSequenceEditor(null); } },
+    { label: 'New Handoff',     icon: Plus, color: ENTITY_COLORS.assignments,   keywords: 'create add handoff task assignment', run: () => openQuickAdd('assignment') },
+    { label: 'New Trigger',     icon: Plus, color: ENTITY_COLORS.workflows,     keywords: 'create add trigger workflow automation', roles: ['admin', 'owner'], run: () => { navigate('/automations?tab=triggers'); openWorkflowEditor(null); } },
+    { label: 'New Sequence',    icon: Plus, color: ENTITY_COLORS.sequences,     keywords: 'create add sequence email automation', roles: ['admin', 'owner'], run: () => { navigate('/automations?tab=sequences'); openSequenceEditor(null); } },
   ], [navigate, openQuickAdd, openWorkflowEditor, openSequenceEditor]);
 
   const matchedDestinations = useMemo(() => {
-    const results = DESTINATIONS.filter(destination => includesQuery(normalizedQuery, destination.label, destination.description, destination.keywords));
+    const results = DESTINATIONS
+      .filter(destination => canUseCommand(destination, role))
+      .filter(destination => includesQuery(normalizedQuery, destination.label, destination.description, destination.keywords));
     return (normalizedQuery ? results : results.slice(0, 10));
-  }, [normalizedQuery]);
+  }, [normalizedQuery, role]);
 
   const matchedActions = useMemo(() => {
-    const results = actions.filter(action => includesQuery(normalizedQuery, action.label, action.description, action.keywords));
+    const results = actions
+      .filter(action => canUseCommand(action, role))
+      .filter(action => includesQuery(normalizedQuery, action.label, action.description, action.keywords));
     return (normalizedQuery ? results : results.slice(0, 6));
-  }, [actions, normalizedQuery]);
+  }, [actions, normalizedQuery, role]);
 
   useEffect(() => {
     if (commandPaletteOpen) {
@@ -345,7 +359,7 @@ export function CommandPalette() {
         )}
 
         {assignments.length > 0 && (
-          <Command.Group heading="Assignments" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
+          <Command.Group heading="Handoffs" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
             {assignments.slice(0, 5).map((a) => (
               <Command.Item
                 key={a.id as string}
@@ -354,7 +368,7 @@ export function CommandPalette() {
                 className={itemClass}
               >
                 <ClipboardList className={cn('w-4 h-4', ENTITY_COLORS.assignments.text)} />
-                <span className="truncate">{(a.title as string) || 'Assignment'}</span>
+                <span className="truncate">{(a.title as string) || 'Handoff'}</span>
                 {a.status && <span className="ml-auto text-xs text-muted-foreground">{a.status as string}</span>}
               </Command.Item>
             ))}
@@ -362,17 +376,20 @@ export function CommandPalette() {
         )}
 
         {contextEntries.length > 0 && (
-          <Command.Group heading="Memory" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
+          <Command.Group heading="Signals & Memory" className="text-xs text-muted-foreground px-2 py-1.5 font-display">
             {contextEntries.slice(0, 5).map((entry) => (
               <Command.Item
                 key={entry.id as string}
                 value={`${entry.title ?? ''} ${entry.body ?? ''} ${entry.context_type ?? ''} ${entry.subject_type ?? ''}`}
-                onSelect={() => runAction(() => navigate('/context'))}
+                onSelect={() => runAction(() => navigate(entry.memory_status === 'signal' ? '/context?tab=signals' : '/context?tab=browser'))}
                 className={itemClass}
               >
                 <FileText className={cn('w-4 h-4', ENTITY_COLORS.context.text)} />
                 <span className="truncate">{((entry.title as string) || (entry.body as string) || 'Context entry').slice(0, 64)}</span>
-                {entry.context_type && <span className="ml-auto text-xs text-muted-foreground">{entry.context_type as string}</span>}
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {entry.memory_status === 'signal' ? 'Signal' : 'Memory'}
+                  {entry.context_type ? ` · ${entry.context_type as string}` : ''}
+                </span>
               </Command.Item>
             ))}
           </Command.Group>

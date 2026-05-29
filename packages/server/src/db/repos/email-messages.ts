@@ -1,0 +1,581 @@
+// Copyright 2026 CRMy Contributors
+// SPDX-License-Identifier: Apache-2.0
+
+import type { DbPool } from '../pool.js';
+import type { PaginatedResponse, UUID } from '@crmy/shared';
+
+export type EmailClassification = 'customer' | 'mixed' | 'internal' | 'automated' | 'unknown';
+export type EmailProcessingStatus = 'unprocessed' | 'processing' | 'processed' | 'needs_review' | 'skipped' | 'failed' | 'ignored';
+export type MailboxProvider = 'google' | 'microsoft' | 'webhook';
+export type MailboxConnectionStatus = 'configuration_required' | 'connected' | 'syncing' | 'error' | 'disconnected';
+
+export interface MailboxConnection {
+  id: UUID;
+  tenant_id: UUID;
+  user_id?: UUID | null;
+  provider: MailboxProvider;
+  email_address: string;
+  display_name?: string | null;
+  status: MailboxConnectionStatus;
+  scopes: string[];
+  sync_cursor?: string | null;
+  settings: Record<string, unknown>;
+  last_sync_at?: string | null;
+  last_error?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmailMessage {
+  id: UUID;
+  tenant_id: UUID;
+  mailbox_connection_id?: UUID | null;
+  user_id?: UUID | null;
+  direction: 'inbound' | 'outbound';
+  source: string;
+  provider_message_id?: string | null;
+  message_id?: string | null;
+  thread_id?: string | null;
+  in_reply_to?: string | null;
+  references_header: string[];
+  from_email: string;
+  from_name?: string | null;
+  to_emails: string[];
+  cc_emails: string[];
+  subject: string;
+  body_text?: string | null;
+  body_html?: string | null;
+  snippet?: string | null;
+  classification: EmailClassification;
+  processing_status: EmailProcessingStatus;
+  processing_reason?: string | null;
+  contact_id?: UUID | null;
+  account_id?: UUID | null;
+  opportunity_id?: UUID | null;
+  use_case_id?: UUID | null;
+  activity_id?: UUID | null;
+  raw_context_source_id?: UUID | null;
+  email_id?: UUID | null;
+  extraction_receipt: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  received_at?: string | null;
+  sent_at?: string | null;
+  ignored_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  contact_name?: string | null;
+  account_name?: string | null;
+  opportunity_name?: string | null;
+  use_case_name?: string | null;
+}
+
+export interface EmailMessageInput {
+  mailbox_connection_id?: UUID | null;
+  user_id?: UUID | null;
+  direction: 'inbound' | 'outbound';
+  source?: string;
+  provider_message_id?: string | null;
+  message_id?: string | null;
+  thread_id?: string | null;
+  in_reply_to?: string | null;
+  references_header?: string[];
+  from_email: string;
+  from_name?: string | null;
+  to_emails?: string[];
+  cc_emails?: string[];
+  subject?: string;
+  body_text?: string | null;
+  body_html?: string | null;
+  snippet?: string | null;
+  classification?: EmailClassification;
+  processing_status?: EmailProcessingStatus;
+  processing_reason?: string | null;
+  contact_id?: UUID | null;
+  account_id?: UUID | null;
+  opportunity_id?: UUID | null;
+  use_case_id?: UUID | null;
+  activity_id?: UUID | null;
+  raw_context_source_id?: UUID | null;
+  email_id?: UUID | null;
+  extraction_receipt?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  received_at?: string | null;
+  sent_at?: string | null;
+}
+
+export interface EmailMessageFilters {
+  q?: string;
+  direction?: 'inbound' | 'outbound';
+  classification?: EmailClassification;
+  classifications?: EmailClassification[];
+  processing_status?: EmailProcessingStatus;
+  processing_statuses?: EmailProcessingStatus[];
+  contact_id?: UUID;
+  account_id?: UUID;
+  opportunity_id?: UUID;
+  use_case_id?: UUID;
+  owner_ids?: UUID[];
+  include_internal?: boolean;
+  limit: number;
+  cursor?: string;
+}
+
+function normalizeDomain(domain: string): string {
+  return domain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+}
+
+function rowToMessage(row: Record<string, unknown>): EmailMessage {
+  return row as unknown as EmailMessage;
+}
+
+export async function listMailboxConnections(
+  db: DbPool,
+  tenantId: UUID,
+  userId?: UUID | null,
+): Promise<MailboxConnection[]> {
+  const params: unknown[] = [tenantId];
+  const conditions = ['tenant_id = $1'];
+  if (userId) {
+    params.push(userId);
+    conditions.push(`(user_id = $${params.length} OR user_id IS NULL)`);
+  }
+  const result = await db.query(
+    `SELECT * FROM mailbox_connections
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY created_at DESC`,
+    params,
+  );
+  return result.rows as MailboxConnection[];
+}
+
+export async function createPlaceholderConnection(
+  db: DbPool,
+  tenantId: UUID,
+  data: {
+    user_id?: UUID | null;
+    provider: MailboxProvider;
+    email_address: string;
+    display_name?: string | null;
+    status?: MailboxConnectionStatus;
+    last_error?: string | null;
+    settings?: Record<string, unknown>;
+  },
+): Promise<MailboxConnection> {
+  const result = await db.query(
+    `INSERT INTO mailbox_connections (
+       tenant_id, user_id, provider, email_address, display_name, status, last_error, settings
+     )
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+     ON CONFLICT (tenant_id, user_id, provider, email_address)
+     DO UPDATE SET
+       display_name = COALESCE(EXCLUDED.display_name, mailbox_connections.display_name),
+       status = EXCLUDED.status,
+       last_error = EXCLUDED.last_error,
+       settings = mailbox_connections.settings || EXCLUDED.settings,
+       updated_at = now()
+     RETURNING *`,
+    [
+      tenantId,
+      data.user_id ?? null,
+      data.provider,
+      data.email_address,
+      data.display_name ?? null,
+      data.status ?? 'configuration_required',
+      data.last_error ?? null,
+      JSON.stringify(data.settings ?? {}),
+    ],
+  );
+  return result.rows[0] as MailboxConnection;
+}
+
+export async function deleteMailboxConnection(db: DbPool, tenantId: UUID, id: UUID): Promise<boolean> {
+  const result = await db.query(
+    'DELETE FROM mailbox_connections WHERE tenant_id = $1 AND id = $2',
+    [tenantId, id],
+  );
+  return (result.rowCount ?? 0) > 0;
+}
+
+export async function enqueueMailboxSyncJob(
+  db: DbPool,
+  tenantId: UUID,
+  connectionId: UUID,
+  metadata: Record<string, unknown> = {},
+): Promise<{ id: UUID; status: string }> {
+  const result = await db.query(
+    `INSERT INTO mailbox_sync_jobs (tenant_id, connection_id, metadata)
+     VALUES ($1,$2,$3::jsonb)
+     RETURNING id, status`,
+    [tenantId, connectionId, JSON.stringify(metadata)],
+  );
+  return result.rows[0] as { id: UUID; status: string };
+}
+
+export async function claimMailboxSyncJobs(db: DbPool, limit = 10): Promise<Array<{ id: UUID; tenant_id: UUID; connection_id: UUID }>> {
+  const result = await db.query(
+    `WITH ready AS (
+       SELECT id
+       FROM mailbox_sync_jobs
+       WHERE status IN ('pending', 'failed') AND run_after <= now()
+       ORDER BY created_at ASC
+       LIMIT $1
+       FOR UPDATE SKIP LOCKED
+     )
+     UPDATE mailbox_sync_jobs j
+     SET status = 'processing', locked_at = now(), attempts = attempts + 1, updated_at = now()
+     FROM ready
+     WHERE j.id = ready.id
+     RETURNING j.id, j.tenant_id, j.connection_id`,
+    [limit],
+  );
+  return result.rows as Array<{ id: UUID; tenant_id: UUID; connection_id: UUID }>;
+}
+
+export async function completeMailboxSyncJob(db: DbPool, id: UUID): Promise<void> {
+  await db.query(
+    `UPDATE mailbox_sync_jobs
+     SET status = 'complete', locked_at = NULL, last_error = NULL, updated_at = now()
+     WHERE id = $1`,
+    [id],
+  );
+}
+
+export async function failMailboxSyncJob(db: DbPool, id: UUID, error: string): Promise<void> {
+  await db.query(
+    `UPDATE mailbox_sync_jobs
+     SET status = 'failed',
+         locked_at = NULL,
+         last_error = $2,
+         run_after = now() + make_interval(mins => LEAST(60, GREATEST(1, attempts * 5))),
+         updated_at = now()
+     WHERE id = $1`,
+    [id, error.slice(0, 500)],
+  );
+}
+
+export async function upsertEmailMessage(
+  db: DbPool,
+  tenantId: UUID,
+  input: EmailMessageInput,
+): Promise<EmailMessage> {
+  const result = await db.query(
+    `INSERT INTO email_messages (
+       tenant_id, mailbox_connection_id, user_id, direction, source,
+       provider_message_id, message_id, thread_id, in_reply_to, references_header,
+       from_email, from_name, to_emails, cc_emails, subject, body_text, body_html,
+       snippet, classification, processing_status, processing_reason, contact_id,
+       account_id, opportunity_id, use_case_id, activity_id, raw_context_source_id,
+       email_id, extraction_receipt, metadata, received_at, sent_at
+     )
+     VALUES (
+       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+       $21,$22,$23,$24,$25,$26,$27,$28,$29::jsonb,$30::jsonb,$31,$32
+     )
+     ON CONFLICT (tenant_id, mailbox_connection_id, provider_message_id)
+       WHERE provider_message_id IS NOT NULL
+     DO UPDATE SET
+       thread_id = COALESCE(EXCLUDED.thread_id, email_messages.thread_id),
+       in_reply_to = COALESCE(EXCLUDED.in_reply_to, email_messages.in_reply_to),
+       references_header = CASE WHEN cardinality(EXCLUDED.references_header) > 0 THEN EXCLUDED.references_header ELSE email_messages.references_header END,
+       from_email = EXCLUDED.from_email,
+       from_name = COALESCE(EXCLUDED.from_name, email_messages.from_name),
+       to_emails = EXCLUDED.to_emails,
+       cc_emails = EXCLUDED.cc_emails,
+       subject = EXCLUDED.subject,
+       body_text = COALESCE(EXCLUDED.body_text, email_messages.body_text),
+       body_html = COALESCE(EXCLUDED.body_html, email_messages.body_html),
+       snippet = COALESCE(EXCLUDED.snippet, email_messages.snippet),
+       classification = EXCLUDED.classification,
+       processing_status = EXCLUDED.processing_status,
+       processing_reason = EXCLUDED.processing_reason,
+       contact_id = COALESCE(EXCLUDED.contact_id, email_messages.contact_id),
+       account_id = COALESCE(EXCLUDED.account_id, email_messages.account_id),
+       opportunity_id = COALESCE(EXCLUDED.opportunity_id, email_messages.opportunity_id),
+       use_case_id = COALESCE(EXCLUDED.use_case_id, email_messages.use_case_id),
+       activity_id = COALESCE(EXCLUDED.activity_id, email_messages.activity_id),
+       raw_context_source_id = COALESCE(EXCLUDED.raw_context_source_id, email_messages.raw_context_source_id),
+       email_id = COALESCE(EXCLUDED.email_id, email_messages.email_id),
+       extraction_receipt = email_messages.extraction_receipt || EXCLUDED.extraction_receipt,
+       metadata = email_messages.metadata || EXCLUDED.metadata,
+       received_at = COALESCE(EXCLUDED.received_at, email_messages.received_at),
+       sent_at = COALESCE(EXCLUDED.sent_at, email_messages.sent_at),
+       updated_at = now()
+     RETURNING *`,
+    [
+      tenantId,
+      input.mailbox_connection_id ?? null,
+      input.user_id ?? null,
+      input.direction,
+      input.source ?? 'manual',
+      input.provider_message_id ?? null,
+      input.message_id ?? null,
+      input.thread_id ?? null,
+      input.in_reply_to ?? null,
+      input.references_header ?? [],
+      input.from_email.toLowerCase(),
+      input.from_name ?? null,
+      input.to_emails ?? [],
+      input.cc_emails ?? [],
+      input.subject ?? '(no subject)',
+      input.body_text ?? null,
+      input.body_html ?? null,
+      input.snippet ?? input.body_text?.slice(0, 240) ?? null,
+      input.classification ?? 'unknown',
+      input.processing_status ?? 'unprocessed',
+      input.processing_reason ?? null,
+      input.contact_id ?? null,
+      input.account_id ?? null,
+      input.opportunity_id ?? null,
+      input.use_case_id ?? null,
+      input.activity_id ?? null,
+      input.raw_context_source_id ?? null,
+      input.email_id ?? null,
+      JSON.stringify(input.extraction_receipt ?? {}),
+      JSON.stringify(input.metadata ?? {}),
+      input.received_at ?? null,
+      input.sent_at ?? null,
+    ],
+  );
+  return result.rows[0] as EmailMessage;
+}
+
+export async function getEmailMessage(db: DbPool, tenantId: UUID, id: UUID): Promise<EmailMessage | null> {
+  const result = await db.query(
+    `SELECT em.*,
+       NULLIF(trim(concat_ws(' ', c.first_name, c.last_name)), '') AS contact_name,
+       a.name AS account_name,
+       o.name AS opportunity_name,
+       u.name AS use_case_name
+     FROM email_messages em
+     LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
+     LEFT JOIN accounts a ON a.id = em.account_id AND a.tenant_id = em.tenant_id
+     LEFT JOIN opportunities o ON o.id = em.opportunity_id AND o.tenant_id = em.tenant_id
+     LEFT JOIN use_cases u ON u.id = em.use_case_id AND u.tenant_id = em.tenant_id
+     WHERE em.tenant_id = $1 AND em.id = $2`,
+    [tenantId, id],
+  );
+  return result.rows[0] ? rowToMessage(result.rows[0]) : null;
+}
+
+export async function listEmailMessages(
+  db: DbPool,
+  tenantId: UUID,
+  filters: EmailMessageFilters,
+): Promise<PaginatedResponse<EmailMessage>> {
+  const conditions = ['em.tenant_id = $1'];
+  const params: unknown[] = [tenantId];
+  let idx = 2;
+
+  if (filters.direction) {
+    conditions.push(`em.direction = $${idx++}`);
+    params.push(filters.direction);
+  }
+  if (filters.classification) {
+    conditions.push(`em.classification = $${idx++}`);
+    params.push(filters.classification);
+  } else if (filters.classifications?.length) {
+    conditions.push(`em.classification = ANY($${idx++}::text[])`);
+    params.push(filters.classifications);
+  } else if (!filters.include_internal) {
+    conditions.push(`em.classification NOT IN ('internal','automated')`);
+  }
+  if (filters.processing_status) {
+    conditions.push(`em.processing_status = $${idx++}`);
+    params.push(filters.processing_status);
+  } else if (filters.processing_statuses?.length) {
+    conditions.push(`em.processing_status = ANY($${idx++}::text[])`);
+    params.push(filters.processing_statuses);
+  }
+  if (filters.contact_id) {
+    conditions.push(`em.contact_id = $${idx++}`);
+    params.push(filters.contact_id);
+  }
+  if (filters.account_id) {
+    conditions.push(`em.account_id = $${idx++}`);
+    params.push(filters.account_id);
+  }
+  if (filters.opportunity_id) {
+    conditions.push(`em.opportunity_id = $${idx++}`);
+    params.push(filters.opportunity_id);
+  }
+  if (filters.use_case_id) {
+    conditions.push(`em.use_case_id = $${idx++}`);
+    params.push(filters.use_case_id);
+  }
+  if (filters.q) {
+    conditions.push(`(
+      em.subject ILIKE $${idx}
+      OR em.body_text ILIKE $${idx}
+      OR em.from_email ILIKE $${idx}
+      OR EXISTS (SELECT 1 FROM unnest(em.to_emails) e WHERE e ILIKE $${idx})
+      OR a.name ILIKE $${idx}
+      OR o.name ILIKE $${idx}
+      OR u.name ILIKE $${idx}
+      OR c.email ILIKE $${idx}
+    )`);
+    params.push(`%${filters.q}%`);
+    idx++;
+  }
+  if (filters.owner_ids) {
+    if (filters.owner_ids.length === 0) {
+      conditions.push('FALSE');
+    } else {
+      conditions.push(`(
+        c.owner_id = ANY($${idx}::uuid[])
+        OR a.owner_id = ANY($${idx}::uuid[])
+        OR o.owner_id = ANY($${idx}::uuid[])
+        OR u.owner_id = ANY($${idx}::uuid[])
+        OR em.user_id = ANY($${idx}::uuid[])
+      )`);
+      params.push(filters.owner_ids);
+      idx++;
+    }
+  }
+  if (filters.cursor) {
+    conditions.push(`COALESCE(em.received_at, em.sent_at, em.created_at) < $${idx++}`);
+    params.push(filters.cursor);
+  }
+
+  const from = `FROM email_messages em
+    LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
+    LEFT JOIN accounts a ON a.id = em.account_id AND a.tenant_id = em.tenant_id
+    LEFT JOIN opportunities o ON o.id = em.opportunity_id AND o.tenant_id = em.tenant_id
+    LEFT JOIN use_cases u ON u.id = em.use_case_id AND u.tenant_id = em.tenant_id`;
+  const where = conditions.join(' AND ');
+  const countResult = await db.query(`SELECT count(*)::int AS total ${from} WHERE ${where}`, params);
+
+  params.push(filters.limit + 1);
+  const result = await db.query(
+    `SELECT em.*,
+       NULLIF(trim(concat_ws(' ', c.first_name, c.last_name)), '') AS contact_name,
+       a.name AS account_name,
+       o.name AS opportunity_name,
+       u.name AS use_case_name
+     ${from}
+     WHERE ${where}
+     ORDER BY COALESCE(em.received_at, em.sent_at, em.created_at) DESC
+     LIMIT $${idx}`,
+    params,
+  );
+  const rows = result.rows.map(rowToMessage);
+  const hasMore = rows.length > filters.limit;
+  const data = hasMore ? rows.slice(0, filters.limit) : rows;
+  return {
+    data,
+    total: Number(countResult.rows[0]?.total ?? 0),
+    next_cursor: hasMore ? (data[data.length - 1].received_at ?? data[data.length - 1].sent_at ?? data[data.length - 1].created_at) : undefined,
+  };
+}
+
+export async function updateEmailMessage(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  patch: {
+    classification?: EmailClassification;
+    processing_status?: EmailProcessingStatus;
+    processing_reason?: string | null;
+    contact_id?: UUID | null;
+    account_id?: UUID | null;
+    opportunity_id?: UUID | null;
+    use_case_id?: UUID | null;
+    activity_id?: UUID | null;
+    raw_context_source_id?: UUID | null;
+    extraction_receipt?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+    ignored_at?: string | null;
+  },
+): Promise<EmailMessage | null> {
+  const sets = ['updated_at = now()'];
+  const params: unknown[] = [tenantId, id];
+  let idx = 3;
+  const scalarFields = [
+    'classification',
+    'processing_status',
+    'processing_reason',
+    'contact_id',
+    'account_id',
+    'opportunity_id',
+    'use_case_id',
+    'activity_id',
+    'raw_context_source_id',
+    'ignored_at',
+  ] as const;
+  for (const field of scalarFields) {
+    if (field in patch) {
+      sets.push(`${field} = $${idx++}`);
+      params.push(patch[field] ?? null);
+    }
+  }
+  if (patch.extraction_receipt !== undefined) {
+    sets.push(`extraction_receipt = extraction_receipt || $${idx++}::jsonb`);
+    params.push(JSON.stringify(patch.extraction_receipt));
+  }
+  if (patch.metadata !== undefined) {
+    sets.push(`metadata = metadata || $${idx++}::jsonb`);
+    params.push(JSON.stringify(patch.metadata));
+  }
+  const result = await db.query(
+    `UPDATE email_messages SET ${sets.join(', ')}
+     WHERE tenant_id = $1 AND id = $2
+     RETURNING *`,
+    params,
+  );
+  return result.rows[0] ? getEmailMessage(db, tenantId, id) : null;
+}
+
+export async function summarizeEmailMessages(
+  db: DbPool,
+  tenantId: UUID,
+  ownerIds?: UUID[],
+): Promise<{
+  total: number;
+  customer: number;
+  needs_review: number;
+  processed: number;
+  internal: number;
+}> {
+  const params: unknown[] = [tenantId];
+  let ownerClause = '';
+  if (ownerIds) {
+    if (ownerIds.length === 0) {
+      ownerClause = ' AND FALSE';
+    } else {
+      params.push(ownerIds);
+      ownerClause = ` AND (
+        c.owner_id = ANY($${params.length}::uuid[])
+        OR a.owner_id = ANY($${params.length}::uuid[])
+        OR o.owner_id = ANY($${params.length}::uuid[])
+        OR u.owner_id = ANY($${params.length}::uuid[])
+        OR em.user_id = ANY($${params.length}::uuid[])
+      )`;
+    }
+  }
+  const result = await db.query(
+    `SELECT
+       count(*)::int AS total,
+       count(*) FILTER (WHERE classification IN ('customer','mixed'))::int AS customer,
+       count(*) FILTER (WHERE processing_status IN ('needs_review','failed','unprocessed') OR classification = 'unknown')::int AS needs_review,
+       count(*) FILTER (WHERE processing_status = 'processed')::int AS processed,
+       count(*) FILTER (WHERE classification IN ('internal','automated'))::int AS internal
+     FROM email_messages em
+     LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
+     LEFT JOIN accounts a ON a.id = em.account_id AND a.tenant_id = em.tenant_id
+     LEFT JOIN opportunities o ON o.id = em.opportunity_id AND o.tenant_id = em.tenant_id
+     LEFT JOIN use_cases u ON u.id = em.use_case_id AND u.tenant_id = em.tenant_id
+     WHERE em.tenant_id = $1${ownerClause}`,
+    params,
+  );
+  return {
+    total: Number(result.rows[0]?.total ?? 0),
+    customer: Number(result.rows[0]?.customer ?? 0),
+    needs_review: Number(result.rows[0]?.needs_review ?? 0),
+    processed: Number(result.rows[0]?.processed ?? 0),
+    internal: Number(result.rows[0]?.internal ?? 0),
+  };
+}
+
+export function emailDomain(email: string | undefined | null): string | null {
+  const domain = email?.split('@')[1];
+  return domain ? normalizeDomain(domain) : null;
+}

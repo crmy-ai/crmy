@@ -3,6 +3,7 @@
 
 import { Command } from 'commander';
 import { getClient } from '../client.js';
+import { resolveRecordRef } from './subject-ref.js';
 
 export function oppsCommand(): Command {
   const cmd = new Command('opps').description('Manage opportunities');
@@ -29,10 +30,11 @@ export function oppsCommand(): Command {
       await client.close();
     });
 
-  cmd.command('get <id>')
+  cmd.command('get <opportunity>')
     .description('Get opportunity details')
-    .action(async (id) => {
+    .action(async (opportunity) => {
       const client = await getClient();
+      const id = await resolveRecordRef(client, 'opportunity', opportunity);
       const result = await client.call('opportunity_get', { id });
       console.log(JSON.parse(result));
       await client.close();
@@ -69,12 +71,13 @@ export function oppsCommand(): Command {
       await client.close();
     });
 
-  cmd.command('advance <id> <stage>')
+  cmd.command('advance <opportunity> <stage>')
     .description('Advance opportunity to a new stage')
     .option('--note <note>', 'Optional note')
     .option('--lost-reason <reason>', 'Required when stage is closed_lost')
-    .action(async (id, stage, opts) => {
+    .action(async (opportunity, stage, opts) => {
       const client = await getClient();
+      const id = await resolveRecordRef(client, 'opportunity', opportunity);
       const result = await client.call('opportunity_advance_stage', {
         id,
         stage,
@@ -86,16 +89,17 @@ export function oppsCommand(): Command {
       await client.close();
     });
 
-  cmd.command('delete <id>')
+  cmd.command('delete <opportunity>')
     .description('Permanently delete an opportunity (admin/owner only)')
-    .action(async (id) => {
+    .action(async (opportunity) => {
       const { default: inquirer } = await import('inquirer');
-      const { confirm } = await inquirer.prompt([
-        { type: 'confirm', name: 'confirm', message: `Delete opportunity ${id}? This cannot be undone.`, default: false },
-      ]);
-      if (!confirm) { console.log('  Cancelled.'); return; }
-
       const client = await getClient();
+      const id = await resolveRecordRef(client, 'opportunity', opportunity);
+      const { confirm } = await inquirer.prompt([
+        { type: 'confirm', name: 'confirm', message: `Delete opportunity ${opportunity}? This cannot be undone.`, default: false },
+      ]);
+      if (!confirm) { console.log('  Cancelled.'); await client.close(); return; }
+
       const result = await client.call('opportunity_delete', { id });
       const data = JSON.parse(result);
       if (data.deleted) console.log(`  Deleted.`);

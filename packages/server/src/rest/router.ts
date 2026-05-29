@@ -14,6 +14,8 @@ import * as accountRepo from '../db/repos/accounts.js';
 import * as oppRepo from '../db/repos/opportunities.js';
 import * as activityRepo from '../db/repos/activities.js';
 import * as rawContextRepo from '../db/repos/raw-context-sources.js';
+import * as emailMessageRepo from '../db/repos/email-messages.js';
+import * as calendarRepo from '../db/repos/calendar.js';
 import * as hitlRepo from '../db/repos/hitl.js';
 import * as eventRepo from '../db/repos/events.js';
 import * as searchRepo from '../db/repos/search.js';
@@ -31,14 +33,23 @@ import { resumeEnrollmentAfterHITL } from '../services/sequence-executor.js';
 import { getSampleDataStatus, seedSampleData } from '../services/sample-data.js';
 import { hashPassword } from '../auth/password.js';
 import { buildSetupUrl, createUserAuthToken, sendAuthLifecycleEmail } from '../services/auth-lifecycle.js';
+import { loadEmbeddingConfig } from '../agent/providers/embeddings.js';
 import {
   assertActivityAccess,
   assertHITLAccess,
   assertHITLPayloadAccess,
   assertSubjectAccess,
   filterVisibleHITLRequests,
+  getActorUserId,
+  isGlobalActor,
   resolveOwnerFilter,
 } from '../services/access-control.js';
+import { ingestEmailMessage, processEmailMessage } from '../services/customer-email.js';
+import {
+  processCalendarEvent,
+  processMeetingArtifact,
+  validateMeetingEvent,
+} from '../services/customer-activity.js';
 import { z } from 'zod';
 
 function getActor(req: Request): ActorContext {
@@ -54,6 +65,12 @@ function qs(val: unknown): string | undefined {
 function qn(val: unknown, def: number): number {
   const s = qs(val);
   return s ? parseInt(s, 10) || def : def;
+}
+
+function qcsv(val: unknown): string[] | undefined {
+  const s = qs(val);
+  if (!s) return undefined;
+  return s.split(',').map(part => part.trim()).filter(Boolean);
 }
 
 function p(req: Request, name: string): string {
@@ -801,12 +818,476 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.post('/emails/draft-preview', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const { emailDraftPreviewSchema, previewEmailDraft } = await import('../services/email-drafts.js');
+      const parsed = emailDraftPreviewSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Invalid email draft preview request',
+          details: parsed.error.flatten().fieldErrors,
+        });
+        return;
+      }
+      res.json(await previewEmailDraft(db, actor, parsed.data));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/emails/drafts', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const { emailDraftSaveSchema, saveEmailDraft } = await import('../services/email-drafts.js');
+      const parsed = emailDraftSaveSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Invalid email draft',
+          details: parsed.error.flatten().fieldErrors,
+        });
+        return;
+      }
+      const result = await saveEmailDraft(db, actor, parsed.data);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Calendar meetings and customer activity capture ---
+  async function assertCalendarEventAccess(actor: ActorContext, event: calendarRepo.CalendarEvent): Promise<void> {
+    if (isGlobalActor(actor)) return;
+    const actorUserId = await getActorUserId(db, actor);
+    if (actorUserId && event.user_id === actorUserId) return;
+    const linked = [
+      ['opportunity', event.opportunity_id],
+      ['use_case', event.use_case_id],
+      ['contact', event.contact_id],
+      ['account', event.account_id],
+    ] as const;
+    for (const [type, id] of linked) {
+      if (!id) continue;
+      await assertSubjectAccess(db, actor, type, id);
+      return;
+    }
+    throw new CrmyError('NOT_FOUND', 'Calendar event not found', 404);
+  }
+
+  router.get('/calendar/connections', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const userId = isGlobalActor(actor) ? undefined : await getActorUserId(db, actor);
+      const data = await calendarRepo.listCalendarConnections(db, actor.tenant_id, userId);
+      const ownerFilter = await resolveOwnerFilter(db, actor);
+      const summary = await calendarRepo.summarizeCalendarEvents(db, actor.tenant_id, ownerFilter.owner_ids);
+      res.json({ data, total: data.length, summary });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/calendar/connections/:provider/start', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const provider = p(req, 'provider');
+      if (!['google', 'microsoft'].includes(provider)) {
+        res.status(400).json({ error: 'Provider must be google or microsoft' });
+        return;
+      }
+      const userId = await getActorUserId(db, actor);
+      if (!userId) {
+        res.status(403).json({ error: 'A human user is required to connect a calendar' });
+        return;
+      }
+      const user = await db.query('SELECT email, name FROM users WHERE tenant_id = $1 AND id = $2 LIMIT 1', [actor.tenant_id, userId]);
+      const email = String(req.body?.email_address ?? user.rows[0]?.email ?? '').trim().toLowerCase();
+      if (!email || !email.includes('@')) {
+        res.status(400).json({ error: 'A valid calendar email address is required' });
+        return;
+      }
+      const connection = await calendarRepo.createPlaceholderCalendarConnection(db, actor.tenant_id, {
+        user_id: userId,
+        provider: provider as calendarRepo.CalendarProvider,
+        email_address: email,
+        display_name: String(req.body?.display_name ?? user.rows[0]?.name ?? ''),
+        status: 'configuration_required',
+        last_error: `${provider === 'google' ? 'Google Calendar' : 'Microsoft 365 Calendar'} OAuth app credentials are not configured yet.`,
+        settings: {
+          setup_required: true,
+          next_step: 'Configure calendar OAuth credentials for this provider, then reconnect this calendar.',
+        },
+      });
+      res.status(202).json({
+        connection,
+        auth_url: null,
+        status: 'configuration_required',
+        message: 'Calendar connection saved as pending. Configure OAuth credentials to enable live sync.',
+      });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/calendar/oauth/:provider/callback', async (_req: Request, res: Response) => {
+    res.status(501).json({
+      error: 'Calendar OAuth callback is not configured yet. Add provider OAuth credentials before enabling live calendar sync.',
+    });
+  });
+
+  router.delete('/calendar/connections/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id');
+      if (!isGlobalActor(actor)) {
+        const userId = await getActorUserId(db, actor);
+        const check = await db.query(
+          'SELECT id FROM calendar_connections WHERE tenant_id = $1 AND id = $2 AND user_id = $3',
+          [actor.tenant_id, id, userId],
+        );
+        if (check.rowCount === 0) throw new CrmyError('NOT_FOUND', 'Calendar connection not found', 404);
+      }
+      const deleted = await calendarRepo.deleteCalendarConnection(db, actor.tenant_id, id);
+      if (!deleted) throw new CrmyError('NOT_FOUND', 'Calendar connection not found', 404);
+      res.status(204).end();
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/calendar/connections/:id/sync', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id');
+      if (!isGlobalActor(actor)) {
+        const userId = await getActorUserId(db, actor);
+        const check = await db.query(
+          'SELECT id FROM calendar_connections WHERE tenant_id = $1 AND id = $2 AND user_id = $3',
+          [actor.tenant_id, id, userId],
+        );
+        if (check.rowCount === 0) throw new CrmyError('NOT_FOUND', 'Calendar connection not found', 404);
+      }
+      const job = await calendarRepo.enqueueCalendarSyncJob(db, actor.tenant_id, id, { requested_by: actor.actor_id });
+      res.status(202).json({
+        job,
+        message: 'Calendar sync queued. Live sync requires configured Google Calendar or Microsoft 365 OAuth credentials.',
+      });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/calendar-events', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const ownerFilter = await resolveOwnerFilter(db, actor);
+      const result = await calendarRepo.listCalendarEvents(db, actor.tenant_id, {
+        q: qs(req.query.q),
+        tab: qs(req.query.tab) as calendarRepo.CalendarEventFilters['tab'],
+        classification: qs(req.query.classification),
+        validation_status: qs(req.query.validation_status) as calendarRepo.MeetingValidationStatus | undefined,
+        processing_status: qs(req.query.processing_status) as calendarRepo.MeetingProcessingStatus | undefined,
+        contact_id: qs(req.query.contact_id),
+        account_id: qs(req.query.account_id),
+        opportunity_id: qs(req.query.opportunity_id),
+        use_case_id: qs(req.query.use_case_id),
+        owner_ids: ownerFilter.owner_ids,
+        include_internal: req.query.include_internal === 'true',
+        limit: Math.min(qn(req.query.limit, 50), 100),
+        cursor: qs(req.query.cursor),
+      });
+      const summary = await calendarRepo.summarizeCalendarEvents(db, actor.tenant_id, ownerFilter.owner_ids);
+      res.json({ ...result, summary });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/calendar-events/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const event = await calendarRepo.getCalendarEvent(db, actor.tenant_id, p(req, 'id'));
+      if (!event) throw new CrmyError('NOT_FOUND', 'Calendar event not found', 404);
+      await assertCalendarEventAccess(actor, event);
+      const artifacts = await calendarRepo.listMeetingArtifacts(db, actor.tenant_id, event.id);
+      res.json({ calendar_event: event, artifacts });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/calendar-events/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const event = await calendarRepo.getCalendarEvent(db, actor.tenant_id, p(req, 'id'));
+      if (!event) throw new CrmyError('NOT_FOUND', 'Calendar event not found', 404);
+      await assertCalendarEventAccess(actor, event);
+      const updated = await calendarRepo.updateCalendarEvent(db, actor.tenant_id, event.id, {
+        classification: typeof req.body?.classification === 'string' ? req.body.classification : undefined,
+        contact_id: typeof req.body?.contact_id === 'string' ? req.body.contact_id : undefined,
+        account_id: typeof req.body?.account_id === 'string' ? req.body.account_id : undefined,
+        opportunity_id: typeof req.body?.opportunity_id === 'string' ? req.body.opportunity_id : undefined,
+        use_case_id: typeof req.body?.use_case_id === 'string' ? req.body.use_case_id : undefined,
+        status: typeof req.body?.status === 'string' ? req.body.status : undefined,
+      });
+      if (!updated) throw new CrmyError('NOT_FOUND', 'Calendar event not found', 404);
+      const validation = await validateMeetingEvent(db, actor.tenant_id, updated);
+      const finalEvent = await calendarRepo.updateCalendarEvent(db, actor.tenant_id, updated.id, validation) ?? updated;
+      res.json({ calendar_event: finalEvent });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/calendar-events/:id/process', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const event = await calendarRepo.getCalendarEvent(db, actor.tenant_id, p(req, 'id'));
+      if (!event) throw new CrmyError('NOT_FOUND', 'Calendar event not found', 404);
+      await assertCalendarEventAccess(actor, event);
+      res.json(await processCalendarEvent(db, actor.tenant_id, event.id, actor));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/calendar-events/:id/artifacts', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const event = await calendarRepo.getCalendarEvent(db, actor.tenant_id, p(req, 'id'));
+      if (!event) throw new CrmyError('NOT_FOUND', 'Calendar event not found', 404);
+      await assertCalendarEventAccess(actor, event);
+      const artifactType = String(req.body?.artifact_type ?? 'notes');
+      if (!['transcript', 'notes', 'summary', 'recording', 'other'].includes(artifactType)) {
+        res.status(400).json({ error: 'Invalid artifact_type' });
+        return;
+      }
+      const text = String(req.body?.text_content ?? '').trim();
+      const artifact = await calendarRepo.createMeetingArtifact(db, actor.tenant_id, {
+        calendar_event_id: event.id,
+        artifact_type: artifactType as calendarRepo.MeetingArtifactType,
+        source: String(req.body?.source ?? 'manual'),
+        source_label: String(req.body?.source_label ?? event.title),
+        text_content: text || null,
+        created_by: actor.actor_id,
+        metadata: { added_from: 'calendar_event' },
+      });
+      const refreshed = await calendarRepo.getCalendarEvent(db, actor.tenant_id, event.id);
+      if (refreshed) {
+        const validation = await validateMeetingEvent(db, actor.tenant_id, refreshed);
+        await calendarRepo.updateCalendarEvent(db, actor.tenant_id, event.id, validation);
+      }
+      if (req.body?.process !== false && text) {
+        const processed = await processMeetingArtifact(db, actor.tenant_id, event.id, artifact, actor);
+        res.status(201).json({ artifact: processed, calendar_event: await calendarRepo.getCalendarEvent(db, actor.tenant_id, event.id) });
+        return;
+      }
+      res.status(201).json({ artifact, calendar_event: await calendarRepo.getCalendarEvent(db, actor.tenant_id, event.id) });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/calendar-events/:id/ignore', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const event = await calendarRepo.getCalendarEvent(db, actor.tenant_id, p(req, 'id'));
+      if (!event) throw new CrmyError('NOT_FOUND', 'Calendar event not found', 404);
+      await assertCalendarEventAccess(actor, event);
+      const updated = await calendarRepo.updateCalendarEvent(db, actor.tenant_id, event.id, {
+        status: 'ignored',
+        processing_status: 'ignored',
+        validation_status: 'skipped_internal',
+        validation_blockers: ['Ignored by user.'],
+        ignored_at: new Date().toISOString(),
+        processing_reason: String(req.body?.reason ?? 'Ignored by user.'),
+      });
+      res.json({ calendar_event: updated });
+    } catch (err) { handleError(res, err); }
+  });
+
   router.get('/emails/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
       const handler = toolHandler(db, 'email_get');
       const result = await handler({ id: p(req, 'id') }, actor);
       res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Customer Email messages and mailbox connections ---
+  async function assertEmailMessageAccess(actor: ActorContext, message: emailMessageRepo.EmailMessage): Promise<void> {
+    if (isGlobalActor(actor)) return;
+    const actorUserId = await getActorUserId(db, actor);
+    if (actorUserId && message.user_id === actorUserId) return;
+    const linked = [
+      ['opportunity', message.opportunity_id],
+      ['use_case', message.use_case_id],
+      ['contact', message.contact_id],
+      ['account', message.account_id],
+    ] as const;
+    for (const [type, id] of linked) {
+      if (!id) continue;
+      await assertSubjectAccess(db, actor, type, id);
+      return;
+    }
+    throw new CrmyError('NOT_FOUND', 'Email message not found', 404);
+  }
+
+  router.get('/mailbox/connections', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const userId = isGlobalActor(actor) ? undefined : await getActorUserId(db, actor);
+      const data = await emailMessageRepo.listMailboxConnections(db, actor.tenant_id, userId);
+      const ownerFilter = await resolveOwnerFilter(db, actor);
+      const summary = await emailMessageRepo.summarizeEmailMessages(db, actor.tenant_id, ownerFilter.owner_ids);
+      res.json({ data, total: data.length, summary });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/mailbox/connections/:provider/start', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const provider = p(req, 'provider');
+      if (!['google', 'microsoft'].includes(provider)) {
+        res.status(400).json({ error: 'Provider must be google or microsoft' });
+        return;
+      }
+      const userId = await getActorUserId(db, actor);
+      if (!userId) {
+        res.status(403).json({ error: 'A human user is required to connect a mailbox' });
+        return;
+      }
+      const user = await db.query('SELECT email, name FROM users WHERE tenant_id = $1 AND id = $2 LIMIT 1', [actor.tenant_id, userId]);
+      const email = String(req.body?.email_address ?? user.rows[0]?.email ?? '').trim().toLowerCase();
+      if (!email || !email.includes('@')) {
+        res.status(400).json({ error: 'A valid mailbox email address is required' });
+        return;
+      }
+      const connection = await emailMessageRepo.createPlaceholderConnection(db, actor.tenant_id, {
+        user_id: userId,
+        provider: provider as emailMessageRepo.MailboxProvider,
+        email_address: email,
+        display_name: String(req.body?.display_name ?? user.rows[0]?.name ?? ''),
+        status: 'configuration_required',
+        last_error: `${provider === 'google' ? 'Google Workspace' : 'Microsoft 365'} OAuth app credentials are not configured yet.`,
+        settings: {
+          setup_required: true,
+          next_step: 'Configure OAuth credentials for this provider, then reconnect this mailbox.',
+        },
+      });
+      res.status(202).json({
+        connection,
+        auth_url: null,
+        status: 'configuration_required',
+        message: 'Mailbox connection saved as pending. Configure OAuth credentials to enable live sync.',
+      });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/mailbox/oauth/:provider/callback', async (_req: Request, res: Response) => {
+    res.status(501).json({
+      error: 'Mailbox OAuth callback is not configured yet. Add provider OAuth credentials before enabling live mailbox sync.',
+    });
+  });
+
+  router.delete('/mailbox/connections/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id');
+      if (!isGlobalActor(actor)) {
+        const userId = await getActorUserId(db, actor);
+        const check = await db.query(
+          'SELECT id FROM mailbox_connections WHERE tenant_id = $1 AND id = $2 AND user_id = $3',
+          [actor.tenant_id, id, userId],
+        );
+        if (check.rowCount === 0) throw new CrmyError('NOT_FOUND', 'Mailbox connection not found', 404);
+      }
+      const deleted = await emailMessageRepo.deleteMailboxConnection(db, actor.tenant_id, id);
+      if (!deleted) throw new CrmyError('NOT_FOUND', 'Mailbox connection not found', 404);
+      res.status(204).end();
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/mailbox/connections/:id/sync', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id');
+      if (!isGlobalActor(actor)) {
+        const userId = await getActorUserId(db, actor);
+        const check = await db.query(
+          'SELECT id FROM mailbox_connections WHERE tenant_id = $1 AND id = $2 AND user_id = $3',
+          [actor.tenant_id, id, userId],
+        );
+        if (check.rowCount === 0) throw new CrmyError('NOT_FOUND', 'Mailbox connection not found', 404);
+      }
+      const job = await emailMessageRepo.enqueueMailboxSyncJob(db, actor.tenant_id, id, { requested_by: actor.actor_id });
+      res.status(202).json({
+        job,
+        message: 'Mailbox sync queued. Live sync requires configured Google Workspace or Microsoft 365 OAuth credentials.',
+      });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/email-messages', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const ownerFilter = await resolveOwnerFilter(db, actor);
+      const view = qs(req.query.view);
+      const classifications = qcsv(req.query.classification) as emailMessageRepo.EmailClassification[] | undefined;
+      const statuses = qcsv(req.query.processing_status) as emailMessageRepo.EmailProcessingStatus[] | undefined;
+      const result = await emailMessageRepo.listEmailMessages(db, actor.tenant_id, {
+        q: qs(req.query.q),
+        direction: qs(req.query.direction) as 'inbound' | 'outbound' | undefined,
+        classifications: view === 'customer' ? ['customer', 'mixed'] : classifications,
+        processing_statuses: view === 'review' ? ['needs_review', 'failed', 'unprocessed'] : statuses,
+        contact_id: qs(req.query.contact_id),
+        account_id: qs(req.query.account_id),
+        opportunity_id: qs(req.query.opportunity_id),
+        use_case_id: qs(req.query.use_case_id),
+        owner_ids: ownerFilter.owner_ids,
+        include_internal: req.query.include_internal === 'true' || view === 'review',
+        limit: Math.min(qn(req.query.limit, 50), 100),
+        cursor: qs(req.query.cursor),
+      });
+      const summary = await emailMessageRepo.summarizeEmailMessages(db, actor.tenant_id, ownerFilter.owner_ids);
+      res.json({ ...result, summary });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/email-messages/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, p(req, 'id'));
+      if (!message) throw new CrmyError('NOT_FOUND', 'Email message not found', 404);
+      await assertEmailMessageAccess(actor, message);
+      res.json({ email_message: message });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/email-messages/:id/classification', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, p(req, 'id'));
+      if (!message) throw new CrmyError('NOT_FOUND', 'Email message not found', 404);
+      await assertEmailMessageAccess(actor, message);
+      const classification = String(req.body?.classification ?? '');
+      if (!['customer', 'mixed', 'internal', 'automated', 'unknown'].includes(classification)) {
+        res.status(400).json({ error: 'Invalid classification' });
+        return;
+      }
+      const updated = await emailMessageRepo.updateEmailMessage(db, actor.tenant_id, message.id, {
+        classification: classification as emailMessageRepo.EmailClassification,
+        processing_status: ['internal', 'automated'].includes(classification) ? 'skipped' : message.processing_status,
+        processing_reason: ['internal', 'automated'].includes(classification)
+          ? 'Marked as non-customer email.'
+          : 'Classification updated.',
+      });
+      res.json({ email_message: updated });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/email-messages/:id/process', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, p(req, 'id'));
+      if (!message) throw new CrmyError('NOT_FOUND', 'Email message not found', 404);
+      await assertEmailMessageAccess(actor, message);
+      const result = await processEmailMessage(db, actor.tenant_id, message.id, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/email-messages/:id/ignore', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, p(req, 'id'));
+      if (!message) throw new CrmyError('NOT_FOUND', 'Email message not found', 404);
+      await assertEmailMessageAccess(actor, message);
+      const updated = await emailMessageRepo.updateEmailMessage(db, actor.tenant_id, message.id, {
+        processing_status: 'ignored',
+        processing_reason: String(req.body?.reason ?? 'Ignored by user.'),
+        ignored_at: new Date().toISOString(),
+      });
+      res.json({ email_message: updated });
     } catch (err) { handleError(res, err); }
   });
 
@@ -2292,6 +2773,75 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  // --- Meeting Classification Registry ---
+  router.get('/meeting-classifications', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const data = await calendarRepo.listMeetingClassifications(db, actor.tenant_id, req.query.include_disabled === 'true');
+      res.json({ data, total: data.length });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/meeting-classifications', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      if (actor.role !== 'admin' && actor.role !== 'owner') throw new CrmyError('PERMISSION_DENIED', 'Admin or owner access is required', 403);
+      const typeName = String(req.body?.type_name ?? '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+      const label = String(req.body?.label ?? '').trim();
+      if (!typeName || !label) {
+        res.status(400).json({ error: 'type_name and label are required' });
+        return;
+      }
+      const entry = await calendarRepo.upsertMeetingClassification(db, actor.tenant_id, {
+        type_name: typeName,
+        label,
+        description: typeof req.body?.description === 'string' ? req.body.description : undefined,
+        mapped_activity_type: typeof req.body?.mapped_activity_type === 'string' ? req.body.mapped_activity_type : undefined,
+        matching_hints: Array.isArray(req.body?.matching_hints) ? req.body.matching_hints.map(String) : undefined,
+        is_customer_facing: typeof req.body?.is_customer_facing === 'boolean' ? req.body.is_customer_facing : undefined,
+        required_record_types: Array.isArray(req.body?.required_record_types) ? req.body.required_record_types.map(String) : undefined,
+        required_artifact_types: Array.isArray(req.body?.required_artifact_types) ? req.body.required_artifact_types.map(String) as calendarRepo.MeetingArtifactType[] : undefined,
+        auto_process_raw_context: typeof req.body?.auto_process_raw_context === 'boolean' ? req.body.auto_process_raw_context : undefined,
+        is_enabled: typeof req.body?.is_enabled === 'boolean' ? req.body.is_enabled : undefined,
+        display_order: typeof req.body?.display_order === 'number' ? req.body.display_order : undefined,
+      });
+      res.status(201).json({ meeting_classification: entry });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/meeting-classifications/:type_name', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      if (actor.role !== 'admin' && actor.role !== 'owner') throw new CrmyError('PERMISSION_DENIED', 'Admin or owner access is required', 403);
+      const existing = (await calendarRepo.listMeetingClassifications(db, actor.tenant_id, true)).find(item => item.type_name === p(req, 'type_name'));
+      if (!existing) throw new CrmyError('NOT_FOUND', 'Meeting classification not found', 404);
+      const entry = await calendarRepo.upsertMeetingClassification(db, actor.tenant_id, {
+        ...existing,
+        label: typeof req.body?.label === 'string' && req.body.label.trim() ? req.body.label.trim() : existing.label,
+        description: typeof req.body?.description === 'string' ? req.body.description : existing.description,
+        mapped_activity_type: typeof req.body?.mapped_activity_type === 'string' ? req.body.mapped_activity_type : existing.mapped_activity_type,
+        matching_hints: Array.isArray(req.body?.matching_hints) ? req.body.matching_hints.map(String) : existing.matching_hints,
+        is_customer_facing: typeof req.body?.is_customer_facing === 'boolean' ? req.body.is_customer_facing : existing.is_customer_facing,
+        required_record_types: Array.isArray(req.body?.required_record_types) ? req.body.required_record_types.map(String) : existing.required_record_types,
+        required_artifact_types: Array.isArray(req.body?.required_artifact_types) ? req.body.required_artifact_types.map(String) as calendarRepo.MeetingArtifactType[] : existing.required_artifact_types,
+        auto_process_raw_context: typeof req.body?.auto_process_raw_context === 'boolean' ? req.body.auto_process_raw_context : existing.auto_process_raw_context,
+        is_enabled: typeof req.body?.is_enabled === 'boolean' ? req.body.is_enabled : existing.is_enabled,
+        display_order: typeof req.body?.display_order === 'number' ? req.body.display_order : existing.display_order,
+      });
+      res.json({ meeting_classification: entry });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/meeting-classifications/:type_name', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      if (actor.role !== 'admin' && actor.role !== 'owner') throw new CrmyError('PERMISSION_DENIED', 'Admin or owner access is required', 403);
+      const removed = await calendarRepo.deleteMeetingClassification(db, actor.tenant_id, p(req, 'type_name'));
+      if (!removed) throw new CrmyError('VALIDATION_ERROR', 'Default classifications cannot be deleted. Disable them instead.', 400);
+      res.json({ removed: true, type_name: p(req, 'type_name') });
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Context Type Registry ---
   router.get('/context-types', async (req: Request, res: Response) => {
     try {
@@ -2365,7 +2915,7 @@ export function apiRouter(db: DbPool): Router {
       lines.push(`Record type: ${subjectType} — ${recordName}`);
       if (sub.lifecycle_stage) lines.push(`Lifecycle: ${sub.lifecycle_stage}`);
       if (sub.stage) lines.push(`Stage: ${sub.stage}`);
-      if (sub.company_name) lines.push(`Company: ${sub.company_name}`);
+      if (sub.company_name) lines.push(`Account: ${sub.company_name}`);
       if (sub.amount) lines.push(`Amount: ${sub.amount}`);
       if (sub.close_date) lines.push(`Close date: ${sub.close_date}`);
       if (briefing.activities?.length) {
@@ -2470,7 +3020,28 @@ export function apiRouter(db: DbPool): Router {
       if (!requireAdmin(req, res)) return;
       const actor = getActor(req);
       const url = process.env.DATABASE_URL ?? '';
-      const pgvectorResult = await db.query("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') as enabled");
+      const pgvectorResult = await db.query(`
+        SELECT
+          EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS extension_enabled,
+          EXISTS (
+            SELECT 1
+              FROM information_schema.columns
+             WHERE table_name = 'context_entries'
+               AND column_name = 'embedding'
+          ) AS embedding_column_ready
+      `);
+      const embeddingConfig = loadEmbeddingConfig();
+      const pgvectorEnabled = Boolean(pgvectorResult.rows[0]?.extension_enabled);
+      const embeddingColumnReady = Boolean(pgvectorResult.rows[0]?.embedding_column_ready);
+      const semanticSearch = {
+        pgvector_enabled: pgvectorEnabled,
+        pgvector_column_ready: embeddingColumnReady,
+        pgvector_env_enabled: process.env.ENABLE_PGVECTOR === 'true',
+        embedding_configured: Boolean(embeddingConfig),
+        embedding_provider: embeddingConfig?.provider ?? null,
+        embedding_model: embeddingConfig?.model ?? null,
+        ready: pgvectorEnabled && embeddingColumnReady && Boolean(embeddingConfig),
+      };
       const sampleData = await getSampleDataStatus(db, actor.tenant_id);
       try {
         const parsed = new URL(url);
@@ -2480,11 +3051,11 @@ export function apiRouter(db: DbPool): Router {
           database: parsed.pathname.slice(1),
           user: parsed.username,
           ssl: parsed.searchParams.get('sslmode') || null,
-          pgvector_enabled: Boolean(pgvectorResult.rows[0]?.enabled),
+          ...semanticSearch,
           sample_data: sampleData,
         });
       } catch {
-        res.json({ host: '', port: '5432', database: '', user: '', ssl: null, pgvector_enabled: Boolean(pgvectorResult.rows[0]?.enabled), sample_data: sampleData });
+        res.json({ host: '', port: '5432', database: '', user: '', ssl: null, ...semanticSearch, sample_data: sampleData });
       }
     } catch (err) { handleError(res, err); }
   });
@@ -3041,7 +3612,8 @@ export function apiRouter(db: DbPool): Router {
         });
         return;
       }
-      const result = await searchRepo.crmSearch(db, actor.tenant_id, q, qn(req.query.limit, 10));
+      const ownerFilter = await resolveOwnerFilter(db, actor);
+      const result = await searchRepo.crmSearch(db, actor.tenant_id, q, qn(req.query.limit, 10), ownerFilter.owner_ids);
       res.json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -3056,20 +3628,26 @@ export function apiRouter(db: DbPool): Router {
 export function inboundRouter(db: DbPool): Router {
   const router = Router();
 
+  async function resolveInboundTenant(req: Request): Promise<string | null> {
+    const requested = qs(req.query.tenant_id) ?? (req.headers['x-crmy-tenant-id'] as string | undefined);
+    if (requested) {
+      const tenant = await db.query('SELECT id FROM tenants WHERE id = $1 OR slug = $1 LIMIT 1', [requested]);
+      return tenant.rows[0]?.id ?? null;
+    }
+    const tenantResult = await db.query('SELECT id FROM tenants LIMIT 1');
+    return tenantResult.rows[0]?.id ?? null;
+  }
+
   // ── Inbound email webhook (no auth — HMAC-signed by provider) ─────────────
   router.post('/email/inbound', async (req: Request, res: Response) => {
     try {
       const { parseInboundEmail } = await import('../email/inbound-parser.js');
-      const { extractContextFromActivity } = await import('../agent/extraction.js');
-      const { emitEvent: emit } = await import('../events/emitter.js');
 
-      // Determine tenant: single-tenant installs use the first tenant
-      const tenantResult = await db.query('SELECT id FROM tenants LIMIT 1');
-      if (tenantResult.rows.length === 0) {
-        res.status(503).json({ error: 'No tenant configured' });
+      const tenantId = await resolveInboundTenant(req);
+      if (!tenantId) {
+        res.status(503).json({ error: 'No matching tenant configured' });
         return;
       }
-      const tenantId: string = tenantResult.rows[0].id;
 
       // Optional HMAC verification using inbound_webhook_secret
       const providerRow = await db.query(
@@ -3097,53 +3675,34 @@ export function inboundRouter(db: DbPool): Router {
         return;
       }
 
-      // Resolve sender to a contact (best-effort)
-      let contactId: string | undefined;
-      try {
-        const resolved = await entityResolve(db, tenantId, {
-          query: parsed.from_email,
-          entity_type: 'contact',
-          context_hints: { email: parsed.from_email },
-        });
-        if (resolved.resolved) {
-          contactId = resolved.resolved.id;
-        } else if (resolved.candidates?.length) {
-          contactId = resolved.candidates[0].id;
-        }
-      } catch { /* entity resolve is best-effort */ }
-
-      const activity = await activityRepo.createActivity(db, tenantId, {
-        type: 'email',
+      const result = await ingestEmailMessage(db, tenantId, {
         direction: 'inbound',
+        source: 'webhook',
+        from_email: parsed.from_email,
+        from_name: parsed.from_name,
+        to_emails: [parsed.to_email].filter(Boolean),
         subject: parsed.subject,
-        body: parsed.text_body,
-        contact_id: contactId,
-        source_agent: 'inbound_webhook',
-        occurred_at: parsed.received_at,
-        detail: {
-          from_email: parsed.from_email,
-          from_name: parsed.from_name,
-          to_email: parsed.to_email,
-          html_body: parsed.html_body,
-          in_reply_to: parsed.in_reply_to,
-        },
+        body_text: parsed.text_body,
+        body_html: parsed.html_body,
+        received_at: parsed.received_at,
+        in_reply_to: parsed.in_reply_to,
+        provider_message_id: typeof req.body?.MessageID === 'string'
+          ? req.body.MessageID
+          : typeof req.body?.['message-id'] === 'string'
+            ? req.body['message-id']
+            : undefined,
+        metadata: { provider_payload: 'inbound_webhook' },
       });
 
-      // Trigger context extraction (async — fire and forget)
-      extractContextFromActivity(db, tenantId, activity.id).catch((err) => {
-        console.error('[inbound-email] extraction error:', err);
+      res.status(202).json({
+        accepted: true,
+        email_message_id: result.message.id,
+        activity_id: result.activity_id ?? null,
+        contact_id: result.message.contact_id ?? null,
+        account_id: result.message.account_id ?? null,
+        classification: result.classification,
+        processing_status: result.processing_status,
       });
-
-      emit(db, {
-        tenantId,
-        eventType: 'activity.created',
-        actorType: 'agent',
-        objectType: 'activity',
-        objectId: activity.id,
-        afterData: activity,
-      }).catch(() => {});
-
-      res.status(200).json({ ok: true, activity_id: activity.id });
     } catch (err) { handleError(res, err); }
   });
 

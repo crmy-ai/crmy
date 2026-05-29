@@ -383,7 +383,7 @@ export default function AgentSettings() {
               <Bot className="w-4 h-4 text-violet-500" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-foreground">Enable Local Workspace Agent</h3>
+              <h3 className="text-sm font-semibold text-foreground">Enable Workspace Agent</h3>
               <p className="text-xs text-muted-foreground">Let the app reason over local CRMy state with your chosen model</p>
             </div>
           </div>
@@ -392,7 +392,7 @@ export default function AgentSettings() {
               checked={enabled}
               onCheckedChange={handleToggleEnabled}
               disabled={!canEnable && !enabled}
-              aria-label="Enable Local Workspace Agent"
+              aria-label="Enable Workspace Agent"
             />
             {!canEnable && !enabled && (
               <p className="text-xs text-muted-foreground text-right max-w-[160px]">
@@ -403,7 +403,7 @@ export default function AgentSettings() {
         </div>
 
         <div className="px-5 py-4 text-sm text-muted-foreground leading-relaxed">
-          The Local Workspace Agent gives the web app a model-backed operator that can read typed revenue objects, assemble persistent customer context, log activities, draft handoffs, and update state through the same scoped tools your external agents use. Use a local or self-hosted model when customer context cannot leave your environment, when you want offline/dev parity, or when you need predictable cost and data residency. Provider-hosted models are also supported; either way, access stays tenant-scoped and follows the permissions below.
+          The Workspace Agent gives the web app a model-backed operator that can read typed revenue objects, assemble persistent customer context, log activities, draft handoffs, and update state through the same scoped tools your external agents use. Use a local or self-hosted model when customer context cannot leave your environment, when you want offline/dev parity, or when you need predictable cost and data residency. Provider-hosted models are also supported; either way, access stays tenant-scoped and follows the permissions below.
         </div>
       </div>
 

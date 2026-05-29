@@ -157,14 +157,14 @@ export default function Opportunities() {
         iconClassName="text-accent"
         description={headerDescription('Track deals and pipeline stages', filtered.length, 'opportunity', 'opportunities')}
       >
-        <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
+        <div className="hidden h-9 rounded-xl border border-border bg-muted p-0.5 md:inline-flex md:mr-2">
           {[
             { mode: 'kanban', icon: Columns3 },
             { mode: 'table', icon: List },
             { mode: 'forecast', icon: BarChart3 },
           ].map(({ mode, icon: Icon }) => (
             <button key={mode} onClick={() => setView(mode as ViewMode)}
-              className={`p-1.5 rounded-lg text-sm transition-all ${view === mode ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
+              className={`p-1.5 rounded-lg text-sm transition-all ${view === mode ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
               <Icon className="w-4 h-4" />
             </button>
           ))}

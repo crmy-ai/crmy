@@ -9,7 +9,32 @@ export interface AIContextEntity {
   name: string;
   detail?: string;
 }
+export interface EmailDraftContext {
+  source_email_message_id?: string;
+  subject_type?: 'account' | 'contact' | 'opportunity' | 'use_case' | 'use-case';
+  subject_id?: string;
+  contact_id?: string;
+  account_id?: string;
+  opportunity_id?: string;
+  use_case_id?: string;
+  to_address?: string;
+  to_name?: string;
+  intent?: 'reply' | 'follow_up' | 'recap_next_steps' | 'nudge_stalled_deal' | 'custom';
+}
 type QuickAddType = 'contact' | 'opportunity' | 'use-case' | 'activity' | 'account' | 'assignment' | null;
+export interface QuickAddContext {
+  parent_subject_type?: 'account' | 'contact' | 'opportunity' | 'use_case' | 'use-case';
+  parent_subject_id?: string;
+  parent_subject_name?: string;
+  defaults?: Record<string, unknown>;
+  source_route?: string;
+}
+export interface FieldProvenance {
+  source: 'user' | 'model_knowledge' | 'matched_record' | 'provider' | 'required';
+  source_label: string;
+  confidence_label?: string;
+  requires_confirmation?: boolean;
+}
 
 interface AppState {
   darkVariant: 'warm' | 'charcoal';
@@ -40,11 +65,20 @@ interface AppState {
 
   quickAddOpen: boolean;
   quickAddType: QuickAddType;
-  openQuickAdd: (type: QuickAddType) => void;
+  quickAddContext: QuickAddContext | null;
+  openQuickAdd: (type: QuickAddType, context?: QuickAddContext | null) => void;
   closeQuickAdd: () => void;
 
   aiContext: AIContextEntity | null;
   openAIWithContext: (context: AIContextEntity) => void;
+
+  recordFieldProvenance: Record<string, Record<string, FieldProvenance>>;
+  setRecordFieldProvenance: (recordType: string, recordId: string, provenance: Record<string, FieldProvenance>) => void;
+
+  emailDraftOpen: boolean;
+  emailDraftContext: EmailDraftContext | null;
+  openEmailDraft: (context?: EmailDraftContext | null) => void;
+  closeEmailDraft: () => void;
 
   workflowEditorId: string | null;   // null = create mode, string = edit mode
   workflowEditorDraft: Record<string, unknown> | null;
@@ -98,11 +132,25 @@ export const useAppStore = create<AppState>()(
 
       quickAddOpen: false,
       quickAddType: null,
-      openQuickAdd: (type) => set({ quickAddOpen: true, quickAddType: type }),
-      closeQuickAdd: () => set({ quickAddOpen: false, quickAddType: null }),
+      quickAddContext: null,
+      openQuickAdd: (type, context = null) => set({ quickAddOpen: true, quickAddType: type, quickAddContext: context }),
+      closeQuickAdd: () => set({ quickAddOpen: false, quickAddType: null, quickAddContext: null }),
 
       aiContext: null,
       openAIWithContext: (context) => set({ aiContext: context }),
+
+      recordFieldProvenance: {},
+      setRecordFieldProvenance: (recordType, recordId, provenance) => set((state) => ({
+        recordFieldProvenance: {
+          ...state.recordFieldProvenance,
+          [`${recordType}:${recordId}`]: provenance,
+        },
+      })),
+
+      emailDraftOpen: false,
+      emailDraftContext: null,
+      openEmailDraft: (context = null) => set({ emailDraftOpen: true, emailDraftContext: context }),
+      closeEmailDraft: () => set({ emailDraftOpen: false, emailDraftContext: null }),
 
       workflowEditorId: null,
       workflowEditorDraft: null,

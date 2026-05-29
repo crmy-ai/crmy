@@ -24,6 +24,7 @@ import { WorkflowDrawer } from '@/components/crm/WorkflowDrawer';
 import { WorkflowEditor } from '@/components/crm/WorkflowEditor';
 import { SequenceEditor } from '@/components/crm/SequenceEditor';
 import { EmailDrawer } from '@/components/crm/EmailDrawer';
+import { EmailDraftDrawer } from '@/components/crm/EmailDraftDrawer';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useAppStore } from '@/store/appStore';
 import { useTheme } from '@/hooks/useTheme';
@@ -189,6 +190,7 @@ function AppContent() {
       <CommandPalette />
       <ShortcutsOverlay />
       <QuickAddDrawer />
+      <EmailDraftDrawer />
 
     </div>
   );

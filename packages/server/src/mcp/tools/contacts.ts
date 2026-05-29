@@ -52,7 +52,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     {
       name: 'contact_create',
       tier: 'core',
-      description: 'Create a new contact record. Contact names are stored as first_name (required) and last_name (optional) separately. Before calling this tool, prefer using entity_resolve to check if the contact already exists. If a potential duplicate is detected (same email, or same name + company/account), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record instead of erroring. Pass allow_duplicates: true to skip the check entirely after confirming with the user.',
+      description: 'Create a new contact record. Contact names are stored as first_name (required) and last_name (optional) separately. Before calling this tool, prefer using entity_resolve to check if the contact already exists. If a potential duplicate is detected (same email, or same name + account), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record instead of erroring. Pass allow_duplicates: true to skip the check entirely after confirming with the user.',
       inputSchema: contactCreate,
       handler: async (input: z.infer<typeof contactCreate>, actor: ActorContext) => {
         return runContactOperation(db, actor, 'contact_create', input, async () => {
@@ -179,7 +179,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     {
       name: 'contact_search',
       tier: 'core',
-      description: 'Search contacts with flexible filters. The query parameter searches across name, email, and company fields simultaneously. Filter by lifecycle_stage to find prospects or champions, account_id to see contacts at a specific company, owner_id for contacts owned by a specific rep, and tags for custom categorization. Returns paginated results.',
+      description: 'Search contacts with flexible filters. The query parameter searches across name, email, and linked account fields simultaneously. Filter by lifecycle_stage to find prospects or champions, account_id to see contacts at a specific account, owner_id for contacts owned by a specific rep, and tags for custom categorization. Returns paginated results.',
       inputSchema: contactSearch,
       handler: async (input: z.infer<typeof contactSearch>, actor: ActorContext) => {
         const ownerFilter = await resolveOwnerFilter(db, actor, input.owner_id);
@@ -194,7 +194,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     {
       name: 'contact_update',
       tier: 'extended',
-      description: 'Update a contact record. Pass the contact UUID as id and a patch object containing only the fields to change. Contact names are stored as first_name and last_name separately — to rename a contact pass { first_name: "Thomas" } or { last_name: "Rivera" } or both. Other patchable fields: email, phone, title, company_name, account_id, lifecycle_stage, tags, custom_fields. Example: { id: "<uuid>", patch: { first_name: "Thomas", last_name: "Rivera" } }',
+      description: 'Update a contact record. Pass the contact ID and a patch object containing only the fields to change. Contact names are stored as first_name and last_name separately — to rename a contact pass { first_name: "Thomas" } or { last_name: "Rivera" } or both. Other patchable fields: email, phone, title, company_name, account_id, lifecycle_stage, tags, custom_fields. Example: { id: "<contact-id>", patch: { first_name: "Thomas", last_name: "Rivera" } }',
       inputSchema: contactUpdate,
       handler: async (input: z.infer<typeof contactUpdate>, actor: ActorContext) => {
         return runContactOperation(db, actor, 'contact_update', input, async () => {

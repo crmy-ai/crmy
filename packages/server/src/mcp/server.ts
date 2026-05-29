@@ -33,6 +33,7 @@ import { metaTools } from './tools/meta.js';
 import { useCaseTools } from './tools/use-cases.js';
 import { webhookTools } from './tools/webhooks.js';
 import { emailTools } from './tools/email.js';
+import { calendarTools } from './tools/calendar.js';
 import { customFieldTools } from './tools/custom-fields.js';
 import { workflowTools } from './tools/workflows.js';
 import { actorTools } from './tools/actors.js';
@@ -46,6 +47,7 @@ import { emailSequenceTools } from './tools/email-sequences.js';
 import { compoundTools } from './tools/compound.js';
 import { agentHandoffTools } from './tools/agent-handoff.js';
 import { systemsOfRecordTools } from './tools/systems-of-record.js';
+import { recordDraftTools } from './tools/record-drafts.js';
 
 export interface ToolDef {
   name: string;
@@ -96,6 +98,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...compoundTools(db),        // deal_advance, contact_outreach
     // 1. Briefing + context (most important agent tools)
     ...contextEntryTools(db),    // briefing_get, context_add/get/list/search/supersede, context_stale
+    ...recordDraftTools(db),     // record_draft_preview
     // 2. Actor identity
     ...actorTools(db),           // actor_whoami, actor_register, actor_expertise
     // 3. Activities
@@ -114,6 +117,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
     // 8. Remaining tools
     ...useCaseTools(db),
     ...emailTools(db),
+    ...calendarTools(db),
     ...emailSequenceTools(db),
     ...entityResolveTools(db),
     ...registryTools(db),

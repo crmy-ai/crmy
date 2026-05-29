@@ -3,6 +3,7 @@
 
 import { Command } from 'commander';
 import { getClient } from '../client.js';
+import { resolveSubjectRef } from './subject-ref.js';
 
 export function assignmentsCommand(): Command {
   const cmd = new Command('assignments').description('Manage assignments (coordination & handoffs)');
@@ -31,6 +32,7 @@ export function assignmentsCommand(): Command {
       const data = JSON.parse(result);
       if (data.assignments?.length === 0) {
         console.log('No assignments found.');
+        await client.close();
         return;
       }
       console.table(data.assignments?.map((a: Record<string, unknown>) => ({
@@ -53,21 +55,22 @@ export function assignmentsCommand(): Command {
         { type: 'input', name: 'title', message: 'Title:' },
         { type: 'input', name: 'description', message: 'Description:' },
         { type: 'list', name: 'assignment_type', message: 'Type:', choices: ['follow_up', 'review', 'approve', 'send', 'call', 'meet', 'research', 'draft', 'custom'] },
-        { type: 'input', name: 'assigned_to', message: 'Assign to (actor UUID):' },
-        { type: 'list', name: 'subject_type', message: 'Subject type:', choices: ['contact', 'account', 'opportunity', 'use_case'] },
-        { type: 'input', name: 'subject_id', message: 'Subject ID (UUID):' },
+        { type: 'input', name: 'assigned_to', message: 'Assign to actor ID (blank for you):' },
+        { type: 'input', name: 'subject_ref', message: 'Subject (type:name or type:id):', default: 'account:' },
         { type: 'list', name: 'priority', message: 'Priority:', choices: ['low', 'normal', 'high', 'urgent'], default: 'normal' },
         { type: 'input', name: 'context', message: 'Context / handoff notes:' },
       ]);
 
       const client = await getClient();
+      const assignee = answers.assigned_to || JSON.parse(await client.call('actor_whoami', {})).actor_id;
+      const subject = await resolveSubjectRef(client, answers.subject_ref);
       const result = await client.call('assignment_create', {
         title: answers.title,
         description: answers.description || undefined,
         assignment_type: answers.assignment_type,
-        assigned_to: answers.assigned_to,
-        subject_type: answers.subject_type,
-        subject_id: answers.subject_id,
+        assigned_to: assignee,
+        subject_type: subject.subject_type,
+        subject_id: subject.subject_id,
         priority: answers.priority,
         context: answers.context || undefined,
       });

@@ -3,6 +3,7 @@
 
 import { Command } from 'commander';
 import { getClient } from '../client.js';
+import { resolveRecordRef } from './subject-ref.js';
 
 export function accountsCommand(): Command {
   const cmd = new Command('accounts').description('Manage accounts');
@@ -26,10 +27,11 @@ export function accountsCommand(): Command {
       await client.close();
     });
 
-  cmd.command('get <id>')
+  cmd.command('get <account>')
     .description('Get account details including contacts and open opportunities')
-    .action(async (id) => {
+    .action(async (account) => {
       const client = await getClient();
+      const id = await resolveRecordRef(client, 'account', account);
       const result = await client.call('account_get', { id });
       console.log(JSON.parse(result));
       await client.close();
@@ -58,16 +60,17 @@ export function accountsCommand(): Command {
       await client.close();
     });
 
-  cmd.command('delete <id>')
+  cmd.command('delete <account>')
     .description('Permanently delete an account (admin/owner only)')
-    .action(async (id) => {
+    .action(async (account) => {
       const { default: inquirer } = await import('inquirer');
-      const { confirm } = await inquirer.prompt([
-        { type: 'confirm', name: 'confirm', message: `Delete account ${id}? This cannot be undone.`, default: false },
-      ]);
-      if (!confirm) { console.log('  Cancelled.'); return; }
-
       const client = await getClient();
+      const id = await resolveRecordRef(client, 'account', account);
+      const { confirm } = await inquirer.prompt([
+        { type: 'confirm', name: 'confirm', message: `Delete account ${account}? This cannot be undone.`, default: false },
+      ]);
+      if (!confirm) { console.log('  Cancelled.'); await client.close(); return; }
+
       const result = await client.call('account_delete', { id });
       const data = JSON.parse(result);
       if (data.deleted) console.log(`  Deleted.`);

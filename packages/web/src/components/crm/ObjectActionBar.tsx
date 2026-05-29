@@ -3,16 +3,9 @@
 
 import type { ElementType } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Brain, Bot, FileText, ScrollText } from 'lucide-react';
+import { Activity, Brain, Bot, FileText, MailPlus } from 'lucide-react';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { useAppStore, type AIContextEntity } from '@/store/appStore';
-
-const AUDIT_OBJECT_TYPE: Record<AIContextEntity['type'], string> = {
-  account: 'account',
-  contact: 'contact',
-  opportunity: 'opportunity',
-  'use-case': 'use_case',
-};
 
 function ActionButton({
   icon: Icon,
@@ -48,13 +41,13 @@ export function ObjectActionBar({
 }) {
   const navigate = useNavigate();
   const { enabled: agentEnabled } = useAgentSettings();
-  const { openAIWithContext, openQuickAdd, closeDrawer } = useAppStore();
+  const { openAIWithContext, openQuickAdd, openEmailDraft, closeDrawer } = useAppStore();
 
   return (
     <div className="mx-4 mt-3 rounded-2xl border border-border bg-card p-2.5">
       <div className="grid grid-cols-2 gap-2">
         {onBrief && (
-          <ActionButton icon={FileText} label="Brief" iconClassName="text-primary" onClick={onBrief} />
+          <ActionButton icon={FileText} label="Generate Brief" iconClassName="text-primary" onClick={onBrief} />
         )}
         {agentEnabled && (
           <ActionButton
@@ -68,17 +61,40 @@ export function ObjectActionBar({
             }}
           />
         )}
-        {!agentEnabled && (
-          <ActionButton
-            icon={Activity}
-            label="Log Activity"
-            iconClassName="text-warning"
-            onClick={() => {
-              closeDrawer();
-              openQuickAdd('activity');
-            }}
-          />
-        )}
+        <ActionButton
+          icon={MailPlus}
+          label="Draft follow-up"
+          iconClassName="text-blue-500"
+          onClick={() => {
+            closeDrawer();
+            openEmailDraft({
+              subject_type: context.type === 'use-case' ? 'use_case' : context.type,
+              subject_id: context.id,
+              ...(context.type === 'contact' ? { contact_id: context.id } : {}),
+              ...(context.type === 'account' ? { account_id: context.id } : {}),
+              ...(context.type === 'opportunity' ? { opportunity_id: context.id } : {}),
+              ...(context.type === 'use-case' ? { use_case_id: context.id } : {}),
+              intent: 'follow_up',
+            });
+          }}
+        />
+        <ActionButton
+          icon={Activity}
+          label="Log Activity"
+          iconClassName="text-warning"
+          onClick={() => {
+            closeDrawer();
+            openQuickAdd('activity', {
+              parent_subject_type: context.type === 'use-case' ? 'use_case' : context.type,
+              parent_subject_id: context.id,
+              parent_subject_name: context.name,
+              defaults: {
+                subject_type: context.type === 'use-case' ? 'use_case' : context.type,
+                subject_id: context.id,
+              },
+            });
+          }}
+        />
         <ActionButton
           icon={Brain}
           label="Add Context"
@@ -86,16 +102,6 @@ export function ObjectActionBar({
           onClick={() => {
             closeDrawer();
             navigate('/context?tab=observations&add=context');
-          }}
-        />
-        <ActionButton
-          icon={ScrollText}
-          label="View Audit"
-          iconClassName="text-violet-400"
-          onClick={() => {
-            closeDrawer();
-            const objectType = AUDIT_OBJECT_TYPE[context.type];
-            navigate(`/audit-log?object_type=${encodeURIComponent(objectType)}&object_id=${encodeURIComponent(context.id)}`);
           }}
         />
       </div>

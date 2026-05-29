@@ -24,6 +24,7 @@ const HELP_TEXT = `
     accounts            Manage accounts (list, get, create, update, delete)
     opps                Manage opportunities (list, get, create, update, delete)
     pipeline            View and manage the sales pipeline
+    activities          Review Customer Activity, meetings, transcripts, and notes
     context             Manage Signals and Memory attached to customer records
     custom-fields       Manage custom field definitions
     search              Search across contacts, accounts, and opportunities
@@ -33,6 +34,7 @@ const HELP_TEXT = `
     events              View the event log
     webhooks            Manage webhook subscriptions
     emails              Send and manage emails
+    sequences           Manage engagement sequences
     hitl                Human-in-the-loop approval queue
 
   Resources
@@ -50,9 +52,14 @@ const HELP_TEXT = `
     $ crmy init                     Set up a new CRMy instance
     $ crmy server                   Start the server on :3000
     $ crmy doctor                   Check setup health
-    $ crmy briefing contact:<id>    Get customer context before action
+    $ crmy briefing "contact:Maya Patel"  Get customer context before action
+    $ crmy context ingest -f call.txt --auto
     $ crmy contacts list            List all contacts
     $ crmy mcp                      Start stdio MCP for local agents
+
+  MCP is CRMy's complete agent-facing tool surface. The CLI is curated for
+  setup, demos, ingestion, activity/email review, systems, workflows, and QA.
+  OAuth connection wizards and provider setup remain UI-first admin flows.
 
   Run crmy <command> --help for detailed usage of any command.
 `;

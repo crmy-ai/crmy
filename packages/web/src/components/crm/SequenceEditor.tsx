@@ -235,7 +235,7 @@ function SettingsPanel({
           value={aiPersona}
           onChange={e => onAiPersonaChange(e.target.value)}
           rows={4}
-          placeholder="You are a sales development rep at Acme Corp. Write concise, personalized emails focused on the prospect's pain around..."
+          placeholder="You are a revenue teammate at Northstar Labs. Write concise, personalized emails focused on the customer's current priorities..."
           className={areaCls}
         />
       </div>

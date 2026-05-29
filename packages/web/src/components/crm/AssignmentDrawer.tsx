@@ -179,7 +179,7 @@ function AssignmentEditForm({
             type="text"
             value={fields.title}
             onChange={e => set('title', e.target.value)}
-            placeholder="e.g. Follow up with Acme about contract"
+            placeholder="e.g. Follow up with Northstar about security review"
             className={inputClass}
           />
         </div>

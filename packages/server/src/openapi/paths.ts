@@ -657,7 +657,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'get', path: '/context/signal-groups',
   tags: ['Context'],
-  summary: 'List Signal Groups',
+  summary: 'List grouped Signals',
   security: bearer,
   request: {
     query: z.object({
@@ -693,7 +693,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'get', path: '/context/signal-groups/{id}',
   tags: ['Context'],
-  summary: 'Get a Signal Group with evidence',
+  summary: 'Get a grouped Signal with evidence',
   security: bearer,
   request: { params: idParam },
   responses: { 200: ok(GenericObject), 404: err404 },
@@ -702,7 +702,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/context/signal-groups/{id}/promote',
   tags: ['Context'],
-  summary: 'Promote a Signal Group into Current Memory',
+  summary: 'Confirm a grouped Signal as Current Memory',
   security: bearer,
   request: { params: idParam, body: jsonBody(z.object({ idempotency_key: z.string().optional() }), false) },
   responses: { 200: ok(GenericObject), 400: err400, 404: err404 },
@@ -711,7 +711,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/context/signal-groups/{id}/reject',
   tags: ['Context'],
-  summary: 'Dismiss a Signal Group while preserving evidence',
+  summary: 'Dismiss a grouped Signal while preserving evidence',
   security: bearer,
   request: {
     params: idParam,
@@ -887,9 +887,122 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'post', path: '/emails/draft-preview',
+  tags: ['Emails'],
+  summary: 'Generate an agentic customer email draft preview from Memory, Signals, and linked customer context',
+  security: bearer,
+  request: { body: jsonBody(z.object({
+    source_email_message_id: z.string().uuid().optional(),
+    subject_type: z.enum(['account', 'contact', 'opportunity', 'use_case', 'use-case']).optional(),
+    subject_id: z.string().uuid().optional(),
+    contact_id: z.string().uuid().optional(),
+    account_id: z.string().uuid().optional(),
+    opportunity_id: z.string().uuid().optional(),
+    use_case_id: z.string().uuid().optional(),
+    to_address: z.string().email().optional(),
+    to_name: z.string().optional(),
+    intent: z.enum(['reply', 'follow_up', 'recap_next_steps', 'nudge_stalled_deal', 'custom']).optional(),
+    instruction: z.string().optional(),
+    tone: z.string().optional(),
+    target: z.enum(['crmy', 'provider_draft']).optional(),
+  })) },
+  responses: { 200: ok(GenericObject), 400: err400 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/emails/drafts',
+  tags: ['Emails'],
+  summary: 'Persist a manual or agent-generated customer email draft, request approval, or explicitly send now',
+  security: bearer,
+  request: { body: jsonBody(z.object({
+    source_email_message_id: z.string().uuid().optional(),
+    subject_type: z.enum(['account', 'contact', 'opportunity', 'use_case', 'use-case']).optional(),
+    subject_id: z.string().uuid().optional(),
+    contact_id: z.string().uuid().optional(),
+    account_id: z.string().uuid().optional(),
+    opportunity_id: z.string().uuid().optional(),
+    use_case_id: z.string().uuid().optional(),
+    to_address: z.string().email(),
+    to_name: z.string().optional(),
+    subject: z.string(),
+    body_text: z.string(),
+    body_html: z.string().optional(),
+    draft_origin: z.enum(['manual', 'agent_generated']).optional(),
+    draft_target: z.enum(['crmy', 'provider_draft']).optional(),
+    delivery_action: z.enum(['save_draft', 'request_approval', 'send_now']).optional(),
+    generation_metadata: z.record(z.unknown()).optional(),
+  })) },
+  responses: { 201: created(GenericObject), 400: err400 },
+});
+
+registry.registerPath({
   method: 'get', path: '/emails/{id}',
   tags: ['Emails'],
   summary: 'Get an email by ID',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/mailbox/connections',
+  tags: ['Emails'],
+  summary: 'List mailbox connections and customer-email processing summary',
+  security: bearer,
+  responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/mailbox/connections/{provider}/start',
+  tags: ['Emails'],
+  summary: 'Start a Gmail or Outlook mailbox connection',
+  security: bearer,
+  request: { params: z.object({ provider: z.enum(['google', 'microsoft']) }) },
+  responses: { 202: ok(GenericObject), 400: err400 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/mailbox/connections/{id}/sync',
+  tags: ['Emails'],
+  summary: 'Queue a mailbox sync job',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 202: ok(GenericObject), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/email-messages',
+  tags: ['Emails'],
+  summary: 'List customer email messages with classification and processing state',
+  security: bearer,
+  request: {
+    query: z.object({
+      view: z.enum(['customer', 'review', 'all']).optional(),
+      q: z.string().optional(),
+      direction: z.enum(['inbound', 'outbound']).optional(),
+      classification: z.string().optional(),
+      processing_status: z.string().optional(),
+      include_internal: z.boolean().optional(),
+      limit: z.number().optional(),
+      cursor: z.string().optional(),
+    }),
+  },
+  responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/email-messages/{id}',
+  tags: ['Emails'],
+  summary: 'Get a customer email message, linked records, and processing receipt',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/email-messages/{id}/process',
+  tags: ['Emails'],
+  summary: 'Process a customer email message as Raw Context',
   security: bearer,
   request: { params: idParam },
   responses: { 200: ok(GenericObject), 404: err404 },

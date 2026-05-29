@@ -6,6 +6,7 @@ import { emailCreate, emailGet, emailSearch, emailProviderSet, emailProviderGet 
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as emailRepo from '../../db/repos/emails.js';
+import * as emailMessageRepo from '../../db/repos/email-messages.js';
 import * as hitlRepo from '../../db/repos/hitl.js';
 import * as activityRepo from '../../db/repos/activities.js';
 import { emitEvent } from '../../events/emitter.js';
@@ -15,6 +16,9 @@ import { getEmailProvider, listEmailProviderTypes } from '../../email/providers/
 import { parseInboundEmail } from '../../email/inbound-parser.js';
 import { extractContextFromActivity } from '../../agent/extraction.js';
 import { entityResolve } from '../../services/entity-resolve.js';
+import { getActorUserId, isGlobalActor, resolveOwnerFilter, assertSubjectAccess } from '../../services/access-control.js';
+import { ingestEmailMessage, processEmailMessage } from '../../services/customer-email.js';
+import { emailDraftPreviewSchema, emailDraftSaveSchema, previewEmailDraft, saveEmailDraft, type EmailDraftPreviewInput, type EmailDraftSaveInput } from '../../services/email-drafts.js';
 import type { ToolDef } from '../server.js';
 import { runToolOperation } from '../tool-operation.js';
 import { mutationReceipt } from '../mutation-receipt.js';
@@ -36,6 +40,24 @@ function redactProviderConfig(provider: string, config: Record<string, unknown>)
     if (safe.api_key) safe.api_key = '***';
   }
   return safe;
+}
+
+async function assertEmailMessageAccess(db: DbPool, actor: ActorContext, message: emailMessageRepo.EmailMessage): Promise<void> {
+  if (isGlobalActor(actor)) return;
+  const actorUserId = await getActorUserId(db, actor);
+  if (actorUserId && message.user_id === actorUserId) return;
+  const linked = [
+    ['opportunity', message.opportunity_id],
+    ['use_case', message.use_case_id],
+    ['contact', message.contact_id],
+    ['account', message.account_id],
+  ] as const;
+  for (const [type, id] of linked) {
+    if (!id) continue;
+    await assertSubjectAccess(db, actor, type, id);
+    return;
+  }
+  throw notFound('EmailMessage', message.id);
 }
 
 export function emailTools(db: DbPool): ToolDef[] {
@@ -80,6 +102,29 @@ export function emailTools(db: DbPool): ToolDef[] {
           status,
           hitl_request_id: hitlRequestId,
           created_by: actor.actor_id,
+        });
+
+        const providerConfig = await emailRepo.getProvider(db, actor.tenant_id);
+        const actorUser = await db.query('SELECT email, name FROM users WHERE tenant_id = $1 AND id = $2 LIMIT 1', [actor.tenant_id, actor.actor_id]);
+        await emailMessageRepo.upsertEmailMessage(db, actor.tenant_id, {
+          direction: 'outbound',
+          source: 'outbound',
+          from_email: providerConfig?.from_email ?? actorUser.rows[0]?.email ?? 'unknown@local',
+          from_name: providerConfig?.from_name ?? actorUser.rows[0]?.name ?? undefined,
+          to_emails: [input.to_address],
+          subject: input.subject,
+          body_html: input.body_html,
+          body_text: bodyText,
+          classification: 'customer',
+          processing_status: status === 'sent' ? 'processed' : 'unprocessed',
+          processing_reason: status === 'pending_approval' ? 'Waiting for governed send approval.' : 'Outbound draft recorded.',
+          contact_id: input.contact_id,
+          account_id: input.account_id,
+          opportunity_id: input.opportunity_id,
+          use_case_id: input.use_case_id,
+          email_id: email.id,
+          user_id: actorUser.rows[0]?.email ? actor.actor_id : undefined,
+          metadata: { governed_email_status: status },
         });
 
         const event_id = await emitEvent(db, {
@@ -146,6 +191,111 @@ export function emailTools(db: DbPool): ToolDef[] {
           cursor: input.cursor,
         });
         return { emails: result.data, next_cursor: result.next_cursor, total: result.total };
+      },
+    },
+    {
+      name: 'mailbox_connection_list',
+      tier: 'extended',
+      description: 'List mailbox connections and customer-email processing summary visible to the current user. Use this to check whether Customer Email is connected and healthy.',
+      inputSchema: z.object({}),
+      handler: async (_input: {}, actor: ActorContext) => {
+        const userId = isGlobalActor(actor) ? undefined : await getActorUserId(db, actor);
+        const ownerFilter = await resolveOwnerFilter(db, actor);
+        const data = await emailMessageRepo.listMailboxConnections(db, actor.tenant_id, userId);
+        const summary = await emailMessageRepo.summarizeEmailMessages(db, actor.tenant_id, ownerFilter.owner_ids);
+        return { mailbox_connections: data, total: data.length, summary };
+      },
+    },
+    {
+      name: 'email_message_search',
+      tier: 'extended',
+      description: 'Search canonical customer email messages from mailbox sync, inbound webhooks, manual ingest, and outbound sends. Results are scoped to the current user and linked revenue records.',
+      inputSchema: z.object({
+        q: z.string().optional(),
+        view: z.enum(['customer', 'review', 'all']).optional().default('customer'),
+        direction: z.enum(['inbound', 'outbound']).optional(),
+        classification: z.enum(['customer', 'mixed', 'internal', 'automated', 'unknown']).optional(),
+        processing_status: z.enum(['unprocessed', 'processing', 'processed', 'needs_review', 'skipped', 'failed', 'ignored']).optional(),
+        include_internal: z.boolean().optional().default(false),
+        limit: z.number().int().min(1).max(100).default(20),
+        cursor: z.string().optional(),
+      }),
+      handler: async (input, actor: ActorContext) => {
+        const ownerFilter = await resolveOwnerFilter(db, actor);
+        const result = await emailMessageRepo.listEmailMessages(db, actor.tenant_id, {
+          q: input.q,
+          direction: input.direction,
+          classifications: input.view === 'customer' ? ['customer', 'mixed'] : input.classification ? [input.classification] : undefined,
+          processing_statuses: input.view === 'review' ? ['needs_review', 'failed', 'unprocessed'] : input.processing_status ? [input.processing_status] : undefined,
+          include_internal: input.include_internal || input.view === 'review',
+          owner_ids: ownerFilter.owner_ids,
+          limit: input.limit,
+          cursor: input.cursor,
+        });
+        return { email_messages: result.data, next_cursor: result.next_cursor, total: result.total };
+      },
+    },
+    {
+      name: 'email_message_get',
+      tier: 'extended',
+      description: 'Get one canonical customer email message, including linked records and processing receipt.',
+      inputSchema: z.object({ id: z.string().uuid() }),
+      handler: async (input: { id: string }, actor: ActorContext) => {
+        const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, input.id);
+        if (!message) throw notFound('EmailMessage', input.id);
+        await assertEmailMessageAccess(db, actor, message);
+        return { email_message: message };
+      },
+    },
+    {
+      name: 'email_message_process',
+      tier: 'extended',
+      description: 'Process an existing customer email message as Raw Context. Internal or automated emails are skipped unless reclassified first.',
+      inputSchema: z.object({ id: z.string().uuid() }),
+      handler: async (input: { id: string }, actor: ActorContext) => {
+        const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, input.id);
+        if (!message) throw notFound('EmailMessage', input.id);
+        await assertEmailMessageAccess(db, actor, message);
+        return processEmailMessage(db, actor.tenant_id, message.id, actor);
+      },
+    },
+    {
+      name: 'email_message_ignore',
+      tier: 'extended',
+      description: 'Ignore a customer email message so it no longer appears in review queues.',
+      inputSchema: z.object({ id: z.string().uuid(), reason: z.string().optional() }),
+      handler: async (input: { id: string; reason?: string }, actor: ActorContext) => {
+        const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, input.id);
+        if (!message) throw notFound('EmailMessage', input.id);
+        await assertEmailMessageAccess(db, actor, message);
+        const updated = await emailMessageRepo.updateEmailMessage(db, actor.tenant_id, message.id, {
+          processing_status: 'ignored',
+          processing_reason: input.reason ?? 'Ignored by user.',
+          ignored_at: new Date().toISOString(),
+        });
+        return { email_message: updated };
+      },
+    },
+    {
+      name: 'email_draft_preview',
+      tier: 'extended',
+      description: 'Generate a customer email draft preview from CRMy Memory, relevant Signals, source email context, and linked revenue records. This does not save or send email; use email_draft_save after review.',
+      inputSchema: emailDraftPreviewSchema,
+      handler: async (input: EmailDraftPreviewInput, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'email_draft_preview', input, async () => (
+          previewEmailDraft(db, actor, input)
+        ));
+      },
+    },
+    {
+      name: 'email_draft_save',
+      tier: 'extended',
+      description: 'Save a reviewed customer email draft, request approval, or explicitly send now through CRMy governed email flow. Agent-generated drafts should normally be saved or sent for approval first.',
+      inputSchema: emailDraftSaveSchema,
+      handler: async (input: EmailDraftSaveInput, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'email_draft_save', input, async () => (
+          saveEmailDraft(db, actor, input)
+        ));
       },
     },
 
@@ -231,6 +381,8 @@ export function emailTools(db: DbPool): ToolDef[] {
         let subject = input.subject;
         let body = input.body;
         let receivedAt = input.received_at ?? new Date().toISOString();
+        let htmlBody: string | undefined;
+        let inReplyTo: string | undefined;
 
         if (input.raw_payload) {
           const parsed = parseInboundEmail(input.raw_payload);
@@ -239,58 +391,55 @@ export function emailTools(db: DbPool): ToolDef[] {
           fromName = parsed.from_name;
           subject = parsed.subject;
           body = parsed.text_body;
+          htmlBody = parsed.html_body;
           receivedAt = parsed.received_at;
+          inReplyTo = parsed.in_reply_to;
         }
 
-        // Resolve contact
-        let contactId: string | undefined = input.contact_id;
-        if (!contactId) {
-          try {
-            const resolved = await entityResolve(db, actor.tenant_id, {
-              query: fromEmail,
-              entity_type: 'contact',
-              context_hints: { email: fromEmail },
-            });
-            if (resolved.resolved) contactId = resolved.resolved.id;
-            else if (resolved.candidates?.length) contactId = resolved.candidates[0].id;
-          } catch { /* best-effort */ }
-        }
-
-        const activity = await activityRepo.createActivity(db, actor.tenant_id, {
-          type: 'email',
+        const result = await ingestEmailMessage(db, actor.tenant_id, {
           direction: 'inbound',
+          source: 'manual',
+          from_email: fromEmail,
+          from_name: fromName,
+          to_emails: [],
           subject,
-          body,
-          contact_id: contactId,
-          source_agent: 'email_ingest',
-          occurred_at: receivedAt,
-          detail: { from_email: fromEmail, from_name: fromName },
-          created_by: actor.actor_id,
-        });
-
-        extractContextFromActivity(db, actor.tenant_id, activity.id).catch((err) => {
-          console.error('[email_ingest] extraction error:', err);
-        });
+          body_text: body,
+          body_html: htmlBody,
+          received_at: receivedAt,
+          in_reply_to: inReplyTo,
+          provider_message_id: input.idempotency_key,
+          contact_id: input.contact_id,
+          metadata: { input_channel: 'mcp_email_ingest' },
+        }, actor);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
-          eventType: 'activity.created',
+          eventType: 'email_message.ingested',
           actorId: actor.actor_id,
           actorType: actor.actor_type,
-          objectType: 'activity',
-          objectId: activity.id,
-          afterData: activity,
+          objectType: 'email_message',
+          objectId: result.message.id,
+          afterData: {
+            classification: result.classification,
+            processing_status: result.processing_status,
+            activity_id: result.activity_id,
+          },
         });
 
         return {
-          activity_id: activity.id,
-          contact_id: contactId ?? null,
+          email_message_id: result.message.id,
+          activity_id: result.activity_id ?? null,
+          raw_context_source_id: result.raw_context_source_id ?? null,
+          contact_id: result.message.contact_id ?? null,
+          account_id: result.message.account_id ?? null,
+          classification: result.classification,
+          processing_status: result.processing_status,
           event_id,
           mutation: mutationReceipt(actor, {
-            objectType: 'activity',
-            objectId: activity.id,
+            objectType: 'email_message',
+            objectId: result.message.id,
             eventId: event_id,
-            sideEffects: ['context_extraction:queued'],
+            sideEffects: result.activity_id ? ['raw_context:processed'] : ['email_message:recorded'],
           }),
         };
         });

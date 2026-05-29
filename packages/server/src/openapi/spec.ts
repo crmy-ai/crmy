@@ -35,7 +35,7 @@ export function buildSpec() {
       { name: 'HITL', description: 'Human-in-the-loop approval workflows' },
       { name: 'Actors', description: 'First-class identity for humans and AI agents' },
       { name: 'Webhooks', description: 'Outbound event notifications with retry tracking' },
-      { name: 'Emails', description: 'Email drafting with optional HITL approval' },
+      { name: 'Emails', description: 'Customer email ingestion, mailbox connections, Raw Context processing, and governed outbound drafts' },
       { name: 'Custom Fields', description: 'Per-tenant field definitions for any object type' },
       { name: 'Workflows', description: 'Event-driven automation' },
       { name: 'Systems of Record', description: 'Governed CRM and warehouse connections, sync, conflicts, and writebacks' },

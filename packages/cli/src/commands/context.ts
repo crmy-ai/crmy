@@ -4,12 +4,7 @@
 import { Command } from 'commander';
 import { readFile } from 'node:fs/promises';
 import { getClient } from '../client.js';
-
-function parseSubject(subject?: string): { subject_type?: string; subject_id?: string } {
-  if (!subject) return {};
-  const [subject_type, subject_id] = subject.split(':');
-  return { subject_type, subject_id };
-}
+import { resolveSubjectRef } from './subject-ref.js';
 
 function printEntries(entries: Record<string, unknown>[], total?: number, limit = 20): void {
   if (entries.length === 0) {
@@ -63,14 +58,14 @@ export function contextCommand(): Command {
 
   cmd.command('list')
     .description('List confirmed Memory and reviewable Signals')
-    .option('--subject <type:id>', 'Filter by subject (contact:UUID, account:UUID, opportunity:UUID, use_case:UUID)')
+    .option('--subject <type:name|type:id>', 'Filter by subject, e.g. account:Northstar Labs')
     .option('--type <contextType>', 'Filter by context type (note, research, objection, etc.)')
     .option('--status <status>', 'Filter by lifecycle status (active, signal, rejected, superseded)')
     .option('--include-superseded', 'Include non-current entries')
     .option('--limit <n>', 'Max results', '20')
     .action(async (opts) => {
       const client = await getClient();
-      const subject = parseSubject(opts.subject);
+      const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
       const limit = parseInt(opts.limit, 10);
       const result = await client.call('context_list', {
         subject_type: subject.subject_type,
@@ -91,8 +86,7 @@ export function contextCommand(): Command {
       const { default: inquirer } = await import('inquirer');
       console.log('\n  For transcripts, emails, notes, or research, use `crmy context ingest` so CRMy creates Raw Context, extracts Signals, and promotes high-confidence Memory.\n');
       const answers = await inquirer.prompt([
-        { type: 'list', name: 'subject_type', message: 'Subject type:', choices: ['contact', 'account', 'opportunity', 'use_case'] },
-        { type: 'input', name: 'subject_id', message: 'Subject ID (UUID):' },
+        { type: 'input', name: 'subject_ref', message: 'Subject (type:name or type:id):', default: 'account:' },
         { type: 'list', name: 'context_type', message: 'Context type:', choices: ['note', 'transcript', 'summary', 'research', 'preference', 'objection', 'competitive_intel', 'relationship_map', 'meeting_notes', 'agent_reasoning'] },
         { type: 'list', name: 'memory_status', message: 'Lifecycle:', choices: [{ name: 'Confirmed Memory', value: 'active' }, { name: 'Signal needing review', value: 'signal' }] },
         { type: 'input', name: 'title', message: 'Title (optional):' },
@@ -103,9 +97,10 @@ export function contextCommand(): Command {
       ]);
 
       const client = await getClient();
+      const subject = await resolveSubjectRef(client, answers.subject_ref);
       const result = await client.call('context_add', {
-        subject_type: answers.subject_type,
-        subject_id: answers.subject_id,
+        subject_type: subject.subject_type,
+        subject_id: subject.subject_id,
         context_type: answers.context_type,
         title: answers.title || undefined,
         body: answers.body,
@@ -124,7 +119,7 @@ export function contextCommand(): Command {
   cmd.command('ingest')
     .description('Add messy Raw Context and let CRMy extract Signals and Memory')
     .option('-f, --file <path>', 'Read source text from a file')
-    .option('--subject <type:id>', 'Known subject to attach to, such as contact:UUID')
+    .option('--subject <type:name|type:id>', 'Known subject to attach to, such as account:Northstar Labs')
     .option('--source <label>', 'Human-readable source label')
     .option('--auto', 'Resolve mentioned contacts/accounts automatically')
     .option('--threshold <n>', 'Auto subject resolution confidence threshold for --auto', '0.6')
@@ -139,8 +134,8 @@ export function contextCommand(): Command {
         ]);
         document = answers.document;
       }
-      const subject = parseSubject(opts.subject);
       const client = await getClient();
+      const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
       const result = await client.call(opts.auto || !subject.subject_type ? 'context_ingest_auto' : 'context_ingest', {
         document,
         text: document,
@@ -167,11 +162,11 @@ export function contextCommand(): Command {
 
   cmd.command('signals')
     .description('List Signals that need review')
-    .option('--subject <type:id>', 'Filter by subject')
+    .option('--subject <type:name|type:id>', 'Filter by subject')
     .option('--limit <n>', 'Max results', '20')
     .action(async (opts) => {
       const client = await getClient();
-      const subject = parseSubject(opts.subject);
+      const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
       const limit = parseInt(opts.limit, 10);
       const result = await client.call('context_list', {
         subject_type: subject.subject_type,
@@ -187,13 +182,13 @@ export function contextCommand(): Command {
 
   cmd.command('signal-groups')
     .description('List evidence-backed Signals with combined source support')
-    .option('--subject <type:id>', 'Filter by subject')
+    .option('--subject <type:name|type:id>', 'Filter by subject')
     .option('--status <status>', 'Filter by status (gathering, ready, blocked, conflicting, promoted, dismissed)')
     .option('--all', 'Include groups that do not need attention')
     .option('--limit <n>', 'Max results', '20')
     .action(async (opts) => {
       const client = await getClient();
-      const subject = parseSubject(opts.subject);
+      const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
       const limit = parseInt(opts.limit, 10);
       const result = await client.call('context_signal_group_list', {
         subject_type: subject.subject_type,
@@ -270,11 +265,11 @@ export function contextCommand(): Command {
     .description('List Raw Context processing records')
     .option('--source-type <type>', 'Filter by source type, such as activity, add_context, mcp, context_api')
     .option('--status <status>', 'Filter by status (processed, needs_review, failed, skipped)')
-    .option('--subject <type:id>', 'Filter by subject')
+    .option('--subject <type:name|type:id>', 'Filter by subject')
     .option('--limit <n>', 'Max results', '50')
     .action(async (opts) => {
       const client = await getClient();
-      const subject = parseSubject(opts.subject);
+      const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
       const limit = parseInt(opts.limit, 10);
       const result = await client.call('context_raw_source_list', {
         source_type: opts.sourceType,
@@ -309,6 +304,44 @@ export function contextCommand(): Command {
       const client = await getClient();
       const result = await client.call('context_raw_source_get', { id });
       console.log(JSON.parse(result));
+      await client.close();
+    });
+
+  cmd.command('reprocess-source <id>')
+    .description('Reprocess a Raw Context source')
+    .action(async (id) => {
+      const client = await getClient();
+      const result = await client.call('context_raw_source_reprocess', { id });
+      const data = JSON.parse(result);
+      printProcessingReceipt(data);
+      await client.close();
+    });
+
+  cmd.command('lineage')
+    .description('Trace Raw Context to Signals, Memory, Handoffs, writebacks, and audit')
+    .option('--subject <type:name|type:id>', 'Subject such as account:Northstar Labs')
+    .option('--entry <id>', 'Context entry / Memory ID')
+    .option('--signal <id>', 'Signal ID')
+    .option('--raw-source <id>', 'Raw Context source ID')
+    .action(async (opts) => {
+      const client = await getClient();
+      const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
+      const result = await client.call('context_lineage_get', {
+        subject_type: subject.subject_type,
+        subject_id: subject.subject_id,
+        context_entry_id: opts.entry,
+        signal_group_id: opts.signal,
+        raw_context_source_id: opts.rawSource,
+      });
+      const data = JSON.parse(result);
+      console.log(data.summary ?? {});
+      console.table((data.nodes ?? []).map((node: Record<string, unknown>) => ({
+        id: String(node.id ?? '').slice(0, 8),
+        type: node.type,
+        title: String(node.title ?? node.label ?? '').slice(0, 48),
+        stage: node.stage ?? '',
+      })));
+      console.log(`Edges: ${(data.edges ?? []).length}`);
       await client.close();
     });
 
@@ -347,7 +380,7 @@ export function contextCommand(): Command {
 
   cmd.command('search <query>')
     .description('Full-text search across Memory and Signals')
-    .option('--subject <subject>', 'Filter by subject (type:UUID)')
+    .option('--subject <subject>', 'Filter by subject (type:name or type:id)')
     .option('--type <contextType>', 'Filter by context type')
     .option('--tag <tag>', 'Filter by tag')
     .option('--include-superseded', 'Include non-current entries')
@@ -358,15 +391,11 @@ export function contextCommand(): Command {
         limit: parseInt(opts.limit, 10),
         current_only: !opts.includeSuperseded,
       };
-      if (opts.subject) {
-        const [st, si] = opts.subject.split(':');
-        input.subject_type = st;
-        input.subject_id = si;
-      }
       if (opts.type) input.context_type = opts.type;
       if (opts.tag) input.tag = opts.tag;
 
       const client = await getClient();
+      if (opts.subject) Object.assign(input, await resolveSubjectRef(client, opts.subject));
       const result = await client.call('context_search', input);
       const data = JSON.parse(result);
       if (data.context_entries?.length === 0) {
@@ -384,6 +413,33 @@ export function contextCommand(): Command {
       await client.close();
     });
 
+  cmd.command('semantic-search <query>')
+    .description('Semantic search across Memory and Signals when embeddings are available')
+    .option('--subject <subject>', 'Filter by subject (type:name or type:id)')
+    .option('--limit <n>', 'Max results', '10')
+    .action(async (query, opts) => {
+      const client = await getClient();
+      const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
+      const result = await client.call('context_semantic_search', {
+        query,
+        subject_type: subject.subject_type,
+        subject_id: subject.subject_id,
+        limit: parseInt(opts.limit, 10),
+      });
+      const data = JSON.parse(result);
+      const rows = data.results ?? data.context_entries ?? [];
+      if (rows.length === 0) console.log('No semantic results found.');
+      else {
+        console.table(rows.map((item: Record<string, unknown>) => ({
+          id: String(item.id ?? '').slice(0, 8),
+          type: item.context_type ?? item.type,
+          title: String(item.title ?? item.body ?? '').slice(0, 48),
+          score: item.similarity ?? item.score ?? '',
+        })));
+      }
+      await client.close();
+    });
+
   cmd.command('review <id>')
     .description('Mark a context entry as reviewed (still accurate)')
     .action(async (id) => {
@@ -396,17 +452,12 @@ export function contextCommand(): Command {
 
   cmd.command('stale')
     .description('List stale context entries that need review')
-    .option('--subject <subject>', 'Filter by subject (type:UUID)')
+    .option('--subject <subject>', 'Filter by subject (type:name or type:id)')
     .option('--limit <n>', 'Max results', '20')
     .action(async (opts) => {
       const input: Record<string, unknown> = { limit: parseInt(opts.limit, 10) };
-      if (opts.subject) {
-        const [st, si] = opts.subject.split(':');
-        input.subject_type = st;
-        input.subject_id = si;
-      }
-
       const client = await getClient();
+      if (opts.subject) Object.assign(input, await resolveSubjectRef(client, opts.subject));
       const result = await client.call('context_stale', input);
       const data = JSON.parse(result);
       if (data.stale_entries?.length === 0) {

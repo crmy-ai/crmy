@@ -3,6 +3,7 @@
 
 import { Command } from 'commander';
 import { getClient } from '../client.js';
+import { resolveRecordRef } from './subject-ref.js';
 
 export function contactsCommand(): Command {
   const cmd = new Command('contacts').description('Manage contacts');
@@ -27,15 +28,17 @@ export function contactsCommand(): Command {
         name: `${c.first_name} ${c.last_name}`,
         email: c.email ?? '',
         stage: c.lifecycle_stage,
-        company: c.company_name ?? '',
+        account: c.account_name ?? c.company_name ?? '',
       })));
       if (data.total > 20) console.log(`\n  Showing 20 of ${data.total} contacts`);
       await client.close();
     });
 
-  cmd.command('get <id>')
-    .action(async (id) => {
+  cmd.command('get <contact>')
+    .description('Get contact details by name, email, or ID')
+    .action(async (contact) => {
       const client = await getClient();
+      const id = await resolveRecordRef(client, 'contact', contact);
       const result = await client.call('contact_get', { id });
       console.log(JSON.parse(result));
       await client.close();
@@ -48,7 +51,7 @@ export function contactsCommand(): Command {
         { type: 'input', name: 'first_name', message: 'First name:' },
         { type: 'input', name: 'last_name', message: 'Last name:' },
         { type: 'input', name: 'email', message: 'Email:' },
-        { type: 'input', name: 'company_name', message: 'Company:' },
+        { type: 'input', name: 'company_name', message: 'Account name:' },
       ]);
 
       const client = await getClient();
@@ -63,16 +66,17 @@ export function contactsCommand(): Command {
       await client.close();
     });
 
-  cmd.command('delete <id>')
+  cmd.command('delete <contact>')
     .description('Permanently delete a contact (admin/owner only)')
-    .action(async (id) => {
+    .action(async (contact) => {
       const { default: inquirer } = await import('inquirer');
-      const { confirm } = await inquirer.prompt([
-        { type: 'confirm', name: 'confirm', message: `Delete contact ${id}? This cannot be undone.`, default: false },
-      ]);
-      if (!confirm) { console.log('  Cancelled.'); return; }
-
       const client = await getClient();
+      const id = await resolveRecordRef(client, 'contact', contact);
+      const { confirm } = await inquirer.prompt([
+        { type: 'confirm', name: 'confirm', message: `Delete contact ${contact}? This cannot be undone.`, default: false },
+      ]);
+      if (!confirm) { console.log('  Cancelled.'); await client.close(); return; }
+
       const result = await client.call('contact_delete', { id });
       const data = JSON.parse(result);
       if (data.deleted) console.log(`  Deleted.`);

@@ -114,7 +114,7 @@ function AccountEditForm({
       </div>
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
         {[
-          { key: 'name', label: 'Account Name', type: 'text', placeholder: 'e.g. Acme Corp', required: true },
+          { key: 'name', label: 'Account Name', type: 'text', placeholder: 'e.g. Northstar Labs', required: true },
           { key: 'industry', label: 'Industry', type: 'text', placeholder: 'e.g. Technology' },
           { key: 'website', label: 'Website', type: 'url', placeholder: 'https://acme.com' },
           { key: 'domain', label: 'Domain', type: 'text', placeholder: 'acme.com' },
@@ -207,7 +207,7 @@ function AccountEditForm({
 }
 
 export function AccountDrawer() {
-  const { drawerEntityId, closeDrawer, drawerBriefing } = useAppStore();
+  const { drawerEntityId, closeDrawer, drawerBriefing, recordFieldProvenance } = useAppStore();
   const [editing, setEditing] = useState(false);
   const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
   const graphHref = drawerEntityId ? `/accounts/${drawerEntityId}/graph` : undefined;
@@ -238,9 +238,13 @@ export function AccountDrawer() {
   const name: string = account.name ?? '';
   const industry: string = account.industry ?? '';
   const website: string = account.website ?? '';
+  const domain: string = account.domain ?? '';
+  const aliases: string[] = Array.isArray(account.aliases) ? account.aliases : [];
+  const tags: string[] = Array.isArray(account.tags) ? account.tags : [];
   const revenue: number = account.annual_revenue ?? 0;
   const employeeCount: number = account.employee_count ?? 0;
   const healthScore: number = account.health_score ?? 0;
+  const accountProvenance = drawerEntityId ? recordFieldProvenance[`account:${drawerEntityId}`] ?? {} : {};
 
   if (view === 'brief') {
     return (
@@ -336,17 +340,30 @@ export function AccountDrawer() {
 
       <DrawerSection title="Details">
         {[
-          { label: 'Industry', value: industry },
-          { label: 'Website', value: website },
-          { label: 'Created', value: account.created_at ? new Date(account.created_at as string).toLocaleDateString() : undefined },
+          { key: 'industry', label: 'Industry', value: industry },
+          { key: 'website', label: 'Website', value: website },
+          { key: 'domain', label: 'Domain', value: domain },
+          { key: 'aliases', label: 'Aliases', value: aliases.length ? aliases.join(', ') : undefined },
+          { key: 'tags', label: 'Tags', value: tags.length ? tags.join(', ') : undefined },
+          { key: 'created_at', label: 'Created', value: account.created_at ? new Date(account.created_at as string).toLocaleDateString() : undefined },
         ]
           .filter((f) => f.value)
-          .map((field) => (
-            <div key={field.label} className="flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">{field.label}</span>
-              <span className="text-sm text-foreground">{field.value}</span>
-            </div>
-          ))}
+          .map((field) => {
+            const provenance = accountProvenance[field.key];
+            return (
+              <div key={field.key} className="flex items-start justify-between gap-4">
+                <span className="text-xs text-muted-foreground">{field.label}</span>
+                <span className="text-right">
+                  <span className="block text-sm text-foreground">{field.value}</span>
+                  {provenance && (
+                    <span className="block text-[11px] text-muted-foreground">
+                      {provenance.source_label}{provenance.confidence_label ? ` · ${provenance.confidence_label}` : ''}
+                    </span>
+                  )}
+                </span>
+              </div>
+            );
+          })}
       </DrawerSection>
 
       {/* Custom Fields */}

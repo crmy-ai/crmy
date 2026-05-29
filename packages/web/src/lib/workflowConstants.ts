@@ -114,7 +114,7 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     configFields: [
       { key: 'to_address',       label: 'To',               placeholder: 'e.g. {{subject.email}} or person@example.com', required: true,  type: 'text',     hint: 'Supports {{variables}}' },
       { key: 'subject',          label: 'Subject',          placeholder: 'e.g. Following up on {{subject.name}}',        required: true,  type: 'text',     hint: 'Supports {{variables}}' },
-      { key: 'ai_generate',      label: 'AI generate content', placeholder: '', required: false, type: 'boolean', hint: 'Requires the Local Workspace Agent to be configured.' },
+      { key: 'ai_generate',      label: 'AI generate content', placeholder: '', required: false, type: 'boolean', hint: 'Requires the Workspace Agent to be configured.' },
       { key: 'ai_prompt',        label: 'AI prompt',        placeholder: 'Describe what to write. CRMy will use this prompt with current customer context.', required: false, type: 'textarea', hint: 'Supports {{variables}}' },
       { key: 'body_text',        label: 'Body',             placeholder: 'Email body. Supports {{variables}}.',          required: true,  type: 'textarea', hint: 'Supports {{variables}}', aiControlled: true },
       { key: 'require_approval', label: 'Require human approval before sending', placeholder: '', required: false, type: 'boolean', hint: 'A HITL review request is created; email only sends after approval' },
@@ -127,10 +127,10 @@ export const ACTION_TYPES: ActionTypeDef[] = [
     group: 'Outreach',
     supportsVariables: true,
     configFields: [
-      { key: 'ai_generate', label: 'AI generate message', placeholder: '', required: false, type: 'boolean', hint: 'Requires the Local Workspace Agent to be configured.' },
+      { key: 'ai_generate', label: 'AI generate message', placeholder: '', required: false, type: 'boolean', hint: 'Requires the Workspace Agent to be configured.' },
       { key: 'ai_prompt',   label: 'AI prompt', placeholder: 'Describe the message CRMy should draft from this event.', required: false, type: 'textarea', hint: 'Supports {{variables}}' },
       { key: 'message',    label: 'Message',    placeholder: 'e.g. New lead arrived: {{subject.first_name}}', required: true,  type: 'textarea', hint: 'Supports {{variables}}', aiControlled: true },
-      { key: 'channel_id', label: 'Channel ID', placeholder: 'UUID (uses default if empty)',                  required: false, type: 'text' },
+      { key: 'channel_id', label: 'Channel ID', placeholder: 'Uses the default channel if empty',             required: false, type: 'text' },
       { key: 'recipient',  label: 'Recipient',  placeholder: 'e.g. #channel or @user',                        required: false, type: 'text' },
     ],
   },
@@ -569,7 +569,7 @@ export function getSamplePayload(triggerEvent: string): Record<string, unknown> 
     return { id: '<contact-uuid>', first_name: 'Alice', last_name: 'Smith', email: 'alice@example.com', lifecycle_stage: 'lead', event_type: triggerEvent, object_type: 'contact', object_id: '<contact-uuid>', metadata };
   }
   if (triggerEvent.startsWith('account.')) {
-    return { id: '<account-uuid>', name: 'Acme Corp', domain: 'acme.com', industry: 'Technology', event_type: triggerEvent, object_type: 'account', object_id: '<account-uuid>', metadata };
+    return { id: '<account-id>', name: 'Northstar Labs', domain: 'northstarlabs.example', industry: 'AI Infrastructure', event_type: triggerEvent, object_type: 'account', object_id: '<account-id>', metadata };
   }
   if (triggerEvent.startsWith('opportunity.')) {
     return { id: '<opportunity-uuid>', name: 'Q1 Deal', stage: 'qualification', amount: 50000, contact_id: '<contact-uuid>', event_type: triggerEvent, object_type: 'opportunity', object_id: '<opportunity-uuid>', metadata };

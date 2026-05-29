@@ -58,7 +58,7 @@ export default function ContextPage() {
   const { data: contextData } = useContextEntries({ limit: 1 }) as any;
   const { data: signalGroupData } = useSignalGroups({ attention_only: true, limit: 1 }) as any;
   const { data: activitiesData } = useActivities({ limit: 1 }) as any;
-  const pgvectorEnabled = Boolean(dbInfo?.pgvector_enabled);
+  const semanticRetrievalReady = Boolean(dbInfo?.ready ?? dbInfo?.pgvector_enabled);
   const contextTotal = Number(contextData?.total ?? 0);
   const signalGroupTotal = Number(signalGroupData?.total ?? 0);
   const observationTotal = Number(activitiesData?.total ?? 0);
@@ -98,12 +98,12 @@ export default function ContextPage() {
           : headerDescription('Search persistent Memory agents retrieve into Active Context', contextTotal, 'entry', 'entries')}
         badge={(
           <span className={`hidden md:inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-            pgvectorEnabled
+            semanticRetrievalReady
               ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
               : 'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400'
           }`}>
-            {pgvectorEnabled ? <CheckCircle2 className="w-3 h-3" /> : <Search className="w-3 h-3" />}
-            {pgvectorEnabled ? 'Semantic search ready' : 'Keyword search fallback'}
+            {semanticRetrievalReady ? <CheckCircle2 className="w-3 h-3" /> : <Search className="w-3 h-3" />}
+            {semanticRetrievalReady ? 'Semantic search ready' : 'Keyword fallback'}
           </span>
         )}
       >

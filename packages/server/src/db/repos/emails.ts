@@ -22,6 +22,12 @@ export interface EmailRow {
   provider_msg_id?: string;
   source_agent?: string;
   created_by?: UUID;
+  draft_origin?: 'manual' | 'agent_generated';
+  draft_target?: 'crmy' | 'provider_draft';
+  source_email_message_id?: UUID;
+  provider_draft_id?: string;
+  provider_draft_status?: 'not_requested' | 'unsupported' | 'pending' | 'created' | 'failed';
+  generation_metadata?: Record<string, unknown>;
   created_at: string;
   updated_at: string;
 }
@@ -68,18 +74,27 @@ export async function createEmail(
     opportunity_id?: UUID;
     use_case_id?: UUID;
     to_email: string;
+    to_name?: string;
     subject: string;
     body_html?: string;
     body_text: string;
     status?: string;
     hitl_request_id?: UUID;
     created_by?: UUID;
+    draft_origin?: 'manual' | 'agent_generated';
+    draft_target?: 'crmy' | 'provider_draft';
+    source_email_message_id?: UUID;
+    provider_draft_id?: string;
+    provider_draft_status?: 'not_requested' | 'unsupported' | 'pending' | 'created' | 'failed';
+    generation_metadata?: Record<string, unknown>;
   },
 ): Promise<EmailRow> {
   const result = await db.query(
     `INSERT INTO emails (tenant_id, contact_id, account_id, opportunity_id, use_case_id,
-       to_email, subject, body_html, body_text, status, hitl_request_id, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+       to_email, to_name, subject, body_html, body_text, status, hitl_request_id, created_by,
+     draft_origin, draft_target, source_email_message_id, provider_draft_id, provider_draft_status,
+     generation_metadata)
+   VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING *`,
     [
       tenantId,
       data.contact_id ?? null,
@@ -87,12 +102,19 @@ export async function createEmail(
       data.opportunity_id ?? null,
       data.use_case_id ?? null,
       data.to_email,
+      data.to_name ?? null,
       data.subject,
       data.body_html ?? null,
       data.body_text,
       data.status ?? 'draft',
       data.hitl_request_id ?? null,
       data.created_by ?? null,
+      data.draft_origin ?? 'manual',
+      data.draft_target ?? 'crmy',
+      data.source_email_message_id ?? null,
+      data.provider_draft_id ?? null,
+      data.provider_draft_status ?? 'not_requested',
+      JSON.stringify(data.generation_metadata ?? {}),
     ],
   );
   return result.rows[0] as EmailRow;

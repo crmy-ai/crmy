@@ -16,6 +16,7 @@
     "dev:server": "npm run dev --workspace=packages/server",
     "dev:web": "npm run dev --workspace=packages/web",
     "test": "node --test packages/server/test/durability.test.mjs",
+    "test:cli-coverage": "node --test packages/cli/test/coverage.test.mjs",
     "lint": "tsc -p packages/shared/tsconfig.json --noEmit && tsc -p packages/server/tsconfig.json --noEmit && tsc -p packages/cli/tsconfig.json --noEmit && tsc -p packages/web/tsconfig.json --noEmit",
     "migrate": "tsx scripts/migrate.ts",
     "start:server": "node packages/server/dist/index.js"

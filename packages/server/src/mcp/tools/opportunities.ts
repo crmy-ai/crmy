@@ -157,7 +157,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     {
       name: 'opportunity_search',
       tier: 'core',
-      description: 'Search opportunities with flexible filters. Use stage to find deals at a specific pipeline stage (e.g. "Negotiation"), account_id for a specific company, forecast_cat for pipeline categorization, and date range to find deals closing within a window. Useful for pipeline reviews and identifying at-risk deals approaching their close_date.',
+      description: 'Search opportunities with flexible filters. Use stage to find deals at a specific pipeline stage (e.g. "Negotiation"), account_id for a specific account, forecast_cat for pipeline categorization, and date range to find deals closing within a window. Useful for pipeline reviews and identifying at-risk deals approaching their close_date.',
       inputSchema: opportunitySearch,
       handler: async (input: z.infer<typeof opportunitySearch>, actor: ActorContext) => {
         const ownerFilter = await resolveOwnerFilter(db, actor, input.owner_id);

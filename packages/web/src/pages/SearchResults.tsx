@@ -86,23 +86,27 @@ export function SearchResultsPage() {
     },
     {
       key: 'assignments',
-      label: 'Assignments',
+      label: 'Handoffs',
       icon: ClipboardList,
       color: ENTITY_COLORS.assignments.text,
       items: data?.assignments ?? [],
       open: item => { navigate('/handoffs'); openDrawer('assignment', item.id); },
-      title: item => item.title ?? 'Assignment',
+      title: item => item.title ?? 'Handoff',
       detail: item => [item.status, item.priority].filter(Boolean).join(' · '),
     },
     {
       key: 'contextEntries',
-      label: 'Memory',
+      label: 'Signals & Memory',
       icon: FileText,
       color: ENTITY_COLORS.context.text,
       items: data?.contextEntries ?? [],
-      open: () => navigate('/context'),
+      open: item => navigate(item.memory_status === 'signal' ? '/context?tab=signals' : '/context?tab=browser'),
       title: item => item.title ?? item.body ?? 'Context entry',
-      detail: item => item.context_type ?? item.subject_type ?? '',
+      detail: item => [
+        item.memory_status === 'signal' ? 'Signal' : 'Memory',
+        item.context_type,
+        item.subject_type,
+      ].filter(Boolean).join(' · '),
     },
   ];
 
@@ -115,8 +119,8 @@ export function SearchResultsPage() {
         icon={Search}
         iconClassName="text-primary"
         description={q
-          ? headerDescription(`Results for "${q}"`, total, 'result')
-          : headerDescription('Search records and customer context', total, 'result')}
+          ? headerDescription(`Visible results for "${q}"`, total, 'result')
+          : headerDescription('Search records and customer context visible to you', total, 'result')}
       />
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6 pt-2">
         {isLoading ? (
@@ -127,7 +131,7 @@ export function SearchResultsPage() {
           <div className="flex flex-col items-center justify-center py-20 text-center">
             <Search className="w-8 h-8 text-muted-foreground/40 mb-3" />
             <p className="text-sm font-semibold text-foreground">No results found</p>
-            <p className="text-sm text-muted-foreground mt-1">Try a customer name, account domain, email, deal, context phrase, or assignment title.</p>
+            <p className="text-sm text-muted-foreground mt-1">Try a customer name, account domain, email, deal, context phrase, or handoff title.</p>
           </div>
         ) : (
           <div className="space-y-5">

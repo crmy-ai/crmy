@@ -3,18 +3,20 @@
 
 import { Command } from 'commander';
 import { getClient } from '../client.js';
+import { resolveRecordRef } from './subject-ref.js';
 
 export function useCasesCommand(): Command {
   const cmd = new Command('use-cases').description('Manage use cases');
 
   cmd.command('list')
-    .option('--account <id>', 'Filter by account ID')
+    .option('--account <name|id>', 'Filter by account name or ID')
     .option('--stage <stage>', 'Filter by stage')
     .option('-q, --query <query>', 'Search query')
     .action(async (opts) => {
       const client = await getClient();
+      const accountId = opts.account ? await resolveRecordRef(client, 'account', opts.account) : undefined;
       const result = await client.call('use_case_search', {
-        account_id: opts.account,
+        account_id: accountId,
         stage: opts.stage,
         query: opts.query,
         limit: 20,
@@ -35,9 +37,11 @@ export function useCasesCommand(): Command {
       await client.close();
     });
 
-  cmd.command('get <id>')
-    .action(async (id) => {
+  cmd.command('get <use_case>')
+    .description('Get use case details by name or ID')
+    .action(async (useCase) => {
       const client = await getClient();
+      const id = await resolveRecordRef(client, 'use_case', useCase);
       const result = await client.call('use_case_get', { id });
       console.log(JSON.parse(result));
       await client.close();
@@ -64,12 +68,13 @@ export function useCasesCommand(): Command {
     });
 
   cmd.command('summary')
-    .option('--account <id>', 'Filter by account ID')
+    .option('--account <name|id>', 'Filter by account name or ID')
     .option('--group-by <field>', 'Group by: stage, product_line, owner', 'stage')
     .action(async (opts) => {
       const client = await getClient();
+      const accountId = opts.account ? await resolveRecordRef(client, 'account', opts.account) : undefined;
       const result = await client.call('use_case_summary', {
-        account_id: opts.account,
+        account_id: accountId,
         group_by: opts.groupBy,
       });
       const data = JSON.parse(result);
@@ -77,16 +82,17 @@ export function useCasesCommand(): Command {
       await client.close();
     });
 
-  cmd.command('delete <id>')
+  cmd.command('delete <use_case>')
     .description('Delete a use case (admin/owner only)')
-    .action(async (id) => {
+    .action(async (useCase) => {
       const { default: inquirer } = await import('inquirer');
-      const { confirm } = await inquirer.prompt([
-        { type: 'confirm', name: 'confirm', message: `Delete use case ${id}? This cannot be undone.`, default: false },
-      ]);
-      if (!confirm) { console.log('  Cancelled.'); return; }
-
       const client = await getClient();
+      const id = await resolveRecordRef(client, 'use_case', useCase);
+      const { confirm } = await inquirer.prompt([
+        { type: 'confirm', name: 'confirm', message: `Delete use case ${useCase}? This cannot be undone.`, default: false },
+      ]);
+      if (!confirm) { console.log('  Cancelled.'); await client.close(); return; }
+
       const result = await client.call('use_case_delete', { id });
       const data = JSON.parse(result);
       if (data.deleted) console.log(`  Deleted.`);

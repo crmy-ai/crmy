@@ -97,7 +97,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     {
       name: 'use_case_search',
       tier: 'core',
-      description: 'Search use cases with flexible filters. Use account_id for a specific company, stage for lifecycle filtering, product_line for product segmentation, and query for text search. Returns paginated results sorted by recency.',
+      description: 'Search use cases with flexible filters. Use account_id for a specific account, stage for lifecycle filtering, product_line for product segmentation, and query for text search. Returns paginated results sorted by recency.',
       inputSchema: useCaseSearch,
       handler: async (input: z.infer<typeof useCaseSearch>, actor: ActorContext) => {
         const ownerFilter = await resolveOwnerFilter(db, actor, input.owner_id);

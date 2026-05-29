@@ -58,11 +58,11 @@ export function EmailDrawer() {
 
       {/* Metadata */}
       <div className="space-y-2 border-t border-border pt-3">
-        {email.to && (
+        {(email.to || email.to_email) && (
           <div className="flex items-center gap-2">
             <User className="w-3.5 h-3.5 text-muted-foreground" />
             <span className="text-xs text-muted-foreground">To:</span>
-            <span className="text-sm text-foreground">{email.to}</span>
+            <span className="text-sm text-foreground">{email.to ?? email.to_email}</span>
           </div>
         )}
         {email.from && (
@@ -89,12 +89,12 @@ export function EmailDrawer() {
       </div>
 
       {/* Body */}
-      {email.body && (
+      {(email.body || email.body_text || email.body_html) && (
         <div className="border-t border-border pt-3">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Body</p>
           <div className="prose prose-sm dark:prose-invert max-w-none">
             <pre className="whitespace-pre-wrap text-sm text-foreground bg-muted/30 p-3 rounded-lg">
-              {email.body}
+              {email.body ?? email.body_text ?? email.body_html}
             </pre>
           </div>
         </div>

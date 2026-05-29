@@ -1549,10 +1549,28 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         if (input.subject_type && input.subject_id) {
           await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
         }
+        const pgvectorResult = await db.query(`
+          SELECT
+            EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') AS extension_enabled,
+            EXISTS (
+              SELECT 1
+                FROM information_schema.columns
+               WHERE table_name = 'context_entries'
+                 AND column_name = 'embedding'
+            ) AS embedding_column_ready
+        `);
+        const pgvectorReady = Boolean(pgvectorResult.rows[0]?.extension_enabled) && Boolean(pgvectorResult.rows[0]?.embedding_column_ready);
+        if (!pgvectorReady) {
+          return {
+            error: 'Semantic search is not enabled on this server. Use a pgvector-capable Postgres database, set ENABLE_PGVECTOR=true, and run migrations.',
+            fallback_available: true,
+            fallback_tool: 'context_search',
+          };
+        }
         const embConfig = loadEmbeddingConfig();
         if (!embConfig) {
           return {
-            error: 'Semantic search is not enabled on this server. Set ENABLE_PGVECTOR=true and EMBEDDING_PROVIDER to enable vector search.',
+            error: 'Semantic search is not enabled on this server. Enable pgvector in Postgres, set ENABLE_PGVECTOR=true, and configure EMBEDDING_PROVIDER/EMBEDDING_API_KEY in the CRMy server environment.',
             fallback_available: true,
             fallback_tool: 'context_search',
           };
@@ -1799,7 +1817,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         }, async () => {
         const embConfig = loadEmbeddingConfig();
         if (!embConfig) {
-          return { error: 'EMBEDDING_PROVIDER is not configured. Set ENABLE_PGVECTOR=true and EMBEDDING_PROVIDER to enable semantic search.' };
+          return { error: 'Embedding provider is not configured. Enable pgvector in Postgres, set ENABLE_PGVECTOR=true, and configure EMBEDDING_PROVIDER/EMBEDDING_API_KEY in the CRMy server environment.' };
         }
 
         const stats = await contextRepo.backfillEmbeddings(

@@ -1416,10 +1416,10 @@ Rules:
 8. Every extracted signal must include evidence. Prefer verbatim snippets and include speaker/source timing when the text provides it.
 9. If nothing customer-specific and operationally useful is found, return {"context_entries":[],"record_proposals":[]}
 10. Treat account as the customer scope. If an account is matched, prefer existing contacts, opportunities, and use cases under that account before proposing anything new.
-11. Propose a new record only when the source clearly names a person, company/account, opportunity/deal, or use case that is not present in matched_subjects, account_scope, or related_records. Include account_name/account_id in record_proposals when the new child record belongs under a matched account. Do not propose records for generic departments, dates, next steps, concepts, products, or internal users.
+11. Propose a new record only when the source clearly names a person, account/customer organization, opportunity/deal, or use case that is not present in matched_subjects, account_scope, or related_records. Include account_name/account_id in record_proposals when the new child record belongs under a matched account. Do not propose records for generic departments, dates, next steps, concepts, products, or internal users.
 12. Do not auto-create records. record_proposals are review candidates only.
 13. Return valid JSON only — no markdown code fences, no commentary
-14. If matched_subjects are present, choose the best subject for each Signal. Prefer contact for person-specific claims, account for company-wide claims, opportunity for deal-specific claims, and use case for implementation/product claims. Never invent subject IDs.
+14. If matched_subjects are present, choose the best subject for each Signal. Prefer contact for person-specific claims, account for account-wide claims, opportunity for deal-specific claims, and use case for implementation/product claims. Never invent subject IDs.
 
 Supported context types:
 ${typeDescriptions}`;
@@ -1434,7 +1434,7 @@ function buildRecoverySystemPrompt(
 
 Review the same extraction packet and Raw Context again. If it contains any customer-specific information that could help a sales or customer-success agent later, extract it as evidence-backed Signals. Do not produce generic summaries.
 
-Use the most specific supported context_type. If none fits${hasKeyFact ? ', use key_fact' : ''}. Do not create generic summaries of the whole document. Do not extract the mere fact that a contact or company was mentioned.
+Use the most specific supported context_type. If none fits${hasKeyFact ? ', use key_fact' : ''}. Do not create generic summaries of the whole document. Do not extract the mere fact that a contact or account was mentioned.
 
 Return valid JSON only:
 {"context_entries":[{"context_type":"key_fact","title":"...","body":"...","confidence":0.7,"structured_data":{},"evidence":[{"source_type":"activity","snippet":"exact short excerpt","confidence":0.7,"rationale":"why this supports the claim"}],"tags":["extracted"]}],"record_proposals":[]}

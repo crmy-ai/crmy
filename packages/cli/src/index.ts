@@ -59,6 +59,8 @@ import { seedDemoCommand } from './commands/seed-demo.js';
 import { resetPasswordCommand } from './commands/reset-password.js';
 import { doctorCommand } from './commands/doctor.js';
 import { systemsCommand } from './commands/systems.js';
+import { activitiesCommand } from './commands/activities.js';
+import { sequencesCommand } from './commands/sequences.js';
 
 const program = new Command();
 
@@ -81,8 +83,10 @@ program.addCommand(eventsCommand());
 program.addCommand(configCommand());
 program.addCommand(migrateCommand());
 program.addCommand(useCasesCommand());
+program.addCommand(activitiesCommand());
 program.addCommand(webhooksCommand());
 program.addCommand(emailsCommand());
+program.addCommand(sequencesCommand());
 program.addCommand(customFieldsCommand());
 program.addCommand(workflowsCommand());
 program.addCommand(actorsCommand());

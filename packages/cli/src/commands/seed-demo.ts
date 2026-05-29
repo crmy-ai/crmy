@@ -64,10 +64,14 @@ export function seedDemoCommand(): Command {
         console.log(`  ${counts.raw_context_sources} Raw Context sources · ${counts.signals} Signals · ${counts.memory} Memory entries · ${counts.handoffs} Handoffs`);
         console.log('');
         console.log('Try it:');
-        console.log('  crmy briefing contact:d0000000-0000-4000-c000-000000000101');
-        console.log('  crmy briefing account:d0000000-0000-4000-b000-000000000101');
-        console.log('  crmy briefing opportunity:d0000000-0000-4000-d000-000000000101');
+        console.log('  crmy briefing "contact:Maya Patel"');
+        console.log('  crmy briefing "account:Northstar Labs"');
+        console.log('  crmy context lineage --subject "account:Northstar Labs"');
         console.log('  crmy hitl list');
+        console.log('');
+        console.log('Sample logins:');
+        console.log('  sample.admin@crmy.local / crmy-demo-123  (admin view)');
+        console.log('  sample.rep@crmy.local / crmy-demo-123    (scoped rep view)');
         console.log('');
       } catch (err) {
         spinner.fail('Failed to seed sample data');

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Provider and model definitions for the Local Workspace Agent.
- * Provider defaults for the Local Workspace Agent.
+ * Provider and model definitions for the Workspace Agent.
+ * Provider defaults for the Workspace Agent.
  *
  * Do not maintain static model menus here. Provider model catalogs change too
  * quickly, and stale model lists make setup feel broken. AgentSettings asks the

@@ -53,6 +53,8 @@ Raw Context → Signals → Memory → Handoffs / Writeback
 
 The goal is simple: let agents observe customer work, understand what is true now, coordinate the next step, and safely prepare or execute revenue-system updates.
 
+Before any agent acts on a customer, CRMy can tell it what is true, what is stale, what is inferred, what is approved, what system owns the record, what action is allowed, and what proof/audit trail will exist afterward.
+
 CRMy is not a CRM replacement, a generic chatbot memory store, or a workflow toy. It is the operational context and policy boundary for GTM agents.
 
 ---
@@ -167,8 +169,9 @@ docker compose -f docker/docker-compose.yml up -d
 With demo data loaded, try these to see CRMy in action:
 
 ```bash
-npx @crmy/cli briefing contact:d0000000-0000-4000-c000-000000000101       # Maya Patel at Northstar Labs
-npx @crmy/cli briefing account:d0000000-0000-4000-b000-000000000101       # Northstar Labs account context
+npx @crmy/cli briefing "contact:Maya Patel"                               # Contact briefing
+npx @crmy/cli briefing "account:Northstar Labs"                           # Account briefing
+npx @crmy/cli context lineage --subject "account:Northstar Labs"          # Source-to-action trail
 npx @crmy/cli context raw-sources                                         # Raw Context processing receipts
 npx @crmy/cli context signals                                             # Evidence-backed Signals that need attention
 npx @crmy/cli hitl list                                                   # Pending governed Handoff
@@ -182,6 +185,17 @@ What you should see:
 4. A Handoff showing how uncertain or sensitive action routes to human review.
 
 Open `http://localhost:3000/app` and follow the same flow in the web UI: **Raw Context → Signals → Memory → Handoffs**. This is the fastest way to understand how CRMy turns messy customer context into trusted GTM action.
+
+For role-scoped QA, demo data also creates sample users:
+
+```text
+Admin   sample.admin@crmy.local / crmy-demo-123
+Manager sample.manager@crmy.local / crmy-demo-123
+Rep     sample.rep@crmy.local / crmy-demo-123
+Peer    sample.peer@crmy.local / crmy-demo-123
+```
+
+The CLI accepts friendly record references for customer records, so you usually do not need to copy IDs. Use `account:Northstar Labs`, `contact:Maya Patel`, `opportunity:Agent Context Rollout`, or `use_case:Production Rollout`; CRMy resolves the visible record first and asks you to disambiguate if a name is not unique. IDs are still used for system artifacts such as Handoffs, raw-source receipts, sync runs, and writeback requests.
 
 ### Connect via MCP
 
@@ -221,7 +235,9 @@ Add to `.cursor/mcp.json` or equivalent:
 }
 ```
 
-Once connected, your agent has access to scoped MCP tools for briefings, context, revenue objects, assignments, HITL approvals, workflows, messaging, and operations. Local stdio MCP uses the `.crmy.json` written by `init`; remote HTTP MCP uses scoped API keys.
+Once connected, your agent has access to scoped MCP tools for briefings, context, revenue objects, record draft previews, customer email drafting, assignments, HITL approvals, workflows, messaging, and operations. Local stdio MCP uses the `.crmy.json` written by `init`; remote HTTP MCP uses scoped API keys.
+
+MCP is the complete agent-facing surface. The CLI is intentionally curated for setup, demos, Raw Context ingestion, activity/email review, systems, workflows, and operational QA. UI/REST remain the right home for admin setup wizards such as mailbox/calendar OAuth and provider configuration.
 
 ---
 
@@ -266,12 +282,12 @@ Automation safety defaults: external-origin events can trigger normal workflows,
 
 Via MCP (natural language):
 
-> Get me a full briefing on contact `<id>` before I reach out.
+> Get me a full briefing on Maya Patel before I reach out.
 
 Via CLI:
 
 ```bash
-npx @crmy/cli briefing contact:<id>
+npx @crmy/cli briefing "contact:Maya Patel"
 ```
 
 Response:
@@ -279,7 +295,7 @@ Response:
 ```json
 {
   "record": { "first_name": "Sarah", "lifecycle_stage": "prospect", ... },
-  "related": { "account": { "name": "Acme Corp", "health_score": 72, ... } },
+  "related": { "account": { "name": "Northstar Labs", "health_score": 82, ... } },
   "activities": [ ... ],
   "open_assignments": [ ... ],
   "context": {
@@ -348,23 +364,38 @@ Memory has a lifecycle because GTM facts decay. CRMy keeps Memory **Current**, f
 
 ### Semantic search (optional)
 
-Enable pgvector for natural-language search across all context entries:
+Enable semantic retrieval when you want CRMy to find related Memory and Signals by meaning, not only matching words. CRMy still works without it; search falls back to keyword mode.
+
+There are three parts:
 
 ```bash
-# During crmy init — the wizard asks "Enable semantic search?"
-# Or manually:
+# 1. Use Postgres with the pgvector extension available.
+# Local development can use pgvector/pgvector:pg16.
+
+# 2. Opt in before running migrations.
 ENABLE_PGVECTOR=true crmy migrate run
 ```
 
-Requires PostgreSQL with pgvector (Supabase, Neon, RDS with pgvector, or `pgvector/pgvector:pg16` Docker image). Configure an embedding provider (OpenAI, or any OpenAI-compatible API):
+Requires PostgreSQL with pgvector (Supabase, Neon, RDS with pgvector, or the `pgvector/pgvector:pg16` Docker image). For hosted Postgres, enable the vector extension in the database first, usually with:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+Then configure an embedding provider in the CRMy server environment. This is separate from **Model Settings**, which controls the Workspace Agent. Anthropic does not provide embeddings, so use OpenAI, OpenRouter, Ollama, or another OpenAI-compatible embeddings endpoint:
 
 ```env
 EMBEDDING_PROVIDER=openai
 EMBEDDING_API_KEY=sk-...
 EMBEDDING_MODEL=text-embedding-3-small
+# Optional for custom/OpenAI-compatible providers:
+# EMBEDDING_BASE_URL=https://...
+# EMBEDDING_DIMENSIONS=1536
 ```
 
-Then backfill existing entries:
+Restart the CRMy server after changing environment variables. New Signals and Memory are embedded automatically when possible; use the backfill tool for existing entries:
+
+In the app, admins can check readiness at **Settings → Database → Semantic retrieval setup**. The page shows whether the server has opted in, whether the pgvector migration is ready, and whether an embedding provider is configured.
 
 ```bash
 # Via MCP
@@ -397,7 +428,8 @@ The MCP server uses **scoped exposure**:
 | Category | Tools |
 |---|---|
 | **Briefing** | `briefing_get` — with `context_radius` (direct/adjacent/account_wide), `token_budget`, and `dropped_entries` in response |
-| **Context** | `context_ingest_auto`, `context_ingest`, `context_raw_source_list`, `context_raw_source_get`, `context_add`, `context_get`, `context_list`, `context_lineage_get`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_promote`, `context_signal_handoff`, `context_signal_group_reject`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_review_batch` ★, `context_stale`, `context_bulk_mark_stale` ★, `context_diff`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
+| **Context** | `context_ingest_auto`, `context_ingest`, `context_raw_source_list`, `context_raw_source_get`, `context_raw_source_reprocess`, `context_add`, `context_get`, `context_list`, `context_lineage_get`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_promote`, `context_signal_handoff`, `context_signal_group_reject`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_review_batch` ★, `context_stale`, `context_bulk_mark_stale` ★, `context_diff`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
+| **Record Drafting** | `record_draft_preview` — draft Account, Contact, Opportunity, Use Case, Activity, or Assignment fields from natural language without writing |
 | **Actors** | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise`, `agent_register_specialization`, `agent_find_specialist`, `agent_set_availability` |
 | **Assignments** | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | **HITL** | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve`, `hitl_rule_create`, `hitl_rule_list`, `hitl_rule_delete` |
@@ -413,7 +445,7 @@ The MCP server uses **scoped exposure**:
 | Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list`, `workflow_test`, `workflow_clone`, `workflow_trigger`, `workflow_run_replay`, `workflow_template_list` ★ |
 | Systems of Record | `sor_system_create`, `sor_system_update`, `sor_system_delete`, `sor_system_list`, `sor_system_get`, `sor_system_test`, `sor_discover`, `sor_mapping_upsert`, `sor_mapping_delete`, `sor_mapping_list`, `sor_sync_run`, `sor_sync_status`, `sor_conflict_list`, `sor_conflict_resolve`, `sor_writeback_preview`, `sor_writeback_request`, `sor_writeback_review`, `sor_writeback_execute`, `sor_writeback_status` |
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
-| Emails | `email_create`, `email_get`, `email_search`, `email_provider_set`, `email_provider_get` |
+| Emails | `email_create`, `email_get`, `email_search`, `email_draft_preview`, `email_draft_save`, `mailbox_connection_list`, `email_message_search`, `email_message_get`, `email_message_process`, `email_message_ignore`, `email_provider_set`, `email_provider_get` |
 | Sequences | `sequence_create`, `sequence_get`, `sequence_update`, `sequence_delete`, `sequence_list`, `sequence_enroll`, `sequence_unenroll`, `sequence_pause`, `sequence_resume`, `sequence_advance`, `sequence_enrollment_get`, `sequence_enrollment_context`, `sequence_enrollment_list`, `sequence_draft_step`, `sequence_analytics`, `sequence_clone` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
 | Operations | `ops_status_get`, `ops_job_recover`, `ops_data_quality_get`, `ops_data_quality_repair`, `ops_audit_get`, `ops_privacy_export`, `ops_pii_redact`, `ops_privacy_delete`, `ops_retention_apply` ★ |
@@ -444,28 +476,37 @@ Authentication
 Contacts
   crmy contacts list [--q <query>]       List contacts
   crmy contacts create                   Interactive create
-  crmy contacts get <id>                 Get contact details
-  crmy contacts delete <id>              Delete (admin/owner only)
+  crmy contacts get <name|id>            Get contact details
+  crmy contacts delete <name|id>         Delete (admin/owner only)
 
 Accounts
   crmy accounts list                     List accounts
   crmy accounts create                   Interactive create
-  crmy accounts get <id>                 Get account + contacts + opps
-  crmy accounts delete <id>              Delete (admin/owner only)
+  crmy accounts get <name|id>            Get account + contacts + opps
+  crmy accounts delete <name|id>         Delete (admin/owner only)
 
 Opportunities
   crmy opps list [--stage <s>]           List opportunities
-  crmy opps get <id>                     Get opportunity details
+  crmy opps get <name|id>                Get opportunity details
   crmy opps create                       Interactive create
-  crmy opps advance <id> <stage>         Advance opportunity stage
-  crmy opps delete <id>                  Delete (admin/owner only)
+  crmy opps advance <name|id> <stage>    Advance opportunity stage
+  crmy opps delete <name|id>             Delete (admin/owner only)
 
 Use Cases
   crmy use-cases list                    List use cases
-  crmy use-cases get <id>                Get use case details
+  crmy use-cases get <name|id>           Get use case details
   crmy use-cases create                  Interactive create
   crmy use-cases summary                 Use case summary
-  crmy use-cases delete <id>             Delete (admin/owner only)
+  crmy use-cases delete <name|id>        Delete (admin/owner only)
+
+Customer Activity
+  crmy activities list                   List logged activities
+  crmy activities meetings               List customer meetings from calendar sync
+  crmy activities meeting <id>           Get meeting details and artifacts
+  crmy activities add-context <id>       Add transcript/notes to a meeting
+  crmy activities process <id>           Process meeting context
+  crmy activities connections            List calendar connections
+  crmy activities classifications        List meeting classifications
 
 Actors
   crmy actors list [--type <t>]          List actors (humans & agents)
@@ -502,22 +543,25 @@ Assignments
 Context
   crmy context ingest [--file <path>]    Add Raw Context and extract Signals/Memory
   crmy context raw-sources               List Raw Context processing receipts
+  crmy context reprocess-source <id>     Reprocess a Raw Context source
+  crmy context lineage                   Trace source-to-Memory/action lineage
   crmy context signals                   List Signals that need review
   crmy context signal-groups             Advanced: inspect combined Signal evidence
   crmy context promote <id>              Promote a Signal to Memory
   crmy context reject <id>               Reject a Signal
   crmy context promote-group <id>        Promote a corroborated Signal to Memory
   crmy context handoff-group <id>        Send a Signal to Handoff for review
-  crmy context list [--subject <type:id>]
+  crmy context list [--subject <type:name|type:id>]
   crmy context add                       Advanced direct Memory/Signal write
   crmy context get <id>                  Get context entry
   crmy context supersede <id>            Supersede with updated content
   crmy context search <query>            Full-text search across context
+  crmy context semantic-search <query>   Semantic search when embeddings are ready
   crmy context review <id>              Mark entry as still accurate
   crmy context stale                     List stale entries needing review
 
 Briefing
-  crmy briefing <type:UUID>              Get a full briefing for an object
+  crmy briefing <type:name|type:id>      Get a full briefing for an object
 
 HITL
   crmy hitl list                         Pending HITL requests
@@ -528,8 +572,22 @@ Workflows
   crmy workflows list                    List automation workflows
   crmy workflows get <id>                Get workflow + recent runs
   crmy workflows create                  Interactive create
+  crmy workflows update <id>             Update workflow metadata/active state
+  crmy workflows test <id>               Dry-run a workflow
+  crmy workflows clone <id>              Clone a workflow
+  crmy workflows trigger <id>            Trigger a workflow manually
   crmy workflows delete <id>             Delete workflow
   crmy workflows runs <id>               Execution history
+
+Sequences
+  crmy sequences list                    List sequences
+  crmy sequences get <id>                Get sequence details
+  crmy sequences enrollments             List sequence enrollments
+  crmy sequences enroll <id>             Enroll a contact
+  crmy sequences unenroll <id>           Unenroll a contact
+  crmy sequences pause <id>              Pause a sequence
+  crmy sequences resume <id>             Resume a sequence
+  crmy sequences analytics <id>          Sequence analytics
 
 Webhooks
   crmy webhooks list                     List webhook endpoints
@@ -540,7 +598,14 @@ Webhooks
 Emails
   crmy emails list                       List outbound emails
   crmy emails get <id>                   Get email details
-  crmy emails create                     Compose email (draft or send)
+  crmy emails create                     Draft a governed follow-up email
+  crmy emails messages                   List customer email messages
+  crmy emails message <id>               Get a customer email message
+  crmy emails process <id>               Process an email as Raw Context
+  crmy emails ignore-message <id>        Ignore a customer email message
+  crmy emails draft-preview              Generate an agentic draft preview
+  crmy emails save-draft                 Save or route a reviewed draft
+  crmy emails connections                List mailbox connections
 
 Other
   crmy pipeline                          Pipeline summary
@@ -566,9 +631,9 @@ Available at `/app` when the server is running. The web UI provides full CRUD fo
 
 | Section | Pages |
 |---------|-------|
-| **Agent Hub** | Overview, Workspace Agent, Context, Automations, Handoffs |
-| **Customer State** | Contacts, Accounts, Opportunities, Use Cases, Activities, Emails |
-| **System** | Settings (Profile, Appearance, API Keys, Webhooks, Custom Fields, Actors, Registries, Workspace Agent, Database, Systems of Record) |
+| **Operating Layer** | Overview, Workspace Agent, Context, Automations, Handoffs |
+| **Customer Records** | Contacts, Accounts, Opportunities, Use Cases, Customer Activity, Customer Email |
+| **Admin & Setup** | Settings, Reliability, Audit Log, Model Settings, Systems of Record, Database, Registries, Actors, API Keys |
 
 **Key features:**
 - **Overview** — command-center flow showing Raw Context → Signals → Memory → Handoffs, plus the next items that need attention and a Memory Health tab for review work
@@ -576,14 +641,13 @@ Available at `/app` when the server is running. The web UI provides full CRUD fo
 - **Context Graph** — dark canvas visualization showing entity nodes, context clusters, related records, activities, and assignments in a concentric radial layout; sidebar for category filtering; click any node to open a detail Sheet drawer
 - **Context page** — inspect Raw Context, review Signals, browse Current Memory, explore the Context Graph, and trace Memory Lineage; inline keyword/semantic search toggle; semantic fallback to keyword when pgvector is unavailable; **Add Context** flow for pasted notes, transcripts, emails, or files; 15 MB upload guard with clear error
 - **Context import** — paste text or upload a file (PDF, DOCX, TXT, MD); subjects are auto-detected from the document using entity resolution; extracted Raw Context becomes Signals until promoted to Memory
-- **Assignments** — My Queue / Delegated / All tabs with status-based filtering
-- **HITL Approvals** — approve or reject pending agent action requests; sequence step cards show full email preview + enrollment progress with **Approve & Send** / **Decline & Skip** actions
+- **Handoffs** — Needs Attention / Delegated / All tabs for human decisions, assigned work, approvals, and governed action reviews
 - **Workflows** — create event-driven automations; start from 8 built-in GTM templates; per-action log drill-down in run history; variable syntax validated before save; crash-isolated editor sections
 - **Sequences** — email sequence management; enrollment status filters (All / Active / Paused / Completed); Resume button for paused enrollments awaiting HITL approval
-- **Emails** — compose, view, and track outbound emails with approval flow
+- **Customer Email** — connect Gmail, Outlook, or an inbound webhook so customer-facing emails become Raw Context; CRMy filters internal noise, links messages to revenue records, extracts Signals/Memory, and keeps outbound follow-ups governed by approvals
 - **Settings → Registries** — manage custom context types and activity types
 - **Settings → Actors** — view and configure humans, users, self-registered agents, scopes, and API keys
-- **Settings → Workspace Agent** — enable auto-extraction of context from activities; configure provider, model, and capability flags
+- **Settings → Model Settings** — enable the Workspace Agent and configure provider, model, and capability flags
 - **Command palette** — `⌘K` for cross-entity search, quick navigation, and automation shortcuts (New Trigger, New Sequence, Go to Automations)
 
 **First-run setup (Docker):** There are no default credentials. After `docker compose up`, create your first admin account using one of these methods:
@@ -692,9 +756,12 @@ docs/roadmap-0.8-1.0.md    Enterprise systems-of-record roadmap
 | `CRMY_ADMIN_PASSWORD` | No | — | Admin password (min 12 chars) |
 | `CRMY_ALLOW_PUBLIC_REGISTRATION` | No | — | Set `true` to keep unauthenticated registration open after the first user exists |
 | `CRMY_SEED_DEMO` | No | — | Set `true` to seed demo data on startup |
-| `ENABLE_PGVECTOR` | No | — | Set `true` to enable semantic search migration |
-| `EMBEDDING_PROVIDER` | No | — | Embedding service (`openai` or compatible) |
-| `EMBEDDING_API_KEY` | No | — | API key for embedding provider |
+| `ENABLE_PGVECTOR` | No | — | Set `true` before migrations to enable pgvector-backed semantic retrieval |
+| `EMBEDDING_PROVIDER` | No | — | Embedding service for semantic retrieval (`openai`, `openrouter`, `ollama`, or `custom`) |
+| `EMBEDDING_API_KEY` | No | — | API key for embedding provider; not required for local Ollama |
+| `EMBEDDING_MODEL` | No | provider default | Embedding model, e.g. `text-embedding-3-small` |
+| `EMBEDDING_BASE_URL` | No | provider default | Override for custom/OpenAI-compatible embedding endpoints |
+| `EMBEDDING_DIMENSIONS` | No | `1536` | Vector dimensions; must match the model and migration column |
 | `NODE_ENV` | No | — | Set `production` to enable security hardening |
 | `LLM_TIMEOUT_MS` | No | `30000` | Hard timeout (ms) for general background LLM calls |
 | `CONTEXT_EXTRACTION_LLM_TIMEOUT_MS` | No | `90000` | Hard timeout (ms) for Raw Context → Signals extraction |
@@ -900,7 +967,7 @@ context_ingest_auto {
 → { subjects_resolved: [...], entries_created: 3 }
 ```
 
-- **Auto-extract from activities** — configurable in Settings → Workspace Agent (`auto_extract_context` toggle). When enabled, the extraction pipeline runs automatically on every new activity.
+- **Auto-extract from activities** — configurable in Model Settings (`auto_extract_context` toggle). When enabled, the extraction pipeline runs automatically on every new activity.
 
 #### Context Graph — full redesign
 
@@ -928,7 +995,7 @@ The entity context graph (`/contacts/:id/graph`, `/accounts/:id/graph`) is now a
 - **`crmy init` wizard** — auto-creates database, offers pgvector opt-in, seeds demo data, shows API key
 - **`crmy init --yes`** — fully non-interactive setup for CI/Docker
 - **`crmy doctor`** — 8-point diagnostic (Node version, DB, migrations, users, pgvector, port, JWT)
-- **`crmy seed-demo`** — lifecycle demo data with stable UUIDs (Raw Context, Signals, Memory, Handoff, account, contact, opportunity, use case, activity, assignment)
+- **`crmy seed-demo`** — lifecycle demo data with stable records and receipts (Raw Context, Signals, Memory, Handoff, account, contact, opportunity, use case, activity, assignment)
 - **Per-migration progress** — spinner updates per file during migrations
 - **Node.js version gate** — clear error on Node < 20 instead of cryptic ESM failures
 

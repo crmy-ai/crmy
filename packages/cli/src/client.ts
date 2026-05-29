@@ -15,6 +15,7 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   contact_get: { method: 'GET', path: (i) => `/api/v1/contacts/${i.id}` },
   contact_search: { method: 'GET', path: (i) => `/api/v1/contacts?q=${encodeURIComponent((i.query as string) ?? '')}&limit=${i.limit ?? 20}${i.lifecycle_stage ? `&stage=${i.lifecycle_stage}` : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
   contact_update: { method: 'PATCH', path: (i) => `/api/v1/contacts/${i.id}` },
+  contact_delete: { method: 'DELETE', path: (i) => `/api/v1/contacts/${i.id}` },
   contact_set_lifecycle: { method: 'PATCH', path: (i) => `/api/v1/contacts/${i.id}` },
   contact_log_activity: { method: 'POST', path: () => '/api/v1/activities' },
   contact_get_timeline: { method: 'GET', path: (i) => `/api/v1/contacts/${i.id}/timeline` },
@@ -24,6 +25,7 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   account_get: { method: 'GET', path: (i) => `/api/v1/accounts/${i.id}` },
   account_search: { method: 'GET', path: (i) => `/api/v1/accounts?q=${encodeURIComponent((i.query as string) ?? '')}&limit=${i.limit ?? 20}` },
   account_update: { method: 'PATCH', path: (i) => `/api/v1/accounts/${i.id}` },
+  account_delete: { method: 'DELETE', path: (i) => `/api/v1/accounts/${i.id}` },
 
   // Opportunities
   opportunity_create: { method: 'POST', path: () => '/api/v1/opportunities' },
@@ -31,11 +33,12 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   opportunity_search: { method: 'GET', path: (i) => `/api/v1/opportunities?q=${encodeURIComponent((i.query as string) ?? '')}&limit=${i.limit ?? 20}${i.stage ? `&stage=${i.stage}` : ''}` },
   opportunity_advance_stage: { method: 'PATCH', path: (i) => `/api/v1/opportunities/${i.id}` },
   opportunity_update: { method: 'PATCH', path: (i) => `/api/v1/opportunities/${i.id}` },
+  opportunity_delete: { method: 'DELETE', path: (i) => `/api/v1/opportunities/${i.id}` },
 
   // Activities
   activity_create: { method: 'POST', path: () => '/api/v1/activities' },
-  activity_get: { method: 'GET', path: (i) => `/api/v1/activities?limit=${i.limit ?? 20}` },
-  activity_search: { method: 'GET', path: (i) => `/api/v1/activities?limit=${i.limit ?? 20}` },
+  activity_get: { method: 'GET', path: (i) => `/api/v1/activities/${i.id}` },
+  activity_search: { method: 'GET', path: (i) => `/api/v1/activities?limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}${i.type ? `&type=${i.type}` : ''}` },
 
   // Use Cases
   use_case_create: { method: 'POST', path: () => '/api/v1/use-cases' },
@@ -50,7 +53,7 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   use_case_unlink_contact: { method: 'DELETE', path: (i) => `/api/v1/use-cases/${i.use_case_id ?? i.id}/contacts/${i.contact_id}` },
   use_case_list_contacts: { method: 'GET', path: (i) => `/api/v1/use-cases/${i.use_case_id ?? i.id}/contacts` },
   use_case_get_timeline: { method: 'GET', path: (i) => `/api/v1/use-cases/${i.id}/timeline` },
-  use_case_summary: { method: 'GET', path: (i) => `/api/v1/analytics/use-cases?group_by=${i.group_by ?? 'stage'}` },
+  use_case_summary: { method: 'GET', path: (i) => `/api/v1/analytics/use-cases?group_by=${i.group_by ?? 'stage'}${i.account_id ? `&account_id=${i.account_id}` : ''}` },
 
   // Analytics
   pipeline_summary: { method: 'GET', path: (i) => `/api/v1/analytics/pipeline${i.owner_id ? `?owner_id=${i.owner_id}` : ''}` },
@@ -60,7 +63,7 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   hitl_list_pending: { method: 'GET', path: () => '/api/v1/hitl' },
   hitl_check_status: { method: 'GET', path: (i) => `/api/v1/hitl/${i.id}` },
   hitl_submit_request: { method: 'POST', path: () => '/api/v1/hitl' },
-  hitl_resolve: { method: 'POST', path: (i) => `/api/v1/hitl/${i.id}/resolve` },
+  hitl_resolve: { method: 'POST', path: (i) => `/api/v1/hitl/${i.id ?? i.request_id}/resolve` },
 
   // Webhooks
   webhook_create: { method: 'POST', path: () => '/api/v1/webhooks' },
@@ -74,6 +77,13 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   email_create: { method: 'POST', path: () => '/api/v1/emails' },
   email_get: { method: 'GET', path: (i) => `/api/v1/emails/${i.id}` },
   email_search: { method: 'GET', path: (i) => `/api/v1/emails?limit=${i.limit ?? 20}` },
+  email_draft_preview: { method: 'POST', path: () => '/api/v1/emails/draft-preview' },
+  email_draft_save: { method: 'POST', path: () => '/api/v1/emails/drafts' },
+  mailbox_connection_list: { method: 'GET', path: () => '/api/v1/mailbox/connections' },
+  email_message_search: { method: 'GET', path: (i) => `/api/v1/email-messages?view=${i.view ?? 'customer'}&limit=${i.limit ?? 20}${i.q ? `&q=${encodeURIComponent(i.q as string)}` : ''}${i.include_internal ? '&include_internal=true' : ''}` },
+  email_message_get: { method: 'GET', path: (i) => `/api/v1/email-messages/${i.id}` },
+  email_message_process: { method: 'POST', path: (i) => `/api/v1/email-messages/${i.id}/process` },
+  email_message_ignore: { method: 'POST', path: (i) => `/api/v1/email-messages/${i.id}/ignore` },
 
   // Custom Fields
   custom_field_create: { method: 'POST', path: () => '/api/v1/custom-fields' },
@@ -84,8 +94,12 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   workflow_create: { method: 'POST', path: () => '/api/v1/workflows' },
   workflow_get: { method: 'GET', path: (i) => `/api/v1/workflows/${i.id}` },
   workflow_list: { method: 'GET', path: () => '/api/v1/workflows' },
+  workflow_update: { method: 'PATCH', path: (i) => `/api/v1/workflows/${i.id}`, bodyTransform: (i) => (i.patch as Record<string, unknown>) ?? i },
   workflow_delete: { method: 'DELETE', path: (i) => `/api/v1/workflows/${i.id}` },
   workflow_run_list: { method: 'GET', path: (i) => `/api/v1/workflows/${i.workflow_id ?? i.id}/runs` },
+  workflow_test: { method: 'POST', path: (i) => `/api/v1/workflows/${i.id}/test` },
+  workflow_clone: { method: 'POST', path: (i) => `/api/v1/workflows/${i.id}/clone` },
+  workflow_trigger: { method: 'POST', path: (i) => `/api/v1/workflows/${i.id}/trigger` },
 
   // Systems of Record
   sor_system_create: { method: 'POST', path: () => '/api/v1/systems-of-record' },
@@ -113,6 +127,8 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
 
   // Search
   search: { method: 'GET', path: (i) => `/api/v1/search?q=${encodeURIComponent((i.query as string) ?? '')}` },
+  crm_search: { method: 'GET', path: (i) => `/api/v1/search?q=${encodeURIComponent((i.query as string) ?? '')}&limit=${i.limit ?? 10}` },
+  entity_resolve: { method: 'POST', path: () => '/api/v1/resolve' },
 
   // Meta
   schema_get: { method: 'GET', path: () => '/health' },
@@ -148,11 +164,42 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   context_signal_group_reject: { method: 'POST', path: (i) => `/api/v1/context/signal-groups/${i.id}/reject` },
   context_signal_handoff: { method: 'POST', path: (i) => `/api/v1/context/signal-groups/${i.id}/handoff` },
   context_supersede: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/supersede` },
-  context_search: { method: 'GET', path: (i) => `/api/v1/context/search?q=${encodeURIComponent(i.query as string)}&limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.context_type ? `&context_type=${i.context_type}` : ''}${i.tag ? `&tag=${i.tag}` : ''}${i.current_only === false ? '&current_only=false' : ''}` },
+  context_search: { method: 'GET', path: (i) => `/api/v1/context/search?q=${encodeURIComponent(i.query as string)}&limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}${i.context_type ? `&context_type=${i.context_type}` : ''}${i.tag ? `&tag=${i.tag}` : ''}${i.current_only === false ? '&current_only=false' : ''}` },
   context_review: { method: 'POST', path: (i) => `/api/v1/context/${i.id}/review` },
   context_stale: { method: 'GET', path: (i) => `/api/v1/context/stale?limit=${i.limit ?? 20}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}` },
   context_ingest: { method: 'POST', path: () => '/api/v1/context/ingest' },
   context_ingest_auto: { method: 'POST', path: () => '/api/v1/context/ingest-auto' },
+  context_lineage_get: { method: 'GET', path: (i) => `/api/v1/context/lineage?${new URLSearchParams(Object.entries({
+    subject_type: i.subject_type,
+    subject_id: i.subject_id,
+    context_entry_id: i.context_entry_id,
+    signal_group_id: i.signal_group_id,
+    raw_context_source_id: i.raw_context_source_id,
+  }).filter(([, value]) => Boolean(value)) as [string, string][]).toString()}` },
+  context_semantic_search: { method: 'GET', path: (i) => `/api/v1/context/semantic-search?q=${encodeURIComponent((i.query as string) ?? '')}&limit=${i.limit ?? 10}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}` },
+  context_raw_source_reprocess: { method: 'POST', path: (i) => `/api/v1/context/raw-sources/${i.id}/reprocess` },
+
+  // Calendar / Customer Activity
+  calendar_connection_list: { method: 'GET', path: () => '/api/v1/calendar/connections' },
+  calendar_event_search: { method: 'GET', path: (i) => `/api/v1/calendar-events?limit=${i.limit ?? 20}${i.q ? `&q=${encodeURIComponent(i.q as string)}` : ''}${i.tab ? `&tab=${i.tab}` : ''}${i.classification ? `&classification=${i.classification}` : ''}${i.validation_status ? `&validation_status=${i.validation_status}` : ''}${i.processing_status ? `&processing_status=${i.processing_status}` : ''}${i.include_internal ? '&include_internal=true' : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
+  calendar_event_get: { method: 'GET', path: (i) => `/api/v1/calendar-events/${i.id}` },
+  calendar_event_process: { method: 'POST', path: (i) => `/api/v1/calendar-events/${i.id}/process` },
+  calendar_event_add_context: { method: 'POST', path: (i) => `/api/v1/calendar-events/${i.id}/artifacts` },
+  meeting_classification_list: { method: 'GET', path: (i) => `/api/v1/meeting-classifications${i.include_disabled ? '?include_disabled=true' : ''}` },
+
+  // Record Drafts
+  record_draft_preview: { method: 'POST', path: () => '/api/v1/agent/extract/record' },
+
+  // Sequences
+  sequence_list: { method: 'GET', path: (i) => `/api/v1/sequences?limit=${i.limit ?? 20}${i.is_active !== undefined ? `&is_active=${i.is_active}` : ''}${i.tags ? `&tags=${(i.tags as string[]).join(',')}` : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
+  sequence_get: { method: 'GET', path: (i) => `/api/v1/sequences/${i.id}` },
+  sequence_update: { method: 'PATCH', path: (i) => `/api/v1/sequences/${i.id}`, bodyTransform: (i) => (i.patch as Record<string, unknown>) ?? i },
+  sequence_enrollment_list: { method: 'GET', path: (i) => `/api/v1/sequences/enrollments?limit=${i.limit ?? 50}${i.sequence_id ? `&sequence_id=${i.sequence_id}` : ''}${i.contact_id ? `&contact_id=${i.contact_id}` : ''}${i.status ? `&status=${i.status}` : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
+  sequence_enroll: { method: 'POST', path: (i) => i.sequence_id ? `/api/v1/sequences/${i.sequence_id}/enroll` : '/api/v1/sequences/enroll' },
+  sequence_unenroll: { method: 'POST', path: (i) => `/api/v1/sequences/${i.sequence_id ?? i.id}/unenroll` },
+  sequence_pause: { method: 'PATCH', path: (i) => `/api/v1/sequences/${i.id}`, bodyTransform: () => ({ is_active: false }) },
+  sequence_resume: { method: 'PATCH', path: (i) => `/api/v1/sequences/${i.id}`, bodyTransform: () => ({ is_active: true }) },
+  sequence_analytics: { method: 'GET', path: (i) => `/api/v1/sequences/${i.sequence_id ?? i.id}/analytics?period_type=${i.period_type ?? 'day'}&limit=${i.limit ?? 30}` },
 
   // Activity Type Registry
   activity_type_list: { method: 'GET', path: (i) => `/api/v1/activity-types${i.category ? `?category=${i.category}` : ''}` },
@@ -198,8 +245,10 @@ function createHttpClient(serverUrl: string, token: string): CliClient {
       const fetchOpts: RequestInit = { method, headers };
       if (method === 'POST' || method === 'PATCH' || method === 'PUT') {
         // Strip path params from body
-        const body = { ...input };
+        const body = mapping.bodyTransform ? mapping.bodyTransform(input) : { ...input };
         delete body.id;
+        delete body.sequence_id;
+        delete body.request_id;
         fetchOpts.body = JSON.stringify(body);
       }
 

@@ -12,13 +12,21 @@ import { callLLM } from './providers/llm.js';
 import { getToolsForActor } from '../mcp/server.js';
 import { getAllTools } from '../mcp/server.js';
 import { enforceToolScopes, getToolScopeRequirements } from '../auth/scopes.js';
-import { assertSubjectAccess } from '../services/access-control.js';
+import { assertSubjectAccess, resolveOwnerFilter } from '../services/access-control.js';
+import { entityResolve } from '../services/entity-resolve.js';
+import * as accountRepo from '../db/repos/accounts.js';
+import * as contactRepo from '../db/repos/contacts.js';
+import * as oppRepo from '../db/repos/opportunities.js';
+import * as ucRepo from '../db/repos/use-cases.js';
+import { listCustomFields } from '../db/repos/custom-fields.js';
+import { checkAccountDuplicate, checkContactDuplicate, checkOpportunityDuplicate, type DuplicateCheckResult } from '../services/deduplication.js';
 import { extractTextFromBuffer } from '../lib/file-extract.js';
 import {
   cancelRunningAgentTurn,
   startAgentTurnRunner,
 } from './turn-runner.js';
 import type { AgentSessionAttachment, AgentTurn, AgentTurnEventRow } from './types.js';
+import { previewRecordDraft, recordDraftPreviewSchema } from '../services/record-drafts.js';
 
 function getActor(req: Request): ActorContext {
   return req.actor!;
@@ -399,6 +407,10 @@ function sanitizeActivityDraft(input: Record<string, unknown>): Record<string, u
   if (typeof input.outcome === 'string' && input.outcome.trim()) out.outcome = input.outcome.trim().replace(/\s+/g, '_').slice(0, 80);
   if (typeof input.direction === 'string' && ['inbound', 'outbound'].includes(input.direction)) out.direction = input.direction;
   if (typeof input.occurred_at === 'string' && !Number.isNaN(Date.parse(input.occurred_at))) out.occurred_at = new Date(input.occurred_at).toISOString();
+  for (const key of ['account_name', 'contact_name', 'opportunity_name', 'use_case_name']) {
+    const value = readString(input, key, 240);
+    if (value) out[key] = value;
+  }
 
   const detail = input.detail && typeof input.detail === 'object' && !Array.isArray(input.detail)
     ? input.detail as Record<string, unknown>
@@ -413,12 +425,94 @@ function sanitizeActivityDraft(input: Record<string, unknown>): Record<string, u
 }
 
 type QuickAddRecordType = 'contact' | 'account' | 'opportunity' | 'use-case' | 'activity' | 'assignment';
+type QuickAddSubjectType = 'account' | 'contact' | 'opportunity' | 'use_case' | 'use-case';
+
+type QuickAddLinkedRecord = {
+  type: 'account' | 'contact' | 'opportunity' | 'use_case';
+  id: string;
+  name: string;
+  detail?: string | null;
+};
+
+type QuickAddFieldRow = {
+  field: string;
+  label: string;
+  value: unknown;
+  source: 'user' | 'model_knowledge' | 'matched_record' | 'provider' | 'required';
+  source_label: string;
+  status: 'ready' | 'missing' | 'linked' | 'optional';
+  required: boolean;
+  confidence_label?: string;
+  requires_confirmation?: boolean;
+};
+
+type QuickAddEnrichmentSuggestion = {
+  field: string;
+  label: string;
+  value: unknown;
+  source: 'model_knowledge' | 'provider';
+  source_label: string;
+  confidence_label: string;
+  requires_confirmation: boolean;
+};
+
+type QuickAddParentContext = {
+  parent_subject_type?: string;
+  parent_subject_id?: string;
+  parent_subject_name?: string;
+  defaults?: Record<string, unknown>;
+};
+
+const QUICK_ADD_REQUIRED_FIELDS: Record<QuickAddRecordType, string[]> = {
+  account: ['name'],
+  contact: ['first_name'],
+  opportunity: ['name'],
+  'use-case': ['name', 'account_id'],
+  activity: ['type', 'subject'],
+  assignment: ['title', 'assignment_type', 'assigned_to'],
+};
+
+const QUICK_ADD_FIELD_LABELS: Record<string, string> = {
+  account_id: 'Account',
+  contact_id: 'Contact',
+  opportunity_id: 'Opportunity',
+  use_case_id: 'Use Case',
+  first_name: 'First Name',
+  last_name: 'Last Name',
+  company_name: 'Account Name',
+  lifecycle_stage: 'Lifecycle Stage',
+  close_date: 'Close Date',
+  occurred_at: 'Occurred At',
+  subject_type: 'Linked Record Type',
+  subject_id: 'Linked Record',
+  attributed_arr: 'Attributed ARR',
+  target_prod_date: 'Target Production Date',
+  annual_revenue: 'Annual Revenue',
+  employee_count: 'Employee Count',
+  assignment_type: 'Assignment Type',
+  assigned_to: 'Assigned To',
+};
+
+function quickAddLabel(field: string): string {
+  return QUICK_ADD_FIELD_LABELS[field] ?? field.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function normalizeQuickAddSubjectType(value?: string | null): QuickAddSubjectType | undefined {
+  if (!value) return undefined;
+  if (value === 'use_case') return 'use-case';
+  if (['account', 'contact', 'opportunity', 'use-case'].includes(value)) return value as QuickAddSubjectType;
+  return undefined;
+}
 
 function readString(input: Record<string, unknown>, key: string, max = 500): string | undefined {
   const value = input[key];
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed.slice(0, max) : undefined;
+}
+
+function deleteKeys(input: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) delete input[key];
 }
 
 function readNumber(input: Record<string, unknown>, key: string): number | undefined {
@@ -439,6 +533,17 @@ function readEnum<T extends string>(input: Record<string, unknown>, key: string,
   const value = readString(input, key, 80)?.toLowerCase().replace(/\s+/g, '_') as T | undefined;
   if (value && allowed.includes(value)) return value;
   return fallback;
+}
+
+function readStringArray(input: Record<string, unknown>, key: string, maxItems = 10): string[] | undefined {
+  const value = input[key];
+  if (!Array.isArray(value)) return undefined;
+  const cleaned = value
+    .filter((item): item is string => typeof item === 'string')
+    .map(item => item.trim())
+    .filter(Boolean)
+    .slice(0, maxItems);
+  return cleaned.length ? cleaned : undefined;
 }
 
 function sanitizeRecordDraft(type: QuickAddRecordType, input: Record<string, unknown>): Record<string, unknown> {
@@ -478,6 +583,10 @@ function sanitizeRecordDraft(type: QuickAddRecordType, input: Record<string, unk
     if (domain) out.domain = domain.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
     const website = readString(input, 'website', 300);
     if (website) out.website = /^https?:\/\//i.test(website) ? website : `https://${website}`;
+    const aliases = readStringArray(input, 'aliases');
+    if (aliases) out.aliases = aliases;
+    const tags = readStringArray(input, 'tags');
+    if (tags) out.tags = tags;
     const employeeCount = readNumber(input, 'employee_count');
     if (employeeCount && employeeCount > 0) out.employee_count = Math.round(employeeCount);
     const annualRevenue = readNumber(input, 'annual_revenue');
@@ -488,6 +597,10 @@ function sanitizeRecordDraft(type: QuickAddRecordType, input: Record<string, unk
   if (type === 'opportunity') {
     const name = readString(input, 'name', 240);
     if (name) out.name = name;
+    const accountName = readString(input, 'account_name', 240) ?? readString(input, 'company_name', 240);
+    if (accountName) out.account_name = accountName;
+    const contactName = readString(input, 'contact_name', 180);
+    if (contactName) out.contact_name = contactName;
     const amount = readNumber(input, 'amount');
     if (amount && amount > 0) out.amount = Math.round(amount);
     const stage = readEnum(input, 'stage', ['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost'] as const, 'prospecting');
@@ -502,6 +615,10 @@ function sanitizeRecordDraft(type: QuickAddRecordType, input: Record<string, unk
   if (type === 'use-case') {
     const name = readString(input, 'name', 240);
     if (name) out.name = name;
+    const accountName = readString(input, 'account_name', 240) ?? readString(input, 'company_name', 240);
+    if (accountName) out.account_name = accountName;
+    const opportunityName = readString(input, 'opportunity_name', 240);
+    if (opportunityName) out.opportunity_name = opportunityName;
     const stage = readEnum(input, 'stage', ['discovery', 'poc', 'production', 'scaling', 'sunset'] as const, 'discovery');
     if (stage) out.stage = stage;
     const description = readString(input, 'description', 2000);
@@ -532,11 +649,515 @@ function sanitizeRecordDraft(type: QuickAddRecordType, input: Record<string, unk
   return out;
 }
 
+function isPresent(value: unknown): boolean {
+  return value !== undefined && value !== null && !(typeof value === 'string' && value.trim() === '');
+}
+
+function quickAddObjectTypeForCustomFields(type: QuickAddRecordType): string {
+  return type === 'use-case' ? 'use_case' : type;
+}
+
+async function getQuickAddParentRecord(
+  db: DbPool,
+  actor: ActorContext,
+  parentType?: string,
+  parentId?: string,
+): Promise<QuickAddLinkedRecord | null> {
+  const normalized = normalizeQuickAddSubjectType(parentType);
+  if (!normalized || !parentId) return null;
+  const accessType = normalized === 'use-case' ? 'use_case' : normalized;
+  await assertSubjectAccess(db, actor, accessType, parentId);
+
+  if (normalized === 'account') {
+    const record = await accountRepo.getAccount(db, actor.tenant_id, parentId);
+    return record ? { type: 'account', id: record.id, name: String(record.name), detail: record.industry ?? record.domain ?? null } : null;
+  }
+  if (normalized === 'contact') {
+    const record = await contactRepo.getContact(db, actor.tenant_id, parentId);
+    return record ? {
+      type: 'contact',
+      id: record.id,
+      name: `${record.first_name ?? ''} ${record.last_name ?? ''}`.trim() || record.email || 'Contact',
+      detail: record.account_name ?? record.company_name ?? null,
+    } : null;
+  }
+  if (normalized === 'opportunity') {
+    const record = await oppRepo.getOpportunity(db, actor.tenant_id, parentId);
+    return record ? { type: 'opportunity', id: record.id, name: String(record.name), detail: record.stage ?? null } : null;
+  }
+  const record = await ucRepo.getUseCase(db, actor.tenant_id, parentId);
+  return record ? { type: 'use_case', id: record.id, name: String(record.name), detail: record.stage ?? null } : null;
+}
+
+async function accountScopeForParent(
+  db: DbPool,
+  actor: ActorContext,
+  parentType?: string,
+  parentId?: string,
+): Promise<string | undefined> {
+  const normalized = normalizeQuickAddSubjectType(parentType);
+  if (!normalized || !parentId) return undefined;
+  if (normalized === 'account') return parentId;
+  if (normalized === 'contact') return (await contactRepo.getContact(db, actor.tenant_id, parentId))?.account_id ?? undefined;
+  if (normalized === 'opportunity') return (await oppRepo.getOpportunity(db, actor.tenant_id, parentId))?.account_id ?? undefined;
+  return (await ucRepo.getUseCase(db, actor.tenant_id, parentId))?.account_id ?? undefined;
+}
+
+async function buildQuickAddCreationPacket(
+  db: DbPool,
+  actor: ActorContext,
+  objectType: QuickAddRecordType,
+  context: QuickAddParentContext,
+) {
+  const ownerFilter = await resolveOwnerFilter(db, actor);
+  const ownerIds = 'owner_ids' in ownerFilter ? ownerFilter.owner_ids : undefined;
+  const customFields = await listCustomFields(db, actor.tenant_id, quickAddObjectTypeForCustomFields(objectType));
+  const parent = await getQuickAddParentRecord(db, actor, context.parent_subject_type, context.parent_subject_id);
+  const accountId = await accountScopeForParent(db, actor, context.parent_subject_type, context.parent_subject_id);
+
+  const related: Record<string, unknown[]> = {};
+  if (accountId) {
+    const [contacts, opportunities, useCases] = await Promise.all([
+      contactRepo.searchContacts(db, actor.tenant_id, { account_id: accountId, owner_ids: ownerIds, limit: 8 }),
+      oppRepo.searchOpportunities(db, actor.tenant_id, { account_id: accountId, owner_ids: ownerIds, limit: 8 }),
+      ucRepo.searchUseCases(db, actor.tenant_id, { account_id: accountId, owner_ids: ownerIds, limit: 8 }),
+    ]);
+    related.contacts = contacts.data.map(c => ({ id: c.id, name: `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim(), email: c.email, title: c.title }));
+    related.opportunities = opportunities.data.map(o => ({ id: o.id, name: o.name, stage: o.stage, amount: o.amount, close_date: o.close_date }));
+    related.use_cases = useCases.data.map(uc => ({ id: uc.id, name: uc.name, stage: uc.stage, opportunity_id: uc.opportunity_id }));
+  }
+
+  return {
+    object_type: objectType,
+    required_fields: QUICK_ADD_REQUIRED_FIELDS[objectType],
+    allowed_fields: quickAddExtractionPrompt(objectType),
+    parent_record: parent,
+    account_scope_id: accountId,
+    related_records: related,
+    defaults: context.defaults ?? {},
+    custom_fields: customFields.map(field => ({
+      key: field.field_key,
+      label: field.label,
+      type: field.field_type,
+      required: field.is_required,
+      options: field.options ?? null,
+    })),
+  };
+}
+
+function applyQuickAddDefaultsAndScope(
+  draft: Record<string, unknown>,
+  objectType: QuickAddRecordType,
+  context: QuickAddParentContext,
+  parent: QuickAddLinkedRecord | null,
+) {
+  Object.assign(draft, context.defaults ?? {}, draft);
+  if (!parent) return;
+
+  if (parent.type === 'account') {
+    if (['contact', 'opportunity', 'use-case', 'activity'].includes(objectType) && !draft.account_id) draft.account_id = parent.id;
+    if (objectType === 'contact' && !draft.company_name) draft.company_name = parent.name;
+  }
+  if (parent.type === 'contact') {
+    if (['opportunity', 'activity'].includes(objectType) && !draft.contact_id) draft.contact_id = parent.id;
+    if (objectType === 'activity' && !draft.subject_type && !draft.subject_id) {
+      draft.subject_type = 'contact';
+      draft.subject_id = parent.id;
+    }
+  }
+  if (parent.type === 'opportunity') {
+    if (['use-case', 'activity'].includes(objectType) && !draft.opportunity_id) draft.opportunity_id = parent.id;
+    if (objectType === 'activity' && !draft.subject_type && !draft.subject_id) {
+      draft.subject_type = 'opportunity';
+      draft.subject_id = parent.id;
+    }
+  }
+  if (parent.type === 'use_case') {
+    if (objectType === 'activity' && !draft.use_case_id) draft.use_case_id = parent.id;
+    if (objectType === 'activity' && !draft.subject_type && !draft.subject_id) {
+      draft.subject_type = 'use_case';
+      draft.subject_id = parent.id;
+    }
+  }
+}
+
+async function linkedRecordsForDraft(db: DbPool, actor: ActorContext, draft: Record<string, unknown>): Promise<QuickAddLinkedRecord[]> {
+  const linked: QuickAddLinkedRecord[] = [];
+  const add = (record: QuickAddLinkedRecord | null) => {
+    if (record && !linked.some(item => item.type === record.type && item.id === record.id)) linked.push(record);
+  };
+
+  if (typeof draft.account_id === 'string') {
+    const record = await accountRepo.getAccount(db, actor.tenant_id, draft.account_id);
+    add(record ? { type: 'account', id: record.id, name: String(record.name), detail: record.industry ?? record.domain ?? null } : null);
+  }
+  if (typeof draft.contact_id === 'string') {
+    const record = await contactRepo.getContact(db, actor.tenant_id, draft.contact_id);
+    add(record ? { type: 'contact', id: record.id, name: `${record.first_name ?? ''} ${record.last_name ?? ''}`.trim() || record.email || 'Contact', detail: record.account_name ?? record.company_name ?? null } : null);
+  }
+  if (typeof draft.opportunity_id === 'string') {
+    const record = await oppRepo.getOpportunity(db, actor.tenant_id, draft.opportunity_id);
+    add(record ? { type: 'opportunity', id: record.id, name: String(record.name), detail: record.stage ?? null } : null);
+  }
+  if (typeof draft.use_case_id === 'string') {
+    const record = await ucRepo.getUseCase(db, actor.tenant_id, draft.use_case_id);
+    add(record ? { type: 'use_case', id: record.id, name: String(record.name), detail: record.stage ?? null } : null);
+  }
+  return linked;
+}
+
+async function quickAddDuplicateCandidates(
+  db: DbPool,
+  actor: ActorContext,
+  objectType: QuickAddRecordType,
+  draft: Record<string, unknown>,
+) {
+  let result: DuplicateCheckResult | null = null;
+  if (objectType === 'account' && typeof draft.name === 'string') {
+    result = await checkAccountDuplicate(db, actor.tenant_id, {
+      name: draft.name,
+      domain: readString(draft, 'domain', 200),
+      website: readString(draft, 'website', 300),
+    });
+  } else if (objectType === 'contact' && typeof draft.first_name === 'string') {
+    result = await checkContactDuplicate(db, actor.tenant_id, {
+      first_name: draft.first_name,
+      last_name: readString(draft, 'last_name', 120),
+      email: readString(draft, 'email', 200),
+      phone: readString(draft, 'phone', 80),
+      company_name: readString(draft, 'company_name', 200),
+      account_id: readString(draft, 'account_id', 80),
+    });
+  } else if (objectType === 'opportunity' && typeof draft.name === 'string') {
+    result = await checkOpportunityDuplicate(db, actor.tenant_id, {
+      name: draft.name,
+      account_id: readString(draft, 'account_id', 80),
+      amount: readNumber(draft, 'amount'),
+      close_date: readString(draft, 'close_date', 40),
+    });
+  } else if (objectType === 'use-case' && typeof draft.name === 'string' && typeof draft.account_id === 'string') {
+    const ownerFilter = await resolveOwnerFilter(db, actor);
+    const ownerIds = 'owner_ids' in ownerFilter ? ownerFilter.owner_ids : undefined;
+    const matches = await ucRepo.searchUseCases(db, actor.tenant_id, {
+      query: draft.name,
+      account_id: draft.account_id,
+      owner_ids: ownerIds,
+      limit: 5,
+    });
+    return matches.data
+      .filter(item => String(item.name).toLowerCase() === String(draft.name).toLowerCase())
+      .map(item => ({ id: item.id, name: item.name, score: 70, reasons: ['same name on same account'] }));
+  }
+  const candidates = result?.candidates ?? [];
+  const subjectType = objectType === 'use-case' ? 'use_case' : objectType;
+  const visible = [];
+  for (const candidate of candidates) {
+    try {
+      await assertSubjectAccess(db, actor, subjectType, candidate.id);
+      visible.push(candidate);
+    } catch {
+      // Do not leak duplicate candidates outside the actor's visible scope.
+    }
+  }
+  return visible;
+}
+
+async function missingQuickAddFields(
+  db: DbPool,
+  actor: ActorContext,
+  objectType: QuickAddRecordType,
+  draft: Record<string, unknown>,
+) {
+  const missing = QUICK_ADD_REQUIRED_FIELDS[objectType].filter(field => !isPresent(draft[field]));
+  const customFields = await listCustomFields(db, actor.tenant_id, quickAddObjectTypeForCustomFields(objectType));
+  const customValues = draft.custom_fields && typeof draft.custom_fields === 'object' && !Array.isArray(draft.custom_fields)
+    ? draft.custom_fields as Record<string, unknown>
+    : {};
+  for (const field of customFields) {
+    if (field.is_required && !isPresent(customValues[field.field_key])) missing.push(`custom_fields.${field.field_key}`);
+  }
+  return missing;
+}
+
+function normalizeFieldSource(value: unknown): QuickAddFieldRow['source'] | undefined {
+  if (value === 'user' || value === 'model_knowledge' || value === 'matched_record' || value === 'provider') return value;
+  return undefined;
+}
+
+function valueLooksUserProvided(value: unknown, sourceText: string): boolean {
+  if (value == null) return false;
+  if (Array.isArray(value)) return value.some(item => valueLooksUserProvided(item, sourceText));
+  const normalizedText = sourceText.toLowerCase();
+  const normalizedValue = String(value).toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '');
+  if (!normalizedValue || normalizedValue.length < 3) return false;
+  return normalizedText.includes(normalizedValue);
+}
+
+function volatileAccountFieldWasProvided(field: string, value: unknown, sourceText: string, rawInput: Record<string, unknown>): boolean {
+  const fieldSources = rawInput.field_sources && typeof rawInput.field_sources === 'object' && !Array.isArray(rawInput.field_sources)
+    ? rawInput.field_sources as Record<string, unknown>
+    : {};
+  return normalizeFieldSource(fieldSources[field]) === 'user' || valueLooksUserProvided(value, sourceText);
+}
+
+function removeUnprovidedVolatileAccountFields(draft: Record<string, unknown>, sourceText: string, rawInput: Record<string, unknown>) {
+  for (const field of ['employee_count', 'annual_revenue']) {
+    if (draft[field] != null && !volatileAccountFieldWasProvided(field, draft[field], sourceText, rawInput)) {
+      delete draft[field];
+    }
+  }
+}
+
+function fieldSourceForDraft(
+  objectType: QuickAddRecordType,
+  field: string,
+  value: unknown,
+  sourceText: string,
+  rawInput: Record<string, unknown>,
+): QuickAddFieldRow['source'] {
+  const fieldSources = rawInput.field_sources && typeof rawInput.field_sources === 'object' && !Array.isArray(rawInput.field_sources)
+    ? rawInput.field_sources as Record<string, unknown>
+    : {};
+  const explicit = normalizeFieldSource(fieldSources[field]);
+  if (explicit) return explicit;
+  if (field.endsWith('_id') || field === 'subject_id') return 'matched_record';
+  if (
+    objectType === 'account'
+    && ['industry', 'domain', 'website', 'aliases', 'tags'].includes(field)
+    && !valueLooksUserProvided(value, sourceText)
+  ) return 'model_knowledge';
+  return 'user';
+}
+
+function sourceLabel(source: QuickAddFieldRow['source']): string {
+  if (source === 'model_knowledge') return 'Suggested by model';
+  if (source === 'matched_record') return 'Matched existing record';
+  if (source === 'provider') return 'Suggested by provider';
+  if (source === 'required') return 'Needs confirmation';
+  return 'Provided by user';
+}
+
+function confidenceLabel(source: QuickAddFieldRow['source']): string | undefined {
+  if (source === 'model_knowledge') return 'Unverified';
+  if (source === 'provider') return 'Provider supplied';
+  return undefined;
+}
+
+function fieldRowsForDraft(
+  objectType: QuickAddRecordType,
+  draft: Record<string, unknown>,
+  missingFields: string[],
+  sourceText = '',
+  rawInput: Record<string, unknown> = {},
+): QuickAddFieldRow[] {
+  const rows: QuickAddFieldRow[] = [];
+  const required = new Set([...QUICK_ADD_REQUIRED_FIELDS[objectType], ...missingFields]);
+  const hidden = new Set(['allow_duplicates', 'if_exists', 'idempotency_key']);
+
+  for (const [field, value] of Object.entries(draft)) {
+    if (hidden.has(field) || value === undefined || value === '') continue;
+    const source = fieldSourceForDraft(objectType, field, value, sourceText, rawInput);
+    rows.push({
+      field,
+      label: quickAddLabel(field),
+      value,
+      source,
+      source_label: sourceLabel(source),
+      status: source === 'matched_record' ? 'linked' : 'ready',
+      required: required.has(field),
+      confidence_label: confidenceLabel(source),
+      requires_confirmation: source === 'model_knowledge' || source === 'provider',
+    });
+  }
+
+  for (const field of missingFields) {
+    if (rows.some(row => row.field === field)) continue;
+    rows.push({
+      field,
+      label: field.startsWith('custom_fields.') ? quickAddLabel(field.replace('custom_fields.', '')) : quickAddLabel(field),
+      value: null,
+      source: 'required',
+      source_label: 'Needs confirmation',
+      status: 'missing',
+      required: true,
+      requires_confirmation: true,
+    });
+  }
+
+  return rows;
+}
+
+function enrichmentSuggestionsFromRows(rows: QuickAddFieldRow[]): QuickAddEnrichmentSuggestion[] {
+  return rows
+    .filter(row => row.source === 'model_knowledge' || row.source === 'provider')
+    .map(row => ({
+      field: row.field,
+      label: row.label,
+      value: row.value,
+      source: row.source as 'model_knowledge' | 'provider',
+      source_label: row.source_label,
+      confidence_label: row.confidence_label ?? 'Unverified',
+      requires_confirmation: true,
+    }));
+}
+
+async function resolveQuickAddReferences(
+  db: DbPool,
+  actor: ActorContext,
+  type: QuickAddRecordType,
+  draft: Record<string, unknown>,
+  context: QuickAddParentContext = {},
+): Promise<{ draft: Record<string, unknown>; resolution_summary: string[]; unresolved_references: string[] }> {
+  const resolutionSummary: string[] = [];
+  const unresolvedReferences: string[] = [];
+  const ownerFilter = await resolveOwnerFilter(db, actor);
+  const ownerIds = 'owner_ids' in ownerFilter ? ownerFilter.owner_ids : undefined;
+  const parent = await getQuickAddParentRecord(db, actor, context.parent_subject_type, context.parent_subject_id);
+  applyQuickAddDefaultsAndScope(draft, type, context, parent);
+  if (parent) resolutionSummary.push(`Using ${parent.type.replace('_', ' ')} scope: ${parent.name}`);
+
+  const resolveAccount = async (name?: string) => {
+    if (!name) return null;
+    const result = await entityResolve(db, actor.tenant_id, {
+      query: name,
+      entity_type: 'account',
+      actor_id: actor.actor_id,
+      owner_ids: ownerIds,
+      limit: 5,
+    });
+    if (result.status === 'resolved' && result.resolved?.entity_type === 'account') return result.resolved;
+    unresolvedReferences.push(`Account "${name}" was not confidently matched.`);
+    return null;
+  };
+
+  const resolveContact = async (name?: string, companyName?: string) => {
+    if (!name) return null;
+    const result = await entityResolve(db, actor.tenant_id, {
+      query: name,
+      entity_type: 'contact',
+      context_hints: companyName ? { company_name: companyName } : undefined,
+      actor_id: actor.actor_id,
+      owner_ids: ownerIds,
+      limit: 5,
+    });
+    if (result.status === 'resolved' && result.resolved?.entity_type === 'contact') return result.resolved;
+    unresolvedReferences.push(`Contact "${name}" was not confidently matched.`);
+    return null;
+  };
+
+  const accountName = readString(draft, 'account_name', 240) ?? readString(draft, 'company_name', 240);
+  if ((type === 'contact' || type === 'opportunity' || type === 'use-case') && !draft.account_id && accountName) {
+    const account = await resolveAccount(accountName);
+    if (account) {
+      draft.account_id = account.id;
+      resolutionSummary.push(`Matched account: ${account.name}`);
+      if (type === 'contact' && !draft.company_name) draft.company_name = account.name;
+    }
+  }
+
+  const contactName = readString(draft, 'contact_name', 180);
+  if ((type === 'opportunity' || type === 'activity') && !draft.contact_id && contactName) {
+    const contact = await resolveContact(contactName, accountName);
+    if (contact) {
+      draft.contact_id = contact.id;
+      resolutionSummary.push(`Matched contact: ${contact.name}`);
+    }
+  }
+
+  const opportunityName = readString(draft, 'opportunity_name', 240);
+  if ((type === 'use-case' || type === 'activity') && !draft.opportunity_id && opportunityName) {
+    const result = await oppRepo.searchOpportunities(db, actor.tenant_id, {
+      query: opportunityName,
+      account_id: typeof draft.account_id === 'string' ? draft.account_id : undefined,
+      owner_ids: ownerIds,
+      limit: 2,
+    });
+    if (result.data.length === 1) {
+      draft.opportunity_id = result.data[0].id;
+      resolutionSummary.push(`Matched opportunity: ${result.data[0].name}`);
+    } else if (result.data.length > 1) {
+      unresolvedReferences.push(`Opportunity "${opportunityName}" matched multiple visible records.`);
+    } else {
+      unresolvedReferences.push(`Opportunity "${opportunityName}" was not found.`);
+    }
+  }
+
+  if (type === 'activity') {
+    const detail = draft.detail && typeof draft.detail === 'object' && !Array.isArray(draft.detail)
+      ? draft.detail as Record<string, unknown>
+      : {};
+    const detailAccountName = readString(detail, 'account_name', 240) ?? readString(detail, 'company_name', 240);
+    const detailContactName = readString(detail, 'contact_name', 180);
+    if (!draft.account_id && detailAccountName) {
+      const account = await resolveAccount(detailAccountName);
+      if (account) {
+        draft.account_id = account.id;
+        resolutionSummary.push(`Matched account: ${account.name}`);
+      }
+    }
+    if (!draft.contact_id && detailContactName) {
+      const contact = await resolveContact(detailContactName, detailAccountName ?? accountName);
+      if (contact) {
+        draft.contact_id = contact.id;
+        resolutionSummary.push(`Matched contact: ${contact.name}`);
+      }
+    }
+    if (!draft.subject_type && !draft.subject_id) {
+      if (draft.opportunity_id) {
+        draft.subject_type = 'opportunity';
+        draft.subject_id = draft.opportunity_id;
+      } else if (draft.contact_id) {
+        draft.subject_type = 'contact';
+        draft.subject_id = draft.contact_id;
+      } else if (draft.account_id) {
+        draft.subject_type = 'account';
+        draft.subject_id = draft.account_id;
+      }
+    }
+  }
+
+  if (type === 'use-case' && !draft.account_id && opportunityName) {
+    const result = await oppRepo.searchOpportunities(db, actor.tenant_id, {
+      query: opportunityName,
+      owner_ids: ownerIds,
+      limit: 2,
+    });
+    if (result.data.length === 1 && result.data[0].account_id) {
+      draft.opportunity_id = result.data[0].id;
+      draft.account_id = result.data[0].account_id;
+      resolutionSummary.push(`Matched opportunity: ${result.data[0].name}`);
+    }
+  }
+
+  if (type === 'activity') {
+    const useCaseName = readString(draft, 'use_case_name', 240);
+    if (useCaseName && !draft.use_case_id) {
+      const result = await ucRepo.searchUseCases(db, actor.tenant_id, {
+        query: useCaseName,
+        account_id: typeof draft.account_id === 'string' ? draft.account_id : undefined,
+        owner_ids: ownerIds,
+        limit: 2,
+      });
+      if (result.data.length === 1) {
+        draft.use_case_id = result.data[0].id;
+        resolutionSummary.push(`Matched use case: ${result.data[0].name}`);
+        if (!draft.subject_type && !draft.subject_id) {
+          draft.subject_type = 'use_case';
+          draft.subject_id = result.data[0].id;
+        }
+      }
+    }
+  }
+
+  deleteKeys(draft, ['account_name', 'contact_name', 'opportunity_name', 'use_case_name']);
+  return { draft, resolution_summary: resolutionSummary, unresolved_references: unresolvedReferences };
+}
+
 function quickAddExtractionPrompt(type: QuickAddRecordType): string {
   const common = [
     'Return JSON only. Do not create records. Do not include commentary.',
     'Extract only fields clearly present in the note. Do not invent UUIDs or linked record IDs.',
-    'If the user names a related company/contact but does not provide a UUID, include the name only in a human-readable field when allowed.',
+    'If the user names a related account/contact/opportunity/use case but does not provide a record ID, include the name in account_name, contact_name, opportunity_name, or use_case_name when allowed. CRMy will resolve it safely.',
   ];
   const byType: Record<QuickAddRecordType, string[]> = {
     contact: [
@@ -545,25 +1166,28 @@ function quickAddExtractionPrompt(type: QuickAddRecordType): string {
       'Allowed lifecycle_stage values: lead, prospect, customer, churned.',
     ],
     account: [
-      'Object type: account/company.',
-      'Allowed fields: name, company_name, domain, website, industry, employee_count, annual_revenue.',
+      'Object type: account.',
+      'Allowed fields: name, company_name, domain, website, industry, aliases, tags, employee_count, annual_revenue, field_sources.',
+      'For well-known companies, you may suggest domain, website, industry, aliases, and simple tags from your model knowledge even if the user did not explicitly provide them.',
+      'Do not infer employee_count or annual_revenue from model knowledge. Include employee_count or annual_revenue only when the user explicitly provided the value.',
+      'When you suggest a field from model knowledge, include field_sources with that field set to "model_knowledge". When the user explicitly provided a field, set it to "user".',
     ],
     opportunity: [
       'Object type: opportunity/deal.',
-      'Allowed fields: name, amount, stage, close_date, description.',
+      'Allowed fields: name, account_name, contact_name, amount, stage, close_date, description.',
       'Allowed stage values: prospecting, qualification, proposal, negotiation, closed_won, closed_lost.',
     ],
     'use-case': [
       'Object type: use case.',
-      'Allowed fields: name, stage, description, attributed_arr, target_prod_date.',
+      'Allowed fields: name, account_name, opportunity_name, stage, description, attributed_arr, target_prod_date.',
       'Allowed stage values: discovery, poc, production, scaling, sunset.',
     ],
     activity: [
       'Object type: activity.',
-      'Allowed fields: type, subject, body, outcome, direction, occurred_at, detail.',
+      'Allowed fields: type, subject, body, outcome, direction, occurred_at, account_name, contact_name, opportunity_name, use_case_name, detail.',
       'Allowed type values: call, email, meeting, note, task, demo, proposal, research, handoff, status_update, outreach_email, outreach_call, outreach_linkedin, outreach_other, meeting_held, meeting_scheduled, note_added, research_completed, stage_change.',
       'Use subject as a concise activity title. Use body for notes and next steps.',
-      'Put unresolved names, company names, mentioned dates, requested next steps, and attendees in detail.',
+      'Put unresolved names, account names, mentioned dates, requested next steps, and attendees in detail.',
     ],
     assignment: [
       'Object type: assignment/task.',
@@ -735,38 +1359,15 @@ export function agentRouter(db: DbPool): Router {
   router.post('/extract/record', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
-      const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
-      const type = typeof req.body?.object_type === 'string' ? req.body.object_type : '';
-      const allowedTypes = new Set<QuickAddRecordType>(['contact', 'account', 'opportunity', 'use-case', 'activity', 'assignment']);
-      if (!text) {
-        res.status(400).json({ error: 'text is required' });
+      const parsed = recordDraftPreviewSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: 'Invalid record draft request',
+          details: parsed.error.flatten(),
+        });
         return;
       }
-      if (!allowedTypes.has(type as QuickAddRecordType)) {
-        res.status(400).json({ error: 'object_type must be one of contact, account, opportunity, use-case, activity, or assignment' });
-        return;
-      }
-
-      const config = await agentRepo.getConfig(db, actor.tenant_id);
-      if (!config?.enabled || !config.model || !config.base_url) {
-        res.status(400).json({ error: 'Workspace Agent is not configured for extraction' });
-        return;
-      }
-
-      const today = new Date().toISOString().slice(0, 10);
-      const objectType = type as QuickAddRecordType;
-      const responseText = await callLLM(db, actor.tenant_id, {
-        maxTokens: Math.min(config.max_tokens_per_turn ?? 1200, 1200),
-        system: [
-          'You extract draft fields for CRMy quick-add record creation from one natural-language user note.',
-          quickAddExtractionPrompt(objectType),
-          `Today is ${today}. Resolve explicit relative dates like today, tomorrow, or yesterday when present.`,
-        ].join('\n'),
-        user: `Extract a ${objectType} draft from this note:\n\n${text}`,
-      });
-
-      const draft = sanitizeRecordDraft(objectType, parseJsonObject(responseText));
-      res.json({ data: draft, source: 'agent' });
+      res.json(await previewRecordDraft(db, actor, parsed.data));
     } catch (err) { handleError(res, err); }
   });
 
@@ -798,7 +1399,27 @@ export function agentRouter(db: DbPool): Router {
       });
 
       const draft = sanitizeActivityDraft(parseJsonObject(responseText));
-      res.json({ data: draft, source: 'agent' });
+      const resolved = await resolveQuickAddReferences(db, actor, 'activity', draft);
+      const linkedRecords = await linkedRecordsForDraft(db, actor, resolved.draft);
+      const missingFields = await missingQuickAddFields(db, actor, 'activity', resolved.draft);
+      res.json({
+        data: resolved.draft,
+        draft: resolved.draft,
+        source: 'agent',
+        field_rows: fieldRowsForDraft('activity', resolved.draft, missingFields, text),
+        required_fields: QUICK_ADD_REQUIRED_FIELDS.activity,
+        missing_fields: missingFields,
+        linked_records: linkedRecords,
+        duplicate_candidates: [],
+        resolution_summary: resolved.resolution_summary,
+        unresolved_references: resolved.unresolved_references,
+        work_log: [
+          'Read activity requirements',
+          linkedRecords.length ? `Matched ${linkedRecords.length} linked record${linkedRecords.length === 1 ? '' : 's'}` : 'No linked records matched yet',
+          'Ready for user review',
+        ],
+        can_create: missingFields.length === 0,
+      });
     } catch (err) { handleError(res, err); }
   });
 

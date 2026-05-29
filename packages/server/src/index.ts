@@ -285,6 +285,8 @@ export async function createApp(config: ServerConfig) {
   const { processEmbeddingJobs } = await import('./services/embedding-service.js');
   const { checkHitlSlaExpiry } = await import('./hitl/sla-checker.js');
   const { refreshStaleScores } = await import('./services/scoring.js');
+  const { processMailboxSyncJobs } = await import('./services/customer-email.js');
+  const { processCalendarSyncJobs } = await import('./services/customer-activity.js');
   const { processSequenceDue, handleSequenceGoalEvent, resolveSequenceGoalContactId } = await import('./services/sequence-executor.js');
   const { refreshSequenceAnalytics } = await import('./services/sequence-analytics.js');
   const { markBackgroundTickFailure, markBackgroundTickSuccess } = await import('./services/scheduler-health.js');
@@ -334,6 +336,8 @@ export async function createApp(config: ServerConfig) {
       await runBackgroundTask('webhook_retries', () => processWebhookRetries(db), failures);
       await runBackgroundTask('context_outbox', () => processContextOutbox(db), failures);
       await runBackgroundTask('context_embedding_jobs', () => processEmbeddingJobs(db), failures);
+      await runBackgroundTask('mailbox_sync_jobs', () => processMailboxSyncJobs(db), failures);
+      await runBackgroundTask('calendar_sync_jobs', () => processCalendarSyncJobs(db), failures);
       await runBackgroundTask('context_stale_scores', () => refreshStaleScores(db), failures);
       // Purge workflow run history older than 90 days
       await runBackgroundTask('workflow_run_purge', () => purgeOldWorkflowRuns(db), failures);

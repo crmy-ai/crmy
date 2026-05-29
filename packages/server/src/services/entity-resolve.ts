@@ -611,7 +611,7 @@ export async function entityResolve(
     return {
       status: 'ambiguous',
       candidates: highConf.slice(0, limit),
-      suggestion: `Found ${highConf.length} high-confidence matches. Use context_hints (company, email, title) to narrow down, or trigger an Approval request.`,
+      suggestion: `Found ${highConf.length} high-confidence matches. Use context_hints (account name, email, title) to narrow down, or trigger an Approval request.`,
     };
   }
 
@@ -632,7 +632,7 @@ export async function entityResolve(
     status: 'ambiguous',
     candidates: sorted.slice(0, limit),
     suggestion: sorted[0].confidence === 'medium'
-      ? `Found ${sorted.length} possible matches. Provide a context_hint (company_name, email, title) or create an Approval request to let a human choose.`
+      ? `Found ${sorted.length} possible matches. Provide a context_hint (account name, email, title) or create an Approval request to let a human choose.`
       : `Found ${sorted.length} weak matches. Try a more specific query or add aliases to the correct record.`,
   };
 }

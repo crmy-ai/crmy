@@ -143,7 +143,7 @@ export function initCommand(): Command {
       }
 
       // ── Step 1: Database connection ─────────────────────────────────────────
-      console.log('  ── Step 1 of 3: Database Connection ──────────────────\n');
+      console.log('  ── Step 1 of 4: Database Connection ──────────────────\n');
 
       let databaseUrl: string;
 
@@ -176,7 +176,7 @@ export function initCommand(): Command {
       await ensureDatabaseExists(databaseUrl, isInteractive);
 
       // ── Step 2: Migrations ───────────────────────────────────────────────────
-      console.log('\n  ── Step 2 of 3: Database Setup ──────────────────────\n');
+      console.log('\n  ── Step 2 of 4: Database Setup ──────────────────────\n');
 
       process.env.CRMY_IMPORTED = '1';
 
@@ -282,7 +282,7 @@ export function initCommand(): Command {
       }
 
       // ── Step 3: Admin account ────────────────────────────────────────────────
-      console.log('\n  ── Step 3 of 3: Admin Account ──────────────────────\n');
+      console.log('\n  ── Step 3 of 4: Admin Account ──────────────────────\n');
 
       // Support non-interactive (CI / Docker) via env vars
       const envEmail    = process.env.CRMY_ADMIN_EMAIL;
@@ -425,6 +425,8 @@ export function initCommand(): Command {
       }
 
       // ── Demo data prompt ──────────────────────────────────────────────────────
+      console.log('\n  ── Step 4 of 4: Demo Data ──────────────────────────\n');
+
       let seedDemo = yesMode; // --yes mode auto-seeds demo data
       if (!yesMode && isInteractive) {
         const { loadDemo } = await inquirer.prompt([
@@ -442,58 +444,12 @@ export function initCommand(): Command {
         console.log('');
         spinner = createSpinner('Seeding demo data…');
         try {
-          // Import seedDemoData directly from @crmy/server — no fragile path resolution
-          const serverModule = await import('@crmy/server');
-          // seedDemoData is an internal function; we use the same inline approach
-          // as the server's Docker-path seeder to avoid subprocess issues
-          const IDS = {
-            ACTOR_CODY: 'd0000000-0000-4000-a000-000000000001',
-            ACTOR_SARAH_R: 'd0000000-0000-4000-a000-000000000002',
-            ACTOR_OUTREACH: 'd0000000-0000-4000-a000-000000000003',
-            ACTOR_RESEARCH: 'd0000000-0000-4000-a000-000000000004',
-            ACCT_ACME: 'd0000000-0000-4000-b000-000000000001',
-            ACCT_BRIGHTSIDE: 'd0000000-0000-4000-b000-000000000002',
-            ACCT_VERTEX: 'd0000000-0000-4000-b000-000000000003',
-            CT_SARAH_CHEN: 'd0000000-0000-4000-c000-000000000001',
-            CT_MARCUS_WEBB: 'd0000000-0000-4000-c000-000000000002',
-            CT_PRIYA_NAIR: 'd0000000-0000-4000-c000-000000000003',
-            CT_JORDAN_LIU: 'd0000000-0000-4000-c000-000000000004',
-            CT_TOMAS_RIVERA: 'd0000000-0000-4000-c000-000000000005',
-            CT_KEIKO_YAMAMOTO: 'd0000000-0000-4000-c000-000000000006',
-            OPP_ACME: 'd0000000-0000-4000-d000-000000000001',
-            OPP_BRIGHTSIDE: 'd0000000-0000-4000-d000-000000000002',
-            OPP_VERTEX: 'd0000000-0000-4000-d000-000000000003',
-          };
-
-          // Check if already seeded
-          const check = await db.query('SELECT id FROM actors WHERE id = $1', [IDS.ACTOR_CODY]);
-          if (check.rows.length === 0) {
-            // Actors
-            await db.query(`INSERT INTO actors (id, tenant_id, actor_type, display_name, email) VALUES ($1, $2, 'human', 'Cody Harris', 'cody@crmy.ai') ON CONFLICT (id) DO NOTHING`, [IDS.ACTOR_CODY, tenantId]);
-            await db.query(`INSERT INTO actors (id, tenant_id, actor_type, display_name, email) VALUES ($1, $2, 'human', 'Sarah Reeves', 'sarah@crmy.ai') ON CONFLICT (id) DO NOTHING`, [IDS.ACTOR_SARAH_R, tenantId]);
-            await db.query(`INSERT INTO actors (id, tenant_id, actor_type, display_name, email, agent_identifier, agent_model) VALUES ($1, $2, 'agent', 'Outreach Agent', NULL, 'outreach-v1', 'claude-sonnet-4-20250514') ON CONFLICT (id) DO NOTHING`, [IDS.ACTOR_OUTREACH, tenantId]);
-            await db.query(`INSERT INTO actors (id, tenant_id, actor_type, display_name, email, agent_identifier, agent_model) VALUES ($1, $2, 'agent', 'Research Agent', NULL, 'research-v1', 'claude-sonnet-4-20250514') ON CONFLICT (id) DO NOTHING`, [IDS.ACTOR_RESEARCH, tenantId]);
-
-            // Accounts
-            await db.query(`INSERT INTO accounts (id, tenant_id, name, industry, health_score, annual_revenue, domain, website) VALUES ($1, $2, 'Acme Corp', 'SaaS', 72, 180000, 'acme.com', 'https://acme.com') ON CONFLICT (id) DO NOTHING`, [IDS.ACCT_ACME, tenantId]);
-            await db.query(`INSERT INTO accounts (id, tenant_id, name, industry, health_score, annual_revenue, domain, website) VALUES ($1, $2, 'Brightside Health', 'Healthcare', 45, 96000, 'brightsidehealth.com', 'https://brightsidehealth.com') ON CONFLICT (id) DO NOTHING`, [IDS.ACCT_BRIGHTSIDE, tenantId]);
-            await db.query(`INSERT INTO accounts (id, tenant_id, name, industry, health_score, annual_revenue, domain, website) VALUES ($1, $2, 'Vertex Logistics', 'Logistics', 88, 240000, 'vertex.io', 'https://vertex.io') ON CONFLICT (id) DO NOTHING`, [IDS.ACCT_VERTEX, tenantId]);
-
-            // Contacts
-            await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Sarah', 'Chen', 'sarah.chen@acme.com', 'VP Engineering', $3, 'prospect') ON CONFLICT (id) DO NOTHING`, [IDS.CT_SARAH_CHEN, tenantId, IDS.ACCT_ACME]);
-            await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Marcus', 'Webb', 'marcus.webb@acme.com', 'CFO', $3, 'prospect') ON CONFLICT (id) DO NOTHING`, [IDS.CT_MARCUS_WEBB, tenantId, IDS.ACCT_ACME]);
-            await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Priya', 'Nair', 'p.nair@brightsidehealth.com', 'CTO', $3, 'customer') ON CONFLICT (id) DO NOTHING`, [IDS.CT_PRIYA_NAIR, tenantId, IDS.ACCT_BRIGHTSIDE]);
-            await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Jordan', 'Liu', 'j.liu@brightsidehealth.com', 'RevOps Lead', $3, 'customer') ON CONFLICT (id) DO NOTHING`, [IDS.CT_JORDAN_LIU, tenantId, IDS.ACCT_BRIGHTSIDE]);
-            await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Tomás', 'Rivera', 't.rivera@vertex.io', 'Head of Sales Ops', $3, 'customer') ON CONFLICT (id) DO NOTHING`, [IDS.CT_TOMAS_RIVERA, tenantId, IDS.ACCT_VERTEX]);
-            await db.query(`INSERT INTO contacts (id, tenant_id, first_name, last_name, email, title, account_id, lifecycle_stage) VALUES ($1, $2, 'Keiko', 'Yamamoto', 'k.yamamoto@vertex.io', 'CEO', $3, 'customer') ON CONFLICT (id) DO NOTHING`, [IDS.CT_KEIKO_YAMAMOTO, tenantId, IDS.ACCT_VERTEX]);
-
-            // Opportunities
-            await db.query(`INSERT INTO opportunities (id, tenant_id, name, account_id, stage, amount, close_date) VALUES ($1, $2, 'Acme Corp Enterprise Deal', $3, 'Discovery', 180000, '2026-06-30') ON CONFLICT (id) DO NOTHING`, [IDS.OPP_ACME, tenantId, IDS.ACCT_ACME]);
-            await db.query(`INSERT INTO opportunities (id, tenant_id, name, account_id, stage, amount, close_date) VALUES ($1, $2, 'Brightside Health Platform Deal', $3, 'PoC', 96000, '2026-05-15') ON CONFLICT (id) DO NOTHING`, [IDS.OPP_BRIGHTSIDE, tenantId, IDS.ACCT_BRIGHTSIDE]);
-            await db.query(`INSERT INTO opportunities (id, tenant_id, name, account_id, stage, amount, close_date) VALUES ($1, $2, 'Vertex Logistics Expansion', $3, 'Negotiation', 240000, '2026-04-30') ON CONFLICT (id) DO NOTHING`, [IDS.OPP_VERTEX, tenantId, IDS.ACCT_VERTEX]);
-          }
-
-          spinner.succeed('Demo data seeded  \x1b[2m(3 accounts, 6 contacts, 3 opportunities)\x1b[0m');
+          const { seedSampleData } = await import('@crmy/server');
+          const status = await seedSampleData(db, tenantId);
+          const counts = status.counts;
+          spinner.succeed(
+            `Demo data seeded  \x1b[2m(${counts.accounts} accounts, ${counts.contacts} contacts, ${counts.opportunities} opportunities, ${counts.raw_context_sources} Raw Context sources)\x1b[0m`,
+          );
         } catch {
           spinner.fail('Demo data seeding failed');
           console.log('  \x1b[33m⚠\x1b[0m  You can run it later with: crmy seed-demo\n');
@@ -513,6 +469,15 @@ export function initCommand(): Command {
       console.log('  Next steps:\n');
       console.log('    Start the server:');
       console.log('    \x1b[1mnpx @crmy/cli server\x1b[0m\n');
+      if (seedDemo) {
+        console.log('    Try the demo data:');
+        console.log('    \x1b[1mnpx @crmy/cli briefing "account:Northstar Labs"\x1b[0m');
+        console.log('    \x1b[1mnpx @crmy/cli context lineage --subject "account:Northstar Labs"\x1b[0m');
+        console.log('    \x1b[1mnpx @crmy/cli hitl list\x1b[0m\n');
+        console.log('    Sample logins:');
+        console.log('    \x1b[1msample.admin@crmy.local\x1b[0m / crmy-demo-123  \x1b[2m(admin view)\x1b[0m');
+        console.log('    \x1b[1msample.rep@crmy.local\x1b[0m / crmy-demo-123    \x1b[2m(scoped rep view)\x1b[0m\n');
+      }
       console.log('    Connect to Claude Code:');
       console.log('    \x1b[1mclaude mcp add crmy -- npx @crmy/cli mcp\x1b[0m\n');
     });

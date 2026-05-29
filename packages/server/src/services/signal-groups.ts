@@ -294,7 +294,7 @@ async function recomputeGroup(
   threshold: number,
 ): Promise<signalGroupRepo.SignalGroupWithMembers> {
   const group = await signalGroupRepo.getSignalGroup(db, tenantId, groupId);
-  if (!group) throw new Error('Signal Group not found');
+  if (!group) throw new Error('Signal not found');
   const supporting = group.members
     .filter(member => member.relation === 'supports')
     .map(member => member.context_entry)
@@ -366,7 +366,7 @@ async function recomputeGroup(
     },
   });
   const refreshed = await signalGroupRepo.getSignalGroup(db, tenantId, group.id);
-  if (!refreshed) throw new Error('Signal Group not found after update');
+  if (!refreshed) throw new Error('Signal not found after update');
   return refreshed;
 }
 
@@ -602,7 +602,7 @@ export async function promoteSignalGroup(
   const forced = { ...group, status: 'ready' as const };
   const promoted = await promoteReadyGroup(db, tenantId, forced, actorId, actor, actor?.actor_type === 'user');
   const refreshed = await signalGroupRepo.getSignalGroup(db, tenantId, groupId);
-  if (!refreshed) throw new Error('Signal Group not found');
+  if (!refreshed) throw new Error('Signal not found');
   return { signal_group: refreshed, context_entry: promoted };
 }
 

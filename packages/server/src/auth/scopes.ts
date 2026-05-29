@@ -118,7 +118,20 @@ const TOOL_SCOPES: Record<string, string[]> = {
   email_get: ['activities:read'],
   email_search: ['activities:read'],
   email_create: ['activities:write'],
+  email_draft_preview: ['activities:read', 'context:read'],
+  email_draft_save: ['activities:write'],
   email_ingest: ['activities:write', 'context:write'],
+  mailbox_connection_list: ['activities:read'],
+  email_message_search: ['activities:read'],
+  email_message_get: ['activities:read'],
+  email_message_process: ['activities:write', 'context:write'],
+  email_message_ignore: ['activities:write'],
+  calendar_connection_list: ['activities:read'],
+  calendar_event_search: ['activities:read'],
+  calendar_event_get: ['activities:read'],
+  calendar_event_process: ['activities:write', 'context:write'],
+  calendar_event_add_context: ['activities:write', 'context:write'],
+  meeting_classification_list: ['read'],
   email_provider_set: ['write'],
   email_provider_get: ['read'],
   email_sequence_create: ['activities:write'],
@@ -145,6 +158,9 @@ const TOOL_SCOPES: Record<string, string[]> = {
   sequence_draft_step: ['activities:write'],
   sequence_analytics: ['activities:read'],
   sequence_clone: ['activities:write'],
+
+  // ── Record Drafting ──
+  record_draft_preview: ['write'],
 
   // ── Webhooks ──
   webhook_get: ['webhooks:read'],

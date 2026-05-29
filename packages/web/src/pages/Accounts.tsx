@@ -156,11 +156,11 @@ export default function Accounts() {
         iconClassName="text-[#8b5cf6]"
         description={headerDescription('Manage accounts and customer context', filtered.length, 'account', 'accounts')}
       >
-        <div className="hidden md:flex items-center gap-1 bg-muted rounded-xl p-0.5">
-          <button onClick={() => setView('table')} className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
+        <div className="hidden h-9 rounded-xl border border-border bg-muted p-0.5 md:inline-flex md:mr-2">
+          <button onClick={() => setView('table')} className={`p-1.5 rounded-lg text-sm transition-all ${view === 'table' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
             <List className="w-4 h-4" />
           </button>
-          <button onClick={() => setView('cards')} className={`p-1.5 rounded-lg text-sm transition-all ${view === 'cards' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'}`}>
+          <button onClick={() => setView('cards')} className={`p-1.5 rounded-lg text-sm transition-all ${view === 'cards' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
             <LayoutGrid className="w-4 h-4" />
           </button>
         </div>

@@ -2,12 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Command } from 'commander';
+import { readFile } from 'node:fs/promises';
 import { getClient } from '../client.js';
+import { resolveSubjectRef } from './subject-ref.js';
 
 export function emailsCommand(): Command {
-  const cmd = new Command('emails').description('Manage outbound emails');
+  const cmd = new Command('emails').description('Manage Customer Email and outbound follow-ups');
 
   cmd.command('list')
+    .description('List governed outbound emails')
     .option('--contact <id>', 'Filter by contact ID')
     .option('--status <status>', 'Filter by status')
     .action(async (opts) => {
@@ -29,6 +32,91 @@ export function emailsCommand(): Command {
         status: e.status,
         created: e.created_at,
       })));
+      await client.close();
+    });
+
+  cmd.command('messages')
+    .description('List customer email messages captured from mailboxes or inbound webhooks')
+    .option('--view <view>', 'customer, review, or all', 'customer')
+    .option('--q <query>', 'Search subject, body, participants, or linked records')
+    .option('--include-internal', 'Include internal and automated email')
+    .action(async (opts) => {
+      const client = await getClient();
+      const result = await client.call('email_message_search', {
+        view: opts.view,
+        q: opts.q,
+        include_internal: Boolean(opts.includeInternal),
+        limit: 20,
+      });
+      const data = JSON.parse(result);
+      const rows = data.email_messages ?? [];
+      if (rows.length === 0) {
+        console.log('No customer email messages found.');
+        await client.close();
+        return;
+      }
+      console.table(rows.map((e: Record<string, unknown>) => ({
+        id: (e.id as string).slice(0, 8),
+        from: e.from_email,
+        subject: e.subject,
+        class: e.classification,
+        status: e.processing_status,
+        account: e.account_name ?? '',
+      })));
+      await client.close();
+    });
+
+  cmd.command('message <id>')
+    .description('Get a customer email message with linked records and processing receipt')
+    .action(async (id) => {
+      const client = await getClient();
+      const result = await client.call('email_message_get', { id });
+      console.log(JSON.parse(result));
+      await client.close();
+    });
+
+  cmd.command('process <id>')
+    .description('Process a customer email message as Raw Context')
+    .action(async (id) => {
+      const client = await getClient();
+      const result = await client.call('email_message_process', { id });
+      const data = JSON.parse(result);
+      console.log(`Processed email message ${data.message?.id ?? id}: ${data.processing_status}`);
+      if (data.extraction) {
+        console.log(`Signals: ${data.extraction.signals_created ?? 0}  Memory: ${data.extraction.memory_created ?? 0}  Skipped: ${data.extraction.skipped ?? 0}`);
+      }
+      await client.close();
+    });
+
+  cmd.command('ignore-message <id>')
+    .description('Ignore a customer email message')
+    .option('--reason <reason>', 'Reason')
+    .action(async (id, opts) => {
+      const client = await getClient();
+      const result = await client.call('email_message_ignore', { id, reason: opts.reason });
+      console.log(JSON.parse(result));
+      await client.close();
+    });
+
+  cmd.command('connections')
+    .description('List mailbox connections and processing summary')
+    .action(async () => {
+      const client = await getClient();
+      const result = await client.call('mailbox_connection_list', {});
+      const data = JSON.parse(result);
+      const rows = data.mailbox_connections ?? [];
+      if (rows.length === 0) {
+        console.log('No mailbox connections found.');
+      } else {
+        console.table(rows.map((c: Record<string, unknown>) => ({
+          id: (c.id as string).slice(0, 8),
+          provider: c.provider,
+          mailbox: c.email_address,
+          status: c.status,
+          last_sync: c.last_sync_at ?? '',
+        })));
+      }
+      if (data.summary) console.log(data.summary);
       await client.close();
     });
 
@@ -64,6 +152,87 @@ export function emailsCommand(): Command {
       if (data.hitl_request_id) {
         console.log(`  HITL approval required: ${data.hitl_request_id}\n`);
       }
+      await client.close();
+    });
+
+  cmd.command('draft-preview')
+    .description('Generate an agentic customer email draft preview')
+    .option('--source-email <id>', 'Source customer email message ID')
+    .option('--subject <type:name|type:id>', 'Linked subject such as account:Northstar Labs')
+    .option('--contact <id>', 'Contact ID')
+    .option('--account <id>', 'Account ID')
+    .option('--opportunity <id>', 'Opportunity ID')
+    .option('--use-case <id>', 'Use Case ID')
+    .option('--to <email>', 'Recipient email override')
+    .option('--intent <intent>', 'reply, follow_up, recap_next_steps, nudge_stalled_deal, or custom', 'follow_up')
+    .option('--instruction <text>', 'Drafting instruction')
+    .action(async (opts) => {
+      const client = await getClient();
+      const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
+      const result = await client.call('email_draft_preview', {
+        source_email_message_id: opts.sourceEmail,
+        subject_type: subject.subject_type,
+        subject_id: subject.subject_id,
+        contact_id: opts.contact,
+        account_id: opts.account,
+        opportunity_id: opts.opportunity,
+        use_case_id: opts.useCase,
+        to_address: opts.to,
+        intent: opts.intent,
+        instruction: opts.instruction,
+      });
+      const data = JSON.parse(result);
+      console.log(`\nSubject: ${data.subject}\n`);
+      console.log(data.body_text);
+      if (data.warnings?.length) console.log(`\nWarnings: ${data.warnings.join('; ')}`);
+      if (data.context_used) console.log('\nContext used:', data.context_used);
+      await client.close();
+    });
+
+  cmd.command('save-draft')
+    .description('Save an edited customer email draft or route it for approval')
+    .option('--subject-line <subject>', 'Email subject')
+    .option('--body <body>', 'Email body text')
+    .option('--body-file <path>', 'Read email body from file')
+    .option('--source-email <id>', 'Source customer email message ID')
+    .option('--subject <type:name|type:id>', 'Linked subject such as account:Northstar Labs')
+    .option('--contact <id>', 'Contact ID')
+    .option('--account <id>', 'Account ID')
+    .option('--opportunity <id>', 'Opportunity ID')
+    .option('--use-case <id>', 'Use Case ID')
+    .option('--to <email>', 'Recipient email')
+    .option('--origin <origin>', 'manual or agent_generated', 'manual')
+    .option('--action <action>', 'save_draft, request_approval, or send_now', 'save_draft')
+    .action(async (opts) => {
+      const { default: inquirer } = await import('inquirer');
+      let subject = opts.subjectLine as string | undefined;
+      let body = opts.body as string | undefined;
+      if (!body && opts.bodyFile) body = await readFile(opts.bodyFile, 'utf8');
+      if (!subject || !body) {
+        const answers = await inquirer.prompt([
+          { type: 'input', name: 'subject', message: 'Subject:', when: () => !subject },
+          { type: 'editor', name: 'body', message: 'Body:', when: () => !body },
+        ]);
+        subject ??= answers.subject;
+        body ??= answers.body;
+      }
+      const client = await getClient();
+      const subjectRef = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
+      const result = await client.call('email_draft_save', {
+        source_email_message_id: opts.sourceEmail,
+        subject_type: subjectRef.subject_type,
+        subject_id: subjectRef.subject_id,
+        contact_id: opts.contact,
+        account_id: opts.account,
+        opportunity_id: opts.opportunity,
+        use_case_id: opts.useCase,
+        to_address: opts.to,
+        subject,
+        body_text: body,
+        draft_origin: opts.origin,
+        delivery_action: opts.action,
+      });
+      console.log(JSON.parse(result));
       await client.close();
     });
 

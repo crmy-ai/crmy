@@ -112,7 +112,7 @@ function OpportunityEditForm({
       <div className="flex-1 overflow-y-auto p-5 space-y-4">
         <div className="space-y-1.5">
           <label className={labelClass}>Opportunity Name<span className="text-destructive ml-0.5">*</span></label>
-          <input type="text" value={fields.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Acme Enterprise" className={inputClass} />
+          <input type="text" value={fields.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Northstar Agent Context Rollout" className={inputClass} />
         </div>
         <div className="space-y-1.5">
           <label className={labelClass}>Stage</label>

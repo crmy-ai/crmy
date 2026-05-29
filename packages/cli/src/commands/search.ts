@@ -18,6 +18,7 @@ export function searchCommand(): Command {
         console.table(data.contacts.map((c: Record<string, unknown>) => ({
           id: (c.id as string).slice(0, 8),
           name: `${c.first_name} ${c.last_name}`,
+          ref: `contact:${c.email ?? `${c.first_name} ${c.last_name}`}`,
           email: c.email ?? '',
         })));
       }
@@ -26,6 +27,7 @@ export function searchCommand(): Command {
         console.table(data.accounts.map((a: Record<string, unknown>) => ({
           id: (a.id as string).slice(0, 8),
           name: a.name,
+          ref: `account:${a.name}`,
         })));
       }
       if (data.opportunities?.length > 0) {
@@ -33,6 +35,7 @@ export function searchCommand(): Command {
         console.table(data.opportunities.map((o: Record<string, unknown>) => ({
           id: (o.id as string).slice(0, 8),
           name: o.name,
+          ref: `opportunity:${o.name}`,
           stage: o.stage,
         })));
       }

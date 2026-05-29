@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useRef, useEffect } from 'react';
-import { useAppStore } from '@/store/appStore';
+import { useAppStore, type FieldProvenance, type QuickAddContext } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { X, Send, Sparkles, Check, FileText, Pencil, ChevronLeft, Bot } from 'lucide-react';
+import { X, Sparkles, Check, FileText, Pencil, ChevronLeft, Bot, ArrowUp, ShieldCheck, Link2, AlertTriangle, Table2 } from 'lucide-react';
 import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useCreateAssignment, useActors, useExtractRecordDraft } from '@/api/hooks';
 import { EntityCombobox } from '@/components/ui/entity-combobox';
 import { toast } from '@/components/ui/use-toast';
@@ -22,131 +22,52 @@ const typeLabels: Record<string, string> = {
   assignment: 'Assignment',
 };
 
-const typeGreetings: Record<string, string> = {
-  contact: "Hi! Tell me about the new contact — name, email, account, and any other details.",
-  opportunity: "Let's create a new opportunity! What's the name, amount, and who's the contact?",
-  'use-case': "Let's set up a new use case. What's the name and which client is it for?",
-  activity: "Log an activity — tell me the type (call, email, meeting, note, demo, proposal, etc.), what it's about, and any outcome or notes.",
-  account: "Let's add a new account. What's the account name and any other details?",
-  assignment: "Let's create a new assignment. What's the title, type (call, email, research, etc.), and who should it be assigned to?",
+type DraftFieldRow = {
+  field: string;
+  label: string;
+  value: unknown;
+  source: 'user' | 'model_knowledge' | 'matched_record' | 'provider' | 'required';
+  source_label?: string;
+  confidence_label?: string;
+  requires_confirmation?: boolean;
+  status: 'ready' | 'missing' | 'linked' | 'optional';
+  required: boolean;
 };
-
-type Message = { role: 'user' | 'assistant'; content: string };
-
-const MONTH_INDEX: Record<string, number> = {
-  january: 0, jan: 0,
-  february: 1, feb: 1,
-  march: 2, mar: 2,
-  april: 3, apr: 3,
-  may: 4,
-  june: 5, jun: 5,
-  july: 6, jul: 6,
-  august: 7, aug: 7,
-  september: 8, sept: 8, sep: 8,
-  october: 9, oct: 9,
-  november: 10, nov: 10,
-  december: 11, dec: 11,
+type EnrichmentSuggestion = {
+  field: string;
+  label: string;
+  value: unknown;
+  source: 'model_knowledge' | 'provider';
+  source_label: string;
+  confidence_label: string;
+  requires_confirmation: boolean;
 };
-
-function cleanExtractedName(value?: string | null): string | undefined {
-  if (!value) return undefined;
-  const cleaned = value
-    .replace(/\s+(?:who|that|which|wants?|needs?|asked|said|has|had|is|was|for|about|on)\b.*$/i, '')
-    .replace(/[.,;:!?]+$/g, '')
-    .trim();
-  return cleaned || undefined;
-}
-
-function extractCompanyName(text: string): string | undefined {
-  const companyMatch =
-    text.match(/\b(?:works at|company is|company|from|at)\s+([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,5})/i);
-  return cleanExtractedName(companyMatch?.[1]);
-}
-
-function extractPersonAndCompany(text: string): { personName?: string; companyName?: string } {
-  const personMatch = text.match(/\b(?:with|spoke with|met with|called|emailed)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s+(?:from|at)\s+([A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,5}))?/i);
-  return {
-    personName: cleanExtractedName(personMatch?.[1]),
-    companyName: cleanExtractedName(personMatch?.[2]) ?? extractCompanyName(text),
-  };
-}
-
-function extractMentionedDate(text: string): { label: string; isoDate?: string } | undefined {
-  const dateMatch = text.match(/\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,\s*(\d{4}))?\b/i);
-  if (!dateMatch) return undefined;
-  const month = MONTH_INDEX[dateMatch[1].toLowerCase().replace('.', '')];
-  const day = Number(dateMatch[2]);
-  if (!Number.isFinite(month) || !Number.isFinite(day)) return { label: dateMatch[0] };
-
-  const now = new Date();
-  let year = dateMatch[3] ? Number(dateMatch[3]) : now.getFullYear();
-  let date = new Date(year, month, day);
-  if (!dateMatch[3] && date.getTime() < new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) {
-    year += 1;
-    date = new Date(year, month, day);
-  }
-  const isoDate = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-  return { label: dateMatch[0], isoDate };
-}
-
-function sentenceParts(text: string): string[] {
-  return text
-    .split(/[.!?]\s+/)
-    .map(part => part.trim().replace(/[.!?]+$/g, ''))
-    .filter(Boolean);
-}
-
-function titleCase(value: string): string {
-  return value.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
-}
-
-function splitContactName(name: string): { first_name: string; last_name?: string } {
-  const parts = name.trim().split(/\s+/);
-  return {
-    first_name: parts[0] ?? name,
-    last_name: parts.slice(1).join(' ') || undefined,
-  };
-}
-
-function parseActivityFields(text: string): Record<string, unknown> {
-  const lower = text.toLowerCase();
-  const fields: Record<string, unknown> = {};
-  const types = ['call', 'email', 'meeting', 'note', 'task', 'demo', 'proposal', 'research', 'handoff', 'status_update'];
-  const foundType = types.find(t => lower.includes(t.replace('_', ' ')) || lower.includes(t)) ?? 'note';
-  const { personName, companyName } = extractPersonAndCompany(text);
-  const mentionedDate = extractMentionedDate(text);
-  const parts = sentenceParts(text);
-  const notes = parts.length > 1 ? parts.slice(1).join('. ') : text;
-
-  fields.type = foundType;
-  if (personName) {
-    fields.subject = `${titleCase(foundType)} with ${personName}${companyName ? ` from ${companyName}` : ''}`;
-  } else if (companyName) {
-    fields.subject = `${titleCase(foundType)} with ${companyName}`;
-  } else {
-    fields.subject = parts[0] || `${titleCase(foundType)} activity`;
-  }
-  fields.body = notes;
-
-  const outcomes = ['connected', 'voicemail', 'positive', 'negative', 'neutral', 'no show', 'no_show', 'follow up needed', 'follow_up_needed'];
-  const foundOutcome = outcomes.find(o => lower.includes(o));
-  if (foundOutcome) fields.outcome = foundOutcome.replace(/ /g, '_');
-  else if (/\b(wants?|requested|asked for|needs?)\b.*\b(demo|follow.?up|meeting|proposal)\b/.test(lower)) fields.outcome = 'follow_up_needed';
-
-  if (lower.includes('yesterday')) fields.occurred_at = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  else if (lower.includes('today')) fields.occurred_at = new Date().toISOString();
-
-  const detail: Record<string, unknown> = {};
-  if (personName) detail.contact_name = personName;
-  if (companyName) detail.company_name = companyName;
-  if (mentionedDate) {
-    detail.mentioned_date = mentionedDate.isoDate ?? mentionedDate.label;
-    if (/\bdemo\b/.test(lower)) detail.next_step = 'demo';
-  }
-  if (Object.keys(detail).length > 0) fields.detail = detail;
-
-  return fields;
-}
+type LinkedRecord = {
+  type: 'account' | 'contact' | 'opportunity' | 'use_case';
+  id: string;
+  name: string;
+  detail?: string | null;
+};
+type AgentDraftResult = {
+  data: Record<string, unknown>;
+  draft?: Record<string, unknown>;
+  field_rows?: DraftFieldRow[];
+  enrichment_suggestions?: EnrichmentSuggestion[];
+  required_fields?: string[];
+  missing_fields?: string[];
+  linked_records?: LinkedRecord[];
+  duplicate_candidates?: DuplicateCandidate[];
+  resolution_summary?: string[];
+  unresolved_references?: string[];
+  work_log?: string[];
+  can_create?: boolean;
+};
+type CreatedQuickAddRecord = {
+  type: 'contact' | 'opportunity' | 'use-case' | 'activity' | 'account';
+  id: string;
+  name: string;
+  detail?: string;
+};
 
 function formatFieldName(key: string): string {
   const labels: Record<string, string> = {
@@ -161,12 +82,27 @@ function formatFieldName(key: string): string {
 
 function formatFieldValue(value: unknown): string {
   if (value == null) return '';
+  if (Array.isArray(value)) return value.map(item => formatFieldValue(item)).filter(Boolean).join(', ');
   if (typeof value === 'object' && !Array.isArray(value)) {
     return Object.entries(value as Record<string, unknown>)
       .map(([k, v]) => `${formatFieldName(k)}: ${String(v)}`)
       .join(', ');
   }
   return String(value);
+}
+
+function editableFieldValue(value: unknown): string {
+  if (value == null) return '';
+  if (Array.isArray(value)) return value.map(item => String(item)).join(', ');
+  return String(value);
+}
+
+function parseEditedSuggestionValue(field: string, value: string, previousValue: unknown): unknown {
+  const trimmed = value.trim();
+  if (Array.isArray(previousValue) || field === 'aliases' || field === 'tags') {
+    return trimmed.split(',').map(item => item.trim()).filter(Boolean);
+  }
+  return trimmed;
 }
 
 function missingRequiredDraftFields(type: string, fields: Record<string, unknown>): string[] {
@@ -190,195 +126,209 @@ function missingRequiredDraftFields(type: string, fields: Record<string, unknown
   return [];
 }
 
-function parseFieldsFromText(text: string, type: string): Record<string, unknown> {
-  const lower = text.toLowerCase();
-  const fields: Record<string, unknown> = {};
+function normalizeCreatedRecord(type: string, result: unknown): CreatedQuickAddRecord | null {
+  const body = (result ?? {}) as Record<string, unknown>;
+  const key = type === 'use-case' ? 'use_case' : type;
+  const record = (body[key] ?? body.data ?? body) as Record<string, unknown>;
 
-  if (type === 'activity') return parseActivityFields(text);
-
-  // Extract name (first sentence or "name is X" pattern)
-  const nameMatch = text.match(/(?:name(?:\s+is)?|called|named)\s+([A-Z][^\.,\n]+)/i) || text.match(/^([A-Z][a-z]+ [A-Z][a-z]+)/);
-  if (nameMatch) {
-    const name = cleanExtractedName(nameMatch[1]) ?? nameMatch[1].trim();
-    if (type === 'contact') Object.assign(fields, splitContactName(name));
-    else fields.name = name;
+  if (type === 'activity') {
+    const id = typeof record.id === 'string' ? record.id : undefined;
+    return id ? { type: 'activity', id, name: String(record.subject ?? 'Activity'), detail: String(record.type ?? '') } : null;
   }
 
-  // Extract email
-  const emailMatch = text.match(/[\w.-]+@[\w.-]+\.\w+/);
-  if (emailMatch) fields.email = emailMatch[0];
-
-  // Extract phone
-  const phoneMatch = text.match(/\+?[\d\s\-().]{10,}/);
-  if (phoneMatch) fields.phone = phoneMatch[0].trim();
-
-  const companyName = extractCompanyName(text);
-  if (companyName) {
-    if (type === 'contact') fields.company_name = companyName;
-    else if (type === 'account' && !fields.name) fields.name = companyName;
-  }
-
-  if (type === 'account' && !fields.name) {
-    fields.name = cleanExtractedName(sentenceParts(text)[0]) ?? text.trim();
-  }
-
-  if (type === 'opportunity') {
-    const amountMatch = text.match(/\$?([\d,]+(?:\.\d+)?)\s*[kKmM]?/);
-    if (amountMatch) {
-      let amount = parseFloat(amountMatch[1].replace(',', ''));
-      if (lower.includes('k') || lower.includes('thousand')) amount *= 1000;
-      if (lower.includes('m') || lower.includes('million')) amount *= 1000000;
-      fields.amount = Math.round(amount);
-    }
-    fields.stage = 'prospecting';
-  }
-
-  if (type === 'use-case') {
-    fields.stage = 'discovery';
-  }
-
-  if (type === 'assignment') {
-    // Extract assignment type
-    const assignmentTypes = ['call', 'draft', 'email', 'follow_up', 'follow up', 'research', 'review', 'send'];
-    const foundType = assignmentTypes.find(t => lower.includes(t));
-    if (foundType) fields.assignment_type = foundType.replace(' ', '_');
-    // Use first sentence as title if no explicit name
-    if (!fields.name) {
-      const firstSentence = text.split(/[.!?]/)[0].trim();
-      if (firstSentence) fields.title = firstSentence;
-    } else {
-      fields.title = fields.name;
-      delete fields.name;
-    }
-    // Extract priority
-    if (lower.includes('urgent')) fields.priority = 'urgent';
-    else if (lower.includes('high priority') || lower.includes('high-priority')) fields.priority = 'high';
-    else if (lower.includes('low priority') || lower.includes('low-priority')) fields.priority = 'low';
-    else fields.priority = 'normal';
-  }
-
-  return fields;
+  const id = typeof record.id === 'string' ? record.id : undefined;
+  if (!id) return null;
+  const name = type === 'contact'
+    ? `${String(record.first_name ?? '')} ${String(record.last_name ?? '')}`.trim()
+    : String(record.name ?? typeLabels[type]);
+  return {
+    type: type === 'use-case' ? 'use-case' : type as CreatedQuickAddRecord['type'],
+    id,
+    name: name || typeLabels[type],
+    detail: String(record.stage ?? record.industry ?? record.company_name ?? record.email ?? ''),
+  };
 }
 
-function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) {
-  const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: typeGreetings[type] ?? typeGreetings.contact },
-  ]);
+function draftRowsFallback(type: string, draft: Record<string, unknown> | null, missing: string[]): DraftFieldRow[] {
+  const rows: DraftFieldRow[] = [];
+  if (draft) {
+    for (const [field, value] of Object.entries(draft)) {
+      if (value === undefined || value === '') continue;
+      const isLinked = field.endsWith('_id') || field === 'subject_id';
+      rows.push({
+        field,
+        label: formatFieldName(field).replace(/\b\w/g, char => char.toUpperCase()),
+        value,
+        source: isLinked ? 'matched_record' : 'user',
+        source_label: isLinked ? 'Matched existing record' : 'Provided by user',
+        status: isLinked ? 'linked' : 'ready',
+        required: missing.includes(field),
+      });
+    }
+  }
+  for (const field of missing) {
+    if (!rows.some(row => row.field === field)) {
+      rows.push({
+        field,
+        label: formatFieldName(field),
+        value: null,
+        source: 'required',
+        source_label: 'Needs confirmation',
+        status: 'missing',
+        required: true,
+        requires_confirmation: true,
+      });
+    }
+  }
+  return rows;
+}
+
+function provenanceFromRows(rows: DraftFieldRow[], excludedFields: string[] = []): Record<string, FieldProvenance> {
+  const provenance: Record<string, FieldProvenance> = {};
+  for (const row of rows) {
+    if (row.source !== 'model_knowledge' && row.source !== 'provider') continue;
+    if (excludedFields.includes(row.field)) continue;
+    provenance[row.field] = {
+      source: row.source,
+      source_label: row.source_label ?? 'Suggested by model',
+      confidence_label: row.confidence_label,
+      requires_confirmation: row.requires_confirmation,
+    };
+  }
+  return provenance;
+}
+
+function LightweightAgentCreatePanel({ type, onClose, context }: { type: string; onClose: () => void; context?: QuickAddContext | null }) {
   const [input, setInput] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [extractedFields, setExtractedFields] = useState<Record<string, unknown> | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
+  const [draftResult, setDraftResult] = useState<AgentDraftResult | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [chatDuplicates, setChatDuplicates] = useState<DuplicateCandidate[] | null>(null);
-  const [chatPendingFields, setChatPendingFields] = useState<Record<string, unknown> | null>(null);
-  const { openDrawer, closeQuickAdd } = useAppStore();
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [duplicates, setDuplicates] = useState<DuplicateCandidate[] | null>(null);
+  const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null);
+  const [excludedSuggestionFields, setExcludedSuggestionFields] = useState<string[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const { enabled: agentEnabled, connectivity, config } = useAgentSettings();
+  const { openDrawer, closeQuickAdd, setRecordFieldProvenance } = useAppStore();
 
   const createContact = useCreateContact();
   const createAccount = useCreateAccount();
   const createOpportunity = useCreateOpportunity();
   const createUseCase = useCreateUseCase();
   const createActivity = useCreateActivity();
-  const createAssignment = useCreateAssignment();
   const extractRecordDraft = useExtractRecordDraft();
-  const canUseAgentExtraction = agentEnabled && Boolean(config?.model && config?.base_url) && connectivity !== 'offline';
-  const extractionModeDetail = connectivity === 'unknown'
-    ? 'Using the saved Workspace Agent config. If the model cannot be reached, this will switch to the form.'
-    : 'Your local or configured model drafts fields before you confirm.';
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
-  }, [messages]);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  const handleSend = async () => {
-    if (!input.trim() || isSubmitting || isExtracting) return;
-    const userText = input.trim();
-    setInput('');
+  const draft = draftResult?.draft ?? draftResult?.data ?? null;
+  const missing = draftResult?.missing_fields ?? (draft ? missingRequiredDraftFields(type, draft) : []);
+  const linkedRecords = draftResult?.linked_records ?? [];
+  const fieldRows = draftResult?.field_rows ?? draftRowsFallback(type, draft, missing);
+  const enrichmentSuggestions = draftResult?.enrichment_suggestions ?? [];
+  const possibleDuplicates = duplicates ?? draftResult?.duplicate_candidates ?? [];
+  const definitiveDuplicate = possibleDuplicates.some(candidate => candidate.score >= 90);
+  const canCreate = Boolean(draft) && missing.length === 0 && !definitiveDuplicate && !isSubmitting && !isExtracting;
 
-    setMessages(prev => [...prev, { role: 'user', content: userText }]);
-
-    let fields: Record<string, unknown>;
-    let extractionSource = 'Workspace Agent';
-    if (canUseAgentExtraction) {
-      setIsExtracting(true);
-      try {
-        const result = await extractRecordDraft.mutateAsync({ text: userText, object_type: type });
-        fields = result.data;
-        extractionSource = 'Workspace Agent';
-      } catch (err) {
-        console.warn('[quick-add] agent extraction failed, opening form:', err);
-        toast({
-          title: 'Workspace Agent unavailable',
-          description: 'Use the form to create this record. The quick parser is intentionally not used for record creation.',
-          variant: 'destructive',
-        });
-        setMessages(prev => [
-          ...prev,
-          { role: 'assistant', content: 'I could not reach the Workspace Agent, so I opened the form. That is safer than guessing fields with the quick parser.' },
-        ]);
-        setShowForm(true);
-        setIsExtracting(false);
-        return;
-      } finally {
-        setIsExtracting(false);
-      }
-    } else {
-      setShowForm(true);
-      return;
-    }
-
-    const mergedFields = { ...(extractedFields ?? {}), ...fields };
-    setExtractedFields(mergedFields);
-    const missing = missingRequiredDraftFields(type, mergedFields);
-
-    // Generate assistant confirmation
-    const fieldsList = Object.entries(mergedFields)
-      .filter(([, v]) => v !== undefined && v !== '')
-      .map(([k, v]) => `• **${formatFieldName(k)}**: ${formatFieldValue(v)}`)
-      .join('\n');
-
-    setMessages(prev => [
-      ...prev,
-      {
-        role: 'assistant',
-        content: missing.length > 0
-          ? `I drafted this with ${extractionSource}:\n\n${fieldsList || 'No reliable fields yet.'}\n\nI still need ${missing.join(', ')}. Add that here, or use the form for fields that require selecting an existing record.`
-          : fieldsList
-          ? `Got it — I drafted this with ${extractionSource}:\n\n${fieldsList}\n\nDoes this look right? Reply "yes" to confirm or add more details.`
-          : "Thanks! Can you share more details like name, email, or any other relevant information?",
-      },
-    ]);
+  const applyExcludedSuggestions = (payload: Record<string, unknown>) => {
+    if (type !== 'account') return payload;
+    for (const field of excludedSuggestionFields) delete payload[field];
+    return payload;
   };
 
-  const handleConfirm = async (fields = extractedFields, allowDuplicates = false) => {
-    if (!fields || isSubmitting || isExtracting) return;
-    setIsSubmitting(true);
+  const handleSuggestionChange = (suggestion: EnrichmentSuggestion, rawValue: string) => {
+    const value = parseEditedSuggestionValue(suggestion.field, rawValue, suggestion.value);
+    setDraftResult(prev => {
+      if (!prev) return prev;
+      const updateDraft = (target?: Record<string, unknown>) => target ? { ...target, [suggestion.field]: value } : target;
+      return {
+        ...prev,
+        data: updateDraft(prev.data) ?? prev.data,
+        draft: updateDraft(prev.draft ?? prev.data),
+        field_rows: prev.field_rows?.map(row => row.field === suggestion.field
+          ? {
+              ...row,
+              value,
+              source_label: row.source === 'model_knowledge' ? 'Edited model suggestion' : row.source_label,
+              confidence_label: row.source === 'model_knowledge' ? 'User reviewed' : row.confidence_label,
+              requires_confirmation: true,
+            }
+          : row),
+        enrichment_suggestions: prev.enrichment_suggestions?.map(item => item.field === suggestion.field
+          ? {
+              ...item,
+              value,
+              source_label: item.source === 'model_knowledge' ? 'Edited model suggestion' : item.source_label,
+              confidence_label: item.source === 'model_knowledge' ? 'User reviewed' : item.confidence_label,
+              requires_confirmation: true,
+            }
+          : item),
+      };
+    });
+  };
 
+  const handleExtract = async () => {
+    if (!input.trim() || isSubmitting || isExtracting) return;
+    const text = input.trim();
+    setInput('');
+    setIsExtracting(true);
     try {
-      const payload = allowDuplicates ? { ...fields, allow_duplicates: true } : fields;
-      if (type === 'contact') await createContact.mutateAsync(payload);
-      else if (type === 'account') await createAccount.mutateAsync(payload);
-      else if (type === 'opportunity') await createOpportunity.mutateAsync(payload);
-      else if (type === 'use-case') await createUseCase.mutateAsync(payload);
-      else if (type === 'activity') await createActivity.mutateAsync(payload);
-      else if (type === 'assignment') await createAssignment.mutateAsync(payload);
+      const result = await extractRecordDraft.mutateAsync({
+        text,
+        object_type: type,
+        parent_subject_type: context?.parent_subject_type,
+        parent_subject_id: context?.parent_subject_id,
+        parent_subject_name: context?.parent_subject_name,
+        defaults: { ...(context?.defaults ?? {}), ...(draft ?? {}) },
+      });
+      setDraftResult(result);
+      setExcludedSuggestionFields([]);
+      setDuplicates(result.duplicate_candidates?.length ? result.duplicate_candidates : null);
+    } catch (err) {
+      console.warn('[quick-add] agent extraction failed, opening form:', err);
+      toast({
+        title: 'Workspace Agent unavailable',
+        description: 'Workspace Agent is unavailable, so CRMy opened the form.',
+        variant: 'destructive',
+      });
+      setShowForm(true);
+    } finally {
+      setIsExtracting(false);
+    }
+  };
 
-      setChatDuplicates(null);
-      setChatPendingFields(null);
-      setConfirmed(true);
-      toast({ title: `${typeLabels[type]} created!`, description: 'Added to operational state. Next: open it for a briefing or audit trail.' });
-      setTimeout(onClose, 1200);
+  const createFromPayload = async (payload: Record<string, unknown>) => {
+    if (type === 'contact') return createContact.mutateAsync(payload);
+    if (type === 'account') return createAccount.mutateAsync(payload);
+    if (type === 'opportunity') return createOpportunity.mutateAsync(payload);
+    if (type === 'use-case') return createUseCase.mutateAsync(payload);
+    if (type === 'activity') return createActivity.mutateAsync(payload);
+    throw new Error(`Unsupported quick add type: ${type}`);
+  };
+
+  const handleCreate = async (allowDuplicates = false, payloadOverride?: Record<string, unknown> | null) => {
+    const payload: Record<string, unknown> = applyExcludedSuggestions({ ...(payloadOverride ?? draft ?? {}), ...(allowDuplicates ? { allow_duplicates: true } : {}) });
+    if (!payload || isSubmitting || isExtracting) return;
+    setIsSubmitting(true);
+    try {
+      normalizeSubjectLink(payload);
+      await assertSubjectReference(payload.subject_type as string | undefined, payload.subject_id as string | undefined);
+      await validateReferences(payload);
+      const result = await createFromPayload(payload);
+      const createdRecord = normalizeCreatedRecord(type, result);
+      if (createdRecord && type === 'account') {
+        const provenance = provenanceFromRows(fieldRows, excludedSuggestionFields);
+        if (Object.keys(provenance).length > 0) {
+          setRecordFieldProvenance(createdRecord.type, createdRecord.id, provenance);
+        }
+      }
+      toast({ title: `${typeLabels[type]} created`, description: createdRecord ? 'Opening the new record.' : 'Added to CRMy.' });
+      closeQuickAdd();
+      if (createdRecord) openDrawer(createdRecord.type, createdRecord.id);
     } catch (err) {
       if (err instanceof ApiError && err.status === 409 && err.candidates.length > 0) {
-        setChatDuplicates(err.candidates as DuplicateCandidate[]);
-        setChatPendingFields(fields);
+        setDuplicates(err.candidates as DuplicateCandidate[]);
+        setPendingPayload(payload);
       } else {
         toast({ title: `Failed to create ${typeLabels[type]}`, description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
       }
@@ -387,155 +337,267 @@ function ChatAddPanel({ type, onClose }: { type: string; onClose: () => void }) 
     }
   };
 
-  const lastMsg = messages[messages.length - 1];
-  const showConfirmButton =
-    lastMsg?.role === 'assistant' &&
-    lastMsg.content.includes("Does this look right") &&
-    extractedFields !== null &&
-    !confirmed;
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (input.toLowerCase().trim() === 'yes' || input.toLowerCase().trim() === 'confirm') {
-        handleConfirm();
-      } else {
-        handleSend();
-      }
-    }
+  const validateReferences = async (payload: Record<string, unknown>) => {
+    if (typeof payload.account_id === 'string') await assertReferenceExists('account', payload.account_id, 'account');
+    if (typeof payload.contact_id === 'string') await assertReferenceExists('contact', payload.contact_id, 'contact');
+    if (typeof payload.opportunity_id === 'string') await assertReferenceExists('opportunity', payload.opportunity_id, 'opportunity');
+    if (typeof payload.use_case_id === 'string') await assertReferenceExists('use_case', payload.use_case_id, 'use case');
   };
 
-  // ── Duplicate warning (chat mode) ───────────────────────────────────────
-  if (chatDuplicates && chatPendingFields) {
-    const entityType = type as 'contact' | 'account' | 'opportunity' | 'use-case';
-    return (
-      <div className="flex flex-col h-full">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-          <span className="font-display font-bold text-foreground">New {typeLabels[type]}</span>
-          <button onClick={onClose}><X className="w-4 h-4 text-muted-foreground" /></button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4">
-          <DuplicateWarning
-            entityType={entityType}
-            candidates={chatDuplicates}
-            onUseExisting={(id) => {
-              openDrawer(entityType === 'use-case' ? 'use-case' : entityType as Parameters<typeof openDrawer>[0], id);
-              closeQuickAdd();
-            }}
-            onCreateAnyway={() => handleConfirm(chatPendingFields, true)}
-            onCancel={() => { setChatDuplicates(null); setChatPendingFields(null); }}
-          />
-        </div>
-      </div>
-    );
+  if (showForm) {
+    return <ManualForm type={type} onClose={onClose} onBack={() => setShowForm(false)} backLabel="Back to agent create" initialFields={draft ?? context?.defaults ?? undefined} />;
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-accent" />
-          <span className="font-display font-bold text-foreground">New {typeLabels[type]}</span>
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-500/15">
+            <Bot className="h-4 w-4 text-violet-400" />
+          </span>
+          <div className="min-w-0">
+            <p className="font-display text-sm font-bold text-foreground">New {typeLabels[type]}</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {context?.parent_subject_name ? `Scoped to ${context.parent_subject_name}` : 'Describe it naturally. Review before CRMy writes.'}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowForm(!showForm)}
-            className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors ${
-              showForm
-                ? 'border-border bg-muted text-foreground'
-                : 'border-border/60 text-muted-foreground hover:text-foreground hover:bg-muted/50'
-            }`}
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            <FileText className="w-3 h-3" />
-            <span>Form</span>
+            <FileText className="h-3 w-3" /> Form
           </button>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors">
-            <X className="w-4 h-4 text-muted-foreground" />
+          <button onClick={onClose} className="rounded-lg p-1.5 transition-colors hover:bg-muted">
+            <X className="h-4 w-4 text-muted-foreground" />
           </button>
         </div>
       </div>
 
-      {showForm ? (
-        <ManualForm type={type} onClose={onClose} onBack={() => setShowForm(false)} backLabel="Back to guided add" />
-      ) : (
-      <>
-      {canUseAgentExtraction && (
-        <div className="border-b border-border px-4 py-2.5">
-          <div className="flex items-start gap-2 rounded-xl border border-violet-500/25 bg-violet-500/8 px-3 py-2 text-violet-300">
-            <Bot className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-violet-400" />
-            <div className="min-w-0">
-              <p className="text-xs font-semibold">Workspace Agent extraction</p>
-              <p className="mt-0.5 text-xs opacity-80">{extractionModeDetail}</p>
-            </div>
-          </div>
+      <div className="border-b border-border px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-violet-500/25 bg-violet-500/10 px-2.5 py-1 text-xs font-semibold text-violet-300">
+            <ShieldCheck className="h-3 w-3" /> Preview before write
+          </span>
+          {context?.parent_subject_name && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-xs text-foreground">
+              <Link2 className="h-3 w-3 text-muted-foreground" /> {context.parent_subject_name}
+            </span>
+          )}
+          {linkedRecords.map(record => (
+            <span key={`${record.type}-${record.id}`} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-1 text-xs text-foreground">
+              <Link2 className="h-3 w-3 text-muted-foreground" /> {record.name}
+            </span>
+          ))}
         </div>
-      )}
-      {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
-        {messages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div
-              className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap ${
-                msg.role === 'user'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-foreground'
-              }`}
-            >
-              {msg.content}
-            </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {isExtracting ? (
+          <div className="rounded-2xl border border-violet-500/25 bg-violet-500/8 p-6 text-center">
+            <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-500/15">
+              <Sparkles className="h-5 w-5 animate-spin text-violet-300" />
+            </span>
+            <p className="mt-3 text-sm font-semibold text-foreground">Drafting {typeLabels[type].toLowerCase()}…</p>
+            <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+              CRMy is reading your details, checking required fields, and matching visible customer records.
+            </p>
           </div>
-        ))}
-        {confirmed && (
-          <div className="flex justify-center">
-            <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-success/15 text-success text-sm font-semibold">
-              <Check className="w-4 h-4" /> Created successfully!
+        ) : !draft ? (
+          <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-6 text-center">
+            <Table2 className="mx-auto h-5 w-5 text-violet-400" />
+            <p className="mt-2 text-sm font-semibold text-foreground">Add {typeLabels[type].toLowerCase()} details</p>
+            <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+              Describe the {typeLabels[type].toLowerCase()} in plain language. CRMy will draft the right fields, check required details, and preview everything before writing.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-2xl border border-border bg-card">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Draft preview</p>
+                <p className="text-xs text-muted-foreground">
+                  {missing.length ? `${missing.length} required detail${missing.length === 1 ? '' : 's'} missing` : 'Ready for your confirmation'}
+                </p>
+              </div>
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${missing.length ? 'bg-amber-500/10 text-amber-400' : 'bg-success/10 text-success'}`}>
+                {missing.length ? 'Needs detail' : 'Ready'}
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-muted/40 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-4 py-2 font-medium">Field</th>
+                    <th className="px-4 py-2 font-medium">Draft value</th>
+                    <th className="px-4 py-2 font-medium">Source / reason</th>
+                    <th className="px-4 py-2 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {fieldRows.map(row => (
+                    <tr key={row.field}>
+                      <td className="px-4 py-2 text-foreground">
+                        {row.label}
+                        {row.required && <span className="ml-1 text-amber-400">*</span>}
+                      </td>
+                      <td className="max-w-[260px] px-4 py-2 text-muted-foreground">
+                        <span className="line-clamp-2">{row.value == null ? 'Missing' : formatFieldValue(row.value)}</span>
+                      </td>
+                      <td className="px-4 py-2 text-xs text-muted-foreground">
+                        <div className="flex flex-col gap-0.5">
+                          <span>{row.source_label ?? row.source}</span>
+                          {row.confidence_label && <span className="text-[11px] text-amber-300">{row.confidence_label}</span>}
+                          {row.requires_confirmation && row.status !== 'missing' && (
+                            <span className="text-[11px] text-muted-foreground">Confirm before saving</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2">
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          row.status === 'missing' ? 'bg-amber-500/10 text-amber-400' :
+                          row.status === 'linked' ? 'bg-blue-500/10 text-blue-400' :
+                          'bg-success/10 text-success'
+                        }`}>
+                          {row.status === 'missing' ? 'Needs detail' : row.status === 'linked' ? 'Linked' : 'Ready'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-col gap-2 border-t border-border bg-background/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-foreground">Confirm before CRMy writes</p>
+                <p className="text-xs text-muted-foreground">
+                  {canCreate
+                    ? `This will create one ${typeLabels[type].toLowerCase()} record.`
+                    : missing.length
+                      ? `Add ${missing.length} required detail${missing.length === 1 ? '' : 's'} before creating.`
+                      : definitiveDuplicate
+                        ? 'Use the existing record or review the duplicate before creating.'
+                        : 'Review the draft before creating.'}
+                </p>
+              </div>
+              <button
+                onClick={() => handleCreate(false)}
+                disabled={!canCreate}
+                className="flex h-9 shrink-0 items-center justify-center gap-2 rounded-xl bg-success px-3.5 text-sm font-semibold text-success-foreground transition-colors hover:bg-success/90 disabled:opacity-40"
+              >
+                {isSubmitting ? 'Creating...' : `Confirm and create ${typeLabels[type]}`}
+                {!isSubmitting && <Check className="h-4 w-4" />}
+              </button>
             </div>
           </div>
         )}
+
+        {type === 'account' && enrichmentSuggestions.length > 0 && (
+          <div className="rounded-2xl border border-violet-500/25 bg-violet-500/8 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-foreground">Enrichment</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  CRMy suggested these account details from model knowledge. Confirm before saving.
+                </p>
+              </div>
+              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-300">
+                Unverified
+              </span>
+            </div>
+            <div className="mt-3 grid gap-2">
+              {enrichmentSuggestions.map(suggestion => {
+                const excluded = excludedSuggestionFields.includes(suggestion.field);
+                return (
+                  <div key={suggestion.field} className="grid gap-2 rounded-xl border border-border/70 bg-background/50 p-3 sm:grid-cols-[1.1fr,1.2fr,auto] sm:items-center">
+                    <label className="block">
+                      <span className="mb-1 block text-xs text-muted-foreground">{suggestion.label}</span>
+                      <input
+                        value={editableFieldValue(suggestion.value)}
+                        onChange={(e) => handleSuggestionChange(suggestion, e.target.value)}
+                        disabled={excluded}
+                        className={`h-9 w-full rounded-lg border border-border bg-background px-2.5 text-sm font-semibold outline-none transition-colors focus:ring-1 focus:ring-violet-500/40 disabled:cursor-not-allowed disabled:opacity-50 ${
+                          excluded ? 'text-muted-foreground line-through' : 'text-foreground'
+                        }`}
+                      />
+                    </label>
+                    <div className="text-xs text-muted-foreground">
+                      <span>{suggestion.source_label}</span>
+                      <span className="mx-1.5">·</span>
+                      <span className={suggestion.confidence_label === 'User reviewed' ? 'text-success' : 'text-amber-300'}>{suggestion.confidence_label}</span>
+                      <span className="mx-1.5">·</span>
+                      <span>{excluded ? 'Will not be saved' : 'Will be saved when you confirm'}</span>
+                    </div>
+                    <button
+                      onClick={() => setExcludedSuggestionFields(prev => (
+                        excluded ? prev.filter(field => field !== suggestion.field) : [...prev, suggestion.field]
+                      ))}
+                      className="h-8 rounded-lg border border-border px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    >
+                      {excluded ? 'Include' : 'Skip'}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {draftResult?.unresolved_references?.length ? (
+          <div className="rounded-2xl border border-amber-500/25 bg-amber-500/8 p-3 text-xs text-amber-200">
+            <div className="mb-1 flex items-center gap-2 font-semibold"><AlertTriangle className="h-3.5 w-3.5" /> Needs a little help</div>
+            {draftResult.unresolved_references.map(item => <p key={item}>{item}</p>)}
+          </div>
+        ) : null}
+
+        {possibleDuplicates.length > 0 && draft && ['contact', 'account', 'opportunity', 'use-case'].includes(type) && (
+          <DuplicateWarning
+            entityType={type as 'contact' | 'account' | 'opportunity' | 'use-case'}
+            candidates={possibleDuplicates}
+            onUseExisting={(id) => {
+              openDrawer(type === 'use-case' ? 'use-case' : type as Parameters<typeof openDrawer>[0], id);
+              closeQuickAdd();
+            }}
+            onCreateAnyway={() => handleCreate(true, pendingPayload ?? draft)}
+            onCancel={() => { setDuplicates(null); setPendingPayload(null); }}
+          />
+        )}
       </div>
 
-      {/* Confirm button */}
-      {showConfirmButton && (
-        <div className="px-4 pb-2">
+      <div className="border-t border-border p-3">
+        <div className="mb-2 flex gap-2">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleExtract();
+              }
+            }}
+            placeholder={`Describe the ${typeLabels[type].toLowerCase()} to create…`}
+            rows={1}
+            className="min-h-[42px] flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-violet-500/40"
+          />
           <button
-            onClick={() => handleConfirm()}
-            disabled={isSubmitting || isExtracting}
-            className="w-full py-2.5 rounded-xl bg-success text-success-foreground text-sm font-semibold hover:bg-success/90 transition-colors disabled:opacity-50"
+            onClick={handleExtract}
+            disabled={!input.trim() || isSubmitting || isExtracting}
+            className="flex h-[42px] w-[42px] items-center justify-center rounded-xl bg-white text-background transition-colors hover:bg-white/90 disabled:opacity-40"
           >
-            {isSubmitting ? 'Creating...' : `Confirm & Create ${typeLabels[type]}`}
+            {isExtracting ? <Sparkles className="h-4 w-4 animate-pulse" /> : <ArrowUp className="h-4 w-4" />}
           </button>
         </div>
-      )}
-
-      {/* Input */}
-      <div className="flex items-end gap-2 p-3 border-t border-border">
-        <textarea
-          ref={inputRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Type details or 'yes' to confirm..."
-          rows={1}
-          className="flex-1 resize-none bg-muted rounded-xl px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-primary/30 min-h-[38px] max-h-28"
-          style={{ height: 'auto' }}
-        />
         <button
-          onClick={() => {
-            if (input.toLowerCase().trim() === 'yes' || input.toLowerCase().trim() === 'confirm') {
-              handleConfirm();
-            } else {
-              handleSend();
-            }
-          }}
-          disabled={!input.trim() || isSubmitting || isExtracting}
-          className="p-2 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-40"
+          onClick={() => handleCreate(false)}
+          disabled={!canCreate}
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-success text-success-foreground text-sm font-semibold transition-colors hover:bg-success/90 disabled:opacity-40"
         >
-          {isExtracting ? <Sparkles className="w-4 h-4 animate-pulse" /> : <Send className="w-4 h-4" />}
+          {isSubmitting ? 'Creating...' : `Confirm and create ${typeLabels[type]}`}
+          {!isSubmitting && <Check className="h-4 w-4" />}
         </button>
       </div>
-      </>
-      )}
     </div>
   );
 }
@@ -563,7 +625,7 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
     { key: 'account_id', label: 'Existing Account', fieldType: 'account-select' },
   ],
   opportunity: [
-    { key: 'name', label: 'Opportunity Name', placeholder: 'e.g. Acme Enterprise', required: true },
+    { key: 'name', label: 'Opportunity Name', placeholder: 'e.g. Northstar Agent Context Rollout', required: true },
     { key: 'account_id', label: 'Account', fieldType: 'account-select' },
     { key: 'contact_id', label: 'Primary Contact', fieldType: 'contact-select' },
     { key: 'amount', label: 'Amount ($)', placeholder: '850000', inputType: 'number' },
@@ -591,13 +653,15 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
     { key: 'body', label: 'Notes', placeholder: 'Additional details...', fieldType: 'textarea' },
   ],
   account: [
-    { key: 'name', label: 'Account Name', placeholder: 'e.g. Acme Corp', required: true },
+    { key: 'name', label: 'Account Name', placeholder: 'e.g. Northstar Labs', required: true },
     { key: 'industry', label: 'Industry', placeholder: 'e.g. Real Estate, Technology' },
     { key: 'website', label: 'Website', placeholder: 'https://acme.com', inputType: 'url' },
     { key: 'domain', label: 'Domain', placeholder: 'acme.com' },
+    { key: 'aliases', label: 'Aliases', placeholder: 'Comma-separated alternate names' },
+    { key: 'tags', label: 'Tags', placeholder: 'Comma-separated tags' },
   ],
   assignment: [
-    { key: 'title', label: 'Title', placeholder: 'e.g. Follow up with Acme about contract', required: true },
+    { key: 'title', label: 'Title', placeholder: 'e.g. Follow up with Northstar about security review', required: true },
     { key: 'assignment_type', label: 'Type', fieldType: 'select', options: ['call', 'draft', 'email', 'follow_up', 'research', 'review', 'send'], required: true },
     { key: 'assigned_to', label: 'Assign To', fieldType: 'actor-select', required: true },
     { key: 'subject_type', label: 'Linked To', fieldType: 'subject-type-select' },
@@ -647,8 +711,31 @@ function ActorSelect({ value, onChange }: { value: string; onChange: (v: string)
   );
 }
 
-function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClose: () => void; onBack: () => void; backLabel?: string }) {
-  const [fields, setFields] = useState<Record<string, string>>({});
+function stringifyInitialFields(initialFields?: Record<string, unknown> | null): Record<string, string> {
+  if (!initialFields) return {};
+  const fields: Record<string, string> = {};
+  for (const [key, value] of Object.entries(initialFields)) {
+    if (value == null) continue;
+    if (Array.isArray(value)) fields[key] = value.map(item => String(item)).join(', ');
+    else if (typeof value !== 'object') fields[key] = String(value);
+  }
+  return fields;
+}
+
+function ManualForm({
+  type,
+  onClose,
+  onBack,
+  backLabel,
+  initialFields,
+}: {
+  type: string;
+  onClose: () => void;
+  onBack?: () => void;
+  backLabel?: string;
+  initialFields?: Record<string, unknown> | null;
+}) {
+  const [fields, setFields] = useState<Record<string, string>>(() => stringifyInitialFields(initialFields));
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [duplicateCandidates, setDuplicateCandidates] = useState<DuplicateCandidate[] | null>(null);
   const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null);
@@ -679,8 +766,16 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
     if (type === 'contact') delete payload.name;
     if (type === 'opportunity') { if (fields.amount) payload.amount = parseFloat(fields.amount) || 0; payload.stage = 'prospecting'; }
     if (type === 'use-case') { if (!payload.stage) payload.stage = 'discovery'; if (fields.attributed_arr) payload.attributed_arr = parseFloat(fields.attributed_arr) || 0; }
-    if (type === 'account' && typeof payload.website === 'string') {
-      payload.website = payload.website.startsWith('http') ? payload.website : `https://${payload.website}`;
+    if (type === 'account') {
+      if (typeof payload.website === 'string') {
+        payload.website = payload.website.startsWith('http') ? payload.website : `https://${payload.website}`;
+      }
+      if (typeof payload.aliases === 'string') {
+        payload.aliases = payload.aliases.split(',').map(item => item.trim()).filter(Boolean);
+      }
+      if (typeof payload.tags === 'string') {
+        payload.tags = payload.tags.split(',').map(item => item.trim()).filter(Boolean);
+      }
     }
     if (type === 'activity') {
       if (fields.occurred_at) payload.occurred_at = new Date(fields.occurred_at).toISOString();
@@ -784,9 +879,11 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
-      <button onClick={onBack} className="flex items-center gap-1.5 text-xs text-accent hover:underline mb-5">
-        {backLabel ? <><Sparkles className="w-3 h-3" /> {backLabel}</> : <><ChevronLeft className="w-3.5 h-3.5" /> Back</>}
-      </button>
+      {onBack && (
+        <button onClick={onBack} className="mb-5 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+          {backLabel ? <><Bot className="w-3 h-3 text-violet-500" /> {backLabel}</> : <><ChevronLeft className="w-3.5 h-3.5" /> Back</>}
+        </button>
+      )}
       <div className="space-y-4">
         {config.filter(isFieldVisible).map(f => (
           <div key={f.key} className="space-y-1.5">
@@ -912,24 +1009,27 @@ function ManualForm({ type, onClose, onBack, backLabel }: { type: string; onClos
 }
 
 export function QuickAddDrawer() {
-  const { quickAddType, closeQuickAdd } = useAppStore();
+  const { quickAddType, quickAddContext, closeQuickAdd } = useAppStore();
   const { enabled: agentEnabled, config, connectivity, loading } = useAgentSettings();
 
   if (!quickAddType) return null;
-  const agentReady = agentEnabled && Boolean(config?.model && config?.base_url) && connectivity !== 'offline';
+  const agentConfigured = agentEnabled && Boolean(config?.model && config?.base_url);
+  const checkingAgent = !loading && agentConfigured && connectivity === 'unknown';
+  const agentReady = agentConfigured && connectivity === 'online';
+  const agentCreatable = quickAddType !== 'assignment';
 
   return (
     <>
       <div className="fixed inset-0 bg-background/60 backdrop-blur-sm z-[80]" onClick={closeQuickAdd} />
       <div className="fixed right-0 top-0 h-full w-full max-w-2xl bg-background border-l border-border z-[90] shadow-2xl flex flex-col animate-slide-in-right">
-        {loading ? (
+        {loading || checkingAgent ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
             <Bot className="h-5 w-5 animate-pulse text-violet-400" />
             <p className="text-sm text-muted-foreground">Checking Workspace Agent settings…</p>
           </div>
-        ) : agentReady
-          ? <ChatAddPanel type={quickAddType} onClose={closeQuickAdd} />
-          : <ManualForm type={quickAddType} onClose={closeQuickAdd} onBack={closeQuickAdd} />
+        ) : agentReady && agentCreatable
+          ? <LightweightAgentCreatePanel type={quickAddType} context={quickAddContext} onClose={closeQuickAdd} />
+          : <ManualForm type={quickAddType} onClose={closeQuickAdd} />
         }
       </div>
     </>

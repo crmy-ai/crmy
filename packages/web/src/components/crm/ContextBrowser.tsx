@@ -784,23 +784,26 @@ export function ContextBrowser({
     isError: semanticError,
   } = useSemanticSearch(searchMode === 'semantic' ? q : '', semanticParams);
   const semanticEntries: any[] = (semanticData as any)?.entries ?? (semanticData as any)?.data ?? [];
+  const semanticUnavailable = searchMode === 'semantic' && (semanticError || Boolean((semanticData as any)?.error));
+  const semanticUnavailableMessage = (semanticData as any)?.error
+    ? String((semanticData as any).error)
+    : 'Semantic retrieval is not ready on this workspace.';
 
   // Toast once when semantic search fails so users notice even if they scrolled past the inline banner
   const semanticErrorToastedRef = useRef(false);
   useEffect(() => {
-    if (semanticError && searchMode === 'semantic' && !semanticErrorToastedRef.current) {
+    if (semanticUnavailable && !semanticErrorToastedRef.current) {
       semanticErrorToastedRef.current = true;
       toast({
         title: 'Semantic search unavailable',
-        description: 'pgvector is not enabled on this instance. Showing keyword results instead. Set ENABLE_PGVECTOR=true to activate semantic search.',
-        variant: 'destructive',
+        description: 'Showing keyword results instead. Ask an admin to finish semantic retrieval setup in Database Settings.',
       });
     }
-    if (!semanticError) semanticErrorToastedRef.current = false;
-  }, [semanticError, searchMode]);
+    if (!semanticUnavailable) semanticErrorToastedRef.current = false;
+  }, [semanticUnavailable]);
 
   // When semantic search errors, fall back to keyword results
-  const effectiveMode = searchMode === 'semantic' && semanticError ? 'keyword' : searchMode;
+  const effectiveMode = searchMode === 'semantic' && semanticUnavailable ? 'keyword' : searchMode;
 
   const filtered = useMemo(() => {
     let items = staleOnly ? entries : effectiveMode === 'semantic' ? semanticEntries : entries;
@@ -829,7 +832,7 @@ export function ContextBrowser({
     ? staleQuery.isLoading
     : searchMode === 'keyword'
     ? isLoading
-    : (semanticError ? isLoading : semanticLoading);
+    : (semanticUnavailable ? isLoading : semanticLoading);
   const hasFilters  = Object.keys(activeFilters).length > 0 || q;
 
   const handleIngest = useCallback(async () => {
@@ -1091,7 +1094,7 @@ export function ContextBrowser({
         )}
 
         {/* Semantic unavailable banner */}
-        {searchMode === 'semantic' && semanticError && (
+        {semanticUnavailable && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -1099,9 +1102,12 @@ export function ContextBrowser({
           >
             <AlertTriangle className="w-4 h-4 flex-shrink-0" />
             <span>
-              Semantic search requires pgvector. Set{' '}
-              <code className="px-1 py-0.5 bg-warning/20 rounded">ENABLE_PGVECTOR=true</code>{' '}
-              and configure an embedding provider. Falling back to keyword search.
+              Semantic search is using keyword fallback. Admins can enable semantic retrieval in{' '}
+              <Link to="/settings/database" className="font-semibold underline underline-offset-2">
+                Database Settings
+              </Link>{' '}
+              by turning on pgvector and adding an embedding provider to the server environment.
+              <span className="sr-only"> {semanticUnavailableMessage}</span>
             </span>
           </motion.div>
         )}

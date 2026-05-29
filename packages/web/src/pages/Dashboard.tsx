@@ -1117,7 +1117,7 @@ function AdminDashboard() {
   const activeAgents = agents.filter((a: any) => a.is_active);
   const dbConnected = Boolean(dbInfo?.database || dbInfo?.host);
   const sampleSeeded = Boolean(dbInfo?.sample_data?.seeded);
-  const pgvectorEnabled = Boolean(dbInfo?.pgvector_enabled);
+  const semanticRetrievalReady = Boolean(dbInfo?.ready ?? dbInfo?.pgvector_enabled);
   const handoffReady = pendingHITL.length === 0;
   const activeTab = searchParams.get('tab') === 'health' ? 'health' : 'overview';
   const activationSteps = [
@@ -1168,11 +1168,11 @@ function AdminDashboard() {
     },
     {
       id: 'pgvector',
-      complete: pgvectorEnabled,
+      complete: semanticRetrievalReady,
       icon: Brain,
-      title: pgvectorEnabled ? 'Semantic context ready' : 'Enable pgvector',
-      detail: pgvectorEnabled ? 'Vector search can retrieve related customer context.' : 'Keyword search works; pgvector improves retrieval.',
-      status: pgvectorEnabled ? 'ready' as const : 'watch' as const,
+      title: semanticRetrievalReady ? 'Semantic context ready' : 'Semantic retrieval setup',
+      detail: semanticRetrievalReady ? 'Vector search can retrieve related customer context.' : 'Keyword search works; pgvector plus embeddings improves retrieval.',
+      status: semanticRetrievalReady ? 'ready' as const : 'watch' as const,
       href: '/settings/database',
     },
   ];
@@ -1233,10 +1233,10 @@ function AdminDashboard() {
       href: '/handoffs',
       tone: 'action' as const,
     }] : []),
-    ...(!pgvectorEnabled ? [{
+    ...(!semanticRetrievalReady ? [{
       icon: Brain,
-      title: 'Semantic search is not enabled',
-      detail: 'Keyword search works; pgvector improves context retrieval.',
+      title: 'Semantic retrieval is not ready',
+      detail: 'Keyword search works; enable pgvector and embeddings for stronger recall.',
       href: '/settings/database',
       tone: 'watch' as const,
     }] : []),
@@ -1536,10 +1536,10 @@ function AdminDashboard() {
               <ReadinessItem
                 icon={Brain}
                 title="Semantic retrieval"
-                value={pgvectorEnabled ? 'Enabled' : 'Keyword'}
-                detail={pgvectorEnabled ? 'Semantic search can find related context.' : 'Keyword search works; pgvector improves recall.'}
+                value={semanticRetrievalReady ? 'Enabled' : 'Keyword'}
+                detail={semanticRetrievalReady ? 'Semantic search can find related context.' : 'Keyword search works; pgvector plus embeddings improves recall.'}
                 href="/settings/database"
-                ready={pgvectorEnabled}
+                ready={semanticRetrievalReady}
               />
             </div>
             {snapshotExpanded && (
