@@ -28,17 +28,6 @@ Raw Context -> Signals -> Memory -> Handoffs / Writeback
 
 Before an agent acts on a customer, CRMy can tell it what is known, what is stale, what is inferred, what is approved, what action is allowed, what system owns the record, and what proof or audit trail will exist afterward.
 
----
-
-CRMy does not replace your system of record. Your CRM, warehouse, support desk, mailbox, calendar, etc. remain the systems where work happens and state is stored. 
-
-CRMy makes that state agent-operable: it turns messy customer context into typed operational Memory, gives agents scoped tools, and governs the path from recommendation to human review to system-of-record writeback.
-
-```text
-Raw Context -> Signals -> Memory -> Handoffs / Writeback
-```
-
-Before any agent acts on a customer, CRMy can tell it what is true, what is stale, what is inferred, what is approved, what system owns the record, what action is allowed, and what proof or audit trail will exist afterward.
 
 ## Why CRMy?
 
