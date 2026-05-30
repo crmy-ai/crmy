@@ -5,7 +5,6 @@ import { useState, useRef } from 'react';
 import { EntityCombobox } from '@/components/ui/entity-combobox';
 import { useQueryClient } from '@tanstack/react-query';
 import { useContact, useActivities, useUpdateContact, useDeleteContact, useUsers, useCustomFields, useContextEntries, useCreateContextEntry, useRescoreContact } from '@/api/hooks';
-import { ContactAvatar } from './ContactAvatar';
 import { useAppStore } from '@/store/appStore';
 import { StageBadge, LeadScoreBadge, CustomFieldsSection } from './CrmWidgets';
 import { ActivityTimeline } from './ActivityTimeline';
@@ -15,9 +14,11 @@ import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
 import { ObjectActionBar } from './ObjectActionBar';
 import { DrawerSection } from './DrawerSection';
+import { CopyIconButton } from './CopyIconButton';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
 import { assertReferenceExists } from '@/lib/referenceValidation';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -232,9 +233,10 @@ function ContactEditForm({
 }
 
 export function ContactDrawer() {
-  const { drawerEntityId, closeDrawer, drawerBriefing } = useAppStore();
+  const { drawerEntityId, closeDrawer, drawerBriefing, drawerEditing, setDrawerEditing, openQuickAdd } = useAppStore();
   const queryClient = useQueryClient();
-  const [editing, setEditing] = useState(false);
+  const editing = drawerEditing;
+  const setEditing = setDrawerEditing;
   const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
   const graphHref = drawerEntityId ? `/contacts/${drawerEntityId}/graph` : undefined;
   const [noting, setNoting] = useState(false);
@@ -252,6 +254,8 @@ export function ContactDrawer() {
   const updateContact = useUpdateContact(drawerEntityId ?? '');
   const deleteContact = useDeleteContact(drawerEntityId ?? '');
   const rescore = useRescoreContact(drawerEntityId ?? '');
+  const { enabled: agentEnabled, config: agentConfig, connectivity } = useAgentSettings();
+  const agentReady = agentEnabled && Boolean(agentConfig?.model && agentConfig?.base_url) && connectivity === 'online';
 
   if (isLoading) {
     return (
@@ -274,8 +278,26 @@ export function ContactDrawer() {
   const contact = contactData.contact;
   const name: string = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || contact.email || '';
   const company: string = contact.account_name ?? contact.company_name ?? '';
+  const title: string = contact.title ?? '';
+  const email: string = contact.email ?? '';
+  const phone: string = contact.phone ?? '';
   const stage: string = contact.lifecycle_stage ?? '';
   const leadScore: number = contact.lead_score ?? 0;
+  const startEdit = () => {
+    if (agentReady && drawerEntityId) {
+      closeDrawer();
+      openQuickAdd('contact', {
+        mode: 'edit',
+        record_id: drawerEntityId,
+        record_name: name,
+        parent_subject_type: 'contact',
+        parent_subject_id: drawerEntityId,
+        parent_subject_name: name,
+      });
+      return;
+    }
+    setEditing(true);
+  };
 
   if (view === 'brief') {
     return (
@@ -319,10 +341,32 @@ export function ContactDrawer() {
       {/* Header */}
       <div className="p-6 border-b border-border">
         <div className="flex items-start gap-4">
-          <ContactAvatar name={name} className="w-14 h-14 rounded-2xl text-lg" />
           <div className="flex-1">
             <h2 className="font-display font-extrabold text-xl text-foreground">{name}</h2>
-            {company && <p className="text-sm text-muted-foreground">{company}</p>}
+            {(title || company) && (
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                {title && <span className="font-medium text-foreground">{title}</span>}
+                {title && company && <span className="text-muted-foreground">·</span>}
+                {company && <span className="text-muted-foreground">{company}</span>}
+              </div>
+            )}
+            {(email || phone) && (
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                {email && (
+                  <span className="inline-flex items-center gap-1">
+                    <span>{email}</span>
+                    <CopyIconButton value={email} label="Email" className="-my-1 h-6 w-6" />
+                  </span>
+                )}
+                {email && phone && <span>·</span>}
+                {phone && (
+                  <span className="inline-flex items-center gap-1">
+                    <span>{phone}</span>
+                    <CopyIconButton value={phone} label="Phone" className="-my-1 h-6 w-6" />
+                  </span>
+                )}
+              </div>
+            )}
             <div className="flex items-center gap-2 mt-2">
               {stage && <StageBadge stage={stage} />}
               {leadScore > 0 && (
@@ -334,19 +378,25 @@ export function ContactDrawer() {
               )}
             </div>
           </div>
+          <button
+            onClick={startEdit}
+            className="flex shrink-0 items-center gap-1.5 rounded-xl bg-muted px-3 py-2 text-sm font-medium text-foreground transition-all hover:bg-muted/80 press-scale"
+          >
+            <Pencil className="h-3.5 w-3.5" /> Edit
+          </button>
         </div>
         <div className="flex gap-2 mt-4">
-          {contact.phone && (
+          {phone && (
             <a
-              href={`tel:${contact.phone}`}
+              href={`tel:${phone}`}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-all press-scale"
             >
               <Phone className="w-3.5 h-3.5" /> Call
             </a>
           )}
-          {contact.email && (
+          {email && (
             <a
-              href={`mailto:${contact.email}`}
+              href={`mailto:${email}`}
               className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
             >
               <Mail className="w-3.5 h-3.5" /> Email
@@ -356,13 +406,7 @@ export function ContactDrawer() {
             onClick={() => { setNoting(v => !v); setTimeout(() => noteRef.current?.focus(), 50); }}
             className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-sm font-medium transition-all press-scale ${noting ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground hover:bg-muted/80'}`}
           >
-            <StickyNote className="w-3.5 h-3.5" /> Note
-          </button>
-          <button
-            onClick={() => setEditing(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
-          >
-            <Pencil className="w-3.5 h-3.5" /> Edit
+            <StickyNote className="w-3.5 h-3.5" /> Notes
           </button>
         </div>
       </div>
@@ -438,7 +482,12 @@ export function ContactDrawer() {
           .map((field) => (
             <div key={field.label} className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">{field.label}</span>
-              <span className="text-sm text-foreground">{field.value}</span>
+              <span className="flex min-w-0 items-center gap-1 text-right">
+                <span className="truncate text-sm text-foreground">{field.value}</span>
+                {(field.label === 'Email' || field.label === 'Phone') && (
+                  <CopyIconButton value={String(field.value ?? '')} label={field.label} />
+                )}
+              </span>
             </div>
           ))}
         {contact.tags && contact.tags.length > 0 && (

@@ -111,7 +111,7 @@ export default function AgentSettings() {
   const [maxTokens,           setMaxTokens]           = useState(4000);
   const [canCreateAssignments, setCanCreateAssignments] = useState(true);
   const [canLogActivities,    setCanLogActivities]    = useState(true);
-  const [canWriteObjects,     setCanWriteObjects]     = useState(false);
+  const [canWriteObjects,     setCanWriteObjects]     = useState(true);
   const [autoExtractContext,  setAutoExtractContext]  = useState(true);
   const [autoPromoteSignals,  setAutoPromoteSignals]  = useState(true);
   const [signalPromotionThreshold, setSignalPromotionThreshold] = useState(0.85);
@@ -139,7 +139,7 @@ export default function AgentSettings() {
     setMaxTokens(config.max_tokens_per_turn);
     setCanCreateAssignments(config.can_create_assignments);
     setCanLogActivities(config.can_log_activities);
-    setCanWriteObjects(config.can_write_objects);
+    setCanWriteObjects(config.can_write_objects !== false);
     setAutoExtractContext(config.auto_extract_context !== false); // default true
     setAutoPromoteSignals(config.auto_promote_signals !== false);
     setSignalPromotionThreshold(Number(config.signal_auto_promote_threshold ?? 0.85));
@@ -862,7 +862,7 @@ export default function AgentSettings() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-foreground">Allow agent to write revenue objects</p>
-                <p className="text-xs text-muted-foreground">Agent can create and edit contacts, accounts, opportunities, and related state</p>
+                <p className="text-xs text-muted-foreground">Lets the Workspace Agent and lightweight record agent create or update revenue records after scope checks and confirmation.</p>
               </div>
               <Switch
                 checked={canWriteObjects}
@@ -879,10 +879,10 @@ export default function AgentSettings() {
               />
             </div>
             {canWriteObjects && (
-              <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                <TriangleAlert className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-amber-700 dark:text-amber-400">
-                  Granting write access means the agent can modify operational records autonomously. Review agent actions regularly.
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-violet-500/10 border border-violet-500/20">
+                <TriangleAlert className="w-3.5 h-3.5 text-violet-600 dark:text-violet-300 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-violet-700 dark:text-violet-300">
+                  Writes still use the current user's record visibility, CRMy policy checks, and confirmation flows. Turn this off to force record changes through forms only.
                 </p>
               </div>
             )}

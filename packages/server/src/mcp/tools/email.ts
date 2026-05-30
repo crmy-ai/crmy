@@ -23,6 +23,15 @@ import type { ToolDef } from '../server.js';
 import { runToolOperation } from '../tool-operation.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 
+type CustomerSubjectType = 'account' | 'contact' | 'opportunity' | 'use_case';
+
+const CUSTOMER_SUBJECT_TABLES: Record<CustomerSubjectType, string> = {
+  account: 'accounts',
+  contact: 'contacts',
+  opportunity: 'opportunities',
+  use_case: 'use_cases',
+};
+
 /** Redact provider-specific sensitive fields before returning config to callers. */
 function redactProviderConfig(provider: string, config: Record<string, unknown>): Record<string, unknown> {
   const safe = { ...config };
@@ -42,6 +51,35 @@ function redactProviderConfig(provider: string, config: Record<string, unknown>)
   return safe;
 }
 
+async function assertVisibleSubjectLink(
+  db: DbPool,
+  actor: ActorContext,
+  subjectType: CustomerSubjectType,
+  subjectId: string,
+): Promise<void> {
+  const table = CUSTOMER_SUBJECT_TABLES[subjectType];
+  const result = await db.query(
+    `SELECT id FROM ${table} WHERE tenant_id = $1 AND id = $2 LIMIT 1`,
+    [actor.tenant_id, subjectId],
+  );
+  if (!result.rows[0]) throw notFound('CustomerRecord', subjectId);
+  await assertSubjectAccess(db, actor, subjectType, subjectId);
+}
+
+async function canAccessSubjectLink(
+  db: DbPool,
+  actor: ActorContext,
+  subjectType: CustomerSubjectType,
+  subjectId: string,
+): Promise<boolean> {
+  try {
+    await assertVisibleSubjectLink(db, actor, subjectType, subjectId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function assertEmailMessageAccess(db: DbPool, actor: ActorContext, message: emailMessageRepo.EmailMessage): Promise<void> {
   if (isGlobalActor(actor)) return;
   const actorUserId = await getActorUserId(db, actor);
@@ -54,8 +92,7 @@ async function assertEmailMessageAccess(db: DbPool, actor: ActorContext, message
   ] as const;
   for (const [type, id] of linked) {
     if (!id) continue;
-    await assertSubjectAccess(db, actor, type, id);
-    return;
+    if (await canAccessSubjectLink(db, actor, type, id)) return;
   }
   throw notFound('EmailMessage', message.id);
 }
@@ -274,6 +311,61 @@ export function emailTools(db: DbPool): ToolDef[] {
           ignored_at: new Date().toISOString(),
         });
         return { email_message: updated };
+      },
+    },
+    {
+      name: 'email_message_link',
+      tier: 'extended',
+      description: 'Link an unmatched customer email to visible customer records and optionally process it as Raw Context. Use this when matching was ambiguous or the email arrived before CRMy could identify the account/contact.',
+      inputSchema: z.object({
+        id: z.string().uuid(),
+        classification: z.enum(['customer', 'mixed', 'internal', 'automated', 'unknown']).optional(),
+        contact_id: z.string().uuid().nullable().optional(),
+        account_id: z.string().uuid().nullable().optional(),
+        opportunity_id: z.string().uuid().nullable().optional(),
+        use_case_id: z.string().uuid().nullable().optional(),
+        process: z.boolean().optional().default(true),
+      }),
+      handler: async (input: {
+        id: string;
+        classification?: emailMessageRepo.EmailClassification;
+        contact_id?: string | null;
+        account_id?: string | null;
+        opportunity_id?: string | null;
+        use_case_id?: string | null;
+        process?: boolean;
+      }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'email_message_link', input, async () => {
+          const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, input.id);
+          if (!message) throw notFound('EmailMessage', input.id);
+          await assertEmailMessageAccess(db, actor, message);
+          if (input.contact_id) await assertVisibleSubjectLink(db, actor, 'contact', input.contact_id);
+          if (input.account_id) await assertVisibleSubjectLink(db, actor, 'account', input.account_id);
+          if (input.opportunity_id) await assertVisibleSubjectLink(db, actor, 'opportunity', input.opportunity_id);
+          if (input.use_case_id) await assertVisibleSubjectLink(db, actor, 'use_case', input.use_case_id);
+          const patch: Parameters<typeof emailMessageRepo.updateEmailMessage>[3] = {
+            processing_status: input.classification && ['internal', 'automated'].includes(input.classification)
+              ? 'skipped'
+              : 'unprocessed',
+            processing_reason: input.classification && ['internal', 'automated'].includes(input.classification)
+              ? 'Marked as non-customer email.'
+              : 'Customer record link updated. Ready to process as Raw Context.',
+            metadata: { link_updated_by: actor.actor_id, link_updated_at: new Date().toISOString() },
+          };
+          if (input.classification !== undefined) patch.classification = input.classification;
+          if (input.contact_id !== undefined) patch.contact_id = input.contact_id;
+          if (input.account_id !== undefined) patch.account_id = input.account_id;
+          if (input.opportunity_id !== undefined) patch.opportunity_id = input.opportunity_id;
+          if (input.use_case_id !== undefined) patch.use_case_id = input.use_case_id;
+          const updated = await emailMessageRepo.updateEmailMessage(db, actor.tenant_id, message.id, patch);
+          if (!updated) throw notFound('EmailMessage', input.id);
+          if (input.process !== false
+            && ['customer', 'mixed'].includes(updated.classification)
+            && (updated.contact_id || updated.account_id || updated.opportunity_id || updated.use_case_id)) {
+            return processEmailMessage(db, actor.tenant_id, updated.id, actor);
+          }
+          return { email_message: updated };
+        });
       },
     },
     {

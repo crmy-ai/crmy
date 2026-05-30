@@ -43,6 +43,7 @@ const HELP_TEXT = `
     seed-demo           Load demo customer data for a fast first run
     reset-password      Reset a local user's password through Postgres
     doctor              Check database, config, migrations, port, and secrets
+    agent-smoke         Verify the one-minute agent demo path with MCP tools
 
   Options
     -V, --version       Output the version number
@@ -52,6 +53,7 @@ const HELP_TEXT = `
     $ crmy init                     Set up a new CRMy instance
     $ crmy server                   Start the server on :3000
     $ crmy doctor                   Check setup health
+    $ crmy agent-smoke              Prove the seeded agent path works
     $ crmy briefing "contact:Maya Patel"  Get customer context before action
     $ crmy context ingest -f call.txt --auto
     $ crmy contacts list            List all contacts

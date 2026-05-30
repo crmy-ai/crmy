@@ -70,6 +70,18 @@ function withTimeout<T>(promise: Promise<T>, ms: number, toolName: string): Prom
   ]);
 }
 
+function normalizeToolErrorMessage(err: unknown): string {
+  const rawMessage = err instanceof Error ? err.message : 'Tool execution failed';
+  const code = typeof err === 'object' && err && 'code' in err ? String((err as { code?: unknown }).code) : '';
+  const status = typeof err === 'object' && err && 'status' in err ? Number((err as { status?: unknown }).status) : undefined;
+  if (code === 'PERMISSION_DENIED' || status === 403 || /do not have access|outside.+book of business/i.test(rawMessage)) {
+    return 'I cannot access that record because it is outside your visible book of business.';
+  }
+  if (/did not respond within/i.test(rawMessage)) return rawMessage;
+  if (/not configured|unavailable|requires pgvector|provider/i.test(rawMessage)) return rawMessage;
+  return rawMessage || 'Tool execution failed';
+}
+
 // ── Tool status messages ──────────────────────────────────────────────────────
 
 /**
@@ -256,7 +268,7 @@ function toolStatusText(name: string): string {
  * Derive the actor scopes the agent is allowed to use based on its config.
  * Read scopes are always granted. Write scopes depend on config toggles.
  */
-function buildAgentScopes(config: AgentConfig): string[] {
+export function buildAgentScopes(config: AgentConfig): string[] {
   const scopes = ['read', 'contacts:read', 'accounts:read', 'opportunities:read', 'activities:read', 'context:read'];
 
   if (config.can_write_objects) {
@@ -377,7 +389,7 @@ function normalizeToolArguments(raw: string | undefined): string {
   try {
     return JSON.stringify(normalizeToolArgumentObject(JSON.parse(raw)));
   } catch {
-    return '{}';
+    return '';
   }
 }
 
@@ -391,19 +403,21 @@ function normalizeToolCalls(toolCalls: ToolCallRecord[], handlers: Map<string, T
   for (const tc of toolCalls) {
     const normalizedName = normalizeToolCallName(tc.name, handlers);
     if (handlers.has(normalizedName)) {
-      valid.push({ ...tc, name: normalizedName, arguments: normalizeToolArguments(tc.arguments) });
+      const normalizedArguments = normalizeToolArguments(tc.arguments);
+      if (!normalizedArguments) {
+        invalid.push(tc);
+        continue;
+      }
+      valid.push({ ...tc, name: normalizedName, arguments: normalizedArguments });
       continue;
     }
 
     const splitNames = splitKnownToolNames(tc.name, handlers);
     if (splitNames.length > 1) {
-      splitNames.forEach((name, index) => {
-        valid.push({
-          id: `${tc.id || 'tool'}-${index}`,
-          name,
-          arguments: '{}',
-        });
-      });
+      // Treat concatenated distinct tool names as malformed provider output.
+      // Executing each split tool with empty args creates confusing failures
+      // and can accidentally run tools the model did not intentionally call.
+      invalid.push(tc);
       continue;
     }
 
@@ -426,7 +440,7 @@ function zodToJsonSchema(schema: any): Record<string, unknown> {
     const typeName = def.typeName;
 
     if (typeName === 'ZodObject') {
-      const shape = schema.shape;
+      const shape = typeof schema.shape === 'function' ? schema.shape() : schema.shape;
       const properties: Record<string, unknown> = {};
       const required: string[] = [];
 
@@ -442,7 +456,13 @@ function zodToJsonSchema(schema: any): Record<string, unknown> {
         }
       }
 
-      return { type: 'object', properties, ...(required.length > 0 ? { required } : {}) };
+      return {
+        type: 'object',
+        properties,
+        additionalProperties: false,
+        ...(required.length > 0 ? { required } : {}),
+        ...(schema.description ? { description: schema.description } : {}),
+      };
     }
 
     if (typeName === 'ZodString') {
@@ -456,11 +476,20 @@ function zodToJsonSchema(schema: any): Record<string, unknown> {
         if (check.kind === 'uuid') result.format = 'uuid';
         if (check.kind === 'regex') result.pattern = check.regex?.source;
       }
-      return result;
+      return { ...result, ...(schema.description ? { description: schema.description } : {}) };
     }
-    if (typeName === 'ZodNumber') return { type: 'number' };
-    if (typeName === 'ZodBoolean') return { type: 'boolean' };
+    if (typeName === 'ZodNumber') {
+      const checks: any[] = def.checks ?? [];
+      const result: Record<string, unknown> = { type: checks.some(check => check.kind === 'int') ? 'integer' : 'number' };
+      for (const check of checks) {
+        if (check.kind === 'min') result.minimum = check.value;
+        if (check.kind === 'max') result.maximum = check.value;
+      }
+      return { ...result, ...(schema.description ? { description: schema.description } : {}) };
+    }
+    if (typeName === 'ZodBoolean') return { type: 'boolean', ...(schema.description ? { description: schema.description } : {}) };
     if (typeName === 'ZodEnum') return { type: 'string', enum: def.values };
+    if (typeName === 'ZodNativeEnum') return { type: 'string', enum: Object.values(def.values ?? {}) };
     if (typeName === 'ZodArray') return { type: 'array', items: zodToJsonSchema(def.type) };
 
     if (typeName === 'ZodOptional' || typeName === 'ZodNullable') {
@@ -469,6 +498,10 @@ function zodToJsonSchema(schema: any): Record<string, unknown> {
 
     if (typeName === 'ZodDefault') {
       return zodToJsonSchema(def.innerType);
+    }
+
+    if (typeName === 'ZodEffects' || typeName === 'ZodPipeline' || typeName === 'ZodCatch') {
+      return zodToJsonSchema(def.schema ?? def.in ?? def.innerType);
     }
 
     if (typeName === 'ZodRecord') {
@@ -764,6 +797,7 @@ export async function runAgentTurn(
 
   const sessionId = opts?.sessionId;
   let turnIndex = 0;
+  let malformedToolRetryUsed = false;
 
   // ── Auto-compaction ────────────────────────────────────────────────────────
   // If the accumulated history exceeds the threshold, summarise the old portion
@@ -850,6 +884,24 @@ export async function runAgentTurn(
     }
 
     if (!toolCalls.length) {
+      if (invalidToolCalls.length > 0 && !malformedToolRetryUsed) {
+        malformedToolRetryUsed = true;
+        const invalidNames = invalidToolCalls.map(tc => tc.name || '(unnamed tool)').join(', ');
+        history.push({
+          role: 'assistant',
+          content: result.content || '',
+        });
+        history.push({
+          role: 'user',
+          content: [
+            'Your previous tool call was malformed and was not executed.',
+            `Invalid tool call name(s): ${invalidNames}.`,
+            'Retry by calling exactly one available tool at a time, using that tool name exactly and valid JSON arguments that satisfy the tool schema.',
+            'If no tool is needed, answer directly without tool calls.',
+          ].join('\n'),
+        });
+        continue;
+      }
       const content = [
         result.content,
         'I could not continue because the model produced an invalid tool call. Please try the request again or choose a more specific action.',
@@ -893,7 +945,7 @@ export async function runAgentTurn(
           if (opts?.abortSignal?.aborted) throw new Error('Agent turn was cancelled');
           toolResult = await withTimeout(handler.handler(args, agentActor), TOOL_TIMEOUT_MS, tc.name);
         } catch (err) {
-          toolResult = { error: err instanceof Error ? err.message : 'Tool execution failed' };
+          toolResult = { error: normalizeToolErrorMessage(err) };
           isError = true;
         }
       }

@@ -3,7 +3,6 @@
 
 import { useState } from 'react';
 import { useAccount, useUpdateAccount, useDeleteAccount, useUsers, useCustomFields } from '@/api/hooks';
-import { ContactAvatar } from './ContactAvatar';
 import { useAppStore } from '@/store/appStore';
 import { Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
 import { DrawerTabBar, type DrawerView } from './DrawerTabBar';
@@ -12,8 +11,10 @@ import { BriefingPanel } from './BriefingPanel';
 import { ObjectActionBar } from './ObjectActionBar';
 import { CustomFieldsSection } from './CrmWidgets';
 import { DrawerSection } from './DrawerSection';
+import { CopyIconButton } from './CopyIconButton';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -207,14 +208,17 @@ function AccountEditForm({
 }
 
 export function AccountDrawer() {
-  const { drawerEntityId, closeDrawer, drawerBriefing, recordFieldProvenance } = useAppStore();
-  const [editing, setEditing] = useState(false);
+  const { drawerEntityId, closeDrawer, drawerBriefing, drawerEditing, setDrawerEditing, openQuickAdd, recordFieldProvenance } = useAppStore();
+  const editing = drawerEditing;
+  const setEditing = setDrawerEditing;
   const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
   const graphHref = drawerEntityId ? `/accounts/${drawerEntityId}/graph` : undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: accountData, isLoading } = useAccount(drawerEntityId ?? '') as any;
   const updateAccount = useUpdateAccount(drawerEntityId ?? '');
   const deleteAccount = useDeleteAccount(drawerEntityId ?? '');
+  const { enabled: agentEnabled, config: agentConfig, connectivity } = useAgentSettings();
+  const agentReady = agentEnabled && Boolean(agentConfig?.model && agentConfig?.base_url) && connectivity === 'online';
 
   if (isLoading) {
     return (
@@ -245,6 +249,21 @@ export function AccountDrawer() {
   const employeeCount: number = account.employee_count ?? 0;
   const healthScore: number = account.health_score ?? 0;
   const accountProvenance = drawerEntityId ? recordFieldProvenance[`account:${drawerEntityId}`] ?? {} : {};
+  const startEdit = () => {
+    if (agentReady && drawerEntityId) {
+      closeDrawer();
+      openQuickAdd('account', {
+        mode: 'edit',
+        record_id: drawerEntityId,
+        record_name: name,
+        parent_subject_type: 'account',
+        parent_subject_id: drawerEntityId,
+        parent_subject_name: name,
+      });
+      return;
+    }
+    setEditing(true);
+  };
 
   if (view === 'brief') {
     return (
@@ -288,7 +307,6 @@ export function AccountDrawer() {
       {/* Header */}
       <div className="p-6 border-b border-border">
         <div className="flex items-start gap-4">
-          <ContactAvatar name={name} className="w-14 h-14 rounded-2xl text-lg" />
           <div className="flex-1">
             <h2 className="font-display font-extrabold text-xl text-foreground">{name}</h2>
             {industry && <p className="text-sm text-muted-foreground">{industry}</p>}
@@ -296,9 +314,15 @@ export function AccountDrawer() {
               {healthScore > 0 && <HealthBadge score={healthScore} />}
             </div>
           </div>
+          <button
+            onClick={startEdit}
+            className="flex shrink-0 items-center gap-1.5 rounded-xl bg-muted px-3 py-2 text-sm font-medium text-foreground transition-all hover:bg-muted/80 press-scale"
+          >
+            <Pencil className="h-3.5 w-3.5" /> Edit
+          </button>
         </div>
-        <div className="flex gap-2 mt-4">
-          {website && (
+        {website && (
+          <div className="flex gap-2 mt-4">
             <a
               href={website.startsWith('http') ? website : `https://${website}`}
               target="_blank"
@@ -307,14 +331,8 @@ export function AccountDrawer() {
             >
               <Globe className="w-3.5 h-3.5" /> Website
             </a>
-          )}
-          <button
-            onClick={() => setEditing(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
-          >
-            <Pencil className="w-3.5 h-3.5" /> Edit
-          </button>
-        </div>
+          </div>
+        )}
       </div>
 
       <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} showBriefTab={false} />
@@ -354,7 +372,12 @@ export function AccountDrawer() {
               <div key={field.key} className="flex items-start justify-between gap-4">
                 <span className="text-xs text-muted-foreground">{field.label}</span>
                 <span className="text-right">
-                  <span className="block text-sm text-foreground">{field.value}</span>
+                  <span className="flex items-center justify-end gap-1">
+                    <span className="block truncate text-sm text-foreground">{field.value}</span>
+                    {(field.key === 'website' || field.key === 'domain') && (
+                      <CopyIconButton value={String(field.value ?? '')} label={field.label} />
+                    )}
+                  </span>
                   {provenance && (
                     <span className="block text-[11px] text-muted-foreground">
                       {provenance.source_label}{provenance.confidence_label ? ` · ${provenance.confidence_label}` : ''}

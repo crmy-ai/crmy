@@ -32,7 +32,7 @@ const AUTH_FILE = path.join(CRMY_DIR, 'auth.json');
  *   2. process.cwd()/.crmy.json  (project-level override)
  *   3. ~/.crmy/config.json       (global; written by `init`, always reachable)
  *
- * This means `npx @crmy/cli mcp` works from any directory (e.g. when Claude
+ * This means `npx -y @crmy/cli mcp` works from any directory (e.g. when Claude
  * Code spawns it) without requiring the user to be in the init directory.
  */
 export function loadConfigFile(explicitPath?: string): CrmyConfig {

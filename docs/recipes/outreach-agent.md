@@ -9,7 +9,7 @@ The agent should treat the briefing as Active Context: the temporary working set
 **Prerequisites:**
 
 - A running CRMy instance with demo data seeded (`crmy seed-demo`)
-- MCP connection configured (`claude mcp add crmy -- npx @crmy/cli mcp`)
+- MCP connection configured (`claude mcp add crmy -- npx -y @crmy/cli mcp`)
 
 **Context engine capabilities used:** `briefing_get`, `context_semantic_search`, `context_search`, `activity_create`, `hitl_submit_request`, `hitl_check_status`, and `assignment_create`.
 

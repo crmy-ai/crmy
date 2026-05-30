@@ -16,8 +16,10 @@ import {
   useProcessEmailMessage,
   useStartMailboxConnection,
   useSyncMailboxConnection,
+  useUpdateEmailMessage,
   useUpdateEmailMessageClassification,
 } from '@/api/hooks';
+import { EntityCombobox, type EntityType } from '@/components/ui/entity-combobox';
 import { useAppStore } from '@/store/appStore';
 import { motion } from 'framer-motion';
 import { formatDistanceToNow } from 'date-fns';
@@ -95,6 +97,7 @@ type Connection = {
   status: string;
   last_sync_at?: string | null;
   last_error?: string | null;
+  sync_stats?: Record<string, number>;
 };
 
 const MAILBOX_PROVIDER_COPY: Record<MailboxProvider, {
@@ -289,6 +292,19 @@ function ConnectionCard({
         )}
       </div>
       <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+        {connection.sync_stats && Object.keys(connection.sync_stats).length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            <span className="rounded-md border border-blue-500/20 bg-blue-500/8 px-2 py-0.5 text-blue-200">
+              {connection.sync_stats.customer_synced ?? 0} customer synced
+            </span>
+            <span className="rounded-md border border-border bg-muted/20 px-2 py-0.5">
+              {connection.sync_stats.filtered_internal ?? 0} internal skipped
+            </span>
+            <span className="rounded-md border border-border bg-muted/20 px-2 py-0.5">
+              {(connection.sync_stats.filtered_spam_trash ?? 0) + (connection.sync_stats.filtered_automated ?? 0)} noise skipped
+            </span>
+          </div>
+        )}
         {!connected && (
           <p>
             Live sync is waiting for provider setup. The guide shows the mailbox, customer filtering, and OAuth steps needed before CRMy can poll this inbox.
@@ -339,8 +355,12 @@ function MessageDetail({
   const { data, isLoading } = useEmailMessage(id);
   const processMessage = useProcessEmailMessage();
   const updateClassification = useUpdateEmailMessageClassification();
+  const updateMessage = useUpdateEmailMessage();
   const ignoreMessage = useIgnoreEmailMessage();
+  const [linkType, setLinkType] = useState<EntityType>('account');
+  const [linkId, setLinkId] = useState('');
   const message = ((data as any)?.email_message ?? null) as EmailMessage | null;
+  const hasLinkedRecord = Boolean(message?.account_id || message?.contact_id || message?.opportunity_id || message?.use_case_id);
 
   if (!id) return null;
 
@@ -382,12 +402,60 @@ function MessageDetail({
                 <RecordChip type="opportunity" id={message.opportunity_id} name={message.opportunity_name} />
                 <RecordChip type="use_case" id={message.use_case_id} name={message.use_case_name} />
                 <RecordChip type="contact" id={message.contact_id} name={message.contact_name} />
-                {!message.account_id && !message.contact_id && !message.opportunity_id && !message.use_case_id && (
+                {!hasLinkedRecord && (
                   <span className="text-sm text-muted-foreground">No linked record yet. Keep this in Needs Review until the customer record is known.</span>
                 )}
               </div>
               {message.processing_reason && (
                 <p className="mt-3 text-sm text-muted-foreground">{message.processing_reason}</p>
+              )}
+              {!hasLinkedRecord && (
+                <div className="mt-4 rounded-lg border border-dashed border-border bg-background/35 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Link and process</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Choose the safest customer record, then CRMy will process this email as Raw Context.
+                  </p>
+                  <div className="mt-3 grid gap-2 md:grid-cols-[150px,1fr,auto]">
+                    <select
+                      value={linkType}
+                      onChange={event => {
+                        setLinkType(event.target.value as EntityType);
+                        setLinkId('');
+                      }}
+                      className="h-10 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+                    >
+                      <option value="account">Account</option>
+                      <option value="contact">Contact</option>
+                      <option value="opportunity">Opportunity</option>
+                      <option value="use_case">Use Case</option>
+                    </select>
+                    <EntityCombobox
+                      entityType={linkType}
+                      value={linkId}
+                      onChange={setLinkId}
+                      placeholder={`Search ${linkType.replace('_', ' ')}`}
+                    />
+                    <Button
+                      disabled={!linkId || updateMessage.isPending}
+                      onClick={() => {
+                        const payload: Record<string, unknown> = {
+                          id: message.id,
+                          classification: message.classification === 'unknown' ? 'customer' : message.classification,
+                          process: true,
+                        };
+                        payload[`${linkType}_id`] = linkId;
+                        updateMessage.mutate(payload as { id: string } & Record<string, unknown>, {
+                          onSuccess: () => toast({ title: 'Email linked', description: 'CRMy linked the customer record and processed the email.' }),
+                          onError: (err) => toast({ title: 'Could not link email', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' }),
+                        });
+                      }}
+                      className="bg-blue-600 text-white hover:bg-blue-500"
+                    >
+                      {updateMessage.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                      Link
+                    </Button>
+                  </div>
+                </div>
               )}
             </section>
 
@@ -591,10 +659,12 @@ export default function EmailsPage() {
       display_name: setupDisplayName.trim(),
     };
     try {
-      if (setupProvider === 'google') {
-        await startGoogle.mutateAsync(payload);
-      } else {
-        await startMicrosoft.mutateAsync(payload);
+      const result = setupProvider === 'google'
+        ? await startGoogle.mutateAsync(payload) as any
+        : await startMicrosoft.mutateAsync(payload) as any;
+      if (result?.auth_url) {
+        window.location.assign(result.auth_url);
+        return;
       }
       toast({
         title: `${MAILBOX_PROVIDER_COPY[setupProvider].label} setup saved`,
@@ -616,7 +686,7 @@ export default function EmailsPage() {
         title="Customer Email"
         icon={Mail}
         iconClassName="text-blue-500"
-        description="Turn customer email into account context, Signals, Memory, and safe follow-up drafts."
+        description="Use customer emails as optional context for customer records, Signals, Memory, and safe follow-up drafts."
       />
 
       <div className="border-b border-border px-4 pt-4 md:px-6">
@@ -625,10 +695,18 @@ export default function EmailsPage() {
             <div>
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-blue-300" />
-                <p className="text-sm font-semibold text-foreground">Customer email feeds your agents</p>
+                <p className="text-sm font-semibold text-foreground">Customer emails can become Signals and Memory</p>
               </div>
               <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                Connect a mailbox so customer threads are matched to accounts and opportunities, processed into Signals and Memory, and available for safe follow-up drafts.
+                Connect your mailbox when you want customer threads auto matched to customer records and processed into Signal and Memory. This is optional: emails can still feed context and agent memory through{' '}
+                <button
+                  type="button"
+                  onClick={() => navigate('/context?tab=observations&add=context')}
+                  className="font-medium text-blue-300 underline-offset-2 hover:underline"
+                >
+                  Add Context
+                </button>
+                {' '}or MCP (<code className="font-mono text-xs text-foreground">context_ingest_auto</code>).
               </p>
             </div>
             {!mailboxConnected && (

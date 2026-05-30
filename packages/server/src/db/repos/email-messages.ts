@@ -19,6 +19,11 @@ export interface MailboxConnection {
   status: MailboxConnectionStatus;
   scopes: string[];
   sync_cursor?: string | null;
+  provider_account_id?: string | null;
+  access_token_enc?: string | null;
+  refresh_token_enc?: string | null;
+  token_expires_at?: string | null;
+  sync_stats?: Record<string, unknown>;
   settings: Record<string, unknown>;
   last_sync_at?: string | null;
   last_error?: string | null;
@@ -148,6 +153,14 @@ export async function listMailboxConnections(
   return result.rows as MailboxConnection[];
 }
 
+export async function getMailboxConnection(db: DbPool, tenantId: UUID, id: UUID): Promise<MailboxConnection | null> {
+  const result = await db.query(
+    'SELECT * FROM mailbox_connections WHERE tenant_id = $1 AND id = $2',
+    [tenantId, id],
+  );
+  return (result.rows[0] as MailboxConnection | undefined) ?? null;
+}
+
 export async function createPlaceholderConnection(
   db: DbPool,
   tenantId: UUID,
@@ -186,6 +199,58 @@ export async function createPlaceholderConnection(
     ],
   );
   return result.rows[0] as MailboxConnection;
+}
+
+export async function updateMailboxConnection(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  patch: Partial<Pick<MailboxConnection,
+    'status' | 'scopes' | 'sync_cursor' | 'provider_account_id' | 'access_token_enc' |
+    'refresh_token_enc' | 'token_expires_at' | 'sync_stats' | 'settings' |
+    'last_sync_at' | 'last_error' | 'display_name' | 'email_address'
+  >>,
+): Promise<MailboxConnection | null> {
+  const sets = ['updated_at = now()'];
+  const params: unknown[] = [tenantId, id];
+  let idx = 3;
+  const scalarFields = [
+    'status',
+    'sync_cursor',
+    'provider_account_id',
+    'access_token_enc',
+    'refresh_token_enc',
+    'token_expires_at',
+    'last_sync_at',
+    'last_error',
+    'display_name',
+    'email_address',
+  ] as const;
+  for (const field of scalarFields) {
+    if (field in patch) {
+      sets.push(`${field} = $${idx++}`);
+      params.push(patch[field] ?? null);
+    }
+  }
+  if (patch.scopes !== undefined) {
+    sets.push(`scopes = $${idx++}`);
+    params.push(patch.scopes);
+  }
+  if (patch.settings !== undefined) {
+    sets.push(`settings = settings || $${idx++}::jsonb`);
+    params.push(JSON.stringify(patch.settings));
+  }
+  if (patch.sync_stats !== undefined) {
+    sets.push(`sync_stats = sync_stats || $${idx++}::jsonb`);
+    params.push(JSON.stringify(patch.sync_stats));
+  }
+  const result = await db.query(
+    `UPDATE mailbox_connections SET ${sets.join(', ')}
+     WHERE tenant_id = $1 AND id = $2
+     RETURNING *`,
+    params,
+  );
+  return (result.rows[0] as MailboxConnection | undefined) ?? null;
 }
 
 export async function deleteMailboxConnection(db: DbPool, tenantId: UUID, id: UUID): Promise<boolean> {

@@ -6,15 +6,17 @@ import { activityCreate, activityUpdate, activitySearch, activityComplete, activ
 import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as activityRepo from '../../db/repos/activities.js';
+import * as rawContextRepo from '../../db/repos/raw-context-sources.js';
 import * as governorLimits from '../../db/repos/governor-limits.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
 import { indexDocument } from '../../search/SearchIndexerService.js';
 import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
-import { triggerExtraction } from '../../agent/extraction.js';
+import { extractContextFromActivity, triggerExtraction } from '../../agent/extraction.js';
 import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+import { runToolOperation } from '../tool-operation.js';
 import { assertActivityAccess, assertSubjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
 
 export function activityTools(db: DbPool): ToolDef[] {
@@ -219,6 +221,75 @@ export function activityTools(db: DbPool): ToolDef[] {
             sideEffects: extractionQueued ? ['context_extraction:queued', 'search_index:queued'] : ['search_index:queued'],
           }),
         };
+        });
+      },
+    },
+    {
+      name: 'activity_add_context',
+      tier: 'extended',
+      description: 'Add debrief notes, a transcript, or a meeting summary to an existing activity and immediately process it as Raw Context. Use this for phone calls, in-person meetings, or calendar meetings that are missing notes.',
+      inputSchema: z.object({
+        id: z.string().uuid(),
+        text: z.string().min(1),
+        artifact_type: z.enum(['notes', 'transcript', 'summary', 'debrief']).optional().default('debrief'),
+        source_label: z.string().optional(),
+      }),
+      handler: async (input: { id: string; text: string; artifact_type?: 'notes' | 'transcript' | 'summary' | 'debrief'; source_label?: string }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'activity_add_context', input, async () => {
+          const before = await activityRepo.getActivity(db, actor.tenant_id, input.id);
+          if (!before) throw notFound('Activity', input.id);
+          await assertActivityAccess(db, actor, input.id);
+          const body = before.body?.trim()
+            ? `${before.body}\n\n--- ${input.artifact_type ?? 'debrief'} ---\n${input.text.trim()}`
+            : input.text.trim();
+          const activity = await activityRepo.updateActivity(db, actor.tenant_id, input.id, {
+            body,
+            detail: {
+              ...(before.detail ?? {}),
+              latest_context_artifact: {
+                type: input.artifact_type ?? 'debrief',
+                source_label: input.source_label ?? 'Activity context',
+                added_at: new Date().toISOString(),
+              },
+            },
+          });
+          if (!activity) throw notFound('Activity', input.id);
+          const extraction = await extractContextFromActivity(db, actor.tenant_id, activity.id, {
+            ownerIds: (await resolveOwnerFilter(db, actor)).owner_ids ?? undefined,
+          });
+          const rawSource = await rawContextRepo.getRawContextSourceByRef(db, actor.tenant_id, 'activity', activity.id)
+            ?? await rawContextRepo.getRawContextSourceByRef(db, actor.tenant_id, 'calendar_meeting', activity.id);
+          const event_id = await emitEvent(db, {
+            tenantId: actor.tenant_id,
+            eventType: 'activity.context_added',
+            actorId: actor.actor_id,
+            actorType: actor.actor_type,
+            objectType: 'activity',
+            objectId: activity.id,
+            afterData: {
+              raw_context_source_id: rawSource?.id ?? null,
+              memory_created: extraction.memory_created,
+              signals_created: extraction.signals_created,
+            },
+          });
+          indexDocument(db, 'activity', activity as unknown as Record<string, unknown>)
+            .catch((err: unknown) => console.warn(`[search] activity index ${activity.id}: ${(err as Error).message}`));
+          return {
+            activity,
+            raw_context_source_id: rawSource?.id ?? null,
+            extraction: {
+              memory_created: extraction.memory_created,
+              signals_created: extraction.signals_created,
+              skipped: extraction.skipped,
+            },
+            event_id,
+            mutation: mutationReceipt(actor, {
+              objectType: 'activity',
+              objectId: activity.id,
+              eventId: event_id,
+              sideEffects: ['raw_context:processed', 'search_index:queued'],
+            }),
+          };
         });
       },
     },

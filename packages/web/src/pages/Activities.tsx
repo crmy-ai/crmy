@@ -29,6 +29,7 @@ import { CompactList } from '@/components/crm/CompactList';
 import { ListToolbar, type FilterConfig } from '@/components/crm/ListToolbar';
 import {
   useActivities,
+  useAddActivityContext,
   useAddMeetingArtifact,
   useCalendarConnections,
   useCalendarEvent,
@@ -292,6 +293,7 @@ function ActivityTable({
   total,
   onPageChange,
   onOpen,
+  onAddContext,
 }: {
   activities: Array<Record<string, any>>;
   page: number;
@@ -299,6 +301,7 @@ function ActivityTable({
   total: number;
   onPageChange: (page: number) => void;
   onOpen: (id: string) => void;
+  onAddContext: (activity: Record<string, any>) => void;
 }) {
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
@@ -310,6 +313,7 @@ function ActivityTable({
             <th className="hidden px-4 py-3 font-medium lg:table-cell">Linked record</th>
             <th className="hidden px-4 py-3 font-medium md:table-cell">Outcome</th>
             <th className="px-4 py-3 font-medium">When</th>
+            <th className="px-4 py-3 font-medium"></th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -336,6 +340,20 @@ function ActivityTable({
                 </td>
                 <td className="whitespace-nowrap px-4 py-3 text-sm text-muted-foreground">
                   {formatWhen(String(activity.occurred_at ?? activity.created_at ?? ''))}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-right">
+                  {!body.trim() && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onAddContext(activity);
+                      }}
+                    >
+                      Add Debrief
+                    </Button>
+                  )}
                 </td>
               </tr>
             );
@@ -408,6 +426,19 @@ function CalendarConnectionCard({
         )}
       </div>
       <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+        {connection.sync_stats && Object.keys(connection.sync_stats).length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            <span className="rounded-md border border-blue-500/20 bg-blue-500/8 px-2 py-0.5 text-blue-200">
+              {connection.sync_stats.customer_synced ?? 0} customer synced
+            </span>
+            <span className="rounded-md border border-border bg-muted/20 px-2 py-0.5">
+              {connection.sync_stats.filtered_internal ?? 0} internal skipped
+            </span>
+            <span className="rounded-md border border-border bg-muted/20 px-2 py-0.5">
+              {connection.sync_stats.filtered_unknown ?? 0} unmatched skipped
+            </span>
+          </div>
+        )}
         {!connected && (
           <p>
             Live sync is waiting for provider setup. The guide shows calendar scope, customer meeting filtering, and OAuth steps.
@@ -688,11 +719,14 @@ export default function Activities() {
   const [setupStep, setSetupStep] = useState(0);
   const [setupEmail, setSetupEmail] = useState('');
   const [setupDisplayName, setSetupDisplayName] = useState('');
+  const [debriefActivity, setDebriefActivity] = useState<Record<string, any> | null>(null);
+  const [debriefText, setDebriefText] = useState('');
   const [page, setPage] = useState(1);
   const startGoogle = useStartCalendarConnection('google');
   const startMicrosoft = useStartCalendarConnection('microsoft');
   const syncConnection = useSyncCalendarConnection();
   const processEvent = useProcessCalendarEvent();
+  const addActivityContext = useAddActivityContext();
   const classificationsQ = useMeetingClassifications() as any;
   const meetingClassificationOptions = ((classificationsQ.data?.data ?? []) as Array<any>).map(classification => ({
     value: classification.type_name,
@@ -807,7 +841,11 @@ export default function Activities() {
       display_name: setupDisplayName.trim(),
     };
     try {
-      await (setupProvider === 'google' ? startGoogle : startMicrosoft).mutateAsync(payload);
+      const result = await (setupProvider === 'google' ? startGoogle : startMicrosoft).mutateAsync(payload) as any;
+      if (result?.auth_url) {
+        window.location.assign(result.auth_url);
+        return;
+      }
       toast({
         title: `${CALENDAR_PROVIDER_COPY[setupProvider].label} setup saved`,
         description: 'CRMy saved the calendar and setup steps. Complete OAuth credentials before live sync runs.',
@@ -834,10 +872,18 @@ export default function Activities() {
             <div>
               <div className="flex items-center gap-2">
                 <CalendarClock className="h-4 w-4 text-blue-300" />
-                <p className="text-sm font-semibold text-foreground">Customer meetings feed your agents</p>
+                <p className="text-sm font-semibold text-foreground">Customer activities can become Signals and Memory</p>
               </div>
               <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                Connect a calendar so customer meetings are matched to revenue records, flagged when notes or transcripts are missing, and processed into Signals and Memory once context arrives.
+                Connect your calendar when you want customer meetings auto matched to customer records and flagged when notes, transcripts, or debriefs are missing. This is optional: meeting transcripts and call notes can still feed context and agent memory through{' '}
+                <button
+                  type="button"
+                  onClick={() => navigate('/context?tab=observations&add=context')}
+                  className="font-medium text-blue-300 underline-offset-2 hover:underline"
+                >
+                  Add Context
+                </button>
+                {' '}or MCP (<code className="font-mono text-xs text-foreground">context_ingest_auto</code>).
               </p>
             </div>
             {!calendarConnected && (
@@ -923,6 +969,10 @@ export default function Activities() {
               total={activityRows.length}
               onPageChange={setPage}
               onOpen={(id) => openDrawer('activity', id)}
+              onAddContext={(activity) => {
+                setDebriefActivity(activity);
+                setDebriefText('');
+              }}
             />
           ) : (
             <CompactList className="p-4">
@@ -996,7 +1046,7 @@ export default function Activities() {
                 <section className="rounded-xl border border-border bg-card/70 p-4">
                   <h3 className="text-sm font-semibold text-foreground">Choose the calendar CRMy should watch</h3>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    CRMy uses this calendar as an observation source. It reads meetings, attendees, timing, and conference links so customer meetings can be matched to accounts and opportunities.
+                    CRMy uses this calendar as an observation source. It reads meetings, attendees, timing, and conference links so customer meetings can be matched to customer records.
                   </p>
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
                     <div className="space-y-1.5">
@@ -1107,6 +1157,58 @@ export default function Activities() {
                   Save setup request
                 </Button>
               )}
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
+
+      <Dialog open={!!debriefActivity} onOpenChange={(open) => {
+        if (!open) {
+          setDebriefActivity(null);
+          setDebriefText('');
+        }
+      }}>
+        {debriefActivity && (
+          <DialogContent className="sm:max-w-xl">
+            <DialogHeader>
+              <DialogTitle>Add debrief</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div className="rounded-lg border border-border bg-muted/25 p-3">
+                <p className="text-sm font-semibold text-foreground">{String(debriefActivity.subject ?? 'Activity')}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Add call notes, meeting notes, or a quick summary. CRMy will process this as Raw Context.
+                </p>
+              </div>
+              <Textarea
+                value={debriefText}
+                onChange={(event) => setDebriefText(event.target.value)}
+                placeholder="What happened? Include commitments, risks, next steps, blockers, or decisions..."
+                className="min-h-36"
+              />
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setDebriefActivity(null)}>Cancel</Button>
+              <Button
+                disabled={!debriefText.trim() || addActivityContext.isPending}
+                onClick={() => addActivityContext.mutate({
+                  id: String(debriefActivity.id),
+                  text: debriefText.trim(),
+                  artifact_type: 'debrief',
+                  source_label: 'Activity debrief',
+                }, {
+                  onSuccess: () => {
+                    toast({ title: 'Debrief processed', description: 'CRMy processed this activity as Raw Context.' });
+                    setDebriefActivity(null);
+                    setDebriefText('');
+                  },
+                  onError: (err) => toast({ title: 'Could not process debrief', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' }),
+                })}
+                className="bg-blue-600 text-white hover:bg-blue-500"
+              >
+                {addActivityContext.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                Process debrief
+              </Button>
             </DialogFooter>
           </DialogContent>
         )}

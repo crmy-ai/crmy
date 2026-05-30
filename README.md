@@ -4,7 +4,9 @@ Operational customer context for AI agents.
 
 CRMy is an open-source foundation for building GTM agents that can safely work across accounts, opportunities, stakeholders, risks, commitments, next steps, and systems of record.
 
-It does not replace your CRM. Your CRM, warehouse, support desk, mailbox, and calendar remain the systems where work happens. CRMy makes that state agent-operable: it turns messy customer context into typed Memory, gives agents scoped tools, and governs the path from recommendation to human review to system-of-record writeback.
+**Star CRMy if you are building agents that need operational memory.**
+
+It does not replace your CRM. Your CRM, warehouse, support desk, mailbox, calendar, etc. remain the systems where work happens. CRMy makes that state agent-operable: it turns messy customer context into typed Memory, gives agents scoped tools, and governs the path from recommendation to human review to system-of-record writeback.
 
 Before any agent acts on a customer, CRMy can tell it what is true, what is stale, what is inferred, what is approved, what system owns the record, what action is allowed, and what proof or audit trail will exist afterward.
 
@@ -12,7 +14,7 @@ Before any agent acts on a customer, CRMy can tell it what is true, what is stal
 Raw Context -> Signals -> Memory -> Handoffs / Writeback
 ```
 
-## Why CRMy
+## Why CRMy?
 
 Most GTM agents can draft, summarize, and call APIs. They still struggle with the operational questions that matter before action:
 
@@ -20,11 +22,24 @@ Most GTM agents can draft, summarize, and call APIs. They still struggle with th
 - Which claims came from evidence, and which are only inferred?
 - What changed since the last call, email, sync, or agent run?
 - Which Memory is stale, contradicted, or missing support?
-- Is this user allowed to see or change this record?
-- Does this action need approval before it touches the CRM?
+- Is this actor/agent allowed to see or change this record?
+- Does this action need approval before it touches our system of record?
 - What receipt proves what happened afterward?
 
 CRMy gives agents that operating layer.
+
+## Who This Is For
+
+CRMy is for builders creating sales, CS, RevOps, support, or GTM (AI) agents that need to work with humans and revenue systems safely.
+
+Use it when your agent needs to know account state, inspect evidence, remember durable customer context, respect user scope, request approval, or prepare governed CRM/writeback actions.
+
+## What CRMy Is Not
+
+- Not a CRM replacement. Salesforce, HubSpot, warehouses, and support desks stay the systems of record.
+- Not generic chatbot memory. CRMy stores typed, evidence-backed GTM Memory with lifecycle, ownership, freshness, and audit.
+- Not a workflow toy. Agents can prepare action, but CRMy keeps policy, Handoffs, writeback receipts, and human review in the path.
+- Not a sales methodology lock-in. Registries and Memory types are extensible, so teams can model their own GTM language.
 
 ## Three Pillars
 
@@ -56,6 +71,32 @@ Agents can prepare work freely. CRMy decides what can be written, what needs app
 | **Active Context** | The temporary working set an agent can see right now: prompt, conversation, bound record, retrieved briefing, tool results, and loaded files. |
 | **Handoffs** | Human review for approvals, escalations, uncertain Signals, and governed decisions. |
 | **Writeback** | Policy-checked updates to systems of record through preview, approval, idempotency, audit, and execution receipts. |
+
+## Architecture
+
+```mermaid
+flowchart LR
+  sources["Calls, emails, CRM, calendar, support, product, docs, MCP"]
+  raw["Raw Context"]
+  signals["Signals\ninferred + evidence-backed"]
+  memory["Memory\nconfirmed + typed"]
+  active["Active Context\nbriefing_get + search"]
+  agent["Agent action"]
+  handoff["Handoffs\napproval + review"]
+  writeback["System-of-record writeback"]
+  audit["Audit + Lineage"]
+
+  sources --> raw --> signals
+  signals -->|trusted enough| memory
+  signals -->|uncertain or sensitive| handoff
+  memory --> active --> agent
+  agent -->|needs approval| handoff
+  handoff --> writeback
+  writeback --> audit
+  raw --> audit
+  signals --> audit
+  memory --> audit
+```
 
 ## What You Can Build
 
@@ -93,9 +134,9 @@ export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crmy
 export CRMY_ADMIN_EMAIL=admin@example.com
 export CRMY_ADMIN_PASSWORD=change-me-please-123
 
-npx @crmy/cli init --yes
-npx @crmy/cli doctor
-npx @crmy/cli server
+npx -y @crmy/cli init --yes
+npx -y @crmy/cli doctor
+npx -y @crmy/cli server
 ```
 
 Open:
@@ -119,7 +160,7 @@ What `init --yes` does:
 Prefer interactive setup?
 
 ```bash
-npx @crmy/cli init
+npx -y @crmy/cli init
 ```
 
 Prefer a global install?
@@ -136,11 +177,12 @@ crmy server
 The seeded demo shows the full source-to-action loop:
 
 ```bash
-npx @crmy/cli briefing "account:Northstar Labs"
-npx @crmy/cli context raw-sources
-npx @crmy/cli context signals
-npx @crmy/cli context lineage --subject "account:Northstar Labs"
-npx @crmy/cli hitl list
+npx -y @crmy/cli briefing "account:Northstar Labs"
+npx -y @crmy/cli context raw-sources
+npx -y @crmy/cli context signals
+npx -y @crmy/cli context lineage --subject "account:Northstar Labs"
+npx -y @crmy/cli hitl list
+npx -y @crmy/cli agent-smoke
 ```
 
 You should see:
@@ -171,6 +213,31 @@ use_case:Production Rollout
 
 IDs are still used for system artifacts such as Handoffs, raw-source receipts, sync runs, and writeback requests.
 
+## 30-Second Briefing
+
+The fastest way to see the memory layer in action is to ask CRMy what an agent should know before touching a customer:
+
+```bash
+npx -y @crmy/cli briefing "account:Northstar Labs"
+```
+
+Equivalent MCP tool call:
+
+```json
+{
+  "tool": "briefing_get",
+  "arguments": {
+    "subject_type": "account",
+    "subject_id": "<resolved-account-id>",
+    "context_radius": "account_wide",
+    "format": "text",
+    "token_budget": 3000
+  }
+}
+```
+
+The briefing returns customer state, Current Memory, unconfirmed Signals, recent activity, open Handoffs, stale warnings, and the context an agent should use before acting.
+
 ## Connect Agents Through MCP
 
 CRMy is MCP-native. Add it to an agent harness and give the agent scoped tools for briefings, Raw Context ingestion, Signals, Memory, Handoffs, email drafting, record drafting, workflows, and systems-of-record writeback.
@@ -178,7 +245,7 @@ CRMy is MCP-native. Add it to an agent harness and give the agent scoped tools f
 Claude Code:
 
 ```bash
-claude mcp add crmy -- npx @crmy/cli mcp
+claude mcp add crmy -- npx -y @crmy/cli mcp
 ```
 
 Claude Desktop, Cursor, Windsurf, or any MCP client:
@@ -188,10 +255,73 @@ Claude Desktop, Cursor, Windsurf, or any MCP client:
   "mcpServers": {
     "crmy": {
       "command": "npx",
-      "args": ["@crmy/cli", "mcp"]
+      "args": ["-y", "@crmy/cli", "mcp"]
     }
   }
 }
+```
+
+Codex:
+
+```bash
+codex mcp add crmy -- npx -y @crmy/cli mcp
+```
+
+Or add CRMy to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.crmy]
+command = "npx"
+args = ["-y", "@crmy/cli", "mcp"]
+```
+
+ChatGPT Developer Mode:
+
+Use CRMy's remote MCP endpoint (`https://<your-crmy-host>/mcp`) as a Developer Mode app. ChatGPT Developer Mode uses remote MCP over SSE or streaming HTTP, so use a reachable HTTPS CRMy server or a secure development tunnel rather than local stdio.
+
+Hermes Agent:
+
+Add CRMy to `~/.hermes/config.yaml` under `mcp_servers`. Hermes prefixes CRMy tools as `mcp_crmy_<tool>`, so `briefing_get` appears as `mcp_crmy_briefing_get`.
+
+```yaml
+mcp_servers:
+  crmy:
+    command: "npx"
+    args: ["-y", "@crmy/cli", "mcp"]
+    timeout: 120
+    connect_timeout: 60
+    tools:
+      include:
+        - entity_resolve
+        - briefing_get
+        - context_ingest_auto
+        - context_signal_group_list
+        - context_signal_group_get
+        - context_signal_group_promote
+        - context_signal_handoff
+        - email_draft_preview
+        - email_draft_save
+        - record_draft_preview
+```
+
+If Hermes runs outside the shell where `crmy init` wrote config, add `DATABASE_URL` and `CRMY_API_KEY` under `env:` or connect to CRMy over HTTP with `url: "http://localhost:3000/mcp"` and an `Authorization` header. Restart Hermes or run `/reload-mcp` after editing the config.
+
+One-minute agent smoke test:
+
+```bash
+npx -y @crmy/cli agent-smoke
+```
+
+Or ask the connected agent:
+
+```text
+Use the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.
+```
+
+For Hermes Agent, ask for the prefixed tools:
+
+```text
+Use mcp_crmy_entity_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, then call mcp_crmy_context_signal_group_list for Signals needing attention. Tell me the safest next action with the evidence you used.
 ```
 
 Common first tools:
@@ -319,6 +449,7 @@ packages/
   cli/      @crmy/cli      Local CLI and stdio MCP server
   web/      @crmy/web      React app at /app
 docker/                    Dockerfile and docker-compose.yml
+examples/                  Copy-paste agent harness setup examples
 docs/recipes/              Agent walkthroughs
 ```
 
@@ -381,6 +512,13 @@ npm test
 
 - [Guide](docs/guide.md)
 - [MCP tools](docs/mcp-tools.md)
+- [Examples](examples/README.md)
+- [Claude Code account briefing example](examples/claude-code-account-briefing/README.md)
+- [Claude Desktop account briefing example](examples/claude-desktop-account-briefing/README.md)
+- [ChatGPT Developer Mode account briefing example](examples/chatgpt-developer-mode-account-briefing/README.md)
+- [Codex account briefing example](examples/codex-account-briefing/README.md)
+- [Hermes Agent account briefing example](examples/hermes-agent-account-briefing/README.md)
+- [OpenClaw plugin account briefing example](examples/openclaw-plugin-account-briefing/README.md)
 - [GTM agent demo](docs/recipes/gtm-agent-demo.md)
 - [Post-meeting agent](docs/recipes/post-meeting-agent.md)
 - [Pipeline review agent](docs/recipes/pipeline-review-agent.md)
@@ -394,7 +532,7 @@ npm test
 
 Current version: `0.8.3`
 
-The 0.8 line focuses on making CRMy a usable, scoped GTM agent workspace:
+v0.8.x focuses on making CRMy a usable, scoped GTM agent workspace:
 
 - Raw Context ingestion with evidence-backed Signals
 - Signal consolidation and typed Memory readiness

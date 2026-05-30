@@ -7,7 +7,7 @@ An agent that keeps customer memory trustworthy. It reviews stale entries, detec
 **Prerequisites:**
 
 - A running CRMy instance with demo data seeded (`crmy seed-demo`)
-- MCP connection configured (`claude mcp add crmy -- npx @crmy/cli mcp`)
+- MCP connection configured (`claude mcp add crmy -- npx -y @crmy/cli mcp`)
 - Optional: pgvector and embeddings for `context_semantic_search`
 
 **Context engine capabilities used:** `context_stale`, `context_review_batch`, `context_detect_contradictions`, `context_contradiction_assign`, `context_consolidate`, `context_semantic_search`, `briefing_get`, and `assignment_create`.

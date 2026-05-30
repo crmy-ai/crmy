@@ -250,11 +250,17 @@ export function useExtractRecordDraft() {
   return useMutation<{
     data: Record<string, unknown>;
     draft?: Record<string, unknown>;
+    patch?: Record<string, unknown>;
+    operation?: 'create' | 'edit';
+    current_record?: Record<string, unknown> | null;
     source: 'agent';
     field_rows?: Array<{
       field: string;
       label: string;
       value: unknown;
+      current_value?: unknown;
+      draft_value?: unknown;
+      changed?: boolean;
       source: 'user' | 'model_knowledge' | 'matched_record' | 'provider' | 'required';
       source_label: string;
       confidence_label?: string;
@@ -279,7 +285,9 @@ export function useExtractRecordDraft() {
     unresolved_references?: string[];
     work_log?: string[];
     can_create?: boolean;
-  }, Error, { text: string; object_type: string; parent_subject_type?: string; parent_subject_id?: string; parent_subject_name?: string; defaults?: Record<string, unknown> }>({
+    can_write?: boolean;
+    policy_blockers?: string[];
+  }, Error, { text: string; mode?: 'create' | 'edit'; object_type: string; record_type?: string; record_id?: string; parent_subject_type?: string; parent_subject_id?: string; parent_subject_name?: string; defaults?: Record<string, unknown> }>({
     mutationFn: (payload) => api.post('agent/extract/record', payload),
   });
 }
@@ -389,6 +397,21 @@ export function useIgnoreCalendarEvent() {
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ['calendar-event', variables.id] });
       qc.invalidateQueries({ queryKey: ['calendar-events'] });
+    },
+  });
+}
+
+export function useAddActivityContext() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; text: string; artifact_type?: string; source_label?: string }) =>
+      api.post(`activities/${id}/context`, data),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['activity', variables.id] });
+      qc.invalidateQueries({ queryKey: ['activities'] });
+      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
+      qc.invalidateQueries({ queryKey: ['signal-groups'] });
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
     },
   });
 }
@@ -691,6 +714,21 @@ export function useSaveEmailDraft() {
   });
 }
 
+export function useSourceFilters() {
+  return useQuery({
+    queryKey: ['source-filters'],
+    queryFn: () => api.get('source-filters'),
+  });
+}
+
+export function useUpdateSourceFilters() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.put('source-filters', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['source-filters'] }),
+  });
+}
+
 export function useMailboxConnections() {
   return useQuery({
     queryKey: ['mailbox-connections'],
@@ -751,6 +789,21 @@ export function useUpdateEmailMessageClassification() {
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ['email-message', variables.id] });
       qc.invalidateQueries({ queryKey: ['email-messages'] });
+    },
+  });
+}
+
+export function useUpdateEmailMessage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & Record<string, unknown>) =>
+      api.patch(`email-messages/${id}`, data),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['email-message', variables.id] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+      qc.invalidateQueries({ queryKey: ['raw-context-sources'] });
+      qc.invalidateQueries({ queryKey: ['signal-groups'] });
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
     },
   });
 }

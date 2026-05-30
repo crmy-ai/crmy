@@ -58,7 +58,7 @@ export function serverCommand(): Command {
       } catch (err) {
         console.error(
           '\n  No .crmy.json found in the current directory.\n' +
-          '  Run `npx @crmy/cli init` to set up CRMy first.\n',
+          '  Run `npx -y @crmy/cli init` to set up CRMy first.\n',
         );
         logToFile('ERROR: .crmy.json not found');
         process.exit(1);
@@ -72,7 +72,7 @@ export function serverCommand(): Command {
       if (!process.env.DATABASE_URL) {
         console.error(
           '\n  No database URL configured.\n' +
-          '  Run `npx @crmy/cli init` first, or set the DATABASE_URL environment variable.\n',
+          '  Run `npx -y @crmy/cli init` first, or set the DATABASE_URL environment variable.\n',
         );
         logToFile('ERROR: No DATABASE_URL configured');
         process.exit(1);
@@ -151,7 +151,7 @@ export function serverCommand(): Command {
           console.error(
             `\n  Port ${port} is already in use.\n` +
             `  Try a different port:\n` +
-            `    npx @crmy/cli server --port ${port + 1}\n`,
+            `    npx -y @crmy/cli server --port ${port + 1}\n`,
           );
           logToFile(`ERROR: EADDRINUSE on port ${port}`);
         } else if (

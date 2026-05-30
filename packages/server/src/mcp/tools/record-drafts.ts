@@ -12,7 +12,7 @@ export function recordDraftTools(db: DbPool): ToolDef[] {
     {
       name: 'record_draft_preview',
       tier: 'extended',
-      description: 'Draft Account, Contact, Opportunity, Use Case, Activity, or Assignment fields from natural language without writing. Returns a structured preview with field rows, missing required fields, linked records, duplicate candidates, unresolved references, and Account enrichment suggestions. Use this before creating records from agent or CLI workflows.',
+      description: 'Draft Account, Contact, Opportunity, Use Case, Activity, or Assignment fields from natural language without writing. Supports create mode and edit mode for existing records. Returns a structured preview with field rows, missing required fields, linked records, duplicate candidates, unresolved references, policy blockers, and Account enrichment suggestions. Use this before creating or updating records from agent or CLI workflows.',
       inputSchema: recordDraftPreviewSchema,
       handler: async (input: RecordDraftPreviewInput, actor: ActorContext) => {
         return runToolOperation(db, actor, 'record_draft_preview', input, async () => (

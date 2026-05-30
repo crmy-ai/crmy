@@ -64,7 +64,6 @@ export function OnboardingEmptyState({
   secondary,
   showSampleData = true,
   iconClassName = 'text-primary',
-  iconBgClassName = 'bg-primary/10',
 }: {
   icon: LucideIcon;
   title: string;
@@ -76,12 +75,12 @@ export function OnboardingEmptyState({
   iconBgClassName?: string;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-4 ${iconBgClassName}`}>
-        <Icon className={`w-7 h-7 ${iconClassName}`} />
+    <div className="rounded-xl border border-dashed border-border p-10 text-center">
+      <div className="flex justify-center">
+        <Icon className={`h-10 w-10 ${iconClassName || 'text-primary'} opacity-70`} />
       </div>
-      <h2 className="text-base font-display font-semibold text-foreground mb-1">{title}</h2>
-      <p className="text-sm text-muted-foreground max-w-md">{description}</p>
+      <h2 className="mt-3 text-sm font-semibold text-foreground">{title}</h2>
+      <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">{description}</p>
       <div className="flex flex-wrap items-center justify-center gap-2 mt-5">
         {primary && (
           <button

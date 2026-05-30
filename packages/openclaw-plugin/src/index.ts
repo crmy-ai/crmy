@@ -146,11 +146,24 @@ const ROUTES: Record<string, RouteHandler> = {
       subject_type: str(p.subject_type),
       subject_id: str(p.subject_id),
       context_type: str(p.context_type),
+      memory_status: str(p.memory_status),
       q: str(p.q),
       is_current: bool(p.is_current),
       limit: num(p.limit, 20),
       cursor: str(p.cursor),
     }),
+  'context.signal_groups': async (c, p) =>
+    c.get('/context/signal-groups', {
+      subject_type: str(p.subject_type),
+      subject_id: str(p.subject_id),
+      context_type: str(p.context_type),
+      status: str(p.status),
+      attention_only: bool(p.attention_only),
+      limit: num(p.limit, 20),
+      cursor: str(p.cursor),
+    }),
+  'context.signal_group.get': async (c, p) =>
+    c.get(`/context/signal-groups/${req(p.id, 'id')}`),
   'context.get': async (c, p) =>
     c.get(`/context/${req(p.id, 'id')}`),
   'context.add': async (c, p) =>

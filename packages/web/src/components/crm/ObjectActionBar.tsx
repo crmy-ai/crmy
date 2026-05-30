@@ -3,7 +3,7 @@
 
 import type { ElementType } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Brain, Bot, FileText, MailPlus } from 'lucide-react';
+import { Activity, Brain, Bot, FileText, MailPlus, Pencil } from 'lucide-react';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { useAppStore, type AIContextEntity } from '@/store/appStore';
 
@@ -42,13 +42,11 @@ export function ObjectActionBar({
   const navigate = useNavigate();
   const { enabled: agentEnabled } = useAgentSettings();
   const { openAIWithContext, openQuickAdd, openEmailDraft, closeDrawer } = useAppStore();
+  const subjectType = context.type === 'use-case' ? 'use_case' : context.type;
 
   return (
     <div className="mx-4 mt-3 rounded-2xl border border-border bg-card p-2.5">
       <div className="grid grid-cols-2 gap-2">
-        {onBrief && (
-          <ActionButton icon={FileText} label="Generate Brief" iconClassName="text-primary" onClick={onBrief} />
-        )}
         {agentEnabled && (
           <ActionButton
             icon={Bot}
@@ -61,14 +59,56 @@ export function ObjectActionBar({
             }}
           />
         )}
+        {!agentEnabled && <div />}
+        {agentEnabled && (
+          <ActionButton
+            icon={Pencil}
+            label="Update with Agent"
+            iconClassName="text-violet-500"
+            onClick={() => {
+              closeDrawer();
+              openQuickAdd(context.type, {
+                mode: 'edit',
+                record_id: context.id,
+                record_name: context.name,
+                parent_subject_type: subjectType,
+                parent_subject_id: context.id,
+                parent_subject_name: context.name,
+              });
+            }}
+          />
+        )}
+        {!agentEnabled && <div />}
+        {onBrief ? (
+          <ActionButton icon={FileText} label="Generate Brief" iconClassName="text-primary" onClick={onBrief} />
+        ) : <div />}
+        <ActionButton
+          icon={Brain}
+          label="Add Context"
+          iconClassName="text-sky-500"
+          onClick={() => {
+            closeDrawer();
+            const params = new URLSearchParams({
+              tab: 'observations',
+              add: 'context',
+              subject_type: subjectType,
+              subject_id: context.id,
+              subject_label: context.name,
+              return_subject_type: subjectType,
+              return_subject_id: context.id,
+              return_subject_label: context.name,
+            });
+            navigate(`/context?${params.toString()}`);
+          }}
+        />
         <ActionButton
           icon={MailPlus}
-          label="Draft follow-up"
+          label="Draft Email"
           iconClassName="text-blue-500"
           onClick={() => {
             closeDrawer();
             openEmailDraft({
-              subject_type: context.type === 'use-case' ? 'use_case' : context.type,
+              subject_type: subjectType,
               subject_id: context.id,
               ...(context.type === 'contact' ? { contact_id: context.id } : {}),
               ...(context.type === 'account' ? { account_id: context.id } : {}),
@@ -85,23 +125,14 @@ export function ObjectActionBar({
           onClick={() => {
             closeDrawer();
             openQuickAdd('activity', {
-              parent_subject_type: context.type === 'use-case' ? 'use_case' : context.type,
+              parent_subject_type: subjectType,
               parent_subject_id: context.id,
               parent_subject_name: context.name,
               defaults: {
-                subject_type: context.type === 'use-case' ? 'use_case' : context.type,
+                subject_type: subjectType,
                 subject_id: context.id,
               },
             });
-          }}
-        />
-        <ActionButton
-          icon={Brain}
-          label="Add Context"
-          iconClassName="text-sky-500"
-          onClick={() => {
-            closeDrawer();
-            navigate('/context?tab=observations&add=context');
           }}
         />
       </div>

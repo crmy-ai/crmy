@@ -2562,6 +2562,7 @@ function SystemsOfRecordSettings() {
     if (type === 'salesforce') return 'Salesforce';
     if (type === 'databricks') return 'Databricks';
     if (type === 'snowflake') return 'Snowflake';
+    if (type === 'other') return 'Custom API / MCP';
     return 'System';
   };
 
@@ -2570,7 +2571,7 @@ function SystemsOfRecordSettings() {
     { type: 'salesforce', label: 'Salesforce', fit: 'CRM accounts, contacts, opportunities, and tasks.', auth: 'Connected app OAuth' },
     { type: 'databricks', label: 'Databricks', fit: 'Warehouse tables and governed SQL templates.', auth: 'SQL Warehouse token' },
     { type: 'snowflake', label: 'Snowflake', fit: 'Warehouse views, tables, and controlled write templates.', auth: 'SQL API token' },
-    { type: 'other', label: 'Other', fit: 'Use the CRMy API/MCP tools for custom connectors today.', auth: 'Coming soon in UI' },
+    { type: 'other', label: 'Custom API / MCP', fit: 'Use scoped API keys, REST, CLI, or MCP tools for custom connectors today.', auth: 'API key + MCP tools' },
   ];
 
   const objectOptions = [
@@ -3226,6 +3227,26 @@ function SystemsOfRecordSettings() {
     return [];
   };
 
+  const setupPreviewRows = selectedReadOptions.map(option => {
+    const preset = connectorPresetMappings(systemType, '__preview__').find(item => item.object_type === option.key);
+    const sampleFields = Object.entries(preset?.field_mapping ?? {})
+      .slice(0, 3)
+      .map(([crmyField, externalField]) => `${externalField} -> ${crmyField.replace(/_/g, ' ')}`);
+    const crmyRecord = option.key === 'activity'
+      ? 'Activity'
+      : option.key === 'use_case'
+        ? 'Use Case'
+        : option.label.replace(/s$/, '');
+    return {
+      key: option.key,
+      crmyRecord,
+      externalObject: preset?.external_object ?? 'Choose in Mappings',
+      matchField: preset?.external_id_field ?? 'Choose ID field',
+      fields: sampleFields.length ? sampleFields.join(', ') : 'Configure after saving',
+      writes: 'Disabled',
+    };
+  });
+
   const handleApplyHubSpotPresets = async (systemId: string) => {
     try {
       for (const preset of hubSpotPresetMappings(systemId)) {
@@ -3312,6 +3333,60 @@ function SystemsOfRecordSettings() {
     const minutes = Math.round(ms / 60000);
     if (minutes < 90) return `OAuth token refreshes soon (${minutes} min)`;
     return `OAuth token valid until ${fmtDate(expiresAt)}`;
+  };
+
+  const readinessIconClass = (tone: 'ready' | 'action' | 'error' | 'muted') => {
+    if (tone === 'ready') return 'bg-success/10 text-success';
+    if (tone === 'error') return 'bg-destructive/10 text-destructive';
+    if (tone === 'action') return 'bg-warning/10 text-warning';
+    return 'bg-muted text-muted-foreground';
+  };
+
+  const latestRunForSystem = (systemId: string) =>
+    runs.find(run => String(run.system_id ?? '') === systemId);
+
+  const systemReadinessItems = (
+    system: SystemOfRecord,
+    systemMappings: SystemMapping[],
+    writeLabel: string,
+    latestRun?: Record<string, unknown>,
+  ) => {
+    const mappedCount = systemMappings.length;
+    const syncStatus = String(latestRun?.status ?? '').toLowerCase();
+    const syncFailing = ['failed', 'error'].includes(syncStatus);
+    const connected = system.status === 'connected';
+    return [
+      {
+        label: connected ? 'Connected' : system.status === 'error' ? 'Connection failing' : 'Test connection',
+        detail: connected ? 'Credentials are valid.' : system.last_error || 'Validate credentials before sync.',
+        tone: connected ? 'ready' as const : system.status === 'error' ? 'error' as const : 'action' as const,
+      },
+      {
+        label: mappedCount > 0 ? 'Mappings ready' : 'Mappings incomplete',
+        detail: mappedCount > 0
+          ? `${mappedCount} mapped record type${mappedCount === 1 ? '' : 's'}.`
+          : 'Choose the external objects CRMy should read.',
+        tone: mappedCount > 0 ? 'ready' as const : 'action' as const,
+      },
+      {
+        label: writeLabel === 'Disabled' ? 'Read-only' : `Writeback ${writeLabel.toLowerCase()}`,
+        detail: writeLabel === 'Disabled'
+          ? 'CRMy can read records, but cannot update the external system.'
+          : 'External updates require configured fields and governed review.',
+        tone: writeLabel === 'Disabled' ? 'muted' as const : 'action' as const,
+      },
+      {
+        label: syncFailing ? 'Sync failing' : system.last_sync_at ? 'Sync current' : 'Run first sync',
+        detail: syncFailing
+          ? String(latestRun?.error ?? latestRun?.message ?? 'Review the latest sync error.')
+          : system.last_sync_at
+            ? `Last sync ${fmtDate(system.last_sync_at)}.`
+            : connected && mappedCount > 0
+              ? 'Run sync to bring customer records into CRMy.'
+              : 'Sync starts after connection and mappings are ready.',
+        tone: syncFailing ? 'error' as const : system.last_sync_at ? 'ready' as const : connected && mappedCount > 0 ? 'action' as const : 'muted' as const,
+      },
+    ];
   };
 
   const fmtDate = (value?: unknown) => typeof value === 'string' ? new Date(value).toLocaleString() : '—';
@@ -3854,20 +3929,44 @@ function SystemsOfRecordSettings() {
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {connectorOptions.map(option => {
-                      const disabled = option.type === 'other';
+                      if (option.type === 'other') {
+                        return (
+                          <div
+                            key={option.type}
+                            className="text-left rounded-xl border border-border bg-muted/20 p-4"
+                          >
+                            <div className="flex h-full flex-col">
+                              <p className="text-sm font-semibold text-foreground">{option.label}</p>
+                              <p className="text-sm text-muted-foreground mt-1">{option.fit}</p>
+                              <div className="mt-4 flex items-center justify-between gap-2 border-t border-border/70 pt-3 text-xs text-muted-foreground">
+                                <span className="font-medium">Setup</span>
+                                <span className="truncate">{option.auth}</span>
+                              </div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <Link to="/settings/api-keys" className="h-7 px-2 rounded-md border border-border bg-background text-xs font-semibold text-foreground hover:bg-muted">
+                                  API keys
+                                </Link>
+                                <a href="https://github.com/crmy-ai/crmy/blob/main/docs/mcp-tools.md" target="_blank" rel="noreferrer" className="h-7 px-2 rounded-md border border-border bg-background text-xs font-semibold text-foreground hover:bg-muted">
+                                  MCP tools
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
                       return (
                         <button
                           key={option.type}
                           type="button"
-                          disabled={disabled}
                           onClick={() => { handleSystemTypeChange(option.type); if (!name.trim()) setName(`${option.label} connection`); setAddWizardStep(1); }}
-                          className={`text-left rounded-xl border p-4 transition-colors ${systemType === option.type ? 'border-primary bg-primary/10' : 'border-border bg-background hover:border-primary/40'} ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`}
+                          className={`text-left rounded-xl border p-4 transition-colors ${systemType === option.type ? 'border-primary bg-primary/10' : 'border-border bg-background hover:border-primary/40'}`}
                         >
-                          <div>
+                          <div className="flex h-full flex-col">
                             <p className="text-sm font-semibold text-foreground">{option.label}</p>
                             <p className="text-sm text-muted-foreground mt-1">{option.fit}</p>
-                            <div className="mt-3 inline-flex items-center rounded-md border border-border bg-muted/50 px-2 py-1 text-xs text-muted-foreground">
-                              {option.auth}
+                            <div className="mt-4 flex items-center justify-between gap-2 border-t border-border/70 pt-3 text-xs text-muted-foreground">
+                              <span className="font-medium">Setup</span>
+                              <span className="truncate">{option.auth}</span>
                             </div>
                           </div>
                         </button>
@@ -4014,6 +4113,42 @@ function SystemsOfRecordSettings() {
                       <p className="text-sm font-semibold text-foreground mt-1">Disabled</p>
                     </div>
                   </div>
+                  <div className="overflow-hidden rounded-xl border border-border bg-background">
+                    <div className="border-b border-border px-4 py-3">
+                      <p className="text-sm font-semibold text-foreground">Activation preview</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">CRMy will create read-only mappings first. You can refine fields or enable governed writeback later.</p>
+                    </div>
+                    {setupPreviewRows.length === 0 ? (
+                      <p className="px-4 py-4 text-sm text-muted-foreground">Choose at least one record type to preview the mappings CRMy will create.</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                          <thead className="bg-muted/40 text-xs text-muted-foreground">
+                            <tr>
+                              <th className="px-4 py-2 font-medium">External object</th>
+                              <th className="px-4 py-2 font-medium">CRMy record</th>
+                              <th className="px-4 py-2 font-medium">Match by</th>
+                              <th className="px-4 py-2 font-medium">Example fields</th>
+                              <th className="px-4 py-2 font-medium">Writeback</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-border">
+                            {setupPreviewRows.map(row => (
+                              <tr key={row.key}>
+                                <td className="px-4 py-2 font-medium text-foreground">{row.externalObject}</td>
+                                <td className="px-4 py-2 text-muted-foreground">{row.crmyRecord}</td>
+                                <td className="px-4 py-2 text-muted-foreground">{row.matchField}</td>
+                                <td className="max-w-[260px] px-4 py-2 text-muted-foreground">{row.fields}</td>
+                                <td className="px-4 py-2">
+                                  <span className="rounded-full border border-border bg-muted/40 px-2 py-0.5 text-xs font-semibold text-muted-foreground">{row.writes}</span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -4063,6 +4198,9 @@ function SystemsOfRecordSettings() {
               <Server className="w-8 h-8 text-muted-foreground/40 mx-auto mb-3" />
               <p className="text-sm font-semibold text-foreground">No systems connected</p>
               <p className="text-sm text-muted-foreground mt-1">Connect the CRM or warehouse that owns customer data. CRMy reads mapped records first; writeback stays explicit and governed.</p>
+              <p className="text-xs text-muted-foreground mt-2">
+                Building a custom connector? Use <Link to="/settings/api-keys" className="text-primary hover:underline">API keys</Link> with REST, CLI, or MCP tools.
+              </p>
               <button
                 onClick={() => { setShowCreate(true); setAddWizardStep(0); }}
                 className="mt-4 h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 inline-flex items-center gap-2 mx-auto"
@@ -4089,6 +4227,8 @@ function SystemsOfRecordSettings() {
               && system.status !== 'connected'
               && (system.status !== 'error' || isHubSpotOAuthIncomplete(system.last_error));
             const tokenLabel = tokenHealthLabel(system);
+            const latestRun = latestRunForSystem(system.id);
+            const readinessItems = systemReadinessItems(system, systemMappings, writeLabel, latestRun);
             return (
               <div key={system.id} className={cardCls}>
                 <div className="flex items-start justify-between gap-3">
@@ -4134,6 +4274,22 @@ function SystemsOfRecordSettings() {
                   <div className="rounded-lg bg-muted/50 p-2"><p className="text-sm font-semibold">{mappedCount}</p><p className="text-xs text-muted-foreground">Mappings</p></div>
                   <div className="rounded-lg bg-muted/50 p-2"><p className="text-sm font-semibold">{conflictCount}</p><p className="text-xs text-muted-foreground">Conflicts</p></div>
                   <div className="rounded-lg bg-muted/50 p-2"><p className="text-sm font-semibold">{writebackCount}</p><p className="text-xs text-muted-foreground">Needs review</p></div>
+                </div>
+                <div className="mt-3 rounded-xl border border-border bg-background/70 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Readiness</p>
+                  <div className="mt-2 grid grid-cols-1 gap-2">
+                    {readinessItems.map(item => (
+                      <div key={item.label} className="flex items-start gap-2 rounded-lg bg-muted/30 px-2.5 py-2">
+                        <span className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-full ${readinessIconClass(item.tone)}`}>
+                          {item.tone === 'ready' ? <CheckCircle2 className="h-3.5 w-3.5" /> : item.tone === 'error' ? <XCircle className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-foreground">{item.label}</p>
+                          <p className="text-xs text-muted-foreground">{item.detail}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className={`mt-3 rounded-xl border p-3 ${actionStateClass(actionState.tone)}`}>
                   <div className="flex items-start gap-2">

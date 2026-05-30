@@ -21,6 +21,8 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ActorContext, SubjectType, UUID } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
 import { assembleBriefing } from '../services/briefing.js';
+import { assertSubjectAccess } from '../services/access-control.js';
+import { requireScopes } from '../auth/scopes.js';
 
 const ENTITY_TYPES: { type: SubjectType; label: string; description: string }[] = [
   { type: 'contact', label: 'Contact', description: 'Individual person — stakeholder, prospect, or champion' },
@@ -80,6 +82,8 @@ export function registerResources(server: McpServer, db: DbPool, getActor: () =>
       async (uri, variables) => {
         const actor = getActor();
         const id = Array.isArray(variables.id) ? variables.id[0] : variables.id;
+        requireScopes(actor, 'context:read');
+        await assertSubjectAccess(db, actor, type, id as string);
         return readEntityBriefing(db, actor.tenant_id, type, id as string, uri.href);
       },
     );

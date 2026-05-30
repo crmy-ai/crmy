@@ -40,6 +40,11 @@ export interface CalendarConnection {
   status: CalendarConnectionStatus;
   scopes: string[];
   sync_cursor?: string | null;
+  provider_account_id?: string | null;
+  access_token_enc?: string | null;
+  refresh_token_enc?: string | null;
+  token_expires_at?: string | null;
+  sync_stats?: Record<string, unknown>;
   settings: Record<string, unknown>;
   last_sync_at?: string | null;
   last_error?: string | null;
@@ -217,6 +222,14 @@ export async function listCalendarConnections(
   return result.rows as CalendarConnection[];
 }
 
+export async function getCalendarConnection(db: DbPool, tenantId: UUID, id: UUID): Promise<CalendarConnection | null> {
+  const result = await db.query(
+    'SELECT * FROM calendar_connections WHERE tenant_id = $1 AND id = $2',
+    [tenantId, id],
+  );
+  return (result.rows[0] as CalendarConnection | undefined) ?? null;
+}
+
 export async function createPlaceholderCalendarConnection(
   db: DbPool,
   tenantId: UUID,
@@ -255,6 +268,58 @@ export async function createPlaceholderCalendarConnection(
     ],
   );
   return result.rows[0] as CalendarConnection;
+}
+
+export async function updateCalendarConnection(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  patch: Partial<Pick<CalendarConnection,
+    'status' | 'scopes' | 'sync_cursor' | 'provider_account_id' | 'access_token_enc' |
+    'refresh_token_enc' | 'token_expires_at' | 'sync_stats' | 'settings' |
+    'last_sync_at' | 'last_error' | 'display_name' | 'email_address'
+  >>,
+): Promise<CalendarConnection | null> {
+  const sets = ['updated_at = now()'];
+  const params: unknown[] = [tenantId, id];
+  let idx = 3;
+  const scalarFields = [
+    'status',
+    'sync_cursor',
+    'provider_account_id',
+    'access_token_enc',
+    'refresh_token_enc',
+    'token_expires_at',
+    'last_sync_at',
+    'last_error',
+    'display_name',
+    'email_address',
+  ] as const;
+  for (const field of scalarFields) {
+    if (field in patch) {
+      sets.push(`${field} = $${idx++}`);
+      params.push(patch[field] ?? null);
+    }
+  }
+  if (patch.scopes !== undefined) {
+    sets.push(`scopes = $${idx++}`);
+    params.push(patch.scopes);
+  }
+  if (patch.settings !== undefined) {
+    sets.push(`settings = settings || $${idx++}::jsonb`);
+    params.push(JSON.stringify(patch.settings));
+  }
+  if (patch.sync_stats !== undefined) {
+    sets.push(`sync_stats = sync_stats || $${idx++}::jsonb`);
+    params.push(JSON.stringify(patch.sync_stats));
+  }
+  const result = await db.query(
+    `UPDATE calendar_connections SET ${sets.join(', ')}
+     WHERE tenant_id = $1 AND id = $2
+     RETURNING *`,
+    params,
+  );
+  return (result.rows[0] as CalendarConnection | undefined) ?? null;
 }
 
 export async function deleteCalendarConnection(db: DbPool, tenantId: UUID, id: UUID): Promise<boolean> {
@@ -298,6 +363,15 @@ export async function claimCalendarSyncJobs(db: DbPool, limit = 10): Promise<Arr
     [limit],
   );
   return result.rows as Array<{ id: UUID; tenant_id: UUID; connection_id: UUID }>;
+}
+
+export async function completeCalendarSyncJob(db: DbPool, id: UUID): Promise<void> {
+  await db.query(
+    `UPDATE calendar_sync_jobs
+     SET status = 'complete', locked_at = NULL, last_error = NULL, updated_at = now()
+     WHERE id = $1`,
+    [id],
+  );
 }
 
 export async function failCalendarSyncJob(db: DbPool, id: UUID, error: string): Promise<void> {

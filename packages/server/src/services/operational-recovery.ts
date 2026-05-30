@@ -6,6 +6,11 @@ import type { DbPool } from '../db/pool.js';
 
 export type RecoverableQueue =
   | 'context_outbox'
+  | 'raw_context_sources'
+  | 'agent_turns'
+  | 'context_embedding_jobs'
+  | 'mailbox_sync_jobs'
+  | 'calendar_sync_jobs'
   | 'webhook_deliveries'
   | 'message_deliveries'
   | 'bulk_jobs'
@@ -53,6 +58,149 @@ const SPECS: Record<RecoverableQueue, RecoverySpec> = {
       `,
     },
     newStatus: { retry: 'pending', park: 'parked', mark_failed: 'failed' },
+  },
+  raw_context_sources: {
+    selectSql: 'SELECT id, status FROM raw_context_sources WHERE tenant_id = $1 AND id = $2',
+    updateSql: {
+      retry: `
+        UPDATE raw_context_sources
+        SET status = 'pending',
+            stage = 'retrying',
+            locked_at = NULL,
+            next_retry_at = now(),
+            last_error = NULL,
+            failure_reason = NULL,
+            failure_code = NULL,
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, status
+      `,
+      park: `
+        UPDATE raw_context_sources
+        SET status = 'needs_review',
+            locked_at = NULL,
+            last_error = COALESCE($3, last_error),
+            failure_reason = COALESCE($3, failure_reason),
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, status
+      `,
+      mark_failed: `
+        UPDATE raw_context_sources
+        SET status = 'failed',
+            locked_at = NULL,
+            last_error = COALESCE($3, last_error),
+            failure_reason = COALESCE($3, failure_reason),
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, status
+      `,
+    },
+    newStatus: { retry: 'pending', park: 'needs_review', mark_failed: 'failed' },
+  },
+  agent_turns: {
+    selectSql: 'SELECT id, status FROM agent_turns WHERE tenant_id = $1 AND id = $2',
+    updateSql: {
+      retry: `
+        UPDATE agent_turns
+        SET status = 'queued',
+            started_at = NULL,
+            completed_at = NULL,
+            cancelled_at = NULL,
+            error_message = NULL,
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2 AND status IN ('failed', 'cancelled', 'running')
+        RETURNING id, status
+      `,
+      park: null,
+      mark_failed: `
+        UPDATE agent_turns
+        SET status = 'failed',
+            completed_at = COALESCE(completed_at, now()),
+            error_message = COALESCE($3, error_message),
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, status
+      `,
+    },
+    newStatus: { retry: 'queued', park: 'running', mark_failed: 'failed' },
+  },
+  context_embedding_jobs: {
+    selectSql: 'SELECT id, status FROM context_embedding_jobs WHERE tenant_id = $1 AND id = $2',
+    updateSql: {
+      retry: `
+        UPDATE context_embedding_jobs
+        SET status = 'pending',
+            locked_at = NULL,
+            last_error = NULL,
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, status
+      `,
+      park: null,
+      mark_failed: `
+        UPDATE context_embedding_jobs
+        SET status = 'failed',
+            locked_at = NULL,
+            last_error = COALESCE($3, last_error),
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, status
+      `,
+    },
+    newStatus: { retry: 'pending', park: 'failed', mark_failed: 'failed' },
+  },
+  mailbox_sync_jobs: {
+    selectSql: 'SELECT id, status FROM mailbox_sync_jobs WHERE tenant_id = $1 AND id = $2',
+    updateSql: {
+      retry: `
+        UPDATE mailbox_sync_jobs
+        SET status = 'pending',
+            run_after = now(),
+            locked_at = NULL,
+            last_error = NULL,
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, status
+      `,
+      park: null,
+      mark_failed: `
+        UPDATE mailbox_sync_jobs
+        SET status = 'failed',
+            locked_at = NULL,
+            last_error = COALESCE($3, last_error),
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, status
+      `,
+    },
+    newStatus: { retry: 'pending', park: 'failed', mark_failed: 'failed' },
+  },
+  calendar_sync_jobs: {
+    selectSql: 'SELECT id, status FROM calendar_sync_jobs WHERE tenant_id = $1 AND id = $2',
+    updateSql: {
+      retry: `
+        UPDATE calendar_sync_jobs
+        SET status = 'pending',
+            run_after = now(),
+            locked_at = NULL,
+            last_error = NULL,
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, status
+      `,
+      park: null,
+      mark_failed: `
+        UPDATE calendar_sync_jobs
+        SET status = 'failed',
+            locked_at = NULL,
+            last_error = COALESCE($3, last_error),
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, status
+      `,
+    },
+    newStatus: { retry: 'pending', park: 'failed', mark_failed: 'failed' },
   },
   webhook_deliveries: {
     selectSql: `

@@ -7,7 +7,7 @@ An agent that runs on a schedule. It reviews all open opportunities, surfaces at
 **Prerequisites:**
 
 - A running CRMy instance with demo data seeded (`crmy seed-demo`)
-- MCP connection configured (`claude mcp add crmy -- npx @crmy/cli mcp`)
+- MCP connection configured (`claude mcp add crmy -- npx -y @crmy/cli mcp`)
 
 **Context engine capabilities used:** `pipeline_forecast`, `opportunity_search`, `briefing_get`, `context_stale`, `context_stale_assign`, `context_detect_contradictions`, `context_contradiction_assign`, `account_health_report`, and `assignment_create`.
 

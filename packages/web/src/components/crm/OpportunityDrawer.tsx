@@ -14,6 +14,7 @@ import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EntityCombobox } from '@/components/ui/entity-combobox';
 import { assertReferenceExists } from '@/lib/referenceValidation';
+import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -252,14 +253,16 @@ function OpportunityEditForm({
 }
 
 export function OpportunityDrawer() {
-  const { drawerEntityId, closeDrawer, openDrawer } = useAppStore();
-  const [editing, setEditing] = useState(false);
+  const { drawerEntityId, closeDrawer, openDrawer, drawerEditing, setDrawerEditing, openQuickAdd } = useAppStore();
+  const editing = drawerEditing;
+  const setEditing = setDrawerEditing;
   const [briefing, setBriefing] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: oppData, isLoading } = useOpportunity(drawerEntityId ?? '') as any;
   const updateOpportunity = useUpdateOpportunity(drawerEntityId ?? '');
   const deleteOpportunity = useDeleteOpportunity(drawerEntityId ?? '');
   const rescore = useRescoreOpportunity(drawerEntityId ?? '');
+  const { enabled: agentEnabled, config: agentConfig, connectivity } = useAgentSettings();
   // These must stay above early returns to satisfy rules of hooks
   const opportunity = oppData?.opportunity ?? null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -290,6 +293,22 @@ export function OpportunityDrawer() {
   const linkedAccount = linkedAccData?.account ?? null;
   const linkedContact = linkedConData?.contact ?? null;
   const linkedContactName = linkedContact ? [linkedContact.first_name, linkedContact.last_name].filter(Boolean).join(' ') : null;
+  const agentReady = agentEnabled && Boolean(agentConfig?.model && agentConfig?.base_url) && connectivity === 'online';
+  const startEdit = () => {
+    if (agentReady && drawerEntityId) {
+      closeDrawer();
+      openQuickAdd('opportunity', {
+        mode: 'edit',
+        record_id: drawerEntityId,
+        record_name: name,
+        parent_subject_type: 'opportunity',
+        parent_subject_id: drawerEntityId,
+        parent_subject_name: name,
+      });
+      return;
+    }
+    setEditing(true);
+  };
 
   if (briefing) {
     return <BriefingPanel subjectType="opportunity" subjectId={drawerEntityId!} onClose={() => setBriefing(false)} />;
@@ -327,7 +346,17 @@ export function OpportunityDrawer() {
     <div className="flex flex-col">
       {/* Header */}
       <div className="p-6 border-b border-border">
-        <h2 className="font-display font-extrabold text-xl text-foreground">{name}</h2>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h2 className="font-display font-extrabold text-xl text-foreground">{name}</h2>
+          </div>
+          <button
+            onClick={startEdit}
+            className="flex shrink-0 items-center gap-1.5 rounded-xl bg-muted px-3 py-2 text-sm font-medium text-foreground transition-all hover:bg-muted/80 press-scale"
+          >
+            <Pencil className="h-3.5 w-3.5" /> Edit
+          </button>
+        </div>
         <p className="text-3xl font-display font-extrabold text-foreground mt-2">
           ${amount >= 1000 ? `${(amount / 1000).toFixed(0)}K` : amount}
         </p>
@@ -353,14 +382,6 @@ export function OpportunityDrawer() {
               {rescore.isPending ? 'Scoring…' : 'Score deal health'}
             </button>
           )}
-        </div>
-        <div className="flex gap-2 mt-4">
-          <button
-            onClick={() => setEditing(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-muted text-foreground text-sm font-medium hover:bg-muted/80 transition-all press-scale"
-          >
-            <Pencil className="w-3.5 h-3.5" /> Edit
-          </button>
         </div>
       </div>
 

@@ -38,6 +38,9 @@ type FieldRow = {
   field: string;
   label: string;
   value: unknown;
+  current_value?: unknown;
+  draft_value?: unknown;
+  changed?: boolean;
   source: 'user' | 'model_knowledge' | 'matched_record' | 'provider' | 'required';
   source_label: string;
   status: 'ready' | 'missing' | 'linked' | 'optional';
@@ -54,7 +57,10 @@ const subjectType = z.enum(['account', 'contact', 'opportunity', 'use-case', 'us
 
 export const recordDraftPreviewSchema = z.object({
   text: z.string().min(1),
+  mode: z.enum(['create', 'edit']).optional().default('create'),
   object_type: recordType,
+  record_type: recordType.optional(),
+  record_id: z.string().uuid().optional(),
   parent_subject_type: subjectType,
   parent_subject_id: z.string().uuid().optional(),
   parent_subject_name: z.string().optional(),
@@ -92,6 +98,21 @@ const FIELD_LABELS: Record<string, string> = {
   assignment_type: 'Assignment Type',
   assigned_to: 'Assigned To',
 };
+
+const BLOCKED_EDIT_FIELDS = new Set([
+  'id',
+  'tenant_id',
+  'owner_id',
+  'created_at',
+  'updated_at',
+  'deleted_at',
+  'account_id',
+  'contact_id',
+  'opportunity_id',
+  'use_case_id',
+  'subject_type',
+  'subject_id',
+]);
 
 function labelFor(field: string): string {
   return FIELD_LABELS[field] ?? field.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -316,6 +337,27 @@ async function assertRecordDraftWriteAccess(actor: ActorContext, objectType: Rec
   if (!actorHasScope(actor, requiredScope)) throw permissionDenied(`Missing scope: ${requiredScope}`);
 }
 
+function assertAgentDraftCapability(
+  config: { can_write_objects?: boolean; can_log_activities?: boolean; can_create_assignments?: boolean },
+  objectType: RecordDraftType,
+): void {
+  if (objectType === 'activity') {
+    if (config.can_log_activities === false) {
+      throw permissionDenied('Workspace Agent activity logging is disabled. Use the form to log this activity.');
+    }
+    return;
+  }
+  if (objectType === 'assignment') {
+    if (config.can_create_assignments === false) {
+      throw permissionDenied('Workspace Agent handoff creation is disabled. Use the form to create this assignment.');
+    }
+    return;
+  }
+  if (config.can_write_objects === false) {
+    throw permissionDenied('Workspace Agent record writing is disabled. Use the form to create or edit this record.');
+  }
+}
+
 async function getParentRecord(db: DbPool, actor: ActorContext, parentType?: string, parentId?: string): Promise<LinkedRecord | null> {
   const normalized = normalizeSubjectType(parentType);
   if (!normalized || !parentId) return null;
@@ -340,6 +382,26 @@ async function getParentRecord(db: DbPool, actor: ActorContext, parentType?: str
   }
   const record = await ucRepo.getUseCase(db, actor.tenant_id, parentId);
   return record ? { type: 'use_case', id: record.id, name: String(record.name), detail: record.stage ?? null } : null;
+}
+
+async function getEditableRecord(db: DbPool, actor: ActorContext, objectType: RecordDraftType, recordId?: string) {
+  if (!recordId || objectType === 'assignment' || objectType === 'activity') return null;
+  const accessType = objectType === 'use-case' ? 'use_case' : objectType;
+  await assertSubjectAccess(db, actor, accessType, recordId);
+  if (objectType === 'account') return accountRepo.getAccount(db, actor.tenant_id, recordId) as Promise<Record<string, unknown> | null>;
+  if (objectType === 'contact') return contactRepo.getContact(db, actor.tenant_id, recordId) as Promise<Record<string, unknown> | null>;
+  if (objectType === 'opportunity') return oppRepo.getOpportunity(db, actor.tenant_id, recordId) as Promise<Record<string, unknown> | null>;
+  return ucRepo.getUseCase(db, actor.tenant_id, recordId) as Promise<Record<string, unknown> | null>;
+}
+
+function compactEditableRecord(record: Record<string, unknown> | null) {
+  if (!record) return null;
+  const hidden = new Set(['tenant_id', 'embedding', 'metadata']);
+  return Object.fromEntries(
+    Object.entries(record)
+      .filter(([key, value]) => !hidden.has(key) && value !== undefined && value !== null && value !== '')
+      .map(([key, value]) => [key, typeof value === 'string' && value.length > 1000 ? value.slice(0, 1000) : value]),
+  );
 }
 
 async function accountScopeForParent(db: DbPool, actor: ActorContext, parentType?: string, parentId?: string): Promise<string | undefined> {
@@ -764,6 +826,53 @@ function fieldRowsForDraft(objectType: RecordDraftType, draft: Record<string, un
   return rows;
 }
 
+function valuesEqual(a: unknown, b: unknown) {
+  if (a == null && b == null) return true;
+  if (Array.isArray(a) || Array.isArray(b) || (typeof a === 'object' && a != null) || (typeof b === 'object' && b != null)) {
+    return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  }
+  return String(a ?? '') === String(b ?? '');
+}
+
+function fieldRowsForEdit(
+  objectType: RecordDraftType,
+  currentRecord: Record<string, unknown>,
+  patch: Record<string, unknown>,
+  sourceText: string,
+  rawInput: Record<string, unknown>,
+): FieldRow[] {
+  return Object.entries(patch)
+    .filter(([field, value]) => value !== undefined && value !== '' && field !== 'allow_duplicates')
+    .map(([field, value]) => {
+      const source = fieldSourceForDraft(objectType, field, value, sourceText, rawInput);
+      const changed = !valuesEqual(currentRecord[field], value);
+      return {
+        field,
+        label: labelFor(field),
+        value,
+        current_value: currentRecord[field] ?? null,
+        draft_value: value,
+        changed,
+        source,
+        source_label: sourceLabel(source),
+        status: BLOCKED_EDIT_FIELDS.has(field) ? 'optional' : source === 'matched_record' ? 'linked' : changed ? 'ready' : 'optional',
+        required: false,
+        confidence_label: confidenceLabel(source),
+        requires_confirmation: source === 'model_knowledge' || source === 'provider' || BLOCKED_EDIT_FIELDS.has(field),
+      } satisfies FieldRow;
+    });
+}
+
+function editPolicyBlockers(rows: FieldRow[]) {
+  const blockers: string[] = [];
+  for (const row of rows) {
+    if (BLOCKED_EDIT_FIELDS.has(row.field)) {
+      blockers.push(`${row.label} changes need form review or a governed workflow.`);
+    }
+  }
+  return blockers;
+}
+
 function enrichmentSuggestionsFromRows(rows: FieldRow[]) {
   return rows
     .filter(row => row.source === 'model_knowledge' || row.source === 'provider')
@@ -789,15 +898,26 @@ function removeUnprovidedVolatileAccountFields(draft: Record<string, unknown>, s
   }
 }
 
+function removeImplicitEditDefaults(draft: Record<string, unknown>, objectType: RecordDraftType, rawInput: Record<string, unknown>) {
+  if ((objectType === 'opportunity' || objectType === 'use-case') && rawInput.stage == null) delete draft.stage;
+  if (objectType === 'activity') {
+    if (rawInput.type == null) delete draft.type;
+    if (rawInput.subject == null) delete draft.subject;
+  }
+}
+
 export async function previewRecordDraft(db: DbPool, actor: ActorContext, input: RecordDraftPreviewInput) {
   const objectType = input.object_type as RecordDraftType;
+  const mode = input.mode ?? 'create';
   await assertRecordDraftWriteAccess(actor, objectType);
+  if (mode === 'edit' && !input.record_id) throw permissionDenied('record_id is required for record edit drafting');
 
   const text = input.text.trim();
   const config = await agentRepo.getConfig(db, actor.tenant_id);
   if (!config?.enabled || !config.model || !config.base_url) {
     throw permissionDenied('Workspace Agent is not configured for record drafting');
   }
+  assertAgentDraftCapability(config, objectType);
 
   const context: ParentContext = {
     parent_subject_type: input.parent_subject_type,
@@ -806,23 +926,75 @@ export async function previewRecordDraft(db: DbPool, actor: ActorContext, input:
     defaults: input.defaults,
   };
   const packet = await buildCreationPacket(db, actor, objectType, context);
+  const currentRecord = mode === 'edit'
+    ? compactEditableRecord(await getEditableRecord(db, actor, objectType, input.record_id))
+    : null;
+  if (mode === 'edit' && !currentRecord) throw permissionDenied('Record is not available for edit drafting');
   const today = new Date().toISOString().slice(0, 10);
   const responseText = await callLLM(db, actor.tenant_id, {
     maxTokens: Math.min(config.max_tokens_per_turn ?? 1200, 1200),
     system: [
-      'You are the CRMy lightweight record creation model.',
-      'Your job is to draft one revenue record from a user note so CRMy can validate it before writing.',
+      mode === 'edit'
+        ? 'You are the CRMy lightweight record update model.'
+        : 'You are the CRMy lightweight record creation model.',
+      mode === 'edit'
+        ? 'Your job is to draft a minimal patch for one existing revenue record from a user note so CRMy can validate it before writing.'
+        : 'Your job is to draft one revenue record from a user note so CRMy can validate it before writing.',
       'Use the creation packet to understand required fields, allowed values, custom fields, parent scope, and related visible records.',
-      'Prefer existing linked records from the packet. Do not invent UUIDs. Use *_name fields when a linked record is mentioned but not confidently identified.',
+      mode === 'edit'
+        ? 'Return only fields the user clearly wants to change. Do not repeat unchanged fields.'
+        : 'Prefer existing linked records from the packet. Do not invent UUIDs. Use *_name fields when a linked record is mentioned but not confidently identified.',
       extractionPrompt(objectType),
       `Today is ${today}. Resolve explicit relative dates like today, tomorrow, or yesterday when present.`,
     ].join('\n'),
-    user: `Creation packet:\n${JSON.stringify(packet)}\n\nUser note:\n${text}\n\nReturn only the draft JSON object.`,
+    user: `${mode === 'edit' ? 'Update' : 'Creation'} packet:\n${JSON.stringify({
+      ...packet,
+      operation: mode,
+      current_record: currentRecord,
+    })}\n\nUser note:\n${text}\n\nReturn only the ${mode === 'edit' ? 'patch' : 'draft'} JSON object.`,
   });
 
   const parsedDraft = parseJsonObject(responseText);
   const draft = sanitizeRecordDraft(objectType, parsedDraft);
+  if (mode === 'edit') removeImplicitEditDefaults(draft, objectType, parsedDraft);
   if (objectType === 'account') removeUnprovidedVolatileAccountFields(draft, text, parsedDraft);
+
+  if (mode === 'edit' && currentRecord) {
+    const resolved = await resolveReferences(db, actor, objectType, draft, {});
+    const rows = fieldRowsForEdit(objectType, currentRecord, resolved.draft, text, parsedDraft);
+    const changedRows = rows.filter(row => row.changed);
+    const blockers = editPolicyBlockers(changedRows);
+    const safePatch = Object.fromEntries(
+      Object.entries(resolved.draft)
+        .filter(([field]) => !BLOCKED_EDIT_FIELDS.has(field))
+        .filter(([field, value]) => !valuesEqual(currentRecord[field], value)),
+    );
+    return {
+      data: safePatch,
+      draft: safePatch,
+      patch: safePatch,
+      operation: 'edit',
+      source: 'agent',
+      current_record: currentRecord,
+      field_rows: rows,
+      required_fields: [],
+      missing_fields: [],
+      linked_records: await linkedRecordsForDraft(db, actor, { ...currentRecord, ...safePatch }),
+      duplicate_candidates: [],
+      enrichment_suggestions: objectType === 'account' ? enrichmentSuggestionsFromRows(rows) : [],
+      resolution_summary: resolved.resolution_summary,
+      unresolved_references: resolved.unresolved_references,
+      policy_blockers: blockers,
+      can_write: Object.keys(safePatch).length > 0 && blockers.length === 0,
+      can_create: false,
+      work_log: [
+        'Read current record',
+        'Drafted changed fields only',
+        blockers.length ? `Found ${blockers.length} guarded change${blockers.length === 1 ? '' : 's'}` : 'No guarded changes found',
+      ],
+    };
+  }
+
   const resolved = await resolveReferences(db, actor, objectType, draft, context);
   const linkedRecords = await linkedRecordsForDraft(db, actor, resolved.draft);
   const missing = await missingFields(db, actor, objectType, resolved.draft);

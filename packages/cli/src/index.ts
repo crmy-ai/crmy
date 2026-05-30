@@ -61,6 +61,7 @@ import { doctorCommand } from './commands/doctor.js';
 import { systemsCommand } from './commands/systems.js';
 import { activitiesCommand } from './commands/activities.js';
 import { sequencesCommand } from './commands/sequences.js';
+import { agentSmokeCommand } from './commands/agent-smoke.js';
 
 const program = new Command();
 
@@ -98,6 +99,7 @@ program.addCommand(briefingCommand());
 program.addCommand(seedDemoCommand());
 program.addCommand(resetPasswordCommand());
 program.addCommand(doctorCommand());
+program.addCommand(agentSmokeCommand());
 program.addCommand(systemsCommand());
 program.addCommand(helpCommand());
 

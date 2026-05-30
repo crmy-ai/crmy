@@ -14,7 +14,7 @@ Complete documentation for CRMy — the operational customer context layer for A
 6. [Contacts](#contacts)
 7. [Accounts](#accounts)
 8. [Opportunities](#opportunities)
-9. [Activities](#activities)
+9. [Customer Activity](#customer-activity)
 10. [Actors](#actors)
 11. [Assignments](#assignments)
 12. [Context Engine](#context-engine)
@@ -26,7 +26,7 @@ Complete documentation for CRMy — the operational customer context layer for A
 18. [Use Cases](#use-cases)
 19. [Workflows & Automation](#workflows--automation)
 20. [Webhooks](#webhooks)
-21. [Email](#email)
+21. [Customer Email](#customer-email)
 22. [Messaging & Channels](#messaging--channels)
 23. [Custom Fields](#custom-fields)
 24. [Action Policies and HITL (Human-in-the-Loop)](#action-policies-and-hitl-human-in-the-loop)
@@ -51,7 +51,7 @@ npm install -g @crmy/cli
 Or use with npx (no install):
 
 ```bash
-npx @crmy/cli init
+npx -y @crmy/cli init
 ```
 
 ### Prerequisites
@@ -74,19 +74,22 @@ docker run --name crmy-postgres \
 export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crmy
 export CRMY_ADMIN_EMAIL=admin@example.com
 export CRMY_ADMIN_PASSWORD=change-me-please-123
-npx @crmy/cli init --yes
+npx -y @crmy/cli init --yes
 
 # 3. Check setup and start the server (REST API + MCP + Web UI at /app)
-npx @crmy/cli doctor
-npx @crmy/cli server
+npx -y @crmy/cli doctor
+npx -y @crmy/cli server
 
 # 4. Add to Claude Code as an MCP server
-claude mcp add crmy -- npx @crmy/cli mcp
+claude mcp add crmy -- npx -y @crmy/cli mcp
+
+# 5. Verify the seeded agent path
+npx -y @crmy/cli agent-smoke
 ```
 
-Prefer prompts? Run `npx @crmy/cli init` without `--yes`.
+Prefer prompts? Run `npx -y @crmy/cli init` without `--yes`.
 
-Semantic retrieval is optional but recommended for serious context work. It lets CRMy find related Signals and Memory by meaning instead of exact keywords. To enable it, use Postgres with the pgvector extension, set `ENABLE_PGVECTOR=true` before migrations, and configure embedding variables in the server environment:
+Semantic retrieval is optional but recommended for serious context work. It lets CRMy find related Signals and Memory by meaning instead of exact keywords. To enable it, use Postgres with the pgvector extension, set `ENABLE_PGVECTOR=true` before running migrations on a fresh database, and configure embedding variables in the server environment:
 
 ```env
 ENABLE_PGVECTOR=true
@@ -95,7 +98,7 @@ EMBEDDING_API_KEY=sk-...
 EMBEDDING_MODEL=text-embedding-3-small
 ```
 
-Restart the server after changing these values. Model Settings configures the Workspace Agent; embeddings are server settings because they are used by background indexing and semantic search. Admins can check readiness in the app at **Settings → Database → Semantic retrieval setup**.
+Restart the server after changing these values, then run `crmy doctor` or check **Settings → Database → Semantic retrieval setup**. Model Settings configures the Workspace Agent; embeddings are server settings because they are used by background indexing and semantic search.
 
 ### Run the GTM agent demo
 
@@ -157,7 +160,7 @@ This starts PostgreSQL and the crmy server on port 3000 with auto-migrations.
 
 **Option A — CLI wizard (recommended for local installs)**
 ```bash
-npx @crmy/cli init
+npx -y @crmy/cli init
 ```
 
 **Option B — REST API (works against any running server)**
@@ -188,7 +191,7 @@ If the server starts with no users and none of the above methods has been used, 
 For local installs, reset any user's password directly in PostgreSQL with the CLI:
 
 ```bash
-npx @crmy/cli reset-password --email admin@yourcompany.com
+npx -y @crmy/cli reset-password --email admin@yourcompany.com
 ```
 
 The command uses the database URL from `.crmy.json` or `DATABASE_URL`, prompts for a new password, and updates every matching user record. Passwords must be at least 12 characters.
@@ -197,7 +200,7 @@ If `.crmy.json` is missing, set the database URL first:
 
 ```bash
 export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crmy
-npx @crmy/cli reset-password --email admin@yourcompany.com
+npx -y @crmy/cli reset-password --email admin@yourcompany.com
 ```
 
 ### Develop from source
@@ -289,14 +292,14 @@ Credentials are stored in `~/.crmy/auth.json` (file permissions `0600`). The JWT
 If you lose the local admin password, reset it directly against the configured PostgreSQL database:
 
 ```bash
-npx @crmy/cli reset-password --email admin@yourcompany.com
+npx -y @crmy/cli reset-password --email admin@yourcompany.com
 ```
 
 Use `DATABASE_URL` if the CLI has not been initialized in the current project:
 
 ```bash
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crmy \
-  npx @crmy/cli reset-password --email admin@yourcompany.com
+  npx -y @crmy/cli reset-password --email admin@yourcompany.com
 ```
 
 #### Headless / CI mode
@@ -483,21 +486,21 @@ Members and managers see an Overview focused on their book of business: record c
 
 - **List**: searchable card/table views with name, email, account, lifecycle stage, and Memory coverage.
 - **Create**: lightweight Workspace Agent creation flow when configured, with manual form fallback.
-- **Detail drawer**: contact info, linked account, activity, Memory, Signals, Generate Brief, Context Graph, and Draft follow-up actions.
+- **Detail drawer**: contact info, linked account, activity, Memory, Signals, Generate Brief, Context Graph, and Draft Email actions.
 
 #### Accounts (`/app/accounts`)
 
 - **List**: searchable card/table views with industry, revenue, health, owner scope, and Memory coverage.
 - **Create**: lightweight Workspace Agent creation flow with editable enrichment suggestions and manual form fallback.
-- **Detail drawer**: account info, contacts, opportunities, use cases, Memory, Generate Brief, Context Graph, and Draft follow-up actions.
+- **Detail drawer**: account info, contacts, opportunities, use cases, Memory, Generate Brief, Context Graph, and Draft Email actions.
 
 #### Opportunities (`/app/opportunities`)
 
-Searchable card/table views for deal stage, value, close date, health signals, owner scope, and Memory coverage. The detail drawer supports stage updates, linked account/contact/use cases, Memory, Generate Brief, Context Graph, and Draft follow-up actions.
+Searchable card/table views for deal stage, value, close date, health signals, owner scope, and Memory coverage. The detail drawer supports stage updates, linked account/contact/use cases, Memory, Generate Brief, Context Graph, and Draft Email actions.
 
 #### Use Cases (`/app/use-cases`)
 
-Searchable card/table views for customer outcomes, stage, health, attributed ARR, adoption details, owner scope, and Memory coverage. The detail drawer links account, opportunity, contacts, activity, Memory, Generate Brief, Context Graph, and Draft follow-up actions.
+Searchable card/table views for customer outcomes, stage, health, attributed ARR, adoption details, owner scope, and Memory coverage. The detail drawer links account, opportunity, contacts, activity, Memory, Generate Brief, Context Graph, and Draft Email actions.
 
 #### Customer Activity (`/app/activities`)
 
@@ -535,38 +538,21 @@ The Context page is the dedicated workspace for Raw Context, Signal review, Curr
   - **Paste text tab**: paste transcripts, emails, meeting notes, support updates, or research; subjects are auto-detected and shown as colored chips
   - **Upload file tab**: drag-and-drop or browse for PDF, DOCX, TXT, or Markdown; text is extracted server-side and subjects detected automatically; file name, size, and a text preview are shown before confirming
   - Both tabs allow adding or removing detected subjects and providing a source label
-  - Submit creates one context entry per confirmed subject and runs the full extraction pipeline
+  - Submit records a Raw Context source, preserves selected subject links, and runs extraction so useful claims become Signals or Memory according to readiness rules
 
-#### Context Graph (`/app/context?tab=graph`, `/app/contacts/:id/graph`, `/app/accounts/:id/graph`) {#context-graph}
+#### Context Graph (`/app/context?tab=graph`) {#context-graph}
 
-An Obsidian-style dark canvas visualization of customer context around a selected record: related records, Current Memory, recent activity, and open handoffs. Accessible from **Context → Graph** or via the **Graph** tab on any Contact or Account detail page.
+Context Graph is a record-centered explorer, not the full Memory lifecycle view. Select a customer record to explore related records, Current Memory, recent activity, and open handoffs. Use **Context → Lineage** when you need to trace Raw Context through Signals, Memory, Handoffs, writebacks, and audit receipts.
 
-**Canvas**: powered by `@xyflow/react` (ReactFlow). Nodes are laid out in a concentric radial arrangement around the subject:
-
-| Node type | Color | Description |
-|---|---|---|
-| `subject` | Purple | The focal entity (contact or account) |
-| `context` | Teal | Individual context entries |
-| `account` | Blue | Linked account records |
-| `contact` | Green | Linked contact records |
-| `activity` | Orange | Recent activity log entries |
-| `assignment` | Yellow | Open assignments |
-
-**Sidebar filters**: toggle each node category on/off to reduce visual noise. Hidden node types are fully removed from the graph, not just faded.
-
-**MiniMap**: top-right corner; shows node positions at scale. Supports panning the main canvas from the minimap.
-
-**Node detail drawer**: click any node to open a Radix UI Sheet from the right side. Shows the node's key fields, content preview, and a direct link to the full record. Context nodes show the full body text, type badge, confidence score, and whether the entry is current.
+Click any graph node to open a detail drawer with key fields, content preview, and links back to the underlying record or context item.
 
 #### Settings (`/app/settings`)
 
-Tabbed interface:
-- **Profile**: name, email, role (read-only)
+Role-aware settings:
+- **Profile**: name, email, role, and personal appearance preferences
 - **API Keys**: create new keys (shown once), list existing, revoke
-- **Webhooks**: add endpoint URL + event types, list existing, delete
-- **Custom Fields**: tabbed by object type (contact, account, opportunity, activity, use_case) — create field definitions, list, delete
-- **Actors**: manage registered actors (humans and agents) — see below
-- **Model Settings** (`/app/settings/model`): configure the Workspace Agent
+- **Admin-only setup**: Model Settings, Systems of Record, source filters, Actors, Webhooks, Custom Fields, Registries, Action Policies, Automations, Reliability, and Audit Log
+- **Tenant identity**: read-only workspace/tenant details for admins
 
 #### Workspace Agent settings (`/app/settings/model`)
 
@@ -583,7 +569,7 @@ Controls the agent that performs background intelligence tasks for your tenant.
 | Allow agent to create assignments | ✓ | Agent can create `stale_context_review` and task assignments |
 | Allow agent to log activities | ✓ | Agent can create activity records as provenance for extractions |
 | **Auto-extract context from activities** | ✓ | Automatically run the extraction pipeline on every new activity |
-| Allow agent to write revenue objects | ✗ | Agent can create/update contacts, accounts, opportunities (requires confirmation warning) |
+| Allow agent to write revenue objects | ✓ | Lite and full Workspace Agent can create/update contacts, accounts, opportunities, use cases, and activities after user confirmation and access checks |
 
 The **Auto-extract context from activities** flag (`auto_extract_context`) controls whether newly created activities trigger the extraction pipeline. When disabled, activities are marked `skipped` and no context entries are written. This is useful when you want to control extraction cost or use `context_ingest_auto` explicitly instead.
 
@@ -823,31 +809,29 @@ GET    /api/v1/analytics/forecast?period=quarter
 
 ---
 
-## Activities
+## Customer Activity
 
-Activities are logged interactions: calls, emails, meetings, notes, and tasks. The activity model supports polymorphic subjects (any customer record), structured `detail` payloads, `occurred_at` timestamps (for retroactive logging), and `outcome` tracking.
+Customer Activity is the meeting/call/note context feed. Calendar meetings, phone calls, in-person meetings, notes, and manually logged interactions can become Raw Context when they include a transcript, debrief, or summary. The activity model supports polymorphic subjects (any customer record), structured `detail` payloads, `occurred_at` timestamps for retroactive logging, and `outcome` tracking.
+
+Calendar capture is optional. Meeting transcripts and call notes can still feed context through **Add Context**, `activity_add_context`, `calendar_event_add_context`, or `context_ingest_auto`.
 
 ### Activity types
 
-Default types are seeded and organized by category. You can also add custom types per tenant via the [Type Registries](#type-registries).
+Default types are seeded and organized by category. Meeting classifications are customizable in [Type Registries](#type-registries), while the core activity write tools currently accept the built-in activity type values.
 
 | Category | Types |
 |---|---|
-| `outreach` | outreach_email, outreach_call, outreach_sms, outreach_social |
-| `meeting` | meeting_scheduled, meeting_held, meeting_cancelled |
-| `proposal` | proposal_drafted, proposal_sent, proposal_viewed |
-| `contract` | contract_sent, contract_signed |
-| `internal` | note_added, research_completed, task_completed |
-| `lifecycle` | stage_change, field_update |
-| `handoff` | handoff_initiated, handoff_accepted |
-
-The `activity_type` field accepts any string — agents can use custom types without schema changes.
+| `basic` | call, email, meeting, note, task, demo, proposal, research, handoff, status_update |
+| `outreach` | outreach_email, outreach_call, outreach_linkedin, outreach_other |
+| `meeting` | meeting_scheduled, meeting_held |
+| `internal` | note_added, research_completed |
+| `lifecycle` | stage_change |
 
 ### Key fields
 
 | Field | Notes |
 |---|---|
-| `activity_type` | String from the type registry (or any custom string) |
+| `type` | Built-in activity type string such as `call`, `meeting_held`, `note_added`, or `research_completed` |
 | `subject_type` / `subject_id` | Polymorphic attachment to any customer record |
 | `occurred_at` | When the activity happened (may differ from `created_at` for retroactive logging) |
 | `detail` | JSONB — structured payload (call recording URL, email thread ID, etc.) |
@@ -861,9 +845,16 @@ The `activity_type` field accepts any string — agents can use custom types wit
 | `activity_create` | Create an activity. Required: `type`, `subject`. Optional: `body`, `contact_id`, `account_id`, `opportunity_id`, `due_at`, `direction`, `detail`, `outcome`, `occurred_at` |
 | `activity_get` | Get by ID |
 | `activity_search` | Filter by `contact_id`, `account_id`, `opportunity_id`, `type` |
+| `activity_add_context` | Add debrief notes, transcript, or summary to an existing activity and process it as Raw Context |
 | `activity_complete` | Mark as completed with optional timestamp and note |
 | `activity_update` | Patch `subject`, `body`, `status`, `due_at` |
 | `activity_get_timeline` | Get timeline for any subject object |
+| `calendar_connection_list` | List calendar connections and meeting-capture health |
+| `calendar_event_search` | Search customer meetings by validation and processing state |
+| `calendar_event_get` | Get one meeting and linked artifacts |
+| `calendar_event_process` | Process a ready meeting as Raw Context |
+| `calendar_event_add_context` | Add transcript/notes/summary to a meeting and process it |
+| `meeting_classification_list` | List tenant meeting classifications |
 
 ### CLI
 
@@ -883,6 +874,14 @@ crmy activities classifications
 GET    /api/v1/activities?contact_id=...&type=call
 POST   /api/v1/activities
 PATCH  /api/v1/activities/:id
+POST   /api/v1/activities/:id/context
+GET    /api/v1/calendar/connections
+POST   /api/v1/calendar/connections/:provider/start
+POST   /api/v1/calendar/connections/:id/sync
+GET    /api/v1/calendar-events
+GET    /api/v1/calendar-events/:id
+POST   /api/v1/calendar-events/:id/process
+POST   /api/v1/calendar-events/:id/artifacts
 ```
 
 ---
@@ -1024,12 +1023,14 @@ pending → accepted → in_progress → completed
 | Field | Description |
 |---|---|
 | `title` | Short description of what needs to be done |
+| `description` | Optional longer explanation |
+| `assignment_type` | Work category such as `review`, `follow_up`, `research`, or `custom` |
 | `subject_type` / `subject_id` | The customer record this assignment is about |
-| `assignee_actor_id` | Who should do it |
-| `assigner_actor_id` | Who created it |
+| `assigned_to` | Actor who should do the work |
+| `assigned_by` | Actor who created it |
 | `due_at` | Optional deadline |
 | `priority` | `low`, `normal`, `high`, `urgent` |
-| `instructions` | Freeform guidance for the assignee |
+| `context` | Freeform handoff notes for the assignee |
 | `outcome` | Filled in when completing the assignment |
 | `blocked_reason` | Filled in when blocking |
 
@@ -1037,10 +1038,10 @@ pending → accepted → in_progress → completed
 
 | Tool | Description |
 |---|---|
-| `assignment_create` | Create an assignment. Required: `title`, `assignee_actor_id`. Optional: `subject_type`, `subject_id`, `instructions`, `priority`, `due_at` |
+| `assignment_create` | Create an assignment. Required: `title`, `assignment_type`, `assigned_to`. Optional: `description`, `subject_type`, `subject_id`, `context`, `priority`, `due_at` |
 | `assignment_get` | Get by ID |
-| `assignment_list` | List with filters: `assignee_actor_id`, `assigner_actor_id`, `status`, `subject_type`, `subject_id` |
-| `assignment_update` | Patch `title`, `instructions`, `due_at`, `priority` |
+| `assignment_list` | List with filters: `assigned_to`, `assigned_by`, `status`, `subject_type`, `subject_id` |
+| `assignment_update` | Patch `title`, `description`, `context`, `due_at`, `priority` |
 | `assignment_accept` | Accept a pending assignment |
 | `assignment_start` | Transition to `in_progress` |
 | `assignment_complete` | Mark complete with optional `outcome` |
@@ -1065,7 +1066,7 @@ crmy assignments cancel <id>
 ### REST API
 
 ```
-GET    /api/v1/assignments?assignee_actor_id=...&status=pending
+GET    /api/v1/assignments?assigned_to=...&status=pending
 POST   /api/v1/assignments
 GET    /api/v1/assignments/:id
 PATCH  /api/v1/assignments/:id
@@ -1258,7 +1259,7 @@ Creating a Signal requires evidence. Normal retrieval, briefings, actor expertis
 
 ### Automatic subject detection — `context_ingest_auto`
 
-When you don't know which customer records a document mentions, use `context_ingest_auto`. The configured Workspace Agent identifies likely people and accounts, CRMy grounds those candidates against existing contacts and accounts with entity resolution, and the extraction pipeline runs for every resolved subject:
+When you don't know which customer records a document mentions, use `context_ingest_auto`. The configured Workspace Agent identifies likely accounts, people, opportunities, and use cases; CRMy grounds those candidates against visible records with account-scoped subject resolution. When an account is matched, CRMy narrows contact, opportunity, and use-case matching to that account before falling back to global matching for strong identifiers.
 
 ```
 context_ingest_auto {
@@ -1283,7 +1284,7 @@ Returns:
 }
 ```
 
-The resolution tiers used are the same as `entity_resolve` — exact name, alias, email, domain, substring, and fuzzy (`pg_trgm`). Only matches above the `confidence_threshold` are linked. Common English words, days of the week, and month names are filtered before resolution to avoid noise.
+The resolution tiers used are the same as `entity_resolve` — exact name, alias, email, domain, substring, and fuzzy (`pg_trgm`) — with account-scoped child matching for GTM objects. Only matches above the `confidence_threshold` are linked. Common English words, days of the week, and month names are filtered before resolution to avoid noise. If CRMy finds a customer account but no existing child record fits, it can return proposed records for review instead of auto-creating duplicates.
 
 This is the recommended tool for agents processing inbound content (emails, transcripts, documents) when subject IDs are not already known.
 
@@ -1318,7 +1319,7 @@ Returns:
 
 | Tool | Description |
 |---|---|
-| `context_ingest_auto` | Ingest Raw Context and automatically resolve mentioned entities — **no subject IDs needed**. Configurable `confidence_threshold`. Recommended for agents processing transcripts, emails, notes, and research. |
+| `context_ingest_auto` | Ingest Raw Context and automatically resolve mentioned entities — **no subject IDs needed**. Configurable `confidence_threshold`; optional `subjects` lets an app/agent pin a known record. Recommended for agents processing transcripts, emails, notes, and research. |
 | `context_ingest` | Ingest Raw Context and auto-extract structured Signals for a known subject. Requires explicit `subject_type` + `subject_id`. Returns a Raw Context processing receipt. |
 | `context_raw_source_list` | List Raw Context processing records with source, status, stage, Signal count, Memory count, skipped count, and failure reason. |
 | `context_raw_source_get` | Inspect one Raw Context processing record. |
@@ -1352,7 +1353,7 @@ crmy context reprocess-source <raw-source-id>
 crmy context lineage --subject "account:Northstar Labs"
 crmy context signals --subject "opportunity:Agent Context Rollout"
 crmy context signal-groups --subject "opportunity:Agent Context Rollout"
-crmy context promote <signal-id>
+crmy context promote <signal-entry-id>
 crmy context promote-group <signal-id>
 crmy context handoff-group <signal-id>
 crmy context list --subject "contact:Maya Patel" --status active
@@ -1690,7 +1691,7 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 4. For REST routes: `enforceToolScopes(toolName, actor)` or `requireScopes(actor, ...scopes)` is called
 5. If any required scope is missing → HTTP 403 with an explanatory message
 
-**Verified JWT users (human login) have full access.** Constructed actors, anonymous actors, agents, and API keys must carry explicit scopes. Tools that are intentionally public are limited to identity/schema/help lookups such as `actor_whoami`, `entity_resolve`, `schema_get`, and `guide_search`.
+**Human JWT users keep their role and record visibility.** Owners and admins can access tenant-wide data. Managers can access records owned by themselves and reporting users. Members can access only their visible book of business. Constructed actors, anonymous actors, agents, and API keys must also carry explicit scopes. Tools that are intentionally public are limited to identity/schema/help lookups such as `actor_whoami`, `entity_resolve`, `schema_get`, and `guide_search`.
 
 ### Wildcard resolution
 
@@ -1714,19 +1715,22 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 | `opportunity_get`, `opportunity_search` | `opportunities:read` |
 | `opportunity_create`, `opportunity_update`, `opportunity_advance_stage`, `opportunity_delete` | `opportunities:write` |
 | `pipeline_summary`, `pipeline_forecast` | `opportunities:read` |
-| `activity_get`, `activity_search`, `activity_get_timeline` | `activities:read` |
+| `activity_get`, `activity_search`, `activity_get_timeline`, `calendar_connection_list`, `calendar_event_search`, `calendar_event_get` | `activities:read` |
 | `activity_create`, `activity_update`, `activity_complete` | `activities:write` |
+| `activity_add_context`, `calendar_event_process`, `calendar_event_add_context` | `activities:write`, `context:write` |
 | `assignment_get`, `assignment_list` | `assignments:read` |
 | `assignment_create`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` | `assignments:write` |
 | `use_case_get`, `use_case_search`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` | `accounts:read` |
 | `use_case_create`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_unlink_contact` | `accounts:write` |
 | `use_case_link_contact` | `accounts:write`, `contacts:read` |
-| `context_get`, `context_search`, `context_list`, `context_raw_source_list`, `context_raw_source_get`, `context_stale`, `context_diff`, `briefing_get` | `context:read` |
+| `context_get`, `context_search`, `context_list`, `context_raw_source_list`, `context_raw_source_get`, `context_signal_group_list`, `context_signal_group_get`, `context_stale`, `context_diff`, `briefing_get` | `context:read` |
 | `context_add`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_review`, `context_extract`, `context_ingest`, `context_ingest_auto`, `context_bulk_mark_stale`, `context_embed_backfill`, `context_stale_assign`, `context_review_batch`, `context_resolve_contradiction`, `context_consolidate` | `context:write` |
+| `context_signal_group_promote`, `context_signal_handoff`, `context_signal_group_reject`, `context_raw_source_reprocess` | `context:write` |
 | `context_detect_contradictions`, `context_semantic_search`, `context_lineage_get` | `context:read` |
 | `context_contradiction_assign` | `context:read`, `assignments:write` |
-| `email_get`, `email_search` | `activities:read` |
-| `email_create` | `activities:write` |
+| `email_get`, `email_search`, `email_message_search`, `email_message_get`, `mailbox_connection_list`, `email_draft_preview` | `activities:read` plus `context:read` for draft preview |
+| `email_create`, `email_draft_save`, `email_message_ignore` | `activities:write` |
+| `email_ingest`, `email_message_process`, `email_message_link` | `activities:write`, `context:write` |
 | `hitl_check_status`, `hitl_list_pending` | `read` |
 | `hitl_submit_request`, `hitl_resolve` | `write` |
 | `actor_get`, `actor_list`, `actor_expertise`, `agent_find_specialist`, `crm_search`, `tenant_get_stats` | `read` |
@@ -2061,20 +2065,33 @@ GET    /api/v1/webhooks/:id/deliveries
 
 ---
 
-## Email
+## Customer Email
 
-Draft and send outbound emails with built-in HITL approval and configurable delivery providers.
+Customer Email is an optional context feed and governed response workspace. Connect a mailbox when you want customer threads auto-matched to customer records and processed into Signals and Memory. Emails can also feed context through **Add Context** or MCP `context_ingest_auto` without connecting a mailbox.
 
 ### How it works
 
-1. **Configure a provider** — set up SMTP (or another provider) via `email_provider_set` with host, credentials, and sender identity
-2. **Draft emails** — use `email_create` to draft an email linked to a contact
-3. **Approval flow** — when `require_approval` is true (default), a HITL request is created for human review
-4. **Delivery** — after approval (or immediately if `require_approval: false`), the email is sent through the configured provider
+1. **Connect a mailbox** — users connect Gmail or Microsoft 365 from `/app/emails` so customer-facing messages can sync into CRMy.
+2. **Filter before storage** — admin source filters skip internal-only, automated, spam/trash, newsletter, and excluded-domain messages before extraction by default.
+3. **Match customer records** — CRMy links messages using known contact email, account domain, reply/thread hints, and account-scoped opportunity/use-case matching.
+4. **Process useful messages** — linked customer messages can become Raw Context, producing Signals, Memory, or review items.
+5. **Draft safely** — users can generate or edit customer replies from Memory, Signals, recent email context, and linked records. Agent-generated drafts land in **Drafts & Approvals** first.
 
-### Provider configuration
+### Mailbox and source filters
 
-Configure your tenant's email provider using `email_provider_set`. SMTP is built-in; additional providers (SendGrid, SES) can be added via plugins.
+Mailbox OAuth setup is UI-first because it involves user redirects and provider consent. Admins control source filters in Settings so CRMy does not waste processing on internal mail or spam-like sources.
+
+Current mailbox connectors:
+
+| Provider | Status | Notes |
+|---|---|---|
+| Gmail / Google Workspace | Built-in | User mailbox OAuth and sync jobs |
+| Microsoft 365 / Outlook | Built-in | User mailbox OAuth and sync jobs |
+| Inbound webhook providers | Advanced | Use for provider-level ingestion or custom API/MCP flows |
+
+### Governed outbound provider
+
+Outbound delivery still uses the governed email provider configuration. SMTP is built in; additional providers can be added via plugins.
 
 ```json
 {
@@ -2100,7 +2117,15 @@ Configure your tenant's email provider using `email_provider_set`. SMTP is built
 
 | Tool | Description |
 |---|---|
-| `email_create` | Draft an email. Required: `to_address`, `subject`. Optional: `body_html`, `body_text`, `contact_id`, `account_id`, `opportunity_id`, `use_case_id`, `require_approval` |
+| `mailbox_connection_list` | List mailbox connections and processing summary visible to the current user |
+| `email_message_search` | Search customer email messages from mailbox sync, inbound webhooks, manual ingest, and outbound sends |
+| `email_message_get` | Get one canonical email message |
+| `email_message_link` | Link or relink a message to a customer record before processing |
+| `email_message_process` | Process a linked customer message as Raw Context |
+| `email_message_ignore` | Ignore a message so it no longer needs review |
+| `email_draft_preview` | Generate a customer email draft preview from Memory, Signals, source email, and linked records |
+| `email_draft_save` | Save an edited/generated draft, request approval, or explicitly send when allowed |
+| `email_create` | Legacy governed outbound email creation. Required: `to_address`, `subject`. Optional: `body_html`, `body_text`, `contact_id`, `account_id`, `opportunity_id`, `use_case_id`, `require_approval` |
 | `email_get` | Get email by ID |
 | `email_search` | Search by `contact_id`, `status` |
 | `email_provider_set` | Configure the tenant's email provider (SMTP, etc.) |
@@ -2114,7 +2139,7 @@ draft → pending_approval → approved → sending → sent
          (if rejected)  → rejected
 ```
 
-- **draft**: created with `require_approval: false`, sent immediately if provider configured
+- **draft**: saved but not sent
 - **pending_approval**: awaiting HITL review
 - **approved**: HITL approved, delivery in progress
 - **sending**: provider send in flight
@@ -2129,6 +2154,7 @@ crmy emails create           # interactive
 crmy emails list --status pending_approval
 crmy emails get <id>
 crmy emails messages --view review
+crmy emails process <message-id>
 crmy emails draft-preview --source-email <message-id>
 crmy emails save-draft --to customer@example.com --subject-line "Next steps" --body-file draft.txt
 crmy emails ignore-message <message-id>
@@ -2140,6 +2166,15 @@ crmy emails ignore-message <message-id>
 GET    /api/v1/emails?contact_id=...&status=sent
 POST   /api/v1/emails
 GET    /api/v1/emails/:id
+GET    /api/v1/mailbox/connections
+POST   /api/v1/mailbox/connections/:provider/start
+POST   /api/v1/mailbox/connections/:id/sync
+GET    /api/v1/email-messages
+GET    /api/v1/email-messages/:id
+POST   /api/v1/email-messages/:id/process
+POST   /api/v1/email-messages/:id/ignore
+POST   /api/v1/emails/draft-preview
+POST   /api/v1/emails/drafts
 GET    /api/v1/email-provider
 PUT    /api/v1/email-provider
 ```
@@ -2592,7 +2627,7 @@ export default function myPlugin(options: MyOptions): CrmyPlugin {
 
 ## MCP Tools Reference
 
-See [mcp-tools.md](mcp-tools.md) for the original core tool reference. All tools follow the patterns documented in each feature section above.
+See [mcp-tools.md](mcp-tools.md) for the full tool catalog. The guide below highlights the common connection patterns and high-value tools.
 
 ### MCP connection
 
@@ -2600,14 +2635,114 @@ See [mcp-tools.md](mcp-tools.md) for the original core tool reference. All tools
 
 ```bash
 # Claude Code
-claude mcp add crmy -- npx @crmy/cli mcp
+claude mcp add crmy -- npx -y @crmy/cli mcp
 
 # claude_desktop_config.json / .cursor/mcp.json
 {
   "mcpServers": {
-    "crmy": { "command": "npx", "args": ["@crmy/cli", "mcp"] }
+    "crmy": { "command": "npx", "args": ["-y", "@crmy/cli", "mcp"] }
   }
 }
+```
+
+**Codex (`~/.codex/config.toml` or `codex mcp add`):**
+
+```bash
+codex mcp add crmy -- npx -y @crmy/cli mcp
+```
+
+For more control, add CRMy to `~/.codex/config.toml` or a trusted project-scoped `.codex/config.toml`:
+
+```toml
+[mcp_servers.crmy]
+command = "npx"
+args = ["-y", "@crmy/cli", "mcp"]
+
+[mcp_servers.crmy.env]
+DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/crmy"
+CRMY_API_KEY = "crmy_..."
+```
+
+For a remote CRMy server:
+
+```toml
+[mcp_servers.crmy]
+url = "https://<your-crmy-host>/mcp"
+bearer_token_env_var = "CRMY_API_KEY"
+```
+
+**ChatGPT Developer Mode:**
+
+ChatGPT Developer Mode connects to remote MCP servers over SSE or streaming HTTP. Use CRMy's remote MCP endpoint as a Developer Mode app:
+
+```text
+https://<your-crmy-host>/mcp
+Authorization: Bearer crmy_...
+```
+
+Use a reachable HTTPS CRMy server or a secure development tunnel. Local stdio MCP servers are better suited to Claude Code, Claude Desktop, Codex, Cursor, Windsurf, and similar local agent harnesses.
+
+**Hermes Agent (`~/.hermes/config.yaml`):**
+
+Hermes reads MCP servers from `mcp_servers` and supports local stdio servers with `command`/`args` or remote HTTP servers with `url`/`headers`. CRMy works with either path.
+
+```yaml
+mcp_servers:
+  crmy:
+    command: "npx"
+    args: ["-y", "@crmy/cli", "mcp"]
+    timeout: 120
+    connect_timeout: 60
+    tools:
+      include:
+        - entity_resolve
+        - briefing_get
+        - context_ingest_auto
+        - context_signal_group_list
+        - context_signal_group_get
+        - context_signal_group_promote
+        - context_signal_handoff
+        - email_draft_preview
+        - email_draft_save
+        - record_draft_preview
+```
+
+If Hermes is running in a service/container and cannot see your local CRMy config, add:
+
+```yaml
+    env:
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/crmy"
+      CRMY_API_KEY: "crmy_..."
+```
+
+Or use CRMy's HTTP MCP endpoint:
+
+```yaml
+mcp_servers:
+  crmy:
+    url: "http://localhost:3000/mcp"
+    headers:
+      Authorization: "Bearer crmy_..."
+```
+
+Hermes registers tools with the `mcp_<server>_<tool>` naming pattern, so `briefing_get` becomes `mcp_crmy_briefing_get`. Restart Hermes or run `/reload-mcp` after editing the config.
+
+Verify the agent-facing tool path directly:
+
+```bash
+npx -y @crmy/cli agent-smoke
+```
+
+Then ask the connected agent:
+
+```text
+Use the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.
+```
+
+Hermes Agent prompt:
+
+```text
+Use mcp_crmy_entity_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, then call mcp_crmy_context_signal_group_list for Signals needing attention. Tell me the safest next action with the evidence you used.
 ```
 
 **HTTP (remote agents):**
@@ -2625,11 +2760,11 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 | Category | Tools |
 |---|---|
 | Briefing | `briefing_get` |
-| Context | `context_ingest_auto`, `context_ingest`, `context_raw_source_list`, `context_raw_source_get`, `context_add`, `context_get`, `context_list`, `context_lineage_get`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_promote`, `context_signal_handoff`, `context_signal_group_reject`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_stale`, `context_diff`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
+| Context | `context_ingest_auto`, `context_ingest`, `context_raw_source_list`, `context_raw_source_get`, `context_raw_source_reprocess`, `context_add`, `context_get`, `context_list`, `context_lineage_get`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_promote`, `context_signal_handoff`, `context_signal_group_reject`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_stale`, `context_diff`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
 | Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise` |
 | Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
-| Activities | `activity_create`, `activity_get`, `activity_search`, `activity_complete`, `activity_update`, `activity_get_timeline` |
+| Activities and Calendar | `activity_create`, `activity_get`, `activity_search`, `activity_add_context`, `activity_complete`, `activity_update`, `activity_get_timeline`, `calendar_connection_list`, `calendar_event_search`, `calendar_event_get`, `calendar_event_process`, `calendar_event_add_context`, `meeting_classification_list` |
 | Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_get_timeline`, `contact_get_opportunities`, `contact_score`, `contact_merge`, `contact_delete` |
 | Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_health_report`, `account_delete` |
 | Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_delete` |
@@ -2638,11 +2773,12 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 | Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
 | Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list` |
 | Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
-| Emails | `email_create`, `email_get`, `email_search`, `mailbox_connection_list`, `email_message_search`, `email_message_get`, `email_message_process`, `email_message_ignore`, `email_provider_set`, `email_provider_get` |
+| Emails | `email_create`, `email_get`, `email_search`, `mailbox_connection_list`, `email_message_search`, `email_message_get`, `email_message_link`, `email_message_process`, `email_message_ignore`, `email_draft_preview`, `email_draft_save`, `email_ingest`, `email_provider_set`, `email_provider_get` |
 | Email Sequences | `email_sequence_create`, `email_sequence_get`, `email_sequence_update`, `email_sequence_delete`, `email_sequence_list`, `email_sequence_enroll`, `email_sequence_unenroll`, `email_sequence_enrollment_list` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
 | Identity | `entity_resolve` |
 | Analytics | `crm_search`, `pipeline_summary`, `pipeline_forecast`, `account_health_report`, `tenant_get_stats` |
+| Record Drafts | `record_draft_preview` |
 | Operations | `ops_status_get`, `ops_job_recover`, `ops_data_quality_get`, `ops_data_quality_repair`, `ops_audit_get`, `ops_privacy_export`, `ops_pii_redact`, `ops_privacy_delete`, `ops_retention_apply` |
 | Meta | `schema_get`, `guide_search` |
 
@@ -2650,7 +2786,7 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 
 ## REST API Reference
 
-All endpoints require `Authorization: Bearer <jwt-or-api-key>`.
+Most endpoints require `Authorization: Bearer <jwt-or-api-key>`. Authentication setup endpoints such as login and first-user registration are intentionally unauthenticated.
 
 Base URL: `/api/v1`
 
@@ -2735,15 +2871,25 @@ Base URL: `/api/v1`
 | Method | Path | Description |
 |---|---|---|
 | GET | `/context` | List context entries |
-| POST | `/context` | Add context entry |
+| POST | `/context` | Advanced direct Memory/Signal write |
 | GET | `/context/:id` | Get entry |
 | POST | `/context/:id/supersede` | Supersede with updated content |
 | POST | `/context/:id/review` | Mark as reviewed |
 | GET | `/context/stale` | List stale entries |
 | GET | `/context/search` | Full-text search |
 | GET | `/context/semantic-search` | pgvector similarity search (`?q=`, `?subject_type=`, `?limit=`) |
+| GET | `/context/raw-sources` | List Raw Context processing receipts |
+| GET | `/context/raw-sources/:id` | Get one Raw Context receipt |
+| POST | `/context/raw-sources/:id/reprocess` | Retry or reprocess a Raw Context source |
+| GET | `/context/signal-groups` | List grouped Signals and readiness state |
+| GET | `/context/signal-groups/:id` | Inspect a Signal group with evidence |
+| POST | `/context/signal-groups/:id/promote` | Confirm a trusted Signal as Memory |
+| POST | `/context/signal-groups/:id/handoff` | Send a Signal to Handoff review |
+| POST | `/context/signal-groups/:id/reject` | Dismiss a Signal while preserving audit |
+| GET | `/context/lineage` | Trace Raw Context through Signals, Memory, Handoffs, writebacks, and audit |
 | POST | `/context/detect-subjects` | Detect customer records mentioned in text (`{ text }`) |
 | POST | `/context/ingest` | Ingest context for a known subject (structured form) |
+| POST | `/context/ingest-auto` | Ingest Raw Context and resolve or pin subjects automatically |
 | POST | `/context/ingest-file` | Extract text from file and ingest (`{ filename, data (base64), source_label }`) |
 
 ### Briefings
@@ -2805,8 +2951,11 @@ Customer Email is the mailbox-facing Raw Context layer. Connect Gmail, Outlook, 
 | GET | `/email-messages` | List canonical customer email messages |
 | GET | `/email-messages/:id` | Get customer email message, linked records, and processing receipt |
 | PATCH | `/email-messages/:id/classification` | Mark a message as customer, mixed, internal, automated, or unknown |
+| PATCH | `/email-messages/:id` | Update classification and linked customer records |
 | POST | `/email-messages/:id/process` | Process an email as Raw Context |
 | POST | `/email-messages/:id/ignore` | Hide a message from review queues |
+| POST | `/emails/draft-preview` | Generate an editable customer email draft preview |
+| POST | `/emails/drafts` | Save a CRMy draft, request approval, or explicit send when allowed |
 
 ### Messaging Channels
 
@@ -2867,8 +3016,8 @@ Customer Email is the mailbox-facing Raw Context layer. Connect Gmail, Outlook, 
 ### Running migrations
 
 ```bash
-npx @crmy/cli migrate run      # apply pending migrations
-npx @crmy/cli migrate status   # show migration status
+npx -y @crmy/cli migrate run      # apply pending migrations
+npx -y @crmy/cli migrate status   # show migration status
 ```
 
 Migrations run automatically on server startup and during `crmy init`.

@@ -21,6 +21,11 @@ export interface RawContextSource {
   memory_created: number;
   skipped: number;
   failure_reason?: string;
+  failure_code?: string;
+  attempt_count: number;
+  locked_at?: string;
+  next_retry_at?: string;
+  last_error?: string;
   metadata: Record<string, unknown>;
   processed_at?: string;
   created_at: string;
@@ -44,6 +49,11 @@ export interface RawContextSourceInput {
   memory_created?: number;
   skipped?: number;
   failure_reason?: string | null;
+  failure_code?: string | null;
+  attempt_count?: number;
+  locked_at?: string | null;
+  next_retry_at?: string | null;
+  last_error?: string | null;
   metadata?: Record<string, unknown>;
 }
 
@@ -82,9 +92,10 @@ export async function upsertRawContextSource(
     `INSERT INTO raw_context_sources (
        tenant_id, source_type, source_ref, source_label, subject_type, subject_id,
        actor_id, status, stage, raw_excerpt, detected_subjects, signals_created,
-       memory_created, skipped, failure_reason, metadata, processed_at
+       memory_created, skipped, failure_reason, failure_code, attempt_count,
+       locked_at, next_retry_at, last_error, metadata, processed_at
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
        CASE WHEN $8 IN ('processed', 'needs_review', 'failed', 'skipped') THEN now() ELSE NULL END
      )
      ON CONFLICT (tenant_id, source_type, source_ref)
@@ -104,6 +115,22 @@ export async function upsertRawContextSource(
        memory_created = EXCLUDED.memory_created,
        skipped = EXCLUDED.skipped,
        failure_reason = EXCLUDED.failure_reason,
+       failure_code = COALESCE(EXCLUDED.failure_code, raw_context_sources.failure_code),
+       attempt_count = CASE
+         WHEN EXCLUDED.status = 'processing' AND raw_context_sources.status <> 'processing'
+           THEN raw_context_sources.attempt_count + 1
+         ELSE GREATEST(raw_context_sources.attempt_count, EXCLUDED.attempt_count)
+       END,
+       locked_at = CASE
+         WHEN EXCLUDED.status = 'processing' THEN COALESCE(EXCLUDED.locked_at, now())
+         WHEN EXCLUDED.status IN ('processed', 'needs_review', 'failed', 'skipped') THEN NULL
+         ELSE COALESCE(EXCLUDED.locked_at, raw_context_sources.locked_at)
+       END,
+       next_retry_at = COALESCE(EXCLUDED.next_retry_at, raw_context_sources.next_retry_at),
+       last_error = CASE
+         WHEN EXCLUDED.status IN ('processed', 'needs_review', 'skipped') THEN NULL
+         ELSE COALESCE(EXCLUDED.last_error, raw_context_sources.last_error)
+       END,
        metadata = raw_context_sources.metadata || EXCLUDED.metadata,
        processed_at = COALESCE(EXCLUDED.processed_at, raw_context_sources.processed_at),
        updated_at = now()
@@ -124,6 +151,11 @@ export async function upsertRawContextSource(
       input.memory_created ?? 0,
       input.skipped ?? 0,
       input.failure_reason ?? null,
+      input.failure_code ?? null,
+      input.attempt_count ?? (input.status === 'processing' ? 1 : 0),
+      input.locked_at ?? (input.status === 'processing' ? new Date().toISOString() : null),
+      input.next_retry_at ?? null,
+      input.last_error ?? input.failure_reason ?? null,
       JSON.stringify(input.metadata ?? {}),
     ],
   );
@@ -152,7 +184,22 @@ export async function updateRawContextSource(
          memory_created = COALESCE($13, memory_created),
          skipped = COALESCE($14, skipped),
          failure_reason = $15,
-         metadata = metadata || COALESCE($16::jsonb, '{}'::jsonb),
+         failure_code = COALESCE($16, failure_code),
+         attempt_count = CASE
+           WHEN $4 = 'processing' AND status <> 'processing' THEN attempt_count + 1
+           ELSE COALESCE($17, attempt_count)
+         END,
+         locked_at = CASE
+           WHEN $4 = 'processing' THEN COALESCE($18, now())
+           WHEN $4 IN ('processed', 'needs_review', 'failed', 'skipped') THEN NULL
+           ELSE COALESCE($18, locked_at)
+         END,
+         next_retry_at = COALESCE($19, next_retry_at),
+         last_error = CASE
+           WHEN $4 IN ('processed', 'needs_review', 'skipped') THEN NULL
+           ELSE COALESCE($20, last_error)
+         END,
+         metadata = metadata || COALESCE($21::jsonb, '{}'::jsonb),
          processed_at = CASE
            WHEN COALESCE($4, status) IN ('processed', 'needs_review', 'failed', 'skipped') THEN COALESCE(processed_at, now())
            ELSE processed_at
@@ -176,6 +223,11 @@ export async function updateRawContextSource(
       patch.memory_created ?? null,
       patch.skipped ?? null,
       patch.failure_reason ?? null,
+      patch.failure_code ?? (typeof patch.metadata?.failure_code === 'string' ? patch.metadata.failure_code : null),
+      patch.attempt_count ?? null,
+      patch.locked_at ?? null,
+      patch.next_retry_at ?? null,
+      patch.last_error ?? patch.failure_reason ?? null,
       patch.metadata ? JSON.stringify(patch.metadata) : null,
     ],
   );

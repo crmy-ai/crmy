@@ -189,6 +189,7 @@ Prefer `subject_type` + `subject_id`. Use `detail` for structured extras like at
 | Action | Purpose |
 |---|---|
 | `context.list`, `context.get` | Browse context entries |
+| `context.signal_groups`, `context.signal_group.get` | Review grouped Signals with evidence and readiness |
 | `context.search` | Keyword search |
 | `context.semantic_search` | Semantic memory search when pgvector is enabled |
 | `context.add` | Store typed customer memory |

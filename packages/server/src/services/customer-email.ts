@@ -11,6 +11,7 @@ import { emitEvent } from '../events/emitter.js';
 import { getActorUserId, getVisibleOwnerIds } from './access-control.js';
 import { attachTranscriptEmailToMeeting } from './customer-activity.js';
 import { handleSequenceReply } from './sequence-executor.js';
+import { getSourceFilterSettings, shouldKeepEmailSource } from './source-filters.js';
 
 export interface NormalizedEmailInput {
   direction: 'inbound' | 'outbound';
@@ -22,6 +23,7 @@ export interface NormalizedEmailInput {
   subject: string;
   body_text?: string;
   body_html?: string;
+  snippet?: string;
   received_at?: string;
   sent_at?: string;
   provider_message_id?: string;
@@ -106,23 +108,18 @@ async function classifyEmail(
   tenantId: UUID,
   input: NormalizedEmailInput,
 ): Promise<{ classification: emailMessageRepo.EmailClassification; reason: string }> {
-  const fromDomain = domainFromEmail(input.from_email);
-  const recipientDomains = input.to_emails.map(domainFromEmail).filter((v): v is string => Boolean(v));
-  const ccDomains = (input.cc_emails ?? []).map(domainFromEmail).filter((v): v is string => Boolean(v));
-  const participantDomains = [fromDomain, ...recipientDomains, ...ccDomains].filter((v): v is string => Boolean(v));
-  const internal = await internalDomains(db, tenantId);
-  const excluded = await excludedDomains(db, tenantId);
-
-  if (AUTOMATED_LOCAL_PARTS.has(localPart(input.from_email)) || participantDomains.some(domain => excluded.has(domain))) {
-    return { classification: 'automated', reason: 'Automated sender or excluded domain.' };
-  }
-
-  const internalCount = participantDomains.filter(domain => internal.has(domain)).length;
-  const externalCount = participantDomains.length - internalCount;
-  if (externalCount === 0 && internalCount > 0) return { classification: 'internal', reason: 'Only internal participants were detected.' };
-  if (externalCount > 0 && internalCount > 0) return { classification: 'mixed', reason: 'Customer-facing thread with internal participants.' };
-  if (externalCount > 0) return { classification: 'customer', reason: 'External customer participant detected.' };
-  return { classification: 'unknown', reason: 'Could not classify participants.' };
+  const settings = await getSourceFilterSettings(db, tenantId);
+  const decision = shouldKeepEmailSource(settings, {
+    from_email: input.from_email,
+    to_emails: input.to_emails,
+    cc_emails: input.cc_emails,
+    subject: input.subject,
+    body_text: input.body_text,
+    headers: input.metadata?.headers as Record<string, string | string[] | undefined> | undefined,
+    mailbox_labels: input.metadata?.label_ids as string[] | undefined,
+    folder: typeof input.metadata?.folder === 'string' ? input.metadata.folder : undefined,
+  });
+  return { classification: decision.classification, reason: decision.message };
 }
 
 async function findAccountByDomain(
@@ -539,17 +536,24 @@ export async function processEmailMessage(
 
 export async function processMailboxSyncJobs(db: DbPool): Promise<{ processed: number; failed: number }> {
   const jobs = await emailMessageRepo.claimMailboxSyncJobs(db, 10);
+  const { syncMailboxConnection } = await import('./source-sync.js');
   let processed = 0;
   let failed = 0;
   for (const job of jobs) {
     try {
-      await emailMessageRepo.failMailboxSyncJob(
-        db,
-        job.id,
-        'Mailbox sync provider is not configured yet. Connect Google Workspace or Microsoft 365 OAuth credentials to enable sync.',
-      );
-      failed++;
-    } catch {
+      await syncMailboxConnection(db, job.tenant_id, job.connection_id);
+      await emailMessageRepo.completeMailboxSyncJob(db, job.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Mailbox sync failed.';
+      await emailMessageRepo.failMailboxSyncJob(db, job.id, message);
+      try {
+        await emailMessageRepo.updateMailboxConnection(db, job.tenant_id, job.connection_id, {
+          status: 'error',
+          last_error: message,
+        });
+      } catch {
+        // Best effort status update only.
+      }
       failed++;
     }
     processed++;

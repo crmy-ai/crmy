@@ -62,6 +62,30 @@ const DATA_QUALITY_COPY: Record<string, { label: string; description: string }> 
     label: 'Stuck context indexing work',
     description: 'Context indexing jobs have been processing too long and may need operator review.',
   },
+  stale_raw_context_sources_processing: {
+    label: 'Stale Raw Context processing',
+    description: 'Raw Context receipts are stuck mid-processing and may need retry or review.',
+  },
+  failed_raw_context_sources_retryable: {
+    label: 'Retryable Raw Context failures',
+    description: 'Raw Context extraction failed in a way that may succeed after retrying.',
+  },
+  stuck_agent_turns_running: {
+    label: 'Stuck Workspace Agent turns',
+    description: 'Agent work has been running too long and may need to be failed or retried.',
+  },
+  stale_mailbox_sync_jobs: {
+    label: 'Mailbox sync needs attention',
+    description: 'Customer Email sync jobs are stuck or failed but still retryable.',
+  },
+  stale_calendar_sync_jobs: {
+    label: 'Calendar sync needs attention',
+    description: 'Customer Activity sync jobs are stuck or failed but still retryable.',
+  },
+  customer_calendar_events_missing_link: {
+    label: 'Customer meetings missing links',
+    description: 'Calendar meetings look customer-facing but are not linked to customer records yet.',
+  },
 };
 
 function humanizeName(value: string) {

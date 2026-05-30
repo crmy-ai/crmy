@@ -70,3 +70,32 @@ test('new MCP agent workflow tools have scope entries', async () => {
     assert.match(scopesSource, new RegExp(`${tool}:\\s*\\[`));
   }
 });
+
+test('direct DB CLI uses actor-scoped MCP tool filtering', async () => {
+  const clientSource = await read('packages/cli/src/client.ts');
+  assert.match(clientSource, /getToolsForActor/);
+  assert.doesNotMatch(clientSource, /const tools = getAllTools\(db\)/);
+  assert.match(clientSource, /actorScopes \? keyScopes\.filter/);
+  assert.match(clientSource, /Invalid CRMY_API_KEY/);
+});
+
+test('agent harness setup avoids npx prompts and includes systems scopes', async () => {
+  const readme = await read('README.md');
+  const guide = await read('docs/guide.md');
+  const initSource = await read('packages/cli/src/commands/init.ts');
+  assert.match(readme, /npx -y @crmy\/cli mcp/);
+  assert.match(guide, /npx -y @crmy\/cli mcp/);
+  assert.match(initSource, /systems:read,systems:write,systems:admin/);
+});
+
+test('agent smoke command exercises the one-minute MCP tool path', async () => {
+  const indexSource = await read('packages/cli/src/index.ts');
+  const smokeSource = await read('packages/cli/src/commands/agent-smoke.ts');
+  const mcpSource = await read('packages/cli/src/commands/mcp.ts');
+  assert.match(indexSource, /agentSmokeCommand/);
+  for (const tool of ['entity_resolve', 'briefing_get', 'context_signal_group_list']) {
+    assert.match(smokeSource, new RegExp(`['"]${tool}['"]`));
+  }
+  assert.match(mcpSource, /command\('doctor'\)/);
+  assert.match(smokeSource, /Northstar Labs/);
+});

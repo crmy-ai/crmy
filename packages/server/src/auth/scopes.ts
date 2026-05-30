@@ -52,6 +52,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   activity_create: ['activities:write'],
   activity_update: ['activities:write'],
   activity_complete: ['activities:write'],
+  activity_add_context: ['activities:write', 'context:write'],
 
   // ── Assignments ──
   assignment_get: ['assignments:read'],
@@ -126,6 +127,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   email_message_get: ['activities:read'],
   email_message_process: ['activities:write', 'context:write'],
   email_message_ignore: ['activities:write'],
+  email_message_link: ['activities:write', 'context:write'],
   calendar_connection_list: ['activities:read'],
   calendar_event_search: ['activities:read'],
   calendar_event_get: ['activities:read'],

@@ -386,7 +386,7 @@ export function initCommand(): Command {
         const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
         await db.query(
           `INSERT INTO api_keys (tenant_id, user_id, key_hash, label, scopes)
-           VALUES ($1, $2, $3, 'default', '{read,write,admin}')`,
+           VALUES ($1, $2, $3, 'default', '{read,write,admin,systems:read,systems:write,systems:admin}')`,
           [tenantId, userId, keyHash],
         );
 
@@ -468,17 +468,23 @@ export function initCommand(): Command {
       console.log('  Config saved:   .crmy.json  \x1b[2m(added to .gitignore)\x1b[0m\n');
       console.log('  Next steps:\n');
       console.log('    Start the server:');
-      console.log('    \x1b[1mnpx @crmy/cli server\x1b[0m\n');
+      console.log('    \x1b[1mnpx -y @crmy/cli server\x1b[0m\n');
       if (seedDemo) {
         console.log('    Try the demo data:');
-        console.log('    \x1b[1mnpx @crmy/cli briefing "account:Northstar Labs"\x1b[0m');
-        console.log('    \x1b[1mnpx @crmy/cli context lineage --subject "account:Northstar Labs"\x1b[0m');
-        console.log('    \x1b[1mnpx @crmy/cli hitl list\x1b[0m\n');
+        console.log('    \x1b[1mnpx -y @crmy/cli briefing "account:Northstar Labs"\x1b[0m');
+        console.log('    \x1b[1mnpx -y @crmy/cli context lineage --subject "account:Northstar Labs"\x1b[0m');
+        console.log('    \x1b[1mnpx -y @crmy/cli hitl list\x1b[0m\n');
         console.log('    Sample logins:');
         console.log('    \x1b[1msample.admin@crmy.local\x1b[0m / crmy-demo-123  \x1b[2m(admin view)\x1b[0m');
         console.log('    \x1b[1msample.rep@crmy.local\x1b[0m / crmy-demo-123    \x1b[2m(scoped rep view)\x1b[0m\n');
       }
       console.log('    Connect to Claude Code:');
-      console.log('    \x1b[1mclaude mcp add crmy -- npx @crmy/cli mcp\x1b[0m\n');
+      console.log('    \x1b[1mclaude mcp add crmy -- npx -y @crmy/cli mcp\x1b[0m\n');
+      if (seedDemo) {
+        console.log('    Verify the agent path:');
+        console.log('    \x1b[1mnpx -y @crmy/cli agent-smoke\x1b[0m\n');
+        console.log('    One-minute agent smoke test:');
+        console.log('    \x1b[1mUse the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.\x1b[0m\n');
+      }
     });
 }

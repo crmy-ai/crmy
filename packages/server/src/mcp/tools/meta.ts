@@ -27,6 +27,11 @@ const opsStatusGet = z.object({
 const opsJobRecover = z.object({
   queue_name: z.enum([
     'context_outbox',
+    'raw_context_sources',
+    'agent_turns',
+    'context_embedding_jobs',
+    'mailbox_sync_jobs',
+    'calendar_sync_jobs',
     'webhook_deliveries',
     'message_deliveries',
     'bulk_jobs',
@@ -48,6 +53,8 @@ const opsDataQualityRepair = z.object({
     'activities_missing_canonical_subject',
     'current_context_missing_search_index',
     'stuck_context_outbox_processing',
+    'stale_raw_context_sources_processing',
+    'stuck_agent_turns_running',
   ]),
   dry_run: z.boolean().optional().default(true),
   limit: z.number().int().min(1).max(1000).optional().default(100),
@@ -273,6 +280,75 @@ const QUEUE_SPECS: QueueSpec[] = [
       FROM context_embedding_jobs
       WHERE tenant_id = $1 AND status IN ('failed', 'processing')
       ORDER BY created_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'raw_context_sources',
+    pendingStatuses: ['pending', 'processing', 'failed'],
+    countSql: `
+      SELECT status, count(*)::int AS count, min(created_at) AS oldest_created_at
+      FROM raw_context_sources
+      WHERE tenant_id = $1
+      GROUP BY status
+    `,
+    failureSql: `
+      SELECT id, source_type, source_ref, status, stage, attempt_count,
+             failure_code, failure_reason, updated_at
+      FROM raw_context_sources
+      WHERE tenant_id = $1 AND status IN ('failed', 'processing')
+      ORDER BY updated_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'agent_turns',
+    pendingStatuses: ['queued', 'running'],
+    countSql: `
+      SELECT status, count(*)::int AS count, min(created_at) AS oldest_created_at
+      FROM agent_turns
+      WHERE tenant_id = $1
+      GROUP BY status
+    `,
+    failureSql: `
+      SELECT id, session_id, status, error_message, started_at, updated_at
+      FROM agent_turns
+      WHERE tenant_id = $1 AND status IN ('failed', 'running')
+      ORDER BY updated_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'mailbox_sync_jobs',
+    pendingStatuses: ['pending', 'processing', 'failed'],
+    countSql: `
+      SELECT status, count(*)::int AS count, min(created_at) AS oldest_created_at
+      FROM mailbox_sync_jobs
+      WHERE tenant_id = $1
+      GROUP BY status
+    `,
+    failureSql: `
+      SELECT id, connection_id, status, attempts, last_error, run_after, updated_at
+      FROM mailbox_sync_jobs
+      WHERE tenant_id = $1 AND status IN ('failed', 'processing')
+      ORDER BY updated_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'calendar_sync_jobs',
+    pendingStatuses: ['pending', 'processing', 'failed'],
+    countSql: `
+      SELECT status, count(*)::int AS count, min(created_at) AS oldest_created_at
+      FROM calendar_sync_jobs
+      WHERE tenant_id = $1
+      GROUP BY status
+    `,
+    failureSql: `
+      SELECT id, connection_id, status, attempts, last_error, run_after, updated_at
+      FROM calendar_sync_jobs
+      WHERE tenant_id = $1 AND status IN ('failed', 'processing')
+      ORDER BY updated_at ASC
       LIMIT $2
     `,
   },

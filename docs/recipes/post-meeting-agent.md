@@ -8,7 +8,7 @@ An agent that runs after a sales or customer-success call. It turns a messy tran
 
 - A running CRMy instance with demo data seeded (`crmy seed-demo`)
 - Workspace Agent configured for local model extraction
-- MCP connection configured (`claude mcp add crmy -- npx @crmy/cli mcp`)
+- MCP connection configured (`claude mcp add crmy -- npx -y @crmy/cli mcp`)
 
 **Context engine capabilities used:** `actor_whoami`, `briefing_get`, `context_ingest_auto`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_promote`, `context_signal_handoff`, `assignment_create`, and `hitl_submit_request`.
 

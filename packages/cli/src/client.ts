@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { loadConfigFile, loadAuthState } from './config.js';
+import type { ActorContext } from '@crmy/shared';
 
 export interface CliClient {
   call(toolName: string, input: Record<string, unknown>): Promise<string>;
@@ -281,10 +282,10 @@ function createHttpClient(serverUrl: string, token: string): CliClient {
 async function createDbClient(databaseUrl: string, apiKey?: string): Promise<CliClient> {
   process.env.CRMY_IMPORTED = '1';
 
-  const { initPool, closePool, getAllTools, normalizeToolInput } = await import('@crmy/server');
+  const { initPool, closePool, getToolsForActor, normalizeToolInput } = await import('@crmy/server');
   const db = await initPool(databaseUrl);
 
-  let actor = {
+  let actor: ActorContext = {
     tenant_id: '',
     actor_id: 'cli-user',
     actor_type: 'user' as const,
@@ -295,15 +296,32 @@ async function createDbClient(databaseUrl: string, apiKey?: string): Promise<Cli
     const crypto = await import('node:crypto');
     const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
     const result = await db.query(
-      `SELECT ak.tenant_id, ak.user_id, u.role
-       FROM api_keys ak LEFT JOIN users u ON ak.user_id = u.id
+      `SELECT ak.tenant_id, ak.user_id, ak.scopes,
+              a.id as resolved_actor_id, a.actor_type as resolved_actor_type,
+              a.role as actor_role, a.scopes as actor_scopes, a.is_active as actor_is_active,
+              u.role as user_role
+       FROM api_keys ak
+       LEFT JOIN users u ON ak.user_id = u.id
+       LEFT JOIN actors a ON ak.actor_id = a.id
        WHERE ak.key_hash = $1`,
       [keyHash],
     );
     if (result.rows.length > 0) {
-      actor.tenant_id = result.rows[0].tenant_id;
-      actor.actor_id = result.rows[0].user_id ?? 'cli-user';
-      actor.role = result.rows[0].role ?? 'owner';
+      const row = result.rows[0];
+      if (row.resolved_actor_id && row.actor_is_active === false) {
+        throw new Error('Actor is deactivated.');
+      }
+      const keyScopes = Array.isArray(row.scopes) ? row.scopes : [];
+      const actorScopes = Array.isArray(row.actor_scopes) ? row.actor_scopes : null;
+      actor = {
+        tenant_id: row.tenant_id,
+        actor_id: row.resolved_actor_id ?? row.user_id ?? 'cli-user',
+        actor_type: row.resolved_actor_type === 'human' ? 'user' : row.user_id ? 'user' : 'agent',
+        role: row.actor_role ?? row.user_role ?? 'member',
+        scopes: actorScopes ? keyScopes.filter((scope: string) => actorScopes.includes(scope)) : keyScopes,
+      };
+    } else {
+      throw new Error('Invalid CRMY_API_KEY.');
     }
   }
 
@@ -314,7 +332,7 @@ async function createDbClient(databaseUrl: string, apiKey?: string): Promise<Cli
     }
   }
 
-  const tools = getAllTools(db);
+  const tools = getToolsForActor(db, actor);
 
   return {
     async call(toolName: string, input: Record<string, unknown>): Promise<string> {
@@ -334,8 +352,8 @@ async function createDbClient(databaseUrl: string, apiKey?: string): Promise<Cli
  * 1. Direct DB (if DATABASE_URL or .crmy.json database.url is set)
  * 2. HTTP client (if authenticated via `crmy login`)
  */
-export async function getClient(): Promise<CliClient> {
-  const config = loadConfigFile();
+export async function getClient(configPath?: string): Promise<CliClient> {
+  const config = loadConfigFile(configPath);
   const databaseUrl = process.env.DATABASE_URL ?? config.database?.url;
 
   // Prefer direct DB connection when available

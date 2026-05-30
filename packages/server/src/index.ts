@@ -21,7 +21,7 @@ import { cleanExpiredSessions } from './db/repos/agent.js';
 import { processPendingExtractions } from './agent/extraction.js';
 import { processPendingAgentTurns } from './agent/turn-runner.js';
 import { processStaleEntries } from './services/staleness.js';
-import { seedSampleData } from './services/sample-data.js';
+import { getSampleDataStatus, seedSampleData } from './services/sample-data.js';
 import { loadPlugins, shutdownPlugins, type PluginConfig } from './plugins/index.js';
 import { CrmyError, unauthorized, type ActorContext } from '@crmy/shared';
 
@@ -150,16 +150,28 @@ export async function createApp(config: ServerConfig) {
       const userCountResult = await db.query('SELECT COUNT(*)::int AS count FROM users');
       const userCount = Number(userCountResult.rows[0]?.count ?? 0);
       const hasUsers = userCount > 0;
+      const tenantResult = await db.query(
+        'SELECT id, name, slug FROM tenants WHERE id::text = $1 OR slug = $1 ORDER BY created_at DESC LIMIT 1',
+        [config.tenantSlug],
+      );
+      const tenantId = tenantResult.rows[0]?.id ?? config.tenantSlug;
+      const sampleStatus = await getSampleDataStatus(db, tenantId);
+      const demoAccountsAvailable = process.env.NODE_ENV !== 'production' && sampleStatus.seeded;
       res.json({
         status: 'ok',
         db: 'ok',
         version: SERVER_VERSION,
         environment: process.env.NODE_ENV ?? 'development',
+        tenant: {
+          name: tenantResult.rows[0]?.name ?? 'CRMy Workspace',
+          slug: tenantResult.rows[0]?.slug ?? config.tenantSlug,
+        },
         setup: {
           has_users: hasUsers,
           bootstrap_required: !hasUsers,
           public_registration_enabled: config.allowPublicRegistration,
           registration_open: !hasUsers || config.allowPublicRegistration,
+          demo_accounts_available: demoAccountsAvailable,
         },
       });
     } catch {
@@ -583,7 +595,7 @@ if (isMain && !process.env.CRMY_IMPORTED) {
 
 export { getPool, initPool, closePool } from './db/pool.js';
 export { runMigrations, getMigrationStatus } from './db/migrate.js';
-export { createMcpServer, getAllTools, normalizeToolInput } from './mcp/server.js';
+export { createMcpServer, getAllTools, getToolsForActor, normalizeToolInput } from './mcp/server.js';
 export { emitEvent } from './events/emitter.js';
 export { createWorkflowEngine } from './workflows/engine.js';
 export { getSampleDataStatus, resetSampleData, seedSampleData } from './services/sample-data.js';

@@ -5,7 +5,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useAppStore, type FieldProvenance, type QuickAddContext } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { X, Sparkles, Check, FileText, Pencil, ChevronLeft, Bot, ArrowUp, ShieldCheck, Link2, AlertTriangle, Table2 } from 'lucide-react';
-import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useCreateAssignment, useActors, useExtractRecordDraft } from '@/api/hooks';
+import { useCreateContact, useCreateAccount, useCreateOpportunity, useCreateUseCase, useCreateActivity, useCreateAssignment, useActors, useExtractRecordDraft, useUpdateContact, useUpdateAccount, useUpdateOpportunity, useUpdateUseCase } from '@/api/hooks';
 import { EntityCombobox } from '@/components/ui/entity-combobox';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker, DateTimePicker } from '@/components/ui/date-picker';
@@ -26,6 +26,9 @@ type DraftFieldRow = {
   field: string;
   label: string;
   value: unknown;
+  current_value?: unknown;
+  draft_value?: unknown;
+  changed?: boolean;
   source: 'user' | 'model_knowledge' | 'matched_record' | 'provider' | 'required';
   source_label?: string;
   confidence_label?: string;
@@ -51,6 +54,9 @@ type LinkedRecord = {
 type AgentDraftResult = {
   data: Record<string, unknown>;
   draft?: Record<string, unknown>;
+  patch?: Record<string, unknown>;
+  operation?: 'create' | 'edit';
+  current_record?: Record<string, unknown> | null;
   field_rows?: DraftFieldRow[];
   enrichment_suggestions?: EnrichmentSuggestion[];
   required_fields?: string[];
@@ -61,6 +67,8 @@ type AgentDraftResult = {
   unresolved_references?: string[];
   work_log?: string[];
   can_create?: boolean;
+  can_write?: boolean;
+  policy_blockers?: string[];
 };
 type CreatedQuickAddRecord = {
   type: 'contact' | 'opportunity' | 'use-case' | 'activity' | 'account';
@@ -68,6 +76,24 @@ type CreatedQuickAddRecord = {
   name: string;
   detail?: string;
 };
+type AgentWriteConfig = {
+  can_write_objects?: boolean;
+  can_log_activities?: boolean;
+  can_create_assignments?: boolean;
+} | null | undefined;
+
+function agentCanUseLiteRecordFlow(type: string, config: AgentWriteConfig): boolean {
+  if (!config) return false;
+  if (type === 'activity') return config.can_log_activities !== false;
+  if (type === 'assignment') return config.can_create_assignments !== false;
+  return config.can_write_objects !== false;
+}
+
+function liteAgentDisabledNotice(type: string): string {
+  if (type === 'activity') return 'Workspace Agent activity logging is disabled, so CRMy opened the form.';
+  if (type === 'assignment') return 'Workspace Agent assignment creation is disabled, so CRMy opened the form.';
+  return 'Workspace Agent record writing is disabled, so CRMy opened the form.';
+}
 
 function formatFieldName(key: string): string {
   const labels: Record<string, string> = {
@@ -101,6 +127,10 @@ function parseEditedSuggestionValue(field: string, value: string, previousValue:
   const trimmed = value.trim();
   if (Array.isArray(previousValue) || field === 'aliases' || field === 'tags') {
     return trimmed.split(',').map(item => item.trim()).filter(Boolean);
+  }
+  if (typeof previousValue === 'number') {
+    const parsed = Number(trimmed.replace(/[$,]/g, ''));
+    return Number.isFinite(parsed) ? parsed : previousValue;
   }
   return trimmed;
 }
@@ -198,7 +228,7 @@ function provenanceFromRows(rows: DraftFieldRow[], excludedFields: string[] = []
   return provenance;
 }
 
-function LightweightAgentCreatePanel({ type, onClose, context }: { type: string; onClose: () => void; context?: QuickAddContext | null }) {
+function LightweightRecordAgentPanel({ type, onClose, context }: { type: string; onClose: () => void; context?: QuickAddContext | null }) {
   const [input, setInput] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -208,27 +238,40 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
   const [pendingPayload, setPendingPayload] = useState<Record<string, unknown> | null>(null);
   const [excludedSuggestionFields, setExcludedSuggestionFields] = useState<string[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const { openDrawer, closeQuickAdd, setRecordFieldProvenance } = useAppStore();
+  const { openDrawer, openDrawerEdit, closeQuickAdd, setRecordFieldProvenance } = useAppStore();
 
   const createContact = useCreateContact();
   const createAccount = useCreateAccount();
   const createOpportunity = useCreateOpportunity();
   const createUseCase = useCreateUseCase();
   const createActivity = useCreateActivity();
+  const updateContact = useUpdateContact(context?.record_id ?? '');
+  const updateAccount = useUpdateAccount(context?.record_id ?? '');
+  const updateOpportunity = useUpdateOpportunity(context?.record_id ?? '');
+  const updateUseCase = useUpdateUseCase(context?.record_id ?? '');
   const extractRecordDraft = useExtractRecordDraft();
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  const draft = draftResult?.draft ?? draftResult?.data ?? null;
+  const mode = context?.mode === 'edit' ? 'edit' : 'create';
+  const draft = draftResult?.patch ?? draftResult?.draft ?? draftResult?.data ?? null;
   const missing = draftResult?.missing_fields ?? (draft ? missingRequiredDraftFields(type, draft) : []);
   const linkedRecords = draftResult?.linked_records ?? [];
   const fieldRows = draftResult?.field_rows ?? draftRowsFallback(type, draft, missing);
   const enrichmentSuggestions = draftResult?.enrichment_suggestions ?? [];
   const possibleDuplicates = duplicates ?? draftResult?.duplicate_candidates ?? [];
+  const policyBlockers = draftResult?.policy_blockers ?? [];
   const definitiveDuplicate = possibleDuplicates.some(candidate => candidate.score >= 90);
   const canCreate = Boolean(draft) && missing.length === 0 && !definitiveDuplicate && !isSubmitting && !isExtracting;
+  const canWrite = mode === 'edit'
+    && Boolean(draft)
+    && Object.keys(draft ?? {}).length > 0
+    && policyBlockers.length === 0
+    && !isSubmitting
+    && !isExtracting;
+  const canConfirm = mode === 'edit' ? canWrite : canCreate;
 
   const applyExcludedSuggestions = (payload: Record<string, unknown>) => {
     if (type !== 'account') return payload;
@@ -267,6 +310,39 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
     });
   };
 
+  const handleFieldChange = (row: DraftFieldRow, rawValue: string) => {
+    const previousValue = row.draft_value ?? row.value;
+    const value = parseEditedSuggestionValue(row.field, rawValue, previousValue);
+    setDraftResult(prev => {
+      if (!prev) return prev;
+      const current = prev.patch ?? prev.draft ?? prev.data ?? {};
+      const nextDraft = { ...current, [row.field]: value };
+      const currentValue = row.current_value;
+      const changed = mode === 'edit' ? formatFieldValue(currentValue) !== formatFieldValue(value) : true;
+      const nextMissing = (prev.missing_fields ?? []).filter(field => field !== row.field);
+      if ((value == null || value === '') && row.required && !nextMissing.includes(row.field)) nextMissing.push(row.field);
+      const nextRows = prev.field_rows?.map(item => item.field === row.field
+        ? {
+            ...item,
+            value,
+            draft_value: value,
+            changed,
+            status: value == null || value === '' ? 'missing' as const : item.status === 'missing' ? 'ready' as const : item.status,
+            source_label: item.source === 'model_knowledge' ? 'Edited model suggestion' : item.source_label,
+            confidence_label: item.source === 'model_knowledge' ? 'User reviewed' : item.confidence_label,
+          }
+        : item);
+      return {
+        ...prev,
+        data: nextDraft,
+        draft: mode === 'create' ? nextDraft : prev.draft,
+        patch: mode === 'edit' ? nextDraft : prev.patch,
+        field_rows: nextRows,
+        missing_fields: nextMissing,
+      };
+    });
+  };
+
   const handleExtract = async () => {
     if (!input.trim() || isSubmitting || isExtracting) return;
     const text = input.trim();
@@ -275,11 +351,14 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
     try {
       const result = await extractRecordDraft.mutateAsync({
         text,
+        mode,
         object_type: type,
+        record_type: type,
+        record_id: context?.record_id,
         parent_subject_type: context?.parent_subject_type,
         parent_subject_id: context?.parent_subject_id,
         parent_subject_name: context?.parent_subject_name,
-        defaults: { ...(context?.defaults ?? {}), ...(draft ?? {}) },
+        defaults: mode === 'create' ? { ...(context?.defaults ?? {}), ...(draft ?? {}) } : context?.defaults,
       });
       setDraftResult(result);
       setExcludedSuggestionFields([]);
@@ -288,10 +367,17 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
       console.warn('[quick-add] agent extraction failed, opening form:', err);
       toast({
         title: 'Workspace Agent unavailable',
-        description: 'Workspace Agent is unavailable, so CRMy opened the form.',
+        description: mode === 'edit'
+          ? 'Workspace Agent is unavailable, so CRMy reopened the record details.'
+          : 'Workspace Agent is unavailable, so CRMy opened the form.',
         variant: 'destructive',
       });
-      setShowForm(true);
+      if (mode === 'edit' && context?.record_id) {
+        closeQuickAdd();
+        openDrawerEdit(type === 'use-case' ? 'use-case' : type as Parameters<typeof openDrawer>[0], context.record_id);
+      } else {
+        setShowForm(true);
+      }
     } finally {
       setIsExtracting(false);
     }
@@ -306,7 +392,15 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
     throw new Error(`Unsupported quick add type: ${type}`);
   };
 
-  const handleCreate = async (allowDuplicates = false, payloadOverride?: Record<string, unknown> | null) => {
+  const updateFromPayload = async (payload: Record<string, unknown>) => {
+    if (type === 'contact') return updateContact.mutateAsync(payload);
+    if (type === 'account') return updateAccount.mutateAsync(payload);
+    if (type === 'opportunity') return updateOpportunity.mutateAsync(payload);
+    if (type === 'use-case') return updateUseCase.mutateAsync(payload);
+    throw new Error(`Unsupported record update type: ${type}`);
+  };
+
+  const handleWrite = async (allowDuplicates = false, payloadOverride?: Record<string, unknown> | null) => {
     const payload: Record<string, unknown> = applyExcludedSuggestions({ ...(payloadOverride ?? draft ?? {}), ...(allowDuplicates ? { allow_duplicates: true } : {}) });
     if (!payload || isSubmitting || isExtracting) return;
     setIsSubmitting(true);
@@ -314,6 +408,16 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
       normalizeSubjectLink(payload);
       await assertSubjectReference(payload.subject_type as string | undefined, payload.subject_id as string | undefined);
       await validateReferences(payload);
+      if (mode === 'edit') {
+        const result = await updateFromPayload(payload);
+        const updatedRecord = normalizeCreatedRecord(type, result) ?? (context?.record_id
+          ? { type: type === 'use-case' ? 'use-case' : type as CreatedQuickAddRecord['type'], id: context.record_id, name: context.record_name ?? typeLabels[type] }
+          : null);
+        toast({ title: `${typeLabels[type]} updated`, description: updatedRecord ? 'Opening the updated record.' : 'Changes saved.' });
+        closeQuickAdd();
+        if (updatedRecord) openDrawer(updatedRecord.type, updatedRecord.id);
+        return;
+      }
       const result = await createFromPayload(payload);
       const createdRecord = normalizeCreatedRecord(type, result);
       if (createdRecord && type === 'account') {
@@ -330,7 +434,7 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
         setDuplicates(err.candidates as DuplicateCandidate[]);
         setPendingPayload(payload);
       } else {
-        toast({ title: `Failed to create ${typeLabels[type]}`, description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+        toast({ title: `Failed to ${mode === 'edit' ? 'update' : 'create'} ${typeLabels[type]}`, description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
       }
     } finally {
       setIsSubmitting(false);
@@ -345,7 +449,7 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
   };
 
   if (showForm) {
-    return <ManualForm type={type} onClose={onClose} onBack={() => setShowForm(false)} backLabel="Back to agent create" initialFields={draft ?? context?.defaults ?? undefined} />;
+    return <ManualForm type={type} onClose={onClose} onBack={() => setShowForm(false)} backLabel={mode === 'edit' ? 'Back to agent update' : 'Back to agent create'} initialFields={draft ?? context?.defaults ?? undefined} />;
   }
 
   return (
@@ -356,18 +460,27 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
             <Bot className="h-4 w-4 text-violet-400" />
           </span>
           <div className="min-w-0">
-            <p className="font-display text-sm font-bold text-foreground">New {typeLabels[type]}</p>
+            <p className="font-display text-sm font-bold text-foreground">{mode === 'edit' ? 'Update' : 'New'} {typeLabels[type]}</p>
             <p className="truncate text-xs text-muted-foreground">
-              {context?.parent_subject_name ? `Scoped to ${context.parent_subject_name}` : 'Describe it naturally. Review before CRMy writes.'}
+              {mode === 'edit'
+                ? `Editing ${context?.record_name ?? typeLabels[type]}. Review before CRMy writes.`
+                : context?.parent_subject_name ? `Scoped to ${context.parent_subject_name}` : 'Describe it naturally. Review before CRMy writes.'}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowForm(true)}
+            onClick={() => {
+              if (mode === 'edit' && context?.record_id) {
+                closeQuickAdd();
+                openDrawerEdit(type === 'use-case' ? 'use-case' : type as Parameters<typeof openDrawer>[0], context.record_id);
+              } else {
+                setShowForm(true);
+              }
+            }}
             className="flex items-center gap-1.5 rounded-md border border-border/70 px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
-            <FileText className="h-3 w-3" /> Form
+            <FileText className="h-3 w-3" /> Use form
           </button>
           <button onClick={onClose} className="rounded-lg p-1.5 transition-colors hover:bg-muted">
             <X className="h-4 w-4 text-muted-foreground" />
@@ -399,30 +512,34 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
             <span className="mx-auto flex h-10 w-10 items-center justify-center rounded-2xl bg-violet-500/15">
               <Sparkles className="h-5 w-5 animate-spin text-violet-300" />
             </span>
-            <p className="mt-3 text-sm font-semibold text-foreground">Drafting {typeLabels[type].toLowerCase()}…</p>
+            <p className="mt-3 text-sm font-semibold text-foreground">{mode === 'edit' ? 'Drafting update' : `Drafting ${typeLabels[type].toLowerCase()}`}…</p>
             <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-              CRMy is reading your details, checking required fields, and matching visible customer records.
+              CRMy is reading your details, checking safe fields, and matching visible customer records.
             </p>
           </div>
         ) : !draft ? (
           <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-6 text-center">
             <Table2 className="mx-auto h-5 w-5 text-violet-400" />
-            <p className="mt-2 text-sm font-semibold text-foreground">Add {typeLabels[type].toLowerCase()} details</p>
+            <p className="mt-2 text-sm font-semibold text-foreground">{mode === 'edit' ? 'Describe the update' : `Add ${typeLabels[type].toLowerCase()} details`}</p>
             <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-              Describe the {typeLabels[type].toLowerCase()} in plain language. CRMy will draft the right fields, check required details, and preview everything before writing.
+              {mode === 'edit'
+                ? 'Describe what changed in plain language. CRMy will draft a minimal update and preview every field before writing.'
+                : `Describe the ${typeLabels[type].toLowerCase()} in plain language. CRMy will draft the right fields, check required details, and preview everything before writing.`}
             </p>
           </div>
         ) : (
           <div className="overflow-hidden rounded-2xl border border-border bg-card">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <div>
-                <p className="text-sm font-semibold text-foreground">Draft preview</p>
+                <p className="text-sm font-semibold text-foreground">{mode === 'edit' ? 'Update preview' : 'Draft preview'}</p>
                 <p className="text-xs text-muted-foreground">
-                  {missing.length ? `${missing.length} required detail${missing.length === 1 ? '' : 's'} missing` : 'Ready for your confirmation'}
+                  {mode === 'edit'
+                    ? policyBlockers.length ? `${policyBlockers.length} guarded change${policyBlockers.length === 1 ? '' : 's'} need review` : Object.keys(draft ?? {}).length ? 'Ready for your confirmation' : 'No changes drafted yet'
+                    : missing.length ? `${missing.length} required detail${missing.length === 1 ? '' : 's'} missing` : 'Ready for your confirmation'}
                 </p>
               </div>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${missing.length ? 'bg-amber-500/10 text-amber-400' : 'bg-success/10 text-success'}`}>
-                {missing.length ? 'Needs detail' : 'Ready'}
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${(mode === 'edit' ? policyBlockers.length > 0 : missing.length > 0) ? 'bg-amber-500/10 text-amber-400' : 'bg-success/10 text-success'}`}>
+                {(mode === 'edit' ? policyBlockers.length > 0 : missing.length > 0) ? 'Needs review' : 'Ready'}
               </span>
             </div>
             <div className="overflow-x-auto">
@@ -430,7 +547,8 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
                 <thead className="bg-muted/40 text-xs text-muted-foreground">
                   <tr>
                     <th className="px-4 py-2 font-medium">Field</th>
-                    <th className="px-4 py-2 font-medium">Draft value</th>
+                    {mode === 'edit' && <th className="px-4 py-2 font-medium">Current value</th>}
+                    <th className="px-4 py-2 font-medium">{mode === 'edit' ? 'Suggested value' : 'Draft value'}</th>
                     <th className="px-4 py-2 font-medium">Source / reason</th>
                     <th className="px-4 py-2 font-medium">Status</th>
                   </tr>
@@ -442,8 +560,18 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
                         {row.label}
                         {row.required && <span className="ml-1 text-amber-400">*</span>}
                       </td>
+                      {mode === 'edit' && (
+                        <td className="max-w-[220px] px-4 py-2 text-muted-foreground">
+                          <span className="line-clamp-2">{row.current_value == null ? 'Empty' : formatFieldValue(row.current_value)}</span>
+                        </td>
+                      )}
                       <td className="max-w-[260px] px-4 py-2 text-muted-foreground">
-                        <span className="line-clamp-2">{row.value == null ? 'Missing' : formatFieldValue(row.value)}</span>
+                        <input
+                          value={editableFieldValue(row.draft_value ?? row.value)}
+                          onChange={(e) => handleFieldChange(row, e.target.value)}
+                          className="h-8 w-full rounded-lg border border-border bg-background px-2 text-sm text-foreground outline-none focus:ring-1 focus:ring-violet-500/40"
+                          placeholder="Missing"
+                        />
                       </td>
                       <td className="px-4 py-2 text-xs text-muted-foreground">
                         <div className="flex flex-col gap-0.5">
@@ -458,9 +586,10 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
                         <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
                           row.status === 'missing' ? 'bg-amber-500/10 text-amber-400' :
                           row.status === 'linked' ? 'bg-blue-500/10 text-blue-400' :
+                          mode === 'edit' && !row.changed ? 'bg-muted text-muted-foreground' :
                           'bg-success/10 text-success'
                         }`}>
-                          {row.status === 'missing' ? 'Needs detail' : row.status === 'linked' ? 'Linked' : 'Ready'}
+                          {row.status === 'missing' ? 'Needs detail' : row.status === 'linked' ? 'Linked' : mode === 'edit' && !row.changed ? 'Unchanged' : 'Ready'}
                         </span>
                       </td>
                     </tr>
@@ -472,9 +601,15 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-foreground">Confirm before CRMy writes</p>
                 <p className="text-xs text-muted-foreground">
-                  {canCreate
-                    ? `This will create one ${typeLabels[type].toLowerCase()} record.`
-                    : missing.length
+                  {mode === 'edit'
+                    ? canWrite
+                      ? `This will update ${Object.keys(draft ?? {}).length} field${Object.keys(draft ?? {}).length === 1 ? '' : 's'}.`
+                      : policyBlockers.length
+                        ? 'Some suggested changes need form review or a governed workflow.'
+                        : 'Review the draft before updating.'
+                    : canCreate
+                      ? `This will create one ${typeLabels[type].toLowerCase()} record.`
+                      : missing.length
                       ? `Add ${missing.length} required detail${missing.length === 1 ? '' : 's'} before creating.`
                       : definitiveDuplicate
                         ? 'Use the existing record or review the duplicate before creating.'
@@ -482,11 +617,11 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
                 </p>
               </div>
               <button
-                onClick={() => handleCreate(false)}
-                disabled={!canCreate}
+                onClick={() => handleWrite(false)}
+                disabled={!canConfirm}
                 className="flex h-9 shrink-0 items-center justify-center gap-2 rounded-xl bg-success px-3.5 text-sm font-semibold text-success-foreground transition-colors hover:bg-success/90 disabled:opacity-40"
               >
-                {isSubmitting ? 'Creating...' : `Confirm and create ${typeLabels[type]}`}
+                {isSubmitting ? (mode === 'edit' ? 'Updating...' : 'Creating...') : `Confirm and ${mode === 'edit' ? 'update' : 'create'} ${typeLabels[type]}`}
                 {!isSubmitting && <Check className="h-4 w-4" />}
               </button>
             </div>
@@ -551,6 +686,13 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
           </div>
         ) : null}
 
+        {policyBlockers.length > 0 && (
+          <div className="rounded-2xl border border-amber-500/25 bg-amber-500/8 p-3 text-xs text-amber-200">
+            <div className="mb-1 flex items-center gap-2 font-semibold"><AlertTriangle className="h-3.5 w-3.5" /> Guarded changes</div>
+            {policyBlockers.map(item => <p key={item}>{item}</p>)}
+          </div>
+        )}
+
         {possibleDuplicates.length > 0 && draft && ['contact', 'account', 'opportunity', 'use-case'].includes(type) && (
           <DuplicateWarning
             entityType={type as 'contact' | 'account' | 'opportunity' | 'use-case'}
@@ -559,7 +701,7 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
               openDrawer(type === 'use-case' ? 'use-case' : type as Parameters<typeof openDrawer>[0], id);
               closeQuickAdd();
             }}
-            onCreateAnyway={() => handleCreate(true, pendingPayload ?? draft)}
+            onCreateAnyway={() => handleWrite(true, pendingPayload ?? draft)}
             onCancel={() => { setDuplicates(null); setPendingPayload(null); }}
           />
         )}
@@ -577,7 +719,7 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
                 handleExtract();
               }
             }}
-            placeholder={`Describe the ${typeLabels[type].toLowerCase()} to create…`}
+            placeholder={mode === 'edit' ? `Describe the update to ${context?.record_name ?? typeLabels[type]}…` : `Describe the ${typeLabels[type].toLowerCase()} to create…`}
             rows={1}
             className="min-h-[42px] flex-1 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-violet-500/40"
           />
@@ -590,11 +732,11 @@ function LightweightAgentCreatePanel({ type, onClose, context }: { type: string;
           </button>
         </div>
         <button
-          onClick={() => handleCreate(false)}
-          disabled={!canCreate}
+          onClick={() => handleWrite(false)}
+          disabled={!canConfirm}
           className="flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-success text-success-foreground text-sm font-semibold transition-colors hover:bg-success/90 disabled:opacity-40"
         >
-          {isSubmitting ? 'Creating...' : `Confirm and create ${typeLabels[type]}`}
+          {isSubmitting ? (mode === 'edit' ? 'Updating...' : 'Creating...') : `Confirm and ${mode === 'edit' ? 'update' : 'create'} ${typeLabels[type]}`}
           {!isSubmitting && <Check className="h-4 w-4" />}
         </button>
       </div>
@@ -728,12 +870,14 @@ function ManualForm({
   onBack,
   backLabel,
   initialFields,
+  notice,
 }: {
   type: string;
   onClose: () => void;
   onBack?: () => void;
   backLabel?: string;
   initialFields?: Record<string, unknown> | null;
+  notice?: string;
 }) {
   const [fields, setFields] = useState<Record<string, string>>(() => stringifyInitialFields(initialFields));
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -884,6 +1028,12 @@ function ManualForm({
           {backLabel ? <><Bot className="w-3 h-3 text-violet-500" /> {backLabel}</> : <><ChevronLeft className="w-3.5 h-3.5" /> Back</>}
         </button>
       )}
+      {notice && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-400" />
+          <span>{notice}</span>
+        </div>
+      )}
       <div className="space-y-4">
         {config.filter(isFieldVisible).map(f => (
           <div key={f.key} className="space-y-1.5">
@@ -1017,6 +1167,10 @@ export function QuickAddDrawer() {
   const checkingAgent = !loading && agentConfigured && connectivity === 'unknown';
   const agentReady = agentConfigured && connectivity === 'online';
   const agentCreatable = quickAddType !== 'assignment';
+  const agentCanDraftRecord = agentCreatable && agentCanUseLiteRecordFlow(quickAddType, config);
+  const writeDisabledNotice = agentReady && agentCreatable && !agentCanDraftRecord
+    ? liteAgentDisabledNotice(quickAddType)
+    : undefined;
 
   return (
     <>
@@ -1027,9 +1181,9 @@ export function QuickAddDrawer() {
             <Bot className="h-5 w-5 animate-pulse text-violet-400" />
             <p className="text-sm text-muted-foreground">Checking Workspace Agent settings…</p>
           </div>
-        ) : agentReady && agentCreatable
-          ? <LightweightAgentCreatePanel type={quickAddType} context={quickAddContext} onClose={closeQuickAdd} />
-          : <ManualForm type={quickAddType} onClose={closeQuickAdd} />
+        ) : agentReady && agentCanDraftRecord
+          ? <LightweightRecordAgentPanel type={quickAddType} context={quickAddContext} onClose={closeQuickAdd} />
+          : <ManualForm type={quickAddType} onClose={closeQuickAdd} notice={writeDisabledNotice} />
         }
       </div>
     </>

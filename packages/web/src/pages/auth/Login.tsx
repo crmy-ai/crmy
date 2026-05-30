@@ -9,11 +9,17 @@ import { Input } from '../../components/ui/input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/card';
 import { ApiError, auth, setToken, setUser } from '../../api/client';
 import crMyLogo from '../../assets/crmy-logo.png';
-import { X, Check, Sun, Moon, ChevronDown } from 'lucide-react';
+import { X, Check, Sun, Moon, ChevronDown, Eye, EyeOff } from 'lucide-react';
 import { useAppStore } from '../../store/appStore';
 
 const TAGLINE = 'Operational customer context for AI agents.';
-const RELEASE_NOTES_URL = 'https://github.com/codycharris/crmy#whats-in-082';
+const RELEASE_NOTES_URL = 'https://github.com/crmy-ai/crmy#release';
+const DEMO_PASSWORD = 'crmy-demo-123';
+const DEMO_ACCOUNTS = [
+  { label: 'Admin', email: 'sample.admin@crmy.local' },
+  { label: 'Manager', email: 'sample.manager@crmy.local' },
+  { label: 'Rep', email: 'sample.rep@crmy.local' },
+] as const;
 
 const PASSWORD_RULES = [
   { label: 'At least 8 characters', test: (p: string) => p.length >= 8 },
@@ -58,6 +64,7 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [touched, setTouched] = useState<Record<string, boolean>>({});
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
+  const [showPassword, setShowPassword] = useState(false);
   const [dbStatus, setDbStatus] = useState<{
     status: 'ok' | 'db_error' | 'api_error' | 'loading';
     environment?: string;
@@ -66,6 +73,11 @@ export function LoginPage() {
       bootstrap_required: boolean;
       public_registration_enabled: boolean;
       registration_open: boolean;
+      demo_accounts_available?: boolean;
+    };
+    tenant?: {
+      name?: string;
+      slug?: string;
     };
     version?: string;
   }>({ status: 'loading' });
@@ -82,6 +94,7 @@ export function LoginPage() {
           status: d.db === 'ok' ? 'ok' : 'db_error',
           environment: d.environment,
           setup: d.setup,
+          tenant: d.tenant,
           version: d.version,
         });
       })
@@ -156,6 +169,14 @@ export function LoginPage() {
     setError('');
   };
 
+  const fillDemoAccount = (emailAddress: string) => {
+    setMode('login');
+    setEmail(emailAddress);
+    setPassword(DEMO_PASSWORD);
+    setTouched({});
+    setError('');
+  };
+
   // Card wrapper: in dark mode render as dark panel variant; in light mode use default light styles
   const cardClass = isDark ? (isCharcoal ? 'dark charcoal' : 'dark') : '';
   const registrationOpen = dbStatus.status === 'ok' && dbStatus.setup?.registration_open === true;
@@ -183,10 +204,13 @@ export function LoginPage() {
         ? 'Public registration enabled'
         : 'Sign-in only'
     : 'Unavailable';
+  const showPasswordHelp = mode === 'login' && Boolean(error) && !registrationOpen;
+  const showDemoAccounts = mode === 'login' && dbStatus.status === 'ok' && dbStatus.setup?.demo_accounts_available === true;
+  const workspaceName = dbStatus.tenant?.name?.trim() || 'CRMy Workspace';
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,hsl(var(--primary)/0.16),transparent_34rem)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(124,58,237,0.14),transparent_34rem)]" />
       <button
         onClick={toggleTheme}
         className="fixed right-4 top-4 z-10 rounded-md p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -220,7 +244,15 @@ export function LoginPage() {
               )}
             </CardTitle>
             <CardDescription>{TAGLINE}</CardDescription>
+            {dbStatus.status === 'ok' && (
+              <p className="text-xs text-muted-foreground/75">{workspaceName}</p>
+            )}
           </div>
+          {mode === 'login' && isFirstRun && (
+            <p className="pt-2 text-xs text-muted-foreground">
+              First local setup? Create the owner account for this workspace.
+            </p>
+          )}
           {mode === 'register' && (
             <p className="pt-2 text-xs text-muted-foreground">
               {isFirstRun
@@ -256,28 +288,41 @@ export function LoginPage() {
               </>
             )}
             <div>
-              <label className="mb-1 block text-sm font-medium">Email <span className="text-destructive">*</span></label>
+              <label className="sr-only">Email</label>
               <Input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 onBlur={() => { setEmail((value) => value.trim()); touch('email'); }}
                 autoComplete="email"
-                placeholder="you@example.com"
+                placeholder="Email"
                 aria-invalid={!!emailError}
               />
               {emailError && <p className="mt-1 text-xs text-destructive">{emailError}</p>}
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium">Password <span className="text-destructive">*</span></label>
-              <Input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onBlur={() => touch('password')}
-                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                aria-invalid={!!passwordError}
-              />
+              <label className="sr-only">Password</label>
+              <div className="relative">
+                <Input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onBlur={() => touch('password')}
+                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  placeholder="Password"
+                  aria-invalid={!!passwordError}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  aria-pressed={showPassword}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               {passwordError && mode !== 'register' && (
                 <p className="mt-1 text-xs text-destructive">{passwordError}</p>
               )}
@@ -297,7 +342,12 @@ export function LoginPage() {
             </div>
             {error && (
               <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                {error}
+                <p>{error}</p>
+                {showPasswordHelp && (
+                  <p className="mt-1 text-xs text-destructive/80">
+                    Forgot your password? Ask an admin to reset it, or run <code className="font-mono">crmy reset-password</code> on the server.
+                  </p>
+                )}
               </div>
             )}
             <Button type="submit" className="w-full" disabled={loading}>
@@ -325,7 +375,28 @@ export function LoginPage() {
               </>
             )}
           </div>
-          <div className="mt-6 flex items-center gap-2 border-t border-border pt-4 text-xs text-muted-foreground">
+          {showDemoAccounts && (
+            <details className="mt-3 rounded-lg border border-border/60 bg-muted/15 px-3 py-2 text-xs text-muted-foreground">
+              <summary className="cursor-pointer list-none font-medium text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
+                Try demo accounts
+              </summary>
+              <div className="mt-2 grid gap-1.5">
+                {DEMO_ACCOUNTS.map((account) => (
+                  <button
+                    key={account.email}
+                    type="button"
+                    onClick={() => fillDemoAccount(account.email)}
+                    className="rounded-md px-2 py-1 text-left text-sky-500 transition-colors hover:bg-sky-500/10 hover:text-sky-400"
+                  >
+                    <span className="font-semibold text-foreground">{account.label}:</span>{' '}
+                    <span>{account.email}</span>
+                    <span className="text-muted-foreground"> / {DEMO_PASSWORD}</span>
+                  </button>
+                ))}
+              </div>
+            </details>
+          )}
+          <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
             <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
               dbStatus.status === 'ok' ? 'bg-green-500' : dbStatus.status === 'loading' ? 'bg-gray-400' : 'bg-red-500'
             }`} />
@@ -356,7 +427,7 @@ export function LoginPage() {
               </a>
             )}
           </div>
-          <details className="group -mb-4 mt-1 border-t border-border/60 text-xs text-muted-foreground">
+          <details className="group -mb-4 mt-1 text-xs text-muted-foreground">
             <summary className="mx-auto flex h-4 w-8 cursor-pointer list-none items-center justify-center rounded-b-md text-muted-foreground/60 transition-colors hover:text-muted-foreground [&::-webkit-details-marker]:hidden">
               <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
               <span className="sr-only">System details</span>
@@ -372,6 +443,12 @@ export function LoginPage() {
               </dd>
               <dt>Setup</dt>
               <dd>{setupLabel}</dd>
+              {dbStatus.tenant?.slug && (
+                <>
+                  <dt>Workspace</dt>
+                  <dd>{workspaceName} <span className="text-muted-foreground/60">({dbStatus.tenant.slug})</span></dd>
+                </>
+              )}
               {dbStatus.environment && (
                 <>
                   <dt>Environment</dt>
@@ -388,6 +465,9 @@ export function LoginPage() {
           </details>
         </CardContent>
       </Card>
+      <p className="mt-3 max-w-sm text-center text-[11px] leading-5 text-muted-foreground/60">
+        All customer context stays safely in this CRMy workspace.
+      </p>
       </div>
     </div>
   );

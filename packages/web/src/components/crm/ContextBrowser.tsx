@@ -283,7 +283,100 @@ function EntityPicker({
 
 // ── Subject section for import dialog ────────────────────────────────────────
 
-type IngestSubjectLocal = { type: string; id: string; label: string; auto?: boolean; confidence?: string };
+type IngestSubjectLocal = {
+  type: string;
+  id: string;
+  label: string;
+  auto?: boolean;
+  confidence?: string;
+  pinned?: boolean;
+};
+
+function normalizeSubjectTypeParam(value: string | null) {
+  if (!value) return '';
+  return value === 'use-case' ? 'use_case' : value;
+}
+
+function subjectKey(subject: Pick<IngestSubjectLocal, 'type' | 'id'>) {
+  return `${subject.type}:${subject.id}`;
+}
+
+function mergeIngestSubjects(
+  existing: IngestSubjectLocal[],
+  incoming: IngestSubjectLocal[],
+): IngestSubjectLocal[] {
+  const merged = new Map<string, IngestSubjectLocal>();
+
+  [...existing, ...incoming].forEach((subject) => {
+    if (!subject.type || !subject.id) {
+      merged.set(`${subject.type || 'unknown'}:${subject.id || Math.random()}`, subject);
+      return;
+    }
+    const key = subjectKey(subject);
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, subject);
+      return;
+    }
+    const pinned = Boolean(current.pinned || subject.pinned);
+    merged.set(key, {
+      ...current,
+      ...subject,
+      label: current.label || subject.label,
+      confidence: subject.confidence ?? current.confidence,
+      pinned,
+      auto: pinned ? false : Boolean(subject.auto ?? current.auto),
+    });
+  });
+
+  return Array.from(merged.values()).sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)));
+}
+
+function PinnedSubjectBanner({
+  subjects,
+  onRemove,
+}: {
+  subjects: IngestSubjectLocal[];
+  onRemove: (subject: IngestSubjectLocal) => void;
+}) {
+  const pinnedSubjects = subjects.filter(subject => subject.pinned && subject.type && subject.id);
+  if (pinnedSubjects.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-sky-700 dark:text-sky-300">
+        Linked record
+      </p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {pinnedSubjects.map((subject) => {
+          const Icon = SUBJECT_ICONS[subject.type] ?? User;
+          const color = SUBJECT_COLORS[subject.type] ?? '#0ea5e9';
+          return (
+            <span
+              key={subjectKey(subject)}
+              className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold"
+              style={{ background: `${color}18`, borderColor: `${color}35`, color }}
+            >
+              <Icon className="h-3.5 w-3.5" />
+              Linked to {subjectTypeLabel(subject.type)} · {subject.label || subject.id}
+              <button
+                type="button"
+                onClick={() => onRemove(subject)}
+                className="ml-0.5 opacity-70 transition-opacity hover:opacity-100"
+                aria-label={`Unlink ${subject.label || subjectTypeLabel(subject.type)}`}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </span>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        CRMy will attach this context to the selected record and can add other mentioned records when it finds them.
+      </p>
+    </div>
+  );
+}
 
 function SubjectSection({
   subjects,
@@ -296,11 +389,12 @@ function SubjectSection({
 }) {
   const [showManual, setShowManual] = useState(false);
 
-  const removeSubject = (id: string) => onChange(subjects.filter(s => s.id !== id));
+  const removeSubject = (subject: IngestSubjectLocal) => onChange(subjects.filter(s => subjectKey(s) !== subjectKey(subject)));
   const addManual = () => setShowManual(true);
 
-  const autoSubjects = subjects.filter(s => s.auto);
-  const manualSubjects = subjects.filter(s => !s.auto);
+  const pinnedSubjects = subjects.filter(s => s.pinned);
+  const autoSubjects = subjects.filter(s => s.auto && !s.pinned);
+  const manualSubjects = subjects.filter(s => !s.auto && !s.pinned);
 
   return (
     <div className="space-y-2">
@@ -334,7 +428,7 @@ function SubjectSection({
               <span className="opacity-60">{s.type}</span>
               <button
                 type="button"
-                onClick={() => removeSubject(s.id)}
+                onClick={() => removeSubject(s)}
                 className="ml-0.5 opacity-60 hover:opacity-100 transition-opacity"
                 aria-label={`Remove ${s.label}`}
               >
@@ -352,7 +446,7 @@ function SubjectSection({
             value={subject.type}
             onValueChange={(v) => {
               const updated = manualSubjects.map((s, i) => i === idx ? { type: v, id: '', label: '' } : s);
-              onChange([...autoSubjects, ...updated]);
+              onChange([...pinnedSubjects, ...autoSubjects, ...updated]);
             }}
           >
             <SelectTrigger className="h-9 w-36 flex-shrink-0 text-sm">
@@ -371,7 +465,7 @@ function SubjectSection({
               selectedLabel={subject.label}
               onSelect={(id, name) => {
                 const updated = manualSubjects.map((s, i) => i === idx ? { ...s, id, label: name } : s);
-                onChange([...autoSubjects, ...updated]);
+                onChange([...pinnedSubjects, ...autoSubjects, ...updated]);
               }}
             />
           ) : (
@@ -383,7 +477,7 @@ function SubjectSection({
             type="button"
             onClick={() => {
               const updated = manualSubjects.filter((_, i) => i !== idx);
-              onChange([...autoSubjects, ...updated]);
+              onChange([...pinnedSubjects, ...autoSubjects, ...updated]);
               if (updated.length === 0) setShowManual(false);
             }}
             className="flex-shrink-0 text-muted-foreground hover:text-destructive transition-colors"
@@ -453,6 +547,11 @@ type IngestSummary = {
   memoryCreated: number;
   signalsCreated: number;
   skipped: number;
+  returnSubject?: {
+    type: string;
+    id: string;
+    label: string;
+  } | null;
 } | null;
 
 export function ContextBrowser({
@@ -472,7 +571,7 @@ export function ContextBrowser({
   // Initialise filters from URL params
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>(() => {
     const init: Record<string, string[]> = {};
-    const st = searchParams.get('subject_type');
+    const st = searchParams.get('add') === 'context' ? null : searchParams.get('subject_type');
     if (st) init.subject_type = [st];
     if (searchParams.get('stale') === 'true') init.validity = ['stale'];
     return init;
@@ -484,7 +583,6 @@ export function ContextBrowser({
   const viewMode = controlledViewMode ?? localViewMode;
 
   // Ingest dialog state
-  type IngestSubject = { type: string; id: string; label: string; auto?: boolean; confidence?: string };
   type IngestProposal = {
     record_type: string;
     name: string;
@@ -496,7 +594,7 @@ export function ContextBrowser({
   const [ingestOpen,        setIngestOpen]        = useState(false);
   const [ingestTab,         setIngestTab]          = useState<'text' | 'file'>('text');
   const [ingestText,        setIngestText]         = useState('');
-  const [ingestSubjects,    setIngestSubjects]     = useState<IngestSubject[]>([]);
+  const [ingestSubjects,    setIngestSubjects]     = useState<IngestSubjectLocal[]>([]);
   const [ingestProposals,   setIngestProposals]    = useState<IngestProposal[]>([]);
   const [ingestResolutionSummary, setIngestResolutionSummary] = useState<string | null>(null);
   const [ingestSource,      setIngestSource]       = useState('');
@@ -510,7 +608,7 @@ export function ContextBrowser({
   const [uploadText,        setUploadText]         = useState('');
   const [uploadPreview,     setUploadPreview]      = useState('');
   const [uploadTruncated,   setUploadTruncated]    = useState(false);
-  const [uploadSubjects,    setUploadSubjects]     = useState<IngestSubject[]>([]);
+  const [uploadSubjects,    setUploadSubjects]     = useState<IngestSubjectLocal[]>([]);
   const [uploadProposals,   setUploadProposals]    = useState<IngestProposal[]>([]);
   const [uploadResolutionSummary, setUploadResolutionSummary] = useState<string | null>(null);
   const [uploadSource,      setUploadSource]       = useState('');
@@ -524,6 +622,7 @@ export function ContextBrowser({
   const [addForm, setAddForm] = useState<AddEntryForm>(BLANK_ADD_FORM);
   const [adding, setAdding] = useState(false);
   const [ingestSummary, setIngestSummary] = useState<IngestSummary>(null);
+  const openDrawer = useAppStore(s => s.openDrawer);
 
   // Detail drawer state
   const [selectedEntry, setSelectedEntry] = useState<any | null>(null);
@@ -558,10 +657,34 @@ export function ContextBrowser({
 
   useEffect(() => {
     if (searchParams.get('add') !== 'context') return;
+    const rawSubjectType = normalizeSubjectTypeParam(searchParams.get('subject_type'));
+    const subjectId = searchParams.get('subject_id') ?? '';
+    const subjectLabel = searchParams.get('subject_label') ?? '';
+    const validSubjectType = SUBJECT_TYPES.includes(rawSubjectType as (typeof SUBJECT_TYPES)[number]);
+    const pinnedSubject: IngestSubjectLocal | null = validSubjectType && subjectId
+      ? {
+          type: rawSubjectType,
+          id: subjectId,
+          label: subjectLabel || subjectTypeLabel(rawSubjectType),
+          auto: false,
+          pinned: true,
+        }
+      : null;
+
     setIngestOpen(true);
     setIngestTab('text');
+    if (pinnedSubject) {
+      setIngestSubjects(prev => mergeIngestSubjects(prev, [pinnedSubject]));
+      setUploadSubjects(prev => mergeIngestSubjects(prev, [pinnedSubject]));
+    }
     const next = new URLSearchParams(searchParams);
     next.delete('add');
+    next.delete('subject_type');
+    next.delete('subject_id');
+    next.delete('subject_label');
+    next.delete('return_subject_type');
+    next.delete('return_subject_id');
+    next.delete('return_subject_label');
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
 
@@ -574,7 +697,7 @@ export function ContextBrowser({
       setDetectError(null);
       try {
         const result = await detectSubjects.mutateAsync(text) as any;
-        const detected: IngestSubject[] = (result?.subjects ?? []).map((s: any) => ({
+        const detected: IngestSubjectLocal[] = (result?.subjects ?? []).map((s: any) => ({
           type: s.type,
           id: s.id,
           label: s.name,
@@ -585,17 +708,11 @@ export function ContextBrowser({
         if (targetTab === 'text') {
           setIngestProposals(proposals);
           setIngestResolutionSummary(result?.resolution_summary ?? null);
-          setIngestSubjects(prev => {
-            // Merge auto-detected with any existing manual entries
-            const manual = prev.filter(s => !s.auto);
-            const newIds = new Set(detected.map(d => d.id));
-            const keptManual = manual.filter(s => !newIds.has(s.id));
-            return [...detected, ...keptManual];
-          });
+          setIngestSubjects(prev => mergeIngestSubjects(prev, detected));
         } else {
           setUploadProposals(proposals);
           setUploadResolutionSummary(result?.resolution_summary ?? null);
-          setUploadSubjects(detected);
+          setUploadSubjects(prev => mergeIngestSubjects(prev, detected));
         }
       } catch (err) {
         setDetectError(err instanceof Error
@@ -636,10 +753,10 @@ export function ContextBrowser({
       setUploadPreview(result.text_preview ?? '');
       setUploadTruncated(result.truncated ?? false);
       setDetectError(result.subject_detection_error ?? null);
-      const detected: IngestSubject[] = (result.subjects ?? []).map((s: any) => ({
+      const detected: IngestSubjectLocal[] = (result.subjects ?? []).map((s: any) => ({
         type: s.type, id: s.id, label: s.name, auto: true, confidence: s.confidence,
       }));
-      setUploadSubjects(detected);
+      setUploadSubjects(prev => mergeIngestSubjects(prev, detected));
       setUploadProposals(result.proposed_records ?? []);
       setUploadResolutionSummary(result.resolution_summary ?? null);
     } catch (err) {
@@ -840,6 +957,7 @@ export function ContextBrowser({
     const activeSubjects = ingestTab === 'file' ? uploadSubjects : ingestSubjects;
     const activeProposals = ingestTab === 'file' ? uploadProposals : ingestProposals;
     const activeSource = ingestTab === 'file' ? uploadSource : ingestSource;
+    const returnSubject = activeSubjects.find(subject => subject.pinned && subject.type && subject.id) ?? null;
 
     const validSubjects = activeSubjects.filter(s => s.type && s.id);
     if (!activeText.trim() || (!autoResolveIngest && validSubjects.length === 0)) {
@@ -889,7 +1007,7 @@ export function ContextBrowser({
       const proposedRecords = results.reduce((sum: number, r: any) => sum + Number(r?.proposed_records?.length ?? 0), 0);
       const handoffRequests = results.reduce((sum: number, r: any) => sum + Number(r?.handoff_requests?.length ?? 0), 0);
       const resolutionSummary = (results.find((r: any) => typeof r?.resolution_summary === 'string') as any)?.resolution_summary;
-      setIngestSummary({ memoryCreated, signalsCreated, skipped });
+      setIngestSummary({ memoryCreated, signalsCreated, skipped, returnSubject });
       if (totalExtracted > 0) {
         toast({
           title: 'Context processed',
@@ -982,6 +1100,13 @@ export function ContextBrowser({
     }
   }, [addForm, createEntry]);
 
+  const activePinnedSubjects = (ingestTab === 'file' ? uploadSubjects : ingestSubjects)
+    .filter(subject => subject.pinned && subject.type && subject.id);
+  const removePinnedSubject = useCallback((subject: IngestSubjectLocal) => {
+    setIngestSubjects(prev => prev.filter(item => subjectKey(item) !== subjectKey(subject)));
+    setUploadSubjects(prev => prev.filter(item => subjectKey(item) !== subjectKey(subject)));
+  }, []);
+
   const searchModeToggle = (
     <div className="flex items-center gap-2 flex-shrink-0">
       <div className="flex items-center gap-0.5 bg-muted rounded-xl p-0.5">
@@ -1063,6 +1188,18 @@ export function ContextBrowser({
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                {ingestSummary.returnSubject && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const drawerType = DRAWER_TYPE_MAP[ingestSummary.returnSubject!.type] ?? 'account';
+                      openDrawer(drawerType, ingestSummary.returnSubject!.id);
+                    }}
+                  >
+                    Back to {ingestSummary.returnSubject.label || subjectTypeLabel(ingestSummary.returnSubject.type)}
+                  </Button>
+                )}
                 <Button variant="outline" size="sm" onClick={() => preservedSetSearchParams({ tab: 'signals' })}>
                   Review Signals
                 </Button>
@@ -1421,6 +1558,8 @@ export function ContextBrowser({
             </button>
             </div>
 
+            <PinnedSubjectBanner subjects={activePinnedSubjects} onRemove={removePinnedSubject} />
+
             {ingestTab === 'text' ? (
               <div className="space-y-3">
               {/* Smart paste banner */}
@@ -1462,7 +1601,9 @@ export function ContextBrowser({
                   <span className="min-w-0">
                     <span className="block text-sm font-semibold text-foreground">Match customer records automatically</span>
                     <span className="block text-xs text-muted-foreground">
-                      CRMy will find the contacts and accounts mentioned here, extract Signals, and promote high-confidence items to Memory.
+                      {activePinnedSubjects.length > 0
+                        ? 'CRMy will attach this context to the selected record and can add other mentioned records when it finds them.'
+                        : 'CRMy will find the contacts and accounts mentioned here, extract Signals, and promote high-confidence items to Memory.'}
                     </span>
                     {autoResolveIngest && ingestSubjects.length > 0 && (
                       <span className="mt-2 block text-xs text-muted-foreground">
@@ -1532,7 +1673,7 @@ export function ContextBrowser({
                     <FileText className="w-4 h-4 text-primary flex-shrink-0" />
                     <span className="text-sm font-medium text-foreground flex-1 truncate">{uploadFile.name}</span>
                     <span className="text-xs text-muted-foreground">{(uploadFile.size / 1024).toFixed(0)} KB</span>
-                    <button onClick={() => { setUploadFile(null); setUploadText(''); setUploadPreview(''); setUploadSubjects([]); setUploadProposals([]); }} className="text-muted-foreground hover:text-foreground">
+                    <button onClick={() => { setUploadFile(null); setUploadText(''); setUploadPreview(''); setUploadSubjects(prev => prev.filter(subject => subject.pinned)); setUploadProposals([]); }} className="text-muted-foreground hover:text-foreground">
                       <X className="w-4 h-4" />
                     </button>
                   </div>
@@ -1560,7 +1701,9 @@ export function ContextBrowser({
                   <span className="min-w-0">
                     <span className="block text-sm font-semibold text-foreground">Match customer records automatically</span>
                     <span className="block text-xs text-muted-foreground">
-                      CRMy will resolve the file to matching customer records before extracting Signals and Memory.
+                      {activePinnedSubjects.length > 0
+                        ? 'CRMy will attach this file to the selected record and can add other mentioned records when it finds them.'
+                        : 'CRMy will resolve the file to matching customer records before extracting Signals and Memory.'}
                     </span>
                     {autoResolveIngest && uploadSubjects.length > 0 && (
                       <span className="mt-2 block text-xs text-muted-foreground">

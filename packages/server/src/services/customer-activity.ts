@@ -10,6 +10,7 @@ import type { EmailMessage } from '../db/repos/email-messages.js';
 import { extractContextFromActivity } from '../agent/extraction.js';
 import { emitEvent } from '../events/emitter.js';
 import { getActorUserId, getVisibleOwnerIds } from './access-control.js';
+import { classifySourceParticipants, getSourceFilterSettings } from './source-filters.js';
 
 function normalizeDomain(value: string | undefined | null): string | null {
   const domain = value?.split('@')[1] ?? value;
@@ -195,8 +196,10 @@ async function associateMeeting(
   const emails = [input.organizer_email, ...(input.attendee_emails ?? [])]
     .map(email => email?.trim().toLowerCase())
     .filter((email): email is string => Boolean(email));
+  const filterSettings = await getSourceFilterSettings(db, tenantId);
+  const externalEmails = emails.filter(email => !filterSettings.internal_domains.includes(normalizeDomain(email) ?? ''));
 
-  for (const email of emails) {
+  for (const email of externalEmails) {
     const contact = await findContactByEmail(db, tenantId, email, ownerIds);
     if (contact) {
       const opportunity = await pickScopedOpportunity(db, tenantId, contact.account_id, contact.id, ownerIds);
@@ -211,7 +214,7 @@ async function associateMeeting(
     }
   }
 
-  for (const email of emails) {
+  for (const email of externalEmails) {
     const account = await findAccountByDomain(db, tenantId, normalizeDomain(email), ownerIds);
     if (account) {
       const opportunity = await pickScopedOpportunity(db, tenantId, account.id, null, ownerIds);
@@ -241,12 +244,12 @@ async function classifyMeeting(
   const classifications = await calendarRepo.listMeetingClassifications(db, tenantId, true);
   const enabled = classifications.filter(c => c.is_enabled);
   const text = `${input.title ?? ''} ${input.description ?? ''} ${input.location ?? ''}`.toLowerCase();
-  const internal = await internalDomains(db, tenantId);
   const participantDomains = [input.organizer_email, ...(input.attendee_emails ?? [])]
-    .map(normalizeDomain)
-    .filter((domain): domain is string => Boolean(domain));
-  const externalCount = participantDomains.filter(domain => !internal.has(domain)).length;
-  const allInternal = participantDomains.length > 0 && externalCount === 0;
+    .map(email => email?.trim().toLowerCase())
+    .filter((email): email is string => Boolean(email));
+  const sourceSettings = await getSourceFilterSettings(db, tenantId);
+  const participants = classifySourceParticipants(sourceSettings, participantDomains);
+  const allInternal = participants.classification === 'internal';
   if (allInternal) {
     const registry = enabled.find(c => c.type_name === 'internal');
     return { classification: 'internal', confidence: 0.95, reason: 'Only internal participants were detected.', registry };
@@ -334,6 +337,33 @@ export async function upsertCalendarEventWithIntelligence(
   });
   const validation = await validateMeetingEvent(db, tenantId, event);
   event = await calendarRepo.updateCalendarEvent(db, tenantId, event.id, validation) ?? event;
+  const subject = primarySubject(event);
+  if (event.validation_status !== 'skipped_internal' && !event.activity_id && subject.subject_type && subject.subject_id) {
+    const registry = classified.registry;
+    const fallbackActivityType: ActivityType = event.status === 'scheduled' ? 'meeting_scheduled' : 'meeting_held';
+    const activity = await activityRepo.createActivity(db, tenantId, {
+      type: toActivityType(registry?.mapped_activity_type, fallbackActivityType),
+      subject: event.title,
+      body: event.description ?? '',
+      contact_id: event.contact_id ?? undefined,
+      account_id: event.account_id ?? undefined,
+      opportunity_id: event.opportunity_id ?? undefined,
+      use_case_id: event.use_case_id ?? undefined,
+      subject_type: subject.subject_type,
+      subject_id: subject.subject_id,
+      owner_id: userId ?? undefined,
+      source_agent: `calendar:${event.provider}`,
+      occurred_at: event.starts_at,
+      detail: {
+        calendar_event_id: event.id,
+        meeting_url: event.meeting_url,
+        attendees: event.attendee_emails,
+        validation_status: event.validation_status,
+      },
+      created_by: userId ?? undefined,
+    });
+    event = await calendarRepo.updateCalendarEvent(db, tenantId, event.id, { activity_id: activity.id }) ?? event;
+  }
   return event;
 }
 
@@ -492,17 +522,24 @@ export async function processCalendarEvent(db: DbPool, tenantId: UUID, eventId: 
 
 export async function processCalendarSyncJobs(db: DbPool): Promise<{ processed: number; failed: number }> {
   const jobs = await calendarRepo.claimCalendarSyncJobs(db, 10);
+  const { syncCalendarConnection } = await import('./source-sync.js');
   let processed = 0;
   let failed = 0;
   for (const job of jobs) {
     try {
-      await calendarRepo.failCalendarSyncJob(
-        db,
-        job.id,
-        'Calendar sync provider is not configured yet. Connect Google Calendar or Microsoft 365 OAuth credentials to enable sync.',
-      );
-      failed++;
-    } catch {
+      await syncCalendarConnection(db, job.tenant_id, job.connection_id);
+      await calendarRepo.completeCalendarSyncJob(db, job.id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Calendar sync failed.';
+      await calendarRepo.failCalendarSyncJob(db, job.id, message);
+      try {
+        await calendarRepo.updateCalendarConnection(db, job.tenant_id, job.connection_id, {
+          status: 'error',
+          last_error: message,
+        });
+      } catch {
+        // Best effort status update only.
+      }
       failed++;
     }
     processed++;

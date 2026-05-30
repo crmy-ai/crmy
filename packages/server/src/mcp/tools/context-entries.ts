@@ -64,6 +64,12 @@ async function assertLineageAccess(db: DbPool, actor: ActorContext, input: z.inf
   if (input.raw_context_source_id) {
     const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.raw_context_source_id);
     if (!source) throw notFound('RawContextSource', input.raw_context_source_id);
+    if (!source.subject_type || !source.subject_id) {
+      if (actor.role !== 'admin' && actor.role !== 'owner' && source.actor_id !== actor.actor_id) {
+        throw notFound('RawContextSource', input.raw_context_source_id);
+      }
+      return;
+    }
     await assertSubjectAccess(db, actor, source.subject_type as SubjectType | undefined, source.subject_id as string | undefined);
   }
 }
@@ -405,6 +411,12 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       handler: async (input: { id: string }, actor: ActorContext) => {
         const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.id);
         if (!source) throw notFound('RawContextSource', input.id);
+        if (!source.subject_type || !source.subject_id) {
+          if (actor.role !== 'admin' && actor.role !== 'owner' && source.actor_id !== actor.actor_id) {
+            throw notFound('RawContextSource', input.id);
+          }
+          return { raw_context_source: source };
+        }
         await assertSubjectAccess(db, actor, source.subject_type as SubjectType | undefined, source.subject_id as string | undefined);
         return { raw_context_source: source };
       },
@@ -419,6 +431,11 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       handler: async (input: { id: string }, actor: ActorContext) => {
         const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.id);
         if (!source) throw notFound('RawContextSource', input.id);
+        if (!source.subject_type || !source.subject_id) {
+          if (actor.role !== 'admin' && actor.role !== 'owner' && source.actor_id !== actor.actor_id) {
+            throw notFound('RawContextSource', input.id);
+          }
+        }
         await assertSubjectAccess(db, actor, source.subject_type as SubjectType | undefined, source.subject_id as string | undefined);
         const actorRecordId = await ensureActorRecordForContext(db, actor);
 
@@ -474,7 +491,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
                   type: 'note',
                   subject: source.source_label ?? 'Reprocessed Raw Context',
                   body: source.raw_excerpt,
-                  subject_type: subject.type as 'contact' | 'account',
+                  subject_type: subject.type as SubjectType,
                   subject_id: subject.id,
                   performed_by: actorRecordId,
                   source_agent: actor.actor_type === 'agent' ? 'context_raw_source_reprocess' : undefined,
@@ -870,6 +887,9 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           key: input.idempotency_key,
           request: input,
         }, async () => {
+        const existing = await contextRepo.getContextEntry(db, actor.tenant_id, input.id);
+        if (!existing) throw notFound('ContextEntry', input.id);
+        await assertSubjectAccess(db, actor, existing.subject_type as SubjectType, existing.subject_id);
         // Determine extend_days: use provided value, fall back to type half_life, then 30
         let extendDays = input.extend_days;
         if (!extendDays) {
@@ -972,6 +992,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'Get a catch-up diff for a CRM subject showing everything that changed since a given timestamp. Returns four lists: new context entries added, entries that were superseded, entries that became stale, and entries that were recently reviewed. Ideal for daily agent check-ins or resuming work after a gap — call this instead of a full briefing when you already have baseline context and just need the delta.',
       inputSchema: contextDiff,
       handler: async (input: z.infer<typeof contextDiff>, actor: ActorContext) => {
+        await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
         // Parse relative durations ("7d", "24h", "30m") into ISO timestamps
         let since = input.since;
         if (!since.includes('T') && !since.includes('-')) {
@@ -1130,7 +1151,17 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           request: input,
         }, async () => {
         const actorRecordId = await ensureActorRecordForContext(db, actor);
-        const sourceRef = `auto:${createHash('sha256').update(input.document).digest('hex').slice(0, 32)}`;
+        const sourceFingerprint = {
+          document_hash: createHash('sha256').update(input.document).digest('hex'),
+          actor_id: actor.actor_id,
+          actor_type: actor.actor_type,
+          source_type: actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+          source_label: input.source_label ?? null,
+          subjects: (input.subjects ?? [])
+            .map(subject => `${subject.type}:${subject.id}`)
+            .sort(),
+        };
+        const sourceRef = `auto:${createHash('sha256').update(JSON.stringify(sourceFingerprint)).digest('hex').slice(0, 32)}`;
         await rawContextRepo.upsertRawContextSource(db, actor.tenant_id, {
           source_type: actor.actor_type === 'agent' ? 'mcp' : 'add_context',
           source_ref: sourceRef,
@@ -1142,6 +1173,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           metadata: {
             input_channel: actor.actor_type === 'agent' ? 'mcp' : 'api',
             confidence_threshold: input.confidence_threshold,
+            source_fingerprint: sourceFingerprint,
           },
         });
 
@@ -1250,11 +1282,14 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
               failure_reason: proposalHandoffs.length > 0
                 ? `${proposalHandoffs.length} possible new ${proposalHandoffs.length === 1 ? 'record needs' : 'records need'} review before CRMy creates anything.`
                 : 'No customer records could be confidently identified in the source.',
+              failure_code: proposalHandoffs.length > 0 ? 'needs_record_review' : 'no_customer_specific_context',
               metadata: proposalHandoffs.length > 0 ? {
                 proposed_records: proposedRecords,
                 handoff_request_ids: proposalHandoffs.map(item => item.request_id),
+                failure_code: 'needs_record_review',
               } : {
                 proposed_records: proposedRecords,
+                failure_code: 'no_customer_specific_context',
               },
             },
           );
@@ -1464,6 +1499,13 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             memory_created: memoryCreated,
             skipped: skippedCount,
             failure_reason: totalCreated === 0 && proposalHandoffs.length === 0 ? noExtractionReason : null,
+            failure_code: totalCreated === 0 && proposalHandoffs.length === 0
+              ? extractionFailure
+                ? 'write_failed'
+                : 'model_returned_empty'
+              : proposalHandoffs.length > 0
+                ? 'needs_record_review'
+                : null,
             metadata: {
               no_extraction_reasons: noExtractionReasons.slice(0, 10),
               account_scope: accountScope,
@@ -1872,9 +1914,12 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         for (let i = 0; i < input.entry_ids.length; i += batchSize) {
           const batch = input.entry_ids.slice(i, i + batchSize);
           const results = await Promise.allSettled(
-            batch.map(id =>
-              contextRepo.reviewContextEntry(db, actor.tenant_id as UUID, id as UUID, input.extend_days),
-            ),
+            batch.map(async id => {
+              const existing = await contextRepo.getContextEntry(db, actor.tenant_id as UUID, id as UUID);
+              if (!existing) return null;
+              await assertSubjectAccess(db, actor, existing.subject_type as SubjectType, existing.subject_id);
+              return contextRepo.reviewContextEntry(db, actor.tenant_id as UUID, id as UUID, input.extend_days);
+            }),
           );
           for (const r of results) {
             if (r.status === 'fulfilled' && r.value) updated++;

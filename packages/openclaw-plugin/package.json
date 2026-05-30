@@ -1,6 +1,6 @@
 {
   "name": "@crmy/openclaw-plugin",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "description": "CRMy plugin for OpenClaw — expose customer context, typed revenue objects, HITL handoffs, and audit-safe writes",
   "type": "module",
   "main": "dist/index.js",
@@ -36,6 +36,6 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/codycharris/crmy"
+    "url": "git+https://github.com/codycharris/crmy.git"
   }
 }

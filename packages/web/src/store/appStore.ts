@@ -23,6 +23,9 @@ export interface EmailDraftContext {
 }
 type QuickAddType = 'contact' | 'opportunity' | 'use-case' | 'activity' | 'account' | 'assignment' | null;
 export interface QuickAddContext {
+  mode?: 'create' | 'edit';
+  record_id?: string;
+  record_name?: string;
   parent_subject_type?: 'account' | 'contact' | 'opportunity' | 'use_case' | 'use-case';
   parent_subject_id?: string;
   parent_subject_name?: string;
@@ -47,8 +50,11 @@ interface AppState {
   drawerType: DrawerType;
   drawerEntityId: string | null;
   drawerBriefing: boolean;
+  drawerEditing: boolean;
   openDrawer: (type: DrawerType, entityId?: string) => void;
   openDrawerBriefing: (type: DrawerType, entityId: string) => void;
+  openDrawerEdit: (type: DrawerType, entityId: string) => void;
+  setDrawerEditing: (editing: boolean) => void;
   closeDrawer: () => void;
 
   commandPaletteOpen: boolean;
@@ -104,9 +110,12 @@ export const useAppStore = create<AppState>()(
       drawerType: null,
       drawerEntityId: null,
       drawerBriefing: false,
-      openDrawer: (type, entityId) => set({ drawerOpen: true, drawerType: type, drawerEntityId: entityId ?? null, drawerBriefing: false }),
-      openDrawerBriefing: (type, entityId) => set({ drawerOpen: true, drawerType: type, drawerEntityId: entityId, drawerBriefing: true }),
-      closeDrawer: () => set({ drawerOpen: false, drawerType: null, drawerEntityId: null, drawerBriefing: false }),
+      drawerEditing: false,
+      openDrawer: (type, entityId) => set({ drawerOpen: true, drawerType: type, drawerEntityId: entityId ?? null, drawerBriefing: false, drawerEditing: false }),
+      openDrawerBriefing: (type, entityId) => set({ drawerOpen: true, drawerType: type, drawerEntityId: entityId, drawerBriefing: true, drawerEditing: false }),
+      openDrawerEdit: (type, entityId) => set({ drawerOpen: true, drawerType: type, drawerEntityId: entityId, drawerBriefing: false, drawerEditing: true }),
+      setDrawerEditing: (editing) => set({ drawerEditing: editing }),
+      closeDrawer: () => set({ drawerOpen: false, drawerType: null, drawerEntityId: null, drawerBriefing: false, drawerEditing: false }),
 
       commandPaletteOpen: false,
       setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { checkContextConvergence } from '../dist/services/context-convergence.js';
 import { createContradictionReviewAssignments } from '../dist/services/context-review-assignments.js';
@@ -28,6 +29,8 @@ import { createWorkflowEngine, dryRunWorkflowDefinition, matchesFilter } from '.
 import { buildVariableContext, interpolate } from '../dist/workflows/variables.js';
 import { __testSignalGrouping } from '../dist/services/signal-groups.js';
 import { evaluateMemoryReadiness } from '../dist/services/memory-readiness.js';
+import { buildAgentScopes } from '../dist/agent/engine.js';
+import { previewRecordDraft } from '../dist/services/record-drafts.js';
 
 const baseInput = {
   tenantId: '11111111-1111-4111-8111-111111111111',
@@ -489,6 +492,32 @@ const memberActor = {
   scopes: ['read', 'write', 'extended', 'analytics'],
 };
 
+class FakeAgentConfigDb {
+  constructor(configPatch = {}) {
+    this.config = {
+      id: 'agent-config-1',
+      tenant_id: baseInput.tenantId,
+      enabled: true,
+      provider: 'openai_compatible',
+      base_url: 'http://localhost:11434/v1',
+      model: 'local-tool-model',
+      max_tokens_per_turn: 1200,
+      can_write_objects: true,
+      can_log_activities: true,
+      can_create_assignments: true,
+      ...configPatch,
+    };
+  }
+
+  async query(sql) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    if (text.startsWith('SELECT * FROM agent_configs')) {
+      return { rows: [this.config], rowCount: 1 };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  }
+}
+
 test('recoverOperationalJob retries context outbox jobs and records an audit entry', async () => {
   const db = new FakeRecoveryDb();
   const result = await recoverOperationalJob(
@@ -520,6 +549,44 @@ test('recoverOperationalJob rejects unsupported workflow retries', async () => {
     () => recoverOperationalJob(db, recoveryActor, 'workflow_runs', db.row.id, 'retry'),
     err => err?.code === 'VALIDATION_ERROR' && err?.status === 422,
   );
+});
+
+class FakeRawContextRecoveryDb {
+  row = { id: '66666666-6666-4666-8666-666666666666', status: 'processing' };
+  recoveryLog = [];
+
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    if (text.startsWith('SELECT id, status FROM raw_context_sources')) {
+      return params[1] === this.row.id ? { rows: [this.row], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (text.startsWith('UPDATE raw_context_sources') && text.includes("status = 'pending'")) {
+      this.row = { ...this.row, status: 'pending' };
+      return { rows: [this.row], rowCount: 1 };
+    }
+    if (text.startsWith('INSERT INTO ops_recovery_log')) {
+      this.recoveryLog.push(params);
+      return { rows: [], rowCount: 1 };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  }
+}
+
+test('recoverOperationalJob can retry stale Raw Context receipts', async () => {
+  const db = new FakeRawContextRecoveryDb();
+  const result = await recoverOperationalJob(
+    db,
+    recoveryActor,
+    'raw_context_sources',
+    db.row.id,
+    'retry',
+    'retry interrupted extraction',
+  );
+
+  assert.equal(result.queue_name, 'raw_context_sources');
+  assert.equal(result.previous_status, 'processing');
+  assert.equal(result.new_status, 'pending');
+  assert.equal(db.recoveryLog.length, 1);
 });
 
 class FakeContradictionAssignmentDb {
@@ -707,6 +774,63 @@ test('sensitive tool scopes enforce read/write and object-level boundaries', () 
   assert.doesNotThrow(() => enforceToolScopes('context_contradiction_assign', contradictionActor));
 });
 
+test('Workspace Agent revenue-object writes default on in migrations', async () => {
+  const migration = await readFile(new URL('../migrations/064_agent_write_objects_default.sql', import.meta.url), 'utf8');
+  assert.match(migration, /ALTER COLUMN can_write_objects SET DEFAULT true/);
+  assert.match(migration, /WHERE can_write_objects = false\s+AND enabled = false/);
+});
+
+test('Workspace Agent write scopes follow can_write_objects', () => {
+  const readOnlyScopes = buildAgentScopes({
+    can_write_objects: false,
+    can_log_activities: true,
+    can_create_assignments: true,
+  });
+  assert.equal(readOnlyScopes.includes('contacts:write'), false);
+  assert.equal(readOnlyScopes.includes('accounts:write'), false);
+  assert.equal(readOnlyScopes.includes('opportunities:write'), false);
+  assert.equal(readOnlyScopes.includes('write'), false);
+  assert.equal(readOnlyScopes.includes('activities:write'), true);
+  assert.equal(readOnlyScopes.includes('context:write'), true);
+
+  const writeScopes = buildAgentScopes({
+    can_write_objects: true,
+    can_log_activities: true,
+    can_create_assignments: true,
+  });
+  assert.equal(writeScopes.includes('contacts:write'), true);
+  assert.equal(writeScopes.includes('accounts:write'), true);
+  assert.equal(writeScopes.includes('opportunities:write'), true);
+  assert.equal(writeScopes.includes('write'), true);
+});
+
+test('lite record draft preview respects can_write_objects', async () => {
+  const db = new FakeAgentConfigDb({ can_write_objects: false });
+  await assert.rejects(
+    () => previewRecordDraft(db, { ...recoveryActor, scopes: ['accounts:write'] }, {
+      text: 'Create Nike as a retail account.',
+      mode: 'create',
+      object_type: 'account',
+    }),
+    err => err?.code === 'PERMISSION_DENIED' && /record writing is disabled/i.test(err.message),
+  );
+});
+
+test('agent harness setup grants admin systems scopes', async () => {
+  const migration = await readFile(new URL('../migrations/065_agent_harness_system_scopes.sql', import.meta.url), 'utf8');
+  assert.match(migration, /systems:read/);
+  assert.match(migration, /systems:write/);
+  assert.match(migration, /systems:admin/);
+  assert.match(migration, /actor_type = 'human'/);
+  assert.match(migration, /role IN \('admin', 'owner'\)/);
+});
+
+test('MCP entity resources enforce context scope and subject access', async () => {
+  const source = await readFile(new URL('../src/mcp/resources.ts', import.meta.url), 'utf8');
+  assert.match(source, /requireScopes\(actor,\s*'context:read'\)/);
+  assert.match(source, /assertSubjectAccess\(db,\s*actor,\s*type,\s*id as string\)/);
+});
+
 test('every tool has an explicit scope mapping unless intentionally public', () => {
   const intentionallyPublic = new Set(['actor_whoami', 'entity_resolve', 'schema_get', 'guide_search']);
   const scopedActor = { ...recoveryActor, scopes: [] };
@@ -795,6 +919,40 @@ test('data-quality repair supports dry-run previews and audited safe repairs', a
   assert.equal(repaired.repaired_count, 3);
   assert.equal(repaired.event_id, 101);
   assert.equal(db.events.length, 1);
+});
+
+class FakeRawContextRepairDb {
+  events = [];
+
+  async query(sql) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    if (text.startsWith('SELECT count(*)::int AS count') && text.includes('FROM raw_context_sources')) {
+      return { rows: [{ count: 4 }], rowCount: 1 };
+    }
+    if (text.startsWith('WITH target AS') && text.includes('UPDATE raw_context_sources')) {
+      return { rows: [], rowCount: 2 };
+    }
+    if (text.startsWith('INSERT INTO events')) {
+      this.events.push(text);
+      return { rows: [{ id: 202 }], rowCount: 1 };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  }
+}
+
+test('data-quality repair can requeue stale Raw Context processing receipts', async () => {
+  const db = new FakeRawContextRepairDb();
+  const dryRun = await repairDataQualityFinding(db, recoveryActor, 'stale_raw_context_sources_processing', {
+    dry_run: true,
+  });
+  assert.equal(dryRun.repaired_count, 4);
+
+  const repaired = await repairDataQualityFinding(db, recoveryActor, 'stale_raw_context_sources_processing', {
+    dry_run: false,
+    limit: 2,
+  });
+  assert.equal(repaired.repaired_count, 2);
+  assert.equal(repaired.event_id, 202);
 });
 
 test('data-quality repair rejects unsafe checks and non-admin actors', async () => {

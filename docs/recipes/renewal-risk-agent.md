@@ -9,7 +9,7 @@ This recipe treats `briefing_get` as the retrieval step: it loads persistent Mem
 **Prerequisites:**
 
 - A running CRMy instance with demo data seeded (`crmy seed-demo`)
-- MCP connection configured (`claude mcp add crmy -- npx @crmy/cli mcp`)
+- MCP connection configured (`claude mcp add crmy -- npx -y @crmy/cli mcp`)
 - pgvector and embeddings enabled for semantic search, or use the keyword fallback shown below
 
 **Context engine capabilities used:** `briefing_get`, `context_semantic_search`, `context_search`, `context_detect_contradictions`, `activity_create`, `context_add`, `assignment_create`, and `hitl_submit_request`.

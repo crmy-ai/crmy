@@ -23,7 +23,9 @@ interface CheckSpec {
 export type RepairableDataQualityCheck =
   | 'activities_missing_canonical_subject'
   | 'current_context_missing_search_index'
-  | 'stuck_context_outbox_processing';
+  | 'stuck_context_outbox_processing'
+  | 'stale_raw_context_sources_processing'
+  | 'stuck_agent_turns_running';
 
 export interface DataQualityRepairResult {
   check_name: RepairableDataQualityCheck;
@@ -151,6 +153,96 @@ const CHECKS: CheckSpec[] = [
     `,
   },
   {
+    name: 'stale_raw_context_sources_processing',
+    severity: 'warning',
+    sql: `
+      SELECT id, source_type, source_ref, stage, attempt_count, failure_code, updated_at
+      FROM raw_context_sources
+      WHERE tenant_id = $1
+        AND status = 'processing'
+        AND updated_at < now() - interval '15 minutes'
+      ORDER BY updated_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'failed_raw_context_sources_retryable',
+    severity: 'warning',
+    sql: `
+      SELECT id, source_type, source_ref, stage, attempt_count, failure_code, failure_reason, updated_at
+      FROM raw_context_sources
+      WHERE tenant_id = $1
+        AND status = 'failed'
+        AND COALESCE(attempt_count, 0) < 3
+        AND (
+          failure_code IS NULL
+          OR failure_code IN ('model_timeout', 'model_output_invalid', 'model_failed', 'write_failed', 'processing_timeout')
+        )
+      ORDER BY updated_at DESC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'stuck_agent_turns_running',
+    severity: 'warning',
+    sql: `
+      SELECT id, session_id, status, started_at, updated_at, error_message
+      FROM agent_turns
+      WHERE tenant_id = $1
+        AND status = 'running'
+        AND updated_at < now() - interval '20 minutes'
+      ORDER BY updated_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'stale_mailbox_sync_jobs',
+    severity: 'warning',
+    sql: `
+      SELECT id, connection_id, status, attempts, last_error, updated_at
+      FROM mailbox_sync_jobs
+      WHERE tenant_id = $1
+        AND (
+          (status = 'processing' AND updated_at < now() - interval '15 minutes')
+          OR (status = 'failed' AND attempts < 5)
+        )
+      ORDER BY updated_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'stale_calendar_sync_jobs',
+    severity: 'warning',
+    sql: `
+      SELECT id, connection_id, status, attempts, last_error, updated_at
+      FROM calendar_sync_jobs
+      WHERE tenant_id = $1
+        AND (
+          (status = 'processing' AND updated_at < now() - interval '15 minutes')
+          OR (status = 'failed' AND attempts < 5)
+        )
+      ORDER BY updated_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'customer_calendar_events_missing_link',
+    severity: 'info',
+    sql: `
+      SELECT id, subject, starts_at, classification, validation_status
+      FROM calendar_events
+      WHERE tenant_id = $1
+        AND ignored_at IS NULL
+        AND classification NOT IN ('internal', 'unknown')
+        AND account_id IS NULL
+        AND contact_id IS NULL
+        AND opportunity_id IS NULL
+        AND use_case_id IS NULL
+      ORDER BY starts_at DESC
+      LIMIT $2
+    `,
+  },
+  {
     name: 'failed_context_embedding_jobs',
     severity: 'warning',
     sql: `
@@ -232,7 +324,9 @@ function ensureRepairable(checkName: string): asserts checkName is RepairableDat
   if (
     checkName !== 'activities_missing_canonical_subject' &&
     checkName !== 'current_context_missing_search_index' &&
-    checkName !== 'stuck_context_outbox_processing'
+    checkName !== 'stuck_context_outbox_processing' &&
+    checkName !== 'stale_raw_context_sources_processing' &&
+    checkName !== 'stuck_agent_turns_running'
   ) {
     throw validationError(`Data-quality check "${checkName}" is not safely auto-repairable`);
   }
@@ -355,6 +449,76 @@ const REPAIR_ACTIONS: Record<RepairableDataQualityCheck, {
       SET status = 'pending'
       FROM target
       WHERE co.id = target.id
+    `,
+  },
+  stale_raw_context_sources_processing: {
+    action: 'Return stale Raw Context processing receipts to pending and requeue the linked activity extraction when possible.',
+    countSql: `
+      SELECT count(*)::int AS count
+      FROM raw_context_sources
+      WHERE tenant_id = $1
+        AND status = 'processing'
+        AND updated_at < now() - interval '15 minutes'
+    `,
+    repairSql: `
+      WITH target AS (
+        SELECT id, source_ref
+        FROM raw_context_sources
+        WHERE tenant_id = $1
+          AND status = 'processing'
+          AND updated_at < now() - interval '15 minutes'
+        ORDER BY updated_at ASC
+        LIMIT $2
+      ),
+      activity_reset AS (
+        UPDATE activities a
+        SET extraction_status = 'pending',
+            extraction_error = NULL,
+            updated_at = now()
+        FROM target
+        WHERE a.tenant_id = $1
+          AND a.id::text = target.source_ref
+        RETURNING a.id
+      )
+      UPDATE raw_context_sources r
+      SET status = 'pending',
+          stage = 'retrying',
+          locked_at = NULL,
+          next_retry_at = now(),
+          failure_code = COALESCE(failure_code, 'processing_timeout'),
+          last_error = COALESCE(last_error, 'Processing was interrupted and queued for retry.'),
+          failure_reason = COALESCE(failure_reason, 'Processing was interrupted and queued for retry.'),
+          updated_at = now()
+      FROM target
+      WHERE r.id = target.id
+    `,
+  },
+  stuck_agent_turns_running: {
+    action: 'Mark agent turns stuck in running as failed so the user can retry without a locked session.',
+    countSql: `
+      SELECT count(*)::int AS count
+      FROM agent_turns
+      WHERE tenant_id = $1
+        AND status = 'running'
+        AND updated_at < now() - interval '20 minutes'
+    `,
+    repairSql: `
+      WITH target AS (
+        SELECT id
+        FROM agent_turns
+        WHERE tenant_id = $1
+          AND status = 'running'
+          AND updated_at < now() - interval '20 minutes'
+        ORDER BY updated_at ASC
+        LIMIT $2
+      )
+      UPDATE agent_turns t
+      SET status = 'failed',
+          error_message = COALESCE(error_message, 'Agent turn was interrupted and marked failed by recovery.'),
+          completed_at = COALESCE(completed_at, now()),
+          updated_at = now()
+      FROM target
+      WHERE t.id = target.id
     `,
   },
 };

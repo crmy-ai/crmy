@@ -9,10 +9,12 @@ import {
   useMessagingChannels, useCreateMessagingChannel,
   useUpdateMessagingChannel, useDeleteMessagingChannel,
   useInboundEmailConfig, useGenerateInboundSecret,
+  useSourceFilters, useUpdateSourceFilters,
 } from '@/api/hooks';
 import {
   Mail, MessageSquare, Plus, Trash2, Pencil,
   Power, PowerOff, Star, Eye, EyeOff, X, Send, CheckCircle2, Download, RefreshCw, Copy,
+  SlidersHorizontal,
 } from 'lucide-react';
 
 // ─── Provider Config Registry ────────────────────────────────────────────────
@@ -124,6 +126,14 @@ function setNestedValue(obj: Record<string, unknown>, path: string, value: unkno
 
 function isRedacted(v: unknown): boolean {
   return typeof v === 'string' && /^\*+$/.test(v);
+}
+
+function csvToList(value: string): string[] {
+  return value.split(',').map(item => item.trim().toLowerCase()).filter(Boolean);
+}
+
+function listToCsv(value: unknown): string {
+  return Array.isArray(value) ? value.join(', ') : '';
 }
 
 // ─── Dynamic Config Form ─────────────────────────────────────────────────────
@@ -634,6 +644,106 @@ function MessagingChannelsSection() {
   );
 }
 
+// ─── Email & Activity Source Filters ────────────────────────────────────────
+
+function SourceFiltersSection() {
+  const { data, isLoading } = useSourceFilters() as { data: { source_filters?: Record<string, unknown> } | undefined; isLoading: boolean };
+  const update = useUpdateSourceFilters();
+  const filters = data?.source_filters ?? {};
+  const [internalDomains, setInternalDomains] = useState('');
+  const [excludedDomains, setExcludedDomains] = useState('');
+  const [excludedSenders, setExcludedSenders] = useState('');
+  const [excludedLocalParts, setExcludedLocalParts] = useState('');
+  const [excludedLabels, setExcludedLabels] = useState('');
+  const [includeInternalCalendar, setIncludeInternalCalendar] = useState(false);
+
+  useEffect(() => {
+    setInternalDomains(listToCsv(filters.internal_domains));
+    setExcludedDomains(listToCsv(filters.excluded_domains));
+    setExcludedSenders(listToCsv(filters.excluded_senders));
+    setExcludedLocalParts(listToCsv(filters.excluded_local_parts));
+    setExcludedLabels(listToCsv(filters.excluded_mailbox_labels));
+    setIncludeInternalCalendar(filters.include_internal_calendar === true);
+  }, [filters]);
+
+  const save = async () => {
+    try {
+      await update.mutateAsync({
+        internal_domains: csvToList(internalDomains),
+        excluded_domains: csvToList(excludedDomains),
+        excluded_senders: csvToList(excludedSenders),
+        excluded_local_parts: csvToList(excludedLocalParts),
+        excluded_mailbox_labels: csvToList(excludedLabels),
+        skip_spam_trash: true,
+        skip_promotions: true,
+        skip_newsletters: true,
+        include_internal_calendar: includeInternalCalendar,
+      });
+      toast({ title: 'Source filters saved', description: 'CRMy will apply these filters before storing mailbox or calendar context.' });
+    } catch (err) {
+      toast({ title: 'Could not save source filters', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' });
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-lg bg-blue-500/15 flex items-center justify-center">
+          <SlidersHorizontal className="w-5 h-5 text-blue-500" />
+        </div>
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">Email & Activity Source Filters</h3>
+          <p className="text-xs text-muted-foreground">Control what mailbox and calendar data CRMy is allowed to read before it becomes customer context.</p>
+        </div>
+      </div>
+      <div className="rounded-lg border border-border bg-card p-4 space-y-4">
+        <div className="rounded-lg border border-blue-500/20 bg-blue-500/8 p-3">
+          <p className="text-sm font-medium text-foreground">Default behavior</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            CRMy syncs customer-facing email and meetings, filters internal-only conversations, skips spam/trash/newsletters, and sends ambiguous customer items to review.
+          </p>
+        </div>
+        {isLoading ? (
+          <div className="text-sm text-muted-foreground">Loading source filters...</div>
+        ) : (
+          <div className="grid gap-3">
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Internal domains</span>
+              <input value={internalDomains} onChange={(e) => setInternalDomains(e.target.value)} className={inputCls} placeholder="yourcompany.com, subsidiary.com" />
+              <span className="text-xs text-muted-foreground">Internal-only email and meetings are ignored by default.</span>
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Excluded domains</span>
+              <input value={excludedDomains} onChange={(e) => setExcludedDomains(e.target.value)} className={inputCls} placeholder="vendor.com, alerts.example.com" />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Excluded senders</span>
+              <input value={excludedSenders} onChange={(e) => setExcludedSenders(e.target.value)} className={inputCls} placeholder="alerts@example.com, bot@example.com" />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Automated sender names</span>
+              <input value={excludedLocalParts} onChange={(e) => setExcludedLocalParts(e.target.value)} className={inputCls} placeholder="no-reply, notifications, postmaster" />
+            </label>
+            <label className="space-y-1">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Mailbox labels/folders to exclude</span>
+              <input value={excludedLabels} onChange={(e) => setExcludedLabels(e.target.value)} className={inputCls} placeholder="spam, trash, promotions" />
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={includeInternalCalendar} onChange={(e) => setIncludeInternalCalendar(e.target.checked)} className="rounded border-border" />
+              <span className="text-sm text-foreground">Allow internal-only calendar events to be stored for review</span>
+            </label>
+            <div className="flex justify-end">
+              <button onClick={save} disabled={update.isPending} className={btnPrimary}>
+                {update.isPending ? 'Saving...' : 'Save source filters'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Inbound Email Section ───────────────────────────────────────────────────
 
 function InboundEmailSection() {
@@ -762,6 +872,10 @@ export default function MessagingSettings() {
       </div>
 
       <EmailProviderSection />
+
+      <div className="border-t border-border" />
+
+      <SourceFiltersSection />
 
       <div className="border-t border-border" />
 

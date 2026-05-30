@@ -3,7 +3,6 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { TopBar } from '@/components/layout/TopBar';
 import { OnboardingEmptyState } from '@/components/crm/OnboardingEmptyState';
 import { useContacts } from '@/api/hooks';
@@ -228,15 +227,13 @@ export default function Contacts() {
                     </button>
                   )}
                 </div>
-                <div className="flex items-center gap-3 mb-3">
-                  <ContactAvatar name={displayName(c)} className="w-11 h-11 rounded-2xl text-sm" />
-                  <div>
-                    <div className="flex items-center gap-2 pr-16">
-                      <p className="font-display font-bold text-foreground truncate">{displayName(c)}</p>
-                      <RecordMemoryIndicator count={memoryCounts.get(c.id as string)} className="shrink-0" />
-                    </div>
-                    <p className="text-xs text-muted-foreground">{companyName(c) || 'Individual'}</p>
+                <div className="mb-3">
+                  <div className="flex items-center gap-2 pr-16">
+                    <p className="font-display font-bold text-foreground truncate">{displayName(c)}</p>
+                    <RecordMemoryIndicator count={memoryCounts.get(c.id as string)} className="shrink-0" />
                   </div>
+                  {c.title && <p className="text-xs font-medium text-foreground/80 truncate">{c.title as string}</p>}
+                  <p className="text-xs text-muted-foreground">{companyName(c) || 'Individual'}</p>
                 </div>
                 <div className="flex items-center gap-2 mb-2 flex-wrap">
                   {c.lifecycle_stage && <StageBadge stage={c.lifecycle_stage as string} />}
