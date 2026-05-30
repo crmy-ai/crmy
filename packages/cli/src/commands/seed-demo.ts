@@ -33,12 +33,22 @@ export function seedDemoCommand(): Command {
         const pool = new Pool({ connectionString: databaseUrl });
 
         const configuredTenant = (config as Record<string, unknown>).tenantId;
-        const tenantRes = configuredTenant
+        const existingSampleTenant = await pool.query(
+          `SELECT t.id, t.slug
+           FROM tenants t
+           JOIN users u ON u.tenant_id = t.id
+           WHERE u.email = 'sample.admin@crmy.local'
+           ORDER BY t.slug ASC
+           LIMIT 1`,
+        );
+        const tenantRes = existingSampleTenant.rows.length > 0
+          ? existingSampleTenant
+          : configuredTenant
           ? await pool.query(
             'SELECT id, slug FROM tenants WHERE id::text = $1 OR slug = $1 ORDER BY created_at DESC LIMIT 1',
             [String(configuredTenant)],
           )
-          : await pool.query('SELECT id, slug FROM tenants ORDER BY created_at DESC LIMIT 1');
+          : await pool.query('SELECT id, slug FROM tenants ORDER BY slug ASC LIMIT 1');
         if (tenantRes.rows.length === 0) {
           spinner.fail('No tenant found');
           console.error(

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { loadConfigFile, loadAuthState } from './config.js';
+import { resolveLocalActor } from './local-actor.js';
 import type { ActorContext } from '@crmy/shared';
 
 export interface CliClient {
@@ -279,18 +280,17 @@ function createHttpClient(serverUrl: string, token: string): CliClient {
 /**
  * Create a direct database client using MCP tools.
  */
-async function createDbClient(databaseUrl: string, apiKey?: string): Promise<CliClient> {
+async function createDbClient(
+  databaseUrl: string,
+  apiKey?: string,
+  tenantSlugOrId?: string,
+): Promise<CliClient> {
   process.env.CRMY_IMPORTED = '1';
 
   const { initPool, closePool, getToolsForActor, normalizeToolInput } = await import('@crmy/server');
   const db = await initPool(databaseUrl);
 
-  let actor: ActorContext = {
-    tenant_id: '',
-    actor_id: 'cli-user',
-    actor_type: 'user' as const,
-    role: 'owner' as const,
-  };
+  let actor: ActorContext | null = null;
 
   if (apiKey) {
     const crypto = await import('node:crypto');
@@ -323,15 +323,13 @@ async function createDbClient(databaseUrl: string, apiKey?: string): Promise<Cli
     } else {
       throw new Error('Invalid CRMY_API_KEY.');
     }
+  } else {
+    actor = await resolveLocalActor(db, tenantSlugOrId);
   }
 
-  if (!actor.tenant_id) {
-    const tenantResult = await db.query("SELECT id FROM tenants WHERE slug = 'default' LIMIT 1");
-    if (tenantResult.rows.length > 0) {
-      actor.tenant_id = tenantResult.rows[0].id;
-    }
+  if (!actor?.tenant_id || !actor.actor_id) {
+    throw new Error('Could not resolve a local CRMy actor. Run `crmy init` or set a valid CRMY_API_KEY.');
   }
-
   const tools = getToolsForActor(db, actor);
 
   return {
@@ -359,7 +357,7 @@ export async function getClient(configPath?: string): Promise<CliClient> {
   // Prefer direct DB connection when available
   if (databaseUrl) {
     const apiKey = process.env.CRMY_API_KEY ?? config.apiKey;
-    return createDbClient(databaseUrl, apiKey);
+    return createDbClient(databaseUrl, apiKey, config.tenantId);
   }
 
   // Fall back to HTTP client if authenticated

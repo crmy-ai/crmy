@@ -4,6 +4,7 @@
 import { Command } from 'commander';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { loadConfigFile } from '../config.js';
+import { resolveLocalActor } from '../local-actor.js';
 import type { ActorContext } from '@crmy/shared';
 import { runAgentSmoke } from './agent-smoke.js';
 
@@ -98,13 +99,8 @@ Agent guidance:
         process.exit(1);
       }
 
-      // Resolve actor from API key
-      let actor: ActorContext = {
-        tenant_id:  '',
-        actor_id:   'cli-agent',
-        actor_type: 'agent' as const,
-        role:       'owner'  as const,
-      };
+      // Resolve actor from API key, or use a real local owner/admin user for direct DB mode.
+      let actor: ActorContext | null = null;
 
       if (apiKey) {
         const crypto  = await import('node:crypto');
@@ -139,22 +135,19 @@ Agent guidance:
           process.stderr.write('[crmy mcp] Invalid CRMY_API_KEY.\n');
           process.exit(1);
         }
-      }
-
-      // Fallback: use default tenant
-      if (!actor.tenant_id) {
-        const tenantResult = await db.query(
-          "SELECT id FROM tenants WHERE slug = 'default' LIMIT 1",
-        );
-        if (tenantResult.rows.length > 0) {
-          actor.tenant_id = tenantResult.rows[0].id;
+      } else {
+        try {
+          actor = await resolveLocalActor(db, config.tenantId);
+        } catch (err) {
+          process.stderr.write(`[crmy mcp] ${(err as Error).message}\n`);
+          process.exit(1);
         }
       }
 
-      if (!actor.tenant_id) {
+      if (!actor?.tenant_id || !actor.actor_id) {
         process.stderr.write(
-          '[crmy mcp] No tenant found in database.\n' +
-          '  Run `npx -y @crmy/cli init` to create the first tenant and owner account.\n',
+          '[crmy mcp] Could not resolve a local CRMy actor.\n' +
+          '  Run `npx -y @crmy/cli init` or set a valid CRMY_API_KEY.\n',
         );
         process.exit(1);
       }

@@ -141,8 +141,6 @@ export async function resetSampleData(db: DbPool, tenantId: string, options?: { 
     await db.query('DELETE FROM opportunities WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
     await db.query('DELETE FROM contacts WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
     await db.query('DELETE FROM accounts WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
-    await db.query('DELETE FROM actors WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
-    await db.query('DELETE FROM users WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
     await db.query('COMMIT');
   } catch (err) {
     await db.query('ROLLBACK');
@@ -165,6 +163,19 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
   await db.query('BEGIN');
   try {
   const sampleIds = Object.values(SAMPLE_DATA_IDS);
+  const sampleUserIds = [IDS.USER_ADMIN, IDS.USER_MANAGER, IDS.USER_MEMBER, IDS.USER_PEER];
+  const existingSampleTenant = await db.query(
+    `SELECT tenant_id
+     FROM users
+     WHERE id = ANY($1::uuid[])
+       AND tenant_id <> $2
+     LIMIT 1`,
+    [sampleUserIds, tenantId],
+  );
+  if (existingSampleTenant.rows.length > 0) {
+    throw new Error('Sample data already exists in another tenant. Use that tenant or reset the existing sample workspace first.');
+  }
+
   await db.query('DELETE FROM hitl_requests WHERE tenant_id <> $1 AND id = ANY($2::uuid[])', [tenantId, sampleIds]);
   await db.query('DELETE FROM signal_groups WHERE tenant_id <> $1 AND id = ANY($2::uuid[])', [tenantId, sampleIds]);
   await db.query('DELETE FROM raw_context_sources WHERE tenant_id <> $1 AND id = ANY($2::uuid[])', [tenantId, sampleIds]);
@@ -181,9 +192,6 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
   await db.query('DELETE FROM opportunities WHERE tenant_id <> $1 AND id = ANY($2::uuid[])', [tenantId, sampleIds]);
   await db.query('DELETE FROM contacts WHERE tenant_id <> $1 AND id = ANY($2::uuid[])', [tenantId, sampleIds]);
   await db.query('DELETE FROM accounts WHERE tenant_id <> $1 AND id = ANY($2::uuid[])', [tenantId, sampleIds]);
-  await db.query('DELETE FROM actors WHERE tenant_id <> $1 AND id = ANY($2::uuid[])', [tenantId, sampleIds]);
-  await db.query('DELETE FROM users WHERE tenant_id <> $1 AND id = ANY($2::uuid[])', [tenantId, sampleIds]);
-
   const demoPasswordHash = hashPassword('crmy-demo-123');
   await db.query(
     `INSERT INTO users (id, tenant_id, email, name, role, manager_id, password_hash, is_active, password_set_at)
@@ -192,7 +200,8 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
        ($2, $5, 'sample.manager@crmy.local', 'Jordan Lee', 'manager', NULL, $6, true, now()),
        ($3, $5, 'sample.rep@crmy.local', 'Cody Harris', 'member', $2, $6, true, now()),
        ($4, $5, 'sample.peer@crmy.local', 'Avery Kim', 'member', $2, $6, true, now())
-     ON CONFLICT (tenant_id, email) DO UPDATE SET
+     ON CONFLICT (id) DO UPDATE SET
+       email = EXCLUDED.email,
        name = EXCLUDED.name,
        role = EXCLUDED.role,
        manager_id = EXCLUDED.manager_id,
