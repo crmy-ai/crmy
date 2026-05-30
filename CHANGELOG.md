@@ -4,6 +4,30 @@ All notable changes to CRMy are documented here.
 
 ---
 
+## [0.8.3] — 2026-05-29
+
+### Release Focus
+
+0.8.3 is a hardening and clarity release for CRMy as the operational customer context and action layer for GTM agents. It tightens the app, MCP/CLI surface, docs, examples, scoped access, context extraction, Signal review, Handoffs, Customer Email, Customer Activity, Systems of Record setup, and Workspace Agent flows.
+
+### Highlights
+
+- **Clearer product promise**: README and guide language now explain CRMy around typed operational Memory, Active Context, Raw Context, Signals, Handoffs, and governed writeback.
+- **Agent harness examples**: added or refreshed examples for Claude Code, Claude Desktop, Codex, ChatGPT Developer Mode, Hermes Agent, and OpenClaw so install-to-value can be proven through MCP quickly.
+- **Scoped GTM workspace polish**: member/manager/admin experiences are clearer, with safer scoped access expectations and user-facing Overview patterns.
+- **Raw Context and Signal reliability**: improved subject association, account-scoped extraction guidance, Signal readiness, and Lineage/Context Graph clarity.
+- **Workspace Agent improvements**: tightened readiness messaging, scoped tool expectations, durable/background task behavior, attachments, record draft preview, and email drafting paths.
+- **Customer Email and Customer Activity**: reframed mailbox/calendar data as optional context feeds, with stronger filtering, record matching, and Raw Context processing language.
+- **Systems of Record clarity**: setup now better communicates what CRMy reads, what it may write, when writeback occurs, and how approvals/audit fit.
+- **UI consistency**: login, Command Center, Handoffs, Context tabs, record drawers, Signals, Memory, search, empty states, and object actions received consistency and usability polish.
+- **MCP/CLI drift repair**: expanded coverage and documentation around agent-facing tools, record draft preview, email drafting, activity/email context, and the `agent-smoke` validation path.
+
+### Notes
+
+Live connector certification remains environment-dependent. HubSpot is the primary certified path; Salesforce, Databricks, Snowflake, mailbox/calendar OAuth, and custom provider flows should be smoke-tested against real tenant credentials before a production claim.
+
+---
+
 ## [0.8.2] — 2026-05-28
 
 ### Release Focus
