@@ -10,6 +10,7 @@ Chosen defaults for the 0.8-1.0 line:
 
 - **0.8 supports CRM and warehouse systems of record.** Salesforce, HubSpot, Databricks SQL Warehouse / Delta-backed tables, and Snowflake are the first targets.
 - **0.9 hardens the source-to-action loop.** The priority is not more surface area. The priority is proving that messy customer context reliably becomes Signals, trusted Memory, governed human decisions, and auditable action.
+- **1.0 is resilience at scale.** The priority is making CRMy dependable on serverless Postgres with high-volume Raw Context, Signals, Memory, source sync, agent work, MCP traffic, and audit history.
 - **Warehouses can be authoritative.** CRMy should not assume the CRM is always the primary system of record.
 - **Warehouse writeback is governed.** Agents cannot run arbitrary SQL writes. Writes must use configured mappings and approved write modes.
 - **Automations and Sequences reuse the existing event bus.** Connector and warehouse sync should emit normal CRMy events so existing triggers, HITL, audit, and context extraction keep working together.
@@ -442,18 +443,201 @@ Acceptance target: a new builder can run CRMy, understand the model, ingest cont
 - Do not require mailbox/calendar connections for emails, transcripts, or notes to feed Memory.
 - Do not let agents write directly to systems of record without policy, preview, idempotency, approval where required, and audit.
 
-## 1.0: Trusted Default Engine
+## 1.0: Resilience At Scale
 
-Goal: make CRMy production-ready as the default context and execution platform for revenue agents.
+Goal: make CRMy reliable as the default context and action engine when a tenant has hundreds of thousands of Raw Context sources and Signals, tens of thousands of Memory entries, active mailbox/calendar/system-of-record sync, multiple Workspace Agent users, and external MCP clients.
+
+Assumed production shape:
+
+- Serverless Postgres such as Neon, Supabase, or Lakebase.
+- Horizontally scaled app instances and separate worker instances.
+- Optional pooled database URLs or PgBouncer-style connection pooling.
+- Long-running work handled by durable jobs, not by request lifetimes.
+- Multiple human roles and agent clients operating under the same scoped access model.
+
+### What Breaks First Without 1.0 Hardening
+
+- **Database connections exhaust.** App instances currently create normal Postgres pools. In serverless deployments, per-instance pools can exceed provider connection limits quickly.
+- **Background work starves or stalls.** A single in-process worker loop and global advisory lock can let one slow task block extraction, embeddings, source sync, outbox retries, and agent-turn recovery.
+- **Lists and dashboards get expensive.** Large pages that request counts, broad totals, or client-filtered batches become slow and costly as tenants reach hundreds of thousands of rows.
+- **Search becomes uneven.** Global search, Context Browser, Signals, Memory, Graph, and Lineage need consistent server-side filtering, stable cursors, and search indexes instead of loading recent records and filtering locally.
+- **Raw Context processing becomes request-bound.** LLM extraction, JSON repair, subject resolution, and signal grouping must survive timeouts, cold starts, provider failures, and retries without duplicate Signals or stuck sources.
+- **Source sync becomes too chunky.** Mailbox, calendar, CRM, and warehouse sync need page-level checkpoints and backoff. A provider page failure should not replay or lose an entire sync run.
+- **Agent and MCP sessions become fragile.** In-memory session registries and long SSE streams do not survive multi-instance routing, serverless freezes, or deploys without resumable persisted events.
+- **Lineage and audit become heavy.** Source-to-action proof trails and audit logs grow quickly and need indexed edges, retention/export, and precomputed summaries.
+- **Scoped access checks get expensive.** Visibility filters that rely on per-row joins or `EXISTS` checks will degrade unless ownership/scope metadata is materialized on high-volume context tables.
+
+Current code signals behind these findings:
+
+- `packages/server/src/db/pool.ts` uses a normal per-process Postgres pool; production needs explicit serverless connection budgeting.
+- `packages/server/src/index.ts` starts migrations and an in-process background worker from the app runtime; production needs separated migration and worker execution.
+- `packages/server/src/db/repos/context-outbox.ts` should gain the same stale-lock and retry scheduling guarantees as newer durable queues.
+- `packages/server/src/db/repos/search.ts` and high-volume list repos should converge on indexed, scoped, server-side search rather than broad unions or client-filtered recent batches.
+- `packages/server/src/services/customer-email.ts` and `packages/server/src/services/customer-activity.ts` need page-level sync checkpoints and pre-storage filtering before large mailbox/calendar deployments.
+- The MCP session registry in `packages/server/src/index.ts` is in-memory today; production multi-instance deployments need persisted or explicitly sticky sessions.
+
+### 1. Serverless Postgres Runtime
+
+Make database usage explicit and safe for Neon, Supabase, Lakebase, and self-hosted Postgres.
 
 Key changes:
 
-- Stable MCP tools, REST API, OpenAPI schema, connector SDK, plugin hooks, and TypeScript/Python SDKs.
-- Connector certification tests for Salesforce, HubSpot, Databricks, Snowflake, and custom systems.
-- Enterprise identity and lifecycle support: SSO/OIDC or SAML, SCIM-ready provisioning, role templates, API key rotation, and audit export.
-- Production operations: backup/restore, sync replay, retention policies, queue health, connector health, upgrade checks, and disaster recovery docs.
-- Expanded customer success coverage: renewals, subscriptions, contracts, support cases, product usage, success plans, QBRs, and health history.
-- Evaluation suites for context retrieval, sync correctness, write safety, automation behavior, sequence outcomes, and agent task completion.
+- Add production database profile settings for pool max, idle timeout, connection timeout, statement timeout, and application name.
+- Document pooled vs direct database URLs, including when migrations should use direct connections and runtime should use pooled connections.
+- Move migrations out of normal app startup for production deployments, or guard them with an explicit one-shot migration command and advisory lock.
+- Add connection budget telemetry: active pool clients, idle clients, waiting requests, slow queries, timed-out statements, and connection errors.
+- Keep health checks cheap. Separate shallow process health from deeper database readiness so load balancers do not create query noise.
+- Add query timeout defaults for request handlers, background jobs, and agent tools.
+
+Acceptance target: CRMy can scale app instances without accidentally multiplying database connections past provider limits.
+
+### 2. Durable Queue And Worker Architecture
+
+Make every long-running or retryable path lease-based, observable, and recoverable.
+
+Key changes:
+
+- Split the single background loop into named job processors with independent leases, batch sizes, and timeouts.
+- Use `FOR UPDATE SKIP LOCKED`, `locked_at`, `next_retry_at`, retry counts, dead-letter states, and stale-processing recovery for every durable queue.
+- Bring context outbox up to the same resilience bar as embedding jobs and agent turns.
+- Make extraction, embeddings, source sync, context outbox, agent turns, workflow runs, sequence steps, and writebacks resumable in small chunks.
+- Add queue health metrics: pending, running, failed, dead-lettered, oldest pending age, oldest locked age, retry rate, and last successful processor heartbeat.
+- Add safe admin recovery actions: retry, reprocess, unlock stale job, dead-letter, replay sync page, and inspect failure payload.
+
+Acceptance target: killing a worker mid-job cannot permanently strand Raw Context, embeddings, outbox events, source sync, or agent work.
+
+### 3. Query, List, And Search Scale
+
+Make high-volume pages search-first and cursor-first instead of count-first and recent-first.
+
+Key changes:
+
+- Replace default total-count requirements with `limit + 1` paging, approximate counts, cached rollups, or async totals where exact counts are not user-critical.
+- Use stable compound cursors such as `(updated_at, id)` or `(created_at, id)` instead of timestamp-only cursors.
+- Add server-side filters for every large collection before records reach the UI: Raw Context, Signals, Memory, Handoffs, Email Messages, Calendar Events, Activities, Audit, Lineage, Graph, and Search.
+- Add tenant-scoped and owner-scope indexes that match the actual filters: tenant, owner/customer scope, status, type, source, subject, updated/created time, and search vector.
+- Introduce a unified search index or materialized search table for global search, command palette record lookup, MCP entity resolution, and agent retrieval.
+- Virtualize large table/card views and avoid client-side filtering over capped result sets.
+- Materialize high-volume access scope where needed, especially for context entries, raw context sources, signal groups, email messages, calendar events, and audit events.
+
+Acceptance target: a tenant with 500k Raw Context sources, 500k Signals, and 50k Memory entries still has fast scoped search, filter, and drawer open flows without requiring pagination controls.
+
+### 4. Raw Context Extraction Throughput
+
+Make extraction high-recall, conservative, idempotent, and resilient under load.
+
+Key changes:
+
+- Route app, REST, MCP, CLI, Email, Activities, attachments, and reprocess flows through one durable Raw Context processing service.
+- Keep a short synchronous attempt for good UX, then continue through a durable job when processing exceeds the request budget.
+- Make `source_ref` idempotency include tenant, source type, actor/user, source label, selected subjects, provider IDs, and document hash.
+- Persist extraction attempt metadata: model/provider, prompt version, packet hash, attempt count, status, failure code, and repaired JSON status.
+- Bound extraction packets with account-scoped related-record directories, compact field hints, capped Memory/Signal candidates, and explicit truncation metadata.
+- Add per-tenant/provider backpressure so extraction does not overwhelm local models, remote APIs, or database write throughput.
+- Add a golden extraction corpus plus replay tooling so prompt/model changes can be evaluated before release.
+
+Acceptance target: malformed JSON, model timeouts, duplicate source ingestion, provider outages, and subject ambiguity become recoverable receipts, not user dead ends.
+
+### 5. Source Sync At Scale
+
+Make mailbox, calendar, CRM, warehouse, and custom API/MCP sync incremental and cheap.
+
+Key changes:
+
+- Filter internal, spam, trash, automated, excluded-domain, and excluded-folder sources before storage whenever provider APIs allow it.
+- Persist provider page checkpoints and cursors after each successful page, not only at the end of a whole sync run.
+- Use Gmail history IDs, Microsoft Graph delta links, calendar sync tokens, CRM watermarks, and warehouse watermark columns with replay-safe dedupe.
+- Store aggregate skipped-source stats without storing full low-value messages or meetings.
+- Stage large sync batches before upsert where useful, with row-level errors, partial success, and retryable failures.
+- Keep ambiguous customer meetings/emails in review instead of creating weakly linked records or wasting extraction.
+- Add connector health that distinguishes auth failure, provider throttling, mapping failure, extraction failure, and writeback failure.
+
+Acceptance target: a large mailbox/calendar/SOR sync can pause, resume, retry, and explain skipped work without losing customer-facing context or consuming extraction on low-value sources.
+
+### 6. Pgvector, Embeddings, And Retrieval Scale
+
+Keep semantic retrieval useful without making pgvector a hard dependency or runaway cost center.
+
+Key changes:
+
+- Keep lexical/deterministic fallback paths for every retrieval flow.
+- Track embedding coverage by entity type and tenant: Raw Context, Context Entries, Signal Groups, Memory, and source artifacts.
+- Add embedding backpressure, model/dimension compatibility checks, stale embedding detection, and re-embedding migration plans.
+- Document pgvector/HNSW index strategy for serverless Postgres, including index build timing and operational caveats.
+- Avoid embedding low-value filtered sources and duplicate raw payloads.
+- Add retrieval evaluation sets for account-scoped candidate discovery, Signal grouping, briefing enrichment, and MCP `entity_resolve`.
+
+Acceptance target: semantic retrieval improves grouping and briefing quality when enabled, but CRMy remains correct and usable when embeddings lag, fail, or are disabled.
+
+### 7. Workspace Agent And MCP Durability
+
+Make agent work reliable across browser navigation, deploys, provider errors, and multi-instance routing.
+
+Key changes:
+
+- Keep durable agent turns as the source of truth for messages, events, tool calls, reasoning summaries, and final outputs.
+- Add polling fallback for every streamed turn so clients can recover when SSE is interrupted.
+- Move MCP session state out of process memory or make session affinity/expiry explicit for production deployments.
+- Add persisted tool-call idempotency keys for write tools so retries cannot duplicate creates, updates, sends, handoffs, or writebacks.
+- Budget every tool call: default limits, explicit filters, timeouts, and clear “too broad” responses.
+- Add MCP doctor and agent smoke tests that prove `entity_resolve -> briefing_get -> signal list -> handoff/action` against demo data in under one minute.
+- Keep every tool scoped to the current human actor, including background continuation and delayed tool execution.
+
+Acceptance target: a user or external agent can leave, reconnect, retry, or switch clients without losing work, duplicating writes, or bypassing permissions.
+
+### 8. Systems Of Record And Writeback Resilience
+
+Make external reads and writes provable, replayable, and policy-safe.
+
+Key changes:
+
+- Add sync-run partitions or chunk tables for object/page checkpoints, row-level errors, conflict states, and replay.
+- Use writeback idempotency keys tied to tenant, actor, subject, target system, mapped object, mapped field set, and request source.
+- Add writeback state transitions for previewed, pending approval, approved, executing, succeeded, failed, retrying, cancelled, and superseded.
+- Attach writeback receipts to Handoffs, Memory, Lineage, external record references, and audit events.
+- Enforce source authority and loop-prevention rules before every external write.
+- Add bulk-safe conflict detection for warehouse and CRM sync instead of per-row interactive checks only.
+
+Acceptance target: admins can prove what CRMy read, what it wrote, why it was allowed, who approved it, and how to replay or recover failures.
+
+### 9. Events, Lineage, Audit, And Data Lifecycle
+
+Make proof trails useful without letting event volume overwhelm operational tables.
+
+Key changes:
+
+- Persist retrieval events for high-impact agent actions so Active Context use appears in Lineage.
+- Precompute or cache lineage edges for common source-to-action paths instead of rebuilding everything from raw joins at read time.
+- Add audit retention/export policies, optional partitions, and archived audit search.
+- Add tenant-level retention controls for raw payloads, email/message bodies, meeting artifacts, extracted snippets, and generated drafts.
+- Add data minimization defaults so low-value raw source material is not stored indefinitely.
+- Add event replay and dedupe controls for workflow, sequence, webhook, plugin/custom API, context outbox, and writeback events.
+
+Acceptance target: CRMy keeps enough proof for trust and compliance while controlling storage, query cost, and sensitive-data exposure.
+
+### 10. Observability, Limits, And Scale Gates
+
+Make scale visible before users feel it.
+
+Key changes:
+
+- Add first-class metrics for request latency, query latency, queue lag, extraction throughput, model latency, provider sync latency, writeback latency, and agent tool latency.
+- Add tenant quotas and soft limits for Raw Context ingestion, extraction jobs, mailbox/calendar sync volume, embedding jobs, agent turns, and MCP traffic.
+- Add graceful degradation states: retrieval degraded, extraction queued, sync throttled, model unavailable, embeddings catching up, and writeback delayed.
+- Add load tests and synthetic large-tenant fixtures to CI or release gates.
+- Add `EXPLAIN`/index review fixtures for high-volume queries that must stay bounded.
+- Add operational runbooks for slow queries, connection exhaustion, stuck queues, provider throttling, model outages, and disaster recovery.
+
+Acceptance target: 1.0 ships with measurable scale budgets, release gates, and recovery procedures rather than best-effort performance.
+
+### 1.0 Non-Goals
+
+- Do not make pgvector mandatory.
+- Do not turn every UI into a reporting table.
+- Do not store internal/spam/automated sources just because a connector can fetch them.
+- Do not let external agents bypass scoped access, approval, or writeback policy for performance.
+- Do not require one specific serverless Postgres provider; document provider-specific caveats while keeping the architecture portable.
+- Do not weaken the README promise. 1.0 should make the promise resilient under real production volume.
 
 ## Acceptance Criteria
 
@@ -478,6 +662,12 @@ Key changes:
 
 ### 1.0
 
+- CRMy can be deployed against serverless Postgres without connection exhaustion, startup migration races, or health-check query storms.
+- High-volume Context pages remain search-first and responsive against synthetic tenants with hundreds of thousands of Raw Context sources and Signals.
+- Durable jobs recover after worker crashes, cold starts, provider timeouts, and deploys without duplicate Signals, duplicate writes, or permanently stuck processing states.
+- Mailbox, calendar, CRM, warehouse, and custom API/MCP source sync can resume from page-level checkpoints and explain skipped/internal/low-value sources.
+- Workspace Agent and MCP work can resume through persisted turn events and safe polling when streams disconnect or instances restart.
+- Lineage, audit, retrieval, and writeback proof trails remain queryable through indexed edges, retention/export, and precomputed summaries.
 - CRMy can be deployed self-hosted by an enterprise team, connected to CRM and warehouse systems, governed by scoped actors/policies, and used by agents for read/write revenue workflows with audit-safe execution.
 - Developers can build against stable SDKs and MCP tools without reverse-engineering app behavior.
 - Admins can prove what happened, why it happened, who approved it, which systems changed, and what context the agent used.
@@ -495,6 +685,12 @@ Key changes:
 - **Scope parity tests:** REST, MCP, CLI, Workspace Agent, search, graph, lineage, Handoffs, email, activity, systems-of-record, Automations, and Sequences enforce the same member/manager/admin visibility model.
 - **Retrieval tests:** lexical fallback and pgvector retrieval both find account-scoped candidates without leaking inaccessible records.
 - **Security tests:** no arbitrary SQL writes, scoped actors cannot access unmapped systems, field-level authority is enforced, and secrets are never exposed in logs or audit payloads.
+- **Serverless Postgres tests:** pooled connection budget, statement timeouts, startup without runtime migrations, shallow/deep health behavior, and provider-specific migration guidance.
+- **Scale fixtures:** synthetic tenants with 500k Raw Context sources, 500k Signals, 50k Memory entries, large audit history, and active mailbox/calendar/SOR sync history.
+- **Query-plan tests:** `EXPLAIN` gates for high-volume list/search/detail endpoints, including Context Browser, Signals, Memory, Handoffs, Email Messages, Calendar Events, Audit, Search, Graph, and Lineage.
+- **Queue recovery tests:** worker crash/restart, stale lock recovery, retry/backoff, dead-letter handling, context outbox recovery, raw extraction retry, embedding catch-up, and agent-turn continuation.
+- **Source-sync scale tests:** provider pagination, cursor replay, partial-page failure, skipped-source aggregate stats, dedupe, row-level errors, and checkpoint resume for mailbox, calendar, CRM, and warehouse sync.
+- **Agent/MCP resilience tests:** interrupted SSE stream, polling recovery, multi-instance routing, stale MCP session behavior, tool-call idempotency, broad-query limits, and scoped denied access.
 
 ## Implementation Notes
 
@@ -503,3 +699,9 @@ Key changes:
 - Treat sync as a producer of typed CRMy mutations plus event metadata.
 - Avoid a separate automation engine for sync. Use the existing event bus and workflow run dedupe model.
 - Keep external writes separate from local object writes until preview, approval, and receipt handling are complete.
+- For production serverless Postgres, runtime app instances should use pooled connections and explicit pool limits; migration jobs should use a controlled direct connection path.
+- Do not run expensive exact counts by default on high-volume user paths. Prefer `limit + 1`, cached rollups, approximate counts, or async totals.
+- Every durable queue should have `locked_at`, `next_retry_at`, retry counts, dead-letter state, and stale-processing recovery.
+- Every high-volume cursor should be stable and compound, not timestamp-only.
+- Every large search/filter path should enforce tenant and actor scope in the database query before returning rows.
+- Any in-memory session or event registry must be documented as local-development-only or replaced with persisted state before 1.0 production guidance.
