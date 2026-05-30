@@ -2,25 +2,41 @@
 
 **Customer memory for AI sales agents.**
 
-Before an AI sales agent prepares a follow up email, updates an opportunity, prepares a pre-meeting brief, performs a renewal review, or writes back to a system of record, it needs to know what is true, what is stale, what is inferred, and what requires approval.
+Before an AI sales agent sends a follow-up, prepares a meeting brief, updates an opportunity, reviews a renewal, or writes back to a system of record, it needs trusted customer context.
+
+It needs to know what is true, what is stale, what is inferred, what requires approval, and which system owns the record.
 
 #### CRMy gives agents one trusted customer briefing before they act.
 
 A `briefing_get` call returns typed customer context across accounts, contacts, opportunities, activities, risks, commitments, next steps, evidence, stale warnings, and open handoffs.
 
+MCP-native, with CLI, REST API, and Web UI access. PostgreSQL-backed. Open source.
+
+If you are building agents that need operational customer memory, **star CRMy** and keep reading.
+
+---
+
+CRMy does not replace your systems of record. Your CRM, warehouse, support desk, mailbox, calendar, and other tools remain where work happens and state is stored.
+
+CRMy makes that state agent-operable.
+
+It turns messy customer context into typed operational Memory, gives agents scoped tools, and governs the path from recommendation to human review to system-of-record writeback.
+
 ```text
 Raw Context -> Signals -> Memory -> Handoffs / Writeback
 ```
 
-MCP-native. PostgreSQL-backed. Open source.
-
-**Star CRMy if you are building agents that need operational memory.**
+Before an agent acts on a customer, CRMy can tell it what is known, what is stale, what is inferred, what is approved, what action is allowed, what system owns the record, and what proof or audit trail will exist afterward.
 
 ---
 
 CRMy does not replace your system of record. Your CRM, warehouse, support desk, mailbox, calendar, etc. remain the systems where work happens and state is stored. 
 
 CRMy makes that state agent-operable: it turns messy customer context into typed operational Memory, gives agents scoped tools, and governs the path from recommendation to human review to system-of-record writeback.
+
+```text
+Raw Context -> Signals -> Memory -> Handoffs / Writeback
+```
 
 Before any agent acts on a customer, CRMy can tell it what is true, what is stale, what is inferred, what is approved, what system owns the record, what action is allowed, and what proof or audit trail will exist afterward.
 
