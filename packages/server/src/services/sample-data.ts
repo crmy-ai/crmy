@@ -663,7 +663,7 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
        id, tenant_id, agent_id, session_id, action_type, action_summary, action_payload,
        status, priority, sla_minutes, expires_at
      )
-     VALUES ($1, $2, 'sample-research-agent', 'sample-northstar-context-review',
+     VALUES ($1, $2, 'sample-research-agent', NULL,
        'context.signal_promote',
        'Review whether Northstar security risk should be promoted to Memory before writeback',
        $3,

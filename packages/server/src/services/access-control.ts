@@ -17,6 +17,11 @@ const OBJECT_TABLES: Record<OwnedObjectType, string> = {
 };
 const HITL_SUBJECT_TYPES = new Set(['account', 'contact', 'opportunity', 'use_case']);
 
+function uuidLike(value: unknown): value is UUID {
+  return typeof value === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 export function isGlobalActor(actor: ActorContext): boolean {
   return actor.role === 'admin' || actor.role === 'owner';
 }
@@ -204,6 +209,7 @@ async function hitlSessionSubject(
   sessionId?: string | null,
 ): Promise<{ subjectType?: string; subjectId?: UUID; userId?: string | null }> {
   if (!sessionId) return {};
+  if (!uuidLike(sessionId)) return {};
   const result = await db.query(
     'SELECT user_id, context_type, context_id FROM agent_sessions WHERE tenant_id = $1 AND id = $2 LIMIT 1',
     [tenantId, sessionId],

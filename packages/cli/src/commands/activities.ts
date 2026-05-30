@@ -5,6 +5,17 @@ import { Command } from 'commander';
 import { readFile } from 'node:fs/promises';
 import { getClient } from '../client.js';
 import { resolveSubjectRef } from './subject-ref.js';
+import { resolveShortId } from './id-ref.js';
+
+async function resolveMeetingId(client: Awaited<ReturnType<typeof getClient>>, id: string): Promise<string> {
+  return resolveShortId(client, id, {
+    label: 'meeting',
+    listTool: 'calendar_event_search',
+    listInput: { tab: 'all', include_internal: true, limit: 100 },
+    responseKeys: ['calendar_events', 'data'],
+    helpCommand: 'crmy activities meetings --tab all',
+  });
+}
 
 function printMeetings(events: Record<string, unknown>[]): void {
   if (events.length === 0) {
@@ -77,7 +88,8 @@ export function activitiesCommand(): Command {
     .description('Show one calendar meeting and linked artifacts')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('calendar_event_get', { id });
+      const meetingId = await resolveMeetingId(client, id);
+      const result = await client.call('calendar_event_get', { id: meetingId });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -86,7 +98,8 @@ export function activitiesCommand(): Command {
     .description('Process meeting artifacts as Raw Context')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('calendar_event_process', { id });
+      const meetingId = await resolveMeetingId(client, id);
+      const result = await client.call('calendar_event_process', { id: meetingId });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -109,8 +122,9 @@ export function activitiesCommand(): Command {
         text = answers.text;
       }
       const client = await getClient();
+      const meetingId = await resolveMeetingId(client, id);
       const result = await client.call('calendar_event_add_context', {
-        id,
+        id: meetingId,
         artifact_type: opts.type,
         text_content: text,
         source_label: opts.source,

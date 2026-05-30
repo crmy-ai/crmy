@@ -4,6 +4,17 @@
 import { Command } from 'commander';
 import { getClient } from '../client.js';
 import { resolveSubjectRef } from './subject-ref.js';
+import { resolveShortId } from './id-ref.js';
+
+async function resolveAssignmentId(client: Awaited<ReturnType<typeof getClient>>, id: string): Promise<string> {
+  return resolveShortId(client, id, {
+    label: 'assignment',
+    listTool: 'assignment_list',
+    listInput: { limit: 100 },
+    responseKeys: ['assignments', 'data'],
+    helpCommand: 'crmy assignments list',
+  });
+}
 
 export function assignmentsCommand(): Command {
   const cmd = new Command('assignments').description('Manage assignments (coordination & handoffs)');
@@ -82,7 +93,8 @@ export function assignmentsCommand(): Command {
   cmd.command('get <id>')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('assignment_get', { id });
+      const assignmentId = await resolveAssignmentId(client, id);
+      const result = await client.call('assignment_get', { id: assignmentId });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -91,7 +103,8 @@ export function assignmentsCommand(): Command {
     .description('Accept a pending assignment')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('assignment_accept', { id });
+      const assignmentId = await resolveAssignmentId(client, id);
+      const result = await client.call('assignment_accept', { id: assignmentId });
       const data = JSON.parse(result);
       console.log(`\n  Accepted assignment: ${data.assignment.id} (status: ${data.assignment.status})\n`);
       await client.close();
@@ -102,8 +115,9 @@ export function assignmentsCommand(): Command {
     .description('Complete an assignment')
     .action(async (id, opts) => {
       const client = await getClient();
+      const assignmentId = await resolveAssignmentId(client, id);
       const result = await client.call('assignment_complete', {
-        id,
+        id: assignmentId,
         completed_by_activity_id: opts.activity || undefined,
       });
       const data = JSON.parse(result);
@@ -116,8 +130,9 @@ export function assignmentsCommand(): Command {
     .description('Decline an assignment')
     .action(async (id, opts) => {
       const client = await getClient();
+      const assignmentId = await resolveAssignmentId(client, id);
       const result = await client.call('assignment_decline', {
-        id,
+        id: assignmentId,
         reason: opts.reason || undefined,
       });
       const data = JSON.parse(result);
@@ -129,7 +144,8 @@ export function assignmentsCommand(): Command {
     .description('Start working on an accepted assignment')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('assignment_start', { id });
+      const assignmentId = await resolveAssignmentId(client, id);
+      const result = await client.call('assignment_start', { id: assignmentId });
       const data = JSON.parse(result);
       console.log(`\n  Started assignment: ${data.assignment.id} (status: ${data.assignment.status})\n`);
       await client.close();
@@ -140,8 +156,9 @@ export function assignmentsCommand(): Command {
     .description('Mark an assignment as blocked')
     .action(async (id, opts) => {
       const client = await getClient();
+      const assignmentId = await resolveAssignmentId(client, id);
       const result = await client.call('assignment_block', {
-        id,
+        id: assignmentId,
         reason: opts.reason || undefined,
       });
       const data = JSON.parse(result);
@@ -154,8 +171,9 @@ export function assignmentsCommand(): Command {
     .description('Cancel an assignment')
     .action(async (id, opts) => {
       const client = await getClient();
+      const assignmentId = await resolveAssignmentId(client, id);
       const result = await client.call('assignment_cancel', {
-        id,
+        id: assignmentId,
         reason: opts.reason || undefined,
       });
       const data = JSON.parse(result);

@@ -4,6 +4,17 @@
 import { Command } from 'commander';
 import { getClient } from '../client.js';
 import { resolveSubjectRef } from './subject-ref.js';
+import { resolveShortId } from './id-ref.js';
+
+async function resolveWorkflowId(client: Awaited<ReturnType<typeof getClient>>, id: string): Promise<string> {
+  return resolveShortId(client, id, {
+    label: 'workflow',
+    listTool: 'workflow_list',
+    listInput: { limit: 100 },
+    responseKeys: ['workflows', 'data'],
+    helpCommand: 'crmy workflows list',
+  });
+}
 
 export function workflowsCommand(): Command {
   const cmd = new Command('workflows').description('Manage automation workflows');
@@ -36,7 +47,8 @@ export function workflowsCommand(): Command {
   cmd.command('get <id>')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('workflow_get', { id });
+      const workflowId = await resolveWorkflowId(client, id);
+      const result = await client.call('workflow_get', { id: workflowId });
       const data = JSON.parse(result);
       console.log('\nWorkflow:', data.workflow.name);
       console.log('Trigger:', data.workflow.trigger_event);
@@ -90,7 +102,8 @@ export function workflowsCommand(): Command {
   cmd.command('delete <id>')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('workflow_delete', { id });
+      const workflowId = await resolveWorkflowId(client, id);
+      const result = await client.call('workflow_delete', { id: workflowId });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -108,7 +121,8 @@ export function workflowsCommand(): Command {
       if (opts.active) patch.is_active = true;
       if (opts.inactive) patch.is_active = false;
       const client = await getClient();
-      const result = await client.call('workflow_update', { id, patch });
+      const workflowId = await resolveWorkflowId(client, id);
+      const result = await client.call('workflow_update', { id: workflowId, patch });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -119,7 +133,8 @@ export function workflowsCommand(): Command {
     .action(async (id, opts) => {
       const sample_payload = JSON.parse(opts.payload);
       const client = await getClient();
-      const result = await client.call('workflow_test', { id, sample_payload });
+      const workflowId = await resolveWorkflowId(client, id);
+      const result = await client.call('workflow_test', { id: workflowId, sample_payload });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -129,7 +144,8 @@ export function workflowsCommand(): Command {
     .option('--name <name>', 'Name for the clone')
     .action(async (id, opts) => {
       const client = await getClient();
-      const result = await client.call('workflow_clone', { id, name: opts.name });
+      const workflowId = await resolveWorkflowId(client, id);
+      const result = await client.call('workflow_clone', { id: workflowId, name: opts.name });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -142,8 +158,9 @@ export function workflowsCommand(): Command {
     .action(async (id, opts) => {
       const client = await getClient();
       const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
+      const workflowId = await resolveWorkflowId(client, id);
       const result = await client.call('workflow_trigger', {
-        id,
+        id: workflowId,
         subject_type: subject.subject_type,
         subject_id: subject.subject_id,
         objective: opts.objective,
@@ -157,8 +174,9 @@ export function workflowsCommand(): Command {
     .option('--status <status>', 'Filter: running, completed, failed')
     .action(async (workflowId, opts) => {
       const client = await getClient();
+      const resolvedWorkflowId = await resolveWorkflowId(client, workflowId);
       const result = await client.call('workflow_run_list', {
-        workflow_id: workflowId,
+        workflow_id: resolvedWorkflowId,
         status: opts.status,
         limit: 20,
       });

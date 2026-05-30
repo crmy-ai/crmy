@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import { readFile } from 'node:fs/promises';
 import { getClient } from '../client.js';
 import { resolveSubjectRef } from './subject-ref.js';
+import { resolveShortId } from './id-ref.js';
 
 function printEntries(entries: Record<string, unknown>[], total?: number, limit = 20): void {
   if (entries.length === 0) {
@@ -75,6 +76,26 @@ async function resolveSignalGroupRef(client: Awaited<ReturnType<typeof getClient
     throw new Error(`Signal ID "${ref}" is ambiguous. Use more characters from the ID.`);
   }
   throw new Error(`No Signal found with ID prefix "${ref}". Run \`crmy context signal-groups --all\`.`);
+}
+
+async function resolveContextEntryRef(client: Awaited<ReturnType<typeof getClient>>, ref: string): Promise<string> {
+  return resolveShortId(client, ref, {
+    label: 'context entry',
+    listTool: 'context_list',
+    listInput: { limit: 100, is_current: undefined },
+    responseKeys: ['context_entries', 'data'],
+    helpCommand: 'crmy context list --include-superseded',
+  });
+}
+
+async function resolveRawSourceRef(client: Awaited<ReturnType<typeof getClient>>, ref: string): Promise<string> {
+  return resolveShortId(client, ref, {
+    label: 'Raw Context source',
+    listTool: 'context_raw_source_list',
+    listInput: { limit: 100 },
+    responseKeys: ['raw_context_sources', 'data'],
+    helpCommand: 'crmy context raw-sources',
+  });
 }
 
 export function contextCommand(): Command {
@@ -266,8 +287,9 @@ export function contextCommand(): Command {
     .option('-c, --confidence <n>', 'Updated confidence')
     .action(async (id, opts) => {
       const client = await getClient();
+      const entryId = await resolveContextEntryRef(client, id);
       const result = await client.call('context_signal_promote', {
-        id,
+        id: entryId,
         body: opts.body,
         title: opts.title,
         confidence: opts.confidence ? parseFloat(opts.confidence) : undefined,
@@ -282,7 +304,8 @@ export function contextCommand(): Command {
     .option('-r, --reason <reason>', 'Reason for rejection')
     .action(async (id, opts) => {
       const client = await getClient();
-      const result = await client.call('context_signal_reject', { id, reason: opts.reason });
+      const entryId = await resolveContextEntryRef(client, id);
+      const result = await client.call('context_signal_reject', { id: entryId, reason: opts.reason });
       const data = JSON.parse(result);
       console.log(`\n  Rejected Signal: ${data.context_entry.id}\n`);
       await client.close();
@@ -329,7 +352,8 @@ export function contextCommand(): Command {
     .description('Show one Raw Context processing record')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('context_raw_source_get', { id });
+      const sourceId = await resolveRawSourceRef(client, id);
+      const result = await client.call('context_raw_source_get', { id: sourceId });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -338,7 +362,8 @@ export function contextCommand(): Command {
     .description('Reprocess a Raw Context source')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('context_raw_source_reprocess', { id });
+      const sourceId = await resolveRawSourceRef(client, id);
+      const result = await client.call('context_raw_source_reprocess', { id: sourceId });
       const data = JSON.parse(result);
       printProcessingReceipt(data);
       await client.close();
@@ -352,30 +377,35 @@ export function contextCommand(): Command {
     .option('--raw-source <id>', 'Raw Context source ID')
     .action(async (opts) => {
       const client = await getClient();
+      const entryId = opts.entry ? await resolveContextEntryRef(client, opts.entry) : undefined;
+      const signalGroupId = opts.signal ? await resolveSignalGroupRef(client, opts.signal) : undefined;
+      const rawSourceId = opts.rawSource ? await resolveRawSourceRef(client, opts.rawSource) : undefined;
       const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
       const result = await client.call('context_lineage_get', {
         subject_type: subject.subject_type,
         subject_id: subject.subject_id,
-        context_entry_id: opts.entry,
-        signal_group_id: opts.signal,
-        raw_context_source_id: opts.rawSource,
+        context_entry_id: entryId,
+        signal_group_id: signalGroupId,
+        raw_context_source_id: rawSourceId,
       });
       const data = JSON.parse(result);
-      console.log(data.summary ?? {});
-      console.table((data.nodes ?? []).map((node: Record<string, unknown>) => ({
+      const lineage = data.lineage ?? data;
+      console.log(lineage.summary ?? {});
+      console.table((lineage.nodes ?? []).map((node: Record<string, unknown>) => ({
         id: String(node.id ?? '').slice(0, 8),
         type: node.type,
         title: String(node.title ?? node.label ?? '').slice(0, 48),
         stage: node.stage ?? '',
       })));
-      console.log(`Edges: ${(data.edges ?? []).length}`);
+      console.log(`Edges: ${(lineage.edges ?? []).length}`);
       await client.close();
     });
 
   cmd.command('get <id>')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('context_get', { id });
+      const entryId = await resolveContextEntryRef(client, id);
+      const result = await client.call('context_get', { id: entryId });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -395,8 +425,9 @@ export function contextCommand(): Command {
       }
 
       const client = await getClient();
+      const entryId = await resolveContextEntryRef(client, id);
       const result = await client.call('context_supersede', {
-        id,
+        id: entryId,
         body,
         title: opts.title || undefined,
       });

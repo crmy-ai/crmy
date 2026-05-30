@@ -3,6 +3,17 @@
 
 import { Command } from 'commander';
 import { getClient } from '../client.js';
+import { resolveShortId } from './id-ref.js';
+
+async function resolveWebhookId(client: Awaited<ReturnType<typeof getClient>>, id: string): Promise<string> {
+  return resolveShortId(client, id, {
+    label: 'webhook',
+    listTool: 'webhook_list',
+    listInput: { limit: 100 },
+    responseKeys: ['webhooks', 'data'],
+    helpCommand: 'crmy webhooks list',
+  });
+}
 
 export function webhooksCommand(): Command {
   const cmd = new Command('webhooks').description('Manage webhook endpoints');
@@ -32,7 +43,8 @@ export function webhooksCommand(): Command {
   cmd.command('get <id>')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('webhook_get', { id });
+      const webhookId = await resolveWebhookId(client, id);
+      const result = await client.call('webhook_get', { id: webhookId });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -61,7 +73,8 @@ export function webhooksCommand(): Command {
   cmd.command('delete <id>')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('webhook_delete', { id });
+      const webhookId = await resolveWebhookId(client, id);
+      const result = await client.call('webhook_delete', { id: webhookId });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -71,8 +84,9 @@ export function webhooksCommand(): Command {
     .option('--status <status>', 'Filter by status (pending, success, failed)')
     .action(async (opts) => {
       const client = await getClient();
+      const endpointId = opts.endpoint ? await resolveWebhookId(client, opts.endpoint) : undefined;
       const result = await client.call('webhook_list_deliveries', {
-        endpoint_id: opts.endpoint,
+        endpoint_id: endpointId,
         status: opts.status,
         limit: 20,
       });

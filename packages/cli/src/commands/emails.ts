@@ -5,6 +5,27 @@ import { Command } from 'commander';
 import { readFile } from 'node:fs/promises';
 import { getClient } from '../client.js';
 import { resolveSubjectRef } from './subject-ref.js';
+import { resolveShortId } from './id-ref.js';
+
+async function resolveEmailId(client: Awaited<ReturnType<typeof getClient>>, id: string): Promise<string> {
+  return resolveShortId(client, id, {
+    label: 'email',
+    listTool: 'email_search',
+    listInput: { limit: 100 },
+    responseKeys: ['emails', 'data'],
+    helpCommand: 'crmy emails list',
+  });
+}
+
+async function resolveEmailMessageId(client: Awaited<ReturnType<typeof getClient>>, id: string): Promise<string> {
+  return resolveShortId(client, id, {
+    label: 'email message',
+    listTool: 'email_message_search',
+    listInput: { view: 'all', limit: 100 },
+    responseKeys: ['email_messages', 'data'],
+    helpCommand: 'crmy emails messages --view all',
+  });
+}
 
 export function emailsCommand(): Command {
   const cmd = new Command('emails').description('Manage Customer Email and outbound follow-ups');
@@ -21,11 +42,13 @@ export function emailsCommand(): Command {
         limit: 20,
       });
       const data = JSON.parse(result);
-      if (data.emails?.length === 0) {
+      const emails = data.emails ?? data.data ?? (Array.isArray(data) ? data : []);
+      if (emails.length === 0) {
         console.log('No emails found.');
+        await client.close();
         return;
       }
-      console.table(data.emails?.map((e: Record<string, unknown>) => ({
+      console.table(emails.map((e: Record<string, unknown>) => ({
         id: (e.id as string).slice(0, 8),
         to: e.to_email,
         subject: e.subject,
@@ -70,7 +93,8 @@ export function emailsCommand(): Command {
     .description('Get a customer email message with linked records and processing receipt')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('email_message_get', { id });
+      const messageId = await resolveEmailMessageId(client, id);
+      const result = await client.call('email_message_get', { id: messageId });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -79,7 +103,8 @@ export function emailsCommand(): Command {
     .description('Process a customer email message as Raw Context')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('email_message_process', { id });
+      const messageId = await resolveEmailMessageId(client, id);
+      const result = await client.call('email_message_process', { id: messageId });
       const data = JSON.parse(result);
       console.log(`Processed email message ${data.message?.id ?? id}: ${data.processing_status}`);
       if (data.extraction) {
@@ -93,7 +118,8 @@ export function emailsCommand(): Command {
     .option('--reason <reason>', 'Reason')
     .action(async (id, opts) => {
       const client = await getClient();
-      const result = await client.call('email_message_ignore', { id, reason: opts.reason });
+      const messageId = await resolveEmailMessageId(client, id);
+      const result = await client.call('email_message_ignore', { id: messageId, reason: opts.reason });
       console.log(JSON.parse(result));
       await client.close();
     });
@@ -123,7 +149,8 @@ export function emailsCommand(): Command {
   cmd.command('get <id>')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('email_get', { id });
+      const emailId = await resolveEmailId(client, id);
+      const result = await client.call('email_get', { id: emailId });
       console.log(JSON.parse(result));
       await client.close();
     });

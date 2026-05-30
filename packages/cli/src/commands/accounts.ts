@@ -14,11 +14,12 @@ export function accountsCommand(): Command {
       const client = await getClient();
       const result = await client.call('account_search', { query: opts.query, limit: 20 });
       const data = JSON.parse(result);
-      if (data.accounts?.length === 0) {
+      const accounts = data.accounts ?? data.data ?? (Array.isArray(data) ? data : []);
+      if (accounts.length === 0) {
         console.log('No accounts found.');
         return;
       }
-      console.table(data.accounts?.map((a: Record<string, unknown>) => ({
+      console.table(accounts.map((a: Record<string, unknown>) => ({
         id: (a.id as string).slice(0, 8),
         name: a.name,
         industry: a.industry ?? '',

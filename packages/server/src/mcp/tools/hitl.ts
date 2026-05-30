@@ -4,7 +4,7 @@
 import { z } from 'zod';
 import { hitlSubmit, hitlCheckStatus, hitlListPending, hitlResolve } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
-import type { ActorContext, UUID } from '@crmy/shared';
+import type { ActorContext, HITLRequest, UUID } from '@crmy/shared';
 import { withTransaction } from '../../db/transaction.js';
 import * as hitlRepo from '../../db/repos/hitl.js';
 import { emitEvent } from '../../events/emitter.js';
@@ -14,6 +14,55 @@ import { runToolOperation } from '../tool-operation.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import { assertHITLAccess, assertHITLPayloadAccess, filterVisibleHITLRequests } from '../../services/access-control.js';
 import { applyApprovedRecordCreation } from '../../services/record-proposals.js';
+import { ensureActorRecordForContext } from '../../services/actor-identity.js';
+import { promoteSignalGroup } from '../../services/signal-groups.js';
+import * as contextRepo from '../../db/repos/context-entries.js';
+import * as signalGroupRepo from '../../db/repos/signal-groups.js';
+
+function hitlPayload(payload: unknown): Record<string, unknown> {
+  if (!payload) return {};
+  if (typeof payload === 'string') {
+    try {
+      const parsed = JSON.parse(payload) as unknown;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof payload === 'object' && !Array.isArray(payload) ? payload as Record<string, unknown> : {};
+}
+
+async function applyApprovedHITLAction(db: DbPool, actor: ActorContext, request: HITLRequest) {
+  const createdRecord = await applyApprovedRecordCreation(db, actor, request);
+  if (createdRecord) return { created_record: createdRecord };
+
+  if (request.action_type !== 'context.signal_review' && request.action_type !== 'context.signal_promote') {
+    return {};
+  }
+
+  const payload = hitlPayload(request.action_payload);
+  const actorRecordId = await ensureActorRecordForContext(db, actor);
+  const signalGroupId = typeof payload.signal_group_id === 'string' ? payload.signal_group_id : undefined;
+  if (signalGroupId) {
+    const result = await promoteSignalGroup(db, actor.tenant_id, signalGroupId, actorRecordId, actor);
+    return { completed_action: 'signal_promoted', context_entry: result.context_entry, signal_group: result.signal_group };
+  }
+
+  const signalId = typeof payload.signal_id === 'string' ? payload.signal_id : undefined;
+  if (!signalId) return {};
+  const groups = await signalGroupRepo.listGroupsForContextEntry(db, actor.tenant_id, signalId);
+  if (groups[0]) {
+    const result = await promoteSignalGroup(db, actor.tenant_id, groups[0].id, actorRecordId, actor);
+    return { completed_action: 'signal_promoted', context_entry: result.context_entry, signal_group: result.signal_group };
+  }
+
+  const entry = await contextRepo.getContextEntry(db, actor.tenant_id, signalId as UUID);
+  if (!entry || entry.memory_status !== 'signal') return {};
+  const promoted = await contextRepo.promoteSignal(db, actor.tenant_id, signalId as UUID, actorRecordId as UUID, {});
+  return { completed_action: promoted ? 'signal_promoted' : undefined, context_entry: promoted };
+}
 
 export function hitlTools(db: DbPool): ToolDef[] {
   return [
@@ -97,7 +146,7 @@ export function hitlTools(db: DbPool): ToolDef[] {
         const before = await hitlRepo.getHITLRequest(db, actor.tenant_id, input.request_id);
         if (!before) throw notFound('HITL Request (or already resolved)', input.request_id);
         await assertHITLAccess(db, actor, before);
-        const { request, created_record, event_id } = await withTransaction(db, async tx => {
+        const { request, applied, event_id } = await withTransaction(db, async tx => {
           const request = await hitlRepo.resolveHITLRequest(
             tx,
             actor.tenant_id,
@@ -107,9 +156,9 @@ export function hitlTools(db: DbPool): ToolDef[] {
             input.note,
           );
           if (!request) throw notFound('HITL Request (or already resolved)', input.request_id);
-          const created_record = input.decision === 'approved'
-            ? await applyApprovedRecordCreation(tx, actor, request)
-            : null;
+          const applied = input.decision === 'approved'
+            ? await applyApprovedHITLAction(tx, actor, request)
+            : {};
 
           const event_id = await emitEvent(tx, {
             tenantId: actor.tenant_id,
@@ -120,12 +169,12 @@ export function hitlTools(db: DbPool): ToolDef[] {
             objectId: request.id,
             afterData: request,
           });
-          return { request, created_record, event_id };
+          return { request, applied, event_id };
         });
 
         return {
           request,
-          ...(created_record ? { created_record } : {}),
+          ...applied,
           event_id,
           mutation: mutationReceipt(actor, {
             objectType: 'hitl_request',
