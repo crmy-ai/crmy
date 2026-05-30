@@ -1280,6 +1280,7 @@ export function useContextEntries(params?: {
   context_type?: string;
   memory_status?: 'signal' | 'active' | 'rejected' | 'superseded';
   is_current?: boolean;
+  q?: string;
   limit?: number;
 }) {
   return useList('context-entries', 'context', params);
@@ -1290,6 +1291,7 @@ export function useContextEntriesInfinite(params?: {
   context_type?: string;
   memory_status?: 'signal' | 'active' | 'rejected' | 'superseded';
   is_current?: boolean;
+  q?: string;
   limit?: number;
 }) {
   const limit = params?.limit ?? 20;
@@ -1302,6 +1304,7 @@ export function useContextEntriesInfinite(params?: {
       if (params?.context_type) query.set('context_type', params.context_type);
       if (params?.memory_status) query.set('memory_status', params.memory_status);
       if (params?.is_current !== undefined) query.set('is_current', String(params.is_current));
+      if (params?.q) query.set('q', params.q);
       query.set('limit', String(limit));
       if (pageParam) query.set('cursor', pageParam as string);
       return api.get(`context?${query}`);
@@ -1341,6 +1344,7 @@ export function useSignalGroups(params?: {
   subject_id?: string;
   context_type?: string;
   attention_only?: boolean;
+  q?: string;
   limit?: number;
 }) {
   return useList<SignalGroup>('signal-groups', 'context/signal-groups', params);
@@ -1454,6 +1458,7 @@ export function useRawContextSources(params?: {
   status?: string;
   subject_type?: string;
   subject_id?: string;
+  q?: string;
   limit?: number;
 }) {
   return useList<RawContextSource>('raw-context-sources', 'context/raw-sources', params);

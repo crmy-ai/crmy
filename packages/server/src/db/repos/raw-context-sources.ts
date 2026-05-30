@@ -267,6 +267,7 @@ export async function listRawContextSources(
     status?: RawContextSourceStatus;
     subject_type?: string;
     subject_id?: string;
+    query?: string;
     owner_ids?: string[];
     limit: number;
     cursor?: string;
@@ -291,6 +292,18 @@ export async function listRawContextSources(
   if (filters.subject_id) {
     conditions.push(`r.subject_id = $${idx++}`);
     params.push(filters.subject_id);
+  }
+  if (filters.query?.trim()) {
+    const textQuery = filters.query.trim();
+    conditions.push(`(
+      to_tsvector('english', coalesce(r.source_label, '') || ' ' || coalesce(r.source_ref, '') || ' ' || coalesce(r.source_type, '') || ' ' || coalesce(r.raw_excerpt, '')) @@ plainto_tsquery('english', $${idx})
+      OR r.source_label ILIKE $${idx + 1}
+      OR r.source_ref ILIKE $${idx + 1}
+      OR r.source_type ILIKE $${idx + 1}
+      OR r.raw_excerpt ILIKE $${idx + 1}
+    )`);
+    params.push(textQuery, `%${textQuery}%`);
+    idx += 2;
   }
   if (filters.cursor) {
     conditions.push(`r.created_at < $${idx++}`);

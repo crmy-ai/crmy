@@ -863,8 +863,9 @@ export function ContextBrowser({
     subject_type: subjectType || undefined,
     context_type: contextType || undefined,
     memory_status: memoryStatus,
+    q:             searchMode === 'keyword' ? q.trim() || undefined : undefined,
     limit:        20,
-  }), [subjectType, contextType, memoryStatus]);
+  }), [subjectType, contextType, memoryStatus, searchMode, q]);
 
   const staleQuery = useStaleContextEntries({
     subject_type: subjectType || undefined,
@@ -924,15 +925,6 @@ export function ContextBrowser({
 
   const filtered = useMemo(() => {
     let items = staleOnly ? entries : effectiveMode === 'semantic' ? semanticEntries : entries;
-
-    if (effectiveMode === 'keyword' && q.trim()) {
-      const lower = q.toLowerCase();
-      items = items.filter((e: any) =>
-        (e.title ?? '').toLowerCase().includes(lower) ||
-        (e.body ?? '').toLowerCase().includes(lower) ||
-        (e.tags ?? []).some((t: string) => t.toLowerCase().includes(lower)),
-      );
-    }
 
     if (sort) {
       items = [...items].sort((a: any, b: any) => {
@@ -1283,6 +1275,13 @@ export function ContextBrowser({
             )}
           </motion.div>
         ) : viewMode === 'table' ? (
+          <>
+          <p className="mb-3 text-xs text-muted-foreground">
+            {effectiveMode === 'semantic'
+              ? `Showing ${filtered.length.toLocaleString()} top semantic matches.`
+              : `Showing ${filtered.length.toLocaleString()} of ${total.toLocaleString()} ${q.trim() ? 'matching ' : ''}${memoryStatus === 'signal' ? 'Signals' : 'Memory entries'}.`}
+            {' '}Use search, record, type, and semantic retrieval to narrow large workspaces.
+          </p>
           <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -1346,8 +1345,15 @@ export function ContextBrowser({
               </table>
             </div>
           </div>
+          </>
         ) : (
           <>
+            <p className="mb-3 text-xs text-muted-foreground">
+              {effectiveMode === 'semantic'
+                ? `Showing ${filtered.length.toLocaleString()} top semantic matches.`
+                : `Showing ${filtered.length.toLocaleString()} of ${total.toLocaleString()} ${q.trim() ? 'matching ' : ''}${memoryStatus === 'signal' ? 'Signals' : 'Memory entries'}.`}
+              {' '}Use search, record, type, and semantic retrieval to narrow large workspaces.
+            </p>
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               {filtered.map((entry: any, i: number) => {
                 const expired = entry.valid_until ? isPast(new Date(entry.valid_until)) : false;

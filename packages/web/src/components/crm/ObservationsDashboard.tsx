@@ -111,6 +111,16 @@ function statusFromRawSource(status?: string): ObservationStatus {
   return 'Processed';
 }
 
+function rawStatusFilter(status: 'all' | ObservationStatus) {
+  if (status === 'Failed') return 'failed';
+  if (status === 'No context found') return 'skipped';
+  if (status === 'Processed') return 'processed';
+  // "Needs review" includes pending and processing rows too, so keep that
+  // broader filter in the UI until the API supports multi-status queries.
+  if (status === 'Needs review') return undefined;
+  return undefined;
+}
+
 function classifyRawSource(sourceType?: string | null): { source: ObservationSource; type: string } {
   const raw = String(sourceType ?? '').toLowerCase();
   if (raw.includes('mcp') || raw.includes('agent')) return { source: 'mcp', type: 'Agent/MCP' };
@@ -222,7 +232,11 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
   const activitiesQ = useActivities({ limit: 100 }) as any;
   const outboundQ = useEmails({ limit: 100 }) as any;
   const syncRunsQ = useSystemSyncRuns({ limit: 100 }) as any;
-  const rawSourcesQ = useRawContextSources({ limit: 100 }) as any;
+  const rawSourcesQ = useRawContextSources({
+    q: query.trim() || undefined,
+    status: rawStatusFilter(statusFilter),
+    limit: 100,
+  }) as any;
   const memoryQ = useContextEntries({ memory_status: 'active', limit: 100 }) as any;
   const signalsQ = useContextEntries({ memory_status: 'signal', limit: 100 }) as any;
   const signalGroupsQ = useSignalGroups({ attention_only: true, limit: 1 }) as any;
@@ -538,6 +552,9 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
             </button>
           )}
         </div>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Showing recent and top matching sources. Search runs against Raw Context before CRMy trims the review list, so large workspaces stay searchable without loading the full archive.
+        </p>
 
         {filteredRows.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-10 text-center">

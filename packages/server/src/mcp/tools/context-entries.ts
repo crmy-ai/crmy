@@ -371,6 +371,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         status: z.enum(['pending', 'processing', 'processed', 'needs_review', 'failed', 'skipped']).optional(),
         subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case']).optional(),
         subject_id: z.string().uuid().optional(),
+        q: z.string().max(200).optional().describe('Search source label, source ref, source type, or excerpt before applying cursor limits'),
         limit: z.number().int().min(1).max(200).default(50),
         cursor: z.string().optional(),
       }),
@@ -380,6 +381,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           status?: rawContextRepo.RawContextSourceStatus;
           subject_type?: SubjectType;
           subject_id?: string;
+          q?: string;
           limit: number;
           cursor?: string;
         },
@@ -394,6 +396,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           status: input.status,
           subject_type: input.subject_type,
           subject_id: input.subject_id,
+          query: input.q,
           owner_ids: ownerIds,
           limit: input.limit ?? 50,
           cursor: input.cursor,
@@ -647,6 +650,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case']).optional(),
         subject_id: z.string().uuid().optional(),
         context_type: z.string().optional(),
+        q: z.string().max(200).optional().describe('Search Signal claim, title, context type, or linked record name before applying cursor limits'),
         attention_only: z.boolean().default(false),
         limit: z.number().int().min(1).max(100).default(20),
         cursor: z.string().optional(),
@@ -656,6 +660,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         subject_type?: string;
         subject_id?: string;
         context_type?: string;
+        q?: string;
         attention_only: boolean;
         limit: number;
         cursor?: string;
@@ -664,7 +669,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
         }
         const ownerIds = await visibleOwnerIds(db, actor);
-        const result = await signalGroupRepo.listSignalGroups(db, actor.tenant_id, { ...input, owner_ids: ownerIds });
+        const result = await signalGroupRepo.listSignalGroups(db, actor.tenant_id, { ...input, query: input.q, owner_ids: ownerIds });
         return { signal_groups: result.data, data: result.data, next_cursor: result.next_cursor, total: result.total };
       },
     },

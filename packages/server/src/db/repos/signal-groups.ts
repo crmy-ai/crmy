@@ -319,6 +319,7 @@ export async function listSignalGroups(
     subject_id?: string;
     context_type?: string;
     attention_only?: boolean;
+    query?: string;
     owner_ids?: string[];
     limit: number;
     cursor?: string;
@@ -345,6 +346,49 @@ export async function listSignalGroups(
   if (filters.context_type) {
     conditions.push(`sg.context_type = $${idx++}`);
     params.push(filters.context_type);
+  }
+  if (filters.query?.trim()) {
+    const textQuery = filters.query.trim();
+    const likeQuery = `%${textQuery}%`;
+    conditions.push(`(
+      to_tsvector('english', coalesce(sg.title, '') || ' ' || coalesce(sg.normalized_claim, '') || ' ' || coalesce(sg.context_type, '')) @@ plainto_tsquery('english', $${idx})
+      OR sg.title ILIKE $${idx + 1}
+      OR sg.normalized_claim ILIKE $${idx + 1}
+      OR sg.context_type ILIKE $${idx + 1}
+      OR EXISTS (
+        SELECT 1 FROM contacts c
+        WHERE c.tenant_id = sg.tenant_id
+          AND sg.subject_type = 'contact'
+          AND c.id = sg.subject_id
+          AND (
+            COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '') ILIKE $${idx + 1}
+            OR c.email ILIKE $${idx + 1}
+          )
+      )
+      OR EXISTS (
+        SELECT 1 FROM accounts a
+        WHERE a.tenant_id = sg.tenant_id
+          AND sg.subject_type = 'account'
+          AND a.id = sg.subject_id
+          AND a.name ILIKE $${idx + 1}
+      )
+      OR EXISTS (
+        SELECT 1 FROM opportunities o
+        WHERE o.tenant_id = sg.tenant_id
+          AND sg.subject_type = 'opportunity'
+          AND o.id = sg.subject_id
+          AND o.name ILIKE $${idx + 1}
+      )
+      OR EXISTS (
+        SELECT 1 FROM use_cases uc
+        WHERE uc.tenant_id = sg.tenant_id
+          AND sg.subject_type = 'use_case'
+          AND uc.id = sg.subject_id
+          AND COALESCE(uc.name, uc.title) ILIKE $${idx + 1}
+      )
+    )`);
+    params.push(textQuery, likeQuery);
+    idx += 2;
   }
   if (filters.attention_only) {
     conditions.push(`sg.status IN ('ready', 'blocked', 'conflicting')`);

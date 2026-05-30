@@ -636,9 +636,13 @@ export async function searchContextEntries(
     idx++;
   }
   if (filters.query) {
-    conditions.push(`(c.title ILIKE $${idx} OR c.body ILIKE $${idx})`);
-    params.push(`%${filters.query}%`);
-    idx++;
+    conditions.push(`(
+      c.search_vector @@ plainto_tsquery('english', $${idx})
+      OR c.title ILIKE $${idx + 1}
+      OR c.body ILIKE $${idx + 1}
+    )`);
+    params.push(filters.query, `%${filters.query}%`);
+    idx += 2;
   }
   if (filters.structured_data_filter) {
     conditions.push(`c.structured_data @> $${idx}::jsonb`);

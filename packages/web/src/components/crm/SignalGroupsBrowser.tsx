@@ -248,8 +248,17 @@ export function SignalGroupsBrowser({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [drawerView, setDrawerView] = useState<'details' | 'evidence'>('details');
   const [confirmDismiss, setConfirmDismiss] = useState(false);
-  const { data, isLoading } = useSignalGroups({ attention_only: attentionOnly, limit: 50 }) as any;
+  const query = q.trim();
+  const { data, isLoading } = useSignalGroups({
+    attention_only: attentionOnly,
+    q: query || undefined,
+    status: activeFilters.status?.[0],
+    subject_type: activeFilters.subject_type?.[0],
+    context_type: activeFilters.context_type?.[0],
+    limit: 50,
+  }) as any;
   const groups: SignalGroup[] = data?.data ?? [];
+  const total = Number(data?.total ?? groups.length);
   const selected = groups.find(g => g.id === selectedId) ?? null;
   const detail = useSignalGroup(selectedId);
   const detailedGroup = (detail.data as any)?.signal_group ?? selected;
@@ -347,24 +356,7 @@ export function SignalGroupsBrowser({
 
   const groupedByStatus = useMemo(() => {
     const order: SignalGroup['status'][] = ['conflicting', 'blocked', 'ready', 'gathering', 'promoted', 'dismissed'];
-    const normalizedQuery = q.trim().toLowerCase();
-    const statusFilter = activeFilters.status ?? [];
-    const subjectFilter = activeFilters.subject_type ?? [];
-    const typeFilter = activeFilters.context_type ?? [];
-    const filtered = groups.filter(group => {
-      if (statusFilter.length && !statusFilter.includes(group.status)) return false;
-      if (subjectFilter.length && !subjectFilter.includes(group.subject_type)) return false;
-      if (typeFilter.length && !typeFilter.includes(group.context_type)) return false;
-      if (!normalizedQuery) return true;
-      return [
-        group.title,
-        group.normalized_claim,
-        group.context_type,
-        group.status,
-        subjectLabel(group),
-        ...sourceTypes(group),
-      ].filter(Boolean).join(' ').toLowerCase().includes(normalizedQuery);
-    });
+    const filtered = groups;
     if (sort) {
       return [...filtered].sort((a, b) => {
         const aValue = sort.key === 'updated_at'
@@ -377,7 +369,7 @@ export function SignalGroupsBrowser({
       });
     }
     return [...filtered].sort((a, b) => order.indexOf(a.status) - order.indexOf(b.status));
-  }, [activeFilters, groups, q, sort]);
+  }, [groups, sort]);
 
   const relatedSignals = useMemo(() => {
     if (!detailedGroup) return [];
@@ -469,6 +461,11 @@ export function SignalGroupsBrowser({
       />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">
+        {!isLoading && groups.length > 0 && (
+          <p className="mb-3 text-xs text-muted-foreground">
+            Showing {groups.length.toLocaleString()} of {total.toLocaleString()} {query ? 'matching' : attentionOnly ? 'attention' : ''} Signals. Use search, record, status, and type filters to narrow large workspaces.
+          </p>
+        )}
         {isLoading ? (
           <div className="flex h-64 items-center justify-center text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
