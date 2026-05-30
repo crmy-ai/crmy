@@ -1,6 +1,6 @@
 {
   "name": "@crmy/cli",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "CRMy CLI — Local CLI + stdio MCP server",
   "type": "module",
   "files": [
@@ -25,6 +25,9 @@
   },
   "devDependencies": {
     "tsup": "^8.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "Apache-2.0"
 }

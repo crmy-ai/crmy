@@ -1,8 +1,15 @@
 {
   "name": "@crmy/core",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "CRMy — operational customer context for AI agents",
   "private": false,
+  "files": [
+    "README.md",
+    "CHANGELOG.md",
+    "RELEASE_NOTES.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "workspaces": [
     "packages/shared",
     "packages/server",
@@ -23,6 +30,9 @@
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "Apache-2.0"
 }

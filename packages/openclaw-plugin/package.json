@@ -1,6 +1,6 @@
 {
   "name": "@crmy/openclaw-plugin",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "CRMy plugin for OpenClaw — expose customer context, typed revenue objects, HITL handoffs, and audit-safe writes",
   "type": "module",
   "main": "dist/index.js",
@@ -23,6 +23,9 @@
     "extensions": [
       "./dist/index.js"
     ]
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "Apache-2.0",
   "keywords": [

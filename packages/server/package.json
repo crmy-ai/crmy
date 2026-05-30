@@ -1,10 +1,11 @@
 {
   "name": "@crmy/server",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "CRMy server — Express + PostgreSQL + MCP endpoint",
   "type": "module",
   "files": [
     "dist",
+    "!dist/**/*.map",
     "migrations",
     "public"
   ],
@@ -43,6 +44,9 @@
     "@types/nodemailer": "^6.4.0",
     "@types/pg": "^8.11.0",
     "tsx": "^4.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "license": "Apache-2.0"
 }
