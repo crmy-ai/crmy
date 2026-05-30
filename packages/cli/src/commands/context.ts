@@ -53,6 +53,30 @@ function printSignalGroups(groups: Record<string, unknown>[], total?: number, li
   if (total && total > limit) console.log(`\n  Showing ${limit} of ${total} Signals`);
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function resolveSignalGroupRef(client: Awaited<ReturnType<typeof getClient>>, ref: string): Promise<string> {
+  if (isUuid(ref)) return ref;
+
+  const result = await client.call('context_signal_group_list', {
+    attention_only: false,
+    limit: 100,
+  });
+  const data = JSON.parse(result);
+  const groups = (data.signal_groups ?? data.data ?? []) as Record<string, unknown>[];
+  const matches = groups.filter((group) => String(group.id ?? '').startsWith(ref));
+
+  if (matches.length === 1) {
+    return String(matches[0].id);
+  }
+  if (matches.length > 1) {
+    throw new Error(`Signal ID "${ref}" is ambiguous. Use more characters from the ID.`);
+  }
+  throw new Error(`No Signal found with ID prefix "${ref}". Run \`crmy context signal-groups --all\`.`);
+}
+
 export function contextCommand(): Command {
   const cmd = new Command('context').description('Manage Raw Context, Signals, and Memory');
 
@@ -206,9 +230,10 @@ export function contextCommand(): Command {
     .description('Promote a trusted Signal into confirmed Memory')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('context_signal_group_promote', { id });
+      const signalGroupId = await resolveSignalGroupRef(client, id);
+      const result = await client.call('context_signal_group_promote', { id: signalGroupId });
       const data = JSON.parse(result);
-      console.log(`\n  Promoted Signal to Memory: ${data.context_entry?.id ?? id}\n`);
+      console.log(`\n  Promoted Signal to Memory: ${data.context_entry?.id ?? signalGroupId}\n`);
       await client.close();
     });
 
@@ -217,8 +242,9 @@ export function contextCommand(): Command {
     .option('-r, --reason <reason>', 'Reason for rejection')
     .action(async (id, opts) => {
       const client = await getClient();
-      await client.call('context_signal_group_reject', { id, reason: opts.reason });
-      console.log(`\n  Rejected Signal: ${id}\n`);
+      const signalGroupId = await resolveSignalGroupRef(client, id);
+      await client.call('context_signal_group_reject', { id: signalGroupId, reason: opts.reason });
+      console.log(`\n  Rejected Signal: ${signalGroupId}\n`);
       await client.close();
     });
 
@@ -226,9 +252,10 @@ export function contextCommand(): Command {
     .description('Send a Signal to Handoff for human review')
     .action(async (id) => {
       const client = await getClient();
-      const result = await client.call('context_signal_handoff', { id });
+      const signalGroupId = await resolveSignalGroupRef(client, id);
+      const result = await client.call('context_signal_handoff', { id: signalGroupId });
       const data = JSON.parse(result);
-      console.log(`\n  Created Handoff for Signal: ${data.hitl_request?.id ?? id}\n`);
+      console.log(`\n  Created Handoff for Signal: ${data.hitl_request?.id ?? signalGroupId}\n`);
       await client.close();
     });
 

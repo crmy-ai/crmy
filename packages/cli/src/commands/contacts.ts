@@ -55,11 +55,20 @@ export function contactsCommand(): Command {
       ]);
 
       const client = await getClient();
+      let account_id: string | undefined;
+      if (answers.company_name) {
+        try {
+          account_id = await resolveRecordRef(client, 'account', answers.company_name);
+        } catch {
+          // Keep the free-text company name when no matching account exists.
+        }
+      }
       const result = await client.call('contact_create', {
         first_name: answers.first_name,
         last_name: answers.last_name || undefined,
         email: answers.email || undefined,
         company_name: answers.company_name || undefined,
+        account_id,
       });
       const data = JSON.parse(result);
       console.log(`\n  Created contact: ${data.contact.id}\n`);
