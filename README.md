@@ -1,12 +1,23 @@
 # CRMy
 
-Operational customer context for AI agents.
+Customer memory for AI sales agents.
 
-CRMy is an open-source foundation for building GTM agents that can safely work across accounts, opportunities, stakeholders, risks, commitments, next steps, and systems of record.
+Before an AI sales agent sends an email, updates an opportunity, prepares a renewal review, or writes back to a system of record, it needs to know what is true, what is stale, what is inferred, and what requires approval.
+
+CRMy gives agents one trusted customer briefing before they act.
+
+One `briefing_get` call returns typed customer context across accounts, contacts, opportunities, activities, risks, commitments, next steps, evidence, stale warnings, and open handoffs.
+
+Raw Context → Signals → Memory → Handoffs / Writeback
+
+MCP-native. PostgreSQL-backed. Open source.
+
 
 **Star CRMy if you are building agents that need operational memory.**
 
-It does not replace your CRM. Your CRM, warehouse, support desk, mailbox, calendar, etc. remain the systems where work happens. CRMy makes that state agent-operable: it turns messy customer context into typed Memory, gives agents scoped tools, and governs the path from recommendation to human review to system-of-record writeback.
+CRMy does not replace your system of record. Your CRM, warehouse, support desk, mailbox, calendar, etc. remain the systems where work happens and state is stored. 
+
+CRMy makes that state agent-operable: it turns messy customer context into typed operational Memory, gives agents scoped tools, and governs the path from recommendation to human review to system-of-record writeback.
 
 Before any agent acts on a customer, CRMy can tell it what is true, what is stale, what is inferred, what is approved, what system owns the record, what action is allowed, and what proof or audit trail will exist afterward.
 
