@@ -2,7 +2,7 @@
 
 **Customer memory for AI sales agents.**
 
-Before an AI sales agent sends an email, updates an opportunity, prepares a renewal review, or writes back to a system of record, it needs to know what is true, what is stale, what is inferred, and what requires approval.
+Before an AI sales agent prepares a follow up email, updates an opportunity, prepares a pre-meeting brief, performs a renewal review, or writes back to a system of record, it needs to know what is true, what is stale, what is inferred, and what requires approval.
 
 #### CRMy gives agents one trusted customer briefing before they act.
 
