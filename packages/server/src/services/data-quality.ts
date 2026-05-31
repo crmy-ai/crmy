@@ -25,6 +25,7 @@ export type RepairableDataQualityCheck =
   | 'current_context_missing_search_index'
   | 'stuck_context_outbox_processing'
   | 'stale_raw_context_sources_processing'
+  | 'failed_raw_context_sources_retryable'
   | 'stuck_agent_turns_running';
 
 export interface DataQualityRepairResult {
@@ -183,6 +184,19 @@ const CHECKS: CheckSpec[] = [
     `,
   },
   {
+    name: 'failed_raw_context_extraction_attempts',
+    severity: 'warning',
+    sql: `
+      SELECT id, raw_context_source_id, activity_id, attempt_number, outcome, failure_code, failure_reason, started_at
+      FROM raw_context_extraction_attempts
+      WHERE tenant_id = $1
+        AND status = 'failed'
+        AND started_at > now() - interval '7 days'
+      ORDER BY started_at DESC
+      LIMIT $2
+    `,
+  },
+  {
     name: 'stuck_agent_turns_running',
     severity: 'warning',
     sql: `
@@ -326,6 +340,7 @@ function ensureRepairable(checkName: string): asserts checkName is RepairableDat
     checkName !== 'current_context_missing_search_index' &&
     checkName !== 'stuck_context_outbox_processing' &&
     checkName !== 'stale_raw_context_sources_processing' &&
+    checkName !== 'failed_raw_context_sources_retryable' &&
     checkName !== 'stuck_agent_turns_running'
   ) {
     throw validationError(`Data-quality check "${checkName}" is not safely auto-repairable`);
@@ -488,6 +503,46 @@ const REPAIR_ACTIONS: Record<RepairableDataQualityCheck, {
           failure_code = COALESCE(failure_code, 'processing_timeout'),
           last_error = COALESCE(last_error, 'Processing was interrupted and queued for retry.'),
           failure_reason = COALESCE(failure_reason, 'Processing was interrupted and queued for retry.'),
+          updated_at = now()
+      FROM target
+      WHERE r.id = target.id
+    `,
+  },
+  failed_raw_context_sources_retryable: {
+    action: 'Return retryable Raw Context failures to pending so the shared extraction path can replay them.',
+    countSql: `
+      SELECT count(*)::int AS count
+      FROM raw_context_sources
+      WHERE tenant_id = $1
+        AND status = 'failed'
+        AND COALESCE(attempt_count, 0) < 3
+        AND (
+          failure_code IS NULL
+          OR failure_code IN ('model_timeout', 'model_output_invalid', 'model_failed', 'write_failed', 'processing_timeout')
+        )
+    `,
+    repairSql: `
+      WITH target AS (
+        SELECT id
+        FROM raw_context_sources
+        WHERE tenant_id = $1
+          AND status = 'failed'
+          AND COALESCE(attempt_count, 0) < 3
+          AND (
+            failure_code IS NULL
+            OR failure_code IN ('model_timeout', 'model_output_invalid', 'model_failed', 'write_failed', 'processing_timeout')
+          )
+        ORDER BY updated_at ASC
+        LIMIT $2
+      )
+      UPDATE raw_context_sources r
+      SET status = 'pending',
+          stage = 'retrying',
+          locked_at = NULL,
+          next_retry_at = now(),
+          last_error = NULL,
+          failure_reason = NULL,
+          failure_code = NULL,
           updated_at = now()
       FROM target
       WHERE r.id = target.id

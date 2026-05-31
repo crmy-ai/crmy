@@ -9,7 +9,7 @@ import {
   contextDiff, contextIngest, contextSemanticSearch, contextEmbedBackfill,
   contextSignalPromote, contextSignalReject, contextLineageGet,
 } from '@crmy/shared';
-import { detectRawContextSubjects } from '../../services/raw-context-subjects.js';
+import { resolveSubjectGraph } from '../../services/subject-graph-resolver.js';
 import { loadEmbeddingConfig, embedText } from '../../agent/providers/embeddings.js';
 import { ensureEmbeddingBestEffort } from '../../services/embedding-service.js';
 import { evaluateMemoryReadiness } from '../../services/memory-readiness.js';
@@ -21,6 +21,7 @@ import * as activityRepo from '../../db/repos/activities.js';
 import * as contextTypeRepo from '../../db/repos/context-type-registry.js';
 import * as outboxRepo from '../../db/repos/context-outbox.js';
 import * as rawContextRepo from '../../db/repos/raw-context-sources.js';
+import * as rawContextPayloadRepo from '../../db/repos/raw-context-source-payloads.js';
 import * as signalGroupRepo from '../../db/repos/signal-groups.js';
 import * as governorLimits from '../../db/repos/governor-limits.js';
 import * as hitlRepo from '../../db/repos/hitl.js';
@@ -35,7 +36,7 @@ import { checkContextConvergence } from '../../services/context-convergence.js';
 import { createContradictionReviewAssignments } from '../../services/context-review-assignments.js';
 import { assertActionPolicyAllowsMutation, evaluateActionPolicy } from '../../services/action-policy.js';
 import { attachSignalToGroup, createSignalGroupHandoff, dismissSignalGroup, promoteSignalGroup } from '../../services/signal-groups.js';
-import { ensureActorRecordForContext } from '../../services/actor-identity.js';
+import { ensureActorRecordForContext, resolveActorRecordId } from '../../services/actor-identity.js';
 import { assertActivityAccess, assertSubjectAccess, resolveOwnerFilter } from '../../services/access-control.js';
 import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
@@ -45,6 +46,45 @@ import type { RawContextRecordProposal } from '../../services/raw-context-subjec
 async function visibleOwnerIds(db: DbPool, actor: ActorContext): Promise<UUID[] | undefined> {
   const filter = await resolveOwnerFilter(db, actor);
   return 'owner_ids' in filter ? filter.owner_ids as UUID[] : undefined;
+}
+
+function normalizeOptionalTimestamp(value?: string): string | null {
+  if (!value?.trim()) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw validationError('source_occurred_at must be a valid date or timestamp.');
+  }
+  return parsed.toISOString();
+}
+
+function metadataString(source: rawContextRepo.RawContextSource, key: string): string | null {
+  const value = source.metadata?.[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function uuidLike(value?: string | null): value is string {
+  return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
+}
+
+async function assertRawContextSourceAccess(
+  db: DbPool,
+  actor: ActorContext,
+  source: rawContextRepo.RawContextSource,
+  sourceIdForError = source.id,
+): Promise<void> {
+  if (!source.subject_type || !source.subject_id) {
+    const requesterActorRecordId = await resolveActorRecordId(db, actor.tenant_id, actor.actor_id);
+    if (
+      actor.role !== 'admin' &&
+      actor.role !== 'owner' &&
+      source.actor_id !== actor.actor_id &&
+      source.actor_id !== requesterActorRecordId
+    ) {
+      throw notFound('RawContextSource', sourceIdForError);
+    }
+    return;
+  }
+  await assertSubjectAccess(db, actor, source.subject_type as SubjectType | undefined, source.subject_id as string | undefined);
 }
 
 async function assertLineageAccess(db: DbPool, actor: ActorContext, input: z.infer<typeof contextLineageGet>): Promise<void> {
@@ -64,13 +104,7 @@ async function assertLineageAccess(db: DbPool, actor: ActorContext, input: z.inf
   if (input.raw_context_source_id) {
     const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.raw_context_source_id);
     if (!source) throw notFound('RawContextSource', input.raw_context_source_id);
-    if (!source.subject_type || !source.subject_id) {
-      if (actor.role !== 'admin' && actor.role !== 'owner' && source.actor_id !== actor.actor_id) {
-        throw notFound('RawContextSource', input.raw_context_source_id);
-      }
-      return;
-    }
-    await assertSubjectAccess(db, actor, source.subject_type as SubjectType | undefined, source.subject_id as string | undefined);
+    await assertRawContextSourceAccess(db, actor, source, input.raw_context_source_id);
   }
 }
 
@@ -388,6 +422,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         actor: ActorContext,
       ) => {
         const ownerIds = await visibleOwnerIds(db, actor);
+        const actorRecordId = ownerIds ? await resolveActorRecordId(db, actor.tenant_id, actor.actor_id) : undefined;
         if (input.subject_type && input.subject_id) {
           await assertSubjectAccess(db, actor, input.subject_type, input.subject_id);
         }
@@ -398,6 +433,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           subject_id: input.subject_id,
           query: input.q,
           owner_ids: ownerIds,
+          actor_ids: actorRecordId ? [actorRecordId] : undefined,
           limit: input.limit ?? 50,
           cursor: input.cursor,
         });
@@ -414,32 +450,21 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       handler: async (input: { id: string }, actor: ActorContext) => {
         const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.id);
         if (!source) throw notFound('RawContextSource', input.id);
-        if (!source.subject_type || !source.subject_id) {
-          if (actor.role !== 'admin' && actor.role !== 'owner' && source.actor_id !== actor.actor_id) {
-            throw notFound('RawContextSource', input.id);
-          }
-          return { raw_context_source: source };
-        }
-        await assertSubjectAccess(db, actor, source.subject_type as SubjectType | undefined, source.subject_id as string | undefined);
+        await assertRawContextSourceAccess(db, actor, source, input.id);
         return { raw_context_source: source };
       },
     },
     {
       name: 'context_raw_source_reprocess',
       tier: 'core',
-      description: 'Retry a failed or skipped Raw Context processing record. If the source still points at an activity, CRMy reruns extraction on that activity. If only an excerpt is available, CRMy reruns automatic subject matching and extraction from the stored excerpt. Use this before asking a user to paste the same source again.',
+      description: 'Retry a failed or skipped Raw Context processing record. If the source points at an activity, CRMy reruns extraction on that activity. If CRMy retained the original payload, it reruns automatic subject matching and extraction from the full source text. Only falls back to the excerpt when no replayable payload is available.',
       inputSchema: z.object({
         id: z.string().uuid().describe('Raw Context source ID to reprocess'),
       }),
       handler: async (input: { id: string }, actor: ActorContext) => {
         const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.id);
         if (!source) throw notFound('RawContextSource', input.id);
-        if (!source.subject_type || !source.subject_id) {
-          if (actor.role !== 'admin' && actor.role !== 'owner' && source.actor_id !== actor.actor_id) {
-            throw notFound('RawContextSource', input.id);
-          }
-        }
-        await assertSubjectAccess(db, actor, source.subject_type as SubjectType | undefined, source.subject_id as string | undefined);
+        await assertRawContextSourceAccess(db, actor, source, input.id);
         const actorRecordId = await ensureActorRecordForContext(db, actor);
 
         await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
@@ -452,28 +477,34 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           },
         });
 
-        const sourceRefLooksLikeActivity = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(source.source_ref);
-        const canRetryActivity = sourceRefLooksLikeActivity
-          && (source.source_type === 'activity' || source.source_type === 'add_context' || source.source_type.includes('email'));
+        const linkedActivityId = metadataString(source, 'primary_activity_id')
+          ?? (uuidLike(source.source_ref) ? source.source_ref : null);
+        const canRetryActivity = uuidLike(linkedActivityId)
+          && (source.source_type === 'activity' || source.source_type === 'add_context' || source.source_type === 'mcp' || source.source_type.includes('email'));
+        const payload = await rawContextPayloadRepo.getRawContextSourcePayload(db, actor.tenant_id, source.id);
+        const replayDocument = payload?.document_text ?? source.raw_excerpt ?? '';
+        const replaySourceLabel = payload?.source_label ?? source.source_label ?? 'Reprocessed Raw Context';
+        const replayOccurredAt = payload?.source_occurred_at ?? metadataString(source, 'source_occurred_at');
+        const replayDocumentHash = payload?.document_hash ?? metadataString(source, 'source_document_hash')
+          ?? (replayDocument ? createHash('sha256').update(replayDocument).digest('hex') : null);
 
         try {
           let result: unknown;
-          if (canRetryActivity) {
-            const outcome = await extractContextFromActivity(db, actor.tenant_id, source.source_ref);
+          if (canRetryActivity && linkedActivityId) {
+            const outcome = await extractContextFromActivity(db, actor.tenant_id, linkedActivityId);
             result = {
               ...outcome,
               mutation: mutationReceipt(actor, {
                 objectType: 'activity',
-                objectId: source.source_ref,
+                objectId: linkedActivityId,
                 sideEffects: ['context_extraction:completed'],
               }),
             };
-          } else if (source.raw_excerpt?.trim()) {
-            const detected = await detectRawContextSubjects(db, actor.tenant_id, source.raw_excerpt, {
+          } else if (replayDocument.trim()) {
+            const detected = await resolveSubjectGraph(db, actor, {
+              text: replayDocument,
               limit: 20,
-              confidenceThreshold: 0.6,
-              actorId: actor.actor_id,
-              ownerIds: await visibleOwnerIds(db, actor),
+              confidence_threshold: 0.6,
             });
             if (detected.subjects.length === 0) {
               await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
@@ -492,13 +523,20 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
               for (const subject of detected.subjects) {
                 const activity = await activityRepo.createActivity(db, actor.tenant_id, {
                   type: 'note',
-                  subject: source.source_label ?? 'Reprocessed Raw Context',
-                  body: source.raw_excerpt,
+                  subject: replaySourceLabel,
+                  body: replayDocument,
                   subject_type: subject.type as SubjectType,
                   subject_id: subject.id,
                   performed_by: actorRecordId,
                   source_agent: actor.actor_type === 'agent' ? 'context_raw_source_reprocess' : undefined,
-                  occurred_at: new Date().toISOString(),
+                  occurred_at: replayOccurredAt ?? new Date().toISOString(),
+                  detail: {
+                    raw_context_source_ref: source.source_ref,
+                    source_document_hash: replayDocumentHash,
+                    source_occurred_at: replayOccurredAt,
+                    source_occurred_at_provided: Boolean(replayOccurredAt),
+                    reprocessed_from_raw_context_source_id: source.id,
+                  },
                 });
                 const outcome = await extractContextFromActivity(db, actor.tenant_id, activity.id);
                 extractedCount += outcome.extracted_count;
@@ -519,11 +557,17 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
                   confidence: subject.confidence,
                 })),
                 failure_reason: extractedCount > 0 ? null : 'Reprocess completed but no extractable context was found.',
+                metadata: {
+                  reprocessed_from_payload: Boolean(payload),
+                  replay_payload_id: payload?.id,
+                  replay_document_hash: replayDocumentHash,
+                  replay_document_chars: replayDocument.length,
+                },
               });
               result = { extracted_count: extractedCount, memory_created: memoryCreated, signals_created: signalsCreated, skipped: skippedCount };
             }
           } else {
-            throw validationError('This Raw Context source cannot be reprocessed because CRMy does not have the original activity or source excerpt.');
+            throw validationError('This Raw Context source cannot be reprocessed because CRMy does not have the original activity, replay payload, or source excerpt.');
           }
 
           const updated = await rawContextRepo.getRawContextSource(db, actor.tenant_id, source.id);
@@ -1112,6 +1156,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       inputSchema: z.object({
         document: z.string().min(1).describe('The full text to ingest — transcript, email body, meeting notes, research, etc.'),
         source_label: z.string().optional().describe('Human-readable label for the source (e.g. "Discovery call 2026-04-09")'),
+        source_occurred_at: z.string().optional().describe('When this context event actually occurred, if known. Re-sending the same source with the same occurrence time will not count as independent corroboration.'),
         context_type: z.string().optional().describe('Override the context type for all extracted entries (e.g. "meeting_notes")'),
         confidence_threshold: z.number().min(0).max(1).default(0.6)
           .describe('Minimum entity resolution confidence to link an entry. 0.6 = medium+high (default). Set lower to include more speculative matches.'),
@@ -1140,6 +1185,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         input: {
           document: string;
           source_label?: string;
+          source_occurred_at?: string;
           context_type?: string;
           confidence_threshold: number;
           subjects?: Array<{ type: 'contact' | 'account' | 'opportunity' | 'use_case'; id: string; name?: string }>;
@@ -1156,19 +1202,53 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           request: input,
         }, async () => {
         const actorRecordId = await ensureActorRecordForContext(db, actor);
+        const sourceOccurredAt = normalizeOptionalTimestamp(input.source_occurred_at);
+        const sourceType = actor.actor_type === 'agent' ? 'mcp' : 'add_context';
         const sourceFingerprint = {
           document_hash: createHash('sha256').update(input.document).digest('hex'),
           actor_id: actor.actor_id,
           actor_type: actor.actor_type,
-          source_type: actor.actor_type === 'agent' ? 'mcp' : 'add_context',
-          source_label: input.source_label ?? null,
+          source_type: sourceType,
+          source_occurred_at: sourceOccurredAt,
           subjects: (input.subjects ?? [])
             .map(subject => `${subject.type}:${subject.id}`)
             .sort(),
         };
         const sourceRef = `auto:${createHash('sha256').update(JSON.stringify(sourceFingerprint)).digest('hex').slice(0, 32)}`;
+        const existingSource = await rawContextRepo.getRawContextSourceByRef(db, actor.tenant_id, sourceType, sourceRef);
+        if (existingSource && ['processed', 'needs_review'].includes(existingSource.status)) {
+          const detected = Array.isArray(existingSource.detected_subjects)
+            ? existingSource.detected_subjects as Array<Record<string, unknown>>
+            : [];
+          return {
+            subjects_resolved: detected
+              .filter(item => item.subject_id && item.subject_type)
+              .map(item => ({
+                entity_type: String(item.subject_type),
+                id: String(item.subject_id),
+                name: typeof item.name === 'string' ? item.name : String(item.subject_id),
+                confidence: typeof item.confidence === 'string' ? item.confidence : 'high',
+                entries_created: Number(item.entries_created ?? 0),
+                memory_created: Number(item.memory_created ?? 0),
+                signals_created: Number(item.signals_created ?? 0),
+              })),
+            entries_created: Number(existingSource.memory_created ?? 0) + Number(existingSource.signals_created ?? 0),
+            extracted_count: Number(existingSource.memory_created ?? 0) + Number(existingSource.signals_created ?? 0),
+            memory_created: Number(existingSource.memory_created ?? 0),
+            signals_created: Number(existingSource.signals_created ?? 0),
+            skipped: Number(existingSource.skipped ?? 0),
+            raw_context_source: existingSource,
+            message: 'This Raw Context source was already processed. Returning the existing receipt instead of extracting it again.',
+            duplicate_of_raw_context_source_id: existingSource.id,
+            mutation: mutationReceipt(actor, {
+              objectType: 'raw_context_source',
+              objectId: existingSource.id,
+              sideEffects: ['context_extraction:deduped'],
+            }),
+          };
+        }
         await rawContextRepo.upsertRawContextSource(db, actor.tenant_id, {
-          source_type: actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+          source_type: sourceType,
           source_ref: sourceRef,
           source_label: input.source_label ?? 'Auto-ingested Raw Context',
           actor_id: actorRecordId,
@@ -1178,9 +1258,30 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           metadata: {
             input_channel: actor.actor_type === 'agent' ? 'mcp' : 'api',
             confidence_threshold: input.confidence_threshold,
+            source_occurred_at: sourceOccurredAt,
             source_fingerprint: sourceFingerprint,
           },
         });
+        const persistedSource = await rawContextRepo.getRawContextSourceByRef(db, actor.tenant_id, sourceType, sourceRef);
+        if (persistedSource) {
+          await rawContextPayloadRepo.upsertRawContextSourcePayload(db, actor.tenant_id, {
+            raw_context_source_id: persistedSource.id,
+            document_hash: sourceFingerprint.document_hash,
+            document_text: input.document,
+            source_label: input.source_label ?? null,
+            source_occurred_at: sourceOccurredAt,
+            subjects: input.subjects?.map(subject => ({
+              subject_type: subject.type,
+              subject_id: subject.id,
+              name: subject.name,
+            })) ?? [],
+            proposed_records: input.proposed_records as unknown as Array<Record<string, unknown>> | undefined,
+            metadata: {
+              input_channel: actor.actor_type === 'agent' ? 'mcp' : 'api',
+              source_ref: sourceRef,
+            },
+          });
+        }
 
         let resolvedSubjects: Array<{
           entity_type: string;
@@ -1196,8 +1297,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         let detectedCandidates: string[];
         let detectedSkipped: Array<{ name: string; reason: string }>;
         let proposedRecords: RawContextRecordProposal[];
-        let accountScope: Awaited<ReturnType<typeof detectRawContextSubjects>>['account_scope'] = [];
-        let recordsExamined: Awaited<ReturnType<typeof detectRawContextSubjects>>['records_examined'];
+        let accountScope: Awaited<ReturnType<typeof resolveSubjectGraph>>['account_scope'] = [];
+        let recordsExamined: Awaited<ReturnType<typeof resolveSubjectGraph>>['records_examined'];
         let resolutionSummary: string | undefined;
         const scopedOwnerIds = await visibleOwnerIds(db, actor);
         if (input.subjects?.length) {
@@ -1223,11 +1324,10 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           proposedRecords = input.proposed_records;
           resolutionSummary = `${proposedRecords.length} possible new ${proposedRecords.length === 1 ? 'record needs' : 'records need'} review.`;
         } else {
-          const detected = await detectRawContextSubjects(db, actor.tenant_id, input.document, {
+          const detected = await resolveSubjectGraph(db, actor, {
+            text: input.document,
             limit: 20,
-            confidenceThreshold: input.confidence_threshold,
-            actorId: actor.actor_id,
-            ownerIds: scopedOwnerIds,
+            confidence_threshold: input.confidence_threshold,
           });
           resolvedSubjects = detected.subjects.map(subject => ({
             entity_type: subject.type,
@@ -1252,7 +1352,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           const currentSource = await rawContextRepo.getRawContextSourceByRef(
             db,
             actor.tenant_id,
-            actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+            sourceType,
             sourceRef,
           );
           const proposalHandoffs = proposedRecords.length > 0
@@ -1267,7 +1367,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           await rawContextRepo.updateRawContextSource(
             db,
             actor.tenant_id,
-            actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+            sourceType,
             sourceRef,
             {
               status: proposalHandoffs.length > 0 ? 'needs_review' : 'skipped',
@@ -1301,7 +1401,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           const updatedSource = await rawContextRepo.getRawContextSourceByRef(
             db,
             actor.tenant_id,
-            actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+            sourceType,
             sourceRef,
           );
           return {
@@ -1364,7 +1464,13 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             subject_id: primarySubject.id,
             performed_by: actorRecordId,
             source_agent: 'context_ingest_auto',
-            occurred_at: new Date().toISOString(),
+            occurred_at: sourceOccurredAt ?? new Date().toISOString(),
+            detail: {
+              raw_context_source_ref: sourceRef,
+              source_document_hash: sourceFingerprint.document_hash,
+              source_occurred_at: sourceOccurredAt,
+              source_occurred_at_provided: Boolean(sourceOccurredAt),
+            },
           });
           activityId = activity.id;
           const extracted = await extractContextFromActivity(db, actor.tenant_id, activity.id, {
@@ -1472,7 +1578,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         await rawContextRepo.updateRawContextSource(
           db,
           actor.tenant_id,
-          actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+          sourceType,
           sourceRef,
           {
             status: parentStatus,
@@ -1513,6 +1619,9 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
                 : null,
             metadata: {
               no_extraction_reasons: noExtractionReasons.slice(0, 10),
+              primary_activity_id: activityId || undefined,
+              source_document_hash: sourceFingerprint.document_hash,
+              source_occurred_at: sourceOccurredAt,
               account_scope: accountScope,
               records_examined: recordsExamined,
               resolution_summary: resolutionSummary,
@@ -1538,7 +1647,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           raw_context_source: await rawContextRepo.getRawContextSourceByRef(
             db,
             actor.tenant_id,
-            actor.actor_type === 'agent' ? 'mcp' : 'add_context',
+            sourceType,
             sourceRef,
           ) ?? undefined,
           proposed_records: proposedRecords.length > 0 ? proposedRecords : undefined,

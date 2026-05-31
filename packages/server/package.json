@@ -18,7 +18,8 @@
     "start": "node dist/index.js",
     "generate:openapi": "tsx scripts/generate-openapi.ts",
     "test:durability": "npm run build && node --test test/durability.test.mjs",
-    "test:integration": "npm run build && node --test test/integration-durability.test.mjs"
+    "test:integration": "npm run build && node --require ./scripts/load-env.cjs scripts/run-integration-tests.cjs",
+    "test:integration:local": "npm run build && node --require ./scripts/load-env.cjs scripts/run-integration-tests.cjs --use-app-database"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.0.0",

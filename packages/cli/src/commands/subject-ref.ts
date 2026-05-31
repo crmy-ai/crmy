@@ -68,26 +68,43 @@ async function resolveViaEntityResolve(client: CliClient, type: 'account' | 'con
   throw new Error(`No ${type} matched "${query}". Try \`crmy search "${query}"\` or create the record first.`);
 }
 
-async function resolveViaSearch(client: CliClient, type: 'opportunity' | 'use_case', query: string): Promise<string> {
-  const tool = type === 'opportunity' ? 'opportunity_search' : 'use_case_search';
-  const key = type === 'opportunity' ? 'opportunities' : 'use_cases';
-  const response = JSON.parse(await client.call(tool, { query, limit: 5 }));
-  const candidates = ((response[key] ?? response.data ?? []) as Record<string, unknown>[])
-    .filter(candidate => typeof candidate.id === 'string');
-  const exact = candidates.filter(candidate => String(candidate.name ?? '').toLowerCase() === query.toLowerCase());
-  if (exact.length === 1) return exact[0].id as string;
-  if (candidates.length === 1) return candidates[0].id as string;
+async function resolveViaCustomerRecordResolve(client: CliClient, type: CliSubjectType, query: string): Promise<string> {
+  const response = JSON.parse(await client.call('customer_record_resolve', {
+    query,
+    subject_type: type,
+    limit: 5,
+  }));
+  const subjects = ((response.subjects ?? []) as Record<string, unknown>[])
+    .filter(subject => subject.type === type && typeof subject.id === 'string');
+  if (subjects.length === 1) return subjects[0].id as string;
+  if (subjects.length > 1) throwAmbiguous(type, query, subjects);
+  const skipped = ((response.skipped ?? []) as Record<string, unknown>[])
+    .filter(item => item.candidate_records);
+  const candidates = skipped.flatMap(item => (item.candidate_records ?? []) as Record<string, unknown>[])
+    .filter(candidate => candidate.type === type && typeof candidate.id === 'string');
   if (candidates.length > 1) throwAmbiguous(type, query, candidates);
-  throw new Error(`No ${type.replace('_', ' ')} matched "${query}". Try \`crmy search "${query}"\` or create the record first.`);
+  const proposalCount = Array.isArray(response.proposed_records) ? response.proposed_records.length : 0;
+  const proposalHint = proposalCount > 0 ? ` CRMy found ${proposalCount} possible new ${type.replace('_', ' ')} record(s) that need review.` : '';
+  throw new Error(`No ${type.replace('_', ' ')} matched "${query}".${proposalHint} Try \`crmy search "${query}"\` or create the record first.`);
+}
+
+function canFallbackToEntityResolve(type: CliSubjectType, err: unknown): type is 'account' | 'contact' {
+  if (type !== 'account' && type !== 'contact') return false;
+  const message = err instanceof Error ? err.message : String(err);
+  return /context:read|customer_record_resolve|Unknown tool|API error \(403\)/i.test(message);
 }
 
 export async function resolveSubjectRef(client: CliClient, ref?: string): Promise<{ subject_type?: CliSubjectType; subject_id?: string }> {
   const parsed = parseSubjectRef(ref);
   if (!parsed.subject_type || parsed.subject_id) return { subject_type: parsed.subject_type, subject_id: parsed.subject_id };
   if (!parsed.query) return { subject_type: parsed.subject_type };
-  const id = parsed.subject_type === 'account' || parsed.subject_type === 'contact'
-    ? await resolveViaEntityResolve(client, parsed.subject_type, parsed.query)
-    : await resolveViaSearch(client, parsed.subject_type, parsed.query);
+  let id: string;
+  try {
+    id = await resolveViaCustomerRecordResolve(client, parsed.subject_type, parsed.query);
+  } catch (err) {
+    if (!canFallbackToEntityResolve(parsed.subject_type, err)) throw err;
+    id = await resolveViaEntityResolve(client, parsed.subject_type, parsed.query);
+  }
   return { subject_type: parsed.subject_type, subject_id: id };
 }
 

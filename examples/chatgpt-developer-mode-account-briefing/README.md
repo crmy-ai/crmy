@@ -58,14 +58,14 @@ Use only the CRMy app tools. Resolve the account "Northstar Labs", get a briefin
 If ChatGPT has trouble selecting tools, be explicit:
 
 ```text
-First call CRMy entity_resolve for "Northstar Labs". Then call CRMy briefing_get for the resolved account. Then call CRMy context_signal_group_list with attention_only true. Summarize confirmed Memory separately from unconfirmed Signals.
+First call CRMy customer_record_resolve for "Northstar Labs". Then call CRMy briefing_get for the resolved account. Then call CRMy context_signal_group_list with attention_only true. Summarize confirmed Memory separately from unconfirmed Signals.
 ```
 
 ## Expected Path
 
 ChatGPT should call:
 
-1. `entity_resolve` for `Northstar Labs`.
+1. `customer_record_resolve` for `Northstar Labs`.
 2. `briefing_get` for the resolved account.
 3. `context_signal_group_list` with `attention_only: true`.
 

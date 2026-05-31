@@ -56,6 +56,7 @@ export interface ResolveCandidate {
   email?: string;
   title?: string;
   company_name?: string;         // contacts: their company_name field
+  account_id?: UUID;             // contacts: linked account id for disambiguation
   account_name?: string;         // contacts: linked account name
   domain?: string;               // accounts: domain
   aliases?: string[];
@@ -120,6 +121,68 @@ async function getAffinityScores(
   return new Map(result.rows.map((r) => [r.id, Number(r.score)]));
 }
 
+type ContactResolveRow = {
+  id: UUID;
+  first_name: string;
+  last_name: string;
+  email?: string;
+  title?: string;
+  company_name?: string;
+  account_id?: UUID;
+  account_name?: string;
+  account_domain?: string;
+  aliases: string[];
+};
+
+function contactHintCondition(
+  hints: ResolveInput['context_hints'],
+  startIndex: number,
+): { sql: string; params: unknown[] } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  let idx = startIndex;
+
+  if (hints?.company_name?.trim()) {
+    conditions.push(`AND (
+      c.company_name ILIKE $${idx}
+      OR a.name ILIKE $${idx}
+      OR a.domain ILIKE $${idx}
+      OR EXISTS (SELECT 1 FROM unnest(a.aliases) _a WHERE _a ILIKE $${idx})
+    )`);
+    params.push(`%${hints.company_name.trim()}%`);
+    idx++;
+  }
+
+  if (hints?.title?.trim()) {
+    conditions.push(`AND c.title ILIKE $${idx}`);
+    params.push(`%${hints.title.trim()}%`);
+  }
+
+  return { sql: conditions.length ? `\n         ${conditions.join('\n         ')}` : '', params };
+}
+
+function contactCandidate(
+  row: ContactResolveRow,
+  matchReason: MatchReason,
+  confidence: Confidence,
+): ResolveCandidate {
+  return {
+    entity_type: 'contact',
+    id: row.id,
+    name: `${row.first_name} ${row.last_name}`.trim(),
+    match_reason: matchReason,
+    confidence,
+    affinity_score: 0,
+    email: row.email,
+    title: row.title ?? undefined,
+    company_name: row.company_name ?? undefined,
+    account_id: row.account_id ?? undefined,
+    account_name: row.account_name ?? row.company_name ?? undefined,
+    domain: row.account_domain ?? undefined,
+    aliases: row.aliases,
+  };
+}
+
 // ─── Contact resolution ───────────────────────────────────────────────────
 
 async function resolveContacts(
@@ -138,29 +201,20 @@ async function resolveContacts(
   // ── 1. Exact email match (if query looks like an email) ─────────────────
   if (hints?.email || q.includes('@')) {
     const emailVal = hints?.email ?? q;
-    const r = await db.query<{
-      id: UUID; first_name: string; last_name: string; email?: string;
-      title?: string; company_name?: string; account_id?: UUID; aliases: string[];
-    }>(
-      `SELECT c.id, c.first_name, c.last_name, c.email, c.title, c.company_name, c.account_id, c.aliases
+    const r = await db.query<ContactResolveRow>(
+      `SELECT c.id, c.first_name, c.last_name, c.email, c.title,
+              COALESCE(a.name, c.company_name) AS company_name,
+              c.account_id, a.name AS account_name, a.domain AS account_domain, c.aliases
        FROM contacts c
-       WHERE c.tenant_id = $1 AND LOWER(c.email) = LOWER($2)
+       LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
+       WHERE c.tenant_id = $1
+         AND c.merged_into IS NULL
+         AND LOWER(c.email) = LOWER($2)
        LIMIT $3`,
       [tenantId, emailVal, limit],
     );
     for (const row of r.rows) {
-      candidates.set(row.id, {
-        entity_type: 'contact',
-        id: row.id,
-        name: `${row.first_name} ${row.last_name}`.trim(),
-        match_reason: 'email_exact',
-        confidence: 'high',
-        affinity_score: 0,
-        email: row.email,
-        title: row.title ?? undefined,
-        company_name: row.company_name ?? undefined,
-        aliases: row.aliases,
-      });
+      candidates.set(row.id, contactCandidate(row, 'email_exact', 'high'));
     }
   }
 
@@ -169,94 +223,69 @@ async function resolveContacts(
     const parts = q.split(/\s+/);
     const firstName = parts[0] ?? '';
     const lastName = parts.slice(1).join(' ');
-    const r = await db.query<{
-      id: UUID; first_name: string; last_name: string; email?: string;
-      title?: string; company_name?: string; account_id?: UUID; aliases: string[];
-    }>(
-      `SELECT c.id, c.first_name, c.last_name, c.email, c.title, c.company_name, c.account_id, c.aliases
+    const hint = contactHintCondition(hints, 5);
+    const r = await db.query<ContactResolveRow>(
+      `SELECT c.id, c.first_name, c.last_name, c.email, c.title,
+              COALESCE(a.name, c.company_name) AS company_name,
+              c.account_id, a.name AS account_name, a.domain AS account_domain, c.aliases
        FROM contacts c
+       LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
        WHERE c.tenant_id = $1
+         AND c.merged_into IS NULL
          AND LOWER(c.first_name) = LOWER($2)
          AND ($3 = '' OR LOWER(c.last_name) = LOWER($3))
+         ${hint.sql}
        LIMIT $4`,
-      [tenantId, firstName, lastName, limit],
+      [tenantId, firstName, lastName, limit, ...hint.params],
     );
     for (const row of r.rows) {
       if (!candidates.has(row.id)) {
-        candidates.set(row.id, {
-          entity_type: 'contact',
-          id: row.id,
-          name: `${row.first_name} ${row.last_name}`.trim(),
-          match_reason: 'exact_name',
-          confidence: 'high',
-          affinity_score: 0,
-          email: row.email,
-          title: row.title ?? undefined,
-          company_name: row.company_name ?? undefined,
-          aliases: row.aliases,
-        });
+        candidates.set(row.id, contactCandidate(row, 'exact_name', 'high'));
       }
     }
   }
 
   // ── 3. Exact alias match ──────────────────────────────────────────────────
   {
-    const r = await db.query<{
-      id: UUID; first_name: string; last_name: string; email?: string;
-      title?: string; company_name?: string; account_id?: UUID; aliases: string[];
-    }>(
-      `SELECT c.id, c.first_name, c.last_name, c.email, c.title, c.company_name, c.account_id, c.aliases
+    const hint = contactHintCondition(hints, 4);
+    const r = await db.query<ContactResolveRow>(
+      `SELECT c.id, c.first_name, c.last_name, c.email, c.title,
+              COALESCE(a.name, c.company_name) AS company_name,
+              c.account_id, a.name AS account_name, a.domain AS account_domain, c.aliases
        FROM contacts c
+       LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
        WHERE c.tenant_id = $1
+         AND c.merged_into IS NULL
          AND EXISTS (SELECT 1 FROM unnest(c.aliases) _a WHERE LOWER(_a) = $2)
+         ${hint.sql}
        LIMIT $3`,
-      [tenantId, qLower, limit],
+      [tenantId, qLower, limit, ...hint.params],
     );
     for (const row of r.rows) {
       if (!candidates.has(row.id)) {
-        candidates.set(row.id, {
-          entity_type: 'contact',
-          id: row.id,
-          name: `${row.first_name} ${row.last_name}`.trim(),
-          match_reason: 'alias_exact',
-          confidence: 'high',
-          affinity_score: 0,
-          email: row.email,
-          title: row.title ?? undefined,
-          company_name: row.company_name ?? undefined,
-          aliases: row.aliases,
-        });
+        candidates.set(row.id, contactCandidate(row, 'alias_exact', 'high'));
       }
     }
   }
 
   // ── 4. ILIKE substring on name + alias ────────────────────────────────────
   if (candidates.size < limit) {
-    const accountFilter = hints?.company_name
-      ? `AND c.account_id IN (
-           SELECT id FROM accounts
-           WHERE tenant_id = $1 AND (name ILIKE $4
-             OR EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE _a ILIKE $4))
-         )`
-      : '';
-    const titleFilter = hints?.title ? ` AND c.title ILIKE $${hints.company_name ? 5 : 4}` : '';
-    const extraParams: unknown[] = [];
-    if (hints?.company_name) extraParams.push(`%${hints.company_name}%`);
-    if (hints?.title) extraParams.push(`%${hints.title}%`);
-
-    const r = await db.query<{
-      id: UUID; first_name: string; last_name: string; email?: string;
-      title?: string; company_name?: string; account_id?: UUID; aliases: string[];
-    }>(
-      `SELECT c.id, c.first_name, c.last_name, c.email, c.title, c.company_name, c.account_id, c.aliases
+    const hint = contactHintCondition(hints, 4);
+    const r = await db.query<ContactResolveRow>(
+      `SELECT c.id, c.first_name, c.last_name, c.email, c.title,
+              COALESCE(a.name, c.company_name) AS company_name,
+              c.account_id, a.name AS account_name, a.domain AS account_domain, c.aliases
        FROM contacts c
+       LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
        WHERE c.tenant_id = $1
+         AND c.merged_into IS NULL
          AND (c.first_name ILIKE $2 OR c.last_name ILIKE $2 OR c.email ILIKE $2
               OR c.company_name ILIKE $2
+              OR a.name ILIKE $2
               OR EXISTS (SELECT 1 FROM unnest(c.aliases) _a WHERE _a ILIKE $2))
-         ${accountFilter}${titleFilter}
+         ${hint.sql}
        LIMIT $3`,
-      [tenantId, pattern, limit, ...extraParams],
+      [tenantId, pattern, limit, ...hint.params],
     );
     for (const row of r.rows) {
       if (!candidates.has(row.id)) {
@@ -264,18 +293,7 @@ async function resolveContacts(
         const isAliasMatch = (row.aliases ?? []).some((a) =>
           a.toLowerCase().includes(qLower),
         );
-        candidates.set(row.id, {
-          entity_type: 'contact',
-          id: row.id,
-          name: `${row.first_name} ${row.last_name}`.trim(),
-          match_reason: isAliasMatch ? 'alias_partial' : 'name_partial',
-          confidence: 'medium',
-          affinity_score: 0,
-          email: row.email,
-          title: row.title ?? undefined,
-          company_name: row.company_name ?? undefined,
-          aliases: row.aliases,
-        });
+        candidates.set(row.id, contactCandidate(row, isAliasMatch ? 'alias_partial' : 'name_partial', 'medium'));
       }
     }
   }
@@ -283,34 +301,25 @@ async function resolveContacts(
   // ── 5. pg_trgm fuzzy fallback (only when nothing found yet) ──────────────
   if (candidates.size === 0) {
     try {
-      const r = await db.query<{
-        id: UUID; first_name: string; last_name: string; email?: string;
-        title?: string; company_name?: string; account_id?: UUID; aliases: string[];
-        sml: number;
-      }>(
-        `SELECT c.id, c.first_name, c.last_name, c.email, c.title, c.company_name, c.account_id, c.aliases,
+      const hint = contactHintCondition(hints, 4);
+      const r = await db.query<ContactResolveRow & { sml: number }>(
+        `SELECT c.id, c.first_name, c.last_name, c.email, c.title,
+                COALESCE(a.name, c.company_name) AS company_name,
+                c.account_id, a.name AS account_name, a.domain AS account_domain, c.aliases,
                 similarity(c.first_name || ' ' || c.last_name, $2) AS sml
          FROM contacts c
+         LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
          WHERE c.tenant_id = $1
+           AND c.merged_into IS NULL
            AND similarity(c.first_name || ' ' || c.last_name, $2) > 0.2
+           ${hint.sql}
          ORDER BY sml DESC
          LIMIT $3`,
-        [tenantId, q, limit],
+        [tenantId, q, limit, ...hint.params],
       );
       for (const row of r.rows) {
         if (!candidates.has(row.id)) {
-          candidates.set(row.id, {
-            entity_type: 'contact',
-            id: row.id,
-            name: `${row.first_name} ${row.last_name}`.trim(),
-            match_reason: 'fuzzy_name',
-            confidence: 'low',
-            affinity_score: 0,
-            email: row.email,
-            title: row.title ?? undefined,
-            company_name: row.company_name ?? undefined,
-            aliases: row.aliases,
-          });
+          candidates.set(row.id, contactCandidate(row, 'fuzzy_name', 'low'));
         }
       }
     } catch {
@@ -361,7 +370,9 @@ async function resolveAccounts(
   if (domainQuery) {
     const r = await db.query<{ id: UUID; name: string; domain?: string; aliases: string[] }>(
       `SELECT id, name, domain, aliases FROM accounts
-       WHERE tenant_id = $1 AND LOWER(domain) = LOWER($2)
+       WHERE tenant_id = $1
+         AND merged_into IS NULL
+         AND LOWER(domain) = LOWER($2)
        LIMIT $3`,
       [tenantId, domainQuery, limit],
     );
@@ -384,6 +395,7 @@ async function resolveAccounts(
     const r = await db.query<{ id: UUID; name: string; domain?: string; aliases: string[] }>(
       `SELECT id, name, domain, aliases FROM accounts
        WHERE tenant_id = $1 AND LOWER(name) = $2
+         AND merged_into IS NULL
        LIMIT $3`,
       [tenantId, qLower, limit],
     );
@@ -408,6 +420,7 @@ async function resolveAccounts(
     const r = await db.query<{ id: UUID; name: string; domain?: string; aliases: string[] }>(
       `SELECT id, name, domain, aliases FROM accounts
        WHERE tenant_id = $1
+         AND merged_into IS NULL
          AND EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE LOWER(_a) = $2)
        LIMIT $3`,
       [tenantId, qLower, limit],
@@ -433,6 +446,7 @@ async function resolveAccounts(
     const r = await db.query<{ id: UUID; name: string; domain?: string; aliases: string[] }>(
       `SELECT id, name, domain, aliases FROM accounts
        WHERE tenant_id = $1
+         AND merged_into IS NULL
          AND (name ILIKE $2 OR domain ILIKE $2
               OR EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE _a ILIKE $2))
        LIMIT $3`,
@@ -465,7 +479,9 @@ async function resolveAccounts(
       }>(
         `SELECT id, name, domain, aliases, similarity(name, $2) AS sml
          FROM accounts
-         WHERE tenant_id = $1 AND similarity(name, $2) > 0.2
+         WHERE tenant_id = $1
+           AND merged_into IS NULL
+           AND similarity(name, $2) > 0.2
          ORDER BY sml DESC
          LIMIT $3`,
         [tenantId, q, limit],

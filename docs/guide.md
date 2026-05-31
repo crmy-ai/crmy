@@ -131,6 +131,18 @@ Peer    sample.peer@crmy.local / crmy-demo-123
 
 Most CLI commands that work with customer records accept friendly references like `account:Northstar Labs`, `contact:Maya Patel`, `opportunity:Agent Context Rollout`, and `use_case:Production Rollout`. CRMy resolves the record inside your visible scope first. IDs are still expected for operational artifacts such as Handoff requests, raw-source receipts, sync runs, and writeback requests.
 
+### First-run product path
+
+Start with the lifecycle, not the admin surfaces:
+
+1. **Overview** shows the scoped Focus Queue: source issues, Signals to confirm, Handoffs to decide, stale Memory, and deal/account work that needs attention.
+2. **Context** is the customer-context lifecycle: **Raw Context → Signals → Memory → Lineage**.
+3. **Context → Sources** explains how context enters CRMy: Add Context, MCP/API, Customer Email, and Customer Activity.
+4. **Handoffs** is where humans approve, reject, reassign, or complete governed decisions.
+5. **Settings** is for workspace setup. Advanced automation, sequences, webhooks, system setup, registries, and reliability tools should not be the first-run path unless you are configuring the platform.
+
+For contributors deciding where new UI belongs, see [What Belongs Where](./what-belongs-where.md).
+
 ### Quick setup — Remote mode
 
 Connect the CLI to an existing CRMy server without needing direct database access:
@@ -480,7 +492,7 @@ http://localhost:3000/app
 
 Admins and owners see the Command Center for the context engine. A compact flow shows **Raw Context → Signals → Memory → Handoffs** so operators can see setup status, source volume, reviewable Signals, Current Memory, and pending governed decisions. A second **Memory Health** tab keeps stale and contradictory Memory review close to the command center.
 
-Members and managers see an Overview focused on their book of business: record coverage, pipeline pulse, a Focus Queue, and quick actions for Add Context, Ask Agent, Signals, Handoffs, and Opportunities.
+Members and managers see an Overview focused on their book of business: record coverage, pipeline pulse, a Focus Queue, and quick actions for Add Context, Ask Agent, Signals, Handoffs, and Opportunities. The Focus Queue is also where source issues appear: unmatched customer emails, meetings missing notes/transcripts/debriefs, Signals needing confirmation, and Handoffs needing decisions.
 
 #### Contacts (`/app/contacts`)
 
@@ -524,11 +536,14 @@ Admin-only actor and user management for humans, agents, scopes, API keys, and r
 
 #### Context (`/app/context`)
 
-The Context page is the dedicated workspace for Raw Context, Signal review, Current Memory, record-centered graph exploration, and Memory Lineage. Raw Context is the user-facing label for raw observations/source material. Features:
+The Context page is the dedicated workspace for the customer-context lifecycle. Raw Context is the user-facing label for raw observations/source material. The primary tabs are:
 
 - **Raw Context tab**: source volume and recent processing outcomes across activities, inbound/outbound emails, Add Context imports, Systems of Record sync runs, MCP/REST/CLI context writes, and future source types
+- **Signals tab**: inferred customer claims that need confirmation, dismissal, more evidence, or Handoff review before agents rely on them
+- **Memory tab**: confirmed operational customer context agents retrieve into Active Context through briefings and search
 - **Lineage tab**: source-to-action timeline showing how Raw Context produced Signals, trusted Memory, handoffs, writebacks, and audit history
-- **Graph tab**: Context Graph picker for exploring related records, Current Memory, recent activity, and open handoffs around a selected customer record
+- **Sources action**: secondary link for choosing how context enters CRMy: Add Context, MCP/API, Customer Email, and Customer Activity
+- **Graph action**: secondary link for record-centered exploration of related records, Current Memory, recent activity, and open handoffs
 - **Dual search modes**: keyword (full-text, client-side) and **semantic** (pgvector similarity). The toggle sits inline in the search bar. If semantic search is unavailable, it falls back to keyword automatically with a warning banner. Admins enable semantic retrieval in Database Settings by using a pgvector-capable database, setting `ENABLE_PGVECTOR=true`, and adding `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` to the server environment.
 - **Filter** by subject type (contact, account, opportunity, use case) and context type
 - **Needs Review toggle** to surface Current Memory past its `valid_until` date
@@ -551,7 +566,7 @@ Click any graph node to open a detail drawer with key fields, content preview, a
 Role-aware settings:
 - **Profile**: name, email, role, and personal appearance preferences
 - **API Keys**: create new keys (shown once), list existing, revoke
-- **Admin-only setup**: Model Settings, Systems of Record, source filters, Actors, Webhooks, Custom Fields, Registries, Action Policies, Automations, Reliability, and Audit Log
+- **Admin-only setup**: Model Settings, Systems of Record, source filters, Actors, Webhooks, Custom Fields, Registries, Action Policies, Advanced Automation, Reliability, and Audit Log
 - **Tenant identity**: read-only workspace/tenant details for admins
 
 #### Workspace Agent settings (`/app/settings/model`)
@@ -631,7 +646,7 @@ Agents should retrieve Memory into Active Context with `briefing_get`, `context_
 
 All customer-context operations are defined as **MCP tools**. The REST API and CLI mostly call the same tool handlers, while a few UI-first admin wizards (mailbox/calendar OAuth, provider setup, and other connection flows) remain REST/UI surfaces because they involve redirects or secrets. MCP is the complete agent-facing surface; the CLI is curated for setup, demos, Raw Context ingestion, activity/email review, systems, workflows, and operational QA.
 
-Use high-level tools for most revenue agents: `briefing_get`, `entity_resolve`, `crm_search`, `context_ingest_auto`, `context_ingest`, `activity_create`, Signal promotion/handoff tools, compound actions, assignments, and HITL. Reserve `context_add`, setup, mapping, operations, workflow administration, and systems-of-record tools for operator agents or human admins with explicit scopes.
+Use high-level tools for most revenue agents: `briefing_get`, `customer_record_resolve`, `crm_search`, `context_ingest_auto`, `context_ingest`, `activity_create`, Signal promotion/handoff tools, compound actions, assignments, and HITL. Use `context_ingest_auto` for messy transcripts, emails, notes, and research; use `customer_record_resolve` when an agent needs to resolve a customer record before briefing or action. Reserve `context_add`, setup, mapping, operations, workflow administration, compatibility lookup tools, and systems-of-record tools for operator agents or human admins with explicit scopes.
 
 **Four ways to interact:**
 
@@ -814,6 +829,8 @@ GET    /api/v1/analytics/forecast?period=quarter
 Customer Activity is the meeting/call/note context feed. Calendar meetings, phone calls, in-person meetings, notes, and manually logged interactions can become Raw Context when they include a transcript, debrief, or summary. The activity model supports polymorphic subjects (any customer record), structured `detail` payloads, `occurred_at` timestamps for retroactive logging, and `outcome` tracking.
 
 Calendar capture is optional. Meeting transcripts and call notes can still feed context through **Add Context**, `activity_add_context`, `calendar_event_add_context`, or `context_ingest_auto`.
+
+Calendar and meeting association uses the same account-first Subject Graph resolver as Raw Context extraction. CRMy still uses deterministic attendee email and account-domain matching first, but opportunity and use-case links are only added when the resolver can identify them inside the matched account scope. Ambiguous child records stay reviewable instead of being guessed.
 
 ### Activity types
 
@@ -1284,7 +1301,7 @@ Returns:
 }
 ```
 
-The resolution tiers used are the same as `entity_resolve` — exact name, alias, email, domain, substring, and fuzzy (`pg_trgm`) — with account-scoped child matching for GTM objects. Only matches above the `confidence_threshold` are linked. Common English words, days of the week, and month names are filtered before resolution to avoid noise. If CRMy finds a customer account but no existing child record fits, it can return proposed records for review instead of auto-creating duplicates.
+Automatic extraction uses the same account-first subject graph exposed by `customer_record_resolve`: exact IDs/emails/domains, stored aliases, account-scoped child matching, ambiguity receipts, and reviewed record proposals. Only matches above the `confidence_threshold` are linked. Common English words, days of the week, and month names are filtered before resolution to avoid noise. If CRMy finds a customer account but no existing child record fits, it can return proposed records for review instead of auto-creating duplicates.
 
 This is the recommended tool for agents processing inbound content (emails, transcripts, documents) when subject IDs are not already known.
 
@@ -1569,53 +1586,56 @@ If a single candidate has non-zero affinity and no other candidate matches at a 
 
 When resolution returns `status: "ambiguous"` and actor affinity cannot break the tie, the agent should surface the candidates to a human via `hitl_submit_request` before proceeding. The response includes a `candidates` array with IDs, names, and confidence scores to populate the approval payload.
 
-### `entity_resolve` MCP tool
+### Customer record resolution
 
-Always call `entity_resolve` before `contact_get` or `account_get` when you have a name but not a record ID.
+Use `customer_record_resolve` when an agent needs to resolve a customer record before briefing or action. It uses the same account-first resolver as Raw Context extraction and returns account scope, ambiguity receipts, and proposed child records.
+
+Use `context_ingest_auto` instead when the input is a messy meeting transcript, email thread, call notes, research, or any other source that should become Signals and Memory.
+
+`entity_resolve` remains available as a compatibility/simple account-contact lookup tool for older agent harnesses. It should not be the primary path for messy GTM context or child records such as opportunities and use cases.
 
 **Input:**
 
 | Field | Type | Description |
 |---|---|---|
-| `query` | string (required) | The name, abbreviation, or partial string to resolve |
-| `entity_type` | `contact` \| `account` \| `any` | Limit search to one type (default `any`) |
-| `context_hints` | object | Optional hints: `company_name`, `email_domain`, `title`, `email` |
-| `actor_id` | uuid | Actor whose affinity history to use (defaults to requesting actor) |
-| `limit` | 1–10 | Max candidates to return (default 5) |
+| `query` or `text` | string (one required) | Customer reference or short source snippet to resolve before action |
+| `subject_type` | `account` \| `contact` \| `opportunity` \| `use_case` \| `any` | Optional target record type |
+| `account_hint` | string | Optional account/customer name, alias, or domain to narrow child records |
+| `confidence_threshold` | 0–1 | Minimum confidence threshold for model-assisted matches |
+| `limit` | 1–20 | Max records/candidates to return |
 
 **Output:**
 
 ```json
 {
-  "status": "resolved",          // "resolved" | "ambiguous" | "not_found"
-  "entity_type": "account",
-  "resolved": {
-    "id": "uuid",
-    "name": "JP Morgan Chase",
-    "confidence": "HIGH",
-    "match_tier": "alias",
-    "affinity_score": 12
-  },
-  "candidates": []               // populated when status = "ambiguous"
+  "resolver": "subject_graph",
+  "subjects": [
+    { "type": "account", "id": "uuid", "name": "Northstar Labs", "confidence": "high" }
+  ],
+  "skipped": [],
+  "proposed_records": [],
+  "account_scope": [],
+  "resolution_summary": "Matched 1 customer record."
 }
 ```
 
-### `POST /resolve` REST endpoint
+### REST endpoint
 
 ```
-POST /api/v1/resolve
+POST /api/v1/subjects/resolve
 Authorization: Bearer <key>
 
 {
-  "query": "JPMC",
-  "entity_type": "account",
-  "actor_id": "uuid",
-  "context_hints": { "email_domain": "jpmorgan.com" },
+  "query": "Northstar Pegasus expansion",
+  "subject_type": "opportunity",
+  "account_hint": "Northstar Labs",
   "limit": 5
 }
 ```
 
 Returns the same shape as the MCP tool output.
+
+Compatibility endpoint: `POST /api/v1/resolve` still serves `entity_resolve` for simple account/contact lookup used by older integrations.
 
 ### Database
 
@@ -1691,7 +1711,7 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 4. For REST routes: `enforceToolScopes(toolName, actor)` or `requireScopes(actor, ...scopes)` is called
 5. If any required scope is missing → HTTP 403 with an explanatory message
 
-**Human JWT users keep their role and record visibility.** Owners and admins can access tenant-wide data. Managers can access records owned by themselves and reporting users. Members can access only their visible book of business. Constructed actors, anonymous actors, agents, and API keys must also carry explicit scopes. Tools that are intentionally public are limited to identity/schema/help lookups such as `actor_whoami`, `entity_resolve`, `schema_get`, and `guide_search`.
+**Human JWT users keep their role and record visibility.** Owners and admins can access tenant-wide data. Managers can access records owned by themselves and reporting users. Members can access only their visible book of business. Constructed actors, anonymous actors, agents, and API keys must also carry explicit scopes. Tools that are intentionally public are limited to identity/schema/help lookups such as `actor_whoami`, `entity_resolve`, `schema_get`, and `guide_search`. Account-first GTM resolution through `customer_record_resolve` requires `context:read`.
 
 ### Wildcard resolution
 
@@ -1726,7 +1746,7 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 | `context_get`, `context_search`, `context_list`, `context_raw_source_list`, `context_raw_source_get`, `context_signal_group_list`, `context_signal_group_get`, `context_stale`, `context_diff`, `briefing_get` | `context:read` |
 | `context_add`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_review`, `context_extract`, `context_ingest`, `context_ingest_auto`, `context_bulk_mark_stale`, `context_embed_backfill`, `context_stale_assign`, `context_review_batch`, `context_resolve_contradiction`, `context_consolidate` | `context:write` |
 | `context_signal_group_promote`, `context_signal_handoff`, `context_signal_group_reject`, `context_raw_source_reprocess` | `context:write` |
-| `context_detect_contradictions`, `context_semantic_search`, `context_lineage_get` | `context:read` |
+| `context_detect_contradictions`, `context_semantic_search`, `context_lineage_get`, `customer_record_resolve` | `context:read` |
 | `context_contradiction_assign` | `context:read`, `assignments:write` |
 | `email_get`, `email_search`, `email_message_search`, `email_message_get`, `mailbox_connection_list`, `email_draft_preview` | `activities:read` plus `context:read` for draft preview |
 | `email_create`, `email_draft_save`, `email_message_ignore` | `activities:write` |
@@ -1866,6 +1886,8 @@ GET    /api/v1/analytics/use-cases?group_by=stage
 ## Workflows & Automation
 
 Event-driven automation. Workflows trigger on CRM events and execute a sequence of actions.
+
+This is an admin capability, now reached from **Settings → Automations** or the compatible `/app/automations` route. It should not be part of the first-run user path. Most users should start from Overview, Context, Handoffs, customer records, and Workspace Agent before configuring action rules or sequences.
 
 ### Trigger events
 
@@ -2069,11 +2091,13 @@ GET    /api/v1/webhooks/:id/deliveries
 
 Customer Email is an optional context feed and governed response workspace. Connect a mailbox when you want customer threads auto-matched to customer records and processed into Signals and Memory. Emails can also feed context through **Add Context** or MCP `context_ingest_auto` without connecting a mailbox.
 
+Email association uses deterministic contact email, reply-chain, and account-domain matching first, then enriches the link with the same account-first Subject Graph resolver used by Raw Context. This lets CRMy match an opportunity or use case mentioned in an email under the right account while leaving ambiguous references in review.
+
 ### How it works
 
 1. **Connect a mailbox** — users connect Gmail or Microsoft 365 from `/app/emails` so customer-facing messages can sync into CRMy.
 2. **Filter before storage** — admin source filters skip internal-only, automated, spam/trash, newsletter, and excluded-domain messages before extraction by default.
-3. **Match customer records** — CRMy links messages using known contact email, account domain, reply/thread hints, and account-scoped opportunity/use-case matching.
+3. **Match customer records** — CRMy links messages using known contact email, account domain, reply/thread hints, and Subject Graph account-scoped opportunity/use-case matching.
 4. **Process useful messages** — linked customer messages can become Raw Context, producing Signals, Memory, or review items.
 5. **Draft safely** — users can generate or edit customer replies from Memory, Signals, recent email context, and linked records. Agent-generated drafts land in **Drafts & Approvals** first.
 
@@ -2695,7 +2719,7 @@ mcp_servers:
     connect_timeout: 60
     tools:
       include:
-        - entity_resolve
+        - customer_record_resolve
         - briefing_get
         - context_ingest_auto
         - context_signal_group_list
@@ -2736,13 +2760,13 @@ npx -y @crmy/cli agent-smoke
 Then ask the connected agent:
 
 ```text
-Use the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.
+Use the CRMy MCP tools to resolve the customer record "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.
 ```
 
 Hermes Agent prompt:
 
 ```text
-Use mcp_crmy_entity_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, then call mcp_crmy_context_signal_group_list for Signals needing attention. Tell me the safest next action with the evidence you used.
+Use mcp_crmy_customer_record_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, then call mcp_crmy_context_signal_group_list for Signals needing attention. Tell me the safest next action with the evidence you used.
 ```
 
 **HTTP (remote agents):**
@@ -2776,7 +2800,8 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 | Emails | `email_create`, `email_get`, `email_search`, `mailbox_connection_list`, `email_message_search`, `email_message_get`, `email_message_link`, `email_message_process`, `email_message_ignore`, `email_draft_preview`, `email_draft_save`, `email_ingest`, `email_provider_set`, `email_provider_get` |
 | Email Sequences | `email_sequence_create`, `email_sequence_get`, `email_sequence_update`, `email_sequence_delete`, `email_sequence_list`, `email_sequence_enroll`, `email_sequence_unenroll`, `email_sequence_enrollment_list` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
-| Identity | `entity_resolve` |
+| Record Resolution | `customer_record_resolve` |
+| Compatibility | `entity_resolve` |
 | Analytics | `crm_search`, `pipeline_summary`, `pipeline_forecast`, `account_health_report`, `tenant_get_stats` |
 | Record Drafts | `record_draft_preview` |
 | Operations | `ops_status_get`, `ops_job_recover`, `ops_data_quality_get`, `ops_data_quality_repair`, `ops_audit_get`, `ops_privacy_export`, `ops_pii_redact`, `ops_privacy_delete`, `ops_retention_apply` |

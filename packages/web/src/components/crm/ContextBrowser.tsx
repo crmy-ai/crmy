@@ -598,6 +598,7 @@ export function ContextBrowser({
   const [ingestProposals,   setIngestProposals]    = useState<IngestProposal[]>([]);
   const [ingestResolutionSummary, setIngestResolutionSummary] = useState<string | null>(null);
   const [ingestSource,      setIngestSource]       = useState('');
+  const [ingestOccurredAt,  setIngestOccurredAt]   = useState('');
   const [autoResolveIngest, setAutoResolveIngest]  = useState(true);
   const [ingesting,         setIngesting]          = useState(false);
   const [detecting,         setDetecting]          = useState(false);
@@ -612,6 +613,7 @@ export function ContextBrowser({
   const [uploadProposals,   setUploadProposals]    = useState<IngestProposal[]>([]);
   const [uploadResolutionSummary, setUploadResolutionSummary] = useState<string | null>(null);
   const [uploadSource,      setUploadSource]       = useState('');
+  const [uploadOccurredAt,  setUploadOccurredAt]   = useState('');
   const [uploadParsing,     setUploadParsing]      = useState(false);
   const [uploadDragging,    setUploadDragging]     = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -775,6 +777,7 @@ export function ContextBrowser({
     setIngestProposals([]);
     setIngestResolutionSummary(null);
     setIngestSource('');
+    setIngestOccurredAt('');
     setAutoResolveIngest(true);
     setIngestTab('text');
     setUploadFile(null);
@@ -784,6 +787,7 @@ export function ContextBrowser({
     setUploadProposals([]);
     setUploadResolutionSummary(null);
     setUploadSource('');
+    setUploadOccurredAt('');
     setClipboardBanner(null);
     setDetectError(null);
     clearTimeout(detectDebounceRef.current);
@@ -949,6 +953,7 @@ export function ContextBrowser({
     const activeSubjects = ingestTab === 'file' ? uploadSubjects : ingestSubjects;
     const activeProposals = ingestTab === 'file' ? uploadProposals : ingestProposals;
     const activeSource = ingestTab === 'file' ? uploadSource : ingestSource;
+    const activeOccurredAt = ingestTab === 'file' ? uploadOccurredAt : ingestOccurredAt;
     const returnSubject = activeSubjects.find(subject => subject.pinned && subject.type && subject.id) ?? null;
 
     const validSubjects = activeSubjects.filter(s => s.type && s.id);
@@ -969,6 +974,7 @@ export function ContextBrowser({
         ? [await ingestAutoMut.mutateAsync({
             text: activeText,
             source: activeSource || undefined,
+            source_occurred_at: activeOccurredAt || undefined,
             subjects: useResolvedSubjects
               ? validSubjects.map(subject => ({
                   type: subject.type,
@@ -1039,7 +1045,7 @@ export function ContextBrowser({
     } finally {
       setIngesting(false);
     }
-  }, [autoResolveIngest, ingestTab, ingestText, ingestSubjects, ingestProposals, ingestSource, uploadText, uploadSubjects, uploadProposals, uploadSource, ingestAutoMut, ingestMutation, closeIngestDialog]);
+  }, [autoResolveIngest, ingestTab, ingestText, ingestSubjects, ingestProposals, ingestSource, ingestOccurredAt, uploadText, uploadSubjects, uploadProposals, uploadSource, uploadOccurredAt, ingestAutoMut, ingestMutation, closeIngestDialog]);
 
   // Handle manual entry creation
   const handleAddEntry = useCallback(async () => {
@@ -1639,12 +1645,22 @@ export function ContextBrowser({
                 />
               )}
 
-              <Input
-                placeholder="Source label (optional, e.g. 'Q1 review call')"
-                value={ingestSource}
-                onChange={(e) => setIngestSource(e.target.value)}
-                className="h-9 text-sm"
-              />
+              <div className="grid gap-2 sm:grid-cols-[1fr_220px]">
+                <Input
+                  placeholder="Source label (optional, e.g. 'Q1 review call')"
+                  value={ingestSource}
+                  onChange={(e) => setIngestSource(e.target.value)}
+                  className="h-9 text-sm"
+                />
+                <Input
+                  type="datetime-local"
+                  aria-label="Context event time"
+                  value={ingestOccurredAt}
+                  onChange={(e) => setIngestOccurredAt(e.target.value)}
+                  className="h-9 text-sm text-muted-foreground"
+                  title="When this customer context happened. This helps CRMy avoid treating the same source as new corroboration."
+                />
+              </div>
               </div>
             ) : (
               <div className="space-y-3">
@@ -1739,12 +1755,22 @@ export function ContextBrowser({
                 />
               )}
 
-              <Input
-                placeholder="Source label (e.g. 'Q1 review transcript')"
-                value={uploadSource}
-                onChange={(e) => setUploadSource(e.target.value)}
-                className="h-9 text-sm"
-              />
+              <div className="grid gap-2 sm:grid-cols-[1fr_220px]">
+                <Input
+                  placeholder="Source label (e.g. 'Q1 review transcript')"
+                  value={uploadSource}
+                  onChange={(e) => setUploadSource(e.target.value)}
+                  className="h-9 text-sm"
+                />
+                <Input
+                  type="datetime-local"
+                  aria-label="Context event time"
+                  value={uploadOccurredAt}
+                  onChange={(e) => setUploadOccurredAt(e.target.value)}
+                  className="h-9 text-sm text-muted-foreground"
+                  title="When this customer context happened. This helps CRMy avoid treating the same source as new corroboration."
+                />
+              </div>
               </div>
             )}
           </div>

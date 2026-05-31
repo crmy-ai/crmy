@@ -1815,6 +1815,7 @@ export function useContextIngestAuto() {
     mutationFn: (data: {
       text: string;
       source?: string;
+      source_occurred_at?: string;
       confidence_threshold?: number;
       subjects?: Array<{ type: string; id: string; name?: string }>;
       proposed_records?: Array<{
@@ -1931,6 +1932,21 @@ export function useOpsDataQuality(params?: { sample_limit?: number; include_clea
   return useQuery({
     queryKey: ['ops-data-quality', params],
     queryFn: () => api.get(`ops/data-quality${qs ? `?${qs}` : ''}`),
+  });
+}
+
+export function useRepairOpsDataQuality() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { check_name: string; dry_run?: boolean; limit?: number }) =>
+      api.post(`ops/data-quality/${input.check_name}/repair`, {
+        dry_run: input.dry_run ?? true,
+        limit: input.limit ?? 100,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ops-data-quality'] });
+      qc.invalidateQueries({ queryKey: ['ops-status'] });
+    },
   });
 }
 

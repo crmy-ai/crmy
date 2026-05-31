@@ -131,6 +131,7 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   search: { method: 'GET', path: (i) => `/api/v1/search?q=${encodeURIComponent((i.query as string) ?? '')}` },
   crm_search: { method: 'GET', path: (i) => `/api/v1/search?q=${encodeURIComponent((i.query as string) ?? '')}&limit=${i.limit ?? 10}` },
   entity_resolve: { method: 'POST', path: () => '/api/v1/resolve' },
+  customer_record_resolve: { method: 'POST', path: () => '/api/v1/subjects/resolve' },
 
   // Meta
   schema_get: { method: 'GET', path: () => '/health' },

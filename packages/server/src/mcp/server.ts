@@ -41,6 +41,7 @@ import { assignmentTools } from './tools/assignments.js';
 import { contextEntryTools } from './tools/context-entries.js';
 import { registryTools } from './tools/registries.js';
 import { entityResolveTools } from './tools/entity-resolve.js';
+import { subjectGraphTools } from './tools/subject-graph.js';
 import { guideTools } from './tools/guide.js';
 import { messagingTools } from './tools/messaging.js';
 import { emailSequenceTools } from './tools/email-sequences.js';
@@ -119,6 +120,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...emailTools(db),
     ...calendarTools(db),
     ...emailSequenceTools(db),
+    ...subjectGraphTools(db),
     ...entityResolveTools(db),
     ...registryTools(db),
     ...webhookTools(db),

@@ -259,6 +259,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   ops_privacy_delete: ['privacy:write'],
   ops_retention_apply: ['ops:write'],
   entity_resolve: [],  // always allowed
+  customer_record_resolve: ['context:read'],
   schema_get: [],      // always allowed
   guide_search: [],    // always allowed
 

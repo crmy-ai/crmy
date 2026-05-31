@@ -20,7 +20,7 @@ import * as hitlRepo from '../db/repos/hitl.js';
 import * as eventRepo from '../db/repos/events.js';
 import * as searchRepo from '../db/repos/search.js';
 import { entityResolve } from '../services/entity-resolve.js';
-import { detectRawContextSubjects } from '../services/raw-context-subjects.js';
+import { resolveSubjectGraph } from '../services/subject-graph-resolver.js';
 import * as ucRepo from '../db/repos/use-cases.js';
 import * as actorRepo from '../db/repos/actors.js';
 import { emitEvent } from '../events/emitter.js';
@@ -60,6 +60,7 @@ import {
   getSourceFilterSettings,
   updateSourceFilterSettings,
 } from '../services/source-filters.js';
+import { resolveActorRecordId } from '../services/actor-identity.js';
 import { z } from 'zod';
 
 function getActor(req: Request): ActorContext {
@@ -217,6 +218,19 @@ export function apiRouter(db: DbPool): Router {
       const result = await handler({
         sample_limit: qn(req.query.sample_limit, 10),
         include_clean: req.query.include_clean === 'true',
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/ops/data-quality/:check_name/repair', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = adminToolHandler(db, 'ops_data_quality_repair');
+      const result = await handler({
+        check_name: p(req, 'check_name'),
+        dry_run: req.body?.dry_run !== false,
+        limit: qn(req.body?.limit, 100),
       }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
@@ -2685,6 +2699,7 @@ export function apiRouter(db: DbPool): Router {
       const actor = getActor(req);
       requireScopes(actor, 'context:read');
       const ownerFilter = await resolveOwnerFilter(db, actor);
+      const actorRecordId = isGlobalActor(actor) ? undefined : await resolveActorRecordId(db, actor.tenant_id, actor.actor_id);
       const result = await rawContextRepo.listRawContextSources(db, actor.tenant_id, {
         source_type: qs(req.query.source_type),
         status: qs(req.query.status) as any,
@@ -2692,6 +2707,7 @@ export function apiRouter(db: DbPool): Router {
         subject_id: qs(req.query.subject_id),
         query: qs(req.query.q),
         owner_ids: 'owner_ids' in ownerFilter ? ownerFilter.owner_ids : undefined,
+        actor_ids: actorRecordId ? [actorRecordId] : undefined,
         limit: Math.min(qn(req.query.limit, 50), 200),
         cursor: qs(req.query.cursor),
       });
@@ -2703,81 +2719,18 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       requireScopes(actor, 'context:read');
-      const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, p(req, 'id'));
-      if (!source) throw new CrmyError('NOT_FOUND', 'Raw Context source not found', 404);
-      await assertSubjectAccess(db, actor, source.subject_type, source.subject_id);
-      res.json({ raw_context_source: source });
+      const handler = toolHandler(db, 'context_raw_source_get');
+      res.json(await handler({ id: p(req, 'id') }, actor));
     } catch (err) { handleError(res, err); }
   });
 
   router.post('/context/raw-sources/:id/reprocess', async (req: Request, res: Response) => {
-    let source: rawContextRepo.RawContextSource | null = null;
     try {
       const actor = getActor(req);
       requireScopes(actor, 'context:write');
-      source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, p(req, 'id'));
-      if (!source) throw new CrmyError('NOT_FOUND', 'Raw Context source not found', 404);
-      await assertSubjectAccess(db, actor, source.subject_type, source.subject_id);
-
-      await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
-        status: 'processing',
-        stage: 'reprocess',
-        failure_reason: null,
-        metadata: {
-          reprocess_requested_at: new Date().toISOString(),
-          reprocess_requested_by: actor.actor_id,
-        },
-      });
-
-      const sourceRefLooksLikeActivity = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(source.source_ref);
-      const canRetryActivity = sourceRefLooksLikeActivity
-        && (source.source_type === 'activity' || source.source_type === 'add_context' || source.source_type.includes('email'));
-
-      let result: unknown;
-      if (canRetryActivity) {
-        const handler = toolHandler(db, 'context_extract');
-        result = await handler({ activity_id: source.source_ref }, actor);
-      } else if (source.raw_excerpt?.trim()) {
-        const handler = toolHandler(db, 'context_ingest_auto');
-        result = await handler({
-          document: source.raw_excerpt,
-          source_label: source.source_label ?? 'Reprocessed Raw Context',
-          confidence_threshold: 0.6,
-        }, actor);
-
-        const r = result as { extracted_count?: number; memory_created?: number; signals_created?: number; skipped?: number };
-        await rawContextRepo.updateRawContextSource(db, actor.tenant_id, source.source_type, source.source_ref, {
-          status: Number(r.signals_created ?? 0) > 0
-            ? 'needs_review'
-            : Number(r.extracted_count ?? 0) > 0
-              ? 'processed'
-              : 'skipped',
-          stage: 'reprocessed',
-          memory_created: Number(r.memory_created ?? 0),
-          signals_created: Number(r.signals_created ?? 0),
-          skipped: Number(r.skipped ?? 0),
-          failure_reason: Number(r.extracted_count ?? 0) > 0 ? null : 'Reprocess completed but no extractable context was found.',
-        });
-      } else {
-        throw new CrmyError(
-          'VALIDATION_ERROR',
-          'This Raw Context source cannot be reprocessed because CRMy does not have the original activity or source excerpt.',
-          400,
-        );
-      }
-
-      const updated = await rawContextRepo.getRawContextSource(db, actor.tenant_id, source.id);
-      res.json({ raw_context_source: updated, result });
+      const handler = toolHandler(db, 'context_raw_source_reprocess');
+      res.json(await handler({ id: p(req, 'id') }, actor));
     } catch (err) {
-      if (source) {
-        const actor = req.actor;
-        await rawContextRepo.updateRawContextSource(db, source.tenant_id, source.source_type, source.source_ref, {
-          status: 'failed',
-          stage: 'reprocess',
-          failure_reason: err instanceof Error ? err.message : 'Reprocess failed.',
-          metadata: actor ? { reprocess_failed_by: actor.actor_id } : undefined,
-        }).catch(() => {});
-      }
       handleError(res, err);
     }
   });
@@ -2884,11 +2837,28 @@ export function apiRouter(db: DbPool): Router {
       const result = await handler({
         document: req.body.text ?? req.body.document,
         source_label: req.body.source ?? req.body.source_label,
+        source_occurred_at: req.body.source_occurred_at,
         context_type: req.body.context_type,
         confidence_threshold: req.body.confidence_threshold,
         subjects: req.body.subjects,
         proposed_records: req.body.proposed_records,
       }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/subjects/resolve', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireScopes(actor, 'context:read');
+      const result = await resolveSubjectGraph(db, actor, {
+        query: req.body.query,
+        text: req.body.text,
+        subject_type: req.body.subject_type,
+        account_hint: req.body.account_hint,
+        confidence_threshold: req.body.confidence_threshold,
+        limit: req.body.limit,
+      });
       res.json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -2899,15 +2869,13 @@ export function apiRouter(db: DbPool): Router {
   router.post('/context/detect-subjects', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      requireScopes(actor, 'context:read');
       const text: string = req.body.text ?? '';
       if (!text.trim()) return res.json({ subjects: [] });
-      const ownerFilter = await resolveOwnerFilter(db, actor);
-
-      const detection = await detectRawContextSubjects(db, actor.tenant_id, text, {
+      const detection = await resolveSubjectGraph(db, actor, {
+        text,
         limit: 15,
-        confidenceThreshold: 0.67,
-        actorId: actor.actor_id,
-        ownerIds: 'owner_ids' in ownerFilter ? ownerFilter.owner_ids : undefined,
+        confidence_threshold: 0.67,
       });
 
       return res.json({
@@ -2928,6 +2896,7 @@ export function apiRouter(db: DbPool): Router {
   router.post('/context/ingest-file', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      requireScopes(actor, 'context:read');
       const { filename, data, source_label } = req.body as {
         filename: string;
         data: string;
@@ -2945,15 +2914,20 @@ export function apiRouter(db: DbPool): Router {
         return res.json({ text_preview: '', truncated: false, subjects: [], filename, format });
       }
 
-      let detection: Awaited<ReturnType<typeof detectRawContextSubjects>> = { candidates: [], subjects: [], skipped: [] };
+      let detection: Awaited<ReturnType<typeof resolveSubjectGraph>> = {
+        resolver: 'subject_graph',
+        query: '',
+        subject_type: 'any',
+        candidates: [],
+        subjects: [],
+        skipped: [],
+      };
       let subjectDetectionError: string | undefined;
       try {
-        const ownerFilter = await resolveOwnerFilter(db, actor);
-        detection = await detectRawContextSubjects(db, actor.tenant_id, text, {
+        detection = await resolveSubjectGraph(db, actor, {
+          text,
           limit: 15,
-          confidenceThreshold: 0.67,
-          actorId: actor.actor_id,
-          ownerIds: 'owner_ids' in ownerFilter ? ownerFilter.owner_ids : undefined,
+          confidence_threshold: 0.67,
         });
       } catch (err) {
         subjectDetectionError = err instanceof Error

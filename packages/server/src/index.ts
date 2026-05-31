@@ -297,6 +297,7 @@ export async function createApp(config: ServerConfig) {
   const { processEmbeddingJobs } = await import('./services/embedding-service.js');
   const { checkHitlSlaExpiry } = await import('./hitl/sla-checker.js');
   const { refreshStaleScores } = await import('./services/scoring.js');
+  const { processPendingRawContextSources } = await import('./services/raw-context-processing.js');
   const { processMailboxSyncJobs } = await import('./services/customer-email.js');
   const { processCalendarSyncJobs } = await import('./services/customer-activity.js');
   const { processSequenceDue, handleSequenceGoalEvent, resolveSequenceGoalContactId } = await import('./services/sequence-executor.js');
@@ -344,6 +345,7 @@ export async function createApp(config: ServerConfig) {
       await runBackgroundTask('agent_session_cleanup', () => cleanExpiredSessions(db), failures);
       await runBackgroundTask('agent_turns', () => processPendingAgentTurns(db), failures);
       await runBackgroundTask('context_pending_extractions', () => processPendingExtractions(db), failures);
+      await runBackgroundTask('raw_context_sources', () => processPendingRawContextSources(db), failures);
       await runBackgroundTask('context_stale_entries', () => processStaleEntries(db), failures);
       await runBackgroundTask('webhook_retries', () => processWebhookRetries(db), failures);
       await runBackgroundTask('context_outbox', () => processContextOutbox(db), failures);

@@ -711,8 +711,12 @@ export default function EmailsPage() {
             </div>
             {!mailboxConnected && (
               <div className="flex shrink-0 gap-2">
+                <Button variant="ghost" onClick={() => navigate('/context?tab=sources')}>View Sources</Button>
                 <Button variant="outline" onClick={() => setTab('connections')}>Connect mailbox</Button>
               </div>
+            )}
+            {mailboxConnected && (
+              <Button className="shrink-0" variant="ghost" onClick={() => navigate('/context?tab=sources')}>View Sources</Button>
             )}
           </div>
         </div>

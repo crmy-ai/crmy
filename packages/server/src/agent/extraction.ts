@@ -24,6 +24,7 @@ import * as contextTypeRepo from '../db/repos/context-type-registry.js';
 import * as actorRepo from '../db/repos/actors.js';
 import * as outboxRepo from '../db/repos/context-outbox.js';
 import * as rawContextRepo from '../db/repos/raw-context-sources.js';
+import * as extractionAttemptRepo from '../db/repos/raw-context-extraction-attempts.js';
 import * as customFieldRepo from '../db/repos/custom-fields.js';
 import * as signalGroupRepo from '../db/repos/signal-groups.js';
 import { decrypt } from './crypto.js';
@@ -86,6 +87,30 @@ export interface ExtractedEntry {
 export interface ExtractionModelOutput {
   entries: ExtractedEntry[];
   proposedRecords: RawContextRecordProposal[];
+}
+
+type ExtractionModelOutputOverride = ExtractionModelOutput | string;
+
+interface ExtractionTelemetry {
+  [key: string]: unknown;
+  result_source?: 'primary' | 'recovery' | 'repair';
+  primary_parse_status?: 'succeeded' | 'failed';
+  primary_parse_error?: string;
+  recovery_status?: 'not_needed' | 'succeeded' | 'failed';
+  recovery_parse_error?: string;
+  repair_status?: 'not_needed' | 'succeeded' | 'failed';
+  repair_error?: string;
+  malformed_json_recovered?: boolean;
+  empty_primary_recovered?: boolean;
+  llm_calls: number;
+  primary_output_excerpt?: string;
+  recovery_output_excerpt?: string;
+  repair_output_excerpt?: string;
+}
+
+interface ExtractionLLMResult {
+  output: ExtractionModelOutput;
+  telemetry: ExtractionTelemetry;
 }
 
 interface EvidenceItem {
@@ -290,6 +315,17 @@ function normalizeEvidenceItem(
   entry: ExtractedEntry,
 ): EvidenceItem {
   const observedAt = activity.occurred_at ?? activity.created_at;
+  const activityDetail = activity.detail ?? {};
+  const sourceDocumentHash = typeof activityDetail.source_document_hash === 'string'
+    ? activityDetail.source_document_hash
+    : undefined;
+  const rawContextSourceRef = typeof activityDetail.raw_context_source_ref === 'string'
+    ? activityDetail.raw_context_source_ref
+    : undefined;
+  const sourceEventAt = typeof activityDetail.source_occurred_at === 'string'
+    ? activityDetail.source_occurred_at
+    : undefined;
+  const sourceEventAtProvided = activityDetail.source_occurred_at_provided === true;
   const sourceType = typeof item.source_type === 'string' && item.source_type.trim()
     ? item.source_type.trim()
     : 'activity';
@@ -304,6 +340,10 @@ function normalizeEvidenceItem(
     source_label: typeof item.source_label === 'string' ? item.source_label : activity.subject,
     observed_at: observedAt,
     captured_at: new Date().toISOString(),
+    ...(sourceDocumentHash ? { source_content_hash: sourceDocumentHash } : {}),
+    ...(rawContextSourceRef ? { raw_context_source_ref: rawContextSourceRef } : {}),
+    ...(sourceEventAt ? { source_event_at: sourceEventAt } : {}),
+    ...(sourceEventAtProvided ? { source_event_at_provided: true } : {}),
     confidence: entry.confidence ?? null,
     ...(typeof item.speaker === 'string' ? { speaker: item.speaker } : {}),
     ...(snippet ? { snippet } : {}),
@@ -845,6 +885,64 @@ function summarizeExtractionPacket(packet: ContextExtractionPacket | null): Reco
   };
 }
 
+function llmOutputExcerpt(value?: string): string | null {
+  if (!value) return null;
+  return value.slice(0, 12_000);
+}
+
+function modelOutputSummary(output?: ExtractionModelOutput): Record<string, unknown> {
+  if (!output) return {};
+  return {
+    context_entries: output.entries.length,
+    record_proposals: output.proposedRecords.length,
+    context_types: Array.from(new Set(output.entries.map(entry => entry.context_type))).slice(0, 20),
+  };
+}
+
+function buildOverrideExtractionResult(override: ExtractionModelOutputOverride): ExtractionLLMResult {
+  const raw = typeof override === 'string' ? override : JSON.stringify(override);
+  const output = parseExtractionOutput(raw);
+  return {
+    output,
+    telemetry: {
+      llm_calls: 0,
+      result_source: 'primary',
+      primary_parse_status: 'succeeded',
+      recovery_status: 'not_needed',
+      repair_status: 'not_needed',
+      primary_output_excerpt: llmOutputExcerpt(raw) ?? undefined,
+      model_output_override: true,
+    },
+  };
+}
+
+async function startExtractionAttemptSafe(
+  db: DbPool,
+  tenantId: UUID | string,
+  input: Parameters<typeof extractionAttemptRepo.startExtractionAttempt>[2],
+): Promise<extractionAttemptRepo.RawContextExtractionAttempt | null> {
+  try {
+    return await extractionAttemptRepo.startExtractionAttempt(db, tenantId, input);
+  } catch (err) {
+    console.warn(`[extraction] Could not record extraction attempt start: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+async function finishExtractionAttemptSafe(
+  db: DbPool,
+  tenantId: UUID | string,
+  attempt: extractionAttemptRepo.RawContextExtractionAttempt | null,
+  patch: Parameters<typeof extractionAttemptRepo.finishExtractionAttempt>[3],
+): Promise<void> {
+  if (!attempt) return;
+  try {
+    await extractionAttemptRepo.finishExtractionAttempt(db, tenantId, attempt.id, patch);
+  } catch (err) {
+    console.warn(`[extraction] Could not record extraction attempt finish: ${(err as Error).message}`);
+  }
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -887,6 +985,12 @@ export async function extractContextFromActivity(
   options: {
     targetSubjects?: Array<{ type: string; id: string; name?: string }>;
     ownerIds?: string[];
+    /**
+     * Test-only deterministic model output. This keeps the production path on
+     * the normal provider call while allowing the durability corpus to exercise
+     * the full write/group/receipt pipeline without a live model.
+     */
+    modelOutputOverride?: ExtractionModelOutputOverride;
   } = {},
 ): Promise<ExtractionResult> {
   // Load activity
@@ -920,6 +1024,7 @@ export async function extractContextFromActivity(
       occurred_at: activity.occurred_at ?? activity.created_at,
     },
   });
+  const rawContextSource = await rawContextRepo.getRawContextSourceByRef(db, tenantId, rawSourceType, activity.id);
 
   // Reject activities without an explicit CRM subject — falling back to
   // activity.id as subject_id would create orphaned context entries that
@@ -1020,20 +1125,58 @@ export async function extractContextFromActivity(
 
   // Build and call the LLM
   let extractionOutput: ExtractionModelOutput;
+  let extractionTelemetry: ExtractionTelemetry | undefined;
+  let extractionAttempt: extractionAttemptRepo.RawContextExtractionAttempt | null = null;
+  const extractionStartedAt = Date.now();
   try {
     await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
       status: 'processing',
       stage: 'extract_signals',
       metadata: { extraction_packet: summarizeExtractionPacket(extractionPacket) },
     });
-    extractionOutput = await callExtractionLLM(db, tenantId, activity, content, extractableTypes, config.max_tokens_per_turn, extractionPacket);
+    extractionAttempt = await startExtractionAttemptSafe(db, tenantId, {
+      raw_context_source_id: rawContextSource?.id ?? null,
+      activity_id: activity.id,
+      stage: 'extract_signals',
+      model: config.model,
+      response_format: 'json_object',
+      timeout_ms: CONTEXT_EXTRACTION_LLM_TIMEOUT_MS,
+      input_summary: {
+        raw_context_source_type: rawSourceType,
+        raw_context_source_ref: activity.id,
+        content_chars: content.length,
+        activity_type: activity.type,
+        subject_type: activity.subject_type,
+        subject_id: activity.subject_id,
+        target_subject_count: options.targetSubjects?.length ?? 0,
+        extraction_packet: summarizeExtractionPacket(extractionPacket),
+      },
+    });
+    const llmResult = options.modelOutputOverride === undefined
+      ? await callExtractionLLM(db, tenantId, activity, content, extractableTypes, config.max_tokens_per_turn, extractionPacket)
+      : buildOverrideExtractionResult(options.modelOutputOverride);
+    extractionOutput = llmResult.output;
+    extractionTelemetry = llmResult.telemetry;
   } catch (err) {
     const rawMsg = err instanceof Error ? err.message : 'LLM call failed';
+    const errorTelemetry = (err as { extractionTelemetry?: ExtractionTelemetry })?.extractionTelemetry;
     const timedOut = rawMsg.toLowerCase().includes('timed out');
     const invalidOutput = /usable json|not valid json|malformed json|could not be parsed/i.test(rawMsg);
+    const failureCode = timedOut ? 'model_timeout' : invalidOutput ? 'model_output_invalid' : 'model_failed';
     const msg = timedOut
       ? `Raw Context extraction timed out after ${Math.round(CONTEXT_EXTRACTION_LLM_TIMEOUT_MS / 1000)} seconds. The model is reachable, but did not finish extracting Signals in time. Try a shorter excerpt, use a faster local model, or increase CONTEXT_EXTRACTION_LLM_TIMEOUT_MS.`
       : rawMsg;
+    await finishExtractionAttemptSafe(db, tenantId, extractionAttempt, {
+      status: 'failed',
+      outcome: failureCode,
+      telemetry: extractionTelemetry ?? errorTelemetry ?? {
+        llm_calls: 1,
+        failure_class: timedOut ? 'timeout' : invalidOutput ? 'invalid_output' : 'model_failed',
+      },
+      failure_code: failureCode,
+      failure_reason: msg,
+      latency_ms: Date.now() - extractionStartedAt,
+    });
     await markExtractionStatus(db, activityId, 'error', msg);
     await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
       status: 'failed',
@@ -1041,7 +1184,7 @@ export async function extractContextFromActivity(
       skipped: 1,
       failure_reason: msg,
       metadata: {
-        failure_code: timedOut ? 'model_timeout' : invalidOutput ? 'model_output_invalid' : 'model_failed',
+        failure_code: failureCode,
         raw_failure_message: rawMsg,
         timeout_ms: timedOut ? CONTEXT_EXTRACTION_LLM_TIMEOUT_MS : undefined,
         extraction_packet: summarizeExtractionPacket(extractionPacket),
@@ -1054,6 +1197,15 @@ export async function extractContextFromActivity(
   const entries = extractionOutput.entries;
   const proposedRecords = extractionOutput.proposedRecords;
   if (entries.length === 0) {
+    await finishExtractionAttemptSafe(db, tenantId, extractionAttempt, {
+      status: 'succeeded',
+      outcome: proposedRecords.length > 0 ? 'record_proposals_need_review' : 'no_customer_specific_signals',
+      telemetry: extractionTelemetry,
+      output_summary: modelOutputSummary(extractionOutput),
+      raw_output_excerpt: extractionTelemetry?.primary_output_excerpt ?? null,
+      repaired_output_excerpt: extractionTelemetry?.repair_output_excerpt ?? null,
+      latency_ms: Date.now() - extractionStartedAt,
+    });
     await markExtractionStatus(db, activityId, 'done');
     await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
       status: proposedRecords.length > 0 ? 'needs_review' : 'processed',
@@ -1190,6 +1342,33 @@ export async function extractContextFromActivity(
   }
 
   await markExtractionStatus(db, activityId, 'done');
+  await finishExtractionAttemptSafe(db, tenantId, extractionAttempt, {
+    status: 'succeeded',
+    outcome: outcome.extracted_count === 0 && outcome.skipped > 0
+      ? 'write_failed'
+      : outcome.memory_created > 0
+        ? 'memory_created'
+        : outcome.signals_created > 0
+          ? 'signals_need_review'
+          : 'processed',
+    telemetry: extractionTelemetry,
+    output_summary: {
+      ...modelOutputSummary(extractionOutput),
+      extracted_count: outcome.extracted_count,
+      memory_created: outcome.memory_created,
+      signals_created: outcome.signals_created,
+      skipped: outcome.skipped,
+      needs_more_detail: outcome.needs_more_detail ?? 0,
+      unsupported_context_types: outcome.unsupported_context_types ?? [],
+    },
+    raw_output_excerpt: extractionTelemetry?.primary_output_excerpt ?? null,
+    repaired_output_excerpt: extractionTelemetry?.repair_output_excerpt ?? null,
+    failure_code: outcome.extracted_count === 0 && outcome.skipped > 0 ? 'write_failed' : null,
+    failure_reason: outcome.extracted_count === 0 && outcome.skipped_reasons?.length
+      ? outcome.skipped_reasons.slice(0, 3).join('; ')
+      : null,
+    latency_ms: Date.now() - extractionStartedAt,
+  });
   await rawContextRepo.updateRawContextSource(db, tenantId, rawSourceType, activity.id, {
     status: outcome.skipped > 0 && outcome.extracted_count === 0
       ? 'skipped'
@@ -1264,7 +1443,7 @@ async function callExtractionLLM(
   extractableTypes: { type_name: string; label: string; description?: string | null; extraction_prompt: string | null; json_schema: Record<string, unknown> | null }[],
   maxTokens: number,
   extractionPacket: ContextExtractionPacket | null,
-): Promise<ExtractionModelOutput> {
+): Promise<ExtractionLLMResult> {
   const systemPrompt = buildSystemPrompt(extractableTypes);
   const userPrompt = buildUserPrompt(activity, content, extractionPacket);
 
@@ -1275,19 +1454,44 @@ async function callExtractionLLM(
     timeoutMs: CONTEXT_EXTRACTION_LLM_TIMEOUT_MS,
     responseFormat: 'json_object',
   });
+  const telemetry: ExtractionTelemetry = {
+    llm_calls: 1,
+    primary_output_excerpt: llmOutputExcerpt(responseText) ?? undefined,
+    recovery_status: 'not_needed',
+    repair_status: 'not_needed',
+  };
 
   let primaryOutput: ExtractionModelOutput;
   let primaryParseError: Error | null = null;
   try {
     primaryOutput = parseExtractionOutput(responseText);
+    telemetry.primary_parse_status = 'succeeded';
   } catch (err) {
     primaryParseError = err instanceof Error ? err : new Error('Extraction response could not be parsed.');
-    return repairExtractionResponse(db, tenantId, extractableTypes, maxTokens, {
+    telemetry.primary_parse_status = 'failed';
+    telemetry.primary_parse_error = primaryParseError.message;
+    const repaired = await repairExtractionResponse(db, tenantId, extractableTypes, maxTokens, {
       primaryOutput: responseText,
       primaryParseError,
-    });
+    }, telemetry);
+    return {
+      output: repaired.output,
+      telemetry: {
+        ...repaired.telemetry,
+        result_source: 'repair',
+        malformed_json_recovered: true,
+      },
+    };
   }
-  if (primaryOutput.entries.length > 0 || primaryOutput.proposedRecords.length > 0) return primaryOutput;
+  if (primaryOutput.entries.length > 0 || primaryOutput.proposedRecords.length > 0) {
+    return {
+      output: primaryOutput,
+      telemetry: {
+        ...telemetry,
+        result_source: 'primary',
+      },
+    };
+  }
   const emptyPrimaryReason = new Error('Primary extraction returned valid JSON with no Signals or record proposals.');
 
   const recoveryText = await callLLM(db, tenantId, {
@@ -1297,16 +1501,37 @@ async function callExtractionLLM(
     timeoutMs: CONTEXT_EXTRACTION_RECOVERY_TIMEOUT_MS,
     responseFormat: 'json_object',
   });
+  telemetry.llm_calls++;
+  telemetry.recovery_output_excerpt = llmOutputExcerpt(recoveryText) ?? undefined;
+  telemetry.empty_primary_recovered = true;
   try {
-    return parseExtractionOutput(recoveryText);
+    const recovered = parseExtractionOutput(recoveryText);
+    telemetry.recovery_status = 'succeeded';
+    return {
+      output: recovered,
+      telemetry: {
+        ...telemetry,
+        result_source: 'recovery',
+      },
+    };
   } catch (err) {
     const recoveryParseError = err instanceof Error ? err : new Error('Recovery response could not be parsed.');
-    return repairExtractionResponse(db, tenantId, extractableTypes, maxTokens, {
+    telemetry.recovery_status = 'failed';
+    telemetry.recovery_parse_error = recoveryParseError.message;
+    const repaired = await repairExtractionResponse(db, tenantId, extractableTypes, maxTokens, {
       primaryOutput: responseText,
       primaryParseError: emptyPrimaryReason,
       recoveryOutput: recoveryText,
       recoveryParseError,
-    });
+    }, telemetry);
+    return {
+      output: repaired.output,
+      telemetry: {
+        ...repaired.telemetry,
+        result_source: 'repair',
+        malformed_json_recovered: true,
+      },
+    };
   }
 }
 
@@ -1321,7 +1546,8 @@ async function repairExtractionResponse(
     recoveryOutput?: string;
     recoveryParseError?: Error;
   },
-): Promise<ExtractionModelOutput> {
+  telemetry: ExtractionTelemetry,
+): Promise<ExtractionLLMResult> {
   const repairText = await callLLM(db, tenantId, {
     system: buildJsonRepairSystemPrompt(extractableTypes),
     user: [
@@ -1340,11 +1566,28 @@ async function repairExtractionResponse(
     timeoutMs: CONTEXT_EXTRACTION_REPAIR_TIMEOUT_MS,
     responseFormat: 'json_object',
   });
+  const nextTelemetry: ExtractionTelemetry = {
+    ...telemetry,
+    llm_calls: telemetry.llm_calls + 1,
+    repair_output_excerpt: llmOutputExcerpt(repairText) ?? undefined,
+  };
   try {
-    return parseExtractionOutput(repairText);
+    const output = parseExtractionOutput(repairText);
+    return {
+      output,
+      telemetry: {
+        ...nextTelemetry,
+        repair_status: 'succeeded',
+      },
+    };
   } catch (repairErr) {
     const repairMsg = repairErr instanceof Error ? repairErr.message : 'Repair response could not be parsed.';
-    throw new Error(`Extraction model did not return usable JSON after repair. ${repairMsg}`);
+    nextTelemetry.repair_status = 'failed';
+    nextTelemetry.repair_error = repairMsg;
+    throw Object.assign(
+      new Error(`Extraction model did not return usable JSON after repair. ${repairMsg}`),
+      { extractionTelemetry: nextTelemetry },
+    );
   }
 }
 
@@ -1491,8 +1734,14 @@ function buildActivityContent(activity: ActivityRow): string {
   const parts: string[] = [];
   if (activity.body) parts.push(activity.body);
   if (activity.detail && Object.keys(activity.detail).length > 0) {
+    const hiddenDetailKeys = new Set([
+      'raw_context_source_ref',
+      'source_document_hash',
+      'source_occurred_at',
+      'source_occurred_at_provided',
+    ]);
     const relevant = Object.entries(activity.detail)
-      .filter(([, v]) => v != null && v !== '')
+      .filter(([key, v]) => !hiddenDetailKeys.has(key) && v != null && v !== '')
       .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`);
     if (relevant.length > 0) parts.push(relevant.join('\n'));
   }

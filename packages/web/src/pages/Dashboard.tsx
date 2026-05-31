@@ -12,9 +12,11 @@ import {
   useAccounts,
   useActors,
   useActivities,
+  useCalendarEvents,
   useContacts,
   useContextEntries,
   useDbConfig,
+  useEmailMessages,
   useHITLRequests,
   useOpportunities,
   usePipelineSummary,
@@ -51,6 +53,7 @@ import {
   Briefcase,
   GitCompareArrows,
   CalendarClock,
+  Mail,
   DollarSign,
   HeartPulse,
   PlusCircle,
@@ -61,9 +64,9 @@ import {
 
 const ACTIVATION_SKIPPED_STORAGE_KEY = 'crmy-activation-skipped-steps';
 type FocusRecordType = EntityType | 'handoff' | 'unknown';
-type FocusFilterType = 'all' | EntityType | 'handoff';
+type FocusFilterType = 'all' | EntityType | 'handoff' | 'source';
 type DrawerRecordType = 'account' | 'contact' | 'opportunity' | 'use-case';
-type FocusQueueKind = 'handoff' | 'signal' | 'memory' | 'opportunity' | 'account' | 'use_case';
+type FocusQueueKind = 'handoff' | 'signal' | 'memory' | 'opportunity' | 'account' | 'use_case' | 'email' | 'activity';
 
 interface FocusQueueItem {
   icon: React.ElementType;
@@ -481,6 +484,39 @@ function inferHandoffRecord(request: any): {
   return { record_type: 'handoff', record_name: 'No linked record' };
 }
 
+function inferSourceRecord(item: any): {
+  record_type: FocusRecordType;
+  record_id?: string;
+  record_name?: string;
+  record_detail?: string;
+  account_id?: string;
+  account_name?: string;
+} {
+  const candidates: Array<[FocusRecordType, string, string, string?]> = [
+    ['opportunity', 'opportunity_id', 'opportunity_name', 'account_name'],
+    ['use_case', 'use_case_id', 'use_case_name', 'account_name'],
+    ['contact', 'contact_id', 'contact_name', 'account_name'],
+    ['account', 'account_id', 'account_name'],
+  ];
+
+  for (const [recordType, idKey, nameKey, detailKey] of candidates) {
+    const id = typeof item?.[idKey] === 'string' ? item[idKey] : undefined;
+    if (!id) continue;
+    const name = typeof item?.[nameKey] === 'string' ? item[nameKey] : undefined;
+    const detail = detailKey && typeof item?.[detailKey] === 'string' ? item[detailKey] : undefined;
+    return {
+      record_type: recordType,
+      record_id: id,
+      record_name: name,
+      record_detail: detail,
+      account_id: recordType === 'account' ? id : typeof item?.account_id === 'string' ? item.account_id : undefined,
+      account_name: recordType === 'account' ? name : typeof item?.account_name === 'string' ? item.account_name : undefined,
+    };
+  }
+
+  return { record_type: 'unknown', record_name: 'No linked customer record' };
+}
+
 function SnapshotChip({
   icon: Icon,
   label,
@@ -664,6 +700,8 @@ function ScopedOverviewDashboard() {
   const { data: staleData } = useStaleContextEntries({ limit: 50 }) as any;
   const { data: signalGroupData } = useSignalGroups({ attention_only: true, limit: 10 }) as any;
   const { data: activitiesData } = useActivities({ limit: 1 }) as any;
+  const { data: emailReviewData } = useEmailMessages({ view: 'review', direction: 'inbound', include_internal: false, limit: 10 }) as any;
+  const { data: meetingNeedsContextData } = useCalendarEvents({ tab: 'needs_context', limit: 10 }) as any;
   const { data: accountsData } = useAccounts({ limit: 100 }) as any;
   const { data: contactsData } = useContacts({ limit: 100 }) as any;
   const { data: opportunitiesData } = useOpportunities({ limit: 100 }) as any;
@@ -679,6 +717,8 @@ function ScopedOverviewDashboard() {
   const opportunities: any[] = opportunitiesData?.data ?? [];
   const useCases: any[] = useCasesData?.data ?? [];
   const signalGroups: any[] = signalGroupData?.data ?? [];
+  const emailReviewItems: any[] = emailReviewData?.data ?? [];
+  const meetingsNeedingContext: any[] = meetingNeedsContextData?.data ?? [];
   const staleEntries: any[] = staleData?.stale_entries ?? staleData?.data ?? [];
   const nextStepMemory: any[] = nextStepMemoryData?.data ?? [];
   const nextStepOppIds = new Set(nextStepMemory.filter(entry => entry.subject_type === 'opportunity').map(entry => entry.subject_id).filter(Boolean));
@@ -792,6 +832,47 @@ function ScopedOverviewDashboard() {
         onOpenRecord: makeOpenRecord(recordType, group.subject_id),
       };
     }),
+    ...emailReviewItems.slice(0, 2).map(message => {
+      const record = inferSourceRecord(message);
+      const sender = message.from_name || message.from_email || 'Customer email';
+      const subject = message.subject || message.snippet || 'Customer email needs review';
+      return {
+        icon: Mail,
+        title: record.record_id ? 'Customer email needs processing' : 'Unmatched customer email',
+        detail: `${sender}${subject ? ` · ${String(subject).slice(0, 80)}` : ''}`,
+        href: '/emails?tab=review',
+        action: record.record_id ? 'Process' : 'Link Record',
+        tone: 'watch' as const,
+        queue_kind: 'email' as const,
+        record_type: record.record_type,
+        record_id: record.record_id,
+        record_name: record.record_name,
+        record_detail: record.record_detail ?? message.processing_reason ?? 'Email source',
+        account_id: record.account_id,
+        account_name: record.account_name,
+        onOpenRecord: makeOpenRecord(record.record_type, record.record_id),
+      };
+    }),
+    ...meetingsNeedingContext.slice(0, 2).map(meeting => {
+      const record = inferSourceRecord(meeting);
+      const validation = String(meeting.validation_status ?? '').replace(/_/g, ' ') || 'missing context';
+      return {
+        icon: CalendarClock,
+        title: 'Meeting is missing context',
+        detail: `${meeting.title ?? 'Customer meeting'} · ${validation}`,
+        href: '/activities?tab=needs_context',
+        action: record.record_id ? 'Add Debrief' : 'Link Record',
+        tone: 'watch' as const,
+        queue_kind: 'activity' as const,
+        record_type: record.record_type,
+        record_id: record.record_id,
+        record_name: record.record_name,
+        record_detail: record.record_detail ?? meeting.classification ?? 'Meeting source',
+        account_id: record.account_id,
+        account_name: record.account_name,
+        onOpenRecord: makeOpenRecord(record.record_type, record.record_id),
+      };
+    }),
     ...staleEntries.slice(0, 1).map(entry => {
       const recordType = normalizeRecordType(entry.subject_type);
       const accountContext = recordAccountContext(recordType, entry.subject_id, entry.subject_name);
@@ -898,14 +979,17 @@ function ScopedOverviewDashboard() {
     { value: 'contact', label: 'Contacts' },
     { value: 'opportunity', label: 'Opportunities' },
     { value: 'use_case', label: 'Use Cases' },
+    { value: 'source', label: 'Sources' },
     { value: 'handoff', label: 'Handoffs' },
   ];
-  const selectedEntityType = focusTypeFilter !== 'all' && focusTypeFilter !== 'handoff' ? focusTypeFilter : null;
+  const selectedEntityType = focusTypeFilter !== 'all' && focusTypeFilter !== 'handoff' && focusTypeFilter !== 'source' ? focusTypeFilter : null;
   const hasFocusFilters = focusTypeFilter !== 'all' || Boolean(focusRecordId);
   const filteredFocusItems = focusItems.filter(item => {
     if (focusTypeFilter !== 'all') {
       if (focusTypeFilter === 'handoff') {
         if (item.queue_kind !== 'handoff') return false;
+      } else if (focusTypeFilter === 'source') {
+        if (item.queue_kind !== 'email' && item.queue_kind !== 'activity') return false;
       } else if (focusTypeFilter === 'account') {
         if (item.record_type !== 'account' && !item.account_id) return false;
       } else if (item.record_type !== focusTypeFilter) {

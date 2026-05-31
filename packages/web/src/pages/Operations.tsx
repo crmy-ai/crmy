@@ -3,8 +3,9 @@
 
 import { useMemo, useState } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
-import { useOpsDataQuality, useOpsStatus, useSystemConflicts, useSystemSyncRuns, useSystemsOfRecord, useSystemWritebacks } from '@/api/hooks';
+import { useOpsDataQuality, useOpsStatus, useRepairOpsDataQuality, useSystemConflicts, useSystemSyncRuns, useSystemsOfRecord, useSystemWritebacks } from '@/api/hooks';
 import { countLabel } from '@/lib/headerCopy';
+import { toast } from '@/hooks/use-toast';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -70,6 +71,10 @@ const DATA_QUALITY_COPY: Record<string, { label: string; description: string }> 
     label: 'Retryable Raw Context failures',
     description: 'Raw Context extraction failed in a way that may succeed after retrying.',
   },
+  failed_raw_context_extraction_attempts: {
+    label: 'Failed Raw Context extraction attempts',
+    description: 'Recent extraction attempts failed during model, parsing, repair, or write processing.',
+  },
   stuck_agent_turns_running: {
     label: 'Stuck Workspace Agent turns',
     description: 'Agent work has been running too long and may need to be failed or retried.',
@@ -87,6 +92,15 @@ const DATA_QUALITY_COPY: Record<string, { label: string; description: string }> 
     description: 'Calendar meetings look customer-facing but are not linked to customer records yet.',
   },
 };
+
+const REPAIRABLE_DATA_QUALITY_CHECKS = new Set([
+  'activities_missing_canonical_subject',
+  'current_context_missing_search_index',
+  'stuck_context_outbox_processing',
+  'stale_raw_context_sources_processing',
+  'failed_raw_context_sources_retryable',
+  'stuck_agent_turns_running',
+]);
 
 function humanizeName(value: string) {
   return value
@@ -207,8 +221,29 @@ function QueueCard({ queue }: { queue: any }) {
   );
 }
 
+function RawContextReliabilityNote() {
+  return (
+    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
+          <RefreshCw className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">Raw Context replay and dedupe</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Re-sending the same source returns the existing receipt instead of extracting again. When a source includes the real event time,
+            repeated or lightly reworded uploads from that same event count as one evidence source for trust scoring; later events can still
+            strengthen a Signal.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DataQualityRow({ check }: { check: any }) {
   const [expanded, setExpanded] = useState(false);
+  const repairMutation = useRepairOpsDataQuality();
   const count = Number(check.count ?? 0);
   const hasIssue = count > 0 || Boolean(check.error);
   const key = check.name ?? check.check_name ?? check.label ?? 'data_quality_check';
@@ -218,6 +253,31 @@ function DataQualityRow({ check }: { check: any }) {
   };
   const samples: Record<string, unknown>[] = Array.isArray(check.sample) ? check.sample : [];
   const canExpand = samples.length > 0 || Boolean(check.error);
+  const canRepair = REPAIRABLE_DATA_QUALITY_CHECKS.has(key) && count > 0;
+
+  function runRepair(dryRun: boolean) {
+    if (!dryRun && !window.confirm(`Run safe repair for ${copy.label}?`)) return;
+    repairMutation.mutate(
+      { check_name: key, dry_run: dryRun, limit: 100 },
+      {
+        onSuccess: (result: any) => {
+          toast({
+            title: dryRun ? 'Repair preview ready' : 'Repair queued',
+            description: dryRun
+              ? `${result.repaired_count ?? 0} record${Number(result.repaired_count ?? 0) === 1 ? '' : 's'} can be repaired safely.`
+              : `${result.repaired_count ?? 0} record${Number(result.repaired_count ?? 0) === 1 ? '' : 's'} repaired or requeued.`,
+          });
+        },
+        onError: (err) => {
+          toast({
+            title: 'Repair failed',
+            description: err instanceof Error ? err.message : 'Try again or check server logs.',
+            variant: 'destructive',
+          });
+        },
+      },
+    );
+  }
 
   return (
     <div className="border-b border-border last:border-b-0">
@@ -236,11 +296,29 @@ function DataQualityRow({ check }: { check: any }) {
             <span className={`rounded-md border px-1.5 py-0.5 text-xs font-semibold capitalize ${severityClass(check.severity)}`}>
               {check.severity ?? 'info'}
             </span>
+            {canRepair && (
+              <span className="rounded-md border border-primary/20 bg-primary/5 px-1.5 py-0.5 text-xs font-semibold text-primary">
+                repairable
+              </span>
+            )}
           </div>
           <p className="mt-1 text-xs text-muted-foreground">{copy.description}</p>
           <p className="mt-1 text-xs font-mono text-muted-foreground/80">{key}</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {canRepair && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                runRepair(true);
+              }}
+              disabled={repairMutation.isPending}
+              className="hidden rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50 md:inline-flex"
+            >
+              Preview repair
+            </button>
+          )}
           <span className={`rounded-md px-2 py-1 text-xs font-mono ${hasIssue ? 'bg-warning/15 text-warning' : 'bg-muted text-muted-foreground'}`}>
             {count}
           </span>
@@ -257,6 +335,31 @@ function DataQualityRow({ check }: { check: any }) {
           {check.error && (
             <div className="mb-3 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-xs text-destructive">
               {check.error}
+            </div>
+          )}
+          {canRepair && (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
+              <p className="text-xs text-muted-foreground">
+                CRMy can safely repair or requeue this finding without manual database work.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => runRepair(true)}
+                  disabled={repairMutation.isPending}
+                  className="rounded-lg border border-border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+                >
+                  Preview
+                </button>
+                <button
+                  type="button"
+                  onClick={() => runRepair(false)}
+                  disabled={repairMutation.isPending}
+                  className="rounded-lg border border-primary/30 bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                >
+                  Run repair
+                </button>
+              </div>
             </div>
           )}
           {samples.length > 0 ? (
@@ -445,6 +548,9 @@ export default function OperationsPage() {
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 {queues.map(queue => <QueueCard key={queue.name} queue={queue} />)}
+              </div>
+              <div className="mt-3">
+                <RawContextReliabilityNote />
               </div>
             </section>
 

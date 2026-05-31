@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { checkContextConvergence } from '../dist/services/context-convergence.js';
@@ -13,10 +14,13 @@ import { recoverOperationalJob } from '../dist/services/operational-recovery.js'
 import { getAllTools, getToolsForActor } from '../dist/mcp/server.js';
 import { runIdempotent } from '../dist/db/repos/idempotency.js';
 import { searchContextEntries } from '../dist/db/repos/context-entries.js';
+import { claimPendingRawContextSources, listRawContextSources } from '../dist/db/repos/raw-context-sources.js';
+import { DEFAULT_CONTEXT_TYPES } from '../dist/db/repos/context-type-registry.js';
 import { withTransaction } from '../dist/db/transaction.js';
 import { encryptSecret, decryptSecret, redactSecrets } from '../dist/lib/secrets.js';
-import { parseExtractionOutput, parseExtractionResponse, shouldAutoPromoteSignal } from '../dist/agent/extraction.js';
+import { extractContextFromActivity, parseExtractionOutput, parseExtractionResponse, shouldAutoPromoteSignal } from '../dist/agent/extraction.js';
 import { detectRawContextSubjects } from '../dist/services/raw-context-subjects.js';
+import { entityResolve } from '../dist/services/entity-resolve.js';
 import { hubspotAdapter } from '../dist/services/systems-of-record/hubspot.js';
 import { salesforceAdapter } from '../dist/services/systems-of-record/salesforce.js';
 import { databricksAdapter } from '../dist/services/systems-of-record/databricks.js';
@@ -312,6 +316,60 @@ test('signal auto-promotion requires evidence and configured confidence threshol
   assert.equal(shouldAutoPromoteSignal({ confidence: 0.95, threshold: 0.85, evidenceCount: 1, speculative: true }), false);
 });
 
+test('signal grouping does not let repeated context masquerade as independent corroboration', () => {
+  const repeatedA = {
+    id: 'signal-a',
+    source: 'extraction',
+    source_ref: 'activity-a',
+    title: 'Maya is the champion',
+    body: 'Maya is the champion for the evaluation.',
+    confidence: 0.84,
+    evidence: [{
+      source_type: 'call_transcript',
+      source_content_hash: 'first-transcript-hash',
+      source_event_at: '2026-05-30T18:00:00.000Z',
+      source_event_at_provided: true,
+      snippet: 'Maya will champion this internally.',
+    }],
+  };
+  const repeatedB = {
+    ...repeatedA,
+    id: 'signal-b',
+    source_ref: 'activity-b',
+    evidence: [{
+      source_type: 'meeting_notes',
+      source_content_hash: 'lightly-reworded-transcript-hash',
+      source_event_at: '2026-05-30T18:00:00.000Z',
+      source_event_at_provided: true,
+      snippet: 'Maya is going to champion this evaluation internally.',
+    }],
+  };
+
+  assert.equal(__testSignalGrouping.sourceKey(repeatedA), __testSignalGrouping.sourceKey(repeatedB));
+  const repeated = __testSignalGrouping.confidenceComponents([repeatedA, repeatedB], 1, 0);
+  assert.equal(repeated.duplicate_source_count, 1);
+  assert.equal(repeated.support_boost, 0);
+  assert.equal(repeated.source_boost, 0);
+  assert.equal(repeated.score, 0.756);
+
+  const laterEvent = {
+    ...repeatedB,
+    evidence: [{
+      source_type: 'call_transcript',
+      source_content_hash: 'later-follow-up-hash',
+      source_event_at: '2026-05-30T18:20:00.000Z',
+      source_event_at_provided: true,
+      snippet: 'Maya will champion this internally.',
+    }],
+  };
+  assert.notEqual(__testSignalGrouping.sourceKey(repeatedA), __testSignalGrouping.sourceKey(laterEvent));
+  const corroborated = __testSignalGrouping.confidenceComponents([repeatedA, laterEvent], 2, 0);
+  assert.equal(corroborated.duplicate_source_count, 0);
+  assert.equal(corroborated.support_boost, 0.04);
+  assert.equal(corroborated.source_boost, 0.06);
+  assert.equal(corroborated.score, 0.856);
+});
+
 test('memory readiness keeps incomplete typed Signals reviewable without dropping details', () => {
   const readiness = evaluateMemoryReadiness({
     person_name: 'Maya Patel',
@@ -373,15 +431,1100 @@ before the deal can move forward.",
   assert.equal(proposalEnvelope.proposedRecords[0].record_type, 'opportunity');
 });
 
+function registrySchemasForFixture(registry = {}) {
+  const schemas = new Map(
+    DEFAULT_CONTEXT_TYPES
+      .filter(type => type.is_extractable && !(registry.disabled_types ?? []).includes(type.type_name))
+      .map(type => [type.type_name, type.json_schema ?? null]),
+  );
+  for (const override of registry.overrides ?? []) {
+    if (!schemas.has(override.type_name)) continue;
+    schemas.set(override.type_name, override.json_schema ?? null);
+  }
+  for (const customType of registry.custom_types ?? []) {
+    if (customType.is_extractable !== false) {
+      schemas.set(customType.type_name, customType.json_schema ?? null);
+    }
+  }
+  return schemas;
+}
+
+test('Raw Context golden corpus covers core GTM extraction scenarios', async () => {
+  const corpusPath = new URL('./fixtures/raw-context-golden-corpus.json', import.meta.url);
+  const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
+  assert.ok(Array.isArray(corpus));
+  assert.ok(corpus.length >= 8);
+  const schemas = new Map(
+    DEFAULT_CONTEXT_TYPES
+      .filter(type => type.is_extractable)
+      .map(type => [type.type_name, type.json_schema ?? null]),
+  );
+
+  const ids = new Set(corpus.map(item => item.id));
+  for (const required of [
+    'champion_role_from_call',
+    'procurement_and_security_path',
+    'success_criteria_from_workshop',
+    'new_opportunity_under_known_account',
+    'first_name_disambiguation_in_account',
+    'duplicate_transcript_same_event',
+    'no_customer_specific_context',
+    'conflicting_later_evidence',
+  ]) {
+    assert.ok(ids.has(required), `missing fixture ${required}`);
+  }
+
+  for (const item of corpus) {
+    assert.equal(typeof item.document, 'string');
+    assert.ok(item.document.length > 20);
+    assert.ok(Array.isArray(item.expected_signal_types));
+    assert.equal(typeof item.expected_behavior, 'string');
+    assert.equal(typeof item.must_not_auto_promote, 'boolean');
+    const output = parseExtractionOutput(JSON.stringify(item.golden_model_output ?? {}));
+    const outputTypes = new Set(output.entries.map(entry => entry.context_type));
+    if (item.expected_behavior === 'create_reviewable_signals') {
+      assert.ok(output.entries.length > 0, `${item.id} should emit reviewable Signals`);
+    }
+    for (const expectedType of item.expected_signal_types) {
+      assert.ok(outputTypes.has(expectedType), `${item.id} missing expected ${expectedType} Signal`);
+    }
+    const readinessResults = output.entries.map(entry => ({
+      context_type: entry.context_type,
+      readiness: evaluateMemoryReadiness(entry.structured_data, schemas.get(entry.context_type)),
+    }));
+    assert.equal(readinessResults.length, output.entries.length);
+    if (item.expected_behavior === 'propose_child_record_for_review') {
+      assert.ok(output.proposedRecords.length > 0, `${item.id} should propose a reviewed record`);
+    }
+    if (item.expected_behavior === 'skip_no_customer_specific_context') {
+      assert.equal(output.entries.length, 0, `${item.id} should not emit Signals`);
+    }
+    if (item.must_not_auto_promote && item.expected_behavior !== 'dedupe_existing_receipt') {
+      for (const entry of output.entries) {
+        assert.equal(
+          shouldAutoPromoteSignal({
+            confidence: entry.confidence ?? 0,
+            threshold: 0.85,
+            evidenceCount: entry.evidence?.length ?? 0,
+            speculative: /may|might|possible|appears|risk|blocked|unconfirmed/i.test(`${entry.title} ${entry.body}`),
+          }),
+          false,
+          `${item.id}:${entry.context_type} should remain reviewable`,
+        );
+      }
+    }
+  }
+
+  const duplicate = corpus.find(item => item.id === 'duplicate_transcript_same_event');
+  assert.equal(duplicate.must_not_auto_promote, true);
+  assert.equal(duplicate.expected_behavior, 'dedupe_existing_receipt');
+});
+
+test('Raw Context custom registry corpus respects tenant Memory vocabulary', async () => {
+  const corpusPath = new URL('./fixtures/raw-context-custom-registry-corpus.json', import.meta.url);
+  const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
+  assert.ok(Array.isArray(corpus));
+  assert.ok(corpus.length >= 4);
+
+  const ids = new Set(corpus.map(item => item.id));
+  for (const required of [
+    'custom_implementation_owner_ready',
+    'custom_implementation_owner_missing_required_detail',
+    'admin_disabled_key_fact_is_unsupported',
+    'admin_stricter_success_criteria_blocks_incomplete_memory',
+  ]) {
+    assert.ok(ids.has(required), `missing custom-registry fixture ${required}`);
+  }
+
+  for (const item of corpus) {
+    const schemas = registrySchemasForFixture(item.registry);
+    const output = parseExtractionOutput(JSON.stringify(item.golden_model_output ?? {}));
+    const supportedEntries = output.entries.filter(entry => schemas.has(entry.context_type));
+    const unsupportedTypes = output.entries
+      .map(entry => entry.context_type)
+      .filter(type => !schemas.has(type));
+    const supportedTypes = new Set(supportedEntries.map(entry => entry.context_type));
+
+    for (const expectedType of item.expected_signal_types ?? []) {
+      assert.ok(supportedTypes.has(expectedType), `${item.id} missing supported ${expectedType} Signal`);
+    }
+    for (const expectedUnsupported of item.expected_unsupported_types ?? []) {
+      assert.ok(unsupportedTypes.includes(expectedUnsupported), `${item.id} should treat ${expectedUnsupported} as unsupported`);
+    }
+
+    for (const entry of supportedEntries) {
+      const readiness = evaluateMemoryReadiness(entry.structured_data, schemas.get(entry.context_type));
+      const expectedReadiness = item.expected_readiness?.[entry.context_type];
+      if (expectedReadiness) {
+        assert.equal(readiness.readiness_status, expectedReadiness, `${item.id}:${entry.context_type} readiness`);
+      }
+      const expectedMissing = item.expected_missing_details?.[entry.context_type] ?? [];
+      for (const missing of expectedMissing) {
+        assert.ok(readiness.missing_details.includes(missing), `${item.id}:${entry.context_type} should miss ${missing}`);
+      }
+      if (item.must_not_auto_promote) {
+        assert.equal(
+          shouldAutoPromoteSignal({
+            confidence: entry.confidence ?? 0,
+            threshold: 0.85,
+            evidenceCount: entry.evidence?.length ?? 0,
+            speculative: readiness.readiness_status !== 'ready_for_memory'
+              || /may|might|possible|appears|risk|blocked|unconfirmed/i.test(`${entry.title} ${entry.body}`),
+          }),
+          false,
+          `${item.id}:${entry.context_type} should remain reviewable under custom registry`,
+        );
+      }
+    }
+  }
+});
+
+const extractionTenantId = '11111111-1111-4111-8111-111111111111';
+const extractionActivityId = '22222222-2222-4222-8222-222222222222';
+const extractionAccountId = '33333333-3333-4333-8333-333333333333';
+const extractionContactId = '44444444-4444-4444-8444-444444444444';
+const extractionOpportunityId = '55555555-5555-4555-8555-555555555555';
+const extractionActorId = '66666666-6666-4666-8666-666666666666';
+
+class FakeExtractionDb {
+  contextEntries = [];
+  signalGroups = [];
+  signalGroupMembers = [];
+  rawContextSources = new Map();
+  attempts = [];
+  activities = new Map();
+
+  constructor(fixture) {
+    this.fixture = fixture;
+    this.activity = {
+      id: extractionActivityId,
+      tenant_id: extractionTenantId,
+      type: 'meeting',
+      subject: fixture.title,
+      body: fixture.document,
+      outcome: null,
+      occurred_at: fixture.source_occurred_at,
+      created_at: fixture.source_occurred_at,
+      subject_type: 'opportunity',
+      subject_id: extractionOpportunityId,
+      created_by: extractionActorId,
+      performed_by: extractionActorId,
+      direction: null,
+      source_agent: 'context_ingest',
+      detail: {
+        source_document_hash: `corpus-${fixture.id}`,
+        raw_context_source_ref: `corpus:${fixture.id}`,
+        source_occurred_at: fixture.source_occurred_at,
+        source_occurred_at_provided: true,
+      },
+      extraction_status: null,
+      extraction_error: null,
+    };
+    this.activities.set(this.activity.id, this.activity);
+  }
+
+  parseJson(value, fallback) {
+    if (typeof value !== 'string') return value ?? fallback;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  }
+
+  now() {
+    return '2026-05-30T18:00:00.000Z';
+  }
+
+  rawKey(sourceType, sourceRef) {
+    return `${sourceType}:${sourceRef}`;
+  }
+
+  contextTypeRows() {
+    return DEFAULT_CONTEXT_TYPES
+      .filter(type => type.is_extractable)
+      .map(type => ({
+        ...type,
+        tenant_id: extractionTenantId,
+        is_default: true,
+        created_at: this.now(),
+        updated_at: this.now(),
+      }));
+  }
+
+  accountRow() {
+    return {
+      id: extractionAccountId,
+      tenant_id: extractionTenantId,
+      name: 'Northstar',
+      domain: 'northstar.example',
+      industry: 'SaaS',
+      owner_id: extractionActorId,
+      created_at: this.now(),
+      updated_at: this.now(),
+    };
+  }
+
+  contactRow() {
+    return {
+      id: extractionContactId,
+      tenant_id: extractionTenantId,
+      first_name: 'Maya',
+      last_name: 'Patel',
+      email: 'maya@northstar.example',
+      title: 'VP Sales',
+      account_id: extractionAccountId,
+      owner_id: extractionActorId,
+      created_at: this.now(),
+      updated_at: this.now(),
+    };
+  }
+
+  opportunityRow() {
+    return {
+      id: extractionOpportunityId,
+      tenant_id: extractionTenantId,
+      name: 'Agent Context Rollout',
+      account_id: extractionAccountId,
+      contact_id: extractionContactId,
+      stage: 'evaluation',
+      amount: 125000,
+      forecast_category: 'pipeline',
+      owner_id: extractionActorId,
+      account_name: 'Northstar',
+      contact_name: 'Maya Patel',
+      contact_email: 'maya@northstar.example',
+      created_at: this.now(),
+      updated_at: this.now(),
+    };
+  }
+
+  rawSourceFromParams(params) {
+    const key = this.rawKey(params[1], params[2]);
+    const existing = this.rawContextSources.get(key);
+    const row = {
+      id: existing?.id ?? '77777777-7777-4777-8777-777777777777',
+      tenant_id: params[0],
+      source_type: params[1],
+      source_ref: params[2],
+      source_label: params[3],
+      subject_type: params[4],
+      subject_id: params[5],
+      actor_id: extractionActorId,
+      status: params[7],
+      stage: params[8],
+      raw_excerpt: params[9],
+      detected_subjects: this.parseJson(params[10], []),
+      signals_created: params[11] ?? 0,
+      memory_created: params[12] ?? 0,
+      skipped: params[13] ?? 0,
+      failure_reason: params[14],
+      failure_code: params[15],
+      attempt_count: params[16] ?? 0,
+      locked_at: params[17],
+      next_retry_at: params[18],
+      last_error: params[19],
+      metadata: this.parseJson(params[20], {}),
+      processed_at: ['processed', 'needs_review', 'failed', 'skipped'].includes(params[7]) ? this.now() : null,
+      created_at: existing?.created_at ?? this.now(),
+      updated_at: this.now(),
+    };
+    this.rawContextSources.set(key, row);
+    return row;
+  }
+
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+
+    if (text.startsWith('SELECT id FROM ( SELECT id, 0 AS priority FROM actors')) {
+      return { rows: [{ id: extractionActorId }], rowCount: 1 };
+    }
+    if (text === 'SELECT * FROM agent_configs WHERE tenant_id = $1') {
+      return {
+        rows: [{
+          enabled: true,
+          provider: 'custom',
+          model: 'corpus-model',
+          base_url: 'http://corpus.local',
+          api_key_enc: null,
+          max_tokens_per_turn: 4096,
+          auto_extract_context: true,
+          auto_promote_signals: false,
+          signal_auto_promote_threshold: 0.85,
+        }],
+        rowCount: 1,
+      };
+    }
+    if (text.startsWith('SELECT id, tenant_id, type, subject, body')) {
+      const row = this.activities.get(params[0]);
+      return { rows: row && row.tenant_id === params[1] ? [row] : [], rowCount: row ? 1 : 0 };
+    }
+    if (text.startsWith('UPDATE activities SET extraction_status')) {
+      const row = this.activities.get(params[2]);
+      if (row) {
+        row.extraction_status = params[0];
+        row.extraction_error = params[1];
+      }
+      return { rows: [], rowCount: row ? 1 : 0 };
+    }
+    if (text.startsWith('INSERT INTO raw_context_sources')) {
+      const row = this.rawSourceFromParams(params);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT * FROM raw_context_sources WHERE tenant_id = $1 AND source_type = $2 AND source_ref = $3')) {
+      const row = this.rawContextSources.get(this.rawKey(params[1], params[2]));
+      return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
+    }
+    if (text.startsWith('UPDATE raw_context_sources')) {
+      const key = this.rawKey(params[1], params[2]);
+      const row = this.rawContextSources.get(key);
+      if (!row) return { rows: [], rowCount: 0 };
+      row.status = params[3] ?? row.status;
+      row.stage = params[4] ?? row.stage;
+      row.source_label = params[5] ?? row.source_label;
+      row.subject_type = params[6] ?? row.subject_type;
+      row.subject_id = params[7] ?? row.subject_id;
+      row.actor_id = extractionActorId;
+      row.raw_excerpt = params[9] ?? row.raw_excerpt;
+      row.detected_subjects = params[10] ? this.parseJson(params[10], row.detected_subjects) : row.detected_subjects;
+      row.signals_created = params[11] ?? row.signals_created;
+      row.memory_created = params[12] ?? row.memory_created;
+      row.skipped = params[13] ?? row.skipped;
+      row.failure_reason = params[14];
+      row.failure_code = params[15] ?? row.failure_code;
+      row.metadata = { ...row.metadata, ...this.parseJson(params[20], {}) };
+      row.processed_at = ['processed', 'needs_review', 'failed', 'skipped'].includes(row.status) ? this.now() : row.processed_at;
+      row.updated_at = this.now();
+      return { rows: [row], rowCount: 1 };
+    }
+    if (text.startsWith('INSERT INTO context_type_registry')) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (text.includes('FROM context_type_registry')) {
+      return { rows: this.contextTypeRows(), rowCount: this.contextTypeRows().length };
+    }
+    if (text === 'SELECT * FROM actors WHERE tenant_id = $1 AND agent_identifier = $2') {
+      return { rows: [], rowCount: 0 };
+    }
+    if (text.startsWith('INSERT INTO actors')) {
+      return {
+        rows: [{
+          id: extractionActorId,
+          tenant_id: params[0],
+          actor_type: params[1],
+          display_name: params[2],
+          agent_identifier: params[7],
+          agent_model: params[8],
+          metadata: this.parseJson(params[10], {}),
+          created_at: this.now(),
+          updated_at: this.now(),
+        }],
+        rowCount: 1,
+      };
+    }
+    if (text.includes('FROM custom_field_definitions')) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (text.includes('FROM opportunities o LEFT JOIN accounts')) {
+      return { rows: [this.opportunityRow()], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT * FROM opportunities WHERE tenant_id = $1 AND id = $2')) {
+      return { rows: [this.opportunityRow()], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT * FROM accounts WHERE tenant_id = $1 AND id = $2')) {
+      return { rows: [this.accountRow()], rowCount: 1 };
+    }
+    if (text.includes('FROM contacts c LEFT JOIN accounts')) {
+      return { rows: [this.contactRow()], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT * FROM contacts WHERE tenant_id = $1 AND id = $2')) {
+      return { rows: [this.contactRow()], rowCount: 1 };
+    }
+    if (text.includes("SELECT 'account' AS relation_type, to_jsonb(a.*) AS record FROM opportunities")) {
+      return {
+        rows: [
+          { relation_type: 'account', record: this.accountRow() },
+          { relation_type: 'contact', record: this.contactRow() },
+        ],
+        rowCount: 2,
+      };
+    }
+    if (text.startsWith('SELECT * FROM use_cases WHERE tenant_id = $1 AND opportunity_id = $2')) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (text.startsWith('SELECT * FROM context_entries WHERE')) {
+      const memoryStatus = text.includes("memory_status = 'active'") ? 'active' : params.includes('signal') ? 'signal' : undefined;
+      const rows = this.contextEntries.filter(entry =>
+        entry.tenant_id === params[0]
+          && (!params[1] || entry.subject_type === params[1])
+          && (!params[2] || entry.subject_id === params[2])
+          && (!memoryStatus || entry.memory_status === memoryStatus)
+      );
+      return { rows, rowCount: rows.length };
+    }
+    if (text.startsWith('SELECT count(*)::int AS total FROM signal_groups')) {
+      return { rows: [{ total: 0 }], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT sg.*, CASE sg.subject_type') && text.includes('FROM signal_groups sg WHERE')) {
+      if (text.includes('sg.id = $2')) {
+        const group = this.signalGroups.find(item => item.id === params[1]);
+        return { rows: group ? [{ ...group, subject_name: 'Agent Context Rollout' }] : [], rowCount: group ? 1 : 0 };
+      }
+      return { rows: [], rowCount: 0 };
+    }
+    if (text.startsWith('SELECT sgm.*, to_jsonb(ce.*)')) {
+      const rows = this.signalGroupMembers
+        .filter(member => member.signal_group_id === params[1])
+        .map(member => ({
+          ...member,
+          context_entry: this.contextEntries.find(entry => entry.id === member.context_entry_id),
+        }));
+      return { rows, rowCount: rows.length };
+    }
+    if (text.startsWith('WITH subject_scope AS') && text.includes('SELECT sg.* FROM signal_groups')) {
+      const rows = this.signalGroups.filter(group =>
+        group.context_type === params[3]
+          && group.status !== 'dismissed'
+          && group.status !== 'merged'
+          && (group.subject_type === params[1] && group.subject_id === params[2])
+      );
+      return { rows, rowCount: rows.length };
+    }
+    if (text.startsWith('SELECT scope.account_id, a.name AS account_name')) {
+      return { rows: [{ account_id: extractionAccountId, account_name: 'Northstar' }], rowCount: 1 };
+    }
+    if (text.startsWith('INSERT INTO context_entries')) {
+      const row = {
+        id: `88888888-8888-4888-8888-${String(this.contextEntries.length + 1).padStart(12, '0')}`.slice(0, 36),
+        tenant_id: params[0],
+        subject_type: params[1],
+        subject_id: params[2],
+        context_type: params[3],
+        authored_by: params[4],
+        title: params[5],
+        body: params[6],
+        structured_data: this.parseJson(params[7], {}),
+        confidence: params[8],
+        memory_status: params[9],
+        evidence: this.parseJson(params[10], []),
+        tags: this.parseJson(params[11], []),
+        source: params[12],
+        source_ref: params[13],
+        source_activity_id: params[14],
+        valid_until: params[15],
+        is_current: true,
+        created_at: this.now(),
+        updated_at: this.now(),
+      };
+      this.contextEntries.push(row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (text.startsWith('INSERT INTO context_outbox')) {
+      return { rows: [{ id: `outbox-${this.contextEntries.length}`, tenant_id: params[0], entity_type: params[1], entity_id: params[2], payload: this.parseJson(params[3], {}) }], rowCount: 1 };
+    }
+    if (text.startsWith('INSERT INTO raw_context_extraction_attempts')) {
+      const row = {
+        id: `99999999-9999-4999-8999-${String(this.attempts.length + 1).padStart(12, '0')}`.slice(0, 36),
+        tenant_id: params[0],
+        raw_context_source_id: params[1],
+        activity_id: params[2],
+        attempt_number: this.attempts.length + 1,
+        status: 'running',
+        stage: params[3],
+        model: params[4],
+        response_format: params[5],
+        timeout_ms: params[6],
+        prompt_version: params[7],
+        input_summary: this.parseJson(params[8], {}),
+        telemetry: {},
+        output_summary: {},
+        created_at: this.now(),
+        updated_at: this.now(),
+      };
+      this.attempts.push(row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (text.startsWith('UPDATE raw_context_extraction_attempts')) {
+      const row = this.attempts.find(item => item.id === params[1]);
+      if (!row) return { rows: [], rowCount: 0 };
+      row.status = params[2];
+      row.outcome = params[3] ?? row.outcome;
+      row.telemetry = { ...row.telemetry, ...this.parseJson(params[4], {}) };
+      row.output_summary = { ...row.output_summary, ...this.parseJson(params[5], {}) };
+      row.raw_output_excerpt = params[6] ?? row.raw_output_excerpt;
+      row.repaired_output_excerpt = params[7] ?? row.repaired_output_excerpt;
+      row.failure_code = params[8] ?? row.failure_code;
+      row.failure_reason = params[9] ?? row.failure_reason;
+      row.latency_ms = params[10] ?? row.latency_ms;
+      row.completed_at = this.now();
+      row.updated_at = this.now();
+      return { rows: [row], rowCount: 1 };
+    }
+    if (text.startsWith('INSERT INTO signal_groups')) {
+      let row = this.signalGroups.find(group =>
+        group.tenant_id === params[0]
+          && group.subject_type === params[1]
+          && group.subject_id === params[2]
+          && group.context_type === params[3]
+          && group.claim_key === params[4]
+      );
+      if (!row) {
+        row = {
+          id: `aaaaaaaa-aaaa-4aaa-8aaa-${String(this.signalGroups.length + 1).padStart(12, '0')}`.slice(0, 36),
+          tenant_id: params[0],
+          subject_type: params[1],
+          subject_id: params[2],
+          context_type: params[3],
+          claim_key: params[4],
+          title: params[5],
+          normalized_claim: params[6],
+          status: 'gathering',
+          aggregate_confidence: 0,
+          support_count: 0,
+          independent_source_count: 0,
+          conflict_count: 0,
+          evidence_count: 0,
+          latest_signal_id: null,
+          promoted_context_entry_id: null,
+          blocked_reason: null,
+          metadata: this.parseJson(params[7], {}),
+          created_at: this.now(),
+          updated_at: this.now(),
+        };
+        this.signalGroups.push(row);
+      }
+      return { rows: [row], rowCount: 1 };
+    }
+    if (text.startsWith('INSERT INTO signal_group_members')) {
+      const row = {
+        id: `bbbbbbbb-bbbb-4bbb-8bbb-${String(this.signalGroupMembers.length + 1).padStart(12, '0')}`.slice(0, 36),
+        tenant_id: params[0],
+        signal_group_id: params[1],
+        context_entry_id: params[2],
+        relation: params[3],
+        similarity_score: params[4],
+        evidence_weight: params[5],
+        source_key: params[6],
+        created_at: this.now(),
+      };
+      this.signalGroupMembers.push(row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (text.startsWith('UPDATE signal_groups SET status = $3')) {
+      const row = this.signalGroups.find(group => group.id === params[1]);
+      if (!row) return { rows: [], rowCount: 0 };
+      row.status = params[2];
+      row.aggregate_confidence = params[3];
+      row.support_count = params[4];
+      row.independent_source_count = params[5];
+      row.conflict_count = params[6];
+      row.evidence_count = params[7];
+      row.latest_signal_id = params[8] ?? row.latest_signal_id;
+      row.blocked_reason = params[9];
+      row.metadata = { ...row.metadata, ...this.parseJson(params[10], {}) };
+      row.updated_at = this.now();
+      return { rows: [row], rowCount: 1 };
+    }
+    if (text.startsWith('UPDATE signal_groups SET metadata = metadata')) {
+      const row = this.signalGroups.find(group => group.id === params[1]);
+      if (!row) return { rows: [], rowCount: 0 };
+      row.metadata = { ...row.metadata, ...this.parseJson(params[2], {}) };
+      row.updated_at = this.now();
+      return { rows: [row], rowCount: 1 };
+    }
+
+    throw new Error(`Unexpected extraction query: ${text}`);
+  }
+}
+
+test('Raw Context corpus can replay through extraction write and grouping pipeline without a live model', async () => {
+  const corpusPath = new URL('./fixtures/raw-context-golden-corpus.json', import.meta.url);
+  const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
+  const fixture = corpus.find(item => item.id === 'procurement_and_security_path');
+  assert.ok(fixture);
+  const db = new FakeExtractionDb(fixture);
+
+  const result = await extractContextFromActivity(db, extractionTenantId, extractionActivityId, {
+    modelOutputOverride: fixture.golden_model_output,
+    targetSubjects: [
+      { type: 'opportunity', id: extractionOpportunityId, name: 'Agent Context Rollout' },
+    ],
+  });
+
+  assert.equal(result.extracted_count, fixture.golden_model_output.context_entries.length);
+  assert.equal(result.signals_created, fixture.golden_model_output.context_entries.length);
+  assert.equal(result.memory_created, 0);
+  assert.equal(db.contextEntries.length, fixture.golden_model_output.context_entries.length);
+  assert.equal(db.signalGroups.length, fixture.golden_model_output.context_entries.length);
+  assert.equal(db.signalGroupMembers.length, fixture.golden_model_output.context_entries.length);
+  assert.ok(db.contextEntries.every(entry => entry.structured_data.readiness_status));
+  assert.ok(db.contextEntries.every(entry => entry.evidence[0]?.source_content_hash === `corpus-${fixture.id}`));
+  assert.ok(db.contextEntries.every(entry => entry.evidence[0]?.source_event_at_provided === true));
+  const rawSource = db.rawContextSources.get(`add_context:${extractionActivityId}`);
+  assert.equal(rawSource.status, 'needs_review');
+  assert.equal(rawSource.signals_created, fixture.golden_model_output.context_entries.length);
+  assert.equal(db.attempts[0].status, 'succeeded');
+  assert.equal(db.attempts[0].telemetry.model_output_override, true);
+  assert.equal(db.attempts[0].output_summary.context_entries, fixture.golden_model_output.context_entries.length);
+});
+
+test('Raw Context corpus replay records a clean no-context receipt without creating Signals', async () => {
+  const corpusPath = new URL('./fixtures/raw-context-golden-corpus.json', import.meta.url);
+  const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
+  const fixture = corpus.find(item => item.id === 'no_customer_specific_context');
+  assert.ok(fixture);
+  const db = new FakeExtractionDb(fixture);
+
+  const result = await extractContextFromActivity(db, extractionTenantId, extractionActivityId, {
+    modelOutputOverride: fixture.golden_model_output,
+    targetSubjects: [
+      { type: 'opportunity', id: extractionOpportunityId, name: 'Agent Context Rollout' },
+    ],
+  });
+
+  assert.equal(result.extracted_count, 0);
+  assert.equal(result.signals_created, 0);
+  assert.equal(result.memory_created, 0);
+  assert.equal(db.contextEntries.length, 0);
+  assert.equal(db.signalGroups.length, 0);
+  const rawSource = db.rawContextSources.get(`add_context:${extractionActivityId}`);
+  assert.equal(rawSource.status, 'processed');
+  assert.equal(rawSource.metadata.failure_code, 'model_returned_empty');
+  assert.equal(db.attempts[0].status, 'succeeded');
+  assert.equal(db.attempts[0].outcome, 'no_customer_specific_signals');
+  assert.equal(db.attempts[0].telemetry.model_output_override, true);
+});
+
+class FakeContextIngestProposalDb {
+  rawContextSources = new Map();
+  payloads = [];
+  hitlRequests = [];
+  contextEntries = [];
+
+  parseJson(value, fallback) {
+    if (typeof value !== 'string') return value ?? fallback;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return fallback;
+    }
+  }
+
+  now() {
+    return '2026-05-30T18:00:00.000Z';
+  }
+
+  rawKey(sourceType, sourceRef) {
+    return `${sourceType}:${sourceRef}`;
+  }
+
+  rawSourceFromParams(params) {
+    const key = this.rawKey(params[1], params[2]);
+    const existing = this.rawContextSources.get(key);
+    const row = {
+      id: existing?.id ?? 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      tenant_id: params[0],
+      source_type: params[1],
+      source_ref: params[2],
+      source_label: params[3],
+      subject_type: params[4],
+      subject_id: params[5],
+      actor_id: extractionActorId,
+      status: params[7],
+      stage: params[8],
+      raw_excerpt: params[9],
+      detected_subjects: this.parseJson(params[10], []),
+      signals_created: params[11] ?? 0,
+      memory_created: params[12] ?? 0,
+      skipped: params[13] ?? 0,
+      failure_reason: params[14],
+      failure_code: params[15],
+      attempt_count: params[16] ?? 0,
+      locked_at: params[17],
+      next_retry_at: params[18],
+      last_error: params[19],
+      metadata: this.parseJson(params[20], {}),
+      processed_at: ['processed', 'needs_review', 'failed', 'skipped'].includes(params[7]) ? this.now() : null,
+      created_at: existing?.created_at ?? this.now(),
+      updated_at: this.now(),
+    };
+    this.rawContextSources.set(key, row);
+    return row;
+  }
+
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+
+    if (text === 'SELECT * FROM actors WHERE id = $1 AND tenant_id = $2') {
+      return {
+        rows: [{
+          id: extractionActorId,
+          tenant_id: params[1],
+          actor_type: 'agent',
+          display_name: 'Test Agent',
+          agent_identifier: 'test-agent',
+          role: 'admin',
+          scopes: ['context:read', 'context:write'],
+          created_at: this.now(),
+          updated_at: this.now(),
+        }],
+        rowCount: 1,
+      };
+    }
+    if (text.startsWith('SELECT id FROM ( SELECT id, 0 AS priority FROM actors')) {
+      return { rows: [{ id: extractionActorId }], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT * FROM raw_context_sources WHERE tenant_id = $1 AND source_type = $2 AND source_ref = $3')) {
+      const row = this.rawContextSources.get(this.rawKey(params[1], params[2]));
+      return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
+    }
+    if (text.startsWith('INSERT INTO raw_context_sources')) {
+      const row = this.rawSourceFromParams(params);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (text.startsWith('INSERT INTO raw_context_source_payloads')) {
+      const row = {
+        id: `dddddddd-dddd-4ddd-8ddd-${String(this.payloads.length + 1).padStart(12, '0')}`.slice(0, 36),
+        tenant_id: params[0],
+        raw_context_source_id: params[1],
+        document_hash: params[2],
+        document_text: params[3],
+        source_label: params[4],
+        source_occurred_at: params[5],
+        subjects: this.parseJson(params[6], []),
+        proposed_records: this.parseJson(params[7], []),
+        metadata: this.parseJson(params[8], {}),
+        created_at: this.now(),
+        updated_at: this.now(),
+      };
+      this.payloads.push(row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT id, name, action_type, condition, decision, priority FROM hitl_approval_rules')) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (text.startsWith('SELECT * FROM hitl_requests WHERE tenant_id = $1 AND action_type = $2')) {
+      const payload = this.parseJson(params[2], {});
+      const existing = this.hitlRequests.find(request =>
+        request.tenant_id === params[0]
+          && request.action_type === params[1]
+          && request.status === 'pending'
+          && request.action_payload?.dedupe_key === payload.dedupe_key
+      );
+      return { rows: existing ? [existing] : [], rowCount: existing ? 1 : 0 };
+    }
+    if (text.startsWith('INSERT INTO hitl_requests')) {
+      const row = {
+        id: `eeeeeeee-eeee-4eee-8eee-${String(this.hitlRequests.length + 1).padStart(12, '0')}`.slice(0, 36),
+        tenant_id: params[0],
+        agent_id: params[1],
+        session_id: params[2],
+        action_type: params[3],
+        action_summary: params[4],
+        action_payload: this.parseJson(params[5], {}),
+        auto_approve_after: params[6],
+        priority: params[7],
+        sla_minutes: params[8],
+        escalate_to_id: params[9],
+        handoff_snapshot_id: params[10],
+        status: 'pending',
+        created_at: this.now(),
+        updated_at: this.now(),
+      };
+      this.hitlRequests.push(row);
+      return { rows: [row], rowCount: 1 };
+    }
+    if (text.startsWith('UPDATE raw_context_sources')) {
+      const key = this.rawKey(params[1], params[2]);
+      const row = this.rawContextSources.get(key);
+      if (!row) return { rows: [], rowCount: 0 };
+      row.status = params[3] ?? row.status;
+      row.stage = params[4] ?? row.stage;
+      row.source_label = params[5] ?? row.source_label;
+      row.subject_type = params[6] ?? row.subject_type;
+      row.subject_id = params[7] ?? row.subject_id;
+      row.actor_id = extractionActorId;
+      row.raw_excerpt = params[9] ?? row.raw_excerpt;
+      row.detected_subjects = params[10] ? this.parseJson(params[10], row.detected_subjects) : row.detected_subjects;
+      row.signals_created = params[11] ?? row.signals_created;
+      row.memory_created = params[12] ?? row.memory_created;
+      row.skipped = params[13] ?? row.skipped;
+      row.failure_reason = params[14];
+      row.failure_code = params[15] ?? row.failure_code;
+      row.metadata = { ...row.metadata, ...this.parseJson(params[20], {}) };
+      row.processed_at = ['processed', 'needs_review', 'failed', 'skipped'].includes(row.status) ? this.now() : row.processed_at;
+      row.updated_at = this.now();
+      return { rows: [row], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT subject_type, subject_id, memory_status')) {
+      return { rows: [], rowCount: 0 };
+    }
+
+    throw new Error(`Unexpected context_ingest_auto query: ${text}`);
+  }
+}
+
+test('context_ingest_auto routes proposed records to a deduped Handoff and reuses duplicate receipts', async () => {
+  const db = new FakeContextIngestProposalDb();
+  const tool = getAllTools(db).find(candidate => candidate.name === 'context_ingest_auto');
+  assert.ok(tool);
+  const actor = {
+    tenant_id: extractionTenantId,
+    actor_id: extractionActorId,
+    actor_type: 'agent',
+    role: 'admin',
+    scopes: ['context:read', 'context:write'],
+  };
+  const input = {
+    document: 'Nike wants to explore a separate customer success rollout for EMEA after the US pilot stabilizes.',
+    source_label: 'Nike expansion note',
+    source_occurred_at: '2026-05-16T19:00:00.000Z',
+    confidence_threshold: 0.6,
+    proposed_records: [{
+      record_type: 'opportunity',
+      name: 'Nike EMEA customer success rollout',
+      confidence: 0.82,
+      reason: 'The source names a separate EMEA rollout under Nike.',
+      fields: { account_name: 'Nike', account_id: extractionAccountId, stage: 'qualification' },
+    }],
+  };
+
+  const first = await tool.handler(input, actor);
+  assert.equal(first.entries_created, 0);
+  assert.equal(first.skipped, 0);
+  assert.equal(first.proposed_records.length, 1);
+  assert.equal(first.handoff_requests.length, 1);
+  assert.equal(first.raw_context_source.status, 'needs_review');
+  assert.equal(first.raw_context_source.metadata.failure_code, 'needs_record_review');
+  assert.equal(db.hitlRequests.length, 1);
+  assert.equal(db.hitlRequests[0].action_type, 'record.create.review');
+  assert.equal(db.hitlRequests[0].action_payload.dedupe_key, 'opportunity:Nike EMEA customer success rollout'.toLowerCase());
+  assert.equal(db.payloads[0].proposed_records.length, 1);
+
+  const second = await tool.handler(input, actor);
+  assert.equal(second.duplicate_of_raw_context_source_id, first.raw_context_source.id);
+  assert.equal(second.message, 'This Raw Context source was already processed. Returning the existing receipt instead of extracting it again.');
+  assert.equal(second.entries_created, 0);
+  assert.equal(second.raw_context_source.status, 'needs_review');
+  assert.equal(db.hitlRequests.length, 1);
+});
+
+test('context_ingest_auto duplicate source receipts do not create more Signals or corroboration', async () => {
+  const db = new FakeContextIngestProposalDb();
+  const tool = getAllTools(db).find(candidate => candidate.name === 'context_ingest_auto');
+  assert.ok(tool);
+  const actor = {
+    tenant_id: extractionTenantId,
+    actor_id: extractionActorId,
+    actor_type: 'agent',
+    role: 'admin',
+    scopes: ['context:read', 'context:write'],
+  };
+  const input = {
+    document: 'Maya said she will sponsor the evaluation with the VP of Sales.',
+    source_label: 'Repeated champion note',
+    source_occurred_at: '2026-05-12T17:00:00.000Z',
+    confidence_threshold: 0.6,
+    subjects: [{ type: 'opportunity', id: extractionOpportunityId, name: 'Agent Context Rollout' }],
+  };
+  const sourceRef = `auto:${createHash('sha256').update(JSON.stringify({
+    document_hash: createHash('sha256').update(input.document).digest('hex'),
+    actor_id: actor.actor_id,
+    actor_type: actor.actor_type,
+    source_type: 'mcp',
+    source_occurred_at: new Date(input.source_occurred_at).toISOString(),
+    subjects: input.subjects.map(subject => `${subject.type}:${subject.id}`).sort(),
+  })).digest('hex').slice(0, 32)}`;
+  db.rawContextSources.set(`mcp:${sourceRef}`, {
+    id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    tenant_id: extractionTenantId,
+    source_type: 'mcp',
+    source_ref: sourceRef,
+    source_label: input.source_label,
+    subject_type: 'opportunity',
+    subject_id: extractionOpportunityId,
+    actor_id: extractionActorId,
+    status: 'needs_review',
+    stage: 'promote_or_review',
+    detected_subjects: [{
+      subject_type: 'opportunity',
+      subject_id: extractionOpportunityId,
+      name: 'Agent Context Rollout',
+      confidence: 'high',
+      entries_created: 1,
+      memory_created: 0,
+      signals_created: 1,
+    }],
+    signals_created: 1,
+    memory_created: 0,
+    skipped: 0,
+    metadata: { source_document_hash: 'existing-hash' },
+    created_at: '2026-05-30T18:00:00.000Z',
+    updated_at: '2026-05-30T18:00:00.000Z',
+  });
+
+  const result = await tool.handler(input, actor);
+  assert.equal(result.duplicate_of_raw_context_source_id, 'ffffffff-ffff-4fff-8fff-ffffffffffff');
+  assert.equal(result.entries_created, 1);
+  assert.equal(result.signals_created, 1);
+  assert.equal(result.memory_created, 0);
+  assert.equal(result.mutation.side_effects.includes('context_extraction:deduped'), true);
+  assert.equal(db.contextEntries.length, 0);
+  assert.equal(db.hitlRequests.length, 0);
+});
+
+test('Raw Context source list does not leak no-subject peer receipts to scoped users', async () => {
+  const db = {
+    queries: [],
+    params: [],
+    async query(sql, params = []) {
+      const text = sql.replace(/\s+/g, ' ').trim();
+      this.queries.push(text);
+      this.params.push(params);
+      if (text.startsWith('SELECT count(*)::int AS total')) return { rows: [{ total: 0 }], rowCount: 1 };
+      if (text.startsWith('SELECT r.* FROM raw_context_sources')) return { rows: [], rowCount: 0 };
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  await listRawContextSources(db, extractionTenantId, {
+    owner_ids: ['99999999-9999-4999-8999-999999999901'],
+    actor_ids: [extractionActorId],
+    limit: 20,
+  });
+
+  assert.match(db.queries[0], /r\.subject_id IS NULL AND r\.actor_id = ANY\(\$3::uuid\[\]\)/);
+  assert.doesNotMatch(db.queries[0], /r\.subject_id IS NULL\s+OR/);
+  assert.deepEqual(db.params[0], [
+    extractionTenantId,
+    ['99999999-9999-4999-8999-999999999901'],
+    [extractionActorId],
+    21,
+  ]);
+});
+
+test('Raw Context source list still returns own no-subject receipts when no owned records are visible', async () => {
+  const db = {
+    queries: [],
+    params: [],
+    async query(sql, params = []) {
+      const text = sql.replace(/\s+/g, ' ').trim();
+      this.queries.push(text);
+      this.params.push(params);
+      if (text.startsWith('SELECT count(*)::int AS total')) return { rows: [{ total: 0 }], rowCount: 1 };
+      if (text.startsWith('SELECT r.* FROM raw_context_sources')) return { rows: [], rowCount: 0 };
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  await listRawContextSources(db, extractionTenantId, {
+    owner_ids: [],
+    actor_ids: [extractionActorId],
+    limit: 20,
+  });
+
+  assert.match(db.queries[0], /r\.subject_id IS NULL AND r\.actor_id = ANY\(\$2::uuid\[\]\)/);
+  assert.doesNotMatch(db.queries[0], /\bFALSE\b/);
+  assert.deepEqual(db.params[0], [
+    extractionTenantId,
+    [extractionActorId],
+    21,
+  ]);
+});
+
+class FakeEntityResolveDb {
+  contacts = [
+    { id: 'contact-nike-jacob', first_name: 'Jacob', last_name: '', name: 'Jacob', email: 'jacob@nike.example', title: 'Director', company_name: 'Nike', account_id: 'acct-nike', account_name: 'Nike', aliases: [] },
+    { id: 'contact-acme-jacob', first_name: 'Jacob', last_name: '', name: 'Jacob', email: 'jacob@acme.example', title: 'Director', company_name: 'Acme', account_id: 'acct-acme', account_name: 'Acme', aliases: [] },
+  ];
+
+  accounts = [
+    { id: 'acct-nike', name: 'Nike', domain: 'nike.example', aliases: ['NKE'], merged_into: null },
+    { id: 'acct-acme', name: 'Acme', domain: 'acme.example', aliases: [], merged_into: null },
+    { id: 'acct-merged', name: 'MergedCo', domain: 'merged.example', aliases: [], merged_into: 'acct-nike' },
+  ];
+
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    if (text.startsWith('WITH ids AS')) return { rows: [], rowCount: 0 };
+    if (text.includes('FROM contacts c')) {
+      let rows = this.contacts;
+      if (text.includes('LOWER(c.email)')) {
+        rows = rows.filter(row => row.email.toLowerCase() === String(params[1]).toLowerCase());
+      } else if (text.includes('LOWER(c.first_name)')) {
+        rows = rows.filter(row => row.first_name.toLowerCase() === String(params[1]).toLowerCase());
+        const last = String(params[2] ?? '');
+        if (last) rows = rows.filter(row => row.last_name.toLowerCase() === last.toLowerCase());
+      } else if (text.includes('LOWER(_a) =')) {
+        rows = rows.filter(row => row.aliases.some(alias => alias.toLowerCase() === String(params[1]).toLowerCase()));
+      } else if (text.includes('ILIKE')) {
+        const q = String(params[1] ?? '').replace(/%/g, '').toLowerCase();
+        rows = rows.filter(row => [row.first_name, row.last_name, row.email, row.company_name, ...row.aliases].some(value => String(value ?? '').toLowerCase().includes(q)));
+      }
+      if (text.includes('a.name ILIKE') || text.includes('c.company_name ILIKE')) {
+        const hint = params.find(value => typeof value === 'string' && value.includes('%Nike%'));
+        if (hint) rows = rows.filter(row => row.account_name === 'Nike' || row.company_name === 'Nike');
+      }
+      return { rows, rowCount: rows.length };
+    }
+    if (text.startsWith('SELECT id, name FROM accounts WHERE id = ANY')) {
+      return { rows: this.accounts.filter(row => params[0].includes(row.id)), rowCount: 0 };
+    }
+    if (text.includes('FROM accounts')) {
+      let rows = this.accounts;
+      if (text.includes('merged_into IS NULL')) rows = rows.filter(row => !row.merged_into);
+      if (text.includes('similarity(')) {
+        rows = [];
+      } else if (text.includes('LOWER(domain)')) {
+        rows = rows.filter(row => row.domain.toLowerCase() === String(params[1]).toLowerCase());
+      } else if (text.includes('LOWER(name)')) {
+        rows = rows.filter(row => row.name.toLowerCase() === String(params[1]).toLowerCase());
+      } else if (text.includes('LOWER(_a) =')) {
+        rows = rows.filter(row => row.aliases.some(alias => alias.toLowerCase() === String(params[1]).toLowerCase()));
+      } else if (text.includes('ILIKE')) {
+        const q = String(params[1] ?? '').replace(/%/g, '').toLowerCase();
+        rows = rows.filter(row => [row.name, row.domain, ...row.aliases].some(value => String(value ?? '').toLowerCase().includes(q)));
+      }
+      return { rows, rowCount: rows.length };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  }
+}
+
+test('entityResolve applies company hints to exact contact-name ambiguity', async () => {
+  const result = await entityResolve(new FakeEntityResolveDb(), extractionTenantId, {
+    query: 'Jacob',
+    entity_type: 'contact',
+    context_hints: { company_name: 'Nike' },
+    limit: 5,
+  });
+
+  assert.equal(result.status, 'resolved');
+  assert.equal(result.resolved.id, 'contact-nike-jacob');
+  assert.equal(result.resolved.account_name, 'Nike');
+});
+
+test('entityResolve does not resolve merged account records', async () => {
+  const result = await entityResolve(new FakeEntityResolveDb(), extractionTenantId, {
+    query: 'MergedCo',
+    entity_type: 'account',
+    limit: 5,
+  });
+
+  assert.equal(result.status, 'not_found');
+});
+
 class FakeRawSubjectDb {
   accounts = [
-    { id: 'acct-nike', name: 'Nike', domain: 'nike.example', industry: 'Retail' },
-    { id: 'acct-acme', name: 'Acme Corporation', domain: 'acme.example', industry: 'Manufacturing' },
+    { id: 'acct-nike', name: 'Nike', domain: 'nike.example', industry: 'Retail', aliases: ['NKE'] },
+    { id: 'acct-acme', name: 'Acme Corporation', domain: 'acme.example', industry: 'Manufacturing', aliases: [] },
   ];
 
   contacts = [
-    { id: 'contact-nike-jacob', first_name: 'Jacob', last_name: 'Lee', name: 'Jacob Lee', email: 'jacob.lee@nike.example', title: 'Director', company_name: 'Nike', account_id: 'acct-nike', account_domain: 'nike.example' },
-    { id: 'contact-acme-jacob', first_name: 'Jacob', last_name: 'Smith', name: 'Jacob Smith', email: 'jacob.smith@acme.example', title: 'VP Ops', company_name: 'Acme Corporation', account_id: 'acct-acme', account_domain: 'acme.example' },
+    { id: 'contact-nike-jacob', first_name: 'Jacob', last_name: 'Lee', name: 'Jacob Lee', email: 'jacob.lee@nike.example', title: 'Director', company_name: 'Nike', account_id: 'acct-nike', account_domain: 'nike.example', aliases: [] },
+    { id: 'contact-acme-jacob', first_name: 'Jacob', last_name: 'Smith', name: 'Jacob Smith', email: 'jacob.smith@acme.example', title: 'VP Ops', company_name: 'Acme Corporation', account_id: 'acct-acme', account_domain: 'acme.example', aliases: [] },
+    { id: 'contact-nike-maya', first_name: 'Maya', last_name: 'Patel', name: 'Maya Patel', email: 'maya@nike.example', title: 'Director', company_name: 'Nike', account_id: 'acct-nike', account_domain: 'nike.example', aliases: [] },
+    { id: 'contact-acme-maya', first_name: 'Maya', last_name: 'Patel', name: 'Maya Patel', email: 'maya@acme.example', title: 'Director', company_name: 'Acme Corporation', account_id: 'acct-acme', account_domain: 'acme.example', aliases: [] },
   ];
 
   opportunities = [
@@ -404,6 +1547,308 @@ class FakeRawSubjectDb {
   }
 }
 
+class FakeAmbiguousAccountChildDb extends FakeRawSubjectDb {
+  constructor() {
+    super();
+    this.contacts = [
+      ...this.contacts,
+      { id: 'contact-nike-maya-duplicate', first_name: 'Maya', last_name: 'Patel', name: 'Maya Patel', email: 'maya.dup@nike.example', title: 'Program Manager', company_name: 'Nike', account_id: 'acct-nike', account_domain: 'nike.example', aliases: [] },
+    ];
+    this.opportunities = [
+      ...this.opportunities,
+      { id: 'opp-nike-pegasus-duplicate', name: 'Pegasus expansion', account_id: 'acct-nike', account_name: 'Nike', contact_id: 'contact-nike-maya', contact_name: 'Maya Patel', stage: 'proposal', close_date: '2026-08-15' },
+    ];
+    this.useCases = [
+      ...this.useCases,
+      { id: 'uc-nike-forecasting-duplicate', name: 'Forecast automation', account_id: 'acct-nike', account_name: 'Nike', opportunity_id: 'opp-nike-pegasus-duplicate', opportunity_name: 'Pegasus expansion', stage: 'planning' },
+    ];
+  }
+}
+
+class FakeRawSubjectModelDb extends FakeRawSubjectDb {
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    if (text === 'SELECT * FROM agent_configs WHERE tenant_id = $1') {
+      return {
+        rows: [{
+          tenant_id: params[0],
+          enabled: true,
+          provider: 'custom',
+          model: 'resolution-corpus-model',
+          base_url: 'http://resolution-corpus.local',
+          api_key_enc: null,
+        }],
+        rowCount: 1,
+      };
+    }
+    return super.query(sql, params);
+  }
+}
+
+class FakeAmbiguousAccountChildModelDb extends FakeAmbiguousAccountChildDb {
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    if (text === 'SELECT * FROM agent_configs WHERE tenant_id = $1') {
+      return {
+        rows: [{
+          tenant_id: params[0],
+          enabled: true,
+          provider: 'custom',
+          model: 'resolution-corpus-model',
+          base_url: 'http://resolution-corpus.local',
+          api_key_enc: null,
+        }],
+        rowCount: 1,
+      };
+    }
+    return super.query(sql, params);
+  }
+}
+
+async function withMockSubjectDetectionLLM(candidates, fn) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      choices: [{
+        message: {
+          content: JSON.stringify({ candidates }),
+        },
+      }],
+    }),
+    text: async () => JSON.stringify({ candidates }),
+  });
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+test('Record resolution golden corpus covers account-scoped and ambiguous GTM references', async () => {
+  const corpusPath = new URL('./fixtures/record-resolution-golden-corpus.json', import.meta.url);
+  const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
+  assert.ok(Array.isArray(corpus));
+  assert.ok(corpus.length >= 8);
+
+  const ids = new Set(corpus.map(item => item.id));
+  for (const required of [
+    'account_name_scopes_child_records',
+    'account_alias_scopes_child_records',
+    'account_domain_scopes_contact',
+    'same_first_name_without_account_scope_is_ambiguous',
+    'same_full_name_without_account_scope_is_ambiguous',
+    'same_opportunity_name_without_account_scope_is_ambiguous',
+    'same_use_case_name_without_account_scope_is_ambiguous',
+    'account_scope_disambiguates_use_case',
+  ]) {
+    assert.ok(ids.has(required), `missing record resolution fixture ${required}`);
+  }
+
+  for (const fixture of corpus) {
+    const detected = await detectRawContextSubjects(
+      new FakeRawSubjectDb(),
+      baseInput.tenantId,
+      fixture.document,
+      { limit: 10 },
+    );
+    for (const expected of fixture.expected_subjects ?? []) {
+      assert.ok(
+        detected.subjects.some(subject => subject.type === expected.type && subject.id === expected.id),
+        `${fixture.id} should resolve ${expected.type}:${expected.id}`,
+      );
+    }
+    for (const forbiddenId of fixture.forbidden_subject_ids ?? []) {
+      assert.equal(
+        detected.subjects.some(subject => subject.id === forbiddenId),
+        false,
+        `${fixture.id} should not resolve ${forbiddenId}`,
+      );
+    }
+    for (const expectedSkip of fixture.expected_skipped ?? []) {
+      assert.ok(
+        detected.skipped.some(item => item.name === expectedSkip.name && item.reason === expectedSkip.reason),
+        `${fixture.id} should skip ${expectedSkip.name} as ${expectedSkip.reason}`,
+      );
+    }
+    for (const expectedScope of fixture.expected_account_scope ?? []) {
+      const scope = detected.account_scope?.find(item => item.account_id === expectedScope.account_id);
+      assert.ok(scope, `${fixture.id} should include account scope ${expectedScope.account_id}`);
+      for (const key of ['contacts_checked', 'opportunities_checked', 'use_cases_checked']) {
+        if (expectedScope[key] !== undefined) {
+          assert.equal(scope[key], expectedScope[key], `${fixture.id} ${key}`);
+        }
+      }
+    }
+    assert.equal(detected.records_examined.accounts, 2, `${fixture.id} should report accounts examined`);
+    assert.equal(detected.records_examined.contacts, 4, `${fixture.id} should report contacts examined`);
+    assert.equal(detected.records_examined.opportunities, 2, `${fixture.id} should report opportunities examined`);
+    assert.equal(detected.records_examined.use_cases, 2, `${fixture.id} should report use cases examined`);
+  }
+});
+
+test('Raw Context model candidates do not over-link ambiguous child records', async () => {
+  await withMockSubjectDetectionLLM([{
+    name: 'Pegasus expansion',
+    entity_type: 'opportunity',
+    account_name: 'Nike',
+    confidence: 0.9,
+    rationale: 'The model believes the source references the Nike Pegasus expansion.',
+  }], async () => {
+    const detected = await detectRawContextSubjects(
+      new FakeAmbiguousAccountChildModelDb(),
+      baseInput.tenantId,
+      'The customer said the project needs a refreshed security plan.',
+      { limit: 10 },
+    );
+
+    assert.equal(detected.subjects.some(subject => subject.id === 'opp-nike-pegasus'), false);
+    assert.equal(detected.subjects.some(subject => subject.id === 'opp-nike-pegasus-duplicate'), false);
+    const skipped = detected.skipped.find(item => item.name === 'Pegasus expansion');
+    assert.equal(skipped.reason, 'ambiguous_within_account_scope');
+    assert.equal(skipped.candidate_count, 2);
+    assert.equal(skipped.candidate_records.length, 2);
+  });
+});
+
+test('Raw Context account-only matches can propose model-detected new child records', async () => {
+  await withMockSubjectDetectionLLM([{
+    name: 'Nike EMEA customer success rollout',
+    entity_type: 'opportunity',
+    account_name: 'Nike',
+    stage: 'qualification',
+    confidence: 0.82,
+    rationale: 'The source describes a new rollout under Nike that is not in the scoped directory.',
+  }], async () => {
+    const detected = await detectRawContextSubjects(
+      new FakeRawSubjectModelDb(),
+      baseInput.tenantId,
+      'Nike is discussing a new EMEA customer success rollout for next quarter.',
+      { limit: 10 },
+    );
+
+    assert.ok(detected.subjects.some(subject => subject.type === 'account' && subject.id === 'acct-nike'));
+    assert.equal(detected.subjects.some(subject => subject.type === 'opportunity' && subject.name === 'Nike EMEA customer success rollout'), false);
+    assert.equal(detected.proposed_records.length, 1);
+    assert.equal(detected.proposed_records[0].record_type, 'opportunity');
+    assert.equal(detected.proposed_records[0].fields.account_id, 'acct-nike');
+    assert.equal(detected.proposed_records[0].fields.account_name, 'Nike');
+    assert.match(detected.resolution_summary, /possible new record needs review/);
+  });
+});
+
+test('customer_record_resolve exposes the account-first subject graph to MCP callers', async () => {
+  const tool = getAllTools(new FakeRawSubjectDb()).find(candidate => candidate.name === 'customer_record_resolve');
+  assert.ok(tool);
+  const result = await tool.handler({
+    text: 'We are working with Nike on the Pegasus expansion. Jacob can join the workshop next week.',
+    subject_type: 'opportunity',
+  }, {
+    tenant_id: baseInput.tenantId,
+    actor_id: 'admin-user',
+    actor_type: 'user',
+    role: 'admin',
+    scopes: ['context:read'],
+  });
+
+  assert.equal(result.resolver, 'subject_graph');
+  assert.equal(result.subject_type, 'opportunity');
+  assert.ok(result.subjects.some(subject => subject.type === 'account' && subject.id === 'acct-nike'));
+  assert.ok(result.subjects.some(subject => subject.type === 'opportunity' && subject.id === 'opp-nike-pegasus'));
+  assert.equal(result.subjects.some(subject => subject.type === 'contact'), false);
+  assert.equal(result.account_scope[0].account_id, 'acct-nike');
+});
+
+test('customer_record_resolve requires context read scope for scoped agent actors', () => {
+  const visible = getToolsForActor(new FakeRawSubjectDb(), {
+    tenant_id: baseInput.tenantId,
+    actor_id: 'limited-agent',
+    actor_type: 'agent',
+    role: 'member',
+    scopes: ['contacts:read'],
+  });
+
+  assert.equal(visible.some(tool => tool.name === 'customer_record_resolve'), false);
+});
+
+test('Raw Context ingest surfaces use the shared Subject Graph resolver', async () => {
+  const contextToolsSource = await readFile(new URL('../src/mcp/tools/context-entries.ts', import.meta.url), 'utf8');
+  const restRouterSource = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  assert.match(contextToolsSource, /resolveSubjectGraph/);
+  assert.doesNotMatch(contextToolsSource, /detectRawContextSubjects/);
+  assert.match(restRouterSource, /resolveSubjectGraph/);
+  assert.doesNotMatch(restRouterSource, /detectRawContextSubjects/);
+});
+
+test('agent guidance exposes one primary customer resolver path', async () => {
+  const engineSource = await readFile(new URL('../src/agent/engine.ts', import.meta.url), 'utf8');
+  const subjectGraphSource = await readFile(new URL('../src/mcp/tools/subject-graph.ts', import.meta.url), 'utf8');
+  const accountToolsSource = await readFile(new URL('../src/mcp/tools/accounts.ts', import.meta.url), 'utf8');
+  const contactToolsSource = await readFile(new URL('../src/mcp/tools/contacts.ts', import.meta.url), 'utf8');
+
+  assert.match(engineSource, /Use customer_record_resolve as the primary customer-record resolver/);
+  assert.match(subjectGraphSource, /For messy transcripts, emails, notes, or research that should become Signals and Memory, call context_ingest_auto instead/);
+  assert.match(accountToolsSource, /use customer_record_resolve to check if the customer already exists/);
+  assert.match(contactToolsSource, /use customer_record_resolve with the contact name, email, and account context/);
+  assert.doesNotMatch(accountToolsSource, /prefer using entity_resolve/);
+  assert.doesNotMatch(contactToolsSource, /prefer using entity_resolve/);
+});
+
+test('Customer Email and Activity enrich association through Subject Graph', async () => {
+  const emailSource = await readFile(new URL('../src/services/customer-email.ts', import.meta.url), 'utf8');
+  const activitySource = await readFile(new URL('../src/services/customer-activity.ts', import.meta.url), 'utf8');
+
+  for (const source of [emailSource, activitySource]) {
+    assert.match(source, /resolveSubjectGraphForSource/);
+    assert.match(source, /association_resolution_summary/);
+    assert.match(source, /association_ambiguity_count/);
+    assert.doesNotMatch(source, /function pickScopedOpportunity/);
+    assert.doesNotMatch(source, /function pickScopedUseCase/);
+  }
+});
+
+test('Raw Context subject detection does not over-link duplicate contacts inside one account scope', async () => {
+  const detected = await detectRawContextSubjects(
+    new FakeAmbiguousAccountChildDb(),
+    baseInput.tenantId,
+    'Nike said Maya Patel should join the security review.',
+    { limit: 10 },
+  );
+
+  assert.ok(detected.subjects.some(subject => subject.type === 'account' && subject.id === 'acct-nike'));
+  assert.equal(detected.subjects.some(subject => subject.id === 'contact-nike-maya'), false);
+  assert.equal(detected.subjects.some(subject => subject.id === 'contact-nike-maya-duplicate'), false);
+  assert.ok(detected.skipped.some(item => item.name === 'Maya Patel' && item.reason === 'ambiguous_within_account_scope'));
+});
+
+test('Raw Context subject detection does not over-link duplicate opportunities inside one account scope', async () => {
+  const detected = await detectRawContextSubjects(
+    new FakeAmbiguousAccountChildDb(),
+    baseInput.tenantId,
+    'Nike wants the Pegasus expansion security plan updated.',
+    { limit: 10 },
+  );
+
+  assert.ok(detected.subjects.some(subject => subject.type === 'account' && subject.id === 'acct-nike'));
+  assert.equal(detected.subjects.some(subject => subject.id === 'opp-nike-pegasus'), false);
+  assert.equal(detected.subjects.some(subject => subject.id === 'opp-nike-pegasus-duplicate'), false);
+  assert.ok(detected.skipped.some(item => item.name === 'Pegasus expansion' && item.reason === 'ambiguous_within_account_scope'));
+});
+
+test('Raw Context subject detection does not over-link duplicate use cases inside one account scope', async () => {
+  const detected = await detectRawContextSubjects(
+    new FakeAmbiguousAccountChildDb(),
+    baseInput.tenantId,
+    'Nike wants the Forecast automation use case reviewed before the workshop.',
+    { limit: 10 },
+  );
+
+  assert.ok(detected.subjects.some(subject => subject.type === 'account' && subject.id === 'acct-nike'));
+  assert.equal(detected.subjects.some(subject => subject.id === 'uc-nike-forecasting'), false);
+  assert.equal(detected.subjects.some(subject => subject.id === 'uc-nike-forecasting-duplicate'), false);
+  assert.ok(detected.skipped.some(item => item.name === 'Forecast automation' && item.reason === 'ambiguous_within_account_scope'));
+});
+
 test('Raw Context subject detection narrows child records to the matched account', async () => {
   const detected = await detectRawContextSubjects(
     new FakeRawSubjectDb(),
@@ -419,6 +1864,45 @@ test('Raw Context subject detection narrows child records to the matched account
   assert.equal(detected.subjects.some(subject => subject.id === 'contact-acme-jacob'), false);
   assert.equal(detected.account_scope[0].opportunities_checked, 1);
   assert.match(detected.resolution_summary, /Matched Nike/);
+});
+
+test('Raw Context subject detection uses account aliases to scope child matches', async () => {
+  const detected = await detectRawContextSubjects(
+    new FakeRawSubjectDb(),
+    baseInput.tenantId,
+    'NKE wants to expand the Pegasus expansion next quarter.',
+    { limit: 10 },
+  );
+
+  assert.ok(detected.subjects.some(subject => subject.type === 'account' && subject.id === 'acct-nike'));
+  assert.ok(detected.subjects.some(subject => subject.type === 'opportunity' && subject.id === 'opp-nike-pegasus'));
+  assert.equal(detected.subjects.some(subject => subject.id === 'opp-acme-pegasus'), false);
+});
+
+test('Raw Context subject detection does not over-link same-named contacts without account scope', async () => {
+  const detected = await detectRawContextSubjects(
+    new FakeRawSubjectDb(),
+    baseInput.tenantId,
+    'Maya Patel said the rollout needs a security review.',
+    { limit: 10 },
+  );
+
+  assert.equal(detected.subjects.some(subject => subject.id === 'contact-nike-maya'), false);
+  assert.equal(detected.subjects.some(subject => subject.id === 'contact-acme-maya'), false);
+  assert.ok(detected.skipped.some(item => item.reason === 'ambiguous_without_account_scope'));
+});
+
+test('Raw Context subject detection does not over-link same-named opportunities without account scope', async () => {
+  const detected = await detectRawContextSubjects(
+    new FakeRawSubjectDb(),
+    baseInput.tenantId,
+    'The Pegasus expansion needs an updated security plan.',
+    { limit: 10 },
+  );
+
+  assert.equal(detected.subjects.some(subject => subject.id === 'opp-nike-pegasus'), false);
+  assert.equal(detected.subjects.some(subject => subject.id === 'opp-acme-pegasus'), false);
+  assert.ok(detected.skipped.some(item => item.name === 'Pegasus expansion' && item.reason === 'ambiguous_without_account_scope'));
 });
 
 test('Raw Context subject detection scopes use cases under the matched account', async () => {
@@ -587,6 +2071,38 @@ test('recoverOperationalJob can retry stale Raw Context receipts', async () => {
   assert.equal(result.previous_status, 'processing');
   assert.equal(result.new_status, 'pending');
   assert.equal(db.recoveryLog.length, 1);
+});
+
+test('claimPendingRawContextSources leases only pending retryable receipts', async () => {
+  const claimedRows = [{
+    id: '77777777-7777-4777-8777-777777777777',
+    tenant_id: '11111111-1111-4111-8111-111111111111',
+    source_type: 'add_context',
+    source_ref: 'auto:test',
+    status: 'processing',
+    stage: 'worker_claimed',
+    attempt_count: 2,
+    detected_subjects: [],
+    signals_created: 0,
+    memory_created: 0,
+    skipped: 0,
+    metadata: {},
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }];
+  const db = {
+    async query(sql, params) {
+      const text = sql.replace(/\s+/g, ' ').trim();
+      assert.match(text, /FOR UPDATE SKIP LOCKED/);
+      assert.match(text, /status = 'pending'/);
+      assert.equal(params[0], 5);
+      return { rows: claimedRows, rowCount: claimedRows.length };
+    },
+  };
+
+  const claimed = await claimPendingRawContextSources(db, 5);
+  assert.equal(claimed.length, 1);
+  assert.equal(claimed[0].stage, 'worker_claimed');
 });
 
 class FakeContradictionAssignmentDb {
@@ -774,6 +2290,82 @@ test('sensitive tool scopes enforce read/write and object-level boundaries', () 
   assert.doesNotThrow(() => enforceToolScopes('context_contradiction_assign', contradictionActor));
 });
 
+class FakeRawContextAccessDb {
+  rawSources = new Map([
+    ['own-source', {
+      id: '88888888-8888-4888-8888-888888888801',
+      tenant_id: recoveryActor.tenant_id,
+      source_type: 'add_context',
+      source_ref: 'auto:own',
+      actor_id: '88888888-8888-4888-8888-888888888901',
+      status: 'skipped',
+      stage: 'resolve_subjects',
+      detected_subjects: [],
+      signals_created: 0,
+      memory_created: 0,
+      skipped: 1,
+      metadata: {},
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }],
+    ['peer-source', {
+      id: '88888888-8888-4888-8888-888888888802',
+      tenant_id: recoveryActor.tenant_id,
+      source_type: 'add_context',
+      source_ref: 'auto:peer',
+      actor_id: '88888888-8888-4888-8888-888888888902',
+      status: 'skipped',
+      stage: 'resolve_subjects',
+      detected_subjects: [],
+      signals_created: 0,
+      memory_created: 0,
+      skipped: 1,
+      metadata: {},
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }],
+  ]);
+
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    if (text.startsWith('SELECT * FROM raw_context_sources')) {
+      const source = this.rawSources.get(params[1]);
+      return { rows: source ? [source] : [], rowCount: source ? 1 : 0 };
+    }
+    if (text.startsWith('SELECT * FROM actors WHERE id = $1')) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (text.startsWith('SELECT * FROM actors WHERE tenant_id = $1 AND user_id = $2')) {
+      const row = params[1] === '99999999-9999-4999-8999-999999999901'
+        ? { id: '88888888-8888-4888-8888-888888888901' }
+        : undefined;
+      return { rows: row ? [row] : [], rowCount: row ? 1 : 0 };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  }
+}
+
+test('Raw Context get allows own actor receipts and hides peer no-subject receipts', async () => {
+  const db = new FakeRawContextAccessDb();
+  const actor = {
+    tenant_id: recoveryActor.tenant_id,
+    actor_id: '99999999-9999-4999-8999-999999999901',
+    actor_type: 'user',
+    role: 'member',
+    scopes: ['context:read'],
+  };
+  const tool = getAllTools(db).find(candidate => candidate.name === 'context_raw_source_get');
+  assert.ok(tool);
+
+  const own = await tool.handler({ id: 'own-source' }, actor);
+  assert.equal(own.raw_context_source.id, '88888888-8888-4888-8888-888888888801');
+
+  await assert.rejects(
+    () => tool.handler({ id: 'peer-source' }, actor),
+    err => err?.code === 'NOT_FOUND' && err?.status === 404,
+  );
+});
+
 test('Workspace Agent revenue-object writes default on in migrations', async () => {
   const migration = await readFile(new URL('../migrations/064_agent_write_objects_default.sql', import.meta.url), 'utf8');
   assert.match(migration, /ALTER COLUMN can_write_objects SET DEFAULT true/);
@@ -948,6 +2540,21 @@ test('data-quality repair can requeue stale Raw Context processing receipts', as
   assert.equal(dryRun.repaired_count, 4);
 
   const repaired = await repairDataQualityFinding(db, recoveryActor, 'stale_raw_context_sources_processing', {
+    dry_run: false,
+    limit: 2,
+  });
+  assert.equal(repaired.repaired_count, 2);
+  assert.equal(repaired.event_id, 202);
+});
+
+test('data-quality repair can requeue retryable Raw Context failures', async () => {
+  const db = new FakeRawContextRepairDb();
+  const dryRun = await repairDataQualityFinding(db, recoveryActor, 'failed_raw_context_sources_retryable', {
+    dry_run: true,
+  });
+  assert.equal(dryRun.repaired_count, 4);
+
+  const repaired = await repairDataQualityFinding(db, recoveryActor, 'failed_raw_context_sources_retryable', {
     dry_run: false,
     limit: 2,
   });

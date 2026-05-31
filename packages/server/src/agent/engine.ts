@@ -195,6 +195,7 @@ const TOOL_STATUS_MAP: Record<string, string> = {
   // Search / misc
   crm_search:           'Searching workspace…',
   entity_resolve:       'Resolving entity…',
+  customer_record_resolve:'Resolving customer records…',
   schema_get:           'Loading schema…',
   briefing_get:         'Loading briefing…',
   actor_whoami:         'Checking identity…',
@@ -701,7 +702,7 @@ function buildSystemPrompt(
     'context_add', 'context_get', 'context_list', 'context_raw_source_list', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_group_list', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_handoff', 'context_signal_group_reject', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale',
     'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status', 'hitl_list_pending',
     'email_sequence_list', 'email_sequence_get', 'email_sequence_enroll', 'email_sequence_unenroll', 'email_sequence_enrollment_list', 'workflow_template_list',
-    'pipeline_summary', 'pipeline_forecast', 'tenant_get_stats', 'crm_search',
+    'pipeline_summary', 'pipeline_forecast', 'tenant_get_stats', 'crm_search', 'customer_record_resolve',
   ]);
   const others = toolDefs.filter(t => !grouped.has(t.name)).map(t => t.name).join(' · ');
   if (others) toolLines.push(`**Other:** ${others}`);
@@ -729,7 +730,9 @@ function buildSystemPrompt(
     '- Do not use excessive disclaimers or refusals for normal CRM operations.',
     '',
     '# Duplicate Prevention',
-    '- Before calling contact_create or account_create, ALWAYS call entity_resolve with the name (and email or domain if available). If status is "resolved", use the existing record\'s ID — never create a duplicate. If status is "ambiguous", present the candidates to the user: "I found existing records that may match — [names]. Which one should I use, or should I create a new one?"',
+    '- Use customer_record_resolve as the primary customer-record resolver before acting on names, source text, or account + child-record references. It resolves account-first, returns ambiguity receipts, and proposes reviewable new child records instead of guessing.',
+    '- Before calling contact_create or account_create, resolve the customer record first. If a matching subject is returned, use the existing record\'s ID — never create a duplicate. If the resolver returns ambiguity receipts, present the candidates to the user: "I found existing records that may match — [names]. Which one should I use, or should I create a new one?"',
+    '- entity_resolve is a compatibility/simple account-contact lookup tool. Prefer customer_record_resolve unless entity_resolve is the only resolver available in the current tool list.',
     '- If contact_create or account_create returns a 409 error with candidates, present them clearly: "A similar [entity] already exists: [name] (matched by: [reason]). Should I use this existing record, or create a new one?" Wait for the user\'s explicit answer before proceeding.',
     '- Use if_exists: "return_existing" only when the user has explicitly requested an idempotent operation (e.g., "make sure this contact exists", bulk import, or data sync).',
     '- To clean up existing duplicates, use contact_merge or account_merge — never delete one and update the other manually.',

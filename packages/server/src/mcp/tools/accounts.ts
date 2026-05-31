@@ -49,7 +49,7 @@ export function accountTools(db: DbPool): ToolDef[] {
     {
       name: 'account_create',
       tier: 'extended',
-      description: 'Create a new account record. Before calling this, prefer using entity_resolve to check if the account already exists. If a potential duplicate is detected (same domain or same name), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record. Pass allow_duplicates: true to skip the check after confirming with the user.',
+      description: 'Create a new account record. Before calling this, use customer_record_resolve to check if the customer already exists; use entity_resolve only as a compatibility fallback for simple account/contact lookup. If a potential duplicate is detected (same domain or same name), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record. Pass allow_duplicates: true to skip the check after confirming with the user.',
       inputSchema: accountCreate,
       handler: async (input: z.infer<typeof accountCreate>, actor: ActorContext) => {
         return runAccountOperation(db, actor, 'account_create', input, async () => {

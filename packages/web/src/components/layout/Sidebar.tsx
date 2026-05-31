@@ -7,14 +7,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
   Inbox,
-  Zap,
   Library,
   Users,
   Building2,
   Briefcase,
   FolderKanban,
-  Activity,
-  Mail,
   ScrollText,
   Settings,
   Database,
@@ -33,7 +30,6 @@ export { ENTITY_COLORS };
 const agentNavItems = [
   { icon: Brain,       label: 'Overview',     path: '/',             color: ENTITY_COLORS.sequences },
   { icon: Library,     label: 'Context',      path: '/context',      color: ENTITY_COLORS.context },
-  { icon: Zap,         label: 'Automations',  path: '/automations',  color: ENTITY_COLORS.workflows },
   { icon: Inbox,       label: 'Handoffs',     path: '/handoffs',     color: ENTITY_COLORS.assignments },
 ];
 
@@ -43,8 +39,6 @@ const dataNavItems = [
   { icon: Building2,   label: 'Accounts',      path: '/accounts',      color: ENTITY_COLORS.accounts },
   { icon: Briefcase,   label: 'Opportunities', path: '/opportunities', color: ENTITY_COLORS.opportunities },
   { icon: FolderKanban,label: 'Use Cases',     path: '/use-cases',     color: ENTITY_COLORS.useCases },
-  { icon: Activity,    label: 'Activities',    path: '/activities',    color: ENTITY_COLORS.activities },
-  { icon: Mail,        label: 'Emails',        path: '/emails',        color: ENTITY_COLORS.emails },
 ];
 
 const bottomItems = [
@@ -130,6 +124,9 @@ export function Sidebar() {
     : bottomItems.filter(item => item.path === '/settings');
 
   function isActive(path: string) {
+    if (path === '/context' && (location.pathname.startsWith('/emails') || location.pathname.startsWith('/activities'))) {
+      return true;
+    }
     return path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
   }
 
@@ -197,7 +194,9 @@ export function Sidebar() {
       {/* Bottom */}
       <div className="flex flex-col gap-1 px-2 pb-3 border-t border-sidebar-border pt-3">
         {visibleBottomItems.map((item) => {
-          const active = location.pathname.startsWith(item.path);
+          const active = item.path === '/settings'
+            ? location.pathname.startsWith('/settings') || location.pathname.startsWith('/automations')
+            : location.pathname.startsWith(item.path);
           return (
             <Link
               key={item.path}

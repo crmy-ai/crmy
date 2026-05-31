@@ -13,8 +13,8 @@ import type { ToolDef } from '../server.js';
 
 export const entityResolveInput = z.object({
   query: z.string().min(1).describe(
-    'The name, alias, abbreviation, email, or domain to resolve. ' +
-    'Examples: "JPMC", "John Smith", "alice@acme.com", "acme.com".',
+    'The name, stored alias/abbreviation, email, or domain to resolve. ' +
+    'Examples: "JPMC" when saved as an alias, "John Smith", "alice@acme.com", "acme.com".',
   ),
   entity_type: z.enum(['contact', 'account', 'any']).default('any').describe(
     'Constrain the search to a specific entity type, or "any" to search both.',
@@ -53,7 +53,7 @@ export function entityResolveTools(db: DbPool): ToolDef[] {
       tier: 'core',
       description:
         'Resolve a natural-language entity reference to a canonical CRM record. ' +
-        'Handles abbreviations (e.g. "JPMC" → JP Morgan Chase), aliases, typos, ' +
+        'Handles stored aliases/abbreviations, exact emails/domains, fuzzy names, ' +
         'and ambiguous names (e.g. multiple "John Smith" contacts). ' +
         'Returns status="resolved" with a single match, status="ambiguous" with ' +
         'ranked candidates (use context_hints or create an Approval request to disambiguate), ' +

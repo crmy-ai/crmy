@@ -64,6 +64,8 @@ Ingest customer context from calls, meetings, emails, notes, CRM changes, Slack,
 
 Raw Context stays messy. CRMy resolves visible customer records, extracts evidence-backed Signals, and keeps receipts for what was processed, skipped, matched, or failed.
 
+The same account-first resolver powers Raw Context, customer email, calendar/activity capture, and agent record lookup, so opportunities and use cases are matched inside the right account instead of guessed globally.
+
 ### 2. Remember Operationally
 
 Store typed GTM Memory for accounts, contacts, opportunities, use cases, stakeholders, risks, objections, commitments, next steps, buying process, success criteria, and forecast signals.
@@ -307,7 +309,7 @@ mcp_servers:
     connect_timeout: 60
     tools:
       include:
-        - entity_resolve
+        - customer_record_resolve
         - briefing_get
         - context_ingest_auto
         - context_signal_group_list
@@ -330,20 +332,20 @@ npx -y @crmy/cli agent-smoke
 Or ask the connected agent:
 
 ```text
-Use the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.
+Use the CRMy MCP tools to resolve the customer record "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.
 ```
 
 For Hermes Agent, ask for the prefixed tools:
 
 ```text
-Use mcp_crmy_entity_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, then call mcp_crmy_context_signal_group_list for Signals needing attention. Tell me the safest next action with the evidence you used.
+Use mcp_crmy_customer_record_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, then call mcp_crmy_context_signal_group_list for Signals needing attention. Tell me the safest next action with the evidence you used.
 ```
 
 Common first tools:
 
 | Goal | MCP tool |
 |---|---|
-| Resolve a record by name | `entity_resolve` |
+| Resolve customer records | `customer_record_resolve` |
 | Brief an agent before action | `briefing_get` |
 | Ingest messy customer context | `context_ingest_auto` |
 | Review evidence-backed Signals | `context_signal_group_list` |

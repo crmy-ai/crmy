@@ -54,6 +54,7 @@ const opsDataQualityRepair = z.object({
     'current_context_missing_search_index',
     'stuck_context_outbox_processing',
     'stale_raw_context_sources_processing',
+    'failed_raw_context_sources_retryable',
     'stuck_agent_turns_running',
   ]),
   dry_run: z.boolean().optional().default(true),
@@ -579,7 +580,7 @@ export function metaTools(db: DbPool): ToolDef[] {
     {
       name: 'ops_data_quality_repair',
       tier: 'admin',
-      description: 'Repair safe tenant-scoped data-quality findings. Supports dry-run-first canonical activity subject backfill, current-context search-index backfill enqueueing, and retrying context outbox jobs stuck in processing. Higher-risk findings remain report-only and require operator review. Admin/owner only.',
+      description: 'Repair safe tenant-scoped data-quality findings. Supports dry-run-first canonical activity subject backfill, current-context search-index backfill enqueueing, retrying stuck context outbox jobs, and requeueing stale or retryable Raw Context processing receipts. Higher-risk findings remain report-only and require operator review. Admin/owner only.',
       inputSchema: opsDataQualityRepair,
       handler: async (input: z.infer<typeof opsDataQualityRepair>, actor: ActorContext) => {
         return repairDataQualityFinding(db, actor, input.check_name, {

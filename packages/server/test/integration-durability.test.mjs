@@ -169,7 +169,7 @@ async function countRows(db, table, where, params) {
 }
 
 if (!databaseUrl) {
-  test('database durability integration tests', { skip: 'Set CRMY_INTEGRATION_DATABASE_URL or TEST_DATABASE_URL to run migrated Postgres checks.' }, () => {});
+  test('database durability integration tests', { skip: 'Set CRMY_INTEGRATION_DATABASE_URL or TEST_DATABASE_URL to run migrated Postgres checks. For local app-database validation, run npm run test:integration:local --workspace=packages/server.' }, () => {});
 } else {
   test('deal_advance is atomic, idempotent, and version guarded on a migrated database', async () => {
     await withMigratedSchema(async (db) => {

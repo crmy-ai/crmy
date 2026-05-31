@@ -35,6 +35,7 @@ test('curated MCP-to-CLI coverage stays mapped in HTTP mode', async () => {
   const clientSource = await read('packages/cli/src/client.ts');
   const mappedTools = new Set([...clientSource.matchAll(/^\s+([a-z0-9_]+):\s*\{/gm)].map(match => match[1]));
   const expected = [
+    'customer_record_resolve',
     'email_draft_preview',
     'email_draft_save',
     'record_draft_preview',
@@ -93,7 +94,7 @@ test('agent smoke command exercises the one-minute MCP tool path', async () => {
   const smokeSource = await read('packages/cli/src/commands/agent-smoke.ts');
   const mcpSource = await read('packages/cli/src/commands/mcp.ts');
   assert.match(indexSource, /agentSmokeCommand/);
-  for (const tool of ['entity_resolve', 'briefing_get', 'context_signal_group_list']) {
+  for (const tool of ['customer_record_resolve', 'briefing_get', 'context_signal_group_list']) {
     assert.match(smokeSource, new RegExp(`['"]${tool}['"]`));
   }
   assert.match(mcpSource, /command\('doctor'\)/);

@@ -471,10 +471,24 @@ Search emails.
 - **Input**: `contact_id`, `status`, `limit`, `cursor`
 - **Output**: `{ emails, next_cursor, total }`
 
-## Identity Tools
+## Customer Record Resolution
 
-### entity_resolve
-Resolve a name, abbreviation, or partial string to a contact or account UUID. **Always call this before `contact_get` or `account_get` when you have a name but not a UUID — never guess an ID.**
+### customer_record_resolve
+Resolve GTM/customer references across accounts, contacts, opportunities, and use cases. Use this when an agent needs to identify a customer record before briefing, searching, drafting, or taking action.
+
+- **Input**: `query` or `text` (one required), `subject_type` (`account` | `contact` | `opportunity` | `use_case` | `any`, default `any`), `account_hint`, `confidence_threshold`, `limit`
+- **Output**: `{ resolver, query, subject_type, subjects, skipped, proposed_records, account_scope, records_examined, resolution_summary }`
+  - `subjects`: resolved customer records, including account scope and parent subject metadata where applicable
+  - `skipped`: ambiguity or low-confidence receipts with candidate records and recommended next action when available
+  - `proposed_records`: possible new contacts/accounts/opportunities/use cases that need review; CRMy does not create them automatically
+  - `account_scope`: the account-level directory CRMy checked before linking child records
+
+This tool shares the same account-first resolver used by Raw Context extraction. Opportunities and use cases should usually resolve inside a matched account. If CRMy is not sure, it returns an ambiguity receipt or reviewed proposal instead of guessing.
+
+For messy meeting transcripts, email threads, notes, research, or any source that should become Signals and Memory, call `context_ingest_auto` instead of trying to resolve every mention manually.
+
+### Compatibility: entity_resolve
+Resolve a name, stored alias/abbreviation, email, domain, or partial string to a contact or account UUID. This is a compatibility/simple lookup tool for older harnesses. Prefer `customer_record_resolve` for current agent workflows, especially when account scope, child records, or ambiguity receipts matter.
 
 - **Input**: `query` (required), `entity_type` (`contact` | `account` | `any`, default `any`), `context_hints` (`{ company_name?, email_domain?, title?, email? }`), `actor_id` (defaults to requesting actor), `limit` (1–10, default 5)
 - **Output**: `{ status, entity_type, resolved, candidates }`

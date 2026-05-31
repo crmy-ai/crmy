@@ -71,7 +71,7 @@ Use the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, 
 
 Codex should call:
 
-1. `entity_resolve` for `Northstar Labs`.
+1. `customer_record_resolve` for `Northstar Labs`.
 2. `briefing_get` for the resolved account.
 3. `context_signal_group_list` with `attention_only: true`.
 

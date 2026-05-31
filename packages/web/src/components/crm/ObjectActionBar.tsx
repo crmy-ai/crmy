@@ -46,6 +46,10 @@ export function ObjectActionBar({
 
   return (
     <div className="mx-4 mt-3 rounded-2xl border border-border bg-card p-2.5">
+      <div className="mb-2 flex items-center justify-between gap-3 px-1">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Actions</p>
+        <p className="hidden text-xs text-muted-foreground sm:block">Use this record as the working scope.</p>
+      </div>
       <div className="grid grid-cols-2 gap-2">
         {agentEnabled && (
           <ActionButton
@@ -59,7 +63,6 @@ export function ObjectActionBar({
             }}
           />
         )}
-        {!agentEnabled && <div />}
         {agentEnabled && (
           <ActionButton
             icon={Pencil}
@@ -78,7 +81,6 @@ export function ObjectActionBar({
             }}
           />
         )}
-        {!agentEnabled && <div />}
         {onBrief ? (
           <ActionButton icon={FileText} label="Generate Brief" iconClassName="text-primary" onClick={onBrief} />
         ) : <div />}

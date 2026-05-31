@@ -94,7 +94,7 @@ export async function runAgentSmoke(options: {
   const accountName = options.account?.trim() || 'Northstar Labs';
   const signalLimit = options.signalLimit ?? 5;
   const checks: SmokeCheck[] = [];
-  const prompt = `Use the CRMy MCP tools to resolve the account "${accountName}", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.`;
+  const prompt = `Use the CRMy MCP tools to resolve the customer record "${accountName}", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.`;
   let client: CliClient | undefined;
   let accountId: string | undefined;
   let memoryCount = 0;
@@ -106,25 +106,26 @@ export async function runAgentSmoke(options: {
   try {
     client = await getClient(options.config);
 
-    const resolved = await runTool(client, 'entity_resolve', {
+    const resolved = await runTool(client, 'customer_record_resolve', {
       query: accountName,
-      entity_type: 'account',
+      subject_type: 'account',
       limit: 5,
     });
-    const resolvedRecord = asRecord(resolved.resolved);
+    const resolvedSubjects = asArray(resolved.subjects);
+    const resolvedRecord = resolvedSubjects.find(subject => subject.type === 'account') ?? {};
     accountId = candidateId(resolvedRecord);
     if (!accountId) {
-      const candidates = asArray(resolved.candidates);
+      const candidates = asArray(resolved.skipped).flatMap(item => asArray(item.candidate_records));
       const candidateList = candidates.slice(0, 3).map(candidateName).join(', ');
       checks.push({
-        name: 'entity_resolve',
+        name: 'customer_record_resolve',
         ok: false,
         detail: `Could not resolve account "${accountName}".${candidateList ? ` Candidates: ${candidateList}.` : ''}`,
         fix: 'Run `crmy seed-demo` or pass --account with an existing account name.',
       });
     } else {
       checks.push({
-        name: 'entity_resolve',
+        name: 'customer_record_resolve',
         ok: true,
         detail: `Resolved account "${candidateName(resolvedRecord)}" (${accountId.slice(0, 8)}).`,
       });

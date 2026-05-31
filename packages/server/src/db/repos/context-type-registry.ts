@@ -16,7 +16,7 @@ interface ContextTypeTemplate extends Omit<ContextTypeRegistryEntry, 'tenant_id'
   is_extractable: boolean;
 }
 
-const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
+export const DEFAULT_CONTEXT_TYPES: ContextTypeTemplate[] = [
   // ── Unstructured (original types, no extraction schema) ─────────────────
   {
     type_name: 'note',

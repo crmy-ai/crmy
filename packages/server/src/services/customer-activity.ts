@@ -11,6 +11,7 @@ import { extractContextFromActivity } from '../agent/extraction.js';
 import { emitEvent } from '../events/emitter.js';
 import { getActorUserId, getVisibleOwnerIds } from './access-control.js';
 import { classifySourceParticipants, getSourceFilterSettings } from './source-filters.js';
+import { resolveSubjectGraphForSource, type SubjectGraphResolution } from './subject-graph-resolver.js';
 
 function normalizeDomain(value: string | undefined | null): string | null {
   const domain = value?.split('@')[1] ?? value;
@@ -53,7 +54,7 @@ async function findContactByEmail(
   tenantId: UUID,
   email: string,
   ownerIds?: UUID[] | null,
-): Promise<{ id: UUID; account_id?: UUID | null; owner_id?: UUID | null } | null> {
+): Promise<{ id: UUID; account_id?: UUID | null; account_name?: string | null; owner_id?: UUID | null } | null> {
   const params: unknown[] = [tenantId, email.trim().toLowerCase()];
   let ownerClause = '';
   if (ownerIds) {
@@ -62,8 +63,9 @@ async function findContactByEmail(
     ownerClause = ` AND c.owner_id = ANY($${params.length}::uuid[])`;
   }
   const result = await db.query(
-    `SELECT c.id, c.account_id, c.owner_id
+    `SELECT c.id, c.account_id, a.name AS account_name, c.owner_id
      FROM contacts c
+     LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
      WHERE c.tenant_id = $1 AND lower(c.email) = $2 AND c.merged_into IS NULL
        ${ownerClause}
      LIMIT 1`,
@@ -99,78 +101,6 @@ async function findAccountByDomain(
   return result.rows[0] ?? null;
 }
 
-async function pickScopedOpportunity(
-  db: DbPool,
-  tenantId: UUID,
-  accountId?: UUID | null,
-  contactId?: UUID | null,
-  ownerIds?: UUID[] | null,
-): Promise<{ id: UUID; name: string } | null> {
-  if (!accountId && !contactId) return null;
-  const params: unknown[] = [tenantId];
-  const conditions = [`o.tenant_id = $1`, `o.stage NOT IN ('closed_won','closed_lost')`];
-  let idx = 2;
-  if (accountId) {
-    conditions.push(`o.account_id = $${idx++}`);
-    params.push(accountId);
-  }
-  if (contactId) {
-    conditions.push(`(o.contact_id = $${idx} OR o.contact_id IS NULL)`);
-    params.push(contactId);
-    idx++;
-  }
-  if (ownerIds) {
-    if (ownerIds.length === 0) return null;
-    conditions.push(`o.owner_id = ANY($${idx++}::uuid[])`);
-    params.push(ownerIds);
-  }
-  const result = await db.query(
-    `SELECT o.id, o.name
-     FROM opportunities o
-     WHERE ${conditions.join(' AND ')}
-     ORDER BY o.close_date ASC NULLS LAST, o.updated_at DESC
-     LIMIT 2`,
-    params,
-  );
-  return result.rows.length === 1 ? result.rows[0] : null;
-}
-
-async function pickScopedUseCase(
-  db: DbPool,
-  tenantId: UUID,
-  accountId?: UUID | null,
-  opportunityId?: UUID | null,
-  ownerIds?: UUID[] | null,
-): Promise<{ id: UUID; name: string } | null> {
-  if (!accountId && !opportunityId) return null;
-  const params: unknown[] = [tenantId];
-  const conditions = [`u.tenant_id = $1`, `u.stage NOT IN ('complete','closed','archived')`];
-  let idx = 2;
-  if (accountId) {
-    conditions.push(`u.account_id = $${idx++}`);
-    params.push(accountId);
-  }
-  if (opportunityId) {
-    conditions.push(`(u.opportunity_id = $${idx} OR u.opportunity_id IS NULL)`);
-    params.push(opportunityId);
-    idx++;
-  }
-  if (ownerIds) {
-    if (ownerIds.length === 0) return null;
-    conditions.push(`u.owner_id = ANY($${idx++}::uuid[])`);
-    params.push(ownerIds);
-  }
-  const result = await db.query(
-    `SELECT u.id, u.name
-     FROM use_cases u
-     WHERE ${conditions.join(' AND ')}
-     ORDER BY u.updated_at DESC
-     LIMIT 2`,
-    params,
-  );
-  return result.rows.length === 1 ? result.rows[0] : null;
-}
-
 async function associateMeeting(
   db: DbPool,
   tenantId: UUID,
@@ -182,6 +112,8 @@ async function associateMeeting(
   opportunity_id?: UUID | null;
   use_case_id?: UUID | null;
   reason: string;
+  resolution_summary?: string;
+  ambiguity_count?: number;
 }> {
   if (input.contact_id || input.account_id || input.opportunity_id || input.use_case_id) {
     return {
@@ -198,37 +130,145 @@ async function associateMeeting(
     .filter((email): email is string => Boolean(email));
   const filterSettings = await getSourceFilterSettings(db, tenantId);
   const externalEmails = emails.filter(email => !filterSettings.internal_domains.includes(normalizeDomain(email) ?? ''));
+  const sourceText = meetingAssociationText(input, externalEmails);
 
   for (const email of externalEmails) {
     const contact = await findContactByEmail(db, tenantId, email, ownerIds);
     if (contact) {
-      const opportunity = await pickScopedOpportunity(db, tenantId, contact.account_id, contact.id, ownerIds);
-      const useCase = await pickScopedUseCase(db, tenantId, contact.account_id, opportunity?.id, ownerIds);
-      return {
+      const base = {
         contact_id: contact.id,
         account_id: contact.account_id ?? null,
-        opportunity_id: opportunity?.id ?? null,
-        use_case_id: useCase?.id ?? null,
         reason: 'Matched by known attendee email.',
       };
+      return enrichAssociationWithSubjectGraph(db, tenantId, sourceText, base, {
+        accountHint: contact.account_name ?? normalizeDomain(email) ?? undefined,
+        ownerIds,
+      });
     }
   }
 
   for (const email of externalEmails) {
     const account = await findAccountByDomain(db, tenantId, normalizeDomain(email), ownerIds);
     if (account) {
-      const opportunity = await pickScopedOpportunity(db, tenantId, account.id, null, ownerIds);
-      const useCase = await pickScopedUseCase(db, tenantId, account.id, opportunity?.id, ownerIds);
-      return {
+      const base = {
         account_id: account.id,
-        opportunity_id: opportunity?.id ?? null,
-        use_case_id: useCase?.id ?? null,
         reason: 'Matched by attendee account domain.',
       };
+      return enrichAssociationWithSubjectGraph(db, tenantId, sourceText, base, {
+        accountHint: account.name,
+        ownerIds,
+      });
     }
   }
 
-  return { reason: 'No matching customer record was found.' };
+  const graphLinked = await enrichAssociationWithSubjectGraph(db, tenantId, sourceText, {
+    reason: 'No matching customer record was found.',
+  }, { ownerIds });
+  return graphLinked.contact_id || graphLinked.account_id || graphLinked.opportunity_id || graphLinked.use_case_id
+    ? graphLinked
+    : { reason: graphLinked.reason, resolution_summary: graphLinked.resolution_summary, ambiguity_count: graphLinked.ambiguity_count };
+}
+
+function meetingAssociationText(input: Partial<calendarRepo.CalendarEvent>, externalEmails: string[]): string {
+  const participants = externalEmails.slice(0, 20).join(', ');
+  return [
+    input.title,
+    input.description?.slice(0, 4000),
+    input.location,
+    input.meeting_url,
+    participants ? `Participants: ${participants}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+function oneSubject(
+  graph: SubjectGraphResolution,
+  type: 'account' | 'contact' | 'opportunity' | 'use_case',
+  accountId?: string | null,
+): { id: string; account_id?: string; name?: string } | null {
+  const subjects = graph.subjects.filter(subject => {
+    if (subject.type !== type) return false;
+    if (!accountId || type === 'account') return true;
+    return subject.account_id === accountId;
+  });
+  return subjects.length === 1 ? subjects[0] : null;
+}
+
+async function enrichAssociationWithSubjectGraph(
+  db: DbPool,
+  tenantId: UUID,
+  text: string,
+  linked: {
+    contact_id?: string | null;
+    account_id?: string | null;
+    opportunity_id?: string | null;
+    use_case_id?: string | null;
+    reason: string;
+  },
+  options: { accountHint?: string; ownerIds?: UUID[] | null } = {},
+): Promise<{
+  contact_id?: string | null;
+  account_id?: string | null;
+  opportunity_id?: string | null;
+  use_case_id?: string | null;
+  reason: string;
+  resolution_summary?: string;
+  ambiguity_count?: number;
+}> {
+  if (!text.trim()) return linked;
+  let graph: SubjectGraphResolution;
+  try {
+    graph = await resolveSubjectGraphForSource(db, tenantId, {
+      text,
+      subject_type: 'any',
+      account_hint: options.accountHint,
+      limit: 12,
+      confidence_threshold: 0.67,
+    }, {
+      ownerIds: options.ownerIds,
+    });
+  } catch (err) {
+    return {
+      ...linked,
+      reason: `${linked.reason} Subject Graph enrichment unavailable: ${err instanceof Error ? err.message : 'resolution failed'}`,
+    };
+  }
+
+  const next = { ...linked };
+  const added: string[] = [];
+  const account = oneSubject(graph, 'account');
+  if (!next.account_id && account?.id) {
+    next.account_id = account.id;
+    added.push('account');
+  }
+  const contact = oneSubject(graph, 'contact', next.account_id);
+  if (!next.contact_id && contact?.id) {
+    next.contact_id = contact.id;
+    if (!next.account_id && contact.account_id) next.account_id = contact.account_id;
+    added.push('contact');
+  }
+  const opportunity = oneSubject(graph, 'opportunity', next.account_id);
+  if (!next.opportunity_id && opportunity?.id) {
+    next.opportunity_id = opportunity.id;
+    if (!next.account_id && opportunity.account_id) next.account_id = opportunity.account_id;
+    added.push('opportunity');
+  }
+  const useCase = oneSubject(graph, 'use_case', next.account_id);
+  if (!next.use_case_id && useCase?.id) {
+    next.use_case_id = useCase.id;
+    if (!next.account_id && useCase.account_id) next.account_id = useCase.account_id;
+    added.push('use case');
+  }
+
+  const ambiguityCount = graph.skipped?.filter(item => item.reason?.includes('ambiguous')).length ?? 0;
+  const reasonParts = [linked.reason];
+  if (added.length > 0) reasonParts.push(`Subject Graph matched ${added.join(', ')} from meeting details.`);
+  if (ambiguityCount > 0) reasonParts.push(`${ambiguityCount} ambiguous customer reference${ambiguityCount === 1 ? '' : 's'} need review.`);
+  return {
+    ...next,
+    reason: reasonParts.join(' '),
+    resolution_summary: graph.resolution_summary,
+    ambiguity_count: ambiguityCount,
+  };
 }
 
 async function classifyMeeting(
@@ -332,6 +372,8 @@ export async function upsertCalendarEventWithIntelligence(
     metadata: {
       ...(input.metadata ?? {}),
       association_reason: linked.reason,
+      association_resolution_summary: linked.resolution_summary,
+      association_ambiguity_count: linked.ambiguity_count,
       classification_reason: classified.reason,
     },
   });

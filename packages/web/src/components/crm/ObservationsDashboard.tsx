@@ -11,6 +11,7 @@ import {
   FileText,
   Plus,
   Search,
+  Settings,
   X,
 } from 'lucide-react';
 import {
@@ -495,6 +496,14 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
           </div>
           <div className="flex flex-shrink-0 items-center gap-2">
             {isLoading && <Clock className="h-4 w-4 animate-pulse text-muted-foreground" />}
+            <Link
+              to="/context?tab=sources"
+              title="Source settings"
+              aria-label="Source settings"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <Settings className="h-4 w-4" />
+            </Link>
             <button
               type="button"
               onClick={onAddContext}

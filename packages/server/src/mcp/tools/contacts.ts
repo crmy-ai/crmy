@@ -52,7 +52,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     {
       name: 'contact_create',
       tier: 'core',
-      description: 'Create a new contact record. Contact names are stored as first_name (required) and last_name (optional) separately. Before calling this tool, prefer using entity_resolve to check if the contact already exists. If a potential duplicate is detected (same email, or same name + account), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record instead of erroring. Pass allow_duplicates: true to skip the check entirely after confirming with the user.',
+      description: 'Create a new contact record. Contact names are stored as first_name (required) and last_name (optional) separately. Before calling this tool, use customer_record_resolve with the contact name, email, and account context to check if the contact already exists; use entity_resolve only as a compatibility fallback for simple account/contact lookup. If a potential duplicate is detected (same email, or same name + account), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record instead of erroring. Pass allow_duplicates: true to skip the check entirely after confirming with the user.',
       inputSchema: contactCreate,
       handler: async (input: z.infer<typeof contactCreate>, actor: ActorContext) => {
         return runContactOperation(db, actor, 'contact_create', input, async () => {

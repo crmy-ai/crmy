@@ -434,6 +434,73 @@ Key changes:
 
 Acceptance target: a new builder can run CRMy, understand the model, ingest context, see Signals/Memory, ask the agent for help, approve an action, and inspect the proof trail.
 
+### 10. Product Surface Cleanup And Feature Altitude
+
+0.9 should make CRMy simpler without making it smaller. The goal is not to delete useful capabilities. The goal is to put each capability where it belongs so the product reads as the context-and-action engine first.
+
+The first-time user should understand:
+
+> CRMy observes customer context, turns it into Signals and Memory, briefs agents, routes risky action through Handoffs, and writes back safely.
+
+Guiding rules:
+
+- Keep the source-to-action loop visually central: Raw Context -> Signals -> Memory -> Briefing / Active Context -> Handoff / Writeback -> Audit.
+- Hide or demote features that compete with that loop until they are needed.
+- Move admin/operator features out of daily user paths.
+- Rename features by outcome, not implementation.
+- Prefer progressive disclosure over deletion.
+
+Recommended feature altitude:
+
+| Feature | 0.9 visibility | Rationale |
+|---|---|---|
+| Raw Context | Core | Intake layer for messy customer material. |
+| Signals | Core | Reasoning layer for inferred claims. |
+| Memory | Core | Trusted operational context agents can rely on. |
+| Handoffs | Core | Human review and safety layer. |
+| Workspace Agent | Core | Primary user-facing action surface. |
+| Briefings / Active Context | Core | The agent intelligence packet. |
+| Lineage | Core/supporting | Proof trail for source-to-action lifecycle. |
+| Customer Email | Supporting source | Feeds context; should not feel like an inbox replacement. |
+| Customer Activity | Supporting source | Meetings, calls, notes, and transcripts feed context; should not feel like a calendar/activity app. |
+| Systems of Record | Admin | Source authority, mapping, sync, and governed writeback setup. |
+| Policies / Registries | Admin | Governance and typed Memory configuration. |
+| Operations / Audit | Admin | Reliability, recovery, proof, and compliance. |
+| Context Graph | Supporting/advanced | Record exploration, not the main proof engine. |
+| Automations | Advanced | Event/action routing; avoid generic workflow-builder positioning. |
+| Sequences | Experimental/advanced | Governed outbound orchestration; avoid sales-engagement positioning. |
+| Manual writeback test bench | Advanced | Admin/operator testing only. |
+| Direct manual Memory creation | Advanced | Normal users should add context, review Signals, and confirm Memory. |
+
+Key cleanup changes:
+
+- Keep primary member/manager navigation focused on Overview, customer records, Context, Handoffs, and Workspace Agent.
+- Move Customer Email and Customer Activity into a Context `Sources` surface or clearly frame them as source feeds.
+- Move Automations, Sequences, Webhooks, and manual writeback testing into Settings -> Automations or other admin-only settings surfaces.
+- Keep Context tabs centered on Raw Context, Signals, Memory, and Lineage. Keep Graph secondary.
+- Make record drawers the main customer action hub: Ask Agent, Update with Agent, Generate Brief, Add Context, Draft Email, Log Activity, Review Signals, and View Lineage.
+- Reorganize Settings around Workspace, Agent, Sources, Systems, Governance, Operations, and Advanced.
+- Keep routes backward compatible even when nav placement changes.
+
+Language cleanup:
+
+- Use `Signal`, not `Signal Group`, in the user-facing app.
+- Use `Confirm Signal`, not `Promote to Memory`, for normal users.
+- Use `Customer Email` as a context source, not inbox management.
+- Use `Customer Activity` as meeting/call/note context capture, not generic activity logging.
+- Use `Action Rules` or `Event Rules` when Automations are visible.
+- Avoid positioning CRMy as a CRM replacement, sales engagement platform, generic workflow builder, or chatbot memory store.
+
+Implementation order:
+
+1. **Navigation cleanup:** move Email and Activities out of primary nav; move Automations and Sequences to Settings -> Automations; keep routes compatible.
+2. **Context simplification:** add a Sources surface, demote Graph, and keep Raw Context / Signals / Memory / Lineage as the main Context path.
+3. **Settings consolidation:** group admin setup by outcome and hide admin-only areas from non-admins.
+4. **Workflow polish:** make Overview and record drawers surface source issues, Signals, Handoffs, stale Memory, and missing context as work to do.
+5. **Docs alignment:** organize docs around Observe -> Signals -> Memory -> Briefing -> Handoff / Writeback -> Proof, with advanced features moved out of the first-run path.
+
+Acceptance target: a new user sees one product story, not a collection of adjacent apps. The power remains available, but the default path explains CRMy as the trusted context and action layer for agents.
+
 ### 0.9 Non-Goals
 
 - Do not weaken the README positioning.
@@ -565,7 +632,7 @@ Key changes:
 - Add embedding backpressure, model/dimension compatibility checks, stale embedding detection, and re-embedding migration plans.
 - Document pgvector/HNSW index strategy for serverless Postgres, including index build timing and operational caveats.
 - Avoid embedding low-value filtered sources and duplicate raw payloads.
-- Add retrieval evaluation sets for account-scoped candidate discovery, Signal grouping, briefing enrichment, and MCP `entity_resolve`.
+- Add retrieval evaluation sets for account-scoped candidate discovery, Signal grouping, briefing enrichment, MCP `customer_record_resolve`, and simple account/contact `entity_resolve`.
 
 Acceptance target: semantic retrieval improves grouping and briefing quality when enabled, but CRMy remains correct and usable when embeddings lag, fail, or are disabled.
 
@@ -580,7 +647,7 @@ Key changes:
 - Move MCP session state out of process memory or make session affinity/expiry explicit for production deployments.
 - Add persisted tool-call idempotency keys for write tools so retries cannot duplicate creates, updates, sends, handoffs, or writebacks.
 - Budget every tool call: default limits, explicit filters, timeouts, and clear “too broad” responses.
-- Add MCP doctor and agent smoke tests that prove `entity_resolve -> briefing_get -> signal list -> handoff/action` against demo data in under one minute.
+- Add MCP doctor and agent smoke tests that prove `customer_record_resolve -> briefing_get -> signal list -> handoff/action` against demo data in under one minute.
 - Keep every tool scoped to the current human actor, including background continuation and delayed tool execution.
 
 Acceptance target: a user or external agent can leave, reconnect, retry, or switch clients without losing work, duplicating writes, or bypassing permissions.
@@ -659,6 +726,8 @@ Acceptance target: 1.0 ships with measurable scale budgets, release gates, and r
 - Risky writes are never silent. Users can preview, approve, reject, retry, or inspect them.
 - Proof-grade lineage connects source, Signal, Memory, retrieval, Handoff, writeback, and audit for first-class workflows.
 - Member, manager, admin, REST, MCP, CLI, and Workspace Agent access boundaries are covered by parity tests.
+- Product navigation and docs make the core loop obvious: Raw Context -> Signals -> Memory -> Briefing / Active Context -> Handoffs / Writeback -> Audit.
+- Email, Activity, Automations, Sequences, Graph, direct Memory creation, and manual writeback testing are placed at the right feature altitude without breaking existing routes.
 
 ### 1.0
 
@@ -685,6 +754,7 @@ Acceptance target: 1.0 ships with measurable scale budgets, release gates, and r
 - **Scope parity tests:** REST, MCP, CLI, Workspace Agent, search, graph, lineage, Handoffs, email, activity, systems-of-record, Automations, and Sequences enforce the same member/manager/admin visibility model.
 - **Retrieval tests:** lexical fallback and pgvector retrieval both find account-scoped candidates without leaking inaccessible records.
 - **Security tests:** no arbitrary SQL writes, scoped actors cannot access unmapped systems, field-level authority is enforced, and secrets are never exposed in logs or audit payloads.
+- **Product-surface tests:** member, manager, and admin navigation show the correct core/supporting/admin/advanced surfaces; legacy routes still resolve; user-facing labels avoid `Signal Group`, generic workflow-builder framing, inbox replacement framing, and CRM replacement framing.
 - **Serverless Postgres tests:** pooled connection budget, statement timeouts, startup without runtime migrations, shallow/deep health behavior, and provider-specific migration guidance.
 - **Scale fixtures:** synthetic tenants with 500k Raw Context sources, 500k Signals, 50k Memory entries, large audit history, and active mailbox/calendar/SOR sync history.
 - **Query-plan tests:** `EXPLAIN` gates for high-volume list/search/detail endpoints, including Context Browser, Signals, Memory, Handoffs, Email Messages, Calendar Events, Audit, Search, Graph, and Lineage.

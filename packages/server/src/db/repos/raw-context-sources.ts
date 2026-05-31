@@ -259,6 +259,35 @@ export async function getRawContextSourceByRef(
   return (result.rows[0] as RawContextSource | undefined) ?? null;
 }
 
+export async function claimPendingRawContextSources(
+  db: DbPool,
+  limit = 10,
+): Promise<RawContextSource[]> {
+  const result = await db.query(
+    `WITH target AS (
+       SELECT id
+       FROM raw_context_sources
+       WHERE status = 'pending'
+         AND (next_retry_at IS NULL OR next_retry_at <= now())
+       ORDER BY COALESCE(next_retry_at, updated_at), updated_at ASC
+       LIMIT $1
+       FOR UPDATE SKIP LOCKED
+     )
+     UPDATE raw_context_sources r
+     SET status = 'processing',
+         stage = 'worker_claimed',
+         locked_at = now(),
+         attempt_count = attempt_count + 1,
+         last_error = NULL,
+         updated_at = now()
+     FROM target
+     WHERE r.id = target.id
+     RETURNING r.*`,
+    [limit],
+  );
+  return result.rows as RawContextSource[];
+}
+
 export async function listRawContextSources(
   db: DbPool,
   tenantId: UUID | string,
@@ -269,6 +298,7 @@ export async function listRawContextSources(
     subject_id?: string;
     query?: string;
     owner_ids?: string[];
+    actor_ids?: string[];
     limit: number;
     cursor?: string;
   },
@@ -310,18 +340,27 @@ export async function listRawContextSources(
     params.push(filters.cursor);
   }
   if (filters.owner_ids) {
+    const actorIds = filters.actor_ids ?? [];
     if (filters.owner_ids.length === 0) {
-      conditions.push('FALSE');
+      if (actorIds.length === 0) {
+        conditions.push('FALSE');
+      } else {
+        conditions.push(`(r.subject_id IS NULL AND r.actor_id = ANY($${idx}::uuid[]))`);
+        params.push(actorIds);
+        idx++;
+      }
     } else {
       conditions.push(`(
-        r.subject_id IS NULL
+        (r.subject_id IS NULL AND ${actorIds.length > 0 ? `r.actor_id = ANY($${idx + 1}::uuid[])` : 'FALSE'})
         OR EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = r.tenant_id AND r.subject_type = 'account' AND a.id = r.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
         OR EXISTS (SELECT 1 FROM contacts c WHERE c.tenant_id = r.tenant_id AND r.subject_type = 'contact' AND c.id = r.subject_id AND c.owner_id = ANY($${idx}::uuid[]))
         OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = r.tenant_id AND r.subject_type = 'opportunity' AND o.id = r.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
         OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = r.tenant_id AND r.subject_type = 'use_case' AND uc.id = r.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
       )`);
       params.push(filters.owner_ids);
+      if (actorIds.length > 0) params.push(actorIds);
       idx++;
+      if (actorIds.length > 0) idx++;
     }
   }
 

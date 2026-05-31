@@ -147,7 +147,7 @@ Expected result:
 }
 ```
 
-If no subjects are resolved, do not manually invent IDs. Ask the user for the customer record, or run `entity_resolve` with the names from the transcript.
+If no subjects are resolved, do not manually invent IDs. Ask the user for the customer record, or run `customer_record_resolve` with the names from the transcript.
 
 ---
 

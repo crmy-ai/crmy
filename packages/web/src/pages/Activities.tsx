@@ -89,6 +89,7 @@ type CalendarEvent = {
 };
 
 const PAGE_SIZE = 50;
+const ACTIVITY_BANNER_HIDDEN_KEY = 'crmy_customer_activity_banner_hidden';
 
 const tabs: Array<{ key: CustomerActivityTab; label: string; icon: typeof CalendarClock }> = [
   { key: 'meetings', label: 'Meetings', icon: CalendarClock },
@@ -722,6 +723,13 @@ export default function Activities() {
   const [debriefActivity, setDebriefActivity] = useState<Record<string, any> | null>(null);
   const [debriefText, setDebriefText] = useState('');
   const [page, setPage] = useState(1);
+  const [bannerHidden, setBannerHidden] = useState(() => {
+    try {
+      return localStorage.getItem(ACTIVITY_BANNER_HIDDEN_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
   const startGoogle = useStartCalendarConnection('google');
   const startMicrosoft = useStartCalendarConnection('microsoft');
   const syncConnection = useSyncCalendarConnection();
@@ -857,6 +865,15 @@ export default function Activities() {
     }
   };
 
+  const hideBanner = () => {
+    setBannerHidden(true);
+    try {
+      localStorage.setItem(ACTIVITY_BANNER_HIDDEN_KEY, 'true');
+    } catch {
+      // Ignore storage failures; the current session can still hide it.
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <TopBar
@@ -867,32 +884,58 @@ export default function Activities() {
       />
 
       <div className="border-b border-border px-4 pt-4 md:px-6">
-        <div className="mb-4 rounded-xl border border-blue-500/20 bg-blue-500/8 p-4">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <CalendarClock className="h-4 w-4 text-blue-300" />
-                <p className="text-sm font-semibold text-foreground">Customer activities can become Signals and Memory</p>
+        {!bannerHidden && (
+          <div className="mb-4 rounded-xl border border-blue-500/20 bg-blue-500/8 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <CalendarClock className="h-4 w-4 text-blue-300" />
+                  <p className="text-sm font-semibold text-foreground">Customer activities can become Signals and Memory</p>
+                  <button
+                    type="button"
+                    onClick={hideBanner}
+                    className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+                    aria-label="Hide activity context message"
+                    title="Hide message"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+                  Connect your calendar when you want customer meetings auto matched to customer records and flagged when notes, transcripts, or debriefs are missing. This is optional: meeting transcripts and call notes can still feed context and agent memory through{' '}
+                  <button
+                    type="button"
+                    onClick={() => navigate('/context?tab=observations&add=context')}
+                    className="font-medium text-blue-300 underline-offset-2 hover:underline"
+                  >
+                    Add Context
+                  </button>
+                  {' '}or MCP (<code className="font-mono text-xs text-foreground">context_ingest_auto</code>).
+                </p>
               </div>
-              <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                Connect your calendar when you want customer meetings auto matched to customer records and flagged when notes, transcripts, or debriefs are missing. This is optional: meeting transcripts and call notes can still feed context and agent memory through{' '}
+              <div className="flex shrink-0 items-center gap-2">
+                {!calendarConnected && (
+                  <>
+                    <Button variant="ghost" onClick={() => navigate('/context?tab=sources')}>View Sources</Button>
+                    <Button variant="outline" onClick={() => setTab('connections')}>Connect calendar</Button>
+                  </>
+                )}
+                {calendarConnected && (
+                  <Button className="shrink-0" variant="ghost" onClick={() => navigate('/context?tab=sources')}>View Sources</Button>
+                )}
                 <button
                   type="button"
-                  onClick={() => navigate('/context?tab=observations&add=context')}
-                  className="font-medium text-blue-300 underline-offset-2 hover:underline"
+                  onClick={hideBanner}
+                  className="hidden h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:inline-flex"
+                  aria-label="Hide activity context message"
+                  title="Hide message"
                 >
-                  Add Context
+                  <X className="h-4 w-4" />
                 </button>
-                {' '}or MCP (<code className="font-mono text-xs text-foreground">context_ingest_auto</code>).
-              </p>
-            </div>
-            {!calendarConnected && (
-              <div className="flex shrink-0 gap-2">
-                <Button variant="outline" onClick={() => setTab('connections')}>Connect calendar</Button>
               </div>
-            )}
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           {tabs.map(item => {

@@ -33,7 +33,7 @@ mcp_servers:
     connect_timeout: 60
     tools:
       include:
-        - entity_resolve
+        - customer_record_resolve
         - briefing_get
         - context_ingest_auto
         - context_signal_group_list
@@ -64,14 +64,14 @@ Then restart Hermes or run:
 Paste this into Hermes Agent:
 
 ```text
-Use mcp_crmy_entity_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, then call mcp_crmy_context_signal_group_list for Signals needing attention. Tell me the safest next action with the evidence you used.
+Use mcp_crmy_customer_record_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, then call mcp_crmy_context_signal_group_list for Signals needing attention. Tell me the safest next action with the evidence you used.
 ```
 
 ## Expected Path
 
 Hermes should call:
 
-1. `mcp_crmy_entity_resolve` for `Northstar Labs`.
+1. `mcp_crmy_customer_record_resolve` for `Northstar Labs`.
 2. `mcp_crmy_briefing_get` for the resolved account.
 3. `mcp_crmy_context_signal_group_list` with `attention_only: true`.
 

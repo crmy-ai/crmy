@@ -4,7 +4,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ListOrdered, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw, Zap } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -22,19 +22,22 @@ import HITLRulesSettings from '@/components/settings/HITLRulesSettings';
 
 type NavRole = 'member' | 'manager' | 'admin' | 'owner';
 
-const settingsNavConfig: { icon: React.ElementType; label: string; path: string; roles: NavRole[] }[] = [
-  { icon: CircleUser, label: 'Profile',       path: '/settings',              roles: ['member', 'manager', 'admin', 'owner'] },
-  { icon: Lock,       label: 'API Keys',      path: '/settings/api-keys',     roles: ['member', 'manager', 'admin', 'owner'] },
-  { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'] },
-  { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'] },
-  { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'] },
-  { icon: Tags,       label: 'Registries',    path: '/settings/registries',   roles: ['admin', 'owner'] },
-  { icon: MessageSquare, label: 'Messaging', path: '/settings/messaging',   roles: ['admin', 'owner'] },
-  { icon: ShieldCheck, label: 'Action Policies', path: '/settings/hitl-rules',  roles: ['admin', 'owner'] },
-  { icon: Sparkles,   label: 'Model Settings', path: '/settings/model',     roles: ['admin', 'owner'] },
-  { icon: Server,     label: 'Systems of Record', path: '/settings/systems', roles: ['admin', 'owner'] },
-  { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'] },
+const settingsNavConfig: { icon: React.ElementType; label: string; path: string; roles: NavRole[]; group: string }[] = [
+  { icon: CircleUser, label: 'Profile',       path: '/settings',              roles: ['member', 'manager', 'admin', 'owner'], group: 'Personal' },
+  { icon: Lock,       label: 'API Keys',      path: '/settings/api-keys',     roles: ['member', 'manager', 'admin', 'owner'], group: 'Personal' },
+  { icon: Sparkles,   label: 'Model Settings', path: '/settings/model',       roles: ['admin', 'owner'], group: 'Agent & Memory' },
+  { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'], group: 'Agent & Memory' },
+  { icon: Tags,       label: 'Registries',    path: '/settings/registries',   roles: ['admin', 'owner'], group: 'Agent & Memory' },
+  { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'], group: 'Agent & Memory' },
+  { icon: Server,     label: 'Systems of Record', path: '/settings/systems', roles: ['admin', 'owner'], group: 'Sources & Systems' },
+  { icon: MessageSquare, label: 'Messaging', path: '/settings/messaging',     roles: ['admin', 'owner'], group: 'Sources & Systems' },
+  { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'], group: 'Sources & Systems' },
+  { icon: ShieldCheck, label: 'Action Policies', path: '/settings/hitl-rules', roles: ['admin', 'owner'], group: 'Governance' },
+  { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'], group: 'Automations' },
+  { icon: Zap,        label: 'Automations',   path: '/settings/advanced',     roles: ['admin', 'owner'], group: 'Automations' },
 ];
+
+const settingsGroupOrder = ['Personal', 'Agent & Memory', 'Sources & Systems', 'Governance', 'Automations'];
 
 function AccessDenied() {
   return (
@@ -5911,11 +5914,73 @@ function RegistriesSettings() {
   );
 }
 
+function AutomationsSettings() {
+  const cards = [
+    {
+      title: 'Action Rules',
+      description: 'Configure event-driven rules for context, handoffs, and governed actions. Use this when CRMy needs to route work after something changes.',
+      Icon: Zap,
+      href: '/automations?tab=triggers',
+      cta: 'Open action rules',
+    },
+    {
+      title: 'Sequences',
+      description: 'Experimental governed outbound orchestration. Keep customer engagement flows policy-aware and human-reviewable.',
+      Icon: ListOrdered,
+      href: '/automations?tab=sequences',
+      cta: 'Open sequences',
+    },
+    {
+      title: 'Webhooks',
+      description: 'Advanced event delivery for operators and developers integrating CRMy with external systems.',
+      Icon: Link2,
+      href: '/settings/webhooks',
+      cta: 'Open webhooks',
+    },
+  ];
+
+  return (
+    <div className="max-w-4xl">
+      <div className="mb-6">
+        <h2 className="font-display text-lg font-bold text-foreground">Automations</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Admin-only automation tools for routing events, governing outbound orchestration, and delivering webhooks.
+        </p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {cards.map(({ title, description, Icon, href, cta }) => (
+          <section key={title} className="rounded-lg border border-border bg-card p-4">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
+                <Icon className="h-5 w-5" />
+              </span>
+              <div className="min-w-0">
+                <h3 className="font-display text-sm font-semibold text-foreground">{title}</h3>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">{description}</p>
+              </div>
+            </div>
+            <Link to={href} className="mt-4 inline-flex h-9 items-center gap-2 rounded-lg border border-border px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+              {cta}
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Link>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const location = useLocation();
   const user = getUser();
   const userRole = (user?.role ?? 'member') as NavRole;
   const visibleNav = settingsNavConfig.filter(item => item.roles.includes(userRole));
+  const groupedNav = settingsGroupOrder
+    .map(group => ({
+      group,
+      items: visibleNav.filter(item => item.group === group),
+    }))
+    .filter(section => section.items.length > 0);
 
   return (
     <div className="flex flex-col h-full">
@@ -5923,7 +5988,7 @@ export default function Settings() {
         title="Settings"
         icon={SettingsIcon}
         iconClassName="text-muted-foreground"
-        description="Manage your account, team, and integrations."
+        description="Manage personal access, agent setup, sources, systems, and governance."
       />
 
       <div className="md:hidden flex gap-1 overflow-x-auto no-scrollbar px-4 pt-3 pb-1 border-b border-border">
@@ -5941,18 +6006,25 @@ export default function Settings() {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        <nav className="hidden md:flex flex-col w-56 border-r border-border bg-muted p-2 gap-0.5">
-          {visibleNav.map((item) => {
-            const active = item.path === '/settings' ? location.pathname === '/settings' : location.pathname.startsWith(item.path);
-            return (
-              <Link key={item.path} to={item.path}
-                className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${active ? 'bg-primary/15 text-primary' : 'text-foreground/60 hover:bg-muted hover:text-foreground'}`}>
-                <item.icon className="w-4 h-4" />
-                {item.label}
-                <SettingsNavHealthDot path={item.path} className="ml-auto" />
-              </Link>
-            );
-          })}
+        <nav className="hidden md:flex flex-col w-60 border-r border-border bg-muted p-2 gap-3 overflow-y-auto">
+          {groupedNav.map((section) => (
+            <div key={section.group} className="space-y-0.5">
+              <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70">
+                {section.group}
+              </p>
+              {section.items.map((item) => {
+                const active = item.path === '/settings' ? location.pathname === '/settings' : location.pathname.startsWith(item.path);
+                return (
+                  <Link key={item.path} to={item.path}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${active ? 'bg-primary/15 text-primary' : 'text-foreground/60 hover:bg-muted hover:text-foreground'}`}>
+                    <item.icon className="w-4 h-4" />
+                    {item.label}
+                    <SettingsNavHealthDot path={item.path} className="ml-auto" />
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
         <div className="flex-1 overflow-y-auto p-6 pb-20 md:pb-6">
           <Routes>
@@ -5966,10 +6038,11 @@ export default function Settings() {
             <Route path="messaging" element={<RequireRole roles={['admin', 'owner']}><MessagingSettings /></RequireRole>} />
             <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
             <Route path="model" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
-            <Route path="automations" element={<Navigate to="/automations" replace />} />
+            <Route path="automations" element={<Navigate to="/settings/advanced" replace />} />
             <Route path="systems" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
             <Route path="systems/oauth/hubspot/callback" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
             <Route path="database" element={<RequireRole roles={['admin', 'owner']}><DatabaseSettings /></RequireRole>} />
+            <Route path="advanced" element={<RequireRole roles={['admin', 'owner']}><AutomationsSettings /></RequireRole>} />
           </Routes>
         </div>
       </div>

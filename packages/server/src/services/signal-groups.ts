@@ -3,6 +3,7 @@
 
 import type { ActorContext, ContextEntry, ContextEvidence, UUID } from '@crmy/shared';
 import { validationError } from '@crmy/shared';
+import { createHash } from 'node:crypto';
 import type { DbPool } from '../db/pool.js';
 import * as contextRepo from '../db/repos/context-entries.js';
 import * as signalGroupRepo from '../db/repos/signal-groups.js';
@@ -103,19 +104,87 @@ function evidenceItems(entry: ContextEntry): Array<Record<string, unknown>> {
   return Array.isArray(entry.evidence) ? entry.evidence as Array<Record<string, unknown>> : [];
 }
 
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function shortHash(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 24);
+}
+
+function normalizeEventOccurrence(value: unknown): string | null {
+  const raw = stringValue(value);
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 16);
+  }
+  return raw.toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
+}
+
+function sourceIdentityType(value: unknown): string {
+  const type = String(value ?? 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  if (type.includes('email')) return 'email';
+  if (type.includes('crm')) return 'crm';
+  if (type.includes('warehouse')) return 'warehouse';
+  if (type.includes('support')) return 'support';
+  if (type.includes('product')) return 'product_usage';
+  if ([
+    'activity',
+    'add_context',
+    'mcp',
+    'manual',
+    'raw_context',
+    'call',
+    'call_transcript',
+    'meeting',
+    'meeting_notes',
+    'note',
+    'notes',
+    'transcript',
+  ].includes(type)) {
+    return 'raw_context_event';
+  }
+  return type || 'unknown';
+}
+
+function sourceKeyFromEvidence(evidence: Record<string, unknown>, fallback: ContextEntry): string {
+  const type = sourceIdentityType(evidence.source_type ?? fallback.source ?? 'unknown');
+  const speaker = evidence.speaker ? `:${String(evidence.speaker).toLowerCase()}` : '';
+  const contentHash = stringValue(evidence.source_content_hash)
+    ?? stringValue(evidence.document_hash)
+    ?? stringValue(evidence.raw_context_document_hash);
+  const explicitOccurrence = evidence.source_event_at_provided === true || evidence.source_occurred_at_provided === true
+    ? normalizeEventOccurrence(evidence.source_event_at ?? evidence.source_occurred_at ?? evidence.observed_at)
+    : null;
+  if (explicitOccurrence) {
+    return `${type}:event:${explicitOccurrence}${speaker}`;
+  }
+  if (contentHash) {
+    return `${type}:content:${contentHash}@event_unknown${speaker}`;
+  }
+
+  const stableSourceRef = stringValue(evidence.raw_context_source_ref)
+    ?? stringValue(evidence.source_id)
+    ?? stringValue(evidence.source_ref)
+    ?? stringValue(evidence.source_url)
+    ?? stringValue(fallback.source_ref);
+  if (stableSourceRef) return `${type}:${stableSourceRef}${speaker}`;
+
+  const snippet = stringValue(evidence.snippet) ?? fallback.body ?? normalizeClaim(fallback);
+  return `${type}:snippet:${shortHash(snippet)}${speaker}`;
+}
+
 function sourceKey(entry: ContextEntry): string {
   const evidence = evidenceItems(entry)[0] ?? {};
-  const type = String(evidence.source_type ?? entry.source ?? 'unknown');
-  const ref = String(evidence.source_id ?? evidence.source_ref ?? evidence.source_url ?? entry.source_ref ?? entry.id);
-  const speaker = evidence.speaker ? `:${String(evidence.speaker).toLowerCase()}` : '';
-  return `${type}:${ref}${speaker}`;
+  return sourceKeyFromEvidence(evidence, entry);
 }
 
 function sourceWeight(entry: ContextEntry): number {
   const evidence = evidenceItems(entry)[0] ?? {};
-  const type = String(evidence.source_type ?? entry.source ?? '').toLowerCase();
-  if (['email', 'inbound_email', 'crm_sync', 'warehouse_sync', 'activity', 'transcript'].includes(type)) return 1.0;
-  if (['support', 'product_usage', 'slack', 'mcp', 'add_context', 'manual', 'raw_context'].includes(type)) return 0.9;
+  const type = sourceIdentityType(evidence.source_type ?? entry.source ?? '');
+  if (['email', 'crm', 'warehouse'].includes(type)) return 1.0;
+  if (['support', 'product_usage', 'slack', 'mcp', 'add_context', 'manual', 'raw_context', 'raw_context_event'].includes(type)) return 0.9;
   if (['research', 'external_research'].includes(type)) return 0.75;
   return 0.85;
 }
@@ -221,7 +290,8 @@ function confidenceComponents(entries: ContextEntry[], independentSources: numbe
   const weighted = entries.map((entry, index) => (entry.confidence ?? 0.5) * weights[index]);
   const base = weighted.length > 0 ? Math.max(...weighted) : 0;
   const strongestSourceWeight = weights.length > 0 ? Math.max(...weights) : 0;
-  const supportBoost = Math.min(0.16, Math.max(0, entries.length - 1) * 0.04);
+  const uniqueSupportCount = Math.min(entries.length, independentSources);
+  const supportBoost = Math.min(0.08, Math.max(0, uniqueSupportCount - 1) * 0.04);
   const sourceBoost = Math.min(0.12, Math.max(0, independentSources - 1) * 0.06);
   const conflictPenalty = Math.min(0.35, conflictCount * 0.18);
   const score = Math.max(0, Math.min(0.98, Number((base + supportBoost + sourceBoost - conflictPenalty).toFixed(3))));
@@ -234,6 +304,7 @@ function confidenceComponents(entries: ContextEntry[], independentSources: numbe
     support_boost: supportBoost,
     source_boost: sourceBoost,
     conflict_penalty: conflictPenalty,
+    duplicate_source_count: Math.max(0, entries.length - independentSources),
   };
 }
 
@@ -300,7 +371,9 @@ async function recomputeGroup(
     .map(member => member.context_entry)
     .filter(Boolean) as ContextEntry[];
   const conflictCount = group.members.filter(member => member.relation === 'conflicts').length;
-  const independentSources = new Set(supporting.map(sourceKey)).size;
+  const sourceKeys = supporting.map(sourceKey);
+  const independentSources = new Set(sourceKeys).size;
+  const duplicateSourceCount = Math.max(0, supporting.length - independentSources);
   const evidenceCount = supporting.reduce((sum, entry) => sum + evidenceItems(entry).length, 0);
   const confidence = aggregateConfidence(supporting, independentSources, conflictCount);
   const readinessBlockers = supporting.flatMap(entry => {
@@ -357,6 +430,10 @@ async function recomputeGroup(
       confidence_components: components,
       promotion_blockers: promotionBlockers,
       missing_details: missingDetails,
+      duplicate_source_count: duplicateSourceCount,
+      repeated_context_note: duplicateSourceCount > 0
+        ? `${duplicateSourceCount} repeated ${duplicateSourceCount === 1 ? 'Signal uses' : 'Signals use'} the same source identity and did not increase independent corroboration.`
+        : undefined,
       promotion_reason: promotionBlockers.length === 0
         ? 'This Signal has enough evidence, source independence, and confidence to become Memory.'
         : 'This Signal needs review or more support before automatic promotion.',
@@ -776,4 +853,6 @@ export const __testSignalGrouping = {
   semanticClaimScore,
   parseRelationDecision,
   deterministicRelation,
+  sourceKey,
+  confidenceComponents,
 };

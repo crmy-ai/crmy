@@ -18,10 +18,24 @@ export interface RawContextResolvedSubject {
   parent_subject?: { type: string; id: string; name: string };
 }
 
+export interface RawContextSkippedCandidate {
+  name: string;
+  reason: string;
+  candidate_count?: number;
+  candidate_records?: Array<{
+    type: string;
+    id: string;
+    name: string;
+    account_id?: string;
+    account_name?: string;
+  }>;
+  recommended_action?: string;
+}
+
 export interface RawContextSubjectDetection {
   candidates: string[];
   subjects: RawContextResolvedSubject[];
-  skipped: Array<{ name: string; reason: string }>;
+  skipped: RawContextSkippedCandidate[];
   proposed_records?: RawContextRecordProposal[];
   account_scope?: RawContextAccountScope[];
   records_examined?: {
@@ -76,6 +90,8 @@ interface DirectoryContact {
   company_name?: string | null;
   account_id?: string | null;
   account_domain?: string | null;
+  aliases?: string[];
+  account_aliases?: string[];
 }
 
 interface DirectoryAccount {
@@ -83,6 +99,7 @@ interface DirectoryAccount {
   name: string;
   domain?: string | null;
   industry?: string | null;
+  aliases?: string[];
 }
 
 interface DirectoryOpportunity {
@@ -208,19 +225,21 @@ async function loadSubjectResolutionDirectory(
     db.query(
       `SELECT c.id, c.first_name || ' ' || c.last_name AS name, c.first_name, c.last_name,
               c.email, c.title, COALESCE(a.name, c.company_name) AS company_name,
-              c.account_id, a.domain AS account_domain
+              c.account_id, a.domain AS account_domain, c.aliases, a.aliases AS account_aliases
        FROM contacts c
        LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
        WHERE c.tenant_id = $1
+         AND c.merged_into IS NULL
          ${contactOwnerFilter}
        ORDER BY c.updated_at DESC
        LIMIT $2`,
       params,
     ),
     db.query(
-      `SELECT id, name, domain, industry
+      `SELECT id, name, domain, industry, aliases
        FROM accounts
        WHERE tenant_id = $1
+         AND merged_into IS NULL
          ${accountOwnerFilter}
        ORDER BY updated_at DESC
       LIMIT $2`,
@@ -263,12 +282,15 @@ async function loadSubjectResolutionDirectory(
       company_name: row.company_name,
       account_id: row.account_id,
       account_domain: row.account_domain,
+      aliases: row.aliases ?? [],
+      account_aliases: row.account_aliases ?? [],
     })),
     accounts: accounts.rows.map(row => ({
       id: row.id,
       name: row.name,
       domain: row.domain,
       industry: row.industry,
+      aliases: row.aliases ?? [],
     })),
     opportunities: opportunities.rows.map(row => ({
       id: row.id,
@@ -402,6 +424,8 @@ function deterministicSubjectMatches(
   const subjects: RawContextResolvedSubject[] = [];
   const candidates = new Set<string>();
   const seen = new Set<string>();
+  const skipped: RawContextSkippedCandidate[] = [];
+  const skippedKeys = new Set<string>();
   const mentionedAccountIds = new Set<string>();
   const mentionedCompanyVariants = new Set<string>();
   const pushSubject = (subject: RawContextResolvedSubject) => {
@@ -410,9 +434,15 @@ function deterministicSubjectMatches(
     seen.add(key);
     subjects.push(subject);
   };
+  const pushSkipped = (name: string, reason: string, details: Partial<RawContextSkippedCandidate> = {}) => {
+    const key = `${reason}:${normalizeForMatch(name)}`;
+    if (skippedKeys.has(key)) return;
+    skippedKeys.add(key);
+    skipped.push({ name, reason, ...details });
+  };
 
   for (const account of directory.accounts) {
-    const variants = matchVariants(account.name, account.domain);
+    const variants = matchVariants(account.name, account.domain, ...(account.aliases ?? []));
     if (variants.some(variant => containsPhrase(normalizedText, variant))) {
       candidates.add(account.name);
       mentionedAccountIds.add(account.id);
@@ -429,27 +459,71 @@ function deterministicSubjectMatches(
   }
 
   const firstNameCounts = new Map<string, number>();
+  const fullNameCounts = new Map<string, number>();
   for (const contact of directory.contacts) {
     const first = normalizeForMatch(contact.first_name ?? contact.name.split(/\s+/)[0] ?? '');
     if (first) firstNameCounts.set(first, (firstNameCounts.get(first) ?? 0) + 1);
+    const full = normalizeForMatch(contact.name);
+    if (full) fullNameCounts.set(full, (fullNameCounts.get(full) ?? 0) + 1);
   }
 
   for (const contact of directory.contacts) {
     const fullName = normalizeForMatch(contact.name);
     const firstName = normalizeForMatch(contact.first_name ?? contact.name.split(/\s+/)[0] ?? '');
     const email = normalizeForMatch(contact.email ?? '');
-    const companyVariants = matchVariants(contact.company_name, contact.account_domain);
-    const fullMatch = containsPhrase(normalizedText, fullName) || (email.includes('@') && normalizedText.includes(email));
+    const aliasMatch = (contact.aliases ?? []).some(alias => containsPhrase(normalizedText, normalizeForMatch(alias)));
+    const companyVariants = matchVariants(contact.company_name, contact.account_domain, ...(contact.account_aliases ?? []));
+    const fullNameMatch = containsPhrase(normalizedText, fullName) || aliasMatch;
+    const emailMatch = email.includes('@') && normalizedText.includes(email);
+    const fullMatch = fullNameMatch || emailMatch;
     const companyMatch = (contact.account_id && mentionedAccountIds.has(contact.account_id))
       || companyVariants.some(variant => mentionedCompanyVariants.has(variant) || containsPhrase(normalizedText, variant));
     const scopedFirstNameCount = contact.account_id
       ? directory.contacts.filter(item => item.account_id === contact.account_id && normalizeForMatch(item.first_name ?? item.name.split(/\s+/)[0] ?? '') === firstName).length
       : firstNameCounts.get(firstName) ?? 0;
+    const scopedFullNameCount = contact.account_id
+      ? directory.contacts.filter(item => item.account_id === contact.account_id && normalizeForMatch(item.name) === fullName).length
+      : fullNameCounts.get(fullName) ?? 0;
     const uniqueFirstName = firstName.length >= 3 && (companyMatch ? scopedFirstNameCount === 1 : firstNameCounts.get(firstName) === 1);
     const firstNameWithCompany = uniqueFirstName && containsPhrase(normalizedText, firstName) && companyMatch;
+    const ambiguousFirstNameWithoutScope = firstName.length >= 3
+      && containsPhrase(normalizedText, firstName)
+      && !companyMatch
+      && (firstNameCounts.get(firstName) ?? 0) > 1;
+    const ambiguousFullNameWithoutScope = fullNameMatch
+      && !emailMatch
+      && !companyMatch
+      && (fullNameCounts.get(fullName) ?? 0) > 1;
+    const ambiguousFullNameWithinScope = fullNameMatch
+      && !emailMatch
+      && companyMatch
+      && scopedFullNameCount > 1;
 
-    if (!fullMatch && !firstNameWithCompany) continue;
+    if (!fullMatch && !firstNameWithCompany) {
+      if (ambiguousFirstNameWithoutScope) {
+        candidates.add(contact.first_name ?? contact.name);
+        pushSkipped(contact.first_name ?? contact.name, 'ambiguous_first_name_without_account_scope', {
+          candidate_count: firstNameCounts.get(firstName) ?? undefined,
+          recommended_action: 'Add an account, email, or full name so CRMy can link the right contact.',
+        });
+      }
+      continue;
+    }
     candidates.add(contact.name);
+    if (ambiguousFullNameWithinScope) {
+      pushSkipped(contact.name, 'ambiguous_within_account_scope', {
+        candidate_count: scopedFullNameCount,
+        recommended_action: 'Review duplicate contacts inside this account before linking context.',
+      });
+      continue;
+    }
+    if (ambiguousFullNameWithoutScope) {
+      pushSkipped(contact.name, 'ambiguous_without_account_scope', {
+        candidate_count: fullNameCounts.get(fullName) ?? undefined,
+        recommended_action: 'Add an account or email so CRMy can link the right contact.',
+      });
+      continue;
+    }
     pushSubject({
       type: 'contact',
       id: contact.id,
@@ -467,13 +541,42 @@ function deterministicSubjectMatches(
     });
   }
 
-  for (const opportunity of directory.opportunities) {
+  const matchingOpportunities = directory.opportunities.filter(opportunity =>
+    matchVariants(opportunity.name).some(variant => containsPhrase(normalizedText, variant)));
+  const matchingOpportunityCounts = matchingOpportunities.reduce((map, opportunity) => {
+    const key = `${opportunity.account_id ?? 'global'}:${normalizeForMatch(opportunity.name)}`;
+    map.set(key, (map.get(key) ?? 0) + 1);
+    return map;
+  }, new Map<string, number>());
+  const ambiguousOpportunityNames = matchingOpportunities
+    .filter(opportunity => !mentionedAccountIds.size || !opportunity.account_id || !mentionedAccountIds.has(opportunity.account_id))
+    .reduce((map, opportunity) => {
+      const key = normalizeForMatch(opportunity.name);
+      map.set(key, (map.get(key) ?? 0) + 1);
+      return map;
+    }, new Map<string, number>());
+
+  for (const opportunity of matchingOpportunities) {
     const variants = matchVariants(opportunity.name);
     const accountScoped = Boolean(opportunity.account_id && mentionedAccountIds.has(opportunity.account_id));
     const nameMatch = variants.some(variant => containsPhrase(normalizedText, variant));
     if (mentionedAccountIds.size > 0 && !accountScoped) continue;
     if (!nameMatch) continue;
     candidates.add(opportunity.name);
+    if (accountScoped && (matchingOpportunityCounts.get(`${opportunity.account_id}:${normalizeForMatch(opportunity.name)}`) ?? 0) > 1) {
+      pushSkipped(opportunity.name, 'ambiguous_within_account_scope', {
+        candidate_count: matchingOpportunityCounts.get(`${opportunity.account_id}:${normalizeForMatch(opportunity.name)}`) ?? undefined,
+        recommended_action: 'Review duplicate opportunities inside this account before linking context.',
+      });
+      continue;
+    }
+    if (!accountScoped && (ambiguousOpportunityNames.get(normalizeForMatch(opportunity.name)) ?? 0) > 1) {
+      pushSkipped(opportunity.name, 'ambiguous_without_account_scope', {
+        candidate_count: ambiguousOpportunityNames.get(normalizeForMatch(opportunity.name)) ?? undefined,
+        recommended_action: 'Add an account name so CRMy can link the right opportunity.',
+      });
+      continue;
+    }
     pushSubject({
       type: 'opportunity',
       id: opportunity.id,
@@ -489,13 +592,42 @@ function deterministicSubjectMatches(
     });
   }
 
-  for (const useCase of directory.use_cases) {
+  const matchingUseCases = directory.use_cases.filter(useCase =>
+    matchVariants(useCase.name).some(variant => containsPhrase(normalizedText, variant)));
+  const matchingUseCaseCounts = matchingUseCases.reduce((map, useCase) => {
+    const key = `${useCase.account_id ?? 'global'}:${normalizeForMatch(useCase.name)}`;
+    map.set(key, (map.get(key) ?? 0) + 1);
+    return map;
+  }, new Map<string, number>());
+  const ambiguousUseCaseNames = matchingUseCases
+    .filter(useCase => !mentionedAccountIds.size || !useCase.account_id || !mentionedAccountIds.has(useCase.account_id))
+    .reduce((map, useCase) => {
+      const key = normalizeForMatch(useCase.name);
+      map.set(key, (map.get(key) ?? 0) + 1);
+      return map;
+    }, new Map<string, number>());
+
+  for (const useCase of matchingUseCases) {
     const variants = matchVariants(useCase.name);
     const accountScoped = Boolean(useCase.account_id && mentionedAccountIds.has(useCase.account_id));
     const nameMatch = variants.some(variant => containsPhrase(normalizedText, variant));
     if (mentionedAccountIds.size > 0 && !accountScoped) continue;
     if (!nameMatch) continue;
     candidates.add(useCase.name);
+    if (accountScoped && (matchingUseCaseCounts.get(`${useCase.account_id}:${normalizeForMatch(useCase.name)}`) ?? 0) > 1) {
+      pushSkipped(useCase.name, 'ambiguous_within_account_scope', {
+        candidate_count: matchingUseCaseCounts.get(`${useCase.account_id}:${normalizeForMatch(useCase.name)}`) ?? undefined,
+        recommended_action: 'Review duplicate use cases inside this account before linking context.',
+      });
+      continue;
+    }
+    if (!accountScoped && (ambiguousUseCaseNames.get(normalizeForMatch(useCase.name)) ?? 0) > 1) {
+      pushSkipped(useCase.name, 'ambiguous_without_account_scope', {
+        candidate_count: ambiguousUseCaseNames.get(normalizeForMatch(useCase.name)) ?? undefined,
+        recommended_action: 'Add an account name so CRMy can link the right use case.',
+      });
+      continue;
+    }
     pushSubject({
       type: 'use_case',
       id: useCase.id,
@@ -515,7 +647,7 @@ function deterministicSubjectMatches(
   return {
     candidates: [...candidates],
     subjects,
-    skipped: [],
+    skipped,
     account_scope: accountScope,
     records_examined: resolutionRecordsExamined(directory),
     resolution_summary: summarizeResolution(subjects, accountScope),
@@ -587,7 +719,7 @@ async function resolveCandidateByRecordId(
     const result = await db.query(
       `SELECT c.id, c.first_name || ' ' || c.last_name AS name
        FROM contacts c
-       WHERE c.tenant_id = $1 AND c.id = $2 ${ownerFilter}`,
+       WHERE c.tenant_id = $1 AND c.id = $2 AND c.merged_into IS NULL ${ownerFilter}`,
       params,
     );
     if (result.rows[0]) {
@@ -604,7 +736,7 @@ async function resolveCandidateByRecordId(
     const result = await db.query(
       `SELECT id, name
        FROM accounts
-       WHERE tenant_id = $1 AND id = $2 ${ownerFilter}`,
+       WHERE tenant_id = $1 AND id = $2 AND merged_into IS NULL ${ownerFilter}`,
       params,
     );
     if (result.rows[0]) {
@@ -743,7 +875,7 @@ function findScopedAccount(
   const candidateVariants = matchVariants(accountName);
   const fromCandidate = accountName
     ? directory.accounts.find(account =>
-      matchVariants(account.name, account.domain).some(variant => candidateVariants.includes(variant)))
+      matchVariants(account.name, account.domain, ...(account.aliases ?? [])).some(variant => candidateVariants.includes(variant)))
     : undefined;
   if (fromCandidate) return fromCandidate;
   if (accountSubjects.length === 1) {
@@ -756,84 +888,179 @@ function recordVariants(value: string | null | undefined): string[] {
   return matchVariants(value).filter(variant => variant.length >= 3);
 }
 
-function candidateMatchesRecord(candidate: ModelSubjectCandidate, recordName: string): boolean {
+function candidateMatchesRecord(candidate: ModelSubjectCandidate, recordName: string, aliases: string[] = []): boolean {
   const candidateVariants = recordVariants(candidate.name);
-  const recordNameVariants = recordVariants(recordName);
+  const recordNameVariants = [...new Set([...recordVariants(recordName), ...aliases.flatMap(alias => recordVariants(alias))])];
   return candidateVariants.some(candidateVariant =>
     recordNameVariants.includes(candidateVariant) ||
     recordNameVariants.some(recordVariant => recordVariant.includes(candidateVariant) || candidateVariant.includes(recordVariant)));
+}
+
+type ScopedChildResolution =
+  | { status: 'resolved'; subject: RawContextResolvedSubject }
+  | { status: 'ambiguous'; skipped: RawContextSkippedCandidate }
+  | { status: 'not_found' };
+
+function childCandidateRecords(
+  type: string,
+  rows: Array<{ id: string; name: string; account_id?: string | null; account_name?: string | null; company_name?: string | null }>,
+): NonNullable<RawContextSkippedCandidate['candidate_records']> {
+  return rows.slice(0, 5).map(row => ({
+    type,
+    id: row.id,
+    name: row.name,
+    account_id: row.account_id ?? undefined,
+    account_name: row.account_name ?? row.company_name ?? undefined,
+  }));
 }
 
 function resolveScopedChildCandidate(
   candidate: ModelSubjectCandidate,
   directory: SubjectResolutionDirectory,
   accountSubjects: RawContextResolvedSubject[],
-): RawContextResolvedSubject | null {
+): ScopedChildResolution {
   const scopedAccount = findScopedAccount(candidate, directory, accountSubjects);
   const accountIds = scopedAccount
     ? new Set([scopedAccount.id])
     : new Set(accountSubjects.map(subject => subject.id));
   if (candidate.entity_type === 'contact' || candidate.email) {
-    const byEmail = candidate.email
-      ? directory.contacts.find(contact => contact.email?.toLowerCase() === candidate.email?.toLowerCase())
-      : undefined;
-    const match = byEmail ?? directory.contacts.find(contact =>
+    const emailMatches = candidate.email
+      ? directory.contacts.filter(contact => contact.email?.toLowerCase() === candidate.email?.toLowerCase())
+      : [];
+    if (emailMatches.length > 1) {
+      return {
+        status: 'ambiguous',
+        skipped: {
+          name: candidate.name,
+          reason: 'ambiguous_email_match',
+          candidate_count: emailMatches.length,
+          candidate_records: childCandidateRecords('contact', emailMatches),
+          recommended_action: 'Review duplicate contacts with this email before linking context.',
+        },
+      };
+    }
+    const byEmail = emailMatches[0];
+    const nameMatches = byEmail ? [] : directory.contacts.filter(contact =>
       (!accountIds.size || (contact.account_id && accountIds.has(contact.account_id))) &&
-      candidateMatchesRecord(candidate, contact.name));
-    if (!match) return null;
+      candidateMatchesRecord(candidate, contact.name, contact.aliases ?? []));
+    if (!byEmail && nameMatches.length > 1) {
+      return {
+        status: 'ambiguous',
+        skipped: {
+          name: candidate.name,
+          reason: accountIds.size ? 'ambiguous_within_account_scope' : 'ambiguous_without_account_scope',
+          candidate_count: nameMatches.length,
+          candidate_records: childCandidateRecords('contact', nameMatches),
+          recommended_action: accountIds.size
+            ? 'Review duplicate contacts inside this account before linking context.'
+            : 'Add an account or email so CRMy can link the right contact.',
+        },
+      };
+    }
+    const match = byEmail ?? nameMatches[0];
+    if (!match) return { status: 'not_found' };
     return {
-      type: 'contact',
-      id: match.id,
-      name: match.name,
-      confidence: byEmail ? 'high' : accountIds.size ? 'high' : 'medium',
-      match_tier: byEmail ? 'email_exact' : accountIds.size ? 'scoped_contact_match' : 'contact_name_match',
-      account_id: match.account_id ?? undefined,
-      account_name: match.company_name ?? undefined,
-      scope_reason: accountIds.size ? 'Contact resolved inside the matched account scope.' : undefined,
-      parent_subject: match.account_id && match.company_name
-        ? { type: 'account', id: match.account_id, name: match.company_name }
-        : undefined,
+      status: 'resolved',
+      subject: {
+        type: 'contact',
+        id: match.id,
+        name: match.name,
+        confidence: byEmail ? 'high' : accountIds.size ? 'high' : 'medium',
+        match_tier: byEmail ? 'email_exact' : accountIds.size ? 'scoped_contact_match' : 'contact_name_match',
+        account_id: match.account_id ?? undefined,
+        account_name: match.company_name ?? undefined,
+        scope_reason: accountIds.size ? 'Contact resolved inside the matched account scope.' : undefined,
+        parent_subject: match.account_id && match.company_name
+          ? { type: 'account', id: match.account_id, name: match.company_name }
+          : undefined,
+      },
     };
   }
   if (candidate.entity_type === 'opportunity') {
-    const match = directory.opportunities.find(opportunity =>
+    const matches = directory.opportunities.filter(opportunity =>
       (!accountIds.size || (opportunity.account_id && accountIds.has(opportunity.account_id))) &&
       candidateMatchesRecord(candidate, opportunity.name));
-    if (!match) return null;
+    if (matches.length > 1) {
+      return {
+        status: 'ambiguous',
+        skipped: {
+          name: candidate.name,
+          reason: accountIds.size ? 'ambiguous_within_account_scope' : 'ambiguous_without_account_scope',
+          candidate_count: matches.length,
+          candidate_records: childCandidateRecords('opportunity', matches),
+          recommended_action: accountIds.size
+            ? 'Review duplicate opportunities inside this account before linking context.'
+            : 'Add an account name so CRMy can link the right opportunity.',
+        },
+      };
+    }
+    const match = matches[0];
+    if (!match) return { status: 'not_found' };
     return {
-      type: 'opportunity',
-      id: match.id,
-      name: match.name,
-      confidence: accountIds.size ? 'high' : 'medium',
-      match_tier: accountIds.size ? 'scoped_opportunity_match' : 'opportunity_name_match',
-      account_id: match.account_id ?? undefined,
-      account_name: match.account_name ?? undefined,
-      scope_reason: accountIds.size ? 'Opportunity resolved inside the matched account scope.' : undefined,
-      parent_subject: match.account_id && match.account_name
-        ? { type: 'account', id: match.account_id, name: match.account_name }
-        : undefined,
+      status: 'resolved',
+      subject: {
+        type: 'opportunity',
+        id: match.id,
+        name: match.name,
+        confidence: accountIds.size ? 'high' : 'medium',
+        match_tier: accountIds.size ? 'scoped_opportunity_match' : 'opportunity_name_match',
+        account_id: match.account_id ?? undefined,
+        account_name: match.account_name ?? undefined,
+        scope_reason: accountIds.size ? 'Opportunity resolved inside the matched account scope.' : undefined,
+        parent_subject: match.account_id && match.account_name
+          ? { type: 'account', id: match.account_id, name: match.account_name }
+          : undefined,
+      },
     };
   }
   if (candidate.entity_type === 'use_case') {
-    const match = directory.use_cases.find(useCase =>
+    const matches = directory.use_cases.filter(useCase =>
       (!accountIds.size || (useCase.account_id && accountIds.has(useCase.account_id))) &&
       candidateMatchesRecord(candidate, useCase.name));
-    if (!match) return null;
+    if (matches.length > 1) {
+      return {
+        status: 'ambiguous',
+        skipped: {
+          name: candidate.name,
+          reason: accountIds.size ? 'ambiguous_within_account_scope' : 'ambiguous_without_account_scope',
+          candidate_count: matches.length,
+          candidate_records: childCandidateRecords('use_case', matches),
+          recommended_action: accountIds.size
+            ? 'Review duplicate use cases inside this account before linking context.'
+            : 'Add an account name so CRMy can link the right use case.',
+        },
+      };
+    }
+    const match = matches[0];
+    if (!match) return { status: 'not_found' };
     return {
-      type: 'use_case',
-      id: match.id,
-      name: match.name,
-      confidence: accountIds.size ? 'high' : 'medium',
-      match_tier: accountIds.size ? 'scoped_use_case_match' : 'use_case_name_match',
-      account_id: match.account_id ?? undefined,
-      account_name: match.account_name ?? undefined,
-      scope_reason: accountIds.size ? 'Use case resolved inside the matched account scope.' : undefined,
-      parent_subject: match.account_id && match.account_name
-        ? { type: 'account', id: match.account_id, name: match.account_name }
-        : undefined,
+      status: 'resolved',
+      subject: {
+        type: 'use_case',
+        id: match.id,
+        name: match.name,
+        confidence: accountIds.size ? 'high' : 'medium',
+        match_tier: accountIds.size ? 'scoped_use_case_match' : 'use_case_name_match',
+        account_id: match.account_id ?? undefined,
+        account_name: match.account_name ?? undefined,
+        scope_reason: accountIds.size ? 'Use case resolved inside the matched account scope.' : undefined,
+        parent_subject: match.account_id && match.account_name
+          ? { type: 'account', id: match.account_id, name: match.account_name }
+          : undefined,
+      },
     };
   }
-  return null;
+  return { status: 'not_found' };
+}
+
+function shouldConsultModelForAccountScopedChildren(
+  text: string,
+  deterministic: RawContextSubjectDetection,
+): boolean {
+  if (deterministic.skipped.length > 0) return false;
+  if (deterministic.subjects.length === 0) return true;
+  if (!deterministic.subjects.every(subject => subject.type === 'account')) return false;
+  return /\b(contact|person|stakeholder|champion|sponsor|buyer|economic buyer|opportunity|deal|pipeline|pilot|evaluation|rollout|expansion|renewal|use case|workflow|initiative|implementation|project)\b/i.test(text);
 }
 
 export async function detectRawContextSubjects(
@@ -848,7 +1075,7 @@ export async function detectRawContextSubjects(
   const threshold = options.confidenceThreshold ?? 0.67;
   const seen = new Set<string>();
   const subjects: RawContextResolvedSubject[] = [];
-  const skipped: Array<{ name: string; reason: string }> = [];
+  const skipped: RawContextSkippedCandidate[] = [...deterministic.skipped];
   const proposals: RawContextRecordProposal[] = [];
   const addSubject = (subject: RawContextResolvedSubject) => {
     const key = `${subject.type}:${subject.id}`;
@@ -859,10 +1086,18 @@ export async function detectRawContextSubjects(
   deterministic.subjects.forEach(addSubject);
 
   const deterministicAccountSubjects = subjects.filter(subject => subject.type === 'account');
-  const canResolveWithoutModel = deterministic.subjects.length > 0;
   let modelCandidates: ModelSubjectCandidate[] = [];
-  if (!canResolveWithoutModel) {
-    modelCandidates = await extractRawContextSubjectCandidates(db, tenantId, text, limit, directory);
+  if (shouldConsultModelForAccountScopedChildren(text, deterministic)) {
+    try {
+      modelCandidates = await extractRawContextSubjectCandidates(db, tenantId, text, limit, directory);
+    } catch (err) {
+      if (deterministic.subjects.length === 0) throw err;
+      skipped.push({
+        name: 'additional customer records',
+        reason: 'model_unavailable_for_child_resolution',
+        recommended_action: 'CRMy matched the account. Add a record manually or enable Workspace Agent to detect child records automatically.',
+      });
+    }
   }
 
   const candidates = Array.from(new Set([
@@ -885,8 +1120,12 @@ export async function detectRawContextSubjects(
       continue;
     }
     const scopedResolved = resolveScopedChildCandidate(candidate, directory, accountSubjects);
-    if (scopedResolved) {
-      addSubject(scopedResolved);
+    if (scopedResolved.status === 'resolved') {
+      addSubject(scopedResolved.subject);
+      continue;
+    }
+    if (scopedResolved.status === 'ambiguous') {
+      skipped.push(scopedResolved.skipped);
       continue;
     }
     if (candidate.entity_type === 'opportunity' || candidate.entity_type === 'use_case') {
