@@ -636,21 +636,21 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
                 <Button
                   variant="default"
                   size="sm"
-                  className="h-8 text-xs gap-1.5"
+                  className="h-8 text-xs gap-1.5 bg-success text-success-foreground hover:bg-success/90"
                   onClick={handlePromoteSignal}
                   disabled={promoteSignal.isPending}
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  Promote to Memory
+                  Confirm Signal
                 </Button>
                 <Button
-                  variant="outline"
+                  variant="destructive"
                   size="sm"
                   className="h-8 text-xs gap-1.5"
                   onClick={handleRejectSignal}
                   disabled={rejectSignal.isPending}
                 >
-                  Dismiss
+                  Dismiss Signal
                 </Button>
               </>
             )}

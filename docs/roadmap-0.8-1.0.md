@@ -264,6 +264,32 @@ CRMy already has the right spine:
 
 The 0.9 work is to make that spine dependable enough for real users and external agents.
 
+### 0.8.5 Release Checkpoint
+
+0.8.5 is the first major hardening checkpoint on the way to 0.9. It does not complete the whole 0.9 roadmap, but it closes the riskiest early gaps in Raw Context reliability, customer-record resolution, surface cleanup, and agent/MCP setup.
+
+Completed in the 0.8.x hardening line:
+
+- **Raw Context reliability foundation:** app, REST, MCP, CLI, file/reprocess, Email, and Activity paths now share durable Raw Context receipt semantics, retry metadata, stale-processing repair, replayable payload storage, and data-quality recovery actions.
+- **Golden extraction coverage:** the durability suite includes a GTM extraction corpus, custom registry corpus, no-context replay, duplicate-source idempotency, proposed-record handoff dedupe, malformed JSON recovery, typed Memory readiness, and conservative auto-promotion checks.
+- **Duplicate corroboration protection:** repeated ingestion of the same source no longer creates extra Signals or artificial independent evidence for promotion.
+- **Subject Graph resolver:** `customer_record_resolve` is the primary account-first resolver for agents and CLI/REST/MCP. Raw Context extraction, reprocess, file ingestion, email association, calendar/activity association, and agent guidance now share the same resolver semantics.
+- **Ambiguity safety:** same-name contacts, opportunities, and use cases are not over-linked without account scope; ambiguous child records become receipts/review states instead of guessed links.
+- **Customer Email and Activity association:** deterministic anchors such as known contact email, reply chain, attendee email, and account domain are still used, then Subject Graph enriches account-scoped contact/opportunity/use-case links when source content supports them.
+- **MCP/CLI setup path:** the agent smoke path exercises `customer_record_resolve -> briefing_get -> context_signal_group_list`; examples for Hermes, Claude Desktop, Claude Code, Codex, ChatGPT Developer Mode, and OpenClaw are aligned to the current tool model.
+- **Scoped safety checks:** hardening tests cover Raw Context no-subject receipt visibility, MCP resource subject access, explicit tool scope mappings, and Workspace Agent write-object policy defaults.
+- **Source and navigation cleanup:** primary navigation is focused on the core loop; Customer Email and Customer Activity are framed as Context Sources; Automations/Sequences are moved into admin settings surfaces while compatible routes remain available.
+- **Docs alignment:** README, guide, MCP tool reference, examples, recipes, Raw Context reliability plan, record-resolution plan, and contributor “what belongs where” guidance now describe the same Observe -> Signals -> Memory -> Briefing/Active Context -> Handoff/Writeback -> Proof model.
+
+Still planned for 0.9:
+
+- Full action-readiness packet/API that extends `briefing_get` with write policy, source authority, tool allowance, expected receipts, and risk state.
+- Persisted retrieval events so high-impact Active Context use appears directly in Lineage.
+- More calibrated trust scoring and source-trust configuration beyond the current conservative defaults and tests.
+- More complete durable agent task orchestration across browser navigation, deploys, and multi-instance routing.
+- Live-environment certification for first-party SOR connectors and provider-specific mailbox/calendar OAuth behavior.
+- Broader synthetic large-tenant scale testing; the current 0.8.5 gate verifies correctness and drift, not 1.0-scale latency budgets.
+
 ### 1. Extraction Reliability And Typed Memory Readiness
 
 Raw Context ingestion is the heart of CRMy. In 0.9 it should be treated like critical infrastructure.

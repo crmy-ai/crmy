@@ -4,6 +4,30 @@ All notable changes to CRMy are documented here.
 
 ---
 
+## [0.8.5] — 2026-05-31
+
+### Release Focus
+
+0.8.5 is the first major hardening checkpoint on the way to 0.9. It tightens CRMy’s core loop without broadening the product surface: Raw Context reliability, account-scoped record resolution, scoped agent/MCP setup, surface cleanup, web performance, and release readiness.
+
+### Highlights
+
+- **Raw Context reliability**: durable receipts, retry metadata, replayable payloads, stale-processing recovery, and consistent app/REST/MCP/CLI ingestion semantics are now documented and covered.
+- **Golden corpus coverage**: extraction and record-resolution tests now cover account-scoped child records, duplicate names, malformed JSON, no-context inputs, proposed records, custom registries, and conservative auto-promotion.
+- **Duplicate corroboration safety**: repeated ingestion of the same source no longer creates extra independent evidence or artificially validates Signals.
+- **Subject Graph alignment**: Raw Context, reprocess, file ingestion, Customer Email, Customer Activity, CLI, MCP, and agent guidance now share one primary customer-record resolver model.
+- **Surface cleanup**: Context focuses on Raw Context, Signals, Memory, Lineage, and Context Sources; Email and Activity are supporting sources; Automations/Sequences are moved into admin settings while compatible routes remain.
+- **MCP/CLI setup confidence**: `agent-smoke` verifies `customer_record_resolve -> briefing_get -> context_signal_group_list`, and `doctor` now catches stale or mismatched `CRMY_API_KEY` values before agent harness setup fails.
+- **Web performance**: major routes, drawers, and editors are lazy-loaded, dropping the initial web bundle below Vite’s warning threshold.
+- **UX consistency**: lingering Signal action labels now use the user-facing `Confirm Signal` / `Dismiss Signal` language.
+- **Release readiness**: OpenAPI, roadmap, release notes, packaged web assets, and npm dry-run package sizes are aligned for the 0.8.5 bump.
+
+### Notes
+
+The 0.8.5 gate verifies correctness, drift, packaging, and local install-to-value. It does not claim full 1.0-scale latency budgets or live certification for every external provider.
+
+---
+
 ## [0.8.3] — 2026-05-29
 
 ### Release Focus

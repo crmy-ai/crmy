@@ -84,9 +84,12 @@ test('agent harness setup avoids npx prompts and includes systems scopes', async
   const readme = await read('README.md');
   const guide = await read('docs/guide.md');
   const initSource = await read('packages/cli/src/commands/init.ts');
+  const doctorSource = await read('packages/cli/src/commands/doctor.ts');
   assert.match(readme, /npx -y @crmy\/cli mcp/);
   assert.match(guide, /npx -y @crmy\/cli mcp/);
   assert.match(initSource, /systems:read,systems:write,systems:admin/);
+  assert.match(doctorSource, /CRMY_API_KEY is valid for this workspace/);
+  assert.match(doctorSource, /does not match this database/);
 });
 
 test('agent smoke command exercises the one-minute MCP tool path', async () => {

@@ -65,7 +65,7 @@
     },
     {
       "name": "Emails",
-      "description": "Email drafting with optional HITL approval"
+      "description": "Customer email ingestion, mailbox connections, Raw Context processing, and governed outbound drafts"
     },
     {
       "name": "Custom Fields",
@@ -8984,7 +8984,7 @@
         "tags": [
           "Context"
         ],
-        "summary": "List Signal Groups",
+        "summary": "List grouped Signals",
         "security": [
           {
             "BearerAuth": []
@@ -9185,7 +9185,7 @@
         "tags": [
           "Context"
         ],
-        "summary": "Get a Signal Group with evidence",
+        "summary": "Get a grouped Signal with evidence",
         "security": [
           {
             "BearerAuth": []
@@ -9232,7 +9232,7 @@
         "tags": [
           "Context"
         ],
-        "summary": "Promote a Signal Group into Current Memory",
+        "summary": "Confirm a grouped Signal as Current Memory",
         "security": [
           {
             "BearerAuth": []
@@ -9304,7 +9304,7 @@
         "tags": [
           "Context"
         ],
-        "summary": "Dismiss a Signal Group while preserving evidence",
+        "summary": "Dismiss a grouped Signal while preserving evidence",
         "security": [
           {
             "BearerAuth": []
@@ -10372,12 +10372,586 @@
         }
       }
     },
+    "/emails/draft-preview": {
+      "post": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Generate an agentic customer email draft preview from Memory, Signals, and linked customer context",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "source_email_message_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "subject_type": {
+                    "type": "string",
+                    "enum": [
+                      "account",
+                      "contact",
+                      "opportunity",
+                      "use_case",
+                      "use-case"
+                    ]
+                  },
+                  "subject_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "contact_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "account_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "opportunity_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "use_case_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "to_address": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "to_name": {
+                    "type": "string"
+                  },
+                  "intent": {
+                    "type": "string",
+                    "enum": [
+                      "reply",
+                      "follow_up",
+                      "recap_next_steps",
+                      "nudge_stalled_deal",
+                      "custom"
+                    ]
+                  },
+                  "instruction": {
+                    "type": "string"
+                  },
+                  "tone": {
+                    "type": "string"
+                  },
+                  "target": {
+                    "type": "string",
+                    "enum": [
+                      "crmy",
+                      "provider_draft"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/emails/drafts": {
+      "post": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Persist a manual or agent-generated customer email draft, request approval, or explicitly send now",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "source_email_message_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "subject_type": {
+                    "type": "string",
+                    "enum": [
+                      "account",
+                      "contact",
+                      "opportunity",
+                      "use_case",
+                      "use-case"
+                    ]
+                  },
+                  "subject_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "contact_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "account_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "opportunity_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "use_case_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "to_address": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "to_name": {
+                    "type": "string"
+                  },
+                  "subject": {
+                    "type": "string"
+                  },
+                  "body_text": {
+                    "type": "string"
+                  },
+                  "body_html": {
+                    "type": "string"
+                  },
+                  "draft_origin": {
+                    "type": "string",
+                    "enum": [
+                      "manual",
+                      "agent_generated"
+                    ]
+                  },
+                  "draft_target": {
+                    "type": "string",
+                    "enum": [
+                      "crmy",
+                      "provider_draft"
+                    ]
+                  },
+                  "delivery_action": {
+                    "type": "string",
+                    "enum": [
+                      "save_draft",
+                      "request_approval",
+                      "send_now"
+                    ]
+                  },
+                  "generation_metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "required": [
+                  "to_address",
+                  "subject",
+                  "body_text"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/emails/{id}": {
       "get": {
         "tags": [
           "Emails"
         ],
         "summary": "Get an email by ID",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailbox/connections": {
+      "get": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "List mailbox connections and customer-email processing summary",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailbox/connections/{provider}/start": {
+      "post": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Start a Gmail or Outlook mailbox connection",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "google",
+                "microsoft"
+              ]
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailbox/connections/{id}/sync": {
+      "post": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Queue a mailbox sync job",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email-messages": {
+      "get": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "List customer email messages with classification and processing state",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "customer",
+                "review",
+                "all"
+              ]
+            },
+            "required": false,
+            "name": "view",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "inbound",
+                "outbound"
+              ]
+            },
+            "required": false,
+            "name": "direction",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "classification",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "processing_status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "boolean"
+            },
+            "required": false,
+            "name": "include_internal",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "number"
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email-messages/{id}": {
+      "get": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Get a customer email message, linked records, and processing receipt",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email-messages/{id}/process": {
+      "post": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Process a customer email message as Raw Context",
         "security": [
           {
             "BearerAuth": []

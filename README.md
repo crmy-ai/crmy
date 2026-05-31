@@ -362,12 +362,12 @@ See [MCP tools](docs/mcp-tools.md) for the full tool catalog and scoped-access m
 |---|---|
 | **Overview** | Daily operating view: what is set up, what context is flowing, and what needs action. |
 | **Workspace Agent** | Scoped GTM workbench for briefings, tool use, drafting, record work, and customer reasoning. |
-| **Context** | Raw Context, Signals, Memory, Context Graph, and Memory Lineage. |
+| **Context** | Raw Context, Signals, Memory, Lineage, and Context Sources. Graph remains available as a supporting record explorer. |
 | **Handoffs** | Decision queue for approvals, escalations, delegated work, and governed action review. |
-| **Customer Email** | Connect mailboxes, filter internal noise, link customer messages, and draft governed follow-ups. |
-| **Customer Activity** | Capture meetings, calls, notes, transcripts, and calendar context. |
-| **Systems of Record** | Connect CRMs and warehouses, map fields, sync records, detect conflicts, and govern writeback. |
-| **Automations** | Trigger workflows and sequences that request governed action instead of bypassing policy. |
+| **Customer Email** | Supporting Context Source for mailboxes, customer-message review, and governed follow-up drafts. |
+| **Customer Activity** | Supporting Context Source for meetings, calls, notes, transcripts, and calendar context. |
+| **Systems of Record** | Admin setup for CRMs and warehouses, field mappings, sync, conflicts, and governed writeback. |
+| **Settings → Automations** | Admin/advanced event rules and sequences that request governed action instead of bypassing policy. |
 
 ## Systems of Record
 
@@ -547,7 +547,7 @@ npm test
 
 ## Release
 
-Current version: `0.8.3`
+Current version: `0.8.4`
 
 v0.8.x focuses on making CRMy a usable, scoped GTM agent workspace:
 

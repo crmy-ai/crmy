@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
+import crypto from 'node:crypto';
 import { loadConfigFile, GLOBAL_CONFIG, type CrmyConfig } from '../config.js';
 
 const KNOWN_BAD_SECRETS = ['change-me-in-production', 'dev-secret', 'secret', ''];
@@ -143,6 +144,38 @@ export function doctorCommand(): Command {
             info('Could not check pgvector status');
           }
 
+          // ── Check 7: API key validity for MCP/agent harnesses ─────────────
+          const apiKey = process.env.CRMY_API_KEY ?? config.apiKey;
+          if (apiKey) {
+            try {
+              const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
+              const key = await db.query(
+                `SELECT ak.id, a.is_active as actor_is_active
+                 FROM api_keys ak
+                 LEFT JOIN actors a ON ak.actor_id = a.id
+                 WHERE ak.key_hash = $1
+                 LIMIT 1`,
+                [keyHash],
+              );
+              const row = key.rows[0];
+              if (!row) {
+                fail('CRMY_API_KEY is configured but does not match this database', 'Run: crmy init  (or update CRMY_API_KEY for this workspace)');
+                failed++;
+              } else if (row.actor_is_active === false) {
+                fail('CRMY_API_KEY resolves to a deactivated actor', 'Create a new API key for an active user or agent actor');
+                failed++;
+              } else {
+                pass('CRMY_API_KEY is valid for this workspace');
+                passed++;
+              }
+            } catch {
+              fail('Could not validate CRMY_API_KEY', 'Check the api_keys table or run: crmy init');
+              failed++;
+            }
+          } else {
+            info('No CRMY_API_KEY configured; direct local CLI mode will use the first active local user.');
+          }
+
           await closePool();
         } catch (err) {
           fail(`PostgreSQL unreachable: ${(err as Error).message}`, 'Check that PostgreSQL is running and DATABASE_URL is correct');
@@ -153,7 +186,7 @@ export function doctorCommand(): Command {
         failed++;
       }
 
-      // ── Check 7: Port available ───────────────────────────────────────────
+      // ── Check 8: Port available ───────────────────────────────────────────
       const port = parseInt(opts.port, 10);
       const portAvailable = await checkPort(port);
       if (portAvailable) {
@@ -164,7 +197,7 @@ export function doctorCommand(): Command {
         failed++;
       }
 
-      // ── Check 8: JWT_SECRET strength ──────────────────────────────────────
+      // ── Check 9: JWT_SECRET strength ──────────────────────────────────────
       const jwt = config.jwtSecret ?? process.env.JWT_SECRET;
       if (jwt && !KNOWN_BAD_SECRETS.includes(jwt)) {
         pass('JWT_SECRET is set and not a known default');
