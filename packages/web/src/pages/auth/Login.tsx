@@ -14,6 +14,7 @@ import { useAppStore } from '../../store/appStore';
 
 const TAGLINE = 'Operational customer context for AI agents.';
 const RELEASE_NOTES_URL = 'https://github.com/crmy-ai/crmy#release';
+const APP_VERSION = __CRMY_WEB_VERSION__;
 const DEMO_PASSWORD = 'crmy-demo-123';
 const DEMO_ACCOUNTS = [
   { label: 'Admin', email: 'sample.admin@crmy.local' },
@@ -207,6 +208,8 @@ export function LoginPage() {
   const showPasswordHelp = mode === 'login' && Boolean(error) && !registrationOpen;
   const showDemoAccounts = mode === 'login' && dbStatus.status === 'ok' && dbStatus.setup?.demo_accounts_available === true;
   const workspaceName = dbStatus.tenant?.name?.trim() || 'CRMy Workspace';
+  const displayVersion = APP_VERSION !== 'unknown' ? APP_VERSION : dbStatus.version;
+  const serverVersionDiffers = Boolean(displayVersion && dbStatus.version && dbStatus.version !== displayVersion);
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background p-4">
@@ -416,14 +419,14 @@ export function LoginPage() {
                 <span className="text-muted-foreground"> — start CRMy, then refresh.</span>
               </span>
             )}
-            {dbStatus.version && (
+            {displayVersion && (
               <a
                 href={RELEASE_NOTES_URL}
                 target="_blank"
                 rel="noreferrer"
                 className="ml-auto flex-shrink-0 text-inherit hover:underline"
               >
-                v{dbStatus.version}
+                v{displayVersion}
               </a>
             )}
           </div>
@@ -455,9 +458,15 @@ export function LoginPage() {
                   <dd>{dbStatus.environment}</dd>
                 </>
               )}
-              {dbStatus.version && (
+              {displayVersion && (
                 <>
-                  <dt>Version</dt>
+                  <dt>App version</dt>
+                  <dd>v{displayVersion}</dd>
+                </>
+              )}
+              {serverVersionDiffers && (
+                <>
+                  <dt>Server version</dt>
                   <dd>v{dbStatus.version}</dd>
                 </>
               )}

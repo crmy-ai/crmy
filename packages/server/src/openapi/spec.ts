@@ -2,8 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { OpenApiGeneratorV31 } from '@asteasolutions/zod-to-openapi';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { registry } from './registry.js';
 import './paths.js'; // side-effect: registers all route paths into the registry
+
+const require = createRequire(import.meta.url);
+const API_VERSION: string = (() => {
+  try {
+    const pkg = require(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../package.json'),
+    ) as { version?: string };
+    return pkg.version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
 
 export function buildSpec() {
   const generator = new OpenApiGeneratorV31(registry.definitions);
@@ -13,7 +28,7 @@ export function buildSpec() {
     openapi: '3.1.0',
     info: {
       title: 'CRMy API',
-      version: '0.8.2',
+      version: API_VERSION,
       description:
         'The operational customer context backend for AI agents. MCP-native, PostgreSQL-backed, open source. ' +
         'All endpoints require `Authorization: Bearer <jwt-or-api-key>` except `/auth/register` and `/auth/login`.',

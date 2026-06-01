@@ -4,6 +4,10 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const pkg = require('./package.json') as { version?: string };
 
 export default defineConfig({
   plugins: [
@@ -24,6 +28,9 @@ export default defineConfig({
     },
     react(),
   ],
+  define: {
+    __CRMY_WEB_VERSION__: JSON.stringify(pkg.version ?? 'unknown'),
+  },
   base: '/app/',
   resolve: {
     alias: {
