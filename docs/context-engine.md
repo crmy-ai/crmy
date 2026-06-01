@@ -1,0 +1,100 @@
+# CRMy Context Engine
+
+CRMy's core engine turns messy customer source material into operational Memory agents can safely use. It is the part of the platform most worth testing, extending, and hardening.
+
+The engine is not just storage. It is a loop:
+
+```text
+Raw Context -> Subject Graph -> Signals -> Memory -> Briefing -> Handoff / Writeback -> Proof
+```
+
+## What the engine does
+
+### 1. Capture Raw Context
+
+Raw Context is source material before it is trusted: call transcripts, meeting notes, customer emails, calendar meetings, CRM changes, warehouse changes, support/product signals, uploaded files, REST calls, CLI inputs, and MCP tool calls.
+
+Each source should produce a processing receipt that says what CRMy matched, extracted, skipped, retried, or failed. Receipts make extraction replayable and debuggable.
+
+### 2. Resolve the customer record
+
+CRMy uses an account-first Subject Graph resolver. The account is the customer scope. Contacts, opportunities, and use cases are resolved inside that account scope before CRMy falls back to broader matching.
+
+This matters because GTM data is ambiguous:
+
+- multiple contacts share a first name;
+- multiple accounts can use similar opportunity names;
+- subsidiaries and parent accounts can share domains or aliases;
+- meeting transcripts often mention partial names;
+- old CRM records may still exist but no longer represent active work.
+
+The resolver should prefer the safest known parent record and keep ambiguity reviewable instead of over-linking precise child records.
+
+### 3. Extract Signals
+
+Signals are inferred claims from Raw Context. They carry evidence, confidence, source lineage, readiness, and review state. A Signal is not trusted Memory yet.
+
+Examples:
+
+- a stakeholder role may have changed;
+- procurement or legal may be blocking the buying process;
+- a next step or commitment was made;
+- a deal risk surfaced;
+- success criteria or forecast confidence changed.
+
+The engine should stay high-recall for useful customer context but conservative about promotion.
+
+### 4. Confirm Memory
+
+Memory is confirmed operational customer context agents can rely on across sessions and workflows. It is typed, scoped, searchable, current/stale-aware, and auditable.
+
+Signals become Memory only when evidence, confidence, subject resolution, policy, and readiness allow it. Repeated ingestion of the same source must not masquerade as independent corroboration.
+
+### 5. Retrieve Active Context
+
+Agents do not use the whole Memory store directly. They call retrieval tools such as `briefing_get`, `context_search`, semantic search, Graph, or Lineage. CRMy selects relevant Memory, Signals, activity, Handoffs, stale warnings, and token-budget metadata for the model-visible working set.
+
+That temporary working set is Active Context. It is not the same thing as persistent Memory.
+
+### 6. Govern action
+
+When an agent prepares action, CRMy should know:
+
+- what Memory supports the action;
+- which Signals are still inferred;
+- what system owns the record;
+- whether the actor can see or change the record;
+- which fields are writable;
+- whether approval is required;
+- what proof will exist after the action.
+
+Handoffs, writeback previews, policy checks, idempotency, execution receipts, audit events, and Lineage make this safe for humans and agents working together.
+
+## Current capabilities
+
+The current 0.8.x engine includes:
+
+- durable Raw Context processing receipts;
+- replayable raw-source payload storage;
+- retry metadata and stale-processing recovery;
+- malformed JSON recovery for local-model extraction;
+- account-scoped subject resolution;
+- Signal grouping and trust/readiness checks;
+- duplicate-source idempotency and duplicate-corroboration protection;
+- proposed-record Handoffs when context implies a new contact, account, opportunity, or use case;
+- typed Memory retrieval through `briefing_get`;
+- Context Lineage from source to Signal, Memory, Handoff, writeback, and audit;
+- optional pgvector-backed candidate retrieval when embeddings are configured;
+- scoped REST, MCP, CLI, and Workspace Agent tool access.
+
+## Where community testing helps most
+
+The engine is strongest when tested against messy, real GTM data. The highest-value contributions are:
+
+- anonymized extraction corpora with expected subjects, Signals, Memory, and non-extractions;
+- account-resolution edge cases with aliases, subsidiaries, duplicate names, and stale records;
+- provider tests for email/calendar/SOR sync under real pagination, filters, failures, and retry behavior;
+- writeback tests proving allowed fields, approval, source authority, idempotency, execution receipts, and failure recovery;
+- agent harness tests showing `customer_record_resolve -> briefing_get -> context_signal_group_list -> Handoff/writeback` works outside the web UI.
+
+If CRMy gets this engine right, agents can act with far more trust: before any agent acts on a customer, CRMy can tell it what is true, what is stale, what is inferred, what is approved, what system owns the record, what action is allowed, and what proof/audit trail will exist afterward.

@@ -129,6 +129,18 @@ Use CRMy when you want agents that can:
 - operate with member, manager, and admin visibility boundaries
 - expose the same capabilities through Web UI, REST, CLI, and MCP
 
+## The Core Context Engine
+
+CRMy's main value is the context engine underneath the app:
+
+```text
+Raw Context -> Subject Graph -> Signals -> Memory -> Briefing -> Handoff / Writeback -> Proof
+```
+
+That engine keeps customer context useful without pretending messy source material is instantly true. It resolves customer scope, extracts evidence-backed Signals, separates inferred claims from confirmed Memory, retrieves the right context into an agent briefing, and governs action through Handoffs, writeback policy, receipts, audit, and Lineage.
+
+The most important community contributions are real-world tests of this loop: messy transcripts, customer emails, calendar meetings, CRM/warehouse sync, custom systems of record, writeback previews, approval flows, and agent harnesses. See [Context Engine](docs/context-engine.md) and [Contributing](CONTRIBUTING.md) for where testing helps most.
+
 ## Quickstart
 
 You need Node.js 20+ and PostgreSQL. For local development, pgvector is recommended but not required.

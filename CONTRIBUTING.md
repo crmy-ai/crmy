@@ -2,6 +2,35 @@
 
 Thanks for your interest in contributing to CRMy! This guide will help you get oriented and start making changes.
 
+## What CRMy needs most from contributors
+
+CRMy's differentiator is the core context engine: messy customer source material becomes Signals, trusted Memory, scoped briefings, governed Handoffs, writeback receipts, and audit/Lineage. The highest-value community contributions are the ones that prove this loop under real-world conditions.
+
+The most useful contributions right now are:
+
+1. **Real-world integration testing** against CRMs, warehouses, mailbox/calendar providers, support tools, and agent harnesses.
+2. **Systems-of-record writeback testing** that proves previews, allowed fields, source authority, approvals, idempotency, execution receipts, and failure recovery behave correctly.
+3. **Messy GTM context corpora**: anonymized calls, meeting notes, transcripts, customer emails, support escalations, product signals, and CRM updates with expected subject matches and expected Signals.
+4. **Record-resolution edge cases**: subsidiaries, aliases, shared domains, duplicate contact first names, same opportunity names under different accounts, stale CRM records, and partial transcript references.
+5. **Agent harness QA** for Claude Code, Claude Desktop, Codex, ChatGPT Developer Mode, Hermes, OpenClaw, and other MCP-capable environments.
+6. **Operational recovery tests** for failed extraction, retryable Raw Context, stuck agent turns, sync drift, writeback failures, and scoped-access denials.
+
+Feature ideas are welcome, but for the 0.9 line we prefer contributions that make the existing engine more reliable, measurable, and boring in production.
+
+### How to report real-world test results
+
+When you test CRMy with a real integration or realistic fixture, please include:
+
+- Provider/system tested, version/API mode, and whether it was sandbox or production-like.
+- CRMy version and deployment shape: local, Docker, serverless Postgres, hosted Postgres, etc.
+- The workflow tested: ingestion, resolution, extraction, briefing, Handoff, writeback preview, writeback execution, or recovery.
+- What records were expected to match and what CRMy actually matched. Use names/domains instead of private IDs when possible.
+- Any Signals/Memory expected, any false positives, any missed context, and whether evidence/Lineage was clear.
+- For writeback tests: target object, allowed fields, approval behavior, idempotency behavior, receipt/result, and rollback or retry behavior.
+- Sanitized logs, receipts, screenshots, or fixture snippets when safe to share.
+
+Please do not include customer secrets, production access tokens, raw personal data, or confidential customer content in public issues. If a useful scenario requires private detail, open a minimal public issue first and note that you can provide a sanitized fixture or private reproduction path.
+
 ## Architecture overview
 
 CRMy is a TypeScript monorepo with the following packages:
@@ -14,7 +43,7 @@ CRMy is a TypeScript monorepo with the following packages:
 | `packages/web` | `@crmy/web` | React SPA served at `/app` |
 | `packages/openclaw-plugin` | `@crmy/openclaw-plugin` | Plugin for OpenClaw integration |
 
-### MCP tools (175+)
+### MCP tools
 
 MCP tool definitions live in `packages/server/src/mcp/tools/`. Each tool file exports an array of `ToolDef` objects with the following shape:
 
@@ -24,13 +53,13 @@ MCP tool definitions live in `packages/server/src/mcp/tools/`. Each tool file ex
 - **`inputSchema`** — a Zod schema for input validation
 - **`handler`** — receives parsed input + `ActorContext` and returns a result object
 
-Tool files: `context-entries.ts`, `actors.ts`, `activities.ts`, `assignments.ts`, `hitl.ts`, `contacts.ts`, `accounts.ts`, `opportunities.ts`, `analytics.ts`, `use-cases.ts`, `registries.ts`, `notes.ts`, `workflows.ts`, `webhooks.ts`, `emails.ts`, `email-sequences.ts`, `custom-fields.ts`, `meta.ts`
+Tool files include `context-entries.ts`, `subject-graph.ts`, `actors.ts`, `activities.ts`, `assignments.ts`, `hitl.ts`, `contacts.ts`, `accounts.ts`, `opportunities.ts`, `analytics.ts`, `use-cases.ts`, `registries.ts`, `notes.ts`, `workflows.ts`, `webhooks.ts`, `email.ts`, `email-sequences.ts`, `calendar.ts`, `systems-of-record.ts`, `custom-fields.ts`, and `meta.ts`.
 
 Tool ordering in the manifest (defined in `packages/server/src/mcp/server.ts`) matters — tools listed first are more likely to be selected by the LLM. Briefing and context tools come first.
 
 ### SQL migrations
 
-Migrations live in `packages/server/migrations/` and are numbered sequentially (001–042+). There is no ORM — all queries use the `pg` Pool directly with raw SQL.
+Migrations live in `packages/server/migrations/` and are numbered sequentially. There is no ORM — all queries use the `pg` Pool directly with raw SQL.
 
 Migration 022 (`022_pgvector.sql`) is conditional — only runs when `ENABLE_PGVECTOR=true`.
 
@@ -41,8 +70,9 @@ Key migrations to be aware of when developing:
 | 001–020 | Core schema (contacts, accounts, opportunities, activities, actors, assignments, context) |
 | 021–030 | Context Engine v2 (pgvector, extraction pipeline, types registry, auto-extract flag) |
 | 031–039 | Automation engine (workflows, sequences, HITL, email sequences) |
-| 040–041 | Automation performance indexes + sequence rate limits |
-| 042 | Context memory indexes (tenant-scoped, authored-by, extraction backlog) |
+| 040–049 | Automation performance, idempotency, recovery, auth lifecycle, and Systems of Record |
+| 050–059 | Signal groups, scoped actors, pgvector/Lineage, durable agent turns, and Customer Email |
+| 060–068 | Email drafts, calendar meetings, source filters, Raw Context recovery, scale indexes, extraction attempts, and replay payloads |
 
 ### Web UI pages (18)
 
@@ -164,14 +194,36 @@ CRMy is built iteratively via versioned spec files passed to Claude Code (Opus).
 ## Good first contributions
 
 1. **Add or improve an MCP tool description** (`packages/server/src/mcp/tools/`)
-2. **Add a `context_type` or `activity_type`** to the registry seed data
-3. **Add a workflow template** to `packages/server/src/lib/workflow-templates.ts` — follow the existing 8 patterns
-4. **Improve error messages in the CLI** (`packages/cli/src/commands/`)
-5. **Add a recipe** to `docs/recipes/` — follow the pattern in the existing 3 recipes
-6. **Report a bug** in the `briefing_get` response with a specific scenario
-7. **Add a web UI page** for a backend feature that lacks one
-8. **Add a `crmy doctor` check** for something that catches new contributors off guard
-9. **Add a test** for a service or repo function in `packages/server/src/` — test coverage is an active gap
+2. **Add a realistic fixture** to the Raw Context or record-resolution corpus
+3. **Report a `briefing_get` bug** with a specific customer scenario and expected context
+4. **Add a `crmy doctor` check** for something that catches new contributors off guard
+5. **Improve CLI or MCP error messages** for setup, auth, extraction, or scoped-access failures
+6. **Add a connector/writeback smoke test** for HubSpot, Salesforce, a warehouse, or a custom API/MCP integration
+7. **Add or improve a recipe** in `docs/recipes/` or an agent harness example in `examples/`
+8. **Add a `context_type`, activity type, or meeting classification** to the registry seed data when it reflects methodology-neutral GTM Memory
+9. **Add a test** for a service or repo function in `packages/server/src/`
+
+## Integration and writeback test contributions
+
+Please prioritize integration tests that answer these questions:
+
+- Can CRMy read from the source without storing internal/spam/noise that should be filtered?
+- Does Subject Graph resolution choose the right account and only attach child contacts, opportunities, and use cases when the account scope supports it?
+- Does Raw Context extraction create useful Signals without false-positive Memory promotion?
+- Does `briefing_get` give an agent enough context to act safely?
+- Does Handoff review include the evidence, proposed action, policy reason, and linked customer record?
+- Does writeback preview block fields that are not explicitly writable?
+- Does approval execute exactly once, with an audit receipt and idempotency protection?
+- Does failure produce a recoverable state instead of a silent partial write?
+
+Useful targets include:
+
+- HubSpot and Salesforce sync/writeback with real custom fields and stale CRM records.
+- Databricks, Snowflake, Supabase, Neon, Lakebase, or another Postgres-backed warehouse-like source.
+- Gmail/Outlook customer email association and filtering.
+- Google/Microsoft calendar meeting capture and transcript/debrief matching.
+- Custom API/MCP integrations that simulate proprietary GTM systems.
+- Agent harnesses that call `customer_record_resolve -> briefing_get -> context_signal_group_list -> Handoff/writeback`.
 
 ## Code conventions
 
