@@ -375,6 +375,7 @@ Common first tools:
 | Decide which tool path to use | `tool_guide` |
 | Resolve customer records | `customer_record_resolve` |
 | Brief an agent before action | `briefing_get` |
+| Find Memory, Signals, stale context, or search results | `context_find` |
 | Ingest messy customer context | `context_ingest_auto` |
 | Review evidence-backed Signals | `context_signal_group_list` |
 | Confirm a Signal as trusted Memory | `context_signal_group_promote` |

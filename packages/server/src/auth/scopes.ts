@@ -68,6 +68,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
 
   // ── Context ──
   context_get: ['context:read'],
+  context_find: ['context:read'],
   context_search: ['context:read'],
   context_list: ['context:read'],
   context_raw_source_list: ['context:read'],

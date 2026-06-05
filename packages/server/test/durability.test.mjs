@@ -2608,8 +2608,10 @@ test('MCP manifests keep scoped agents focused and expose the router first', asy
   assert.equal(readOnlyTools[0].name, 'tool_guide');
   assert.equal(postMeetingTools[0].name, 'tool_guide');
   assert.equal(adminTools[0].name, 'tool_guide');
-  assert.ok(readOnlyTools.length <= 30);
-  assert.ok(postMeetingTools.length <= 55);
+  assert.equal(readOnlyTools.some(tool => tool.name === 'context_find'), true);
+  assert.equal(postMeetingTools.some(tool => tool.name === 'context_find'), true);
+  assert.ok(readOnlyTools.length <= 31);
+  assert.ok(postMeetingTools.length <= 56);
   assert.ok(adminTools.length > 200);
 
   const guide = postMeetingTools.find(tool => tool.name === 'tool_guide');
@@ -2617,6 +2619,8 @@ test('MCP manifests keep scoped agents focused and expose the router first', asy
   const result = await guide.handler({ workflow: 'ingest_raw_context' }, memberActor);
   assert.equal(result.recommended_tools.includes('context_ingest_auto'), true);
   assert.match(result.avoid_tools.join(' '), /context_add/);
+  const signalGuide = await guide.handler({ workflow: 'review_signals' }, memberActor);
+  assert.equal(signalGuide.recommended_tools[0], 'context_find');
 });
 
 test('sensitive tool scopes enforce read/write and object-level boundaries', () => {

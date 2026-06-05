@@ -15,10 +15,11 @@ Search the CRMy guide for feature, concept, and workflow documentation.
 - **Output**: `{ sections, available_sections }`
 
 Common safe paths:
-- **Unknown customer reference**: `customer_record_resolve` → `briefing_get` or `action_context_get`
+- **Unknown customer reference**: `customer_record_resolve` → `action_context_get` or `briefing_get`
+- **Find Memory, Signals, stale context, or search results**: `context_find`
 - **Raw notes/transcripts/email/research**: `context_ingest_auto` when IDs are unknown, `context_ingest` when subject IDs are known
 - **Before customer-facing action**: `action_context_get` with `proposed_action`
-- **Signal review**: `context_signal_group_list` → `context_signal_group_get` → complete details, handoff, reject, or promote
+- **Signal review**: `context_find` with `mode="signals"` → `context_signal_group_get` → complete details, handoff, reject, or promote
 - **Operator recovery**: `ops_status_get` or `ops_data_quality_get` first; keep repair tools at `dry_run=true` until confirmed
 
 ## Contact Tools
@@ -572,7 +573,7 @@ Approve or reject a request.
 
 Use these tools with the Active Context / Memory distinction in mind:
 
-- **Retrieval tools** load persistent Memory and related customer state into the model's temporary Active Context: `action_context_get`, `briefing_get`, `context_search`, `context_semantic_search`, `context_get`, `context_list`, `context_lineage_get`, and `context_diff`.
+- **Retrieval tools** load persistent Memory and related customer state into the model's temporary Active Context: `action_context_get`, `briefing_get`, `context_find`, `context_get`, and, for specialized cases, `context_search`, `context_semantic_search`, `context_list`, `context_lineage_get`, and `context_diff`.
 - **Ingestion tools** accept Raw Context and let CRMy extract evidence-backed Signals: `context_ingest_auto`, `context_ingest`, and `context_extract`.
 - **Promotion tools** turn confirmed Signals into Current Memory: `context_signal_group_promote` and `context_signal_promote`.
 - **Governance tools** keep Memory safe to act on: Handoff, stale review, rejection, supersession, and review tools.
@@ -589,8 +590,17 @@ Get a context entry by ID.
 - **Input**: `id` (required)
 - **Output**: `{ context_entry }`
 
+### context_find
+Consolidated retrieval for Current Memory, Signals, stale Memory, and workspace context search. Prefer this for ordinary agent retrieval instead of choosing between `context_list`, `context_search`, `context_stale`, and `context_signal_group_list`.
+- **Input**: `mode` (`recent` | `search` | `signals` | `stale`, default `recent`), `query`, `subject_type`, `subject_id`, `context_type`, `memory_status`, `current_only`, `attention_only`, `structured_data_filter`, `limit`, `cursor`
+- **Output**:
+  - `mode="recent"` or `mode="search"`: `{ mode, context_entries, next_cursor?, total, recommended_next_tools }`
+  - `mode="signals"`: `{ mode, signal_groups, next_cursor, total, recommended_next_tools }`
+  - `mode="stale"`: `{ mode, stale_entries, context_entries, total, recommended_next_tools }`
+- **Use when**: an agent needs to retrieve Memory or Signals but does not need a lower-level specialized retrieval tool.
+
 ### context_list
-List Current Memory or Signals with filters.
+Specific/advanced listing tool for Current Memory or Signals with filters. Prefer `context_find` for ordinary retrieval.
 - **Input**: `subject_type`, `subject_id`, `context_type`, `authored_by`, `memory_status` (`active` by default, or `signal`), `is_current`, `tag`, `query`, `structured_data_filter`, `limit`, `cursor`
 - **Output**: `{ context_entries, next_cursor, total }`
 - **Note**: `structured_data_filter` is a JSONB containment filter — e.g. `{ "status": "open" }` finds entries whose `structured_data` contains that key/value pair.
@@ -607,12 +617,12 @@ Get one Raw Context processing record.
 - **Output**: `{ raw_context_source }`
 
 ### context_search
-Full-text search across Memory by default using PostgreSQL GIN index.
+Specific/advanced full-text search across Memory by default using PostgreSQL GIN index. Prefer `context_find` with `mode="search"` for ordinary keyword search.
 - **Input**: `query` (required), `subject_type`, `subject_id`, `context_type`, `tag`, `current_only`, `memory_status`, `limit`, `structured_data_filter`
 - **Output**: `{ context_entries, total }` — results ranked by relevance
 
 ### context_signal_group_list
-List corroborated Signals: evidence-backed claims assembled from related Signals.
+Specific Signal-group listing tool. Prefer `context_find` with `mode="signals"` for ordinary Signal review queues.
 - **Input**: `status`, `subject_type`, `subject_id`, `context_type`, `attention_only`, `limit`, `cursor`
 - **Output**: `{ signal_groups, next_cursor, total }`; each group includes `readiness` with status, reasons, blockers, next actions, score components, and confirmation gates.
 - **Use when**: an agent needs to know which inferred claims are ready for Memory, need evidence/detail, require approval, or are challenged by conflicting evidence.
@@ -645,7 +655,7 @@ Dismiss a corroborated Signal while preserving evidence for audit.
 - **Output**: `{ signal_group, mutation }`
 
 ### context_signal_promote
-Promote an evidence-backed Signal into Current Memory.
+Advanced direct promotion for one evidence-backed Signal. Prefer `context_signal_group_promote` for ordinary agent workflows because it uses grouped evidence and readiness.
 - **Input**: `id` (required), optional edits: `body`, `title`, `structured_data`, `confidence`, `tags`
 - **Output**: `{ context_entry, event_id }`
 
@@ -675,7 +685,7 @@ Invalidate up to 200 context entries in a single parameterized UPDATE. Sets `val
 - **Output**: `{ updated, not_found_or_already_stale, reason, message }`
 
 ### context_stale
-List Current Memory where `valid_until` has passed and the claim needs review before use.
+Specific Memory Health listing tool for Current Memory where `valid_until` has passed and the claim needs review before use. Prefer `context_find` with `mode="stale"` for ordinary stale-memory retrieval.
 - **Input**: `subject_type`, `subject_id`, `limit`
 - **Output**: `{ stale_entries, total }`
 

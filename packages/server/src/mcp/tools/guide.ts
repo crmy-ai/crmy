@@ -113,19 +113,19 @@ const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
 }> = {
   first_steps: {
     summary: 'Start with identity, record resolution, and a briefing before choosing specialized tools.',
-    recommended_tools: ['actor_whoami', 'customer_record_resolve', 'briefing_get', 'action_context_get', 'guide_search'],
+    recommended_tools: ['actor_whoami', 'customer_record_resolve', 'action_context_get', 'briefing_get', 'context_find', 'guide_search'],
     avoid_tools: ['context_add for raw notes', 'direct record writes before action_context_get', 'admin/ops tools unless doing incident response'],
     next_step: 'If you have a customer name or text, call customer_record_resolve. If you already have a subject_id, call briefing_get or action_context_get.',
   },
   record_lookup: {
     summary: 'Resolve customer references account-first across accounts, contacts, opportunities, and use cases.',
-    recommended_tools: ['customer_record_resolve', 'briefing_get', 'context_search'],
+    recommended_tools: ['customer_record_resolve', 'action_context_get', 'briefing_get', 'context_find'],
     avoid_tools: ['entity_resolve unless you only need simple account/contact compatibility lookup'],
     next_step: 'Call customer_record_resolve with query or text, then use the resolved subject with briefing_get.',
   },
   brief_before_action: {
     summary: 'Load current Memory, Signals, stale warnings, policy gates, and retrieval proof before acting.',
-    recommended_tools: ['action_context_get', 'briefing_get', 'context_signal_group_list', 'context_get'],
+    recommended_tools: ['action_context_get', 'briefing_get', 'context_find', 'context_get'],
     avoid_tools: ['customer-facing actions before checking readiness', 'record_update/writeback tools without policy/source checks'],
     next_step: 'Call action_context_get with the proposed_action when you are deciding whether an action is safe.',
   },
@@ -137,15 +137,15 @@ const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
   },
   review_signals: {
     summary: 'Inspect unconfirmed evidence-backed Signals and decide whether they need details, handoff, rejection, or confirmation.',
-    recommended_tools: ['context_signal_group_list', 'context_signal_group_get', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject'],
+    recommended_tools: ['context_find', 'context_signal_group_get', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject'],
     avoid_tools: ['context_signal_group_promote when readiness is blocked and no human/policy approval exists'],
     next_step: 'Call context_signal_group_list with attention_only=true, then inspect one group with context_signal_group_get.',
   },
   promote_memory: {
     summary: 'Turn reviewed or policy-approved Signals into Current Memory.',
-    recommended_tools: ['context_signal_group_get', 'context_signal_group_promote', 'context_signal_promote', 'briefing_get'],
+    recommended_tools: ['context_find', 'context_signal_group_get', 'context_signal_group_promote', 'briefing_get'],
     avoid_tools: ['context_add memory_status=active unless the user gave reviewed Current Memory directly'],
-    next_step: 'Confirm evidence/readiness first, then promote the Signal group or specific Signal.',
+    next_step: 'Use context_find mode="signals" or context_signal_group_get to confirm evidence/readiness first, then promote the Signal group.',
   },
   customer_outreach: {
     summary: 'Prepare customer communication from confirmed context and policy checks.',

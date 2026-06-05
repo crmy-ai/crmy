@@ -68,6 +68,24 @@ function uuidLike(value?: string | null): value is string {
   return Boolean(value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value));
 }
 
+const contextFind = z.object({
+  mode: z.enum(['recent', 'search', 'signals', 'stale']).default('recent')
+    .describe('recent: list Memory/Signals on a record; search: full-text Memory search; signals: Signal groups needing review; stale: Current Memory needing reverification.'),
+  query: z.string().min(1).optional()
+    .describe('Search text. Required for mode="search"; optional filter for recent entries and Signal groups.'),
+  subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case']).optional(),
+  subject_id: z.string().uuid().optional(),
+  context_type: z.string().optional(),
+  memory_status: z.enum(['signal', 'active', 'rejected', 'superseded']).optional()
+    .describe('Filter entries by status. Defaults to active for recent/search; ignored for mode="signals" and mode="stale".'),
+  current_only: z.boolean().default(true),
+  attention_only: z.boolean().default(true)
+    .describe('For mode="signals", return only Signal groups needing review/promotion/dismissal unless set false.'),
+  structured_data_filter: z.record(z.unknown()).optional(),
+  limit: z.number().int().min(1).max(100).default(20),
+  cursor: z.string().optional(),
+});
+
 async function assertRawContextSourceAccess(
   db: DbPool,
   actor: ActorContext,
@@ -377,9 +395,100 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       },
     },
     {
+      name: 'context_find',
+      tier: 'core',
+      description: 'Consolidated retrieval for Current Memory, Signals, stale Memory, and workspace context search. Prefer this over context_list, context_search, context_stale, or context_signal_group_list unless you need one of those tools\' specialized parameters. Use mode="recent" for entries on a known record, mode="search" for keyword search, mode="signals" for Signal groups needing review, and mode="stale" for Memory that should be reverified.',
+      inputSchema: contextFind,
+      handler: async (input: z.infer<typeof contextFind>, actor: ActorContext) => {
+        if (input.subject_type && input.subject_id) {
+          await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
+        }
+        const ownerIds = await visibleOwnerIds(db, actor);
+
+        if (input.mode === 'signals') {
+          const result = await signalGroupRepo.listSignalGroups(db, actor.tenant_id, {
+            status: undefined,
+            subject_type: input.subject_type,
+            subject_id: input.subject_id,
+            context_type: input.context_type,
+            query: input.query,
+            attention_only: input.attention_only,
+            limit: input.limit,
+            cursor: input.cursor,
+            owner_ids: ownerIds,
+          });
+          const signalGroups = result.data.map(group => withSignalReadiness(group));
+          return {
+            mode: input.mode,
+            signal_groups: signalGroups,
+            data: signalGroups,
+            next_cursor: result.next_cursor,
+            total: result.total,
+            recommended_next_tools: ['context_signal_group_get', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_promote'],
+          };
+        }
+
+        if (input.mode === 'stale') {
+          const entries = await contextRepo.listStaleEntries(db, actor.tenant_id, {
+            subject_type: input.subject_type,
+            subject_id: input.subject_id,
+            owner_ids: ownerIds,
+            limit: input.limit,
+          });
+          return {
+            mode: input.mode,
+            stale_entries: entries,
+            context_entries: entries,
+            total: entries.length,
+            recommended_next_tools: ['context_get', 'context_review_batch', 'context_supersede'],
+          };
+        }
+
+        if (input.mode === 'search') {
+          if (!input.query?.trim()) throw validationError('context_find mode="search" requires query.');
+          const entries = await contextRepo.fullTextSearch(db, actor.tenant_id, input.query, {
+            subject_type: input.subject_type,
+            subject_id: input.subject_id,
+            context_type: input.context_type,
+            current_only: input.current_only,
+            memory_status: input.memory_status ?? 'active',
+            limit: input.limit,
+            structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
+            owner_ids: ownerIds,
+          });
+          return {
+            mode: input.mode,
+            context_entries: entries,
+            total: entries.length,
+            recommended_next_tools: ['context_get', 'briefing_get', 'action_context_get'],
+          };
+        }
+
+        const result = await contextRepo.searchContextEntries(db, actor.tenant_id, {
+          subject_type: input.subject_type,
+          subject_id: input.subject_id,
+          context_type: input.context_type,
+          memory_status: input.memory_status ?? 'active',
+          is_current: input.current_only,
+          query: input.query,
+          structured_data_filter: input.structured_data_filter as Record<string, unknown> | undefined,
+          owner_ids: ownerIds,
+          limit: input.limit,
+          cursor: input.cursor,
+        });
+        return {
+          mode: input.mode,
+          context_entries: result.data,
+          next_cursor: result.next_cursor,
+          total: result.total,
+          recommended_next_tools: ['context_get', 'briefing_get', 'action_context_get'],
+        };
+      },
+    },
+    {
       name: 'context_list',
       tier: 'core',
-      description: 'List Current Memory and Signals attached to a customer record with flexible filters. Use memory_status="active" for Current Memory and memory_status="signal" for reviewable Signals. Use subject_type and subject_id to scope to a specific record, context_type to filter by category (e.g. "objection", "preference"), authored_by to see what a specific actor contributed, and is_current to exclude superseded entries. The structured_data_filter parameter supports typed JSONB queries for domain-specific searches like finding all open objections or critical deal risks. Returns entries sorted by recency.',
+      description: 'Specific/advanced listing tool for Current Memory and Signals attached to a customer record. Prefer context_find for ordinary retrieval. Use this when you need cursor pagination, authored_by filtering, visibility/pinned note filters, or exact low-level entry listing controls. Use memory_status="active" for Current Memory and memory_status="signal" for reviewable Signals.',
       inputSchema: contextEntrySearch,
       handler: async (input: z.infer<typeof contextEntrySearch>, actor: ActorContext) => {
         if (input.subject_type && input.subject_id) {
@@ -587,7 +696,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_signal_promote',
       tier: 'core',
-      description: 'Promote an evidence-backed Signal into Current Memory. Use this only after human review, explicit user confirmation, or an Action Policy that allows the Signal to become Memory. Promotion makes the entry available to briefing_get and normal memory search.',
+      description: 'Advanced direct promotion for one evidence-backed Signal into Current Memory. Prefer context_signal_group_promote for ordinary agent workflows because it uses grouped evidence and readiness. Use this only after human review, explicit user confirmation, or an Action Policy that allows the Signal to become Memory.',
       inputSchema: contextSignalPromote,
       handler: async (input: z.infer<typeof contextSignalPromote>, actor: ActorContext) => {
         return runIdempotent(db, {
@@ -690,7 +799,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_signal_group_list',
       tier: 'core',
-      description: 'List corroborated Signals: evidence-backed inferred claims created from one or more source Signals. Use attention_only=true to find Signals that need promotion, dismissal, or review before agents use the claim operationally.',
+      description: 'Specific Signal-group listing tool for evidence-backed inferred claims created from one or more source Signals. Prefer context_find mode="signals" for ordinary Signal review queues. Use this when you need status filters or cursor-level Signal group listing controls.',
       inputSchema: z.object({
         status: z.enum(['gathering', 'ready', 'promoted', 'blocked', 'dismissed', 'conflicting', 'merged']).optional(),
         subject_type: z.enum(['contact', 'account', 'opportunity', 'use_case']).optional(),
@@ -942,7 +1051,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_search',
       tier: 'core',
-      description: 'Full-text search across all context entries using PostgreSQL GIN index — useful for cross-cutting queries like "what do we know about procurement concerns across all accounts" or "find every competitive intel mention of HubSpot." Returns results ranked by relevance with highlighted matches. Supports structured_data_filter for typed JSONB queries. Use this when you need to find information across multiple subjects rather than within a single record.',
+      description: 'Specific/advanced full-text search across context entries using PostgreSQL GIN index. Prefer context_find mode="search" for ordinary search. Use this lower-level tool when you need direct full-text search parameters, tag filtering, or typed structured_data_filter searches across multiple subjects.',
       inputSchema: contextSearch,
       handler: async (input: z.infer<typeof contextSearch>, actor: ActorContext) => {
         if (input.subject_type && input.subject_id) {
@@ -1003,7 +1112,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_stale',
       tier: 'core',
-      description: 'List Current Memory that needs review because valid_until has passed. These entries may be outdated and should be reverified before an agent acts. Use this as a recurring Memory Health check to identify competitive intel, org chart details, next steps, or research that may have decayed. Optionally filter by subject_type to scope the check to a specific entity type.',
+      description: 'Specific Memory Health tool for Current Memory whose valid_until has passed. Prefer context_find mode="stale" for ordinary stale-memory retrieval. Use this lower-level tool for recurring Memory Health checks or direct stale-entry review workflows.',
       inputSchema: contextStaleList,
       handler: async (input: z.infer<typeof contextStaleList>, actor: ActorContext) => {
         if (input.subject_type && input.subject_id) {
