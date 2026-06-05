@@ -67,7 +67,7 @@ const DESTINATIONS: DestinationCommand[] = [
   { label: 'Settings',        icon: Settings,        path: '/settings',                 color: null, keywords: 'settings profile account' },
   { label: 'Actors',          icon: Users,           path: '/settings/actors',          color: ENTITY_COLORS.agents, keywords: 'actors users agents scopes invites passwords api keys', roles: ['admin', 'owner'] },
   { label: 'Database Settings', icon: Database,      path: '/settings/database',        color: ENTITY_COLORS.operations, keywords: 'database postgres neon supabase rds lakebase pgvector sample data', roles: ['admin', 'owner'] },
-  { label: 'Model Settings',  icon: Sparkles,        path: '/settings/model',           color: ENTITY_COLORS.agents, keywords: 'model local workspace agent llm openai ollama', roles: ['admin', 'owner'] },
+  { label: 'Model Settings',  icon: Sparkles,        path: '/settings/model',           color: ENTITY_COLORS.agents, keywords: 'model local workspace agent llm openai anthropic azure gemini bedrock mistral litellm openrouter ollama databricks nvidia backup provider', roles: ['admin', 'owner'] },
   { label: 'Systems of Record', icon: Server,        path: '/settings/systems',         color: ENTITY_COLORS.operations, keywords: 'systems of record hubspot salesforce snowflake databricks connectors sync mappings writebacks external systems', roles: ['admin', 'owner'] },
   { label: 'Appearance',      icon: Palette,         path: '/settings/appearance',      color: null, keywords: 'appearance theme charcoal color display' },
   { label: 'API Keys',        icon: KeyRound,        path: '/settings/api-keys',        color: null, keywords: 'api keys tokens access' },

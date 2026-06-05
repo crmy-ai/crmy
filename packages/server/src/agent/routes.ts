@@ -27,6 +27,11 @@ import {
 } from './turn-runner.js';
 import type { AgentSessionAttachment, AgentTurn, AgentTurnEventRow } from './types.js';
 import { previewRecordDraft, recordDraftPreviewSchema } from '../services/record-drafts.js';
+import {
+  buildOpenAICompatibleHeaders,
+  verifyAgentToolCalling,
+  type ReadinessResult,
+} from './readiness.js';
 
 function getActor(req: Request): ActorContext {
   return req.actor!;
@@ -44,175 +49,7 @@ function safeErrorMessage(err: unknown, fallback = 'Agent request failed'): stri
 }
 
 const AGENT_READINESS_TTL_MS = Number(process.env.AGENT_READINESS_TTL_MS ?? 60_000);
-const AGENT_READINESS_TIMEOUT_MS = Number(process.env.AGENT_READINESS_TIMEOUT_MS ?? 10_000);
-type ReadinessResult = {
-  ok: boolean;
-  status: string;
-  error?: string;
-  warning?: string;
-  tool_calling_verified?: boolean;
-};
 const readinessCache = new Map<string, { expiresAt: number; result: ReadinessResult }>();
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = AGENT_READINESS_TIMEOUT_MS): Promise<globalThis.Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function responseIncludesToolCall(value: unknown, toolName: string): boolean {
-  if (!value || typeof value !== 'object') return false;
-  if (Array.isArray(value)) return value.some(item => responseIncludesToolCall(item, toolName));
-  const record = value as Record<string, unknown>;
-
-  if (record.type === 'tool_use' && record.name === toolName) return true;
-  if (record.type === 'function' && record.name === toolName) return true;
-  if (record.name === toolName && ('arguments' in record || 'input' in record)) return true;
-  if (record.function && typeof record.function === 'object') {
-    const fn = record.function as Record<string, unknown>;
-    if (fn.name === toolName) return true;
-  }
-  if (record.function_call && typeof record.function_call === 'object') {
-    const fn = record.function_call as Record<string, unknown>;
-    if (fn.name === toolName) return true;
-  }
-
-  return Object.values(record).some(child => responseIncludesToolCall(child, toolName));
-}
-
-function unverifiedToolCallResult(): ReadinessResult {
-  return {
-    ok: true,
-    status: 'tool_calling_unverified',
-    tool_calling_verified: false,
-    warning: 'CRMy reached the model, but could not verify tool/function calling from this provider response. You can save if you know this model or gateway supports tool calls; CRMy will still enforce scoped tool use at runtime.',
-  };
-}
-
-async function verifyPlainModelReachability(input: {
-  provider: string;
-  baseUrl: string;
-  model: string;
-  apiKey: string;
-  headers?: Record<string, string>;
-}): Promise<ReadinessResult> {
-  if (input.provider === 'anthropic') {
-    const res = await fetchWithTimeout(`${input.baseUrl}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': input.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: input.model,
-        max_tokens: 16,
-        messages: [{ role: 'user', content: 'Reply with ok.' }],
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      return { ok: false, status: 'offline', error: `${res.status}: ${err.slice(0, 200)}` };
-    }
-    return { ok: true, status: 'online' };
-  }
-
-  const res = await fetchWithTimeout(`${input.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: input.headers ?? { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: input.model,
-      max_tokens: 16,
-      messages: [{ role: 'user', content: 'Reply with ok.' }],
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    return { ok: false, status: 'offline', error: `${res.status}: ${err.slice(0, 200)}` };
-  }
-  return { ok: true, status: 'online' };
-}
-
-async function verifyAgentToolCalling(input: {
-  provider: string;
-  baseUrl: string;
-  model: string;
-  apiKey: string;
-  headers?: Record<string, string>;
-}): Promise<ReadinessResult> {
-  const toolName = 'crmy_readiness_check';
-  const parameters = {
-    type: 'object',
-    properties: {
-      ok: { type: 'boolean', description: 'Always true for this readiness check.' },
-    },
-    required: ['ok'],
-    additionalProperties: false,
-  };
-
-  if (input.provider === 'anthropic') {
-    const testRes = await fetchWithTimeout(`${input.baseUrl}/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': input.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: input.model,
-        max_tokens: 64,
-        messages: [{ role: 'user', content: 'Use the readiness tool now.' }],
-        tools: [{
-          name: toolName,
-          description: 'Confirms the selected model can call CRMy tools.',
-          input_schema: parameters,
-        }],
-        tool_choice: { type: 'tool', name: toolName },
-      }),
-    });
-    if (!testRes.ok) {
-      const reachable = await verifyPlainModelReachability(input);
-      return reachable.ok ? unverifiedToolCallResult() : reachable;
-    }
-    const json = await testRes.json().catch(() => null);
-    const called = responseIncludesToolCall(json, toolName);
-    return called
-      ? { ok: true, status: 'online', tool_calling_verified: true }
-      : unverifiedToolCallResult();
-  }
-
-  const testRes = await fetchWithTimeout(`${input.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: input.headers ?? { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: input.model,
-      max_tokens: 64,
-      messages: [{ role: 'user', content: 'Use the readiness tool now.' }],
-      tools: [{
-        type: 'function',
-        function: {
-          name: toolName,
-          description: 'Confirms the selected model can call CRMy tools.',
-          parameters,
-        },
-      }],
-      tool_choice: { type: 'function', function: { name: toolName } },
-    }),
-  });
-  if (!testRes.ok) {
-    const reachable = await verifyPlainModelReachability(input);
-    return reachable.ok ? unverifiedToolCallResult() : reachable;
-  }
-  const json = await testRes.json().catch(() => null);
-  const called = responseIncludesToolCall(json, toolName);
-  return called
-    ? { ok: true, status: 'online', tool_calling_verified: true }
-    : unverifiedToolCallResult();
-}
 
 function readinessError(actor: ActorContext, error: string): string {
   return isAdmin(actor)
@@ -1213,11 +1050,25 @@ export function agentRouter(db: DbPool): Router {
         return;
       }
       // Never return the ciphertext — send only a hint (last 4 chars)
-      const { api_key_enc: _enc, ...rest } = config;
+      const {
+        api_key_enc: _enc,
+        backup_api_key_enc: _backupEnc,
+        ...rest
+      } = config;
       const keyMeta = isAdmin(actor)
         ? buildKeyMeta(_enc)
         : { api_key_configured: Boolean(_enc), api_key_hint: null };
-      res.json({ data: { ...rest, ...keyMeta } });
+      const backupKeyMeta = isAdmin(actor)
+        ? buildKeyMeta(_backupEnc)
+        : { api_key_configured: Boolean(_backupEnc), api_key_hint: null };
+      res.json({
+        data: {
+          ...rest,
+          ...keyMeta,
+          backup_api_key_configured: backupKeyMeta.api_key_configured,
+          backup_api_key_hint: backupKeyMeta.api_key_hint,
+        },
+      });
     } catch (err) { handleError(res, err); }
   });
 
@@ -1228,11 +1079,12 @@ export function agentRouter(db: DbPool): Router {
       requireAdmin(actor);
 
       const body = req.body as Record<string, unknown>;
+      const existingConfig = await agentRepo.getConfig(db, actor.tenant_id);
       const update: Record<string, unknown> = {};
 
       // Pick allowed fields
-      const boolFields = ['enabled', 'can_write_objects', 'can_log_activities', 'can_create_assignments', 'auto_extract_context', 'auto_promote_signals'];
-      const strFields = ['provider', 'base_url', 'model', 'system_prompt'];
+      const boolFields = ['enabled', 'can_write_objects', 'can_log_activities', 'can_create_assignments', 'auto_extract_context', 'auto_promote_signals', 'backup_enabled'];
+      const strFields = ['provider', 'base_url', 'model', 'system_prompt', 'backup_provider', 'backup_base_url', 'backup_model'];
       const intFields = ['max_tokens_per_turn', 'history_retention_days'];
 
       for (const f of boolFields) {
@@ -1252,11 +1104,34 @@ export function agentRouter(db: DbPool): Router {
       // Encrypt API key if a new one was provided (non-empty string)
       if (typeof body.api_key === 'string' && body.api_key.trim()) {
         update.api_key_enc = encrypt(body.api_key.trim());
+      } else if (typeof body.provider === 'string' && existingConfig?.provider && existingConfig.provider !== body.provider) {
+        update.api_key_enc = null;
+      }
+      if (typeof body.backup_api_key === 'string' && body.backup_api_key.trim()) {
+        update.backup_api_key_enc = encrypt(body.backup_api_key.trim());
+      } else if (
+        typeof body.backup_provider === 'string'
+        && existingConfig?.backup_provider
+        && existingConfig.backup_provider !== body.backup_provider
+      ) {
+        update.backup_api_key_enc = null;
       }
 
       const config = await agentRepo.upsertConfig(db, actor.tenant_id, update);
-      const { api_key_enc: _enc2, ...rest2 } = config;
-      res.json({ data: { ...rest2, ...buildKeyMeta(_enc2) } });
+      const {
+        api_key_enc: _enc2,
+        backup_api_key_enc: _backupEnc2,
+        ...rest2
+      } = config;
+      const backupKeyMeta = buildKeyMeta(_backupEnc2);
+      res.json({
+        data: {
+          ...rest2,
+          ...buildKeyMeta(_enc2),
+          backup_api_key_configured: backupKeyMeta.api_key_configured,
+          backup_api_key_hint: backupKeyMeta.api_key_hint,
+        },
+      });
     } catch (err) { handleError(res, err); }
   });
 
@@ -1273,7 +1148,13 @@ export function agentRouter(db: DbPool): Router {
       const config = await agentRepo.getConfig(db, actor.tenant_id);
 
       // Merge form values (not-yet-saved) over stored config
-      const body = req.body as { provider?: string; base_url?: string; api_key?: string; model?: string };
+      const body = req.body as {
+        provider?: string;
+        base_url?: string;
+        api_key?: string;
+        model?: string;
+        target?: 'primary' | 'backup';
+      };
       const bodyKeys = Object.keys(body ?? {});
       const testingOverrides = bodyKeys.some(key => ['provider', 'base_url', 'api_key', 'model'].includes(key));
       if (!isAdmin(actor) && testingOverrides) {
@@ -1285,17 +1166,26 @@ export function agentRouter(db: DbPool): Router {
         return;
       }
 
-      const provider = isAdmin(actor) ? body.provider ?? config?.provider : config?.provider;
-      const rawUrl   = isAdmin(actor) ? body.base_url  ?? config?.base_url ?? '' : config?.base_url ?? '';
-      const model    = isAdmin(actor) ? body.model     ?? config?.model    ?? '' : config?.model ?? '';
+      const target = body.target === 'backup' ? 'backup' : 'primary';
+      const savedProvider = target === 'backup' ? config?.backup_provider : config?.provider;
+      const savedBaseUrl = target === 'backup' ? config?.backup_base_url : config?.base_url;
+      const savedModel = target === 'backup' ? config?.backup_model : config?.model;
+      const savedApiKeyEnc = target === 'backup' ? config?.backup_api_key_enc : config?.api_key_enc;
+
+      const provider = isAdmin(actor) ? body.provider ?? savedProvider : savedProvider;
+      const rawUrl   = isAdmin(actor) ? body.base_url  ?? savedBaseUrl ?? '' : savedBaseUrl ?? '';
+      const model    = isAdmin(actor) ? body.model     ?? savedModel    ?? '' : savedModel ?? '';
       const baseUrl  = rawUrl.replace(/\/+$/, '');
 
       // If caller sent an api_key, use it directly (trimmed). Otherwise decrypt the stored one.
       let apiKey = '';
       if (isAdmin(actor) && typeof body.api_key === 'string' && body.api_key.trim()) {
         apiKey = body.api_key.trim();
-      } else if (config?.api_key_enc) {
-        apiKey = decrypt(config.api_key_enc).trim();
+      } else if (
+        savedApiKeyEnc
+        && !(isAdmin(actor) && typeof body.provider === 'string' && body.provider !== savedProvider)
+      ) {
+        apiKey = decrypt(savedApiKeyEnc).trim();
       }
 
       if (!config && !isAdmin(actor)) {
@@ -1333,13 +1223,7 @@ export function agentRouter(db: DbPool): Router {
       if (provider === 'anthropic') {
         readinessResult = await verifyAgentToolCalling({ provider, baseUrl, model, apiKey });
       } else {
-        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-        if (baseUrl.includes('openrouter.ai')) {
-          headers['HTTP-Referer'] = 'https://github.com/crmy-dev/crmy';
-          headers['X-Title'] = 'CRMy';
-        }
-
+        const headers = buildOpenAICompatibleHeaders(baseUrl, apiKey, provider);
         readinessResult = await verifyAgentToolCalling({ provider, baseUrl, model, apiKey, headers });
       }
 

@@ -1,0 +1,1 @@
+import{j as s}from"./vendor-react-BJfidKy0.js";import{B as t}from"./index-CDDf2qxp.js";function d({className:r,...o}){return s.jsx("div",{className:t("rounded-2xl border border-border bg-card p-3 shadow-sm",r),...o})}function n({className:r,...o}){return s.jsx("div",{className:t("rounded-xl transition-colors hover:bg-muted/40",r),...o})}export{d as C,n as a};

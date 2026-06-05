@@ -7,6 +7,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createSpinner } from '../spinner.js';
 import { saveConfigFile } from '../config.js';
+import {
+  CUSTOM_MODEL_SENTINEL,
+  PROVIDERS,
+  getProvider,
+  getProviderDefaultModel,
+  isProviderId,
+  type ProviderId,
+} from '@crmy/shared';
 
 // ── Input validators ───────────────────────────────────────────────────────────
 function validateEmail(input: string): boolean | string {
@@ -101,9 +109,266 @@ async function ensureDatabaseExists(
   }
 }
 
+type DbLike = {
+  query(sql: string, params?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }>;
+};
+
+interface AgentSetupConfig {
+  provider: ProviderId;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+}
+
+interface OllamaStatus {
+  available: boolean;
+  models: string[];
+}
+
+async function detectOllamaModels(baseUrl = 'http://localhost:11434'): Promise<OllamaStatus> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1200);
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/api/tags`, { signal: controller.signal });
+    if (!res.ok) return { available: false, models: [] };
+    const json = await res.json().catch(() => null) as { models?: Array<{ name?: string }> } | null;
+    const models = (json?.models ?? [])
+      .map(model => model.name)
+      .filter((name): name is string => Boolean(name))
+      .sort((a, b) => a.localeCompare(b));
+    return { available: true, models };
+  } catch {
+    return { available: false, models: [] };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function preferredOllamaModel(installedModels: string[]): string {
+  const preferred = getProvider('ollama').models.map(model => model.id);
+  return preferred.find(model => installedModels.includes(model)) ?? installedModels[0] ?? getProviderDefaultModel('ollama');
+}
+
+async function promptForModel(
+  inquirer: typeof import('inquirer').default,
+  provider: ProviderId,
+  extraModels: string[] = [],
+): Promise<string> {
+  const providerDef = getProvider(provider);
+  const choices = new Map<string, { name: string; value: string }>();
+
+  for (const model of extraModels) {
+    choices.set(model, { name: `${model} (installed locally)`, value: model });
+  }
+  for (const model of providerDef.models) {
+    if (!choices.has(model.id)) {
+      choices.set(model.id, { name: `${model.label} (${model.id})`, value: model.id });
+    }
+  }
+
+  if (choices.size > 0) {
+    const { selected } = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'selected',
+        message: '  Model:',
+        default: extraModels[0] ?? getProviderDefaultModel(provider) ?? CUSTOM_MODEL_SENTINEL,
+        choices: [
+          ...Array.from(choices.values()),
+          { name: 'Custom model ID...', value: CUSTOM_MODEL_SENTINEL },
+        ],
+      },
+    ]);
+    if (selected !== CUSTOM_MODEL_SENTINEL) return selected;
+  }
+
+  const { customModel } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'customModel',
+      message: '  Model ID:',
+      validate: (value: string) => value.trim() ? true : 'Enter a model ID',
+    },
+  ]);
+  return customModel.trim();
+}
+
+async function promptForProviderSetup(
+  inquirer: typeof import('inquirer').default,
+  providerChoices: ProviderId[],
+): Promise<AgentSetupConfig | null> {
+  const { configure } = await inquirer.prompt([
+    {
+      type: 'confirm',
+      name: 'configure',
+      message: '  Configure a Workspace Agent model now?',
+      default: true,
+    },
+  ]);
+  if (!configure) return null;
+
+  const { provider } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'provider',
+      message: '  Provider:',
+      choices: providerChoices.map(id => {
+        const providerDef = getProvider(id);
+        return { name: providerDef.label, value: id };
+      }),
+    },
+  ]);
+  const providerId = provider as ProviderId;
+  const providerDef = getProvider(providerId);
+
+  const { baseUrl } = await inquirer.prompt([
+    {
+      type: 'input',
+      name: 'baseUrl',
+      message: '  Base URL:',
+      default: providerDef.baseUrl,
+      validate: (value: string) => value.trim() ? true : 'Enter a base URL',
+    },
+  ]);
+
+  const model = await promptForModel(inquirer, providerId);
+  let apiKey = '';
+  if (providerDef.requiresKey) {
+    const answer = await inquirer.prompt([
+      {
+        type: 'password',
+        name: 'apiKey',
+        message: '  API key:',
+        mask: '*',
+        validate: (value: string) => value.trim() ? true : `${providerDef.label} requires an API key`,
+      },
+    ]);
+    apiKey = answer.apiKey.trim();
+  } else if (providerId !== 'ollama') {
+    const answer = await inquirer.prompt([
+      {
+        type: 'password',
+        name: 'apiKey',
+        message: `  ${providerDef.keyLabel} (optional; leave blank if this endpoint does not require one):`,
+        mask: '*',
+      },
+    ]);
+    apiKey = answer.apiKey.trim();
+  }
+
+  return {
+    provider: providerId,
+    baseUrl: String(baseUrl).trim(),
+    model,
+    apiKey: apiKey || undefined,
+  };
+}
+
+async function chooseAgentSetup(
+  inquirer: typeof import('inquirer').default,
+  yesMode: boolean,
+  isInteractive: boolean,
+): Promise<AgentSetupConfig | null> {
+  if (process.env.CRMY_AGENT_ENABLED === 'false') return null;
+
+  const envProvider = process.env.CRMY_AGENT_PROVIDER;
+  const envModel = process.env.CRMY_AGENT_MODEL;
+  if (envProvider || envModel) {
+    const provider = isProviderId(envProvider ?? '') ? envProvider as ProviderId : 'custom';
+    const providerDef = getProvider(provider);
+    if (!envModel?.trim()) {
+      throw new Error('CRMY_AGENT_MODEL is required when configuring CRMY_AGENT_PROVIDER during init.');
+    }
+    if (providerDef.requiresKey && !process.env.CRMY_AGENT_API_KEY?.trim()) {
+      throw new Error(`CRMY_AGENT_API_KEY is required for ${providerDef.label}.`);
+    }
+    return {
+      provider,
+      baseUrl: process.env.CRMY_AGENT_BASE_URL?.trim() || providerDef.baseUrl,
+      model: envModel.trim(),
+      apiKey: process.env.CRMY_AGENT_API_KEY?.trim() || undefined,
+    };
+  }
+
+  const ollama = await detectOllamaModels();
+  if (yesMode || !isInteractive) {
+    if (ollama.available && ollama.models.length > 0) {
+      return {
+        provider: 'ollama',
+        baseUrl: getProvider('ollama').baseUrl,
+        model: preferredOllamaModel(ollama.models),
+      };
+    }
+    return null;
+  }
+
+  if (ollama.available) {
+    console.log(ollama.models.length > 0
+      ? `  Ollama detected with ${ollama.models.length} installed model(s).`
+      : '  Ollama detected, but no installed models were reported.');
+    const { useOllama } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'useOllama',
+        message: '  Use local Ollama for the Workspace Agent?',
+        default: ollama.models.length > 0,
+      },
+    ]);
+    if (useOllama) {
+      const model = await promptForModel(inquirer, 'ollama', ollama.models);
+      return {
+        provider: 'ollama',
+        baseUrl: getProvider('ollama').baseUrl,
+        model,
+      };
+    }
+  } else {
+    console.log('  Ollama was not detected at http://localhost:11434.');
+  }
+
+  return promptForProviderSetup(
+    inquirer,
+    PROVIDERS.map(provider => provider.id).filter(id => id !== 'ollama'),
+  );
+}
+
+async function saveWorkspaceAgentConfig(
+  db: DbLike,
+  tenantId: string,
+  setup: AgentSetupConfig,
+  jwtSecret: string,
+): Promise<void> {
+  process.env.JWT_SECRET = jwtSecret;
+  const { encryptAgentSecret } = await import('@crmy/server');
+  const apiKeyEnc = setup.apiKey ? encryptAgentSecret(setup.apiKey) : null;
+  await db.query(
+    `INSERT INTO agent_configs (
+       tenant_id, enabled, provider, base_url, api_key_enc, model,
+       max_tokens_per_turn, history_retention_days,
+       can_write_objects, can_log_activities, can_create_assignments,
+       auto_extract_context, auto_promote_signals, signal_auto_promote_threshold
+     )
+     VALUES ($1, true, $2, $3, $4, $5, 4000, 90, true, true, true, true, true, 0.85)
+     ON CONFLICT (tenant_id) DO UPDATE SET
+       enabled = true,
+       provider = EXCLUDED.provider,
+       base_url = EXCLUDED.base_url,
+       api_key_enc = EXCLUDED.api_key_enc,
+       model = EXCLUDED.model,
+       can_write_objects = true,
+       can_log_activities = true,
+       can_create_assignments = true,
+       auto_extract_context = true,
+       auto_promote_signals = true,
+       signal_auto_promote_threshold = 0.85,
+       updated_at = now()`,
+    [tenantId, setup.provider, setup.baseUrl, apiKeyEnc, setup.model],
+  );
+}
+
 export function initCommand(): Command {
   return new Command('init')
-    .description('Set up CRMy: database, migrations, owner account, API key, and sample data')
+    .description('Set up CRMy: database, migrations, owner account, API key, Workspace Agent model, and sample data')
     .option('-y, --yes', 'Use defaults non-interactively (requires CRMY_ADMIN_EMAIL + CRMY_ADMIN_PASSWORD; DATABASE_URL optional)')
     .action(async (opts) => {
       const yesMode = !!opts.yes;
@@ -117,7 +382,8 @@ export function initCommand(): Command {
       console.log('    Step 1 — Connect to your PostgreSQL database');
       console.log('    Step 2 — Create all CRMy tables (migrations)');
       console.log('    Step 3 — Create your owner account and local API key');
-      console.log('    Step 4 — Optionally seed demo data for a fast first run\n');
+      console.log('    Step 4 — Optionally configure the Workspace Agent model');
+      console.log('    Step 5 — Optionally seed demo data for a fast first run\n');
 
       // ── Detect existing config ──────────────────────────────────────────────
       const localConfigPath = path.join(process.cwd(), '.crmy.json');
@@ -143,7 +409,7 @@ export function initCommand(): Command {
       }
 
       // ── Step 1: Database connection ─────────────────────────────────────────
-      console.log('  ── Step 1 of 4: Database Connection ──────────────────\n');
+      console.log('  ── Step 1 of 5: Database Connection ──────────────────\n');
 
       let databaseUrl: string;
 
@@ -176,7 +442,7 @@ export function initCommand(): Command {
       await ensureDatabaseExists(databaseUrl, isInteractive);
 
       // ── Step 2: Migrations ───────────────────────────────────────────────────
-      console.log('\n  ── Step 2 of 4: Database Setup ──────────────────────\n');
+      console.log('\n  ── Step 2 of 5: Database Setup ──────────────────────\n');
 
       process.env.CRMY_IMPORTED = '1';
 
@@ -282,7 +548,7 @@ export function initCommand(): Command {
       }
 
       // ── Step 3: Admin account ────────────────────────────────────────────────
-      console.log('\n  ── Step 3 of 4: Admin Account ──────────────────────\n');
+      console.log('\n  ── Step 3 of 5: Admin Account ──────────────────────\n');
 
       // Support non-interactive (CI / Docker) via env vars
       const envEmail    = process.env.CRMY_ADMIN_EMAIL;
@@ -366,6 +632,7 @@ export function initCommand(): Command {
       spinner = createSpinner('Creating admin account…');
 
       let rawKey = '';
+      let jwtSecret = '';
 
       try {
         // scrypt — same params as auth/routes.ts so passwords are portable
@@ -393,7 +660,7 @@ export function initCommand(): Command {
         spinner.succeed('Admin account created');
 
         // Generate JWT secret + write config
-        const jwtSecret = crypto.randomBytes(32).toString('hex');
+        jwtSecret = crypto.randomBytes(32).toString('hex');
         const crmmyConfig = {
           serverUrl: 'http://localhost:3000',
           apiKey: rawKey,
@@ -424,8 +691,29 @@ export function initCommand(): Command {
         process.exit(1);
       }
 
+      // ── Step 4: Workspace Agent model ───────────────────────────────────────
+      console.log('\n  ── Step 4 of 5: Workspace Agent Model ──────────────\n');
+
+      let configuredAgent: AgentSetupConfig | null = null;
+      try {
+        configuredAgent = await chooseAgentSetup(inquirer, yesMode, isInteractive);
+        if (configuredAgent) {
+          spinner = createSpinner(`Saving ${getProvider(configuredAgent.provider).label} model settings…`);
+          await saveWorkspaceAgentConfig(db, tenantId, configuredAgent, jwtSecret);
+          spinner.succeed(
+            `Workspace Agent configured  \x1b[2m(${getProvider(configuredAgent.provider).label} · ${configuredAgent.model})\x1b[0m`,
+          );
+        } else {
+          console.log('  Workspace Agent model setup skipped.');
+          console.log('  Configure it later in Settings -> Model or rerun init with CRMY_AGENT_PROVIDER and CRMY_AGENT_MODEL.\n');
+        }
+      } catch (err) {
+        console.log(`  \x1b[33m⚠\x1b[0m  Workspace Agent setup skipped: ${(err as Error).message}`);
+        console.log('  Configure it later in Settings -> Model.\n');
+      }
+
       // ── Demo data prompt ──────────────────────────────────────────────────────
-      console.log('\n  ── Step 4 of 4: Demo Data ──────────────────────────\n');
+      console.log('\n  ── Step 5 of 5: Demo Data ──────────────────────────\n');
 
       let seedDemo = yesMode; // --yes mode auto-seeds demo data
       if (!yesMode && isInteractive) {
@@ -465,6 +753,9 @@ export function initCommand(): Command {
       console.log('  └───────────────────────────────────────────────────┘\n');
       console.log(`  Admin account:  ${email.trim()}`);
       console.log(`  API key:        ${keyPreview}  \x1b[2m(full key in .crmy.json)\x1b[0m`);
+      if (configuredAgent) {
+        console.log(`  Agent model:    ${getProvider(configuredAgent.provider).label} · ${configuredAgent.model}`);
+      }
       console.log('  Config saved:   .crmy.json  \x1b[2m(added to .gitignore)\x1b[0m\n');
       console.log('  Next steps:\n');
       console.log('    Start the server:');
@@ -483,6 +774,10 @@ export function initCommand(): Command {
       if (seedDemo) {
         console.log('    Verify the agent path:');
         console.log('    \x1b[1mnpx -y @crmy/cli agent-smoke\x1b[0m\n');
+        if (configuredAgent) {
+          console.log('    Verify model-backed extraction:');
+          console.log('    \x1b[1mnpx -y @crmy/cli agent-smoke --with-model\x1b[0m\n');
+        }
         console.log('    One-minute agent smoke test:');
         console.log('    \x1b[1mUse the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.\x1b[0m\n');
       }

@@ -89,6 +89,25 @@ npx -y @crmy/cli agent-smoke
 
 Prefer prompts? Run `npx -y @crmy/cli init` without `--yes`.
 
+Workspace Agent model setup is part of init. Interactive init checks for local Ollama first. If Ollama is unavailable, or you decline it, the wizard lets you choose from the same provider/model catalog used by the web Model Settings page and still supports a custom model ID.
+
+The shared catalog currently includes Anthropic, OpenAI, Azure OpenAI, Google Gemini, Amazon Bedrock, Mistral, LiteLLM Proxy, OpenRouter, Ollama, Databricks AI Gateway, NVIDIA NIM, and other OpenAI-compatible endpoints. Backup provider failover is configured later in **Settings → Model**, not during init.
+
+For non-interactive setup, either run Ollama locally with an installed model before `init --yes`, or set provider variables:
+
+```env
+CRMY_AGENT_PROVIDER=openai
+CRMY_AGENT_MODEL=gpt-5.2
+CRMY_AGENT_API_KEY=sk-...
+# CRMY_AGENT_BASE_URL=https://api.openai.com/v1
+```
+
+Use the model-backed smoke test to prove the full Raw Context engine:
+
+```bash
+npx -y @crmy/cli agent-smoke --with-model
+```
+
 Semantic retrieval is optional but recommended for serious context work. It lets CRMy find related Signals and Memory by meaning instead of exact keywords. To enable it, use Postgres with the pgvector extension, set `ENABLE_PGVECTOR=true` before running migrations on a fresh database, and configure embedding variables in the server environment:
 
 ```env
@@ -575,7 +594,9 @@ Controls the agent that performs background intelligence tasks for your tenant.
 
 **Section 1 — Enable**: master on/off switch.
 
-**Section 2 — Provider & Model**: select Anthropic, OpenAI, OpenRouter, Ollama, or a custom OpenAI-compatible endpoint. Enter the API key (stored encrypted, shown only as a hint after saving). Model pricing is estimated per-turn based on `max_tokens_per_turn`.
+**Section 2 — Provider & Model**: select Anthropic, OpenAI, Azure OpenAI, Google Gemini, Amazon Bedrock, Mistral, LiteLLM Proxy, OpenRouter, Ollama, Databricks AI Gateway, NVIDIA NIM, or another OpenAI-compatible endpoint. Enter the API key or gateway token when required (stored encrypted, shown only as a hint after saving). Model pricing is estimated per-turn based on `max_tokens_per_turn`.
+
+**Backup provider**: optional failover model used only when the primary provider call fails. Configure and test it after the primary provider is working. Backup provider failures do not bypass scoped permissions or write policies.
 
 **Section 3 — Behavior**:
 

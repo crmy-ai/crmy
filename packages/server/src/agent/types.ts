@@ -1,12 +1,14 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ProviderId } from '@crmy/shared';
+
 /** Persisted agent config (one per tenant). */
 export interface AgentConfig {
   id: string;
   tenant_id: string;
   enabled: boolean;
-  provider: 'anthropic' | 'openai' | 'openrouter' | 'ollama' | 'custom';
+  provider: ProviderId;
   base_url: string;
   api_key_enc: string | null;
   model: string;
@@ -19,6 +21,11 @@ export interface AgentConfig {
   auto_extract_context: boolean;
   auto_promote_signals: boolean;
   signal_auto_promote_threshold: number;
+  backup_enabled: boolean;
+  backup_provider: ProviderId | null;
+  backup_base_url: string | null;
+  backup_api_key_enc: string | null;
+  backup_model: string | null;
 }
 
 /** A single message in a conversation. */

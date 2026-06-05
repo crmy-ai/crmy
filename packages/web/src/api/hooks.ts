@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { ProviderId } from '@crmy/shared';
 import { api, getUser } from './client';
 
 // Generic list hook with pagination
@@ -1956,7 +1957,7 @@ export interface AgentConfigData {
   id: string;
   tenant_id: string;
   enabled: boolean;
-  provider: 'anthropic' | 'openai' | 'openrouter' | 'ollama' | 'custom';
+  provider: ProviderId;
   base_url: string;
   api_key_configured: boolean;
   api_key_hint: string | null;
@@ -1970,6 +1971,12 @@ export interface AgentConfigData {
   auto_extract_context: boolean;
   auto_promote_signals: boolean;
   signal_auto_promote_threshold: number;
+  backup_enabled: boolean;
+  backup_provider: ProviderId | null;
+  backup_base_url: string | null;
+  backup_api_key_configured: boolean;
+  backup_api_key_hint: string | null;
+  backup_model: string | null;
 }
 
 export interface AgentSessionSummary {

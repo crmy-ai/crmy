@@ -32,6 +32,12 @@ interface AgentSmokeResult {
       trust_score?: number;
     }>;
   };
+  model_extraction?: {
+    attempted: boolean;
+    extracted_count: number;
+    raw_context_source_id?: string;
+    duplicate?: boolean;
+  };
   checks: SmokeCheck[];
   prompt: string;
 }
@@ -88,6 +94,7 @@ async function runTool(client: CliClient, toolName: string, input: Record<string
 export async function runAgentSmoke(options: {
   account?: string;
   signalLimit?: number;
+  withModel?: boolean;
   json?: boolean;
   config?: string;
 } = {}): Promise<AgentSmokeResult> {
@@ -102,6 +109,7 @@ export async function runAgentSmoke(options: {
   let assignmentCount = 0;
   let briefingSignalGroupCount = 0;
   let signals: AgentSmokeResult['signals']['examples'] = [];
+  let modelExtraction: AgentSmokeResult['model_extraction'] | undefined;
 
   try {
     client = await getClient(options.config);
@@ -153,6 +161,43 @@ export async function runAgentSmoke(options: {
           : `Briefing resolved but contains no demo context for "${accountName}".`,
         fix: hasBriefingContent ? undefined : 'Run `crmy seed-demo` to load the Northstar Labs source-to-action demo.',
       });
+
+      if (options.withModel) {
+        const ingestResult = await runTool(client, 'context_ingest_auto', {
+          source_label: 'Agent smoke model-backed extraction demo',
+          source_occurred_at: '2026-01-15T17:00:00.000Z',
+          idempotency_key: `agent-smoke-model:${accountId}`,
+          confidence_threshold: 0.6,
+          subjects: [{ type: 'account', id: accountId, name: accountName }],
+          document:
+            `${accountName} customer call note: Maya Patel may be the evaluation sponsor. ` +
+            'The team wants a security review before expanding the rollout, and the next step is to schedule a technical validation session next Friday.',
+        });
+        const rawSource = asRecord(ingestResult.raw_context_source);
+        const extractedCount = Number(
+          ingestResult.extracted_count
+          ?? ingestResult.entries_created
+          ?? ingestResult.signals_created
+          ?? 0,
+        );
+        const duplicate = Boolean(ingestResult.duplicate_of_raw_context_source_id);
+        modelExtraction = {
+          attempted: true,
+          extracted_count: extractedCount,
+          raw_context_source_id: typeof rawSource.id === 'string' ? rawSource.id : undefined,
+          duplicate,
+        };
+        checks.push({
+          name: 'context_ingest_auto',
+          ok: extractedCount > 0 || duplicate,
+          detail: duplicate
+            ? 'Model-backed Raw Context extraction returned an existing idempotent receipt.'
+            : `Model-backed Raw Context extraction produced ${extractedCount} context item(s).`,
+          fix: extractedCount > 0 || duplicate
+            ? undefined
+            : 'Check Workspace Agent model settings, then try a shorter source or run `crmy doctor`.',
+        });
+      }
     }
 
     const signalResult = await runTool(client, 'context_signal_group_list', {
@@ -198,6 +243,7 @@ export async function runAgentSmoke(options: {
       count: signals.length,
       examples: signals,
     },
+    model_extraction: modelExtraction,
     checks,
     prompt,
   };
@@ -223,6 +269,11 @@ export async function runAgentSmoke(options: {
     }
   }
 
+  if (modelExtraction?.attempted) {
+    const duplicate = modelExtraction.duplicate ? ' · existing receipt' : '';
+    console.log(`\n  Model-backed extraction: ${modelExtraction.extracted_count} item(s)${duplicate}`);
+  }
+
   console.log('\n  One-minute agent prompt:');
   console.log(`  \x1b[1m${prompt}\x1b[0m\n`);
 
@@ -241,6 +292,7 @@ export function agentSmokeCommand(): Command {
     .description('Verify the one-minute agent demo path: resolve account, get briefing, list Signals')
     .option('--account <name>', 'Demo account name to resolve', 'Northstar Labs')
     .option('--signal-limit <n>', 'Signals to request from context_signal_group_list', '5')
+    .option('--with-model', 'Also ingest a small Raw Context source through the configured Workspace Agent model')
     .option('--config <path>', 'Explicit path to a .crmy.json config file')
     .option('--json', 'Print machine-readable JSON')
     .action(async (opts) => {
@@ -248,6 +300,7 @@ export function agentSmokeCommand(): Command {
       await runAgentSmoke({
         account: opts.account,
         signalLimit: Number.isFinite(signalLimit) ? signalLimit : 5,
+        withModel: Boolean(opts.withModel),
         config: opts.config,
         json: Boolean(opts.json),
       });

@@ -26,6 +26,7 @@ import {
   PROVIDERS,
   CUSTOM_MODEL_SENTINEL,
   getProvider,
+  getProviderDefaultModel,
   type ProviderId,
 } from '@/lib/agentProviders';
 
@@ -90,6 +91,16 @@ export default function AgentSettings() {
   const [modelId,     setModelId]     = useState('');
   /** Free-text model name when modelId === CUSTOM_MODEL_SENTINEL or provider === 'custom'. */
   const [customModel, setCustomModel] = useState('');
+  const [backupEnabled, setBackupEnabled] = useState(false);
+  const [backupProvider, setBackupProvider] = useState<ProviderId>('openai');
+  const [backupBaseUrl, setBackupBaseUrl] = useState(getProvider('openai').baseUrl);
+  const [backupModelId, setBackupModelId] = useState('');
+  const [backupCustomModel, setBackupCustomModel] = useState('');
+  const [backupApiKey, setBackupApiKey] = useState('');
+  const [backupKeyHint, setBackupKeyHint] = useState<string | null>(null);
+  const [backupKeyConfigured, setBackupKeyConfigured] = useState(false);
+  const [backupTestStatus, setBackupTestStatus] = useState<'idle' | 'testing' | 'ok' | 'warn' | 'fail'>('idle');
+  const [backupTestError, setBackupTestError] = useState('');
 
   // ── Token pricing ────────────────────────────────────────────────────────
   /** USD per million INPUT tokens — editable, auto-populated from model defs or OpenRouter API */
@@ -125,13 +136,26 @@ export default function AgentSettings() {
   useEffect(() => {
     if (!config) return;
     setEnabled(config.enabled);
-    setProvider(config.provider as ProviderId);
+    const nextProvider = config.provider as ProviderId;
+    const providerInfo = getProvider(nextProvider);
+    const knownModel = providerInfo.models.find(model => model.id === config.model);
+    setProvider(nextProvider);
     setBaseUrl(config.base_url);
     setKeyConfigured(config.api_key_configured ?? false);
     setKeyHint(config.api_key_hint ?? null);
 
-    setModelId(CUSTOM_MODEL_SENTINEL);
+    setModelId(knownModel ? knownModel.id : CUSTOM_MODEL_SENTINEL);
     setCustomModel(config.model ?? '');
+    setBackupEnabled(config.backup_enabled ?? false);
+    const savedBackupProvider = config.backup_provider ?? 'openai';
+    const backupProviderInfo = getProvider(savedBackupProvider);
+    const knownBackupModel = backupProviderInfo.models.find(model => model.id === config.backup_model);
+    setBackupProvider(savedBackupProvider);
+    setBackupBaseUrl(config.backup_base_url ?? backupProviderInfo.baseUrl);
+    setBackupModelId(knownBackupModel ? knownBackupModel.id : CUSTOM_MODEL_SENTINEL);
+    setBackupCustomModel(config.backup_model ?? '');
+    setBackupKeyConfigured(config.backup_api_key_configured ?? false);
+    setBackupKeyHint(config.backup_api_key_hint ?? null);
 
     setHistoryRetention(config.history_retention_days);
     setSystemPrompt(config.system_prompt ?? defaultSystemPrompt);
@@ -151,7 +175,8 @@ export default function AgentSettings() {
   }, [editingPrompt]);
 
   // Auto-populate token prices only when a reliable source is available.
-  // Static model catalogs go stale quickly, so admins enter model IDs directly.
+  // The shared provider catalog is for model selection; pricing still needs
+  // provider-backed data or explicit admin input.
   useEffect(() => {
     const modelKey = customModel;
     if (!modelKey) { setPriceSource('unknown'); return; }
@@ -192,6 +217,8 @@ export default function AgentSettings() {
   const providerDef = getProvider(provider);
   /** The actual model string to send to the API. */
   const resolvedModel = customModel.trim();
+  const backupProviderDef = getProvider(backupProvider);
+  const resolvedBackupModel = backupCustomModel.trim();
 
   /**
    * Whether the enable toggle is interactive.
@@ -200,6 +227,10 @@ export default function AgentSettings() {
   const canEnable = !providerDef.requiresKey
     ? Boolean(resolvedModel && baseUrl)
     : Boolean((keyConfigured || newApiKey.trim()) && resolvedModel && baseUrl);
+  const backupReady = !backupEnabled || (
+    Boolean(resolvedBackupModel && backupBaseUrl)
+    && (!backupProviderDef.requiresKey || Boolean(backupKeyConfigured || backupApiKey.trim()))
+  );
 
   const buildConfigPayload = (overrides: Record<string, unknown> = {}) => {
     const payload: Record<string, unknown> = {
@@ -215,27 +246,71 @@ export default function AgentSettings() {
       auto_extract_context:   autoExtractContext,
       auto_promote_signals:   autoPromoteSignals,
       signal_auto_promote_threshold: signalPromotionThreshold,
+      backup_enabled:        backupEnabled,
+      backup_provider:       backupProvider,
+      backup_base_url:       backupBaseUrl,
+      backup_model:          resolvedBackupModel,
       ...overrides,
     };
     if (newApiKey.trim()) {
       payload.api_key = newApiKey.trim();
+    }
+    if (backupApiKey.trim()) {
+      payload.backup_api_key = backupApiKey.trim();
     }
     return payload;
   };
 
   /** Reset test status whenever any config-sensitive field changes. */
   const resetTest = () => { setTestStatus('idle'); setTestError(''); };
+  const resetBackupTest = () => { setBackupTestStatus('idle'); setBackupTestError(''); };
 
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   const handleProviderChange = (p: ProviderId) => {
     setProvider(p);
     const def = getProvider(p);
+    const defaultModel = getProviderDefaultModel(p);
     setBaseUrl(def.baseUrl);
-    setModelId(CUSTOM_MODEL_SENTINEL);
-    setCustomModel('');
+    setModelId(defaultModel || CUSTOM_MODEL_SENTINEL);
+    setCustomModel(defaultModel);
     setNewApiKey('');
+    setKeyConfigured(false);
+    setKeyHint(null);
     resetTest();
+  };
+
+  const handleModelSelect = (value: string) => {
+    setModelId(value);
+    if (value !== CUSTOM_MODEL_SENTINEL) {
+      setCustomModel(value);
+    } else {
+      setCustomModel('');
+    }
+    resetTest();
+  };
+
+  const handleBackupProviderChange = (p: ProviderId) => {
+    setBackupProvider(p);
+    const def = getProvider(p);
+    const defaultModel = getProviderDefaultModel(p);
+    setBackupBaseUrl(def.baseUrl);
+    setBackupModelId(defaultModel || CUSTOM_MODEL_SENTINEL);
+    setBackupCustomModel(defaultModel);
+    setBackupApiKey('');
+    setBackupKeyConfigured(false);
+    setBackupKeyHint(null);
+    resetBackupTest();
+  };
+
+  const handleBackupModelSelect = (value: string) => {
+    setBackupModelId(value);
+    if (value !== CUSTOM_MODEL_SENTINEL) {
+      setBackupCustomModel(value);
+    } else {
+      setBackupCustomModel('');
+    }
+    resetBackupTest();
   };
 
   const handleToggleEnabled = async (val: boolean) => {
@@ -285,12 +360,43 @@ export default function AgentSettings() {
     }
   };
 
+  const handleTestBackupConnection = async () => {
+    setBackupTestStatus('testing');
+    setBackupTestError('');
+    try {
+      const payload: Record<string, string> = {
+        target: 'backup',
+        provider: backupProvider,
+        base_url: backupBaseUrl,
+        model:    resolvedBackupModel,
+      };
+      if (backupApiKey.trim()) payload.api_key = backupApiKey.trim();
+
+      const result = await testConnection.mutateAsync(payload);
+      if (result.ok) {
+        if (result.status === 'tool_calling_unverified' || result.tool_calling_verified === false) {
+          setBackupTestStatus('warn');
+          setBackupTestError(result.warning ?? 'Connection works, but tool calling could not be verified from this provider response.');
+        } else {
+          setBackupTestStatus('ok');
+        }
+      } else {
+        setBackupTestStatus('fail');
+        setBackupTestError(result.error ?? 'Check your backup settings and try again.');
+      }
+    } catch (err) {
+      setBackupTestStatus('fail');
+      setBackupTestError(err instanceof Error ? err.message : 'Backup connection failed');
+    }
+  };
+
   const handleSaveProvider = async () => {
     try {
       await saveConfig.mutateAsync(buildConfigPayload({ enabled: true }));
       setEnabled(true);
       // After save, the key is now stored — update hint state from response
       setNewApiKey('');  // clear the new-key input
+      setBackupApiKey('');
       toast({
         title: 'Workspace Agent enabled',
         description: testStatus === 'warn'
@@ -328,6 +434,9 @@ export default function AgentSettings() {
   const keyPlaceholder = keyConfigured
     ? `••••••••${keyHint ?? '••••'}`
     : 'Paste your API key…';
+  const backupKeyPlaceholder = backupKeyConfigured
+    ? `••••••••${backupKeyHint ?? '••••'}`
+    : 'Paste backup API key…';
 
   return (
     <div className="space-y-5 max-w-2xl">
@@ -461,6 +570,7 @@ export default function AgentSettings() {
               <p className="text-xs text-violet-700/80 dark:text-violet-300/80">
                 Enter the exact model ID from your provider or local runtime. CRMy requires tool/function calling so the Workspace Agent can use scoped tools safely. Reasoning-capable models are recommended, but not required.
               </p>
+              <p className="text-xs text-violet-700/80 dark:text-violet-300/80">{providerDef.setupHint}</p>
             </div>
           </div>
 
@@ -470,7 +580,7 @@ export default function AgentSettings() {
             <input
               value={baseUrl}
               onChange={e => { setBaseUrl(e.target.value); resetTest(); }}
-              placeholder={providerDef.baseUrl || 'https://…'}
+              placeholder={providerDef.baseUrlPlaceholder || providerDef.baseUrl || 'https://…'}
               className={inputCls}
             />
           </div>
@@ -479,7 +589,7 @@ export default function AgentSettings() {
           {providerDef.requiresKey ? (
             <div className="py-4 space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">API Key</label>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{providerDef.keyLabel}</label>
                 {keyConfigured && !newApiKey && (
                   <span className="text-xs text-muted-foreground">
                     Enter a new key to replace the stored one
@@ -510,22 +620,42 @@ export default function AgentSettings() {
               <p className="text-xs text-muted-foreground italic">
                 {provider === 'ollama'
                   ? 'Ollama runs locally — no API key required.'
-                  : 'No API key required for this provider.'}
+                  : `${providerDef.label} can be configured without an API key. Add one only if the endpoint requires it.`}
               </p>
             </div>
           )}
 
           {/* Model */}
           <div className="py-4 space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Model</label>
-            <input
-              value={customModel}
-              onChange={e => { setModelId(CUSTOM_MODEL_SENTINEL); setCustomModel(e.target.value); resetTest(); }}
-              placeholder={provider === 'ollama' ? 'e.g. llama3.2 or your local model name' : 'Enter the provider model ID exactly'}
-              className={inputCls}
-            />
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{providerDef.modelLabel}</label>
+            {providerDef.models.length > 0 && (
+              <Select value={modelId} onValueChange={handleModelSelect}>
+                <SelectTrigger className="w-full h-9 text-sm">
+                  <SelectValue placeholder="Select model…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {providerDef.models.map(model => (
+                    <SelectItem key={model.id} value={model.id}>
+                      <span className="flex flex-col">
+                        <span>{model.label}</span>
+                        <span className="text-xs text-muted-foreground">{model.id}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={CUSTOM_MODEL_SENTINEL}>Custom model ID…</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+            {(providerDef.models.length === 0 || modelId === CUSTOM_MODEL_SENTINEL) && (
+              <input
+                value={modelId === CUSTOM_MODEL_SENTINEL ? customModel : ''}
+                onChange={e => { setModelId(CUSTOM_MODEL_SENTINEL); setCustomModel(e.target.value); resetTest(); }}
+                placeholder={provider === 'ollama' ? 'e.g. llama3.2 or your local model name' : `Enter the ${providerDef.modelLabel.toLowerCase()} exactly`}
+                className={inputCls}
+              />
+            )}
             <p className="text-xs text-muted-foreground">
-              CRMy does not show a static model list because provider catalogs change frequently. Test verifies the model is reachable and can call tools before saving.
+              Choose a recommended model or enter a custom model ID. Test verifies the model is reachable and can call tools before saving.
             </p>
           </div>
 
@@ -541,9 +671,13 @@ export default function AgentSettings() {
               </button>
               <button
                 onClick={handleSaveProvider}
-                disabled={(testStatus !== 'ok' && testStatus !== 'warn') || saveConfig.isPending}
+                disabled={(testStatus !== 'ok' && testStatus !== 'warn') || !backupReady || saveConfig.isPending}
                 className={primaryBtn}
-                title={(testStatus !== 'ok' && testStatus !== 'warn') ? 'Run a successful connection test first' : undefined}
+                title={(testStatus !== 'ok' && testStatus !== 'warn')
+                  ? 'Run a successful connection test first'
+                  : !backupReady
+                    ? 'Finish backup provider settings or disable backup'
+                    : undefined}
               >
                 {saveConfig.isPending ? 'Saving…' : 'Save and enable'}
               </button>
@@ -572,6 +706,148 @@ export default function AgentSettings() {
               <p className="text-xs text-muted-foreground">
                 Test your connection before saving to confirm the key works.
               </p>
+            )}
+          </div>
+
+          {/* Backup provider */}
+          <div className="py-4 space-y-3">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-foreground">Backup provider</p>
+                <p className="text-xs text-muted-foreground">
+                  Optional failover when the primary model provider is unavailable.
+                </p>
+              </div>
+              <Switch
+                checked={backupEnabled}
+                onCheckedChange={(value) => { setBackupEnabled(value); resetBackupTest(); }}
+              />
+            </div>
+
+            {backupEnabled && (
+              <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Provider</label>
+                    <Select
+                      value={backupProvider}
+                      onValueChange={(v) => handleBackupProviderChange(v as ProviderId)}
+                    >
+                      <SelectTrigger className="w-full h-9 text-sm">
+                        <SelectValue placeholder="Select backup provider…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PROVIDERS.map(p => (
+                          <SelectItem key={p.id} value={p.id}>
+                            <span className="flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${p.dotColor}`} />
+                              {p.label}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{backupProviderDef.modelLabel}</label>
+                    {backupProviderDef.models.length > 0 ? (
+                      <Select value={backupModelId} onValueChange={handleBackupModelSelect}>
+                        <SelectTrigger className="w-full h-9 text-sm">
+                          <SelectValue placeholder="Select backup model…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {backupProviderDef.models.map(model => (
+                            <SelectItem key={model.id} value={model.id}>
+                              <span className="flex flex-col">
+                                <span>{model.label}</span>
+                                <span className="text-xs text-muted-foreground">{model.id}</span>
+                              </span>
+                            </SelectItem>
+                          ))}
+                          <SelectItem value={CUSTOM_MODEL_SENTINEL}>Custom model ID…</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    ) : null}
+                    {(backupProviderDef.models.length === 0 || backupModelId === CUSTOM_MODEL_SENTINEL) && (
+                      <input
+                        value={backupModelId === CUSTOM_MODEL_SENTINEL ? backupCustomModel : ''}
+                        onChange={e => { setBackupModelId(CUSTOM_MODEL_SENTINEL); setBackupCustomModel(e.target.value); resetBackupTest(); }}
+                        placeholder={`Enter the ${backupProviderDef.modelLabel.toLowerCase()} exactly`}
+                        className={inputCls}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Base URL</label>
+                  <input
+                    value={backupBaseUrl}
+                    onChange={e => { setBackupBaseUrl(e.target.value); resetBackupTest(); }}
+                    placeholder={backupProviderDef.baseUrlPlaceholder || backupProviderDef.baseUrl || 'https://…'}
+                    className={inputCls}
+                  />
+                  <p className="text-xs text-muted-foreground">{backupProviderDef.setupHint}</p>
+                </div>
+
+                {backupProviderDef.requiresKey ? (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{backupProviderDef.keyLabel}</label>
+                      {backupKeyConfigured && !backupApiKey && (
+                        <span className="text-xs text-muted-foreground">
+                          Enter a new key to replace the stored one
+                        </span>
+                      )}
+                    </div>
+                    <input
+                      type="password"
+                      value={backupApiKey}
+                      onChange={e => { setBackupApiKey(e.target.value); resetBackupTest(); }}
+                      placeholder={backupKeyPlaceholder}
+                      className={inputCls}
+                      autoComplete="new-password"
+                    />
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground italic">
+                    Add a backup API key only if this endpoint requires one.
+                  </p>
+                )}
+
+                <div className="space-y-2">
+                  <button
+                    onClick={handleTestBackupConnection}
+                    disabled={
+                      backupTestStatus === 'testing'
+                      || !resolvedBackupModel
+                      || !backupBaseUrl
+                      || (backupProviderDef.requiresKey && !backupKeyConfigured && !backupApiKey.trim())
+                    }
+                    className={ghostBtn}
+                  >
+                    {backupTestStatus === 'testing' ? 'Testing backup…' : 'Test backup'}
+                  </button>
+                  {backupTestStatus === 'ok' && (
+                    <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Backup connection and tool calling verified.</span>
+                    </div>
+                  )}
+                  {backupTestStatus === 'warn' && (
+                    <div className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-300">
+                      <TriangleAlert className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                      <span>{backupTestError || 'Backup connection works, but tool calling could not be verified.'}</span>
+                    </div>
+                  )}
+                  {backupTestStatus === 'fail' && (
+                    <div className="flex items-start gap-1.5 text-xs text-destructive">
+                      <XCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                      <span>{backupTestError || 'Backup connection failed.'}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </div>

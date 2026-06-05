@@ -184,7 +184,21 @@ What `init --yes` does:
 3. Runs migrations.
 4. Creates the first owner account.
 5. Writes local CLI and MCP config.
-6. Seeds demo data so the examples below work immediately.
+6. Configures the Workspace Agent automatically when local Ollama is running with an installed model.
+7. Seeds demo data so the examples below work immediately.
+
+To configure a provider during non-interactive init, set:
+
+```bash
+export CRMY_AGENT_PROVIDER=openai        # also supports azure_openai, google_gemini, aws_bedrock, mistral, litellm, databricks, nvidia_nim
+export CRMY_AGENT_MODEL=gpt-5.2
+export CRMY_AGENT_API_KEY=sk-...         # not required for Ollama
+# export CRMY_AGENT_BASE_URL=https://api.openai.com/v1
+```
+
+Supported Workspace Agent providers are centrally maintained and shared by the web UI and CLI: Anthropic, OpenAI, Azure OpenAI, Google Gemini, Amazon Bedrock, Mistral, LiteLLM Proxy, OpenRouter, Ollama, Databricks AI Gateway, NVIDIA NIM, and other OpenAI-compatible endpoints.
+
+Interactive `crmy init` detects Ollama first. If Ollama is unavailable, or you choose not to use it, the wizard prompts for the same centrally maintained provider/model options shown in the web Model Settings page. Backup provider failover is configured later in **Settings → Model**; it is intentionally not part of the first-run CLI path.
 
 Prefer interactive setup?
 
@@ -212,6 +226,7 @@ npx -y @crmy/cli context signals
 npx -y @crmy/cli context lineage --subject "account:Northstar Labs"
 npx -y @crmy/cli hitl list
 npx -y @crmy/cli agent-smoke
+npx -y @crmy/cli agent-smoke --with-model   # proves model-backed Raw Context extraction when configured
 ```
 
 You should see:

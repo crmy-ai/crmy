@@ -8,6 +8,7 @@ import { enforceToolScopes } from '../auth/scopes.js';
 import { decrypt } from './crypto.js';
 import { callAnthropic } from './providers/anthropic.js';
 import { callOpenAICompat } from './providers/openai-compat.js';
+import { backupRuntimeConfig, providerUsesAnthropicFormat } from './provider-utils.js';
 import { logToolCall } from '../db/repos/agent-activity.js';
 import { needsCompaction, compactHistory } from './compaction.js';
 import type {
@@ -842,30 +843,53 @@ export async function runAgentTurn(
     const turnId = crypto.randomUUID();
     let result: { content: string; tool_calls: ToolCallRecord[] };
 
-    try {
-      if (config.provider === 'anthropic') {
+    const callModelOnce = async (
+      runtimeConfig: AgentConfig,
+      runtimeApiKey: string,
+    ): Promise<{ content: string; tool_calls: ToolCallRecord[] }> => {
+      if (providerUsesAnthropicFormat(runtimeConfig.provider)) {
         result = await callAnthropic(
           history,
           toolDefs,
-          config,
-          apiKey,
+          runtimeConfig,
+          runtimeApiKey,
           (text) => onEvent({ type: 'delta', content: text }),
           // Emit reasoning blocks with the current turn_id so the UI can group
           // thinking with the tool calls that follow it in the same round.
           (text) => onEvent({ type: 'thinking', content: text, turn_id: turnId }),
           { abortSignal: opts?.abortSignal },
         );
+        return result;
       } else {
-        // OpenAI-compatible providers (OpenAI, OpenRouter, Ollama, custom)
+        // OpenAI-compatible providers and gateways.
         // Thinking/reasoning is not supported — onThinking is a no-op for these.
         result = await callOpenAICompat(
           history,
           toolDefs,
-          config,
-          apiKey || null,
+          runtimeConfig,
+          runtimeApiKey || null,
           (text) => onEvent({ type: 'delta', content: text }),
           { abortSignal: opts?.abortSignal },
         );
+        return result;
+      }
+    };
+
+    try {
+      try {
+        result = await callModelOnce(config, apiKey);
+      } catch (primaryErr) {
+        const backup = backupRuntimeConfig(config);
+        if (!backup || opts?.abortSignal?.aborted) throw primaryErr;
+        const backupApiKey = backup.api_key_enc ? decrypt(backup.api_key_enc).trim() : '';
+        onEvent({
+          type: 'tool_status',
+          id: 'model-failover',
+          name: 'model_failover',
+          status: 'Primary model unavailable, using backup provider',
+          turn_id: turnId,
+        });
+        result = await callModelOnce(backup, backupApiKey);
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'LLM call failed';

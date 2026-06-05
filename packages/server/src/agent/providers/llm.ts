@@ -15,12 +15,19 @@
  *
  * Provider routing:
  *   anthropic                → POST /messages (Anthropic format, x-api-key header)
- *   openai | openrouter |
- *   ollama | custom          → POST /chat/completions (OpenAI-compat, Bearer header)
+ *   all other configured providers → OpenAI-compatible Chat Completions with
+ *                                    provider-specific base URL/header hints
  */
 
 import type { DbPool } from '../../db/pool.js';
 import { CrmyError } from '@crmy/shared';
+import type { AgentConfig } from '../types.js';
+import {
+  backupRuntimeConfig,
+  buildOpenAICompatibleHeaders,
+  chatCompletionsUrl,
+  providerUsesAnthropicFormat,
+} from '../provider-utils.js';
 
 /** Default timeout for background LLM calls (30 seconds). */
 const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? 30_000);
@@ -86,28 +93,45 @@ export async function callLLM(
   const maxTokens = opts.maxTokens ?? 1024;
   const timeoutMs = opts.timeoutMs ?? LLM_TIMEOUT_MS;
 
-  if (!config || config.provider === 'anthropic') {
-    return callAnthropicSync(
+  const callConfigured = async (runtimeConfig: AgentConfig | null): Promise<string> => {
+    if (!runtimeConfig || providerUsesAnthropicFormat(runtimeConfig.provider)) {
+      return callAnthropicSync(
+        opts.system,
+        opts.user,
+        runtimeConfig?.model ?? model,
+        runtimeConfig?.base_url ?? 'https://api.anthropic.com/v1',
+        runtimeConfig ? await resolveApiKey(runtimeConfig) : (process.env.ANTHROPIC_API_KEY ?? ''),
+        maxTokens,
+        timeoutMs,
+      );
+    }
+
+    return callOpenAICompatSync(
       opts.system,
       opts.user,
-      model,
-      config?.base_url ?? 'https://api.anthropic.com/v1',
-      config ? await resolveApiKey(config) : (process.env.ANTHROPIC_API_KEY ?? ''),
+      runtimeConfig.model,
+      runtimeConfig.base_url,
+      await resolveApiKey(runtimeConfig),
       maxTokens,
       timeoutMs,
+      opts.responseFormat,
+      runtimeConfig.provider,
     );
-  }
+  };
 
-  return callOpenAICompatSync(
-    opts.system,
-    opts.user,
-    model,
-    config.base_url,
-    await resolveApiKey(config),
-    maxTokens,
-    timeoutMs,
-    opts.responseFormat,
-  );
+  try {
+    return await callConfigured(config);
+  } catch (err) {
+    const backup = config ? backupRuntimeConfig(config) : null;
+    if (!backup) throw err;
+    try {
+      return await callConfigured(backup);
+    } catch (backupErr) {
+      const primaryMessage = err instanceof Error ? err.message : 'primary provider failed';
+      const backupMessage = backupErr instanceof Error ? backupErr.message : 'backup provider failed';
+      throw new Error(`Primary LLM failed: ${primaryMessage}. Backup LLM failed: ${backupMessage}`);
+    }
+  }
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -172,10 +196,11 @@ async function callOpenAICompatSync(
   maxTokens: number,
   timeoutMs: number,
   responseFormat?: 'json_object',
+  provider = 'custom',
 ): Promise<string> {
-  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+  const url = chatCompletionsUrl(normalizedBaseUrl);
+  const headers = buildOpenAICompatibleHeaders(provider, normalizedBaseUrl, apiKey);
 
   const body: Record<string, unknown> = {
     model,

@@ -28,6 +28,18 @@ CRMy should stay lifecycle-first. New features should make it easier to understa
 
 When in doubt, ask: does this help a user understand or move the source-to-action lifecycle forward?
 
+## Engine Guardrails
+
+- Keep Raw Context, Signals, Memory, Active Context, Handoffs, writebacks, receipts, and audit events as separate lifecycle states.
+- Validate runtime data at the edge: REST, MCP, webhooks, providers, syncs, emails, calendars, files, and LLM output.
+- Scope every read and write by tenant, actor, role, owner visibility, and tool permissions.
+- Keep provider-specific behavior in provider adapters; the core engine should consume CRMy-shaped data.
+- Keep durable invariants in PostgreSQL: idempotency, uniqueness, current/stale state, row versions, replay safety, and transaction boundaries.
+- Route external writes through preview, policy checks, allowed-field checks, approval when required, idempotency, execution receipts, and audit.
+- Preserve Lineage whenever source material becomes Signals, Memory, Handoffs, writebacks, or operator-facing recovery state.
+- Keep user-facing contracts stable across REST, CLI, MCP, and Web UI surfaces.
+- Split edge parsing, domain decisions, persistence, provider adapters, and presentation when one unit starts crossing too many boundaries.
+
 ## Navigation Rules
 
 - Keep primary navigation focused on the surfaces users visit daily.

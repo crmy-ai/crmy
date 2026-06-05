@@ -4,7 +4,7 @@ Thanks for your interest in contributing to CRMy! This guide will help you get o
 
 ## What CRMy needs most from contributors
 
-CRMy's differentiator is the core context engine: messy customer source material becomes Signals, trusted Memory, scoped briefings, governed Handoffs, writeback receipts, and audit/Lineage. The highest-value community contributions are the ones that prove this loop under real-world conditions.
+CRMy's differentiator is the core context engine: messy customer source material becomes Signals, confirmed Memory, scoped briefings, governed Handoffs, writeback receipts, and audit/Lineage. The highest-value community contributions are the ones that prove this loop under real-world conditions.
 
 The most useful contributions right now are:
 
@@ -42,6 +42,20 @@ CRMy is a TypeScript monorepo with the following packages:
 | `packages/cli` | `@crmy/cli` | Local CLI + stdio MCP server |
 | `packages/web` | `@crmy/web` | React SPA served at `/app` |
 | `packages/openclaw-plugin` | `@crmy/openclaw-plugin` | Plugin for OpenClaw integration |
+
+## Engine guardrails
+
+The engine should keep clear boundaries between source material, inferred claims, confirmed customer context, model-visible working context, governed action, and proof. When adding features or changing behavior, preserve these guardrails:
+
+1. **Keep lifecycle states distinct.** Raw Context is source material before extraction. Signals are inferred claims with evidence and readiness. Memory is confirmed operational customer context. Active Context is temporary model-visible context assembled for an agent turn. Handoffs, writebacks, receipts, and audit events record governed action.
+2. **Validate at every external boundary.** REST payloads, MCP tool input, webhooks, provider responses, CRM/warehouse sync data, email/calendar data, file extraction output, and LLM output enter as runtime data. Parse and validate them at the edge before passing domain-shaped values deeper into the engine.
+3. **Scope every operation.** Reads and writes must remain tenant-scoped and actor-scoped. UI visibility is not enough; REST handlers, MCP tools, services, repositories, background workers, and workflow actions must preserve `tenant_id`, actor role, owner visibility, and tool scopes.
+4. **Keep API and tool contracts stable.** REST, CLI, MCP, and web UI surfaces can share behavior, but each boundary should expose explicit input/output contracts. Do not leak provider quirks, SQL rows, private IDs, or internal retry state into user-facing contracts unless the contract is specifically for operators.
+5. **Put durability in Postgres.** TypeScript should model intent, but migrations and queries must enforce idempotency, uniqueness, current/stale state, row versions, replay safety, and transactional invariants.
+6. **Keep provider details in adapters.** LLM providers, embedding providers, email providers, calendar providers, CRMs, warehouses, and OpenAI-compatible gateways should normalize into CRMy shapes before the core engine consumes them.
+7. **Govern external writes.** System-of-record changes need preview, allowed-field checks, source-authority checks, approval when required, idempotency, execution receipts, and audit events. Workflow or agent convenience should not bypass this path.
+8. **Preserve Lineage.** If a feature creates, changes, dismisses, supersedes, or writes customer context, keep enough source references, evidence, receipt data, and audit metadata for an operator to reconstruct what happened.
+9. **Avoid boundary collapse.** A function that validates loose input, checks auth, runs SQL, calls a provider, mutates external systems, and formats UI output is doing too much. Split edge parsing, domain decisions, persistence, provider adapters, and presentation into separate units.
 
 ### MCP tools
 

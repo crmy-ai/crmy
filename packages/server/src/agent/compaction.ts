@@ -32,6 +32,7 @@ import type { ConversationMessage, AgentConfig } from './types.js';
 import { callAnthropic } from './providers/anthropic.js';
 import { callOpenAICompat } from './providers/openai-compat.js';
 import { decrypt } from './crypto.js';
+import { backupRuntimeConfig, providerUsesAnthropicFormat } from './provider-utils.js';
 
 // ── Thresholds ────────────────────────────────────────────────────────────────
 
@@ -182,34 +183,46 @@ async function summarise(
 
   // Lightweight call: low token budget, no tools.
   const compactConfig: AgentConfig = { ...config, max_tokens_per_turn: 1000 };
-  const apiKey = config.api_key_enc ? decrypt(config.api_key_enc).trim() : '';
+  const apiKey = compactConfig.api_key_enc ? decrypt(compactConfig.api_key_enc).trim() : '';
 
   let summaryText = '';
-  try {
-    if (config.provider === 'anthropic') {
-      // Thinking explicitly disabled — no reasoning budget needed for summarisation.
+  const callSummaryModel = async (runtimeConfig: AgentConfig, runtimeApiKey: string) => {
+    if (providerUsesAnthropicFormat(runtimeConfig.provider)) {
       const result = await callAnthropic(
         summaryHistory,
         [],            // no tools needed for summarisation
-        compactConfig,
-        apiKey,
+        runtimeConfig,
+        runtimeApiKey,
         (delta) => { summaryText += delta; },
         undefined,                  // no thinking callback
         { enableThinking: false },  // never use reasoning budget here
       );
       return result.content || summaryText;
-    } else {
-      // OpenAI-compatible path (OpenAI, OpenRouter, Ollama, custom)
-      const result = await callOpenAICompat(
-        summaryHistory,
-        [],
-        compactConfig,
-        apiKey || null,
-        (delta) => { summaryText += delta; },
-      );
-      return result.content || summaryText;
     }
+
+    const result = await callOpenAICompat(
+      summaryHistory,
+      [],
+      runtimeConfig,
+      runtimeApiKey || null,
+      (delta) => { summaryText += delta; },
+    );
+    return result.content || summaryText;
+  };
+
+  try {
+    return await callSummaryModel(compactConfig, apiKey);
   } catch {
+    const backup = backupRuntimeConfig(compactConfig);
+    if (backup) {
+      try {
+        summaryText = '';
+        const backupApiKey = backup.api_key_enc ? decrypt(backup.api_key_enc).trim() : '';
+        return await callSummaryModel({ ...backup, max_tokens_per_turn: 1000 }, backupApiKey);
+      } catch {
+        // Fall through to deterministic summary.
+      }
+    }
     return buildFallbackSummary(messages);
   }
 }

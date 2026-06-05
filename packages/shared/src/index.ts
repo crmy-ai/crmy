@@ -4,4 +4,5 @@
 export * from './types.js';
 export * from './schemas.js';
 export * from './errors.js';
+export * from './agent-providers.js';
 export type { DuplicateCandidate } from './errors.js';

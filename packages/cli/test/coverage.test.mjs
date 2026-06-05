@@ -85,11 +85,49 @@ test('agent harness setup avoids npx prompts and includes systems scopes', async
   const guide = await read('docs/guide.md');
   const initSource = await read('packages/cli/src/commands/init.ts');
   const doctorSource = await read('packages/cli/src/commands/doctor.ts');
+  const providerSource = await read('packages/shared/src/agent-providers.ts');
+  const webProviderSource = await read('packages/web/src/lib/agentProviders.ts');
   assert.match(readme, /npx -y @crmy\/cli mcp/);
   assert.match(guide, /npx -y @crmy\/cli mcp/);
   assert.match(initSource, /systems:read,systems:write,systems:admin/);
+  assert.match(initSource, /chooseAgentSetup/);
+  assert.match(initSource, /CRMY_AGENT_PROVIDER/);
+  assert.match(doctorSource, /Workspace Agent online/);
   assert.match(doctorSource, /CRMY_API_KEY is valid for this workspace/);
   assert.match(doctorSource, /does not match this database/);
+  assert.match(providerSource, /export const PROVIDERS/);
+  for (const provider of [
+    'azure_openai',
+    'google_gemini',
+    'aws_bedrock',
+    'mistral',
+    'litellm',
+    'openrouter',
+    'ollama',
+    'databricks',
+    'nvidia_nim',
+    'custom',
+  ]) {
+    assert.match(providerSource, new RegExp(`id: '${provider}'`));
+  }
+  assert.match(webProviderSource, /from '@crmy\/shared'/);
+});
+
+test('workspace agent provider catalog and backup config stay wired', async () => {
+  const providerSource = await read('packages/shared/src/agent-providers.ts');
+  const routeSource = await read('packages/server/src/agent/routes.ts');
+  const typeSource = await read('packages/server/src/agent/types.ts');
+  const engineSource = await read('packages/server/src/agent/engine.ts');
+  const webSource = await read('packages/web/src/pages/AgentSettings.tsx');
+  const migrationSource = await read('packages/server/migrations/069_agent_backup_provider.sql');
+
+  assert.match(providerSource, /runtime: 'openai-compatible'/);
+  assert.match(routeSource, /backup_api_key_enc/);
+  assert.match(routeSource, /target === 'backup'/);
+  assert.match(typeSource, /backup_enabled: boolean/);
+  assert.match(engineSource, /backupRuntimeConfig/);
+  assert.match(webSource, /Backup provider/);
+  assert.match(migrationSource, /backup_provider TEXT/);
 });
 
 test('agent smoke command exercises the one-minute MCP tool path', async () => {
@@ -100,6 +138,9 @@ test('agent smoke command exercises the one-minute MCP tool path', async () => {
   for (const tool of ['customer_record_resolve', 'briefing_get', 'context_signal_group_list']) {
     assert.match(smokeSource, new RegExp(`['"]${tool}['"]`));
   }
+  assert.match(smokeSource, /context_ingest_auto/);
+  assert.match(smokeSource, /withModel/);
   assert.match(mcpSource, /command\('doctor'\)/);
+  assert.match(mcpSource, /with-model/);
   assert.match(smokeSource, /Northstar Labs/);
 });

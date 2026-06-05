@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentConfig, ConversationMessage, AgentToolDef, ToolCallRecord } from '../types.js';
+import { buildOpenAICompatibleHeaders, chatCompletionsUrl } from '../provider-utils.js';
 
 const AGENT_STREAM_TIMEOUT_MS = Number(process.env.AGENT_STREAM_TIMEOUT_MS ?? 120_000);
 
@@ -20,7 +21,7 @@ function timeoutSignal(timeoutMs = AGENT_STREAM_TIMEOUT_MS, externalSignal?: Abo
 }
 
 /**
- * Call any OpenAI-compatible API (OpenAI, OpenRouter, Ollama, custom gateways)
+ * Call any OpenAI-compatible API or gateway configured in the shared provider catalog
  * with streaming. Uses raw fetch — no SDK dependency.
  */
 export async function callOpenAICompat(
@@ -50,16 +51,8 @@ export async function callOpenAICompat(
   if (openaiTools) body.tools = openaiTools;
 
   const baseUrl = config.base_url.replace(/\/+$/, '');
-  const url = `${baseUrl}/chat/completions`;
-
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-  // OpenRouter requires HTTP-Referer to identify the calling app
-  if (baseUrl.includes('openrouter.ai')) {
-    headers['HTTP-Referer'] = 'https://github.com/crmy-dev/crmy';
-    headers['X-Title'] = 'CRMy';
-  }
+  const url = chatCompletionsUrl(baseUrl);
+  const headers = buildOpenAICompatibleHeaders(config.provider, baseUrl, apiKey ?? '');
 
   const timeout = timeoutSignal(AGENT_STREAM_TIMEOUT_MS, opts?.abortSignal);
   try {

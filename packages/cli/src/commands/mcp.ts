@@ -42,6 +42,7 @@ Agent guidance:
     .description('Verify the one-minute MCP agent demo path against seeded data')
     .option('--account <name>', 'Demo account name to resolve', 'Northstar Labs')
     .option('--signal-limit <n>', 'Signals to request from context_signal_group_list', '5')
+    .option('--with-model', 'Also ingest a small Raw Context source through the configured Workspace Agent model')
     .option('--config <path>', 'Explicit path to a .crmy.json config file')
     .option('--json', 'Print machine-readable JSON')
     .action(async (opts) => {
@@ -49,6 +50,7 @@ Agent guidance:
       await runAgentSmoke({
         account: opts.account,
         signalLimit: Number.isFinite(signalLimit) ? signalLimit : 5,
+        withModel: Boolean(opts.withModel),
         config: opts.config,
         json: Boolean(opts.json),
       });

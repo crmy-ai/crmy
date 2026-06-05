@@ -13,7 +13,12 @@
     "sourceMap": true,
     "outDir": "dist",
     "rootDir": ".",
-    "composite": true
+    "composite": true,
+    "baseUrl": ".",
+    "paths": {
+      "@crmy/shared": ["packages/shared/src/index.ts"],
+      "@crmy/server": ["packages/server/src/index.ts"]
+    }
   },
   "references": [
     { "path": "./packages/shared" },
