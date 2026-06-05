@@ -8,7 +8,7 @@ import * as path from 'node:path';
 import crypto from 'node:crypto';
 import type { DbPool } from '../db/pool.js';
 import type { ActorContext, UUID } from '@crmy/shared';
-import { CrmyError, workflowAction } from '@crmy/shared';
+import { CrmyError, actionContextGet, workflowAction } from '@crmy/shared';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as accountRepo from '../db/repos/accounts.js';
 import * as oppRepo from '../db/repos/opportunities.js';
@@ -115,6 +115,19 @@ function safeInternalDetail(err: unknown): string {
 function handleError(res: Response, err: unknown): void {
   if (err instanceof CrmyError) {
     res.status(err.status).json(err.toJSON());
+    return;
+  }
+  if (err instanceof z.ZodError) {
+    res.status(422).json({
+      type: 'https://crmy.ai/errors/validation_error',
+      title: 'Validation Error',
+      status: 422,
+      detail: 'Request validation failed',
+      errors: err.issues.map(issue => ({
+        field: issue.path.join('.'),
+        message: issue.message,
+      })),
+    });
     return;
   }
   res.status(500).json({
@@ -2685,6 +2698,15 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.post('/context/signal-groups/:id/complete-details', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'context_signal_group_complete_details');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   router.post('/context/signal-groups/:id/reject', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
@@ -3136,6 +3158,15 @@ export function apiRouter(db: DbPool): Router {
   });
 
   // --- Briefing ---
+  router.post('/action-context', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'action_context_get');
+      const result = await handler(actionContextGet.parse(req.body ?? {}), actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   router.get('/briefing/:subject_type/:subject_id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);

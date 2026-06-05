@@ -137,7 +137,7 @@ crmy context signal-groups
 crmy hitl list
 ```
 
-In the web UI, open `/app` and follow **Raw Context → Signals → Memory → Handoffs**. The seeded Northstar Labs workflow shows a GTM agent path end to end: messy customer context is processed into Signals, trusted items become Memory, risky decisions route to Handoffs, and system-of-record writeback remains governed.
+In the web UI, open `/app` and follow **Raw Context → Signals → Memory → Handoffs**. The seeded Northstar Labs workflow shows a GTM agent path end to end: messy customer context is processed into Signals, confirmed items become Memory, risky decisions route to Handoffs, and system-of-record writeback remains governed.
 
 For role-scoped QA, demo data also creates sample users:
 
@@ -560,7 +560,7 @@ The Context page is the dedicated workspace for the customer-context lifecycle. 
 - **Raw Context tab**: source volume and recent processing outcomes across activities, inbound/outbound emails, Add Context imports, Systems of Record sync runs, MCP/REST/CLI context writes, and future source types
 - **Signals tab**: inferred customer claims that need confirmation, dismissal, more evidence, or Handoff review before agents rely on them
 - **Memory tab**: confirmed operational customer context agents retrieve into Active Context through briefings and search
-- **Lineage tab**: source-to-action timeline showing how Raw Context produced Signals, trusted Memory, handoffs, writebacks, and audit history
+- **Lineage tab**: source-to-action timeline showing how Raw Context produced Signals, confirmed Memory, handoffs, writebacks, and audit history
 - **Sources action**: secondary link for choosing how context enters CRMy: Add Context, MCP/API, Customer Email, and Customer Activity
 - **Graph action**: secondary link for record-centered exploration of related records, Current Memory, recent activity, and open handoffs
 - **Dual search modes**: keyword (full-text, client-side) and **semantic** (pgvector similarity). The toggle sits inline in the search bar. If semantic search is unavailable, it falls back to keyword automatically with a warning banner. Admins enable semantic retrieval in Database Settings by using a pgvector-capable database, setting `ENABLE_PGVECTOR=true`, and adding `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` to the server environment.
@@ -653,7 +653,7 @@ CRMy separates the model's temporary working set from persistent customer Memory
 - **Active Context** is the working desk: the current prompt, conversation, bound record, retrieved briefing, tool results, and any loaded source material visible to the model in this task. It is ephemeral and limited by the model's context window.
 - **Memory** is the filing cabinet: confirmed typed customer context that survives across sessions, carries evidence and lifecycle state, and can be retrieved for future agent work.
 - **Raw Context** is incoming source material before extraction: calls, emails, transcripts, notes, systems-of-record updates, documents, and MCP/REST/CLI inputs.
-- **Signals** are inferred, evidence-backed claims from Raw Context. Trusted Signals become Memory; uncertain or risky Signals stay separate or route to Handoffs.
+- **Signals** are inferred, evidence-backed claims from Raw Context. Confirmed Signals become Memory; uncertain or risky Signals stay separate or route to Handoffs.
 
 The normal flow is:
 
@@ -1312,7 +1312,7 @@ Returns:
 ```json
 {
   "subjects_resolved": [
-    { "entity_type": "account", "id": "...", "name": "Northstar Labs", "confidence": "high", "entries_created": 3, "memory_created": 2, "signals_created": 1, "activity_id": "...", "processing_receipt": { "status": "needs_review", "next_action": "Review Signals and promote trusted items to Memory." } },
+    { "entity_type": "account", "id": "...", "name": "Northstar Labs", "confidence": "high", "entries_created": 3, "memory_created": 2, "signals_created": 1, "activity_id": "...", "processing_receipt": { "status": "needs_review", "next_action": "Review Signals and confirm ready items as Memory." } },
     { "entity_type": "contact", "id": "...", "name": "Jane Smith", "confidence": "medium", "entries_created": 2, "memory_created": 0, "signals_created": 2, "activity_id": "...", "processing_receipt": { "status": "needs_review" } }
   ],
   "entries_created": 5,
@@ -1368,7 +1368,7 @@ Returns:
 | `context_signal_group_list` | List corroborated Signal claims with aggregate confidence, support count, source count, status, and conflict state. |
 | `context_signal_group_get` | Inspect one corroborated Signal with supporting/conflicting evidence. |
 | `context_lineage_get` | Trace Raw Context through Signals, Memory, Handoffs, writebacks, and audit events. |
-| `context_signal_group_promote` | Promote a trusted corroborated Signal into Current Memory. |
+| `context_signal_group_promote` | Confirm a corroborated Signal into Current Memory. |
 | `context_signal_handoff` | Route a Signal to Handoff when policy, conflict, or risk requires human review before promotion. |
 | `context_signal_group_reject` | Dismiss a corroborated Signal while preserving evidence for audit. |
 | `context_signal_promote` | Promote a reviewed Signal into Current Memory |
@@ -2929,7 +2929,7 @@ Base URL: `/api/v1`
 | POST | `/context/raw-sources/:id/reprocess` | Retry or reprocess a Raw Context source |
 | GET | `/context/signal-groups` | List grouped Signals and readiness state |
 | GET | `/context/signal-groups/:id` | Inspect a Signal group with evidence |
-| POST | `/context/signal-groups/:id/promote` | Confirm a trusted Signal as Memory |
+| POST | `/context/signal-groups/:id/promote` | Confirm a Signal as Memory |
 | POST | `/context/signal-groups/:id/handoff` | Send a Signal to Handoff review |
 | POST | `/context/signal-groups/:id/reject` | Dismiss a Signal while preserving audit |
 | GET | `/context/lineage` | Trace Raw Context through Signals, Memory, Handoffs, writebacks, and audit |

@@ -8,6 +8,7 @@ import {
   contextSearch, contextReview, contextStaleList, briefingGet,
   contextDiff, contextIngest, contextSemanticSearch, contextEmbedBackfill,
   contextSignalPromote, contextSignalReject, contextLineageGet,
+  contextSignalGroupCompleteDetails, contextSignalGroupHandoff,
 } from '@crmy/shared';
 import { resolveSubjectGraph } from '../../services/subject-graph-resolver.js';
 import { loadEmbeddingConfig, embedText } from '../../agent/providers/embeddings.js';
@@ -35,7 +36,8 @@ import { consolidateContextEntries } from '../../services/consolidation.js';
 import { checkContextConvergence } from '../../services/context-convergence.js';
 import { createContradictionReviewAssignments } from '../../services/context-review-assignments.js';
 import { assertActionPolicyAllowsMutation, evaluateActionPolicy } from '../../services/action-policy.js';
-import { attachSignalToGroup, createSignalGroupHandoff, dismissSignalGroup, promoteSignalGroup } from '../../services/signal-groups.js';
+import { attachSignalToGroup, completeSignalGroupDetails, createSignalGroupHandoff, dismissSignalGroup, promoteSignalGroup } from '../../services/signal-groups.js';
+import { withSignalReadiness } from '../../services/signal-readiness.js';
 import { ensureActorRecordForContext, resolveActorRecordId } from '../../services/actor-identity.js';
 import { assertActivityAccess, assertSubjectAccess, resolveOwnerFilter } from '../../services/access-control.js';
 import { runIdempotent } from '../../db/repos/idempotency.js';
@@ -115,7 +117,7 @@ function processingNextAction(input: {
   skipped?: number;
 }): string {
   if (input.status === 'failed') return 'Review the failure reason, fix the source or setup issue, then ingest again.';
-  if (input.signals_created && input.signals_created > 0) return 'Review Signals and promote trusted items to Memory.';
+  if (input.signals_created && input.signals_created > 0) return 'Review Signals and promote confirmed items to Memory.';
   if (input.memory_created && input.memory_created > 0) return 'View Memory or ask for a briefing.';
   if (input.skipped && input.skipped > 0) return 'Add more customer-specific detail or resolve the subject, then ingest again.';
   return 'No action needed.';
@@ -356,7 +358,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             candidates: convergence.candidates,
             bypassed: input.allow_similar && convergence.candidates.length > 0,
           },
-          ...(signal_group_result ? { signal_group: signal_group_result.signal_group } : {}),
+          ...(signal_group_result ? { signal_group: withSignalReadiness(signal_group_result.signal_group) } : {}),
           ...(validation_warnings.length > 0 ? { validation_warnings } : {}),
         };
         });
@@ -399,7 +401,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_raw_source_list',
       tier: 'core',
-      description: 'List Raw Context processing records. Use this to see where context came from, whether source material was processed, how many Signals or Memory entries it produced, and what failed or needs review. This is the best tool for agents and operators to inspect ingestion receipts before deciding whether to retry, review Signals, or trust Memory.',
+      description: 'List Raw Context processing records. Use this to see where context came from, whether source material was processed, how many Signals or Memory entries it produced, and what failed or needs review. This is the best tool for agents and operators to inspect ingestion receipts before deciding whether to retry, review Signals, or rely on confirmed Memory.',
       inputSchema: z.object({
         source_type: z.string().optional().describe('Filter by source type such as activity, add_context, email_inbound, mcp, context_api, crm_sync, or warehouse_sync'),
         status: z.enum(['pending', 'processing', 'processed', 'needs_review', 'failed', 'skipped']).optional(),
@@ -714,7 +716,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         }
         const ownerIds = await visibleOwnerIds(db, actor);
         const result = await signalGroupRepo.listSignalGroups(db, actor.tenant_id, { ...input, query: input.q, owner_ids: ownerIds });
-        return { signal_groups: result.data, data: result.data, next_cursor: result.next_cursor, total: result.total };
+        const data = result.data.map(group => withSignalReadiness(group));
+        return { signal_groups: data, data, next_cursor: result.next_cursor, total: result.total };
       },
     },
     {
@@ -726,7 +729,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
         const group = await signalGroupRepo.getSignalGroup(db, actor.tenant_id, input.id);
         if (!group) throw notFound('Signal', input.id);
         await assertSubjectAccess(db, actor, group.subject_type as SubjectType, group.subject_id);
-        return { signal_group: group };
+        return { signal_group: withSignalReadiness(group) };
       },
     },
     {
@@ -744,7 +747,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'context_signal_group_promote',
       tier: 'core',
-      description: 'Promote a trusted corroborated Signal into Current Memory. This promotes the best supporting Signal, preserves combined evidence, and retires duplicate supporting Signals.',
+      description: 'Promote a corroborated Signal into confirmed Memory. This promotes the best supporting Signal, preserves combined evidence, and retires duplicate supporting Signals.',
       inputSchema: z.object({ id: z.string().uuid(), idempotency_key: z.string().max(128).optional() }),
       handler: async (input: { id: string; idempotency_key?: string }, actor: ActorContext) => {
         return runIdempotent(db, {
@@ -764,6 +767,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           }
           return {
             ...result,
+            signal_group: withSignalReadiness(result.signal_group),
             mutation: mutationReceipt(actor, {
               objectType: 'context_entry',
               objectId: result.context_entry.id,
@@ -774,11 +778,41 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       },
     },
     {
+      name: 'context_signal_group_complete_details',
+      tier: 'core',
+      description: 'Add missing typed Signal details so readiness can be recomputed before confirmation. This updates only the unconfirmed Signal structured_data; it does not edit CRM records, promote Memory, or execute writebacks.',
+      inputSchema: contextSignalGroupCompleteDetails,
+      handler: async (input: z.infer<typeof contextSignalGroupCompleteDetails>, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_signal_group_complete_details',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
+          const group = await signalGroupRepo.getSignalGroup(db, actor.tenant_id, input.id);
+          if (!group) throw notFound('Signal', input.id);
+          await assertSubjectAccess(db, actor, group.subject_type as SubjectType, group.subject_id);
+          const result = await completeSignalGroupDetails(db, actor.tenant_id, input.id, actor, input.structured_data_patch);
+          return {
+            ...result,
+            signal_group: withSignalReadiness(result.signal_group),
+            mutation: mutationReceipt(actor, {
+              objectType: 'signal_group',
+              objectId: result.signal_group.id,
+              eventId: result.event_id,
+              sideEffects: ['signal_group:details_completed', 'search_index:queued'],
+            }),
+          };
+        });
+      },
+    },
+    {
       name: 'context_signal_handoff',
       tier: 'core',
-      description: 'Send a Signal to Handoff for human review when evidence is conflicting, policy-blocked, or not yet trusted enough to become Memory.',
-      inputSchema: z.object({ id: z.string().uuid(), idempotency_key: z.string().max(128).optional() }),
-      handler: async (input: { id: string; idempotency_key?: string }, actor: ActorContext) => {
+      description: 'Send a Signal to Handoff for a named reviewer when evidence is conflicting, policy-blocked, or not ready to become confirmed Memory.',
+      inputSchema: contextSignalGroupHandoff,
+      handler: async (input: z.infer<typeof contextSignalGroupHandoff>, actor: ActorContext) => {
         return runIdempotent(db, {
           tenantId: actor.tenant_id,
           actorId: actor.actor_id,
@@ -790,9 +824,15 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           if (!group) throw notFound('Signal', input.id);
           await assertSubjectAccess(db, actor, group.subject_type as SubjectType, group.subject_id);
           const actorRecordId = await ensureActorRecordForContext(db, actor);
-          const result = await createSignalGroupHandoff(db, actor.tenant_id, input.id, actorRecordId, actor);
+          const result = await createSignalGroupHandoff(db, actor.tenant_id, input.id, actorRecordId, actor, {
+            assigneeActorId: input.assignee_actor_id,
+            reason: input.reason,
+            note: input.note,
+            priority: input.priority,
+          });
           return {
             ...result,
+            signal_group: withSignalReadiness(result.signal_group),
             mutation: mutationReceipt(actor, {
               objectType: 'hitl_request',
               objectId: (result.hitl_request as { id: string }).id,
@@ -826,7 +866,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           const group = await dismissSignalGroup(db, actor.tenant_id, input.id, actorRecordId, input.reason);
           if (!group) throw notFound('Signal', input.id);
           return {
-            signal_group: group,
+            signal_group: withSignalReadiness(group),
             mutation: mutationReceipt(actor, {
               objectType: 'context_entry',
               objectId: input.id,

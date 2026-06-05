@@ -1,5 +1,26 @@
 # crmy.ai MCP Tools Reference
 
+## Start Here
+
+CRMy exposes many tools, but agents should usually connect with scoped credentials so they only see the tools needed for their job. Avoid full admin/operator manifests for ordinary customer workflows.
+
+### tool_guide
+Read-only router for common MCP workflows. Use this when the agent is unsure which CRMy tool path to take.
+- **Input**: `workflow` (`first_steps`, `record_lookup`, `brief_before_action`, `ingest_raw_context`, `review_signals`, `promote_memory`, `customer_outreach`, `record_update`, `systems_writeback`, `ops_recovery`)
+- **Output**: `{ workflow, summary, recommended_tools, avoid_tools, next_step, reminder }`
+
+### guide_search
+Search the CRMy guide for feature, concept, and workflow documentation.
+- **Input**: `query` (required), `section`
+- **Output**: `{ sections, available_sections }`
+
+Common safe paths:
+- **Unknown customer reference**: `customer_record_resolve` → `briefing_get` or `action_context_get`
+- **Raw notes/transcripts/email/research**: `context_ingest_auto` when IDs are unknown, `context_ingest` when subject IDs are known
+- **Before customer-facing action**: `action_context_get` with `proposed_action`
+- **Signal review**: `context_signal_group_list` → `context_signal_group_get` → complete details, handoff, reject, or promote
+- **Operator recovery**: `ops_status_get` or `ops_data_quality_get` first; keep repair tools at `dry_run=true` until confirmed
+
 ## Contact Tools
 
 ### contact_create
@@ -366,13 +387,13 @@ Retry, park, or mark failed a durable async job with an audit entry.
 - **Output**: `{ queue_name, job_id, action, previous_status, new_status, recovered, recovered_at }`
 
 ### ops_data_quality_get ★ 0.7+
-Run data-quality checks for malformed lifecycle/stage values, missing canonical subjects, orphaned actor links, missing search-index rows, and stuck context indexing work.
+Run data-quality checks for malformed lifecycle/stage values, missing canonical subjects, orphaned actor links, missing search-index rows, stuck context indexing work, stale Raw Context processing receipts, retryable Raw Context failures, and stuck Raw Context extraction attempts.
 - **Input**: `sample_limit`, `include_clean`
 - **Output**: `{ generated_at, checks, summary }`
 
 ### ops_data_quality_repair ★ 0.7+
 Repair only deterministic, low-risk data-quality findings. Defaults to dry run.
-- **Input**: `check_name` (`activities_missing_canonical_subject`|`current_context_missing_search_index`|`stuck_context_outbox_processing`), `dry_run`, `limit`
+- **Input**: `check_name` (`activities_missing_canonical_subject`|`current_context_missing_search_index`|`stuck_context_outbox_processing`|`stale_raw_context_sources_processing`|`stuck_raw_context_extraction_attempts_running`|`failed_raw_context_sources_retryable`|`stuck_agent_turns_running`), `dry_run`, `limit`
 - **Output**: `{ check_name, dry_run, action, repaired_count, event_id? }`
 
 ### ops_audit_get ★ 0.7+
@@ -551,9 +572,9 @@ Approve or reject a request.
 
 Use these tools with the Active Context / Memory distinction in mind:
 
-- **Retrieval tools** load persistent Memory and related customer state into the model's temporary Active Context: `briefing_get`, `context_search`, `context_semantic_search`, `context_get`, `context_list`, `context_lineage_get`, and `context_diff`.
+- **Retrieval tools** load persistent Memory and related customer state into the model's temporary Active Context: `action_context_get`, `briefing_get`, `context_search`, `context_semantic_search`, `context_get`, `context_list`, `context_lineage_get`, and `context_diff`.
 - **Ingestion tools** accept Raw Context and let CRMy extract evidence-backed Signals: `context_ingest_auto`, `context_ingest`, and `context_extract`.
-- **Promotion tools** turn trusted Signals into Current Memory: `context_signal_group_promote` and `context_signal_promote`.
+- **Promotion tools** turn confirmed Signals into Current Memory: `context_signal_group_promote` and `context_signal_promote`.
 - **Governance tools** keep Memory safe to act on: Handoff, stale review, rejection, supersession, and review tools.
 
 ### context_add
@@ -593,22 +614,22 @@ Full-text search across Memory by default using PostgreSQL GIN index.
 ### context_signal_group_list
 List corroborated Signals: evidence-backed claims assembled from related Signals.
 - **Input**: `status`, `subject_type`, `subject_id`, `context_type`, `attention_only`, `limit`, `cursor`
-- **Output**: `{ signal_groups, next_cursor, total }`
-- **Use when**: an agent needs to know which inferred claims are ready for Memory, blocked by policy, or challenged by conflicting evidence.
+- **Output**: `{ signal_groups, next_cursor, total }`; each group includes `readiness` with status, reasons, blockers, next actions, score components, and confirmation gates.
+- **Use when**: an agent needs to know which inferred claims are ready for Memory, need evidence/detail, require approval, or are challenged by conflicting evidence.
 
 ### context_signal_group_get
 Inspect one corroborated Signal with supporting/conflicting source evidence.
 - **Input**: `id` (required)
-- **Output**: `{ signal_group }`
+- **Output**: `{ signal_group }`, including full `readiness` details for “why not Memory yet?”
 
 ### context_lineage_get
-Trace Raw Context through Signals, Memory, Handoffs, governed writebacks, and audit events.
+Trace Raw Context through Signals, Memory, Active Context retrievals, Handoffs, governed writebacks, and audit events.
 - **Input**: one of `subject_type` + `subject_id`, `context_entry_id`, `signal_group_id`, or `raw_context_source_id`
 - **Output**: `{ lineage: { nodes, edges, summary } }`
-- **Use when**: an agent needs to explain why a Memory exists, what evidence supports it, whether a human reviewed it, or whether it produced a system-of-record writeback. Lineage is provenance; it is not the same as the model's current Active Context.
+- **Use when**: an agent needs to explain why a Memory exists, what evidence supports it, whether Action Context was assembled before action, whether a human reviewed it, or whether it produced a system-of-record writeback.
 
 ### context_signal_group_promote
-Promote a trusted corroborated Signal into Current Memory.
+Promote a confirmed corroborated Signal into Current Memory.
 - **Input**: `id` (required)
 - **Output**: `{ signal_group, context_entry, mutation }`
 
@@ -690,6 +711,15 @@ Get a unified briefing for any customer record — assembles the record, related
 - **Output (text)**: `{ briefing_text }` — a formatted string ready for prompt injection
 - **Active Context**: this is the main retrieval tool for moving persistent Memory and relevant Signals into the model's current working set before action.
 - **Note**: `token_budget` enables priority-ranked, budget-constrained packing. Entries are scored by `effective_confidence × priority_weight` (with per-type half-life decay) and greedily packed. Pass `context_radius: "adjacent"` or `"account_wide"` to pull in context from related entities. When entries are dropped due to budget exhaustion, `dropped_entries` summarizes what was cut (context_type, title, confidence) so agents can request specific entries via `context_get`.
+
+### action_context_get
+Assess whether a customer record has enough current, confirmed, authorized context for action.
+- **Input**: `subject_type` (required), `subject_id` (required), `since`, `context_types`, `include_stale`, `context_radius`, `token_budget`, `emit_retrieval_event` (default `true`), and optional `proposed_action`
+- **Proposed action types**: `customer_outreach`, `assignment_create`, `memory_promote`, `record_update`, `external_writeback`
+- **Output**: `{ action_context: { briefing, readiness, checks, allowed_actions, required_handoffs, proof } }`
+- **Readiness states**: `ready`, `review_needed`, or `blocked`
+- **Proof**: when `emit_retrieval_event` is true, CRMy records an `action_context.retrieved` event with compact metadata: context IDs, Signal group IDs, stale count, contradiction count, readiness status, risk level, and proposed action type.
+- **Boundary**: this tool does not create activities, promote Memory, update records, create handoffs, or execute writebacks. It only assesses readiness and records retrieval proof.
 
 ## Actor Tools
 

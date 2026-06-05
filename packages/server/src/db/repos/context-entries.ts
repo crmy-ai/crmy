@@ -447,6 +447,29 @@ export async function reviewContextEntry(
 }
 
 /**
+ * Patch typed details on an unconfirmed Signal without promoting it.
+ */
+export async function updateSignalStructuredData(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  structuredData: Record<string, unknown>,
+): Promise<ContextEntry | null> {
+  const result = await db.query(
+    `UPDATE context_entries
+     SET structured_data = $3::jsonb,
+         updated_at = now()
+     WHERE id = $1
+       AND tenant_id = $2
+       AND memory_status = 'signal'
+       AND is_current = true
+     RETURNING *`,
+    [id, tenantId, JSON.stringify(structuredData)],
+  );
+  return (result.rows[0] as ContextEntry) ?? null;
+}
+
+/**
  * Promote an inferred signal into confirmed operational memory.
  */
 export async function promoteSignal(

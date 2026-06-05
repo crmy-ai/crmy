@@ -657,7 +657,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'get', path: '/context/signal-groups',
   tags: ['Context'],
-  summary: 'List grouped Signals',
+  summary: 'List grouped Signals with readiness state',
   security: bearer,
   request: {
     query: z.object({
@@ -693,7 +693,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'get', path: '/context/signal-groups/{id}',
   tags: ['Context'],
-  summary: 'Get a grouped Signal with evidence',
+  summary: 'Get a grouped Signal with evidence and readiness details',
   security: bearer,
   request: { params: idParam },
   responses: { 200: ok(GenericObject), 404: err404 },
@@ -705,6 +705,24 @@ registry.registerPath({
   summary: 'Confirm a grouped Signal as Current Memory',
   security: bearer,
   request: { params: idParam, body: jsonBody(z.object({ idempotency_key: z.string().optional() }), false) },
+  responses: { 200: ok(GenericObject), 400: err400, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/signal-groups/{id}/complete-details',
+  tags: ['Context'],
+  summary: 'Add missing typed Signal details and recompute readiness',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(Req.ContextSignalGroupCompleteDetails) },
+  responses: { 200: ok(GenericObject), 400: err400, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/signal-groups/{id}/handoff',
+  tags: ['Context'],
+  summary: 'Send a grouped Signal to an explicit Handoff reviewer',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(Req.ContextSignalGroupHandoff, false) },
   responses: { 200: ok(GenericObject), 400: err400, 404: err404 },
 });
 
@@ -785,6 +803,15 @@ registry.registerPath({
 });
 
 // -- Briefing --
+
+registry.registerPath({
+  method: 'post', path: '/action-context',
+  tags: ['Briefing'],
+  summary: 'Assess whether a record has enough current, confirmed, authorized context for action',
+  security: bearer,
+  request: { body: jsonBody(Req.ActionContextGet) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
 
 registry.registerPath({
   method: 'get', path: '/briefing/{subject_type}/{subject_id}',

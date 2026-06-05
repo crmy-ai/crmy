@@ -8,14 +8,18 @@ import type { DbPool } from '../db/pool.js';
 import * as contextRepo from '../db/repos/context-entries.js';
 import * as signalGroupRepo from '../db/repos/signal-groups.js';
 import * as hitlRepo from '../db/repos/hitl.js';
+import * as actorRepo from '../db/repos/actors.js';
+import * as contextTypeRepo from '../db/repos/context-type-registry.js';
 import { checkContextConvergence } from './context-convergence.js';
 import { evaluateActionPolicy } from './action-policy.js';
+import { evaluateMemoryReadiness } from './memory-readiness.js';
 import { emitEvent } from '../events/emitter.js';
 import * as outboxRepo from '../db/repos/context-outbox.js';
 import * as agentRepo from '../db/repos/agent.js';
 import { callLLM } from '../agent/providers/llm.js';
 import { ensureEmbeddingBestEffort } from './embedding-service.js';
 import { retrieveSignalGroupCandidates } from './context-candidate-retriever.js';
+import { deriveSignalReadiness, signalReadinessForGroup } from './signal-readiness.js';
 
 const SENSITIVE_CONTEXT_TYPES = new Set([
   'stakeholder',
@@ -39,6 +43,13 @@ const STOPWORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'have',
   'in', 'is', 'it', 'may', 'might', 'of', 'on', 'or', 'that', 'the', 'this', 'to',
   'was', 'with', 'will', 'would',
+]);
+
+const STRUCTURED_READINESS_KEYS = new Set([
+  'readiness_blockers',
+  'missing_details',
+  'extraction_completeness',
+  'validation_warnings',
 ]);
 
 const GTM_CONCEPTS: Record<string, string[]> = {
@@ -384,6 +395,12 @@ async function recomputeGroup(
     const data = entry.structured_data ?? {};
     return Array.isArray(data.missing_details) ? data.missing_details.map(String) : [];
   })));
+  const typedCompletenessValues = supporting
+    .map(entry => Number((entry.structured_data ?? {}).extraction_completeness))
+    .filter(value => Number.isFinite(value));
+  const typedCompleteness = typedCompletenessValues.length > 0
+    ? Math.max(0, Math.min(1, Math.min(...typedCompletenessValues)))
+    : null;
   const latest = supporting[0] ?? null;
   const convergence = latest
     ? await checkContextConvergence(db, tenantId as UUID, {
@@ -411,9 +428,31 @@ async function recomputeGroup(
     ...(conflictCount > 0 ? ['Conflicting evidence needs review.'] : []),
     ...(Boolean(convergence.should_block) ? ['Similar or conflicting Memory already exists.'] : []),
     ...Array.from(new Set(readinessBlockers)),
-    ...(confidence < threshold ? [`Trust score is ${Math.round(confidence * 100)}%, below the ${Math.round(threshold * 100)}% auto-promotion threshold.`] : []),
+    ...(confidence < threshold ? [`Readiness score is ${Math.round(confidence * 100)}%, below the ${Math.round(threshold * 100)}% confirmation threshold.`] : []),
     ...(sensitive && independentSources < 2 ? ['Sensitive context needs corroboration or approval before becoming Memory.'] : []),
   ];
+  const readiness = deriveSignalReadiness({
+    group_status: state.status,
+    score: confidence,
+    threshold,
+    support_count: supporting.length,
+    independent_source_count: independentSources,
+    duplicate_source_count: duplicateSourceCount,
+    evidence_count: evidenceCount,
+    conflict_count: conflictCount,
+    model_confidence: components.strongest_evidence_confidence,
+    source_quality: components.strongest_source_weight,
+    source_boost: components.source_boost,
+    conflict_penalty: components.conflict_penalty,
+    typed_completeness: typedCompleteness,
+    sensitive,
+    requires_approval: sensitive && independentSources < 2,
+    convergence_blocked: Boolean(convergence.should_block),
+    readiness_blockers: readinessBlockers,
+    missing_details: missingDetails,
+    promotion_blockers: promotionBlockers,
+    blocked_reason: state.blockedReason,
+  });
   await signalGroupRepo.updateSignalGroupState(db, tenantId, group.id, {
     status: state.status,
     aggregate_confidence: confidence,
@@ -428,15 +467,18 @@ async function recomputeGroup(
       threshold,
       trust_score: confidence,
       confidence_components: components,
+      readiness,
+      readiness_blockers: Array.from(new Set(readinessBlockers)),
       promotion_blockers: promotionBlockers,
       missing_details: missingDetails,
+      typed_completeness: typedCompleteness,
       duplicate_source_count: duplicateSourceCount,
       repeated_context_note: duplicateSourceCount > 0
         ? `${duplicateSourceCount} repeated ${duplicateSourceCount === 1 ? 'Signal uses' : 'Signals use'} the same source identity and did not increase independent corroboration.`
         : undefined,
       promotion_reason: promotionBlockers.length === 0
-        ? 'This Signal has enough evidence, source independence, and confidence to become Memory.'
-        : 'This Signal needs review or more support before automatic promotion.',
+        ? 'This Signal has enough evidence, source independence, and confidence to become confirmed Memory.'
+        : 'This Signal needs review or more support before confirmation.',
       requires_corroboration: sensitive && independentSources < 2,
       can_promote_manually: conflictCount === 0 && !Boolean(convergence.should_block),
       suggested_action: (convergence as { suggested_action?: string }).suggested_action,
@@ -496,6 +538,14 @@ async function promoteReadyGroup(
   });
   if (!promoted) return null;
   await signalGroupRepo.markGroupPromoted(db, tenantId, group.id, promoted.id);
+  await signalGroupRepo.updateSignalGroupMetadata(db, tenantId, group.id, {
+    readiness: signalReadinessForGroup({
+      ...group,
+      status: 'promoted',
+      promoted_context_entry_id: promoted.id,
+      blocked_reason: null,
+    }),
+  });
   await signalGroupRepo.markSupportSignalsSupersededExcept(db, tenantId, group.id, promoted.id);
   await emitEvent(db, {
     tenantId: tenantId as UUID,
@@ -758,7 +808,113 @@ export async function dismissSignalGroup(
       failed_count: failed.length,
     });
   }
+  await signalGroupRepo.updateSignalGroupMetadata(db, tenantId, groupId, {
+    readiness: signalReadinessForGroup({
+      ...group,
+      status: 'dismissed',
+    }),
+  });
   return signalGroupRepo.getSignalGroup(db, tenantId, groupId);
+}
+
+function detailDataOnly(data: Record<string, unknown>): Record<string, unknown> {
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (!STRUCTURED_READINESS_KEYS.has(key)) cleaned[key] = value;
+  }
+  return cleaned;
+}
+
+function supportingSignalEntry(group: signalGroupRepo.SignalGroupWithMembers): ContextEntry | null {
+  const supporting = group.members
+    .filter(member => member.relation === 'supports')
+    .map(member => member.context_entry)
+    .filter((entry): entry is ContextEntry => Boolean(entry && entry.memory_status === 'signal' && entry.is_current !== false));
+  if (group.latest_signal_id) {
+    const latest = supporting.find(entry => entry.id === group.latest_signal_id);
+    if (latest) return latest;
+  }
+  return supporting[0] ?? null;
+}
+
+export async function completeSignalGroupDetails(
+  db: DbPool,
+  tenantId: UUID | string,
+  groupId: UUID | string,
+  actor: ActorContext,
+  structuredDataPatch: Record<string, unknown>,
+): Promise<{
+  signal_group: signalGroupRepo.SignalGroupWithMembers;
+  context_entry: ContextEntry;
+  validation_warnings: string[];
+  event_id: number;
+}> {
+  if (!structuredDataPatch || typeof structuredDataPatch !== 'object' || Array.isArray(structuredDataPatch)) {
+    throw validationError('structured_data_patch must be an object.');
+  }
+  const group = await signalGroupRepo.getSignalGroup(db, tenantId, groupId);
+  if (!group) throw validationError('Signal not found.');
+  if (['promoted', 'dismissed', 'merged'].includes(group.status) || group.promoted_context_entry_id || group.merged_into_signal_group_id) {
+    throw validationError('This Signal group is already resolved and cannot be edited.');
+  }
+  const entry = supportingSignalEntry(group);
+  if (!entry) {
+    throw validationError('This Signal has no current supporting Signal entry to update.');
+  }
+
+  const schema = await contextTypeRepo.getContextTypeSchema(db, tenantId as UUID, group.context_type);
+  const existingDetails = detailDataOnly(entry.structured_data ?? {});
+  const patchedDetails = {
+    ...existingDetails,
+    ...structuredDataPatch,
+  };
+  const memoryReadiness = evaluateMemoryReadiness(patchedDetails, schema);
+  const nextStructuredData = {
+    ...memoryReadiness.normalized_structured_data,
+    readiness_blockers: memoryReadiness.readiness_blockers,
+    missing_details: memoryReadiness.missing_details,
+    extraction_completeness: memoryReadiness.extraction_completeness,
+    validation_warnings: memoryReadiness.validation_warnings,
+  };
+  const updatedEntry = await contextRepo.updateSignalStructuredData(
+    db,
+    tenantId as UUID,
+    entry.id as UUID,
+    nextStructuredData,
+  );
+  if (!updatedEntry) {
+    throw validationError('This Signal entry is no longer editable.');
+  }
+
+  outboxRepo.insertJob(db, tenantId as UUID, 'context_entry', updatedEntry.id, updatedEntry as unknown as Record<string, unknown>)
+    .catch((err: unknown) => console.warn(`[outbox] signal detail completion enqueue ${updatedEntry.id}: ${(err as Error).message}`));
+
+  const refreshedGroup = await recomputeGroup(db, tenantId, group.id, Number(group.metadata?.threshold ?? 0.85));
+  const eventId = await emitEvent(db, {
+    tenantId: tenantId as UUID,
+    eventType: 'context.signal_group_details_completed',
+    actorId: actor.actor_id,
+    actorType: actor.actor_type,
+    objectType: 'signal_group',
+    objectId: group.id as UUID,
+    metadata: {
+      signal_group_id: group.id,
+      context_entry_id: updatedEntry.id,
+      subject_type: group.subject_type,
+      subject_id: group.subject_id,
+      patched_fields: Object.keys(structuredDataPatch),
+      remaining_missing_details: memoryReadiness.missing_details,
+      validation_warning_count: memoryReadiness.validation_warnings.length,
+      readiness_status: signalReadinessForGroup(refreshedGroup).status,
+    },
+  });
+
+  return {
+    signal_group: refreshedGroup,
+    context_entry: updatedEntry,
+    validation_warnings: memoryReadiness.validation_warnings,
+    event_id: eventId,
+  };
 }
 
 export async function createSignalGroupHandoff(
@@ -767,9 +923,21 @@ export async function createSignalGroupHandoff(
   groupId: UUID | string,
   actorId: UUID | string,
   actor?: ActorContext,
+  options?: {
+    assigneeActorId?: string;
+    reason?: string;
+    note?: string;
+    priority?: 'low' | 'normal' | 'high' | 'urgent';
+  },
 ): Promise<{ signal_group: signalGroupRepo.SignalGroupWithMembers; hitl_request: unknown; reused_existing: boolean }> {
   const group = await signalGroupRepo.getSignalGroup(db, tenantId, groupId);
   if (!group) throw validationError('Signal not found.');
+  if (options?.assigneeActorId) {
+    const assignee = await actorRepo.getActor(db, tenantId as UUID, options.assigneeActorId as UUID);
+    if (!assignee || !assignee.is_active) {
+      throw validationError('Choose an active reviewer for this handoff.');
+    }
+  }
 
   const supporting = group.members
     .filter(member => member.relation === 'supports')
@@ -791,7 +959,13 @@ export async function createSignalGroupHandoff(
     signal_group_id: group.id,
   });
   if (existing) {
-    return { signal_group: group, hitl_request: existing, reused_existing: true };
+    const updated = (options?.assigneeActorId || options?.priority)
+      ? await hitlRepo.updatePendingHITLRequest(db, tenantId as UUID, existing.id as UUID, {
+        priority: options?.priority,
+        escalate_to_id: options?.assigneeActorId as UUID | undefined,
+      })
+      : null;
+    return { signal_group: group, hitl_request: updated ?? existing, reused_existing: true };
   }
   const hitl = await hitlRepo.createHITLRequest(db, tenantId as UUID, {
     agent_id: actor?.actor_id ?? String(actorId),
@@ -805,16 +979,19 @@ export async function createSignalGroupHandoff(
       subject_type: group.subject_type,
       subject_id: group.subject_id,
       subject_name: group.subject_name,
-      trust_score: group.aggregate_confidence,
+      readiness_score: group.aggregate_confidence,
       status: group.status,
       promotion_blockers: blockers,
+      reason: options?.reason,
+      note: options?.note,
       evidence_count: group.evidence_count,
       independent_source_count: group.independent_source_count,
       conflict_count: group.conflict_count,
       evidence: evidence.slice(0, 12),
     },
-    priority: group.status === 'conflicting' ? 'high' : 'normal',
+    priority: options?.priority ?? (group.status === 'conflicting' ? 'high' : 'normal'),
     sla_minutes: 1440,
+    escalate_to_id: options?.assigneeActorId as UUID | undefined,
   });
   await emitEvent(db, {
     tenantId: tenantId as UUID,
@@ -828,7 +1005,8 @@ export async function createSignalGroupHandoff(
       signal_group_id: group.id,
       subject_type: group.subject_type,
       subject_id: group.subject_id,
-      trust_score: group.aggregate_confidence,
+      readiness_score: group.aggregate_confidence,
+      assignee_actor_id: options?.assigneeActorId ?? null,
     },
   });
   await emitEvent(db, {
@@ -843,7 +1021,9 @@ export async function createSignalGroupHandoff(
       signal_group_id: group.id,
       subject_type: group.subject_type,
       subject_id: group.subject_id,
-      trust_score: group.aggregate_confidence,
+      readiness_score: group.aggregate_confidence,
+      assignee_actor_id: options?.assigneeActorId ?? null,
+      reason: options?.reason,
     },
   });
   return { signal_group: group, hitl_request: hitl, reused_existing: false };

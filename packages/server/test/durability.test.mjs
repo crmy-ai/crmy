@@ -28,6 +28,8 @@ import { snowflakeAdapter } from '../dist/services/systems-of-record/snowflake.j
 import { connectorHttpError, writebackParameters } from '../dist/services/systems-of-record/adapters.js';
 import { buildConnectorContext, executeExternalWriteback, previewExternalWriteback, requestExternalWriteback, reviewExternalWriteback } from '../dist/services/systems-of-record/index.js';
 import { evaluateActionPolicy } from '../dist/services/action-policy.js';
+import { deriveActionReadiness } from '../dist/services/action-context.js';
+import { deriveSignalReadiness } from '../dist/services/signal-readiness.js';
 import { resolveSequenceGoalContactId } from '../dist/services/sequence-executor.js';
 import { createWorkflowEngine, dryRunWorkflowDefinition, matchesFilter } from '../dist/workflows/engine.js';
 import { buildVariableContext, interpolate } from '../dist/workflows/variables.js';
@@ -368,6 +370,331 @@ test('signal grouping does not let repeated context masquerade as independent co
   assert.equal(corroborated.support_boost, 0.04);
   assert.equal(corroborated.source_boost, 0.06);
   assert.equal(corroborated.score, 0.856);
+});
+
+test('signal readiness marks complete, corroborated Signals ready to confirm', () => {
+  const readiness = deriveSignalReadiness({
+    group_status: 'ready',
+    score: 0.91,
+    threshold: 0.85,
+    support_count: 2,
+    independent_source_count: 2,
+    evidence_count: 2,
+    conflict_count: 0,
+    model_confidence: 0.9,
+    source_quality: 1,
+    source_boost: 0.06,
+    conflict_penalty: 0,
+    typed_completeness: 1,
+  });
+
+  assert.equal(readiness.status, 'ready_to_confirm');
+  assert.equal(readiness.can_confirm, true);
+  assert.equal(readiness.can_auto_confirm, true);
+  assert.equal(readiness.components.independent_source_count, 2);
+});
+
+test('signal readiness explains evidence, detail, conflict, approval, and terminal states', () => {
+  const lowEvidence = deriveSignalReadiness({
+    group_status: 'gathering',
+    score: 0.62,
+    threshold: 0.85,
+    support_count: 1,
+    independent_source_count: 1,
+    evidence_count: 1,
+    conflict_count: 0,
+    duplicate_source_count: 1,
+  });
+  assert.equal(lowEvidence.status, 'needs_more_evidence');
+  assert.equal(lowEvidence.can_confirm, false);
+  assert.equal(lowEvidence.components.duplicate_source_count, 1);
+
+  const missingDetail = deriveSignalReadiness({
+    group_status: 'blocked',
+    score: 0.9,
+    threshold: 0.85,
+    support_count: 1,
+    independent_source_count: 1,
+    evidence_count: 1,
+    conflict_count: 0,
+    typed_completeness: 0.6,
+    missing_details: ['Role'],
+  });
+  assert.equal(missingDetail.status, 'needs_more_detail');
+  assert.match(missingDetail.blockers.join(' '), /Role/);
+
+  const conflict = deriveSignalReadiness({
+    group_status: 'conflicting',
+    score: 0.9,
+    threshold: 0.85,
+    support_count: 2,
+    independent_source_count: 2,
+    evidence_count: 2,
+    conflict_count: 1,
+  });
+  assert.equal(conflict.status, 'blocked_by_conflict');
+  assert.equal(conflict.next_actions.includes('resolve_conflict'), true);
+
+  const approval = deriveSignalReadiness({
+    group_status: 'blocked',
+    score: 0.9,
+    threshold: 0.85,
+    support_count: 1,
+    independent_source_count: 1,
+    evidence_count: 1,
+    conflict_count: 0,
+    sensitive: true,
+    requires_approval: true,
+    promotion_blockers: ['Sensitive context needs corroboration or approval before becoming Memory.'],
+  });
+  assert.equal(approval.status, 'approval_required');
+  assert.equal(approval.can_confirm, true);
+
+  assert.equal(deriveSignalReadiness({
+    group_status: 'promoted',
+    score: 0.91,
+    support_count: 1,
+    independent_source_count: 1,
+    evidence_count: 1,
+    conflict_count: 0,
+  }).status, 'confirmed');
+  assert.equal(deriveSignalReadiness({
+    group_status: 'dismissed',
+    score: 0.91,
+    support_count: 1,
+    independent_source_count: 1,
+    evidence_count: 1,
+    conflict_count: 0,
+  }).status, 'dismissed');
+});
+
+class FakeSignalGroupReadinessDb {
+  group = {
+    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    tenant_id: baseInput.tenantId,
+    subject_type: 'contact',
+    subject_id: '33333333-3333-4333-8333-333333333333',
+    context_type: 'stakeholder',
+    claim_key: 'maya-champion',
+    title: 'Maya may be champion',
+    normalized_claim: 'Maya may be the champion.',
+    status: 'gathering',
+    aggregate_confidence: 0.62,
+    support_count: 1,
+    independent_source_count: 1,
+    conflict_count: 0,
+    evidence_count: 1,
+    latest_signal_id: null,
+    promoted_context_entry_id: null,
+    blocked_reason: null,
+    metadata: {
+      threshold: 0.85,
+      confidence_components: {
+        strongest_evidence_confidence: 0.74,
+        strongest_source_weight: 0.9,
+        source_boost: 0,
+        conflict_penalty: 0,
+        duplicate_source_count: 0,
+      },
+    },
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    if (text.startsWith('SELECT count(*)::int AS total FROM signal_groups')) {
+      return { rows: [{ total: 1 }], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT sg.*, CASE sg.subject_type') && text.includes('FROM signal_groups sg WHERE')) {
+      if (text.includes('sg.id = $2') && params[1] !== this.group.id) return { rows: [], rowCount: 0 };
+      return { rows: [{ ...this.group, subject_name: 'Ada Lovelace' }], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT sgm.*, to_jsonb(ce.*)')) {
+      return { rows: [], rowCount: 0 };
+    }
+    throw new Error(`Unexpected Signal readiness query: ${text}`);
+  }
+}
+
+test('Signal group MCP list and get include readiness', async () => {
+  const db = new FakeSignalGroupReadinessDb();
+  const actor = {
+    tenant_id: baseInput.tenantId,
+    actor_id: 'admin-actor',
+    actor_type: 'user',
+    role: 'admin',
+    scopes: ['context:read', 'context:write'],
+  };
+  const tools = getAllTools(db);
+  const listTool = tools.find(candidate => candidate.name === 'context_signal_group_list');
+  const getTool = tools.find(candidate => candidate.name === 'context_signal_group_get');
+  assert.ok(listTool);
+  assert.ok(getTool);
+
+  const listed = await listTool.handler({ attention_only: false, limit: 20 }, actor);
+  assert.equal(listed.signal_groups[0].readiness.status, 'needs_more_evidence');
+  assert.match(listed.signal_groups[0].readiness.reasons.join(' '), /below the 85% confirmation threshold/);
+
+  const detailed = await getTool.handler({ id: db.group.id }, actor);
+  assert.equal(detailed.signal_group.readiness.status, 'needs_more_evidence');
+  assert.equal(detailed.signal_group.readiness.components.source_quality, 0.9);
+});
+
+class FakeSignalGroupCompletionDb {
+  entry = {
+    id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    tenant_id: baseInput.tenantId,
+    subject_type: 'account',
+    subject_id: '33333333-3333-4333-8333-333333333333',
+    context_type: 'implementation_owner',
+    title: 'Implementation owner identified',
+    body: 'Ada owns the implementation.',
+    structured_data: {
+      readiness_blockers: ['Needs owner before agents can rely on this as Memory.'],
+      missing_details: ['Owner'],
+      extraction_completeness: 0,
+    },
+    confidence: 0.9,
+    memory_status: 'signal',
+    evidence: [{ source_type: 'meeting_notes', source_ref: 'kickoff', snippet: 'Ada owns implementation.' }],
+    tags: [],
+    is_current: true,
+    source: 'raw_context',
+    source_ref: 'kickoff',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  group = {
+    id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+    tenant_id: baseInput.tenantId,
+    subject_type: 'account',
+    subject_id: '33333333-3333-4333-8333-333333333333',
+    context_type: 'implementation_owner',
+    claim_key: 'implementation-owner',
+    title: 'Implementation owner identified',
+    normalized_claim: 'Ada owns implementation.',
+    status: 'blocked',
+    aggregate_confidence: 0.9,
+    support_count: 1,
+    independent_source_count: 1,
+    conflict_count: 0,
+    evidence_count: 1,
+    latest_signal_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    promoted_context_entry_id: null,
+    blocked_reason: 'Needs more detail before agents can rely on it as Memory.',
+    metadata: {
+      threshold: 0.7,
+      readiness_blockers: ['Needs owner before agents can rely on this as Memory.'],
+      missing_details: ['Owner'],
+      typed_completeness: 0,
+    },
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  events = [];
+
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    if (text.startsWith('SELECT sg.*, CASE sg.subject_type') && text.includes('FROM signal_groups sg WHERE sg.tenant_id = $1 AND sg.id = $2')) {
+      if (params[1] !== this.group.id) return { rows: [], rowCount: 0 };
+      return { rows: [{ ...this.group, subject_name: 'Acme Corp' }], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT sgm.*, to_jsonb(ce.*)')) {
+      return {
+        rows: [{
+          id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+          tenant_id: baseInput.tenantId,
+          signal_group_id: this.group.id,
+          context_entry_id: this.entry.id,
+          relation: 'supports',
+          similarity_score: 1,
+          evidence_weight: 0.9,
+          source_key: 'meeting:kickoff',
+          created_at: new Date().toISOString(),
+          context_entry: { ...this.entry, subject_name: 'Acme Corp' },
+        }],
+        rowCount: 1,
+      };
+    }
+    if (text.startsWith('SELECT json_schema FROM context_type_registry')) {
+      return {
+        rows: [{
+          json_schema: {
+            type: 'object',
+            properties: { owner: { type: 'string' } },
+            required: ['owner'],
+          },
+        }],
+        rowCount: 1,
+      };
+    }
+    if (text.startsWith('UPDATE context_entries SET structured_data = $3::jsonb')) {
+      this.entry = {
+        ...this.entry,
+        structured_data: JSON.parse(params[2]),
+        updated_at: new Date().toISOString(),
+      };
+      return { rows: [this.entry], rowCount: 1 };
+    }
+    if (text.startsWith('INSERT INTO context_outbox')) {
+      return { rows: [{ id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' }], rowCount: 1 };
+    }
+    if (text.startsWith('SELECT * FROM context_entries WHERE tenant_id = $1')) {
+      return { rows: [], rowCount: 0 };
+    }
+    if (text.startsWith('UPDATE signal_groups SET status = $3')) {
+      this.group = {
+        ...this.group,
+        status: params[2],
+        aggregate_confidence: params[3],
+        support_count: params[4],
+        independent_source_count: params[5],
+        conflict_count: params[6],
+        evidence_count: params[7],
+        latest_signal_id: params[8] ?? this.group.latest_signal_id,
+        blocked_reason: params[9],
+        metadata: {
+          ...this.group.metadata,
+          ...(params[10] ? JSON.parse(params[10]) : {}),
+        },
+        updated_at: new Date().toISOString(),
+      };
+      return { rows: [this.group], rowCount: 1 };
+    }
+    if (text.startsWith('INSERT INTO events')) {
+      const row = { id: this.events.length + 1, metadata: JSON.parse(params[8]) };
+      this.events.push(row);
+      return { rows: [row], rowCount: 1 };
+    }
+    throw new Error(`Unexpected Signal completion query: ${text}`);
+  }
+}
+
+test('Signal group detail completion patches Signal structured data and recomputes readiness', async () => {
+  const db = new FakeSignalGroupCompletionDb();
+  const actor = {
+    tenant_id: baseInput.tenantId,
+    actor_id: 'admin-actor',
+    actor_type: 'user',
+    role: 'admin',
+    scopes: ['context:read', 'context:write'],
+  };
+  const tool = getAllTools(db).find(candidate => candidate.name === 'context_signal_group_complete_details');
+  assert.ok(tool);
+
+  const result = await tool.handler({
+    id: db.group.id,
+    structured_data_patch: { owner: 'Ada Lovelace' },
+  }, actor);
+
+  assert.equal(result.context_entry.structured_data.owner, 'Ada Lovelace');
+  assert.deepEqual(result.context_entry.structured_data.missing_details, []);
+  assert.equal(result.signal_group.readiness.status, 'ready_to_confirm');
+  assert.equal(result.mutation.side_effects.includes('signal_group:details_completed'), true);
+  assert.equal(db.events[0].metadata.readiness_status, 'ready_to_confirm');
 });
 
 test('memory readiness keeps incomplete typed Signals reviewable without dropping details', () => {
@@ -1046,9 +1373,6 @@ test('Raw Context corpus can replay through extraction write and grouping pipeli
 
   const result = await extractContextFromActivity(db, extractionTenantId, extractionActivityId, {
     modelOutputOverride: fixture.golden_model_output,
-    targetSubjects: [
-      { type: 'opportunity', id: extractionOpportunityId, name: 'Agent Context Rollout' },
-    ],
   });
 
   assert.equal(result.extracted_count, fixture.golden_model_output.context_entries.length);
@@ -1066,6 +1390,7 @@ test('Raw Context corpus can replay through extraction write and grouping pipeli
   assert.equal(db.attempts[0].status, 'succeeded');
   assert.equal(db.attempts[0].telemetry.model_output_override, true);
   assert.equal(db.attempts[0].output_summary.context_entries, fixture.golden_model_output.context_entries.length);
+  assert.ok(db.attempts[0].input_summary.extraction_packet.matched_subject_count > 0);
 });
 
 test('Raw Context corpus replay records a clean no-context receipt without creating Signals', async () => {
@@ -2260,6 +2585,40 @@ test('sensitive admin tools are hidden from non-admin actors', () => {
   assert.equal(adminTools.includes('sor_system_create'), true);
 });
 
+test('MCP manifests keep scoped agents focused and expose the router first', async () => {
+  const readOnlyTools = getToolsForActor({}, {
+    ...memberActor,
+    scopes: ['context:read', 'accounts:read', 'contacts:read', 'opportunities:read', 'activities:read'],
+  });
+  const postMeetingTools = getToolsForActor({}, {
+    ...memberActor,
+    scopes: [
+      'context:read',
+      'context:write',
+      'accounts:read',
+      'contacts:read',
+      'opportunities:read',
+      'activities:read',
+      'activities:write',
+      'assignments:write',
+    ],
+  });
+  const adminTools = getToolsForActor({}, recoveryActor);
+
+  assert.equal(readOnlyTools[0].name, 'tool_guide');
+  assert.equal(postMeetingTools[0].name, 'tool_guide');
+  assert.equal(adminTools[0].name, 'tool_guide');
+  assert.ok(readOnlyTools.length <= 30);
+  assert.ok(postMeetingTools.length <= 55);
+  assert.ok(adminTools.length > 200);
+
+  const guide = postMeetingTools.find(tool => tool.name === 'tool_guide');
+  assert.ok(guide);
+  const result = await guide.handler({ workflow: 'ingest_raw_context' }, memberActor);
+  assert.equal(result.recommended_tools.includes('context_ingest_auto'), true);
+  assert.match(result.avoid_tools.join(' '), /context_add/);
+});
+
 test('sensitive tool scopes enforce read/write and object-level boundaries', () => {
   const adminReadOnly = { ...recoveryActor, scopes: ['read'] };
   const adminWriteOnly = { ...recoveryActor, scopes: ['write'] };
@@ -2424,7 +2783,7 @@ test('MCP entity resources enforce context scope and subject access', async () =
 });
 
 test('every tool has an explicit scope mapping unless intentionally public', () => {
-  const intentionallyPublic = new Set(['actor_whoami', 'entity_resolve', 'schema_get', 'guide_search']);
+  const intentionallyPublic = new Set(['actor_whoami', 'entity_resolve', 'schema_get', 'tool_guide', 'guide_search']);
   const scopedActor = { ...recoveryActor, scopes: [] };
   const accidentalPublic = [];
 
@@ -2532,6 +2891,25 @@ class FakeRawContextRepairDb {
   }
 }
 
+class FakeRawContextAttemptRepairDb {
+  events = [];
+
+  async query(sql) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    if (text.startsWith('SELECT count(*)::int AS count') && text.includes('FROM raw_context_extraction_attempts')) {
+      return { rows: [{ count: 1 }], rowCount: 1 };
+    }
+    if (text.startsWith('WITH target AS') && text.includes('UPDATE raw_context_extraction_attempts')) {
+      return { rows: [], rowCount: 1 };
+    }
+    if (text.startsWith('INSERT INTO events')) {
+      this.events.push(text);
+      return { rows: [{ id: 303 }], rowCount: 1 };
+    }
+    throw new Error(`Unexpected query: ${text}`);
+  }
+}
+
 test('data-quality repair can requeue stale Raw Context processing receipts', async () => {
   const db = new FakeRawContextRepairDb();
   const dryRun = await repairDataQualityFinding(db, recoveryActor, 'stale_raw_context_sources_processing', {
@@ -2545,6 +2923,21 @@ test('data-quality repair can requeue stale Raw Context processing receipts', as
   });
   assert.equal(repaired.repaired_count, 2);
   assert.equal(repaired.event_id, 202);
+});
+
+test('data-quality repair can fail stale Raw Context extraction attempts and requeue work', async () => {
+  const db = new FakeRawContextAttemptRepairDb();
+  const dryRun = await repairDataQualityFinding(db, recoveryActor, 'stuck_raw_context_extraction_attempts_running', {
+    dry_run: true,
+  });
+  assert.equal(dryRun.repaired_count, 1);
+
+  const repaired = await repairDataQualityFinding(db, recoveryActor, 'stuck_raw_context_extraction_attempts_running', {
+    dry_run: false,
+    limit: 1,
+  });
+  assert.equal(repaired.repaired_count, 1);
+  assert.equal(repaired.event_id, 303);
 });
 
 test('data-quality repair can requeue retryable Raw Context failures', async () => {
@@ -3291,4 +3684,141 @@ test('action policy blocks Signal promotion without evidence', () => {
 
   assert.equal(result.decision, 'blocked');
   assert.equal(result.required_evidence, true);
+});
+
+function actionReadinessBriefing(overrides = {}) {
+  return {
+    subject: { id: '33333333-3333-4333-8333-333333333333', first_name: 'Ada', last_name: 'Lovelace' },
+    subject_type: 'contact',
+    related_objects: {},
+    activities: [],
+    open_assignments: [],
+    context_entries: {
+      preference: [{
+        id: '55555555-5555-4555-8555-555555555555',
+        tenant_id: baseInput.tenantId,
+        subject_type: 'contact',
+        subject_id: '33333333-3333-4333-8333-333333333333',
+        context_type: 'preference',
+        authored_by: '44444444-4444-4444-8444-444444444444',
+        title: 'Prefers concise updates',
+        body: 'Prefers concise update emails.',
+        structured_data: {},
+        tags: [],
+        confidence: 0.9,
+        memory_status: 'active',
+        evidence: [{ source_type: 'activity', source_ref: 'call', snippet: 'Keep it concise.' }],
+        is_current: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }],
+    },
+    staleness_warnings: [],
+    ...overrides,
+  };
+}
+
+function actionReadinessSystems(overrides = {}) {
+  return {
+    mappings: [],
+    open_conflict_count: 0,
+    pending_writeback_count: 0,
+    source_blockers: [],
+    ...overrides,
+  };
+}
+
+test('action readiness is ready when context, policy, and source checks are clear', () => {
+  const result = deriveActionReadiness({
+    briefing: actionReadinessBriefing(),
+    systems: actionReadinessSystems(),
+  });
+
+  assert.equal(result.readiness.status, 'ready');
+  assert.equal(result.readiness.risk_level, 'low');
+  assert.equal(result.checks.memory.confirmed_count, 1);
+  assert.equal(result.required_handoffs.length, 0);
+});
+
+test('action readiness asks for review when confirmed Memory is stale', () => {
+  const staleEntry = actionReadinessBriefing().context_entries.preference[0];
+  const result = deriveActionReadiness({
+    briefing: actionReadinessBriefing({ staleness_warnings: [staleEntry] }),
+    systems: actionReadinessSystems(),
+  });
+
+  assert.equal(result.readiness.status, 'review_needed');
+  assert.equal(result.checks.memory.stale_count, 1);
+  assert.match(result.readiness.reasons.join(' '), /review/);
+});
+
+test('action readiness asks for review when no confirmed Memory is loaded', () => {
+  const result = deriveActionReadiness({
+    briefing: actionReadinessBriefing({ context_entries: {} }),
+    systems: actionReadinessSystems(),
+  });
+
+  assert.equal(result.readiness.status, 'review_needed');
+  assert.equal(result.checks.memory.confirmed_count, 0);
+  assert.match(result.readiness.reasons.join(' '), /No confirmed Memory/);
+});
+
+test('action readiness asks for review when Signal readiness is unresolved', () => {
+  const result = deriveActionReadiness({
+    briefing: actionReadinessBriefing({
+      signal_groups: [{
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        tenant_id: baseInput.tenantId,
+        subject_type: 'contact',
+        subject_id: '33333333-3333-4333-8333-333333333333',
+        context_type: 'stakeholder',
+        claim_key: 'maya-champion',
+        title: 'Maya may be the champion',
+        normalized_claim: 'Maya may be the champion.',
+        status: 'gathering',
+        aggregate_confidence: 0.62,
+        support_count: 1,
+        independent_source_count: 1,
+        conflict_count: 0,
+        evidence_count: 1,
+        metadata: {},
+        readiness: deriveSignalReadiness({
+          group_status: 'gathering',
+          score: 0.62,
+          threshold: 0.85,
+          support_count: 1,
+          independent_source_count: 1,
+          evidence_count: 1,
+          conflict_count: 0,
+        }),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }],
+    }),
+    systems: actionReadinessSystems(),
+  });
+
+  assert.equal(result.readiness.status, 'review_needed');
+  assert.equal(result.checks.signals.unresolved_readiness_count, 1);
+  assert.match(result.checks.signals.readiness_reasons.join(' '), /below the 85% confirmation threshold/);
+  assert.equal(result.required_handoffs[0].type, 'signal_review');
+});
+
+test('action readiness blocks when source authority or policy blocks action', () => {
+  const result = deriveActionReadiness({
+    briefing: actionReadinessBriefing(),
+    systems: actionReadinessSystems({
+      source_blockers: ['Target mapping does not allow writes to: forecast_cat.'],
+    }),
+    policy: {
+      decision: 'blocked',
+      reasons: ['The target mapping is read-only.'],
+      risk_level: 'high',
+      policy: 'crmy.action_policy.v1',
+    },
+  });
+
+  assert.equal(result.readiness.status, 'blocked');
+  assert.equal(result.readiness.risk_level, 'high');
+  assert.match(result.readiness.blockers.join(' '), /read-only|forecast_cat/);
 });

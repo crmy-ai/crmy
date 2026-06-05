@@ -10,6 +10,7 @@ import * as activityRepo from '../db/repos/activities.js';
 import * as assignmentRepo from '../db/repos/assignments.js';
 import * as contextRepo from '../db/repos/context-entries.js';
 import * as signalGroupRepo from '../db/repos/signal-groups.js';
+import { withSignalReadiness } from './signal-readiness.js';
 import * as contextTypeRepo from '../db/repos/context-type-registry.js';
 import { detectContradictions } from './contradictions.js';
 
@@ -274,6 +275,7 @@ export async function assembleBriefing(
     attention_only: false,
     limit: 20,
   });
+  const signalGroupsWithReadiness = signalGroups.data.map(group => withSignalReadiness(group));
 
   // Filter by requested context types
   const ownEntries = options?.context_types?.length
@@ -398,7 +400,7 @@ export async function assembleBriefing(
     activities,
     open_assignments,
     context_entries,
-    ...(signalGroups.data.length > 0 ? { signal_groups: signalGroups.data } : {}),
+    ...(signalGroupsWithReadiness.length > 0 ? { signal_groups: signalGroupsWithReadiness } : {}),
     ...(ownSignals.length > 0 ? { signals: groupByType(ownSignals) } : {}),
     staleness_warnings,
     ...(active_sequences?.length ? { active_sequences } : {}),

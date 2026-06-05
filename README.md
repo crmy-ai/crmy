@@ -372,6 +372,7 @@ Common first tools:
 
 | Goal | MCP tool |
 |---|---|
+| Decide which tool path to use | `tool_guide` |
 | Resolve customer records | `customer_record_resolve` |
 | Brief an agent before action | `briefing_get` |
 | Ingest messy customer context | `context_ingest_auto` |
@@ -380,6 +381,8 @@ Common first tools:
 | Route uncertain work to review | `context_signal_handoff` |
 | Draft a customer email | `email_draft_preview` |
 | Draft a new record from natural language | `record_draft_preview` |
+
+Use scoped API keys for agents whenever possible. Ordinary customer-reasoning agents should see a small workflow-specific tool set, not the full admin/operator catalog.
 
 See [MCP tools](docs/mcp-tools.md) for the full tool catalog and scoped-access model.
 

@@ -25,6 +25,7 @@ export type RepairableDataQualityCheck =
   | 'current_context_missing_search_index'
   | 'stuck_context_outbox_processing'
   | 'stale_raw_context_sources_processing'
+  | 'stuck_raw_context_extraction_attempts_running'
   | 'failed_raw_context_sources_retryable'
   | 'stuck_agent_turns_running';
 
@@ -197,6 +198,19 @@ const CHECKS: CheckSpec[] = [
     `,
   },
   {
+    name: 'stuck_raw_context_extraction_attempts_running',
+    severity: 'warning',
+    sql: `
+      SELECT id, raw_context_source_id, activity_id, attempt_number, stage, timeout_ms, started_at
+      FROM raw_context_extraction_attempts
+      WHERE tenant_id = $1
+        AND status = 'running'
+        AND started_at < now() - interval '15 minutes'
+      ORDER BY started_at ASC
+      LIMIT $2
+    `,
+  },
+  {
     name: 'stuck_agent_turns_running',
     severity: 'warning',
     sql: `
@@ -340,6 +354,7 @@ function ensureRepairable(checkName: string): asserts checkName is RepairableDat
     checkName !== 'current_context_missing_search_index' &&
     checkName !== 'stuck_context_outbox_processing' &&
     checkName !== 'stale_raw_context_sources_processing' &&
+    checkName !== 'stuck_raw_context_extraction_attempts_running' &&
     checkName !== 'failed_raw_context_sources_retryable' &&
     checkName !== 'stuck_agent_turns_running'
   ) {
@@ -546,6 +561,62 @@ const REPAIR_ACTIONS: Record<RepairableDataQualityCheck, {
           updated_at = now()
       FROM target
       WHERE r.id = target.id
+    `,
+  },
+  stuck_raw_context_extraction_attempts_running: {
+    action: 'Mark stale Raw Context extraction attempts failed and requeue the linked activity/source for retry.',
+    countSql: `
+      SELECT count(*)::int AS count
+      FROM raw_context_extraction_attempts
+      WHERE tenant_id = $1
+        AND status = 'running'
+        AND started_at < now() - interval '15 minutes'
+    `,
+    repairSql: `
+      WITH target AS (
+        SELECT id, raw_context_source_id, activity_id, started_at
+        FROM raw_context_extraction_attempts
+        WHERE tenant_id = $1
+          AND status = 'running'
+          AND started_at < now() - interval '15 minutes'
+        ORDER BY started_at ASC
+        LIMIT $2
+      ),
+      source_reset AS (
+        UPDATE raw_context_sources r
+        SET status = 'pending',
+            stage = 'retrying',
+            locked_at = NULL,
+            next_retry_at = now(),
+            failure_code = COALESCE(failure_code, 'processing_timeout'),
+            last_error = COALESCE(last_error, 'Extraction was interrupted and queued for retry.'),
+            failure_reason = COALESCE(failure_reason, 'Extraction was interrupted and queued for retry.'),
+            updated_at = now()
+        FROM target
+        WHERE r.tenant_id = $1
+          AND r.id = target.raw_context_source_id
+        RETURNING r.id
+      ),
+      activity_reset AS (
+        UPDATE activities a
+        SET extraction_status = 'pending',
+            extraction_error = NULL,
+            updated_at = now()
+        FROM target
+        WHERE a.tenant_id = $1
+          AND a.id = target.activity_id
+        RETURNING a.id
+      )
+      UPDATE raw_context_extraction_attempts ea
+      SET status = 'failed',
+          outcome = COALESCE(outcome, 'processing_timeout'),
+          failure_code = COALESCE(failure_code, 'processing_timeout'),
+          failure_reason = COALESCE(failure_reason, 'Extraction was interrupted and marked failed by recovery.'),
+          latency_ms = COALESCE(latency_ms, GREATEST(0, (EXTRACT(EPOCH FROM (now() - target.started_at)) * 1000)::int)),
+          completed_at = COALESCE(completed_at, now()),
+          updated_at = now()
+      FROM target
+      WHERE ea.id = target.id
     `,
   },
   stuck_agent_turns_running: {

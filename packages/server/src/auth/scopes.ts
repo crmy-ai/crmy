@@ -76,6 +76,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   context_stale: ['context:read'],
   context_diff: ['context:read'],
   briefing_get: ['context:read'],
+  action_context_get: ['context:read'],
   context_add: ['context:write'],
   context_signal_promote: ['context:write'],
   context_signal_reject: ['context:write'],
@@ -83,6 +84,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   context_signal_group_get: ['context:read'],
   context_lineage_get: ['context:read'],
   context_signal_group_promote: ['context:write'],
+  context_signal_group_complete_details: ['context:write'],
   context_signal_handoff: ['context:write'],
   context_signal_group_reject: ['context:write'],
   context_supersede: ['context:write'],
@@ -261,6 +263,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   entity_resolve: [],  // always allowed
   customer_record_resolve: ['context:read'],
   schema_get: [],      // always allowed
+  tool_guide: [],      // always allowed
   guide_search: [],    // always allowed
 
   // ── Messaging ──

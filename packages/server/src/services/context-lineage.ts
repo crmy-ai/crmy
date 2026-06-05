@@ -48,6 +48,13 @@ function relationLabel(relation: string): string {
   return relation.replace(/_/g, ' ');
 }
 
+function metadataStringArray(metadata: unknown, key: string): string[] {
+  if (!metadata || typeof metadata !== 'object') return [];
+  const value = (metadata as Record<string, unknown>)[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
 export async function getContextLineage(
   db: DbPool,
   tenantId: UUID | string,
@@ -445,6 +452,74 @@ export async function getContextLineage(
     }
   }
 
+  const retrievalClauses: string[] = [];
+  const retrievalParams: unknown[] = [tenantId];
+  let retrievalIdx = 2;
+  if (query.subject_type && query.subject_id) {
+    retrievalClauses.push(`(object_type = $${retrievalIdx++} AND object_id = $${retrievalIdx++}::uuid)`);
+    retrievalParams.push(query.subject_type, query.subject_id);
+  }
+  if (contextIds.size > 0) {
+    retrievalClauses.push(`(metadata->'used_context_entry_ids' ?| $${retrievalIdx++}::text[])`);
+    retrievalParams.push([...contextIds]);
+  }
+  if (groupIds.size > 0) {
+    retrievalClauses.push(`(metadata->'used_signal_group_ids' ?| $${retrievalIdx++}::text[])`);
+    retrievalParams.push([...groupIds]);
+  }
+  if (retrievalClauses.length > 0) {
+    retrievalParams.push(50);
+    const retrievalEvents = await db.query(
+      `SELECT id, event_type, actor_id, actor_type, object_type, object_id, after_data, metadata, created_at
+       FROM events
+       WHERE tenant_id = $1
+         AND event_type = 'action_context.retrieved'
+         AND (${retrievalClauses.join(' OR ')})
+       ORDER BY created_at DESC
+       LIMIT $${retrievalIdx}`,
+      retrievalParams,
+    ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+
+    for (const event of retrievalEvents.rows) {
+      const objectType = String(event.object_type);
+      const objectId = typeof event.object_id === 'string' ? event.object_id : null;
+      addNode(nodes, {
+        id: `retrieval:${event.id}`,
+        type: 'retrieval',
+        label: 'Action Context retrieved',
+        timestamp: event.created_at as string,
+        status: typeof event.metadata === 'object' && event.metadata
+          ? String((event.metadata as Record<string, unknown>).readiness_status ?? 'retrieved')
+          : 'retrieved',
+        subject_type: subjectKey(objectType, objectId) ? objectType as never : undefined,
+        subject_id: objectId as never,
+        object_id: String(event.id),
+        stage: 'active_context',
+        display_order: 35,
+        description: 'Briefing, policy, source authority, and readiness checks loaded into Active Context.',
+        data: event,
+      });
+      for (const contextId of metadataStringArray(event.metadata, 'used_context_entry_ids')) {
+        addEdge(edges, {
+          id: `context-retrieval:${contextId}:${event.id}`,
+          source: `context:${contextId}`,
+          target: `retrieval:${event.id}`,
+          relation: 'loaded_into_active_context',
+          data: { label: 'loaded' },
+        });
+      }
+      for (const groupId of metadataStringArray(event.metadata, 'used_signal_group_ids')) {
+        addEdge(edges, {
+          id: `signal-group-retrieval:${groupId}:${event.id}`,
+          source: `signal_group:${groupId}`,
+          target: `retrieval:${event.id}`,
+          relation: 'loaded_into_active_context',
+          data: { label: 'loaded' },
+        });
+      }
+    }
+  }
+
   const subjectPairs = new Set<string>();
   if (query.subject_type && query.subject_id) {
     const key = subjectKey(query.subject_type, query.subject_id);
@@ -534,6 +609,7 @@ export async function getContextLineage(
        FROM events
        WHERE tenant_id = $1
          AND object_id = ANY($2::uuid[])
+         AND event_type <> 'action_context.retrieved'
        ORDER BY created_at DESC
        LIMIT 100`,
       [tenantId, objectIds],
@@ -572,6 +648,7 @@ export async function getContextLineage(
       signals: nodeList.filter(node => node.type === 'signal').length,
       signal_groups: nodeList.filter(node => node.type === 'signal_group').length,
       memory: nodeList.filter(node => node.type === 'memory').length,
+      retrievals: nodeList.filter(node => node.type === 'retrieval').length,
       handoffs: nodeList.filter(node => node.type === 'handoff').length,
       writebacks: nodeList.filter(node => node.type === 'writeback').length,
       audit_events: nodeList.filter(node => node.type === 'audit').length,

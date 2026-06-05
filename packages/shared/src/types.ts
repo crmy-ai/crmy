@@ -724,6 +724,46 @@ export interface SignalGroupMember {
   context_entry?: ContextEntry;
 }
 
+export type SignalReadinessStatus =
+  | 'ready_to_confirm'
+  | 'needs_more_evidence'
+  | 'needs_more_detail'
+  | 'blocked_by_conflict'
+  | 'approval_required'
+  | 'confirmed'
+  | 'dismissed';
+
+export type SignalReadinessNextAction =
+  | 'confirm_signal'
+  | 'add_evidence'
+  | 'add_detail'
+  | 'resolve_conflict'
+  | 'send_to_handoff'
+  | 'dismiss_signal';
+
+export interface SignalReadiness {
+  version: 'crmy.signal_readiness.v1';
+  status: SignalReadinessStatus;
+  can_confirm: boolean;
+  can_auto_confirm: boolean;
+  score: number;
+  threshold: number;
+  reasons: string[];
+  blockers: string[];
+  next_actions: SignalReadinessNextAction[];
+  components: {
+    model_confidence: number;
+    source_quality: number;
+    independent_source_count: number;
+    duplicate_source_count: number;
+    evidence_count: number;
+    conflict_count: number;
+    typed_completeness: number | null;
+    source_boost: number;
+    conflict_penalty: number;
+  };
+}
+
 export interface SignalGroup {
   id: UUID;
   tenant_id: UUID;
@@ -748,6 +788,7 @@ export interface SignalGroup {
   dismissed_by?: UUID | null;
   merged_into_signal_group_id?: UUID | null;
   merged_at?: string | null;
+  readiness?: SignalReadiness;
   created_at: string;
   updated_at: string;
   members?: SignalGroupMember[];
@@ -762,6 +803,7 @@ export type ContextLineageNodeType =
   | 'signal'
   | 'signal_group'
   | 'memory'
+  | 'retrieval'
   | 'handoff'
   | 'writeback'
   | 'audit';
@@ -798,6 +840,7 @@ export interface ContextLineage {
     signals: number;
     signal_groups: number;
     memory: number;
+    retrievals?: number;
     handoffs: number;
     writebacks: number;
     audit_events: number;
@@ -1009,6 +1052,128 @@ export interface Briefing {
   token_estimate?: number;
   /** True if context entries were truncated to fit within token_budget. */
   truncated?: boolean;
+}
+
+export type ActionContextProposedActionType =
+  | 'customer_outreach'
+  | 'assignment_create'
+  | 'memory_promote'
+  | 'record_update'
+  | 'external_writeback';
+
+export interface ActionContextProposedAction {
+  action_type: ActionContextProposedActionType;
+  object_type?: SubjectType | ExternalObjectMapping['object_type'];
+  field_names?: string[];
+  source_context_entry_ids?: UUID[];
+  signal_group_ids?: UUID[];
+  system_id?: UUID;
+  mapping_id?: UUID;
+  external_object?: string;
+  payload?: Record<string, unknown>;
+  approved?: boolean;
+}
+
+export interface ActionContextGetInput {
+  subject_type: SubjectType;
+  subject_id: UUID;
+  since?: string;
+  context_types?: string[];
+  include_stale?: boolean;
+  context_radius?: 'direct' | 'adjacent' | 'account_wide';
+  token_budget?: number;
+  emit_retrieval_event?: boolean;
+  proposed_action?: ActionContextProposedAction;
+}
+
+export type ActionContextReadinessStatus = 'ready' | 'review_needed' | 'blocked';
+export type ActionContextRiskLevel = 'low' | 'medium' | 'high';
+
+export interface ActionContextPolicySummary {
+  decision: 'allowed' | 'approval_required' | 'blocked' | 'draft_only';
+  reasons: string[];
+  required_approval?: boolean;
+  required_evidence?: boolean;
+  risk_level: ActionContextRiskLevel;
+  policy: string;
+}
+
+export interface ActionContextCheckStatus {
+  status: ActionContextReadinessStatus;
+  reasons: string[];
+}
+
+export interface ActionContextSourceAuthoritySummary {
+  mapping_id: UUID;
+  system_id: UUID;
+  object_type: string;
+  external_object: string;
+  source_authority: SourceAuthority;
+  writable_fields: string[];
+  writeback_mode?: WritebackMode;
+  is_active: boolean;
+}
+
+export interface ActionContextAllowedAction {
+  action_type: ActionContextProposedActionType;
+  status: 'allowed' | 'approval_required' | 'blocked';
+  required_scopes: string[];
+  reasons: string[];
+  policy?: ActionContextPolicySummary;
+}
+
+export interface ActionContext {
+  subject_type: SubjectType;
+  subject_id: UUID;
+  generated_at: string;
+  briefing: Briefing;
+  readiness: {
+    status: ActionContextReadinessStatus;
+    risk_level: ActionContextRiskLevel;
+    reasons: string[];
+    blockers: string[];
+    review_required: boolean;
+  };
+  checks: {
+    memory: ActionContextCheckStatus & {
+      confirmed_count: number;
+      stale_count: number;
+      contradiction_count: number;
+    };
+    signals: ActionContextCheckStatus & {
+      signal_count: number;
+      signal_group_count: number;
+      conflicting_count: number;
+      unresolved_readiness_count?: number;
+      readiness_reasons?: string[];
+    };
+    assignments: ActionContextCheckStatus & {
+      open_count: number;
+    };
+    permissions: ActionContextCheckStatus & {
+      actor_id: string;
+      actor_type: ActorContext['actor_type'];
+    };
+    systems_of_record: ActionContextCheckStatus & {
+      mappings: ActionContextSourceAuthoritySummary[];
+      open_conflict_count: number;
+      pending_writeback_count: number;
+    };
+    policy?: ActionContextPolicySummary;
+  };
+  allowed_actions: ActionContextAllowedAction[];
+  required_handoffs: Array<{
+    type: 'assignment' | 'signal_review' | 'policy_approval' | 'source_conflict';
+    id?: UUID | string;
+    status?: string;
+    title: string;
+  }>;
+  proof: {
+    retrieval_event_id?: number;
+    used_context_entry_ids: UUID[];
+    used_signal_group_ids: UUID[];
+    expected_receipts: string[];
+  };
 }
 
 export interface MessagingChannel {

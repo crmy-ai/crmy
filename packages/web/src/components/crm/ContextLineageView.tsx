@@ -16,6 +16,7 @@ import {
   Library,
   Loader2,
   Search,
+  ShieldCheck,
   Sparkles,
   UserRound,
   X,
@@ -27,12 +28,13 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { useSlashSearchFocus } from '@/hooks/useSlashSearchFocus';
 
 type SubjectType = 'contact' | 'account' | 'opportunity' | 'use_case';
-type LineagePhase = 'sources' | 'signals' | 'memory' | 'actions' | 'audit';
+type LineagePhase = 'sources' | 'signals' | 'memory' | 'active_context' | 'actions' | 'audit';
 
 const PHASES: Array<{ key: LineagePhase; label: string }> = [
   { key: 'sources', label: 'Sources' },
   { key: 'signals', label: 'Signals' },
   { key: 'memory', label: 'Memory' },
+  { key: 'active_context', label: 'Active Context' },
   { key: 'actions', label: 'Handoffs & Actions' },
   { key: 'audit', label: 'Audit' },
 ];
@@ -44,6 +46,7 @@ const NODE_CONFIG: Record<ContextLineageNode['type'], { label: string; icon: typ
   signal:       { label: 'Signal',       icon: Sparkles,      className: 'bg-violet-500/10 text-violet-500 border-violet-500/20',       dotClassName: 'bg-violet-500' },
   signal_group: { label: 'Signal',       icon: GitBranch,     className: 'bg-violet-500/10 text-violet-500 border-violet-500/20',       dotClassName: 'bg-violet-500' },
   memory:       { label: 'Memory',       icon: Library,       className: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',    dotClassName: 'bg-emerald-500' },
+  retrieval:    { label: 'Active Context', icon: ShieldCheck, className: 'bg-cyan-500/10 text-cyan-600 border-cyan-500/20',             dotClassName: 'bg-cyan-500' },
   handoff:      { label: 'Handoff',      icon: ClipboardList, className: 'bg-rose-500/10 text-rose-500 border-rose-500/20',             dotClassName: 'bg-rose-500' },
   writeback:    { label: 'Writeback',    icon: Database,      className: 'bg-slate-500/10 text-slate-500 border-slate-500/20',          dotClassName: 'bg-slate-500' },
   audit:        { label: 'Audit',        icon: CheckCircle2,  className: 'bg-muted text-muted-foreground border-border',                dotClassName: 'bg-muted-foreground' },
@@ -66,6 +69,7 @@ function phaseFor(node: ContextLineageNode): LineagePhase | 'record' {
   if (node.type === 'raw_context' || node.type === 'activity') return 'sources';
   if (node.type === 'signal' || node.type === 'signal_group') return 'signals';
   if (node.type === 'memory') return 'memory';
+  if (node.type === 'retrieval') return 'active_context';
   if (node.type === 'handoff' || node.type === 'writeback') return 'actions';
   return 'audit';
 }
@@ -74,6 +78,7 @@ function phaseSummary(summary: Record<string, number>, phase: LineagePhase) {
   if (phase === 'sources') return (summary.raw_context ?? 0) + (summary.activity ?? 0);
   if (phase === 'signals') return (summary.signals ?? 0) + (summary.signal_groups ?? 0);
   if (phase === 'memory') return summary.memory ?? 0;
+  if (phase === 'active_context') return summary.retrievals ?? 0;
   if (phase === 'actions') return (summary.handoffs ?? 0) + (summary.writebacks ?? 0);
   return summary.audit_events ?? 0;
 }
@@ -90,6 +95,7 @@ function relationLabel(relation: string) {
     sent_to_handoff: 'sent to handoff',
     approved_writeback: 'approved',
     requested_writeback: 'written back',
+    loaded_into_active_context: 'loaded',
     audits: 'audited',
   };
   return labels[relation] ?? relation.replace(/_/g, ' ');
@@ -111,12 +117,14 @@ function journeySummary(summary: Record<string, number>) {
   const sources = (summary.raw_context ?? 0) + (summary.activity ?? 0);
   const signals = (summary.signals ?? 0) + (summary.signal_groups ?? 0);
   const memory = summary.memory ?? 0;
+  const retrievals = summary.retrievals ?? 0;
   const handoffs = summary.handoffs ?? 0;
   const writebacks = summary.writebacks ?? 0;
   const parts = [
     `${sources} source${sources === 1 ? '' : 's'}`,
     `${signals} Signal${signals === 1 ? '' : 's'}`,
     `${memory} Memory ${memory === 1 ? 'entry' : 'entries'}`,
+    `${retrievals} Active Context retrieval${retrievals === 1 ? '' : 's'}`,
     `${handoffs} Handoff${handoffs === 1 ? '' : 's'}`,
     `${writebacks} writeback${writebacks === 1 ? '' : 's'}`,
   ];
@@ -400,6 +408,7 @@ export function ContextLineageView() {
     sources: visibleNodes.filter(node => phaseFor(node) === 'sources'),
     signals: visibleNodes.filter(node => phaseFor(node) === 'signals'),
     memory: visibleNodes.filter(node => phaseFor(node) === 'memory'),
+    active_context: visibleNodes.filter(node => phaseFor(node) === 'active_context'),
     actions: visibleNodes.filter(node => phaseFor(node) === 'actions'),
     audit: visibleNodes.filter(node => phaseFor(node) === 'audit'),
   };
@@ -550,7 +559,7 @@ export function ContextLineageView() {
       <div className="flex-1 overflow-y-auto px-4 pb-24 md:px-6 md:pb-6">
         <div className="space-y-4">
           <div className="rounded-xl border border-border bg-card/70 px-3 py-2.5 text-sm text-muted-foreground">
-            Trace how source material becomes Signals, trusted Memory, handoffs, writebacks, and audit history. This shows the source-to-Memory trail, not the agent&apos;s temporary Active Context window.
+            Trace how source material becomes Signals, confirmed Memory, Active Context, handoffs, writebacks, and audit history.
           </div>
 
           {visibleData && nonRecordNodes.length > 0 && (
@@ -645,8 +654,16 @@ export function ContextLineageView() {
               />
               <PhaseSection
                 title="Confirmed Memory"
-                description="Trusted operational context available for briefings, workflows, and governed action."
+                description="Confirmed operational context available for briefings, workflows, and governed action."
                 nodes={nodesByPhase.memory}
+                edges={visibleEdges}
+                nodesById={nodesById}
+                onSelect={setSelectedNode}
+              />
+              <PhaseSection
+                title="Active Context"
+                description="Briefing, policy, source authority, and readiness checks retrieved before action."
+                nodes={nodesByPhase.active_context}
                 edges={visibleEdges}
                 nodesById={nodesById}
                 onSelect={setSelectedNode}

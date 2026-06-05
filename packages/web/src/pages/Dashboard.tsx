@@ -818,7 +818,7 @@ function ScopedOverviewDashboard() {
       return {
         icon: Sparkles,
         title: group.title ?? group.normalized_claim ?? 'Signal needs attention',
-        detail: `${Math.round(Number(group.aggregate_confidence ?? 0) * 100)}% trust · evidence is ready for review`,
+        detail: `${Math.round(Number(group.aggregate_confidence ?? 0) * 100)}% readiness · evidence is ready for review`,
         href: `/context?tab=signals&signal_group_id=${group.id}`,
         action: 'Review',
         tone: group.status === 'conflicting' || group.status === 'blocked' ? 'danger' as const : 'action' as const,
@@ -1299,7 +1299,7 @@ function AdminDashboard() {
     ...(signalGroupTotal > 0 ? [{
       icon: Sparkles,
       title: `${signalGroupTotal.toLocaleString()} Signal${signalGroupTotal === 1 ? '' : 's'} need attention`,
-      detail: 'Promote trusted claims, review conflicts, or dismiss noise.',
+      detail: 'Confirm ready claims, review conflicts, or dismiss noise.',
       href: '/context?tab=signals',
       tone: 'action' as const,
     }] : []),
@@ -1348,7 +1348,7 @@ function AdminDashboard() {
         iconClassName="text-primary"
         description={activeTab === 'health'
           ? 'Review Memory that needs attention before agents rely on it.'
-          : 'Watch raw context become trusted Memory that agents retrieve into Active Context.'}
+          : 'Watch Raw Context become confirmed Memory that agents retrieve into Active Context.'}
       />
 
       <div className="flex items-center justify-between gap-3 overflow-x-auto border-b border-border px-4 pt-4 md:px-6">
@@ -1525,7 +1525,7 @@ function AdminDashboard() {
               <div>
                 <h2 className="font-display font-bold text-foreground">Context Flow</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Raw Context becomes Signals, trusted Memory, and governed Handoffs.
+                  Raw Context becomes Signals, confirmed Memory, and governed Handoffs.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">

@@ -1214,7 +1214,7 @@ export function ContextBrowser({
               <div>
                 <p className="text-sm font-semibold text-foreground">Signals are raw inferences</p>
                 <p className="text-sm text-muted-foreground">
-                  CRMy combines supporting evidence across sources so trusted Signals can become Memory.
+                  CRMy combines supporting evidence across sources so confirmed Signals can become Memory.
                 </p>
               </div>
               <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground whitespace-nowrap">

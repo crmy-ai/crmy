@@ -3,13 +3,14 @@
 
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useBriefing, useBriefingSummary } from '@/api/hooks';
+import { useActionContext, useBriefingSummary } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { FileText, ChevronDown, ChevronUp, AlertTriangle, ClipboardList, Brain, X, Phone, Mail, Calendar, Monitor, CheckSquare, Activity, Swords, Sparkles, Loader2, Network, Gauge, EyeOff, Bot } from 'lucide-react';
 import { ACTIVITY_COLORS } from './GraphSidebar';
 import { TYPE_COLORS } from './ContextPanel';
 import { toast } from '@/components/ui/use-toast';
+import { ActionReadinessPanel } from './ActionReadinessPanel';
 
 interface BriefingPanelProps {
   subjectType: string;
@@ -63,8 +64,7 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
   const [tokenBudget, setTokenBudget] = useState<TokenBudget>('standard');
   const tokenBudgetValue = TOKEN_BUDGETS[tokenBudget].value;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, isLoading, error } = useBriefing(subjectType, subjectId, {
-    format: 'json',
+  const { data, isLoading, error } = useActionContext(subjectType, subjectId, {
     include_stale: includeStale,
     context_radius: contextRadius,
     token_budget: tokenBudgetValue,
@@ -118,7 +118,8 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
     );
   }
 
-  const briefing = data?.briefing ?? data;
+  const actionContext = data?.action_context;
+  const briefing = actionContext?.briefing;
   const activityCount: number = briefing?.activities?.length ?? 0;
   const contextTypes = briefing?.context_entries ? Object.keys(briefing.context_entries) : [];
   const signalTypes = briefing?.signals ? Object.keys(briefing.signals) : [];
@@ -152,6 +153,8 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
             {aiSummary}
           </div>
         )}
+
+        <ActionReadinessPanel actionContext={actionContext} isLoading={isLoading} isError={Boolean(error)} />
 
         {/* Briefing controls */}
         <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-3">

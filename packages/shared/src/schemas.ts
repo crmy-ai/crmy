@@ -25,6 +25,45 @@ export const writebackMode = z.enum(['append_event', 'mapped_upsert', 'stored_pr
 export const sourceAuthority = z.enum(['crmy', 'external', 'bidirectional', 'read_only', 'approval_required']);
 export const externalObjectType = z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case', 'context_entry']);
 export const memoryStatus = z.enum(['signal', 'active', 'rejected', 'superseded']);
+export const signalReadinessStatus = z.enum([
+  'ready_to_confirm',
+  'needs_more_evidence',
+  'needs_more_detail',
+  'blocked_by_conflict',
+  'approval_required',
+  'confirmed',
+  'dismissed',
+]);
+export const signalReadinessNextAction = z.enum([
+  'confirm_signal',
+  'add_evidence',
+  'add_detail',
+  'resolve_conflict',
+  'send_to_handoff',
+  'dismiss_signal',
+]);
+export const signalReadiness = z.object({
+  version: z.literal('crmy.signal_readiness.v1'),
+  status: signalReadinessStatus,
+  can_confirm: z.boolean(),
+  can_auto_confirm: z.boolean(),
+  score: z.number(),
+  threshold: z.number(),
+  reasons: z.array(z.string()),
+  blockers: z.array(z.string()),
+  next_actions: z.array(signalReadinessNextAction),
+  components: z.object({
+    model_confidence: z.number(),
+    source_quality: z.number(),
+    independent_source_count: z.number().int(),
+    duplicate_source_count: z.number().int(),
+    evidence_count: z.number().int(),
+    conflict_count: z.number().int(),
+    typed_completeness: z.number().nullable(),
+    source_boost: z.number(),
+    conflict_penalty: z.number(),
+  }),
+});
 
 const tags = z.array(z.string()).default([]);
 const customFields = z.record(z.unknown()).default({});
@@ -1336,6 +1375,37 @@ export const briefingGet = z.object({
   token_budget: z.number().int().min(100).optional(),
 });
 
+export const actionContextProposedAction = z.object({
+  action_type: z.enum([
+    'customer_outreach',
+    'assignment_create',
+    'memory_promote',
+    'record_update',
+    'external_writeback',
+  ]),
+  object_type: externalObjectType.or(subjectType).optional(),
+  field_names: z.array(z.string().min(1)).optional(),
+  source_context_entry_ids: z.array(uuid).optional(),
+  signal_group_ids: z.array(uuid).optional(),
+  system_id: uuid.optional(),
+  mapping_id: uuid.optional(),
+  external_object: z.string().min(1).optional(),
+  payload: z.record(z.unknown()).optional(),
+  approved: z.boolean().optional(),
+});
+
+export const actionContextGet = z.object({
+  subject_type: subjectType,
+  subject_id: uuid,
+  since: z.string().optional(),
+  context_types: z.array(z.string()).optional(),
+  include_stale: z.boolean().default(false),
+  context_radius: z.enum(['direct', 'adjacent', 'account_wide']).default('direct'),
+  token_budget: z.number().int().min(100).optional(),
+  emit_retrieval_event: z.boolean().default(true),
+  proposed_action: actionContextProposedAction.optional(),
+});
+
 // -- Context search (full-text) schema --
 
 export const contextSearch = z.object({
@@ -1620,6 +1690,21 @@ export const contextSignalPromote = z.object({
   structured_data: z.record(z.unknown()).optional(),
   confidence: z.number().min(0).max(1).optional(),
   tags: z.array(contextTag).max(20).optional(),
+  idempotency_key: idempotencyKey,
+});
+
+export const contextSignalGroupCompleteDetails = z.object({
+  id: uuid,
+  structured_data_patch: z.record(z.unknown()),
+  idempotency_key: idempotencyKey,
+});
+
+export const contextSignalGroupHandoff = z.object({
+  id: uuid,
+  assignee_actor_id: uuid.optional(),
+  reason: z.string().max(1000).optional(),
+  note: z.string().max(5000).optional(),
+  priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
   idempotency_key: idempotencyKey,
 });
 

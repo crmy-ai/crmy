@@ -73,7 +73,7 @@ function SourcesTab() {
       Icon: Bot,
       color: ENTITY_COLORS.agents,
       status: 'Best for external agents and scripts',
-      description: 'Use context_ingest_auto to send customer context into CRMy, then briefing_get to retrieve trusted Memory before an agent acts.',
+      description: 'Use context_ingest_auto to send customer context into CRMy, then action_context_get to check confirmed Memory, Signals, and source gates before an agent acts.',
       primary: 'Manage API Keys',
       primaryHref: '/settings/api-keys',
       primaryClassName: 'bg-[#6366f1] text-white hover:bg-[#6366f1]/90',
@@ -112,7 +112,7 @@ function SourcesTab() {
       <div className="mb-5 max-w-3xl">
         <h2 className="text-lg font-display font-semibold text-foreground">Context Sources</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Choose how customer context enters CRMy. Every source feeds the same loop: Raw Context becomes Signals, trusted Signals become Memory, and agents retrieve Memory before acting.
+          Choose how customer context enters CRMy. Every source feeds the same loop: Raw Context becomes Signals, confirmed Signals become Memory, and agents retrieve Action Context before acting.
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">

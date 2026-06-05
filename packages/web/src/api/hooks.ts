@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { ProviderId } from '@crmy/shared';
+import type { ActionContext, ActionContextGetInput, ProviderId, SignalReadiness } from '@crmy/shared';
 import { api, getUser } from './client';
 
 // Generic list hook with pagination
@@ -1334,6 +1334,7 @@ export interface SignalGroup {
   promoted_context_entry_id?: string | null;
   blocked_reason?: string | null;
   metadata?: Record<string, unknown>;
+  readiness?: SignalReadiness;
   subject_name?: string | null;
   updated_at: string;
   created_at: string;
@@ -1380,12 +1381,35 @@ export function useRejectSignalGroup() {
     },
   });
 }
+export function useCompleteSignalGroupDetails() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, structured_data_patch }: { id: string; structured_data_patch: Record<string, unknown> }) =>
+      api.post(`context/signal-groups/${id}/complete-details`, { structured_data_patch }),
+    onSuccess: (_result, variables) => {
+      qc.invalidateQueries({ queryKey: ['signal-groups'] });
+      qc.invalidateQueries({ queryKey: ['signal-group', variables.id] });
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['context-entries-infinite'] });
+    },
+  });
+}
 export function useSendSignalGroupToHandoff() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.post(`context/signal-groups/${id}/handoff`, {}),
-    onSuccess: () => {
+    mutationFn: (input: {
+      id: string;
+      assignee_actor_id?: string;
+      reason?: string;
+      note?: string;
+      priority?: 'low' | 'normal' | 'high' | 'urgent';
+    }) => {
+      const { id, ...body } = input;
+      return api.post(`context/signal-groups/${id}/handoff`, body);
+    },
+    onSuccess: (_result, variables) => {
       qc.invalidateQueries({ queryKey: ['signal-groups'] });
+      qc.invalidateQueries({ queryKey: ['signal-group', variables.id] });
       qc.invalidateQueries({ queryKey: ['hitl'] });
       qc.invalidateQueries({ queryKey: ['inbox-count'] });
     },
@@ -1394,7 +1418,7 @@ export function useSendSignalGroupToHandoff() {
 
 export interface ContextLineageNode {
   id: string;
-  type: 'record' | 'raw_context' | 'activity' | 'signal' | 'signal_group' | 'memory' | 'handoff' | 'writeback' | 'audit';
+  type: 'record' | 'raw_context' | 'activity' | 'signal' | 'signal_group' | 'memory' | 'retrieval' | 'handoff' | 'writeback' | 'audit';
   label: string;
   timestamp?: string | null;
   status?: string | null;
@@ -1903,6 +1927,20 @@ export function useBriefing(subjectType: string, subjectId: string, params?: {
 export function useBriefingSummary(subjectType: string, subjectId: string) {
   return useMutation({
     mutationFn: () => api.post<{ summary: string | null }>(`briefing/${subjectType}/${subjectId}/summary`, {}),
+  });
+}
+
+export function useActionContext(subjectType: string, subjectId: string, params?: Omit<ActionContextGetInput, 'subject_type' | 'subject_id'>) {
+  return useQuery<{ action_context: ActionContext }>({
+    queryKey: ['action-context', subjectType, subjectId, params],
+    queryFn: () => api.post('action-context', {
+      subject_type: subjectType,
+      subject_id: subjectId,
+      ...params,
+    }),
+    enabled: !!subjectType && !!subjectId,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
   });
 }
 

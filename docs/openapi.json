@@ -2767,6 +2767,125 @@
           }
         }
       },
+      "SignalReadiness": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string",
+            "enum": [
+              "crmy.signal_readiness.v1"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready_to_confirm",
+              "needs_more_evidence",
+              "needs_more_detail",
+              "blocked_by_conflict",
+              "approval_required",
+              "confirmed",
+              "dismissed"
+            ]
+          },
+          "can_confirm": {
+            "type": "boolean"
+          },
+          "can_auto_confirm": {
+            "type": "boolean"
+          },
+          "score": {
+            "type": "number"
+          },
+          "threshold": {
+            "type": "number"
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blockers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "next_actions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "confirm_signal",
+                "add_evidence",
+                "add_detail",
+                "resolve_conflict",
+                "send_to_handoff",
+                "dismiss_signal"
+              ]
+            }
+          },
+          "components": {
+            "type": "object",
+            "properties": {
+              "model_confidence": {
+                "type": "number"
+              },
+              "source_quality": {
+                "type": "number"
+              },
+              "independent_source_count": {
+                "type": "integer"
+              },
+              "duplicate_source_count": {
+                "type": "integer"
+              },
+              "evidence_count": {
+                "type": "integer"
+              },
+              "conflict_count": {
+                "type": "integer"
+              },
+              "typed_completeness": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "source_boost": {
+                "type": "number"
+              },
+              "conflict_penalty": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "model_confidence",
+              "source_quality",
+              "independent_source_count",
+              "duplicate_source_count",
+              "evidence_count",
+              "conflict_count",
+              "typed_completeness",
+              "source_boost",
+              "conflict_penalty"
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "status",
+          "can_confirm",
+          "can_auto_confirm",
+          "score",
+          "threshold",
+          "reasons",
+          "blockers",
+          "next_actions",
+          "components"
+        ]
+      },
       "BriefingGet": {
         "type": "object",
         "properties": {
@@ -2805,6 +2924,140 @@
             "minimum": 100
           }
         }
+      },
+      "ActionContextGet": {
+        "type": "object",
+        "properties": {
+          "subject_type": {
+            "type": "string",
+            "enum": [
+              "contact",
+              "account",
+              "opportunity",
+              "use_case"
+            ]
+          },
+          "subject_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "since": {
+            "type": "string"
+          },
+          "context_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "include_stale": {
+            "type": "boolean",
+            "default": false
+          },
+          "context_radius": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "adjacent",
+              "account_wide"
+            ],
+            "default": "direct"
+          },
+          "token_budget": {
+            "type": "integer",
+            "minimum": 100
+          },
+          "emit_retrieval_event": {
+            "type": "boolean",
+            "default": true
+          },
+          "proposed_action": {
+            "type": "object",
+            "properties": {
+              "action_type": {
+                "type": "string",
+                "enum": [
+                  "customer_outreach",
+                  "assignment_create",
+                  "memory_promote",
+                  "record_update",
+                  "external_writeback"
+                ]
+              },
+              "object_type": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "contact",
+                      "account",
+                      "opportunity",
+                      "activity",
+                      "use_case",
+                      "context_entry"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "contact",
+                      "account",
+                      "opportunity",
+                      "use_case"
+                    ]
+                  }
+                ]
+              },
+              "field_names": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "source_context_entry_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "signal_group_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "system_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "mapping_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "external_object": {
+                "type": "string",
+                "minLength": 1
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "approved": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "action_type"
+            ]
+          }
+        },
+        "required": [
+          "subject_type",
+          "subject_id"
+        ]
       },
       "WebhookCreate": {
         "type": "object",
@@ -8984,7 +9237,7 @@
         "tags": [
           "Context"
         ],
-        "summary": "List grouped Signals",
+        "summary": "List grouped Signals with readiness state",
         "security": [
           {
             "BearerAuth": []
@@ -9185,7 +9438,7 @@
         "tags": [
           "Context"
         ],
-        "summary": "Get a grouped Signal with evidence",
+        "summary": "Get a grouped Signal with evidence and readiness details",
         "security": [
           {
             "BearerAuth": []
@@ -9692,6 +9945,71 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action-context": {
+      "post": {
+        "tags": [
+          "Briefing"
+        ],
+        "summary": "Assess whether a record has enough current, confirmed, authorized context for action",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionContextGet"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
             "content": {
               "application/json": {
                 "schema": {

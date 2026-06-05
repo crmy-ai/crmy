@@ -39,6 +39,7 @@ import { workflowTools } from './tools/workflows.js';
 import { actorTools } from './tools/actors.js';
 import { assignmentTools } from './tools/assignments.js';
 import { contextEntryTools } from './tools/context-entries.js';
+import { actionContextTools } from './tools/action-context.js';
 import { registryTools } from './tools/registries.js';
 import { entityResolveTools } from './tools/entity-resolve.js';
 import { subjectGraphTools } from './tools/subject-graph.js';
@@ -95,9 +96,12 @@ export function getAllTools(db: DbPool): ToolDef[] {
   // Order signals importance to the LLM scanning the tool list.
   // High-frequency agent tools first, infrastructure tools last.
   return [
+    // 0. Tool routing guide — keep this first so large MCP clients see the map before the catalog.
+    ...guideTools(),
     // 0. Compound actions — highest priority, replace multi-step sequences
     ...compoundTools(db),        // deal_advance, contact_outreach
     // 1. Briefing + context (most important agent tools)
+    ...actionContextTools(db),   // action_context_get
     ...contextEntryTools(db),    // briefing_get, context_add/get/list/search/supersede, context_stale
     ...recordDraftTools(db),     // record_draft_preview
     // 2. Actor identity
@@ -130,8 +134,6 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...metaTools(db),
     // 9. Messaging channels
     ...messagingTools(db),
-    // 10. User guide — always available, no DB needed
-    ...guideTools(),
   ];
 }
 

@@ -226,9 +226,13 @@ export const Req = {
   ContextSearch: registry.register('ContextSearch', S.contextSearch),
   ContextEntrySearch: registry.register('ContextEntrySearch', S.contextEntrySearch),
   ContextStaleList: registry.register('ContextStaleList', S.contextStaleList),
+  SignalReadiness: registry.register('SignalReadiness', S.signalReadiness),
+  ContextSignalGroupCompleteDetails: registry.register('ContextSignalGroupCompleteDetails', S.contextSignalGroupCompleteDetails.omit({ id: true })),
+  ContextSignalGroupHandoff: registry.register('ContextSignalGroupHandoff', S.contextSignalGroupHandoff.omit({ id: true })),
 
   // Briefing
   BriefingGet: registry.register('BriefingGet', S.briefingGet.omit({ subject_type: true, subject_id: true })),
+  ActionContextGet: registry.register('ActionContextGet', S.actionContextGet),
 
   // Webhooks
   WebhookCreate: registry.register('WebhookCreate', S.webhookCreate),

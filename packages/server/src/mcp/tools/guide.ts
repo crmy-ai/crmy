@@ -90,8 +90,106 @@ function scoreSection(section: GuideSection, query: string): number {
 
 const MAX_RESULT_LENGTH = 6000;
 
+const workflowGuideInput = z.object({
+  workflow: z.enum([
+    'first_steps',
+    'record_lookup',
+    'brief_before_action',
+    'ingest_raw_context',
+    'review_signals',
+    'promote_memory',
+    'customer_outreach',
+    'record_update',
+    'systems_writeback',
+    'ops_recovery',
+  ]).default('first_steps').describe('The customer workflow you are trying to perform. Use first_steps when unsure.'),
+});
+
+const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
+  summary: string;
+  recommended_tools: string[];
+  avoid_tools?: string[];
+  next_step: string;
+}> = {
+  first_steps: {
+    summary: 'Start with identity, record resolution, and a briefing before choosing specialized tools.',
+    recommended_tools: ['actor_whoami', 'customer_record_resolve', 'briefing_get', 'action_context_get', 'guide_search'],
+    avoid_tools: ['context_add for raw notes', 'direct record writes before action_context_get', 'admin/ops tools unless doing incident response'],
+    next_step: 'If you have a customer name or text, call customer_record_resolve. If you already have a subject_id, call briefing_get or action_context_get.',
+  },
+  record_lookup: {
+    summary: 'Resolve customer references account-first across accounts, contacts, opportunities, and use cases.',
+    recommended_tools: ['customer_record_resolve', 'briefing_get', 'context_search'],
+    avoid_tools: ['entity_resolve unless you only need simple account/contact compatibility lookup'],
+    next_step: 'Call customer_record_resolve with query or text, then use the resolved subject with briefing_get.',
+  },
+  brief_before_action: {
+    summary: 'Load current Memory, Signals, stale warnings, policy gates, and retrieval proof before acting.',
+    recommended_tools: ['action_context_get', 'briefing_get', 'context_signal_group_list', 'context_get'],
+    avoid_tools: ['customer-facing actions before checking readiness', 'record_update/writeback tools without policy/source checks'],
+    next_step: 'Call action_context_get with the proposed_action when you are deciding whether an action is safe.',
+  },
+  ingest_raw_context: {
+    summary: 'Send transcripts, emails, meeting notes, research, and other messy source text through Raw Context ingestion.',
+    recommended_tools: ['context_ingest_auto', 'context_ingest', 'context_raw_source_get', 'context_signal_group_list'],
+    avoid_tools: ['context_add for messy source text', 'manually splitting transcripts into Memory entries'],
+    next_step: 'Use context_ingest_auto when subject IDs are unknown; use context_ingest when you already know subject_type and subject_id.',
+  },
+  review_signals: {
+    summary: 'Inspect unconfirmed evidence-backed Signals and decide whether they need details, handoff, rejection, or confirmation.',
+    recommended_tools: ['context_signal_group_list', 'context_signal_group_get', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject'],
+    avoid_tools: ['context_signal_group_promote when readiness is blocked and no human/policy approval exists'],
+    next_step: 'Call context_signal_group_list with attention_only=true, then inspect one group with context_signal_group_get.',
+  },
+  promote_memory: {
+    summary: 'Turn reviewed or policy-approved Signals into Current Memory.',
+    recommended_tools: ['context_signal_group_get', 'context_signal_group_promote', 'context_signal_promote', 'briefing_get'],
+    avoid_tools: ['context_add memory_status=active unless the user gave reviewed Current Memory directly'],
+    next_step: 'Confirm evidence/readiness first, then promote the Signal group or specific Signal.',
+  },
+  customer_outreach: {
+    summary: 'Prepare customer communication from confirmed context and policy checks.',
+    recommended_tools: ['action_context_get', 'briefing_get', 'email_draft_preview', 'activity_create', 'contact_outreach'],
+    avoid_tools: ['message_send or email_draft_save before user approval unless your policy explicitly allows it'],
+    next_step: 'Call action_context_get with proposed_action="customer_outreach" before drafting or logging outreach.',
+  },
+  record_update: {
+    summary: 'Preview governed record changes before mutating CRM objects.',
+    recommended_tools: ['action_context_get', 'record_draft_preview', 'contact_update', 'account_update', 'opportunity_update'],
+    avoid_tools: ['direct updates based only on unconfirmed Signals', 'allow_duplicates without presenting candidates'],
+    next_step: 'Call action_context_get with proposed_action="record_update", then preview or update only when policy permits.',
+  },
+  systems_writeback: {
+    summary: 'External system writes require systems scopes, object write scopes, source authority checks, and review.',
+    recommended_tools: ['sor_mapping_list', 'sor_writeback_preview', 'sor_writeback_request', 'sor_writeback_review', 'sor_writeback_execute'],
+    avoid_tools: ['sor_writeback_execute without approved request/review', 'systems tools in ordinary customer-reasoning agents'],
+    next_step: 'Start with sor_mapping_list and sor_writeback_preview; request/review/execute only when authorized.',
+  },
+  ops_recovery: {
+    summary: 'Operator-only durability and data-quality workflows for stuck jobs, Raw Context retries, audit, privacy, and retention.',
+    recommended_tools: ['ops_status_get', 'ops_data_quality_get', 'ops_data_quality_repair', 'ops_job_recover', 'ops_audit_get'],
+    avoid_tools: ['ops repair tools outside admin/owner incident response', 'dry_run=false before reviewing counts'],
+    next_step: 'Call ops_status_get or ops_data_quality_get first. For repairs, keep dry_run=true until an operator confirms.',
+  },
+};
+
 export function guideTools(): ToolDef[] {
   return [
+    {
+      name: 'tool_guide',
+      tier: 'core',
+      description:
+        'Start here when you are unsure which CRMy MCP tool to use. Returns the recommended tools, tools to avoid, and next step for common workflows such as record lookup, briefing, Raw Context ingestion, Signal review, Memory promotion, customer outreach, record updates, systems writeback, and ops recovery. This tool does not mutate data.',
+      inputSchema: workflowGuideInput,
+      handler: async (input: z.infer<typeof workflowGuideInput>, _actor: ActorContext) => {
+        const workflow = input.workflow ?? 'first_steps';
+        return {
+          workflow,
+          ...WORKFLOW_GUIDES[workflow],
+          reminder: 'Use scoped agent credentials so the model only sees tools needed for its job. Avoid admin/full manifests for ordinary customer workflows.',
+        };
+      },
+    },
     {
       name: 'guide_search',
       tier: 'core',

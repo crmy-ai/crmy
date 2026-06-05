@@ -1116,9 +1116,15 @@ export async function extractContextFromActivity(
     agent_model: config.model,
     metadata: { purpose: 'context_extraction' },
   });
-  const extractionPacket = await buildContextExtractionPacket(db, tenantId, activity, extractableTypes, options.targetSubjects ?? [], options.ownerIds);
+  const defaultTargetSubjects = supportedSubjectType(activity.subject_type) && activity.subject_id
+    ? [{ type: activity.subject_type, id: activity.subject_id }]
+    : [];
+  const effectiveTargetSubjects = options.targetSubjects?.length
+    ? options.targetSubjects
+    : defaultTargetSubjects;
+  const extractionPacket = await buildContextExtractionPacket(db, tenantId, activity, extractableTypes, effectiveTargetSubjects, options.ownerIds);
   const allowedTargetSubjects = new Map(
-    (extractionPacket?.matched_subjects ?? options.targetSubjects ?? [])
+    (extractionPacket?.matched_subjects ?? effectiveTargetSubjects)
       .filter(subject => supportedSubjectType(subject.type))
       .map(subject => [`${subject.type}:${subject.id}`, subject]),
   );
@@ -1148,7 +1154,7 @@ export async function extractContextFromActivity(
         activity_type: activity.type,
         subject_type: activity.subject_type,
         subject_id: activity.subject_id,
-        target_subject_count: options.targetSubjects?.length ?? 0,
+        target_subject_count: effectiveTargetSubjects.length,
         extraction_packet: summarizeExtractionPacket(extractionPacket),
       },
     });
@@ -1173,6 +1179,8 @@ export async function extractContextFromActivity(
         llm_calls: 1,
         failure_class: timedOut ? 'timeout' : invalidOutput ? 'invalid_output' : 'model_failed',
       },
+      raw_output_excerpt: errorTelemetry?.primary_output_excerpt ?? null,
+      repaired_output_excerpt: errorTelemetry?.repair_output_excerpt ?? null,
       failure_code: failureCode,
       failure_reason: msg,
       latency_ms: Date.now() - extractionStartedAt,
@@ -1450,7 +1458,7 @@ async function callExtractionLLM(
   const responseText = await callLLM(db, tenantId, {
     system: systemPrompt,
     user: userPrompt,
-    maxTokens: Math.min(maxTokens, 2000),
+    maxTokens: Math.min(Math.max(maxTokens, 3000), 4000),
     timeoutMs: CONTEXT_EXTRACTION_LLM_TIMEOUT_MS,
     responseFormat: 'json_object',
   });
@@ -1497,7 +1505,7 @@ async function callExtractionLLM(
   const recoveryText = await callLLM(db, tenantId, {
     system: buildRecoverySystemPrompt(extractableTypes),
     user: userPrompt,
-    maxTokens: Math.min(maxTokens, 1200),
+    maxTokens: Math.min(Math.max(maxTokens, 2000), 3000),
     timeoutMs: CONTEXT_EXTRACTION_RECOVERY_TIMEOUT_MS,
     responseFormat: 'json_object',
   });
@@ -1562,7 +1570,7 @@ async function repairExtractionResponse(
       input.recoveryOutput ? '\nRecovery output:' : undefined,
       input.recoveryOutput?.slice(0, 12_000),
     ].filter((line): line is string => line !== undefined).join('\n'),
-    maxTokens: Math.min(maxTokens, 1200),
+    maxTokens: Math.min(Math.max(maxTokens, 2000), 3000),
     timeoutMs: CONTEXT_EXTRACTION_REPAIR_TIMEOUT_MS,
     responseFormat: 'json_object',
   });
@@ -1656,13 +1664,14 @@ Rules:
 5. Avoid duplicating current Memory. Extract a repeated claim only if this source updates it, contradicts it, increases evidence quality, or provides materially new evidence.
 6. Strengthen or contradict existing open Signals when the new source supports or conflicts with them. Use the advisory hint fields when helpful.
 7. Create one entry per distinct piece of information (e.g. one entry per stakeholder, one per competitor)
-8. Every extracted signal must include evidence. Prefer verbatim snippets and include speaker/source timing when the text provides it.
-9. If nothing customer-specific and operationally useful is found, return {"context_entries":[],"record_proposals":[]}
-10. Treat account as the customer scope. If an account is matched, prefer existing contacts, opportunities, and use cases under that account before proposing anything new.
-11. Propose a new record only when the source clearly names a person, account/customer organization, opportunity/deal, or use case that is not present in matched_subjects, account_scope, or related_records. Include account_name/account_id in record_proposals when the new child record belongs under a matched account. Do not propose records for generic departments, dates, next steps, concepts, products, or internal users.
-12. Do not auto-create records. record_proposals are review candidates only.
-13. Return valid JSON only — no markdown code fences, no commentary
-14. If matched_subjects are present, choose the best subject for each Signal. Prefer contact for person-specific claims, account for account-wide claims, opportunity for deal-specific claims, and use case for implementation/product claims. Never invent subject IDs.
+8. Return at most 5 highest-value Signals. Prefer the most actionable claims over exhaustive extraction.
+9. Every extracted signal must include one concise evidence item. Use source_type, snippet, confidence, and speaker/observed_at when known. Keep snippets under 180 characters and omit long rationales.
+10. If nothing customer-specific and operationally useful is found, return {"context_entries":[],"record_proposals":[]}
+11. Treat account as the customer scope. If an account is matched, prefer existing contacts, opportunities, and use cases under that account before proposing anything new.
+12. Propose a new record only when the source clearly names a person, account/customer organization, opportunity/deal, or use case that is not present in matched_subjects, account_scope, or related_records. Include account_name/account_id in record_proposals when the new child record belongs under a matched account. Do not propose records for generic departments, dates, next steps, concepts, products, or internal users.
+13. Do not auto-create records. record_proposals are review candidates only.
+14. Return valid JSON only — no markdown code fences, no commentary
+15. If matched_subjects are present, choose the best subject for each Signal. Prefer contact for person-specific claims, account for account-wide claims, opportunity for deal-specific claims, and use case for implementation/product claims. Never invent subject IDs.
 
 Supported context types:
 ${typeDescriptions}`;
