@@ -1,6 +1,38 @@
-# CRMy
+<p align="center">
+  <img src="https://crmy.ai/crmy-logo.png" alt="CRMy" width="120" />
+</p>
 
-**Customer memory for AI sales agents.**
+<h1 align="center">CRMy</h1>
+
+<p align="center">
+  <strong>Operational customer context for AI agents.</strong>
+</p>
+
+<p align="center">
+  Give every GTM agent a governed customer briefing before it acts.
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@crmy/cli"><img alt="npm" src="https://img.shields.io/npm/v/@crmy/cli?label=npm&color=2563eb"></a>
+  <a href="https://github.com/crmy-ai/crmy/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-0f172a"></a>
+  <a href="https://discord.gg/2HvmudDwE"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white"></a>
+  <a href="https://github.com/crmy-ai/crmy/releases"><img alt="Release" src="https://img.shields.io/badge/release-v0.8.7-16a34a"></a>
+  <a href="https://github.com/crmy-ai/crmy/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/crmy-ai/crmy?style=social"></a>
+</p>
+
+<p align="center">
+  <a href="#quickstart">Quickstart</a>
+  ·
+  <a href="#why-crmy">Why CRMy?</a>
+  ·
+  <a href="#connect-agents-through-mcp">MCP</a>
+  ·
+  <a href="docs/recipes/README.md">Recipes</a>
+  ·
+  <a href="examples/README.md">Examples</a>
+</p>
+
+---
 
 Before an AI sales agent sends a follow-up, prepares a meeting brief, updates an opportunity, reviews a renewal, or writes back to a system of record, it needs confirmed, authorized customer context.
 
@@ -12,7 +44,14 @@ A `briefing_get` call returns typed customer context across accounts, contacts, 
 
 MCP-native, with CLI, REST API, and Web UI access. PostgreSQL-backed. Open source.
 
-If you are building agents that need operational customer memory, **star CRMy** and keep reading.
+Star CRMy if you’re building GTM agents that need operational memory, scoped tools, and governed action.
+
+> **30-second proof:** run the smoke test after initialization to verify entity resolution, Signals, Memory, briefings, and Handoffs against seeded demo data.
+>
+> ```bash
+> npx -y @crmy/cli init --yes
+> npx -y @crmy/cli agent-smoke
+> ```
 
 ---
 
@@ -22,12 +61,16 @@ CRMy makes that state agent-operable.
 
 It turns messy customer context into typed operational Memory, gives agents scoped tools, and governs the path from recommendation to human review to system-of-record writeback.
 
-```text
-Raw Context -> Signals -> Memory -> Handoffs / Writeback
+```mermaid
+flowchart LR
+  raw["Raw Context"] --> signals["Signals"]
+  signals --> memory["Memory"]
+  memory --> briefing["Briefing"]
+  briefing --> action["Handoffs / Writeback"]
+  action --> proof["Proof"]
 ```
 
 Before an agent acts on a customer, CRMy can tell it what is known, what is stale, what is inferred, what is approved, what action is allowed, what system owns the record, and what proof or audit trail will exist afterward.
-
 
 ## Why CRMy?
 
