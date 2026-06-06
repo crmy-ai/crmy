@@ -620,7 +620,7 @@ npm test
 
 ## Release
 
-Current version: `0.8.6`
+Current version: `0.8.7`
 
 v0.8.x focuses on making CRMy a usable, scoped GTM agent workspace:
 

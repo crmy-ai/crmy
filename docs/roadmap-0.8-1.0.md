@@ -320,6 +320,19 @@ Completed in this checkpoint:
 - **Raw Context guidance:** recipes now prefer `context_ingest_auto` for messy transcripts, emails, notes, research, and debriefs, with direct `context_add` reserved for advanced reviewed writes.
 - **OpenClaw support:** the OpenClaw plugin exposes Raw Context ingestion and aligns its skill guidance with the current account, Signal, Memory, and Handoff model.
 
+### 0.8.7 Release Checkpoint
+
+0.8.7 is a same-day launch-hardening patch for 0.8.6, not the 0.9 release.
+
+Completed in this checkpoint:
+
+- **Auth/scope hardening:** JWT users resolve against current database user/actor state; deactivated users and actors are rejected; missing scopes no longer imply broad access; admin-only scopes cover API keys, HITL policies, inbound email config, and systems administration.
+- **API key governance:** API key management is owner/admin-only with `api_keys:admin`, and requested scopes must be known and within the grantor's own authority.
+- **Webhook safety:** inbound email ingestion requires explicit tenant identity plus a valid HMAC signature; webhook secret configuration requires owner/admin plus `email_provider:admin`.
+- **HITL/writeback safety:** HITL policy routes are ordered correctly, HITL rules require `hitl:admin`, pending writebacks cannot execute before approval, and HITL/writeback review state transitions are transactional.
+- **Migration reliability:** migrations use a connection-scoped PostgreSQL advisory lock to reduce concurrent runner risk.
+- **Self-registration guidance:** setup documentation now reflects the current local actor/API-key model.
+
 ### 1. Extraction Reliability And Typed Memory Readiness
 
 Status: **In progress.** Raw Context receipts, golden fixtures, typed readiness, and conservative auto-promotion checks are landed; broader source coverage and calibration continue.

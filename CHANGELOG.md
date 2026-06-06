@@ -4,6 +4,28 @@ All notable changes to CRMy are documented here.
 
 ---
 
+## [0.8.7] — 2026-06-06
+
+### Release Focus
+
+0.8.7 is a same-day launch-hardening patch for 0.8.6. It includes the 0.8.6 MCP/API/CLI and recipe alignment work, then adds stronger auth, scope, webhook, migration, and governed writeback safeguards.
+
+### Highlights
+
+- **Auth and scope hardening**: JWT users resolve against current database user/actor state, deactivated users/actors are rejected, missing scopes no longer imply broad access, and admin-only scopes cover API keys, HITL policies, inbound email config, and systems administration.
+- **API key governance**: only owner/admin actors with `api_keys:admin` can create/list/update/revoke keys, and requested scopes must be known and within the grantor's own authority.
+- **HITL and webhook safety**: `/hitl/rules` routes before `/hitl/:id`, HITL rules require `hitl:admin`, inbound webhook secret config requires `email_provider:admin`, and inbound email ingestion requires explicit tenant identity plus a valid HMAC signature.
+- **Writeback safety**: pending writebacks can no longer execute before approval, and HITL/writeback review state updates are transactional.
+- **Migration reliability**: migrations now use a connection-scoped PostgreSQL advisory lock.
+- **MCP/API/CLI parity**: actor-scoped REST and CLI tool listing, description, and invocation remain part of this package line.
+- **Recipes and harnesses**: recipes/examples continue to use friendly record references, `agent-smoke`, `tools describe`, and Raw Context ingestion guidance.
+
+### Notes
+
+This is not the 0.9 release. It is a launch-hardening patch on the 0.8.x line.
+
+---
+
 ## [0.8.6] — 2026-06-05
 
 ### Release Focus
