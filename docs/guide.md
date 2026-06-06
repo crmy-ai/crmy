@@ -400,7 +400,7 @@ API keys can be created with a restricted set of scopes to limit what the key is
 **Wildcard shortcuts:**
 - `read` — grants read access to all resources (equivalent to `contacts:read`, `accounts:read`, `opportunities:read`, etc.)
 - `write` — grants write access to all resources
-- `*` — full access (read + write everything)
+- `*` — full access for trusted operator credentials only. Do not use this for normal agents.
 
 Systems-of-record scopes are intentionally excluded from the `read` and `write` shortcuts. Connector setup, sync, mapping, conflicts, and external writebacks must be granted with explicit `systems:read`, `systems:write`, or `systems:admin` scopes, or with `*`.
 
@@ -419,19 +419,20 @@ Systems-of-record scopes are intentionally excluded from the `read` and `write` 
 | `systems:admin` | Create, update, test, delete systems and manage mappings |
 | `read` | All `:read` scopes (wildcard) |
 | `write` | All `:write` scopes (wildcard) |
-| `*` | Everything |
+| `*` | Everything; reserved for explicitly trusted operator credentials |
 
 **How scopes are enforced:**
 
-- JWT tokens (human login) bypass scope enforcement and always have full access.
-- MCP sessions filter the tool manifest before an agent sees it, then API key requests have their scopes checked against `TOOL_SCOPES` again before any tool handler runs.
+- Human login JWTs resolve the current user and actor from the database. Owner/admin roles receive the setup and operator scopes needed for first-run administration; member and manager roles receive normal read/write defaults and still respect object-level visibility.
+- API keys carry explicit scopes. If a key is bound to an actor, the effective scope set is the intersection of the key scopes and that actor's active scopes.
+- MCP sessions filter the tool manifest before an agent sees it, then requests have their scopes checked against `TOOL_SCOPES` again before any tool handler runs.
 - If a required scope is missing, the server returns HTTP 403 with a message identifying exactly which scope was needed.
 
 See the [Scope Enforcement](#scope-enforcement) section for the complete reference.
 
 #### Agent Self-Registration
 
-Agents can register themselves without admin intervention.
+Agents can submit a self-registration request with an existing authenticated CRMy token. Self-registered agents start read-only, inactive, and pending review; an owner/admin activates the actor and grants the workflow-specific scopes from Settings → Actors.
 
 Via MCP:
 
@@ -464,7 +465,7 @@ Authorization: Bearer <jwt-or-api-key>
 }
 ```
 
-Response includes the created (or existing) actor record and a bound API key:
+Response includes the created (or existing) pending actor record and a bound read-only API key:
 
 ```json
 {
@@ -473,12 +474,12 @@ Response includes the created (or existing) actor record and a bound API key:
     "id": "...",
     "label": "Outreach Agent auto",
     "key": "crmy_...",
-    "scopes": ["contacts:read", "activities:write"]
+    "scopes": ["read"]
   }
 }
 ```
 
-The operation is idempotent — calling it twice with the same `agent_identifier` returns the existing actor (no duplicate). New agents start with `['read']` scopes by default if `requested_scopes` is not provided. An admin can expand scopes from the Settings → Actors panel.
+The operation is idempotent — calling it twice with the same `agent_identifier` returns the existing actor (no duplicate). `requested_scopes` documents what the agent is asking for; it is not granted automatically. An admin can activate the agent and expand scopes from the Settings → Actors panel.
 
 ### Roles
 

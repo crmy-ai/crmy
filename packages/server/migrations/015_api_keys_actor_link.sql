@@ -21,7 +21,8 @@ WHERE ak.user_id = a.user_id
 -- ============================================================
 ALTER TABLE actors ADD COLUMN scopes TEXT[] NOT NULL DEFAULT '{read}';
 
--- Backfill: humans linked to user accounts get full access
+-- Backfill: humans linked to user accounts get the pre-role scoped baseline.
+-- Later migrations and runtime role defaults grant owner/admin setup scopes.
 UPDATE actors
 SET scopes = '{read,write,contacts:read,contacts:write,accounts:read,accounts:write,opportunities:read,opportunities:write,activities:read,activities:write,assignments:create,assignments:update,context:read,context:write}'
 WHERE actor_type = 'human' AND user_id IS NOT NULL;
