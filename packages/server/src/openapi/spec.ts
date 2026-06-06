@@ -31,7 +31,7 @@ export function buildSpec() {
       version: API_VERSION,
       description:
         'The operational customer context backend for AI agents. MCP-native, PostgreSQL-backed, open source. ' +
-        'All endpoints require `Authorization: Bearer <jwt-or-api-key>` except `/auth/register` and `/auth/login`.',
+        'Application endpoints require `Authorization: Bearer <jwt-or-api-key>` except `/auth/register` and `/auth/login`; provider OAuth callbacks and inbound email webhooks use provider state or tenant-scoped HMAC signatures instead.',
       license: { name: 'Apache-2.0' },
     },
     servers: [

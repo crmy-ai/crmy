@@ -323,6 +323,16 @@ const API_KEY_SCOPE_GROUPS = [
   { label: 'HITL', scopes: [
     { value: 'hitl:read', label: 'Read' },
     { value: 'hitl:write', label: 'Write' },
+    { value: 'hitl:admin', label: 'Policy admin' },
+  ]},
+  { label: 'Systems', scopes: [
+    { value: 'systems:read', label: 'Read' },
+    { value: 'systems:write', label: 'Sync/writeback' },
+    { value: 'systems:admin', label: 'Connection admin' },
+  ]},
+  { label: 'Admin Setup', scopes: [
+    { value: 'api_keys:admin', label: 'API keys' },
+    { value: 'email_provider:admin', label: 'Inbound email' },
   ]},
   { label: 'Agent', scopes: [
     { value: 'agent:read', label: 'Read' },
@@ -370,7 +380,26 @@ const SCOPE_TEMPLATES = [
   {
     label: 'Admin operator',
     description: 'Broad access for trusted operators during setup, migration, or incident response.',
-    scopes: ['read', 'write', 'ops:read', 'ops:write', 'privacy:read', 'privacy:write'],
+    scopes: [
+      'read',
+      'write',
+      'systems:read',
+      'systems:write',
+      'systems:admin',
+      'api_keys:admin',
+      'email_provider:admin',
+      'hitl:admin',
+      'ops:read',
+      'ops:write',
+      'privacy:read',
+      'privacy:write',
+      'webhooks:read',
+      'webhooks:write',
+      'workflows:read',
+      'workflows:write',
+      'messaging:read',
+      'messaging:write',
+    ],
   },
 ];
 

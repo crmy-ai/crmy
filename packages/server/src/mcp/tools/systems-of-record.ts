@@ -85,7 +85,7 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'sor_system_create',
-      tier: 'extended',
+      tier: 'admin',
       description: 'Create a governed external system connection such as HubSpot, Salesforce, Databricks, or Snowflake. Credentials are encrypted and redacted from responses.',
       inputSchema: sorSystemCreate,
       handler: async (input: z.infer<typeof sorSystemCreate>, actor: ActorContext) =>
@@ -106,7 +106,7 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'sor_system_update',
-      tier: 'extended',
+      tier: 'admin',
       description: 'Update a system-of-record connection, including encrypted credentials, sync settings, or status.',
       inputSchema: sorSystemUpdate,
       handler: async (input: z.infer<typeof sorSystemUpdate>, actor: ActorContext) =>
@@ -142,7 +142,7 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'sor_system_delete',
-      tier: 'extended',
+      tier: 'admin',
       description: 'Admin-only destructive tool for removing a system-of-record connection and its mappings, refs, conflicts, sync runs, and writeback queue. Prefer disabling or pausing sync when historical integration state should remain available.',
       inputSchema: sorSystemDelete,
       handler: async (input: z.infer<typeof sorSystemDelete>, actor: ActorContext) =>
@@ -190,7 +190,7 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'sor_system_test',
-      tier: 'extended',
+      tier: 'admin',
       description: 'Validate credentials and test connectivity for a system of record.',
       inputSchema: sorSystemTest,
       handler: async (input: z.infer<typeof sorSystemTest>, actor: ActorContext) => {
@@ -214,7 +214,7 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'sor_mapping_upsert',
-      tier: 'extended',
+      tier: 'admin',
       description: 'Create or update an object mapping between an external object/table and a typed CRMy object.',
       inputSchema: sorMappingUpsert,
       handler: async (input: z.infer<typeof sorMappingUpsert>, actor: ActorContext) =>
@@ -234,7 +234,7 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'sor_mapping_delete',
-      tier: 'extended',
+      tier: 'admin',
       description: 'Admin-only destructive tool for deleting one external object mapping. Use only after reviewing affected sync and writeback behavior for the mapped object.',
       inputSchema: sorMappingDelete,
       handler: async (input: z.infer<typeof sorMappingDelete>, actor: ActorContext) =>

@@ -145,13 +145,8 @@ export function getAllTools(db: DbPool): ToolDef[] {
 export function getToolsForActor(db: DbPool, actor: ActorContext): ToolDef[] {
   const all = getAllTools(db);
   const isAdmin = actor.role === 'admin' || actor.role === 'owner';
-  // No scopes = JWT user (full access); scopes array present = agent API key
-  const hasExtended = !actor.scopes
-    || actor.scopes.includes('extended')
-    || actor.scopes.includes('write');
-  const hasAnalytics = !actor.scopes
-    || actor.scopes.includes('analytics')
-    || actor.scopes.includes('read');
+  const hasExtended = actorHasScope(actor, 'extended') || actorHasScope(actor, 'write');
+  const hasAnalytics = actorHasScope(actor, 'analytics') || actorHasScope(actor, 'read');
 
   return all.filter(t => {
     const requiredScopes = getToolScopeRequirements(t.name);

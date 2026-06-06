@@ -13,6 +13,7 @@ import * as actorRepo from '../db/repos/actors.js';
 import * as governorLimits from '../db/repos/governor-limits.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { hashAuthToken } from '../services/auth-lifecycle.js';
+import { assertCanGrantScopes, dedupeScopes, requireScopes } from './scopes.js';
 
 // ── Simple in-memory rate limiter ────────────────────────────────────────────
 // No external dependency. Keyed by "route:ip". Entries auto-expire.
@@ -52,6 +53,27 @@ function clientIp(req: Request): string {
     req.socket.remoteAddress ??
     'unknown'
   );
+}
+
+function handleAuthRouteError(res: Response, err: unknown, fallbackDetail: string): void {
+  if (err instanceof CrmyError) {
+    res.status(err.status).json(err.toJSON());
+    return;
+  }
+  res.status(500).json({
+    type: 'https://crmy.ai/errors/internal',
+    title: 'Internal Error',
+    status: 500,
+    detail: fallbackDetail,
+  });
+}
+
+function requireApiKeyAdmin(req: Request): void {
+  const actor = req.actor!;
+  if (actor.role !== 'owner' && actor.role !== 'admin') {
+    throw new CrmyError('PERMISSION_DENIED', 'Owner or admin access is required to manage API keys', 403);
+  }
+  requireScopes(actor, 'api_keys:admin');
 }
 
 export function authRouter(
@@ -471,8 +493,11 @@ export function authRouter(
   // POST /auth/api-keys
   authenticated.post('/api-keys', async (req: Request, res: Response) => {
     try {
+      requireApiKeyAdmin(req);
       const data = apiKeyCreate.parse(req.body);
       const actor = req.actor!;
+      const scopes = dedupeScopes(data.scopes);
+      assertCanGrantScopes(actor, scopes);
 
       // Generate key
       const rawKey = 'crmy_' + crypto.randomBytes(32).toString('hex');
@@ -500,7 +525,7 @@ export function authRouter(
         `INSERT INTO api_keys (tenant_id, user_id, actor_id, key_hash, label, scopes, expires_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id, label, scopes, actor_id, created_at, expires_at`,
-        [actor.tenant_id, actorId ? null : actor.actor_id, actorId, keyHash, data.label, data.scopes, data.expires_at ?? null],
+        [actor.tenant_id, actorId ? null : actor.actor_id, actorId, keyHash, data.label, scopes, data.expires_at ?? null],
       );
 
       await emitEvent(db, {
@@ -510,7 +535,7 @@ export function authRouter(
         actorType: actor.actor_type,
         objectType: 'api_key',
         objectId: result.rows[0].id,
-        afterData: { label: data.label, scopes: data.scopes },
+        afterData: { label: data.label, scopes },
       });
 
       res.status(201).json({
@@ -518,42 +543,43 @@ export function authRouter(
         key: rawKey, // Only returned once
       });
     } catch (err) {
-      res.status(500).json({
-        type: 'https://crmy.ai/errors/internal',
-        title: 'Internal Error',
-        status: 500,
-        detail: 'Failed to create API key',
-      });
+      handleAuthRouteError(res, err, 'Failed to create API key');
     }
   });
 
   // GET /auth/api-keys
   authenticated.get('/api-keys', async (req: Request, res: Response) => {
-    const actor = req.actor!;
-    // Optionally filter by actor_id
-    const actorFilter = req.query.actor_id as string | undefined;
-    const params: unknown[] = [actor.tenant_id];
-    let where = 'ak.tenant_id = $1';
-    if (actorFilter) {
-      where += ' AND ak.actor_id = $2';
-      params.push(actorFilter);
+    try {
+      requireApiKeyAdmin(req);
+      const actor = req.actor!;
+      // Optionally filter by actor_id
+      const actorFilter = req.query.actor_id as string | undefined;
+      const params: unknown[] = [actor.tenant_id];
+      let where = 'ak.tenant_id = $1';
+      if (actorFilter) {
+        where += ' AND ak.actor_id = $2';
+        params.push(actorFilter);
+      }
+      const result = await db.query(
+        `SELECT ak.id, ak.label, ak.scopes, ak.actor_id, ak.user_id,
+                ak.last_used_at, ak.expires_at, ak.created_at,
+                a.display_name as actor_name, a.actor_type as actor_type
+         FROM api_keys ak
+         LEFT JOIN actors a ON ak.actor_id = a.id
+         WHERE ${where}
+         ORDER BY ak.created_at DESC`,
+        params,
+      );
+      res.json({ data: result.rows });
+    } catch (err) {
+      handleAuthRouteError(res, err, 'Failed to list API keys');
     }
-    const result = await db.query(
-      `SELECT ak.id, ak.label, ak.scopes, ak.actor_id, ak.user_id,
-              ak.last_used_at, ak.expires_at, ak.created_at,
-              a.display_name as actor_name, a.actor_type as actor_type
-       FROM api_keys ak
-       LEFT JOIN actors a ON ak.actor_id = a.id
-       WHERE ${where}
-       ORDER BY ak.created_at DESC`,
-      params,
-    );
-    res.json({ data: result.rows });
   });
 
   // PATCH /auth/api-keys/:id
   authenticated.patch('/api-keys/:id', async (req: Request, res: Response) => {
     try {
+      requireApiKeyAdmin(req);
       const actor = req.actor!;
       const keyId = typeof req.params.id === 'string' ? req.params.id : '';
       const { label, scopes, actor_id, expires_at } = req.body as {
@@ -589,7 +615,12 @@ export function authRouter(
       const params: unknown[] = [];
       let p = 1;
       if (label !== undefined) { sets.push(`label = $${p++}`); params.push(label); }
-      if (scopes !== undefined) { sets.push(`scopes = $${p++}`); params.push(scopes); }
+      if (scopes !== undefined) {
+        const normalizedScopes = dedupeScopes(scopes);
+        assertCanGrantScopes(actor, normalizedScopes);
+        sets.push(`scopes = $${p++}`);
+        params.push(normalizedScopes);
+      }
       if ('actor_id' in req.body) { sets.push(`actor_id = $${p++}`); params.push(actor_id ?? null); }
       if ('expires_at' in req.body) { sets.push(`expires_at = $${p++}`); params.push(expires_at ? new Date(expires_at) : null); }
 
@@ -606,39 +637,44 @@ export function authRouter(
       );
 
       res.json(result.rows[0]);
-    } catch {
-      res.status(500).json({ detail: 'Failed to update API key' });
+    } catch (err) {
+      handleAuthRouteError(res, err, 'Failed to update API key');
     }
   });
 
   // DELETE /auth/api-keys/:id
   authenticated.delete('/api-keys/:id', async (req: Request, res: Response) => {
-    const actor = req.actor!;
-    const keyId = typeof req.params.id === 'string' ? req.params.id : '';
-    const result = await db.query(
-      'DELETE FROM api_keys WHERE id = $1 AND tenant_id = $2 RETURNING id',
-      [keyId, actor.tenant_id],
-    );
-    if (result.rows.length === 0) {
-      res.status(404).json({
-        type: 'https://crmy.ai/errors/not_found',
-        title: 'Not Found',
-        status: 404,
-        detail: 'API key not found',
+    try {
+      requireApiKeyAdmin(req);
+      const actor = req.actor!;
+      const keyId = typeof req.params.id === 'string' ? req.params.id : '';
+      const result = await db.query(
+        'DELETE FROM api_keys WHERE id = $1 AND tenant_id = $2 RETURNING id',
+        [keyId, actor.tenant_id],
+      );
+      if (result.rows.length === 0) {
+        res.status(404).json({
+          type: 'https://crmy.ai/errors/not_found',
+          title: 'Not Found',
+          status: 404,
+          detail: 'API key not found',
+        });
+        return;
+      }
+
+      await emitEvent(db, {
+        tenantId: actor.tenant_id,
+        eventType: 'api_key.revoked',
+        actorId: actor.actor_id,
+        actorType: actor.actor_type,
+        objectType: 'api_key',
+        objectId: keyId,
       });
-      return;
+
+      res.json({ deleted: true });
+    } catch (err) {
+      handleAuthRouteError(res, err, 'Failed to revoke API key');
     }
-
-    await emitEvent(db, {
-      tenantId: actor.tenant_id,
-      eventType: 'api_key.revoked',
-      actorId: actor.actor_id,
-      actorType: actor.actor_type,
-      objectType: 'api_key',
-      objectId: keyId,
-    });
-
-    res.json({ deleted: true });
   });
 
   // PATCH /auth/profile — self-service profile update (any authenticated user)

@@ -677,6 +677,49 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  // --- HITL Approval Rules ---
+  router.get('/hitl/rules', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      requireScopes(actor, 'hitl:admin');
+      const rules = await hitlRepo.listApprovalRules(db, actor.tenant_id);
+      res.json({ data: rules });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/hitl/rules', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      requireScopes(actor, 'hitl:admin');
+      const rule = await hitlRepo.createApprovalRule(db, actor.tenant_id, req.body);
+      res.status(201).json(rule);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/hitl/rules/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      requireScopes(actor, 'hitl:admin');
+      const rule = await hitlRepo.updateApprovalRule(db, actor.tenant_id, p(req, 'id'), req.body);
+      if (!rule) { res.status(404).json({ error: 'Rule not found' }); return; }
+      res.json(rule);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/hitl/rules/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      requireScopes(actor, 'hitl:admin');
+      const deleted = await hitlRepo.deleteApprovalRule(db, actor.tenant_id, p(req, 'id'));
+      if (!deleted) { res.status(404).json({ error: 'Rule not found' }); return; }
+      res.status(204).end();
+    } catch (err) { handleError(res, err); }
+  });
+
   router.get('/hitl/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
@@ -757,41 +800,6 @@ export function apiRouter(db: DbPool): Router {
       }
 
       res.json(result);
-    } catch (err) { handleError(res, err); }
-  });
-
-  // --- HITL Approval Rules ---
-  router.get('/hitl/rules', async (req: Request, res: Response) => {
-    try {
-      const actor = getActor(req);
-      const rules = await hitlRepo.listApprovalRules(db, actor.tenant_id);
-      res.json({ data: rules });
-    } catch (err) { handleError(res, err); }
-  });
-
-  router.post('/hitl/rules', async (req: Request, res: Response) => {
-    try {
-      const actor = getActor(req);
-      const rule = await hitlRepo.createApprovalRule(db, actor.tenant_id, req.body);
-      res.status(201).json(rule);
-    } catch (err) { handleError(res, err); }
-  });
-
-  router.patch('/hitl/rules/:id', async (req: Request, res: Response) => {
-    try {
-      const actor = getActor(req);
-      const rule = await hitlRepo.updateApprovalRule(db, actor.tenant_id, p(req, 'id'), req.body);
-      if (!rule) { res.status(404).json({ error: 'Rule not found' }); return; }
-      res.json(rule);
-    } catch (err) { handleError(res, err); }
-  });
-
-  router.delete('/hitl/rules/:id', async (req: Request, res: Response) => {
-    try {
-      const actor = getActor(req);
-      const deleted = await hitlRepo.deleteApprovalRule(db, actor.tenant_id, p(req, 'id'));
-      if (!deleted) { res.status(404).json({ error: 'Rule not found' }); return; }
-      res.status(204).end();
     } catch (err) { handleError(res, err); }
   });
 
@@ -1706,6 +1714,8 @@ export function apiRouter(db: DbPool): Router {
   router.get('/email-provider/inbound', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      requireAdminActor(actor);
+      requireScopes(actor, 'email_provider:admin');
       const row = await db.query(
         'SELECT inbound_enabled, CASE WHEN inbound_webhook_secret IS NOT NULL THEN true ELSE false END as has_secret FROM email_providers WHERE tenant_id = $1',
         [actor.tenant_id],
@@ -1718,6 +1728,8 @@ export function apiRouter(db: DbPool): Router {
   router.post('/email-provider/inbound/secret', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      requireAdminActor(actor);
+      requireScopes(actor, 'email_provider:admin');
       const secret = crypto.randomBytes(32).toString('hex');
       await db.query(
         'UPDATE email_providers SET inbound_webhook_secret = $1, inbound_enabled = true WHERE tenant_id = $2',
@@ -3986,8 +3998,7 @@ export function inboundRouter(db: DbPool): Router {
       const tenant = await db.query('SELECT id FROM tenants WHERE id = $1 OR slug = $1 LIMIT 1', [requested]);
       return tenant.rows[0]?.id ?? null;
     }
-    const tenantResult = await db.query('SELECT id FROM tenants LIMIT 1');
-    return tenantResult.rows[0]?.id ?? null;
+    return null;
   }
 
   router.get('/mailbox/oauth/:provider/callback', async (req: Request, res: Response) => {
@@ -4033,28 +4044,41 @@ export function inboundRouter(db: DbPool): Router {
 
       const tenantId = await resolveInboundTenant(req);
       if (!tenantId) {
-        res.status(503).json({ error: 'No matching tenant configured' });
+        res.status(400).json({ error: 'Explicit tenant_id query parameter or x-crmy-tenant-id header is required' });
         return;
       }
 
-      // Optional HMAC verification using inbound_webhook_secret
+      // Required HMAC verification using inbound_webhook_secret.
       const providerRow = await db.query(
-        'SELECT inbound_webhook_secret FROM email_providers WHERE tenant_id = $1',
+        'SELECT inbound_webhook_secret, inbound_enabled FROM email_providers WHERE tenant_id = $1',
         [tenantId],
       );
       const secret: string | null = providerRow.rows[0]?.inbound_webhook_secret ?? null;
-      if (secret) {
-        const sig = req.headers['x-webhook-signature'] as string | undefined;
-        if (sig) {
-          const expected = crypto
-            .createHmac('sha256', secret)
-            .update(JSON.stringify(req.body))
-            .digest('hex');
-          if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
-            res.status(401).json({ error: 'Invalid webhook signature' });
-            return;
-          }
-        }
+      const inboundEnabled = providerRow.rows[0]?.inbound_enabled === true;
+      if (!secret || !inboundEnabled) {
+        res.status(401).json({ error: 'Inbound email webhook is not configured for this tenant' });
+        return;
+      }
+
+      const sig = req.headers['x-webhook-signature'] as string | undefined;
+      if (!sig) {
+        res.status(401).json({ error: 'Missing webhook signature' });
+        return;
+      }
+      const supplied = sig.startsWith('sha256=') ? sig.slice('sha256='.length) : sig;
+      const expected = crypto
+        .createHmac('sha256', secret)
+        .update(JSON.stringify(req.body))
+        .digest('hex');
+      if (!/^[a-f0-9]{64}$/i.test(supplied)) {
+        res.status(401).json({ error: 'Invalid webhook signature' });
+        return;
+      }
+      const suppliedBytes = Buffer.from(supplied, 'hex');
+      const expectedBytes = Buffer.from(expected, 'hex');
+      if (suppliedBytes.length !== expectedBytes.length || !crypto.timingSafeEqual(suppliedBytes, expectedBytes)) {
+        res.status(401).json({ error: 'Invalid webhook signature' });
+        return;
       }
 
       const parsed = parseInboundEmail(req.body as Record<string, unknown>);

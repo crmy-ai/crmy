@@ -239,9 +239,9 @@ const TOOL_SCOPES: Record<string, string[]> = {
   hitl_list_pending: ['hitl:read'],
   hitl_submit_request: ['hitl:write'],
   hitl_resolve: ['hitl:write'],
-  hitl_rule_create: ['hitl:write'],
-  hitl_rule_list: ['hitl:read'],
-  hitl_rule_delete: ['hitl:write'],
+  hitl_rule_create: ['hitl:admin'],
+  hitl_rule_list: ['hitl:admin'],
+  hitl_rule_delete: ['hitl:admin'],
 
   // ── Agent handoff ──
   agent_capture_handoff: ['agent:write'],
@@ -278,20 +278,90 @@ const TOOL_SCOPES: Record<string, string[]> = {
   message_delivery_search: ['messaging:read'],
 };
 
+const ADMIN_ONLY_SCOPES = [
+  'api_keys:admin',
+  'email_provider:admin',
+  'hitl:admin',
+] as const;
+
+const ADMIN_ROLE_SCOPES = [
+  'read',
+  'write',
+  'systems:read',
+  'systems:write',
+  'systems:admin',
+  'ops:read',
+  'ops:write',
+  'privacy:read',
+  'privacy:write',
+  'webhooks:read',
+  'webhooks:write',
+  'workflows:read',
+  'workflows:write',
+  'messaging:read',
+  'messaging:write',
+  ...ADMIN_ONLY_SCOPES,
+] as const;
+
+const NON_ADMIN_ROLE_SCOPES = ['read', 'write'] as const;
+
+const KNOWN_SCOPES = new Set<string>([
+  'read',
+  'write',
+  'extended',
+  'analytics',
+  '*',
+  'use_cases:read',
+  'use_cases:write',
+  ...ADMIN_ROLE_SCOPES,
+  ...ADMIN_ONLY_SCOPES,
+  ...Object.values(TOOL_SCOPES).flat(),
+]);
+
+export function roleDefaultScopes(role: ActorContext['role']): string[] {
+  return role === 'admin' || role === 'owner'
+    ? [...ADMIN_ROLE_SCOPES]
+    : [...NON_ADMIN_ROLE_SCOPES];
+}
+
+export function dedupeScopes(scopes: readonly string[]): string[] {
+  return [...new Set(scopes)];
+}
+
+export function effectiveJwtScopes(role: ActorContext['role'], actorScopes?: readonly string[] | null): string[] {
+  return dedupeScopes([...roleDefaultScopes(role), ...(actorScopes ?? [])]);
+}
+
+export function isKnownScope(scope: string): boolean {
+  return KNOWN_SCOPES.has(scope);
+}
+
+export function assertKnownScopes(scopes: readonly string[]): void {
+  const unknown = scopes.filter(scope => !isKnownScope(scope));
+  if (unknown.length > 0) {
+    throw permissionDenied(`Unknown API key scope(s): ${unknown.join(', ')}`);
+  }
+}
+
+export function assertCanGrantScopes(grantor: ActorContext, requestedScopes: readonly string[]): void {
+  assertKnownScopes(requestedScopes);
+  for (const scope of requestedScopes) {
+    if (!actorHasScope(grantor, scope)) {
+      throw permissionDenied(`Cannot grant scope '${scope}' because the current actor does not have it.`);
+    }
+  }
+}
+
 /**
  * Check if an actor has the required scope. General 'read' grants all *:read,
  * and general 'write' grants all *:write.
  */
 export function actorHasScope(actor: ActorContext, requiredScope: string): boolean {
-  const scopes = actor.scopes;
-  // No scopes defined = verified JWT user (full access). Constructed actors,
-  // anonymous actors, and API-key actors must carry explicit scopes.
-  if (!scopes) {
-    return actor.actor_type === 'user'
-      && Boolean(actor.tenant_id)
-      && Boolean(actor.actor_id)
-      && actor.actor_id !== 'anonymous';
-  }
+  const scopes = actor.scopes ?? (
+    Boolean(actor.tenant_id) && Boolean(actor.actor_id) && actor.actor_id !== 'anonymous'
+      ? roleDefaultScopes(actor.role)
+      : []
+  );
 
   // Direct match
   if (scopes.includes(requiredScope)) return true;

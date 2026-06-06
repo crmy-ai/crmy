@@ -116,7 +116,18 @@ test('agent harness setup avoids npx prompts and includes systems scopes', async
   const webProviderSource = await read('packages/web/src/lib/agentProviders.ts');
   assert.match(readme, /npx -y @crmy\/cli mcp/);
   assert.match(guide, /npx -y @crmy\/cli mcp/);
-  assert.match(initSource, /systems:read,systems:write,systems:admin/);
+  for (const scope of [
+    'systems:read',
+    'systems:write',
+    'systems:admin',
+    'api_keys:admin',
+    'email_provider:admin',
+    'hitl:admin',
+  ]) {
+    assert.match(initSource, new RegExp(scope));
+  }
+  assert.match(initSource, /INSERT INTO actors/);
+  assert.match(initSource, /registration_status = 'approved'/);
   assert.match(initSource, /chooseAgentSetup/);
   assert.match(initSource, /CRMY_AGENT_PROVIDER/);
   assert.match(doctorSource, /Workspace Agent online/);

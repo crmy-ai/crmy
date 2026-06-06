@@ -9,7 +9,7 @@ import { checkContextConvergence } from '../dist/services/context-convergence.js
 import { createContradictionReviewAssignments } from '../dist/services/context-review-assignments.js';
 import { getDataQualityReport, repairDataQualityFinding } from '../dist/services/data-quality.js';
 import { applyRetentionPolicy, redactSubjectPii } from '../dist/services/privacy-governance.js';
-import { enforceToolScopes } from '../dist/auth/scopes.js';
+import { actorHasScope, assertCanGrantScopes, enforceToolScopes, effectiveJwtScopes } from '../dist/auth/scopes.js';
 import { recoverOperationalJob } from '../dist/services/operational-recovery.js';
 import { getAllTools, getToolsForActor } from '../dist/mcp/server.js';
 import { isSameMcpActor } from '../dist/mcp/session-registry.js';
@@ -144,6 +144,15 @@ test('runIdempotent marks failed operations and allows a retry with the same pay
 
   const retry = await runIdempotent(db, baseInput, async () => ({ recovered: true }));
   assert.deepEqual(retry, { recovered: true });
+});
+
+test('inbound email webhook requires explicit tenant and signature', async () => {
+  const source = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  assert.match(source, /return null;\n\s*}/);
+  assert.doesNotMatch(source, /SELECT id FROM tenants LIMIT 1/);
+  assert.match(source, /Explicit tenant_id query parameter or x-crmy-tenant-id header is required/);
+  assert.match(source, /Missing webhook signature/);
+  assert.match(source, /timingSafeEqual/);
 });
 
 class FakeTransactionClient {
@@ -2936,6 +2945,57 @@ test('sensitive admin tools are hidden from non-admin actors', () => {
   assert.equal(adminTools.includes('sor_system_create'), true);
 });
 
+test('JWT role defaults do not grant member actors admin-only trust boundaries', () => {
+  const jwtMember = {
+    tenant_id: baseInput.tenantId,
+    actor_id: 'jwt-member',
+    actor_type: 'user',
+    role: 'member',
+  };
+  const jwtOwner = {
+    tenant_id: baseInput.tenantId,
+    actor_id: 'jwt-owner',
+    actor_type: 'user',
+    role: 'owner',
+  };
+
+  assert.equal(actorHasScope(jwtMember, 'context:read'), true);
+  assert.equal(actorHasScope(jwtMember, 'systems:admin'), false);
+  assert.throws(
+    () => enforceToolScopes('sor_system_create', jwtMember),
+    err => err?.code === 'PERMISSION_DENIED' && err?.status === 403,
+  );
+  assert.throws(
+    () => enforceToolScopes('hitl_rule_create', jwtMember),
+    err => err?.code === 'PERMISSION_DENIED' && err?.status === 403,
+  );
+
+  assert.doesNotThrow(() => enforceToolScopes('sor_system_create', jwtOwner));
+  assert.doesNotThrow(() => enforceToolScopes('hitl_rule_create', jwtOwner));
+  assert.equal(effectiveJwtScopes('owner').includes('api_keys:admin'), true);
+});
+
+test('API key scope grants are known and cannot exceed the grantor', () => {
+  assert.doesNotThrow(() => assertCanGrantScopes(recoveryActor, ['contacts:read', 'api_keys:admin']));
+  assert.throws(
+    () => assertCanGrantScopes(memberActor, ['api_keys:admin']),
+    err => err?.code === 'PERMISSION_DENIED' && err?.status === 403,
+  );
+  assert.throws(
+    () => assertCanGrantScopes(recoveryActor, ['totally:made_up']),
+    err => err?.code === 'PERMISSION_DENIED' && err?.status === 403,
+  );
+});
+
+test('user-linked API keys resolve as user actors for first-run bootstrap keys', async () => {
+  const middlewareSource = await readFile(new URL('../src/auth/middleware.ts', import.meta.url), 'utf8');
+  const cliClientSource = await readFile(new URL('../../cli/src/client.ts', import.meta.url), 'utf8');
+  const cliMcpSource = await readFile(new URL('../../cli/src/commands/mcp.ts', import.meta.url), 'utf8');
+  assert.match(middlewareSource, /resolved_actor_type === 'human' \|\| apiKey\.user_id \? 'user' : 'agent'/);
+  assert.match(cliClientSource, /resolved_actor_type === 'human' \? 'user' : row\.user_id \? 'user' : 'agent'/);
+  assert.match(cliMcpSource, /resolved_actor_type === 'human' \? 'user' : row\.user_id \? 'user' : 'agent'/);
+});
+
 test('MCP manifests keep scoped agents focused and expose the router first', async () => {
   const readOnlyTools = getToolsForActor({}, {
     ...memberActor,
@@ -3149,6 +3209,18 @@ test('agent harness setup grants admin systems scopes', async () => {
   assert.match(migration, /systems:admin/);
   assert.match(migration, /actor_type = 'human'/);
   assert.match(migration, /role IN \('admin', 'owner'\)/);
+});
+
+test('migration runner uses a connection-scoped advisory lock', async () => {
+  const source = await readFile(new URL('../src/db/migrate.ts', import.meta.url), 'utf8');
+  assert.match(source, /pg_advisory_lock\(hashtext\('crmy:migrations'\)\)/);
+  assert.match(source, /pg_advisory_unlock\(hashtext\('crmy:migrations'\)\)/);
+});
+
+test('HITL approval rule routes are ordered before dynamic HITL id routes and require admin scope', async () => {
+  const source = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  assert.ok(source.indexOf("router.get('/hitl/rules'") < source.indexOf("router.get('/hitl/:id'"));
+  assert.match(source, /requireScopes\(actor,\s*'hitl:admin'\)/);
 });
 
 test('MCP entity resources enforce context scope and subject access', async () => {
@@ -3659,6 +3731,39 @@ test('writeback idempotency keys reject changed payloads', async () => {
       idempotency_key: 'idem-1',
     }),
     err => err?.code === 'VALIDATION_ERROR' && String(err.message).includes('already used'),
+  );
+});
+
+test('pending external writebacks cannot execute before approval', async () => {
+  const tenantId = baseInput.tenantId;
+  const writebackId = '77777777-7777-4777-8777-777777777777';
+  const db = {
+    async query(sql) {
+      const text = sql.replace(/\s+/g, ' ').trim();
+      if (text.startsWith('SELECT * FROM external_writeback_requests')) {
+        return {
+          rows: [{
+            id: writebackId,
+            tenant_id: tenantId,
+            system_id: '88888888-8888-4888-8888-888888888888',
+            mapping_id: '99999999-9999-4999-8999-999999999999',
+            status: 'pending',
+            operation: 'update',
+            writeback_mode: 'mapped_upsert',
+            object_type: 'contact',
+            external_object: 'contacts',
+            payload: { email: 'cody@example.com' },
+          }],
+          rowCount: 1,
+        };
+      }
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+
+  await assert.rejects(
+    () => executeExternalWriteback(db, tenantId, writebackId),
+    err => err?.code === 'VALIDATION_ERROR' && String(err.message).includes('requires approval'),
   );
 });
 

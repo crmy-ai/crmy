@@ -103,12 +103,32 @@ const SCOPE_GROUPS = [
   { label: 'HITL / Handoff', scopes: [
     { value: 'hitl:read', label: 'Read approvals' },
     { value: 'hitl:write', label: 'Write approvals' },
+    { value: 'hitl:admin', label: 'Manage approval rules' },
     { value: 'agent:read', label: 'Read handoffs' },
     { value: 'agent:write', label: 'Write handoffs' },
+  ]},
+  { label: 'Systems', scopes: [
+    { value: 'systems:read', label: 'Read systems' },
+    { value: 'systems:write', label: 'Sync and writeback' },
+    { value: 'systems:admin', label: 'Manage connections' },
+  ]},
+  { label: 'Admin Setup', scopes: [
+    { value: 'api_keys:admin', label: 'Manage API keys' },
+    { value: 'email_provider:admin', label: 'Manage inbound email' },
+  ]},
+  { label: 'Workflows / Messaging', scopes: [
+    { value: 'workflows:read', label: 'Read workflows' },
+    { value: 'workflows:write', label: 'Write workflows' },
+    { value: 'webhooks:read', label: 'Read webhooks' },
+    { value: 'webhooks:write', label: 'Write webhooks' },
+    { value: 'messaging:read', label: 'Read messaging' },
+    { value: 'messaging:write', label: 'Write messaging' },
   ]},
   { label: 'Operations', scopes: [
     { value: 'ops:read', label: 'Read ops' },
     { value: 'ops:write', label: 'Write ops' },
+    { value: 'privacy:read', label: 'Privacy read' },
+    { value: 'privacy:write', label: 'Privacy write' },
   ]},
 ];
 

@@ -1793,13 +1793,16 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 | `email_get`, `email_search`, `email_message_search`, `email_message_get`, `mailbox_connection_list`, `email_draft_preview` | `activities:read` plus `context:read` for draft preview |
 | `email_create`, `email_draft_save`, `email_message_ignore` | `activities:write` |
 | `email_ingest`, `email_message_process`, `email_message_link` | `activities:write`, `context:write` |
-| `hitl_check_status`, `hitl_list_pending` | `read` |
-| `hitl_submit_request`, `hitl_resolve` | `write` |
+| `hitl_check_status`, `hitl_list_pending` | `hitl:read` |
+| `hitl_submit_request`, `hitl_resolve` | `hitl:write` |
+| `hitl_rule_create`, `hitl_rule_list`, `hitl_rule_delete` | `hitl:admin` plus owner/admin role |
 | `actor_get`, `actor_list`, `actor_expertise`, `agent_find_specialist`, `crm_search`, `tenant_get_stats` | `read` |
 | `actor_register`, `actor_update`, `agent_register_specialization`, `agent_set_availability` | `write` |
 | `ops_status_get`, `ops_data_quality_get`, `ops_audit_get`, `ops_privacy_export` | `read` plus admin/owner visibility |
 | `ops_job_recover`, `ops_data_quality_repair`, `ops_pii_redact`, `ops_privacy_delete`, `ops_retention_apply` | `write` plus admin/owner visibility |
-| `webhook_*`, `custom_field_*`, `workflow_*` | `read` or `write` (general) |
+| `webhook_*` | `webhooks:read` or `webhooks:write` |
+| `workflow_*` | `workflows:read` or `workflows:write` |
+| `custom_field_*` | `read` or `write` (general) |
 | `actor_whoami`, `entity_resolve`, `schema_get`, `guide_search` | *(always allowed)* |
 
 ### Error response
@@ -2153,7 +2156,7 @@ Current mailbox connectors:
 |---|---|---|
 | Gmail / Google Workspace | Built-in | User mailbox OAuth and sync jobs |
 | Microsoft 365 / Outlook | Built-in | User mailbox OAuth and sync jobs |
-| Inbound webhook providers | Advanced | Use for provider-level ingestion or custom API/MCP flows |
+| Inbound webhook providers | Advanced | Requires explicit tenant ID and `x-webhook-signature` HMAC using the tenant inbound secret |
 
 ### Governed outbound provider
 
@@ -3017,7 +3020,7 @@ Base URL: `/api/v1`
 
 ### Emails
 
-Customer Email is the mailbox-facing Raw Context layer. Connect Gmail, Outlook, or an inbound webhook so CRMy can capture customer-facing messages, filter internal-only email by default, associate conversations to accounts/contacts/opportunities/use cases, and process useful messages into Signals and Memory.
+Customer Email is the mailbox-facing Raw Context layer. Connect Gmail, Outlook, or an inbound webhook so CRMy can capture customer-facing messages, filter internal-only email by default, associate conversations to accounts/contacts/opportunities/use cases, and process useful messages into Signals and Memory. Inbound webhook posts must include an explicit `tenant_id` query parameter or `x-crmy-tenant-id` header plus a valid `x-webhook-signature` HMAC.
 
 | Method | Path | Description |
 |---|---|---|

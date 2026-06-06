@@ -647,14 +647,43 @@ export function initCommand(): Command {
           [tenantId, email.trim(), name, passwordHash],
         );
         const userId = userResult.rows[0].id;
+        const bootstrapAdminScopes = [
+          'read',
+          'write',
+          'systems:read',
+          'systems:write',
+          'systems:admin',
+          'api_keys:admin',
+          'email_provider:admin',
+          'hitl:admin',
+          'ops:read',
+          'ops:write',
+          'privacy:read',
+          'privacy:write',
+          'webhooks:read',
+          'webhooks:write',
+          'workflows:read',
+          'workflows:write',
+          'messaging:read',
+          'messaging:write',
+        ];
+
+        await db.query(
+          `INSERT INTO actors (tenant_id, actor_type, display_name, email, user_id, role, scopes, is_active, registration_source, registration_status)
+           VALUES ($1, 'human', $2, $3, $4, 'owner', $5, true, 'admin', 'approved')
+           ON CONFLICT (tenant_id, user_id) WHERE user_id IS NOT NULL
+           DO UPDATE SET display_name = $2, email = $3, role = 'owner', scopes = $5, is_active = true,
+                         registration_source = 'admin', registration_status = 'approved', updated_at = now()`,
+          [tenantId, name, email.trim(), userId, bootstrapAdminScopes],
+        );
 
         // Generate API key
         rawKey  = 'crmy_' + crypto.randomBytes(32).toString('hex');
         const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
         await db.query(
           `INSERT INTO api_keys (tenant_id, user_id, key_hash, label, scopes)
-           VALUES ($1, $2, $3, 'default', '{read,write,admin,systems:read,systems:write,systems:admin}')`,
-          [tenantId, userId, keyHash],
+           VALUES ($1, $2, $3, 'default', $4)`,
+          [tenantId, userId, keyHash, bootstrapAdminScopes],
         );
 
         spinner.succeed('Admin account created');

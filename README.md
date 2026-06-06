@@ -521,6 +521,9 @@ POST /auth/api-keys
 { "label": "my-agent", "scopes": ["contacts:read", "activities:write"] }
 ```
 
+API key creation, update, listing, and revocation require an owner/admin actor with
+`api_keys:admin`. Actors can only grant scopes they already hold.
+
 ## Architecture
 
 ```text
@@ -550,6 +553,7 @@ Design choices:
 |---|---|---|
 | `DATABASE_URL` | Yes | PostgreSQL connection string. |
 | `JWT_SECRET` | Production | JWT signing secret. Required for hardened production deployments. |
+| `CRMY_ENCRYPTION_KEY` | Production | Secret encryption key for connector credentials and other stored secrets. |
 | `CRMY_ADMIN_EMAIL` | Optional | Auto-create the first owner account. |
 | `CRMY_ADMIN_PASSWORD` | Optional | Password for the first owner account. |
 | `CRMY_SEED_DEMO` | Optional | Seed demo data on startup when set to `true`. |
@@ -558,6 +562,10 @@ Design choices:
 | `EMBEDDING_API_KEY` | Optional | Embedding provider API key. |
 | `LLM_TIMEOUT_MS` | Optional | General Workspace Agent and background LLM timeout. |
 | `CONTEXT_EXTRACTION_LLM_TIMEOUT_MS` | Optional | Raw Context extraction timeout. |
+
+Inbound email webhooks are unauthenticated by bearer token, but must include an
+explicit tenant (`tenant_id` query parameter or `x-crmy-tenant-id` header) and a
+valid `x-webhook-signature` HMAC using the tenant's configured inbound secret.
 
 See [`.env.example`](.env.example) for the full reference.
 

@@ -13,63 +13,74 @@ export async function runMigrations(
   db: DbPool,
   onMigration?: (name: string, index: number, total: number) => void,
 ): Promise<string[]> {
-  // Create migrations tracking table
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS _migrations (
-      name TEXT PRIMARY KEY,
-      applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    )
-  `);
+  const client = await db.connect();
+  let locked = false;
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtext('crmy:migrations'))");
+    locked = true;
+    // Create migrations tracking table
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS _migrations (
+        name TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
 
-  // Get already-applied migrations
-  const applied = await db.query('SELECT name FROM _migrations ORDER BY name');
-  const appliedSet = new Set(applied.rows.map(r => r.name as string));
+    // Get already-applied migrations
+    const applied = await client.query('SELECT name FROM _migrations ORDER BY name');
+    const appliedSet = new Set(applied.rows.map(r => r.name as string));
 
-  // Read migration files
-  const files = fs.readdirSync(MIGRATIONS_DIR)
-    .filter(f => f.endsWith('.sql'))
-    .sort();
+    // Read migration files
+    const files = fs.readdirSync(MIGRATIONS_DIR)
+      .filter(f => f.endsWith('.sql'))
+      .sort();
 
-  const ran: string[] = [];
-  const pending = files.filter(f => !appliedSet.has(f));
+    const ran: string[] = [];
+    const pending = files.filter(f => !appliedSet.has(f));
 
-  let idx = 0;
-  for (const file of files) {
-    if (appliedSet.has(file)) continue;
+    let idx = 0;
+    for (const file of files) {
+      if (appliedSet.has(file)) continue;
 
-    // Migration 022 requires pgvector extension — skip unless explicitly opted in.
-    // Supported on Supabase, Neon, RDS, and local Docker with pgvector/pgvector:pg16.
-    if (file === '022_pgvector.sql' && process.env.ENABLE_PGVECTOR !== 'true') {
-      console.log(`[migrate] Skipping ${file} (set ENABLE_PGVECTOR=true to enable semantic search)`);
-      idx++;
-      continue;
-    }
-
-    onMigration?.(file, idx, pending.length);
-    idx++;
-
-    const rawSql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8');
-    // Substitute ${EMBEDDING_DIMENSIONS} for pgvector migration (default: 1536 for text-embedding-3-small)
-    const embDims = process.env.EMBEDDING_DIMENSIONS ?? '1536';
-    const sql = rawSql.replace(/\$\{EMBEDDING_DIMENSIONS\}/g, embDims);
-    // Extract only the "Up" portion (before "-- Down:")
-    const upSql = sql.split('-- Down:')[0];
-
-    await db.query('BEGIN');
-    try {
-      await db.query(upSql);
-      const recorded = await db.query('INSERT INTO _migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [file]);
-      await db.query('COMMIT');
-      if ((recorded.rowCount ?? 0) > 0) {
-        ran.push(file);
+      // Migration 022 requires pgvector extension — skip unless explicitly opted in.
+      // Supported on Supabase, Neon, RDS, and local Docker with pgvector/pgvector:pg16.
+      if (file === '022_pgvector.sql' && process.env.ENABLE_PGVECTOR !== 'true') {
+        console.log(`[migrate] Skipping ${file} (set ENABLE_PGVECTOR=true to enable semantic search)`);
+        idx++;
+        continue;
       }
-    } catch (err) {
-      await db.query('ROLLBACK');
-      throw new Error(`Migration ${file} failed: ${(err as Error).message}`);
-    }
-  }
 
-  return ran;
+      onMigration?.(file, idx, pending.length);
+      idx++;
+
+      const rawSql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf-8');
+      // Substitute ${EMBEDDING_DIMENSIONS} for pgvector migration (default: 1536 for text-embedding-3-small)
+      const embDims = process.env.EMBEDDING_DIMENSIONS ?? '1536';
+      const sql = rawSql.replace(/\$\{EMBEDDING_DIMENSIONS\}/g, embDims);
+      // Extract only the "Up" portion (before "-- Down:")
+      const upSql = sql.split('-- Down:')[0];
+
+      await client.query('BEGIN');
+      try {
+        await client.query(upSql);
+        const recorded = await client.query('INSERT INTO _migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING', [file]);
+        await client.query('COMMIT');
+        if ((recorded.rowCount ?? 0) > 0) {
+          ran.push(file);
+        }
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw new Error(`Migration ${file} failed: ${(err as Error).message}`);
+      }
+    }
+
+    return ran;
+  } finally {
+    if (locked) {
+      await client.query("SELECT pg_advisory_unlock(hashtext('crmy:migrations'))").catch(() => {});
+    }
+    client.release();
+  }
 }
 
 export async function getMigrationStatus(db: DbPool): Promise<{ applied: string[]; pending: string[] }> {

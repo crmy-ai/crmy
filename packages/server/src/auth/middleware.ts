@@ -6,6 +6,7 @@ import * as jose from 'jose';
 import crypto from 'node:crypto';
 import type { DbPool } from '../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
+import { effectiveJwtScopes } from './scopes.js';
 
 declare global {
   namespace Express {
@@ -34,21 +35,79 @@ export function authMiddleware(db: DbPool, jwtSecret: string) {
 
     // Try JWT first
     if (!token.startsWith('crmy_')) {
+      let payload: jose.JWTPayload;
       try {
-        const { payload } = await jose.jwtVerify(token, secret);
-        req.actor = {
-          tenant_id: payload.tenant_id as string,
-          actor_id: payload.sub as string,
-          actor_type: 'user',
-          role: payload.role as 'owner' | 'admin' | 'manager' | 'member',
-        };
-        return next();
+        ({ payload } = await jose.jwtVerify(token, secret));
       } catch {
         res.status(401).json({
           type: 'https://crmy.ai/errors/unauthorized',
           title: 'Unauthorized',
           status: 401,
           detail: 'Invalid or expired token',
+        });
+        return;
+      }
+
+      try {
+        const userId = payload.sub as string | undefined;
+        const tenantId = payload.tenant_id as string | undefined;
+        if (!userId || !tenantId) {
+          res.status(401).json({
+            type: 'https://crmy.ai/errors/unauthorized',
+            title: 'Unauthorized',
+            status: 401,
+            detail: 'Invalid token claims',
+          });
+          return;
+        }
+
+        const userResult = await db.query(
+          `SELECT u.id, u.tenant_id, u.role, u.is_active,
+                  a.id as actor_record_id, a.scopes as actor_scopes,
+                  a.is_active as actor_is_active, a.registration_status as actor_registration_status
+           FROM users u
+           LEFT JOIN actors a
+             ON a.tenant_id = u.tenant_id
+            AND a.user_id = u.id
+            AND a.actor_type = 'human'
+           WHERE u.id = $1 AND u.tenant_id = $2
+           LIMIT 1`,
+          [userId, tenantId],
+        );
+        const user = userResult.rows[0];
+        if (!user) {
+          res.status(401).json({
+            type: 'https://crmy.ai/errors/unauthorized',
+            title: 'Unauthorized',
+            status: 401,
+            detail: 'User no longer exists',
+          });
+          return;
+        }
+        if (user.is_active === false || user.actor_is_active === false || user.actor_registration_status === 'rejected') {
+          res.status(403).json({
+            type: 'https://crmy.ai/errors/permission_denied',
+            title: 'Permission Denied',
+            status: 403,
+            detail: 'User is deactivated',
+          });
+          return;
+        }
+        const role = user.role as 'owner' | 'admin' | 'manager' | 'member';
+        req.actor = {
+          tenant_id: user.tenant_id as string,
+          actor_id: user.id as string,
+          actor_type: 'user',
+          role,
+          scopes: effectiveJwtScopes(role, Array.isArray(user.actor_scopes) ? user.actor_scopes : undefined),
+        };
+        return next();
+      } catch {
+        res.status(500).json({
+          type: 'https://crmy.ai/errors/internal',
+          title: 'Internal Error',
+          status: 500,
+          detail: 'Authentication service error',
         });
         return;
       }
@@ -59,7 +118,7 @@ export function authMiddleware(db: DbPool, jwtSecret: string) {
     try {
       // Join with actors table to resolve identity when actor_id is set
       const result = await db.query(
-        `SELECT ak.*, u.role as user_role,
+        `SELECT ak.*, u.role as user_role, u.is_active as user_is_active,
                 a.id as resolved_actor_id, a.actor_type as resolved_actor_type,
                 a.role as actor_role, a.scopes as actor_scopes, a.is_active as actor_is_active
          FROM api_keys ak
@@ -83,6 +142,16 @@ export function authMiddleware(db: DbPool, jwtSecret: string) {
       const apiKey = result.rows[0];
 
       // If key is linked to an inactive actor, reject
+      if (apiKey.user_id && apiKey.user_is_active === false) {
+        res.status(403).json({
+          type: 'https://crmy.ai/errors/permission_denied',
+          title: 'Permission Denied',
+          status: 403,
+          detail: 'User is deactivated',
+        });
+        return;
+      }
+
       if (apiKey.resolved_actor_id && apiKey.actor_is_active === false) {
         res.status(403).json({
           type: 'https://crmy.ai/errors/permission_denied',
@@ -98,7 +167,7 @@ export function authMiddleware(db: DbPool, jwtSecret: string) {
 
       // Resolve identity: prefer linked actor, fall back to user or key ID
       const actorId = apiKey.resolved_actor_id ?? apiKey.user_id ?? apiKey.id;
-      const actorType = apiKey.resolved_actor_type === 'human' ? 'user' : 'agent';
+      const actorType = apiKey.resolved_actor_type === 'human' || apiKey.user_id ? 'user' : 'agent';
       const role = apiKey.actor_role ?? apiKey.user_role ?? 'member';
       // Effective scopes: intersection of key scopes and actor scopes (if actor linked)
       const scopes = apiKey.actor_scopes

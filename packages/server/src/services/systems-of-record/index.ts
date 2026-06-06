@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import type { ExternalObjectMapping, ExternalSyncConflict, ExternalSystem, SystemOfRecordType, UUID, WritebackMode } from '@crmy/shared';
 import { notFound, validationError } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
+import { withTransaction } from '../../db/transaction.js';
 import { decryptSecret } from '../../lib/secrets.js';
 import { redactSecrets } from '../../lib/secrets.js';
 import { emitEvent } from '../../events/emitter.js';
@@ -1183,26 +1184,32 @@ export async function reviewExternalWriteback(
     throw validationError('This writeback is blocked by policy and cannot be approved. Update the mapping or payload, then create a new writeback request.');
   }
 
-  if (before.hitl_request_id) {
-    await hitlRepo.resolveHITLRequest(
-      db,
-      tenantId,
-      before.hitl_request_id,
-      input.decision,
-      actorId,
-      input.note,
-    );
-  }
-
   const nextPolicyResult = {
     ...policyResult,
     reviewer_id: actorId,
     review_note: input.note,
     reviewed_at: new Date().toISOString(),
   };
-  const writeback = await sorRepo.updateWriteback(db, tenantId, before.id, {
-    status: input.decision,
-    policy_result: nextPolicyResult,
+
+  const writeback = await withTransaction(db, async (tx) => {
+    if (before.hitl_request_id) {
+      const resolved = await hitlRepo.resolveHITLRequest(
+        tx,
+        tenantId,
+        before.hitl_request_id,
+        input.decision,
+        actorId,
+        input.note,
+      );
+      if (!resolved) {
+        throw validationError(`HITL request ${before.hitl_request_id} is no longer pending.`);
+      }
+    }
+
+    return sorRepo.updateWriteback(tx, tenantId, before.id, {
+      status: input.decision,
+      policy_result: nextPolicyResult,
+    });
   });
   if (!writeback) throw notFound('External writeback', input.id);
 
@@ -1231,10 +1238,10 @@ export async function executeExternalWriteback(
 ) {
   const writeback = await sorRepo.getWriteback(db, tenantId, writebackId);
   if (!writeback) throw notFound('External writeback', writebackId);
-  if (writeback.status === 'approval_required') {
+  if (writeback.status === 'approval_required' || writeback.status === 'pending') {
     throw validationError('This writeback requires approval before it can be executed.');
   }
-  if (!['approved', 'pending'].includes(writeback.status)) {
+  if (writeback.status !== 'approved') {
     throw validationError(`Writeback ${writeback.id} is ${writeback.status} and cannot be executed.`);
   }
   if (!writeback.mapping_id) {
