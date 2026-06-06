@@ -571,8 +571,16 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
       description: 'Retry a failed or skipped Raw Context processing record. If the source points at an activity, CRMy reruns extraction on that activity. If CRMy retained the original payload, it reruns automatic subject matching and extraction from the full source text. Only falls back to the excerpt when no replayable payload is available.',
       inputSchema: z.object({
         id: z.string().uuid().describe('Raw Context source ID to reprocess'),
+        idempotency_key: z.string().max(128).optional(),
       }),
-      handler: async (input: { id: string }, actor: ActorContext) => {
+      handler: async (input: { id: string; idempotency_key?: string }, actor: ActorContext) => {
+        return runIdempotent(db, {
+          tenantId: actor.tenant_id,
+          actorId: actor.actor_id,
+          operation: 'context_raw_source_reprocess',
+          key: input.idempotency_key,
+          request: input,
+        }, async () => {
         const source = await rawContextRepo.getRawContextSource(db, actor.tenant_id, input.id);
         if (!source) throw notFound('RawContextSource', input.id);
         await assertRawContextSourceAccess(db, actor, source, input.id);
@@ -691,6 +699,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
           });
           throw err;
         }
+        });
       },
     },
     {

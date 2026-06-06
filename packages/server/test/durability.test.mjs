@@ -12,6 +12,7 @@ import { applyRetentionPolicy, redactSubjectPii } from '../dist/services/privacy
 import { enforceToolScopes } from '../dist/auth/scopes.js';
 import { recoverOperationalJob } from '../dist/services/operational-recovery.js';
 import { getAllTools, getToolsForActor } from '../dist/mcp/server.js';
+import { isSameMcpActor } from '../dist/mcp/session-registry.js';
 import { runIdempotent } from '../dist/db/repos/idempotency.js';
 import { searchContextEntries } from '../dist/db/repos/context-entries.js';
 import { claimPendingRawContextSources, listRawContextSources } from '../dist/db/repos/raw-context-sources.js';
@@ -29,7 +30,7 @@ import { connectorHttpError, writebackParameters } from '../dist/services/system
 import { buildConnectorContext, executeExternalWriteback, previewExternalWriteback, requestExternalWriteback, reviewExternalWriteback } from '../dist/services/systems-of-record/index.js';
 import { evaluateActionPolicy } from '../dist/services/action-policy.js';
 import { deriveActionReadiness } from '../dist/services/action-context.js';
-import { deriveSignalReadiness } from '../dist/services/signal-readiness.js';
+import { deriveSignalReadiness, deriveSignalResolution } from '../dist/services/signal-readiness.js';
 import { resolveSequenceGoalContactId } from '../dist/services/sequence-executor.js';
 import { createWorkflowEngine, dryRunWorkflowDefinition, matchesFilter } from '../dist/workflows/engine.js';
 import { buildVariableContext, interpolate } from '../dist/workflows/variables.js';
@@ -468,6 +469,103 @@ test('signal readiness explains evidence, detail, conflict, approval, and termin
   }).status, 'dismissed');
 });
 
+test('signal resolution distinguishes mentioned people from attached records', () => {
+  const readiness = deriveSignalReadiness({
+    group_status: 'blocked',
+    score: 0.9,
+    threshold: 0.85,
+    support_count: 1,
+    independent_source_count: 1,
+    evidence_count: 1,
+    conflict_count: 0,
+    typed_completeness: 0.5,
+    missing_details: ['Role'],
+  });
+  const resolution = deriveSignalResolution({
+    subject_type: 'account',
+    subject_id: '33333333-3333-4333-8333-333333333333',
+    subject_name: 'Acme Corp',
+    context_type: 'stakeholder',
+    status: 'blocked',
+    aggregate_confidence: 0.9,
+    support_count: 1,
+    independent_source_count: 1,
+    conflict_count: 0,
+    evidence_count: 1,
+    metadata: { missing_details: ['Role'] },
+    members: [{
+      relation: 'supports',
+      context_entry: {
+        id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        structured_data: {
+          person_name: 'Riley Quinn',
+          missing_details: ['Role'],
+        },
+      },
+    }],
+  }, readiness);
+
+  assert.equal(resolution.target_type, 'mentioned_person');
+  assert.equal(resolution.target_label, 'Riley Quinn');
+  assert.equal(resolution.subject_label, 'Acme Corp');
+  assert.equal(resolution.subject_type, 'account');
+  assert.equal(resolution.primary_missing_field, 'role');
+  assert.equal(resolution.primary_action, 'add_signal_detail');
+  assert.match(resolution.helper_text, /Riley Quinn's role/);
+  assert.match(resolution.helper_text, /does not edit the account record/);
+});
+
+test('signal resolution covers subject metadata and terminal states', () => {
+  for (const subject_type of ['contact', 'account', 'opportunity', 'use_case']) {
+    const readiness = deriveSignalReadiness({
+      group_status: 'gathering',
+      score: 0.62,
+      threshold: 0.85,
+      support_count: 1,
+      independent_source_count: 1,
+      evidence_count: 1,
+      conflict_count: 0,
+    });
+    const resolution = deriveSignalResolution({
+      subject_type,
+      subject_id: '33333333-3333-4333-8333-333333333333',
+      subject_name: `${subject_type} record`,
+      status: 'gathering',
+      aggregate_confidence: 0.62,
+      support_count: 1,
+      independent_source_count: 1,
+      conflict_count: 0,
+      evidence_count: 1,
+      metadata: {},
+    }, readiness);
+    assert.equal(resolution.subject_type, subject_type);
+    assert.equal(resolution.subject_id, '33333333-3333-4333-8333-333333333333');
+    assert.equal(resolution.subject_label, `${subject_type} record`);
+    assert.equal(resolution.primary_action, 'add_evidence');
+  }
+
+  const confirmed = deriveSignalReadiness({
+    group_status: 'promoted',
+    score: 0.91,
+    support_count: 1,
+    independent_source_count: 1,
+    evidence_count: 1,
+    conflict_count: 0,
+  });
+  assert.equal(deriveSignalResolution({
+    subject_type: 'contact',
+    subject_id: '33333333-3333-4333-8333-333333333333',
+    subject_name: 'Ada Lovelace',
+    status: 'promoted',
+    aggregate_confidence: 0.91,
+    support_count: 1,
+    independent_source_count: 1,
+    conflict_count: 0,
+    evidence_count: 1,
+    metadata: {},
+  }, confirmed).primary_action, 'view_only');
+});
+
 class FakeSignalGroupReadinessDb {
   group = {
     id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -534,10 +632,13 @@ test('Signal group MCP list and get include readiness', async () => {
 
   const listed = await listTool.handler({ attention_only: false, limit: 20 }, actor);
   assert.equal(listed.signal_groups[0].readiness.status, 'needs_more_evidence');
+  assert.equal(listed.signal_groups[0].resolution.primary_action, 'add_evidence');
+  assert.equal(listed.signal_groups[0].resolution.subject_label, 'Ada Lovelace');
   assert.match(listed.signal_groups[0].readiness.reasons.join(' '), /below the 85% confirmation threshold/);
 
   const detailed = await getTool.handler({ id: db.group.id }, actor);
   assert.equal(detailed.signal_group.readiness.status, 'needs_more_evidence');
+  assert.equal(detailed.signal_group.resolution.target_type, 'evidence');
   assert.equal(detailed.signal_group.readiness.components.source_quality, 0.9);
 });
 
@@ -693,6 +794,7 @@ test('Signal group detail completion patches Signal structured data and recomput
   assert.equal(result.context_entry.structured_data.owner, 'Ada Lovelace');
   assert.deepEqual(result.context_entry.structured_data.missing_details, []);
   assert.equal(result.signal_group.readiness.status, 'ready_to_confirm');
+  assert.equal(result.signal_group.resolution.primary_action, 'confirm_signal');
   assert.equal(result.mutation.side_effects.includes('signal_group:details_completed'), true);
   assert.equal(db.events[0].metadata.readiness_status, 'ready_to_confirm');
 });
@@ -2623,6 +2725,26 @@ test('MCP manifests keep scoped agents focused and expose the router first', asy
   assert.equal(signalGuide.recommended_tools[0], 'context_find');
 });
 
+test('retry-sensitive MCP operations expose idempotency keys', () => {
+  const toolsByName = new Map(getAllTools({}).map(tool => [tool.name, tool]));
+  for (const name of [
+    'context_raw_source_reprocess',
+    'email_message_process',
+    'email_message_ignore',
+    'email_message_link',
+    'email_draft_save',
+    'calendar_event_process',
+    'calendar_event_add_context',
+    'ops_job_recover',
+    'ops_data_quality_repair',
+    'ops_pii_redact',
+    'ops_privacy_delete',
+    'ops_retention_apply',
+  ]) {
+    assert.ok(toolsByName.get(name)?.inputSchema.shape.idempotency_key, `${name} should accept idempotency_key`);
+  }
+});
+
 test('sensitive tool scopes enforce read/write and object-level boundaries', () => {
   const adminReadOnly = { ...recoveryActor, scopes: ['read'] };
   const adminWriteOnly = { ...recoveryActor, scopes: ['write'] };
@@ -2784,6 +2906,24 @@ test('MCP entity resources enforce context scope and subject access', async () =
   const source = await readFile(new URL('../src/mcp/resources.ts', import.meta.url), 'utf8');
   assert.match(source, /requireScopes\(actor,\s*'context:read'\)/);
   assert.match(source, /assertSubjectAccess\(db,\s*actor,\s*type,\s*id as string\)/);
+});
+
+test('MCP session reuse requires the same authenticated actor and scopes', async () => {
+  assert.equal(isSameMcpActor(memberActor, { ...memberActor }), true);
+  assert.equal(
+    isSameMcpActor(
+      { ...memberActor, scopes: ['context:read', 'accounts:read'] },
+      { ...memberActor, scopes: ['accounts:read', 'context:read'] },
+    ),
+    true,
+  );
+  assert.equal(isSameMcpActor(memberActor, { ...memberActor, actor_id: 'other-actor' }), false);
+  assert.equal(isSameMcpActor({ ...memberActor, scopes: ['context:read'] }, { ...memberActor, scopes: ['context:write'] }), false);
+
+  const source = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+  assert.match(source, /Session ids are state handles, not bearer credentials/);
+  assert.match(source, /const actor = await extractMcpActor\(req\);/);
+  assert.match(source, /isSameMcpActor\(actor,\s*existingSession\.actor\)/);
 });
 
 test('every tool has an explicit scope mapping unless intentionally public', () => {

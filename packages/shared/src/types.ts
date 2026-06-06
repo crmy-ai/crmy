@@ -764,6 +764,34 @@ export interface SignalReadiness {
   };
 }
 
+export type SignalResolutionTargetType =
+  | 'mentioned_person'
+  | 'mentioned_entity'
+  | 'subject_record'
+  | 'signal_detail'
+  | 'evidence'
+  | 'conflict'
+  | 'approval';
+
+export type SignalResolutionPrimaryAction =
+  | 'add_signal_detail'
+  | 'add_evidence'
+  | 'resolve_conflict'
+  | 'request_approval'
+  | 'confirm_signal'
+  | 'view_only';
+
+export interface SignalResolution {
+  target_type: SignalResolutionTargetType;
+  target_label: string;
+  subject_label: string;
+  subject_type: SubjectType;
+  subject_id: UUID;
+  primary_missing_field?: string;
+  primary_action: SignalResolutionPrimaryAction;
+  helper_text: string;
+}
+
 export interface SignalGroup {
   id: UUID;
   tenant_id: UUID;
@@ -789,6 +817,7 @@ export interface SignalGroup {
   merged_into_signal_group_id?: UUID | null;
   merged_at?: string | null;
   readiness?: SignalReadiness;
+  resolution?: SignalResolution;
   created_at: string;
   updated_at: string;
   members?: SignalGroupMember[];

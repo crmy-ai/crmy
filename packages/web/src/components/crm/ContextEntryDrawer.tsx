@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/popover';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
+import { ClaimScoreBar, ContextClaimPanel, DetailDisclosure } from '@/components/crm/ContextClaimPanel';
 import { useSupersedeContextEntry, useReviewContextEntry, useContextTypes, usePromoteSignal, useRejectSignal } from '@/api/hooks';
 import {
   User, Building2, Briefcase, FolderKanban,
@@ -232,6 +233,17 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
   const typeColor = TYPE_COLORS[entry.context_type] ?? '#64748b';
 
   const structuredDataKeys = Object.keys(entry.structured_data ?? {}).filter(k => entry.structured_data[k] != null && entry.structured_data[k] !== '');
+  const evidenceCount = Array.isArray(entry.evidence) ? entry.evidence.length : 0;
+  const claimLabel = isSignal ? 'Signal candidate' : 'Confirmed Memory';
+  const claimHelper = isSignal
+    ? 'Signals are inferred claims. Confirm them as Memory before agents use them for operational decisions.'
+    : 'Memory is persistent customer context. Agents retrieve confirmed Memory into Active Context through briefings and search before they act.';
+  const memoryLifecycleLabel = isSuperseded ? 'Superseded' : expired ? 'Needs review' : 'Current';
+  const memoryLifecycleClass = isSuperseded
+    ? 'border-muted bg-muted text-muted-foreground'
+    : expired
+      ? 'border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+      : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
 
   // Actions
   async function handleReview() {
@@ -376,56 +388,79 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
         {/* ── Scrollable body ─────────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
 
-          {/* Confidence & decay */}
-          {storedConf !== null && (
-            <Section title="Confidence" defaultOpen>
-              <div className="space-y-3">
-                <ConfidenceBar value={storedConf} label="Stored confidence" />
-                {halfLife && (
-                  <>
-                    <ConfidenceBar value={effectiveConf!} label="Effective today (after decay)" />
-                    <DecayTimeline stored={storedConf} createdAt={entry.created_at} halfLifeDays={halfLife} />
-                  </>
+          <ContextClaimPanel
+            label={claimLabel}
+            tone={isSignal ? 'signal' : 'memory'}
+            title={entry.body || entry.title || <span className="text-muted-foreground italic">Untitled entry</span>}
+            chips={(
+              <div className="flex flex-wrap items-center justify-end gap-2 text-xs font-medium">
+                {evidenceCount > 0 && (
+                  <span className="rounded-full border border-border/70 bg-background/50 px-2.5 py-1 text-muted-foreground">
+                    {evidenceCount} evidence
+                  </span>
                 )}
-                {!halfLife && (
-                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                    No decay — this Memory type is treated as a permanent record.
-                  </p>
+                {entry.source && (
+                  <span className="rounded-full border border-border/70 bg-background/50 px-2.5 py-1 text-muted-foreground">
+                    {entry.source}
+                  </span>
                 )}
-              </div>
-            </Section>
-          )}
-
-          {/* Claim */}
-          <Section title={isSignal ? 'Claim (Signal)' : 'Claim (Memory)'} defaultOpen>
-            <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed">{entry.body}</p>
-            <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
-              isSignal
-                ? 'border-violet-500/20 bg-violet-500/10 text-violet-700 dark:text-violet-300'
-                : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-            }`}>
-              {isSignal
-                ? 'Signals are inferred claims. Promote them to Memory before agents use them for operational decisions.'
-                : 'Memory is persistent customer context. Agents retrieve it into Active Context through briefings and search before they act.'}
-            </div>
-            {structuredDataKeys.length > 0 && (
-              <div className="mt-3 rounded-lg border border-border overflow-hidden">
-                {structuredDataKeys.map(k => (
-                  <div key={k} className="flex items-start gap-3 px-3 py-2 border-b border-border last:border-0 text-xs">
-                    <span className="text-muted-foreground font-medium capitalize min-w-[100px] flex-shrink-0">
-                      {k.replace(/_/g, ' ')}
-                    </span>
-                    <span className="text-foreground break-words">
-                      {typeof entry.structured_data[k] === 'object'
-                        ? JSON.stringify(entry.structured_data[k])
-                        : String(entry.structured_data[k])}
-                    </span>
-                  </div>
-                ))}
               </div>
             )}
-          </Section>
+            score={storedConf !== null ? (
+              <ClaimScoreBar
+                label={isSignal ? 'Signal confidence' : 'Stored confidence'}
+                value={storedConf}
+                trailing={<span className="text-muted-foreground">{confLabel(Math.round(storedConf * 100))}</span>}
+              />
+            ) : undefined}
+            lifecycle={(
+              <>
+                <span className={`rounded-full border px-2.5 py-1 ${isSignal ? 'border-violet-500/20 bg-violet-500/10 text-violet-600 dark:text-violet-300' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'}`}>
+                  {isSignal ? 'Signal' : 'Confirmed Memory'}
+                </span>
+                <span className={`rounded-full border px-2.5 py-1 ${memoryLifecycleClass}`}>
+                  {isSignal ? 'Awaiting confirmation' : memoryLifecycleLabel}
+                </span>
+              </>
+            )}
+            helper={claimHelper}
+          />
+
+          <DetailDisclosure title={isSignal ? 'Signal details' : 'Memory details'}>
+            <div className="space-y-3">
+              {storedConf !== null && halfLife && (
+                <>
+                  <ConfidenceBar value={effectiveConf!} label="Effective today (after decay)" />
+                  <DecayTimeline stored={storedConf} createdAt={entry.created_at} halfLifeDays={halfLife} />
+                </>
+              )}
+              {storedConf !== null && !halfLife && (
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
+                  No decay: this Memory type is treated as a permanent record.
+                </p>
+              )}
+              {structuredDataKeys.length > 0 && (
+                <div className="overflow-hidden rounded-lg border border-border">
+                  {structuredDataKeys.map(k => (
+                    <div key={k} className="flex items-start gap-3 border-b border-border px-3 py-2 text-xs last:border-0">
+                      <span className="min-w-[100px] flex-shrink-0 font-medium capitalize text-muted-foreground">
+                        {k.replace(/_/g, ' ')}
+                      </span>
+                      <span className="break-words text-foreground">
+                        {typeof entry.structured_data[k] === 'object'
+                          ? JSON.stringify(entry.structured_data[k])
+                          : String(entry.structured_data[k])}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {storedConf === null && structuredDataKeys.length === 0 && (
+                <p className="text-xs text-muted-foreground">No additional claim details are available.</p>
+              )}
+            </div>
+          </DetailDisclosure>
 
           {/* Provenance */}
           <Section title="Provenance" defaultOpen>
@@ -572,6 +607,156 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
             </Section>
           )}
 
+          {!isSuperseded ? (
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {isSignal ? 'Signal actions' : 'Memory actions'}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {isSignal && (
+                  <>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="h-8 text-xs gap-1.5 bg-success text-success-foreground hover:bg-success/90"
+                      onClick={handlePromoteSignal}
+                      disabled={promoteSignal.isPending}
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Confirm Signal
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10"
+                      onClick={handleRejectSignal}
+                      disabled={rejectSignal.isPending}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Reject as Memory
+                    </Button>
+                  </>
+                )}
+
+                {expired && !isSignal && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10"
+                    onClick={handleReview}
+                    disabled={reviewEntry.isPending}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    Mark reviewed
+                  </Button>
+                )}
+
+                {!supersedeOpen && !isSignal && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 text-xs gap-1.5"
+                    onClick={() => { setSupersedeOpen(true); setSupersedeBody(''); setSupersedeConf(storedConf); }}
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    Update
+                  </Button>
+                )}
+
+                {!isSignal && (
+                  <Popover open={forgetOpen} onOpenChange={setForgetOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Forget
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72 p-4 space-y-3" side="top" align="start">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground mb-1">Forget this belief?</p>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          The entry will be marked as intentionally forgotten and removed from Current Memory.
+                          The original record is preserved in audit history.
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs flex-1"
+                          onClick={() => setForgetOpen(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-7 text-xs flex-1"
+                          onClick={handleForget}
+                          disabled={supersedeEntry.isPending}
+                        >
+                          {supersedeEntry.isPending ? 'Forgetting...' : 'Forget'}
+                        </Button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                )}
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5"
+                  asChild
+                >
+                  <Link to={`/context?tab=lineage&context_entry_id=${entry.id}`}>
+                    <GitBranch className="w-3.5 h-3.5" />
+                    Lineage
+                  </Link>
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5"
+                  onClick={handleCopyId}
+                >
+                  {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied ? 'Copied' : 'Copy ID'}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-border bg-muted/30 p-4">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                <p className="text-xs text-muted-foreground">
+                  This entry has been superseded and is no longer Current Memory. It is preserved for audit purposes.
+                </p>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" asChild>
+                  <Link to={`/context?tab=lineage&context_entry_id=${entry.id}`}>
+                    <GitBranch className="w-3.5 h-3.5" />
+                    Lineage
+                  </Link>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5"
+                  onClick={handleCopyId}
+                >
+                  {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copied ? 'Copied' : 'Copy ID'}
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* Supersede form (inline) */}
           {supersedeOpen && (
             <div className="rounded-xl border border-border bg-card p-4 space-y-3">
@@ -628,148 +813,6 @@ export function ContextEntryDrawer({ entry, open, onClose }: ContextEntryDrawerP
           )}
         </div>
 
-        {/* ── Sticky footer actions ───────────────────────────────────────── */}
-        {!isSuperseded && (
-          <div className="flex-shrink-0 border-t border-border px-5 py-3 bg-card flex items-center gap-2 flex-wrap">
-            {isSignal && (
-              <>
-                <Button
-                  variant="default"
-                  size="sm"
-                  className="h-8 text-xs gap-1.5 bg-success text-success-foreground hover:bg-success/90"
-                  onClick={handlePromoteSignal}
-                  disabled={promoteSignal.isPending}
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  Confirm Signal
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="h-8 text-xs gap-1.5"
-                  onClick={handleRejectSignal}
-                  disabled={rejectSignal.isPending}
-                >
-                  Dismiss Signal
-                </Button>
-              </>
-            )}
-            {/* Mark reviewed — highlighted if expired */}
-            {expired && !isSignal && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10"
-                onClick={handleReview}
-                disabled={reviewEntry.isPending}
-              >
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                Mark reviewed
-              </Button>
-            )}
-
-            {/* Supersede */}
-            {!supersedeOpen && !isSignal && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs gap-1.5"
-                onClick={() => { setSupersedeOpen(true); setSupersedeBody(''); setSupersedeConf(storedConf); }}
-              >
-                <Edit3 className="w-3.5 h-3.5" />
-                Update
-              </Button>
-            )}
-
-            {/* Forget / Invalidate */}
-            {!isSignal && <Popover open={forgetOpen} onOpenChange={setForgetOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Forget
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-72 p-4 space-y-3" side="top" align="start">
-                <div>
-                  <p className="text-sm font-semibold text-foreground mb-1">Forget this belief?</p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    The entry will be marked as intentionally forgotten and removed from Current Memory.
-                    The original record is preserved in audit history.
-                  </p>
-                </div>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs flex-1"
-                    onClick={() => setForgetOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="h-7 text-xs flex-1"
-                    onClick={handleForget}
-                    disabled={supersedeEntry.isPending}
-                  >
-                    {supersedeEntry.isPending ? 'Forgetting…' : 'Forget'}
-                  </Button>
-                </div>
-              </PopoverContent>
-            </Popover>}
-
-            {/* Spacer */}
-            <div className="flex-1" />
-
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
-              asChild
-            >
-              <Link to={`/context?tab=lineage&context_entry_id=${entry.id}`}>
-                <GitBranch className="w-3.5 h-3.5" />
-                View Lineage
-              </Link>
-            </Button>
-
-            {/* Copy ID */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
-              onClick={handleCopyId}
-            >
-              {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-              {copied ? 'Copied!' : 'Copy ID'}
-            </Button>
-          </div>
-        )}
-
-        {/* Superseded banner */}
-        {isSuperseded && (
-          <div className="flex-shrink-0 border-t border-border px-5 py-3 bg-muted/30 flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-            <p className="text-xs text-muted-foreground">
-              This entry has been superseded and is no longer Current Memory. It is preserved for audit purposes.
-            </p>
-            <div className="flex-1" />
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground flex-shrink-0"
-              onClick={handleCopyId}
-            >
-              {copied ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-              {copied ? 'Copied!' : 'ID'}
-            </Button>
-          </div>
-        )}
       </SheetContent>
     </Sheet>
   );

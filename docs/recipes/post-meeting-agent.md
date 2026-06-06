@@ -1,6 +1,6 @@
 # Build a post-meeting agent with CRMy
 
-An agent that runs after a sales or customer-success call. It turns a messy transcript into evidence-backed Signals, promotes trusted items to Memory, routes uncertain or risky claims to Handoffs, and creates clear follow-up work.
+An agent that runs after a sales or customer-success call. It turns a messy transcript into evidence-backed Signals, promotes confirmed items to Memory, routes uncertain or risky claims to Handoffs, and creates clear follow-up work.
 
 **What you will build:** A post-meeting processing workflow that uses CRMy as the context engine, not a hand-written parser.
 
@@ -19,14 +19,14 @@ An agent that runs after a sales or customer-success call. It turns a messy tran
 Copy-paste this system prompt into your agent configuration to create a Post-Meeting Agent.
 
 ```text
-You are the Post-Meeting Agent for CRMy. Your job is to turn messy customer calls into trusted GTM operating context.
+You are the Post-Meeting Agent for CRMy. Your job is to turn messy customer calls into confirmed GTM operating context.
 
 CRMy's context lifecycle is:
 Raw Context -> Signals -> Memory -> Active Context -> Handoffs -> Systems of Record.
 
 Definitions:
 - Raw Context is messy input: transcripts, emails, meeting notes, support updates, research, and CRM/warehouse changes.
-- Signals are inferred claims with evidence and trust scores. They are useful, but not confirmed truth.
+- Signals are inferred claims with evidence, source quality, and readiness scores. They are useful, but not confirmed truth.
 - Memory is confirmed operational context that agents, automations, handoffs, and governed writeback may rely on.
 - Active Context is the temporary working set the model can see right now: briefing results, bound records, tool outputs, and the current conversation.
 - Handoffs are the human-review path for risky, conflicting, or low-confidence action.
@@ -37,7 +37,7 @@ Workflow:
 2. If you know the customer record, call briefing_get before processing the meeting. If you do not know it, let CRMy resolve the subjects during ingestion.
 3. Send the full transcript or notes to context_ingest_auto. Do not manually parse the transcript into context_add calls unless a human explicitly asks you to write reviewed Memory.
 4. Read the ingestion result:
-   - memory_created means trusted Memory is already available.
+   - memory_created means confirmed Memory is already available.
    - signals_created means inferred claims need review, more evidence, or promotion.
    - skipped or failed means inspect the processing receipt before acting.
 5. Call context_signal_group_list for the resolved account, contact, opportunity, or use case. Treat these as the primary Signals view.
@@ -137,7 +137,7 @@ Expected result:
       "signals_created": 3,
       "processing_receipt": {
         "status": "needs_review",
-        "next_action": "Review Signals and promote trusted items to Memory."
+        "next_action": "Review Signals and promote confirmed items to Memory."
       }
     }
   ],
@@ -174,7 +174,7 @@ crmy context signal-groups --subject account:d0000000-0000-4000-b000-00000000010
 
 Look for:
 
-- Trust score and promotion threshold
+- Readiness score and promotion threshold
 - Evidence count and independent source count
 - Conflict state
 - Whether the Signal is ready for Memory, needs more evidence, or needs approval
@@ -221,7 +221,7 @@ context_signal_handoff {
 crmy context handoff-group <signal-id>
 ```
 
-CRMy creates a HITL review request with the claim, evidence summary, trust score, subject record, and requested decision.
+CRMy creates a HITL review request with the claim, evidence summary, readiness score, subject record, and requested decision.
 
 ---
 
@@ -275,6 +275,6 @@ The post-meeting agent does not need to rebuild customer state from notes, CRM h
 
 1. Ingest messy GTM context.
 2. Extract evidence-backed Signals.
-3. Promote trusted Signals into Memory.
+3. Promote confirmed Signals into Memory.
 4. Route risky action through Handoffs.
 5. Act or write back only after policy allows it.

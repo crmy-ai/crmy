@@ -288,29 +288,39 @@ export function emailTools(db: DbPool): ToolDef[] {
       name: 'email_message_process',
       tier: 'extended',
       description: 'Process an existing customer email message as Raw Context. Internal or automated emails are skipped unless reclassified first.',
-      inputSchema: z.object({ id: z.string().uuid() }),
-      handler: async (input: { id: string }, actor: ActorContext) => {
-        const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, input.id);
-        if (!message) throw notFound('EmailMessage', input.id);
-        await assertEmailMessageAccess(db, actor, message);
-        return processEmailMessage(db, actor.tenant_id, message.id, actor);
+      inputSchema: z.object({ id: z.string().uuid(), idempotency_key: z.string().max(128).optional() }),
+      handler: async (input: { id: string; idempotency_key?: string }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'email_message_process', input, async () => {
+          const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, input.id);
+          if (!message) throw notFound('EmailMessage', input.id);
+          await assertEmailMessageAccess(db, actor, message);
+          return processEmailMessage(db, actor.tenant_id, message.id, actor);
+        });
       },
     },
     {
       name: 'email_message_ignore',
       tier: 'extended',
       description: 'Ignore a customer email message so it no longer appears in review queues.',
-      inputSchema: z.object({ id: z.string().uuid(), reason: z.string().optional() }),
-      handler: async (input: { id: string; reason?: string }, actor: ActorContext) => {
-        const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, input.id);
-        if (!message) throw notFound('EmailMessage', input.id);
-        await assertEmailMessageAccess(db, actor, message);
-        const updated = await emailMessageRepo.updateEmailMessage(db, actor.tenant_id, message.id, {
-          processing_status: 'ignored',
-          processing_reason: input.reason ?? 'Ignored by user.',
-          ignored_at: new Date().toISOString(),
+      inputSchema: z.object({ id: z.string().uuid(), reason: z.string().optional(), idempotency_key: z.string().max(128).optional() }),
+      handler: async (input: { id: string; reason?: string; idempotency_key?: string }, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'email_message_ignore', input, async () => {
+          const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, input.id);
+          if (!message) throw notFound('EmailMessage', input.id);
+          await assertEmailMessageAccess(db, actor, message);
+          const updated = await emailMessageRepo.updateEmailMessage(db, actor.tenant_id, message.id, {
+            processing_status: 'ignored',
+            processing_reason: input.reason ?? 'Ignored by user.',
+            ignored_at: new Date().toISOString(),
+          });
+          return {
+            email_message: updated,
+            mutation: mutationReceipt(actor, {
+              objectType: 'email_message',
+              objectId: message.id,
+            }),
+          };
         });
-        return { email_message: updated };
       },
     },
     {
@@ -325,6 +335,7 @@ export function emailTools(db: DbPool): ToolDef[] {
         opportunity_id: z.string().uuid().nullable().optional(),
         use_case_id: z.string().uuid().nullable().optional(),
         process: z.boolean().optional().default(true),
+        idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (input: {
         id: string;
@@ -334,6 +345,7 @@ export function emailTools(db: DbPool): ToolDef[] {
         opportunity_id?: string | null;
         use_case_id?: string | null;
         process?: boolean;
+        idempotency_key?: string;
       }, actor: ActorContext) => {
         return runToolOperation(db, actor, 'email_message_link', input, async () => {
           const message = await emailMessageRepo.getEmailMessage(db, actor.tenant_id, input.id);

@@ -2,11 +2,11 @@
 
 **Customer memory for AI sales agents.**
 
-Before an AI sales agent sends a follow-up, prepares a meeting brief, updates an opportunity, reviews a renewal, or writes back to a system of record, it needs trusted customer context.
+Before an AI sales agent sends a follow-up, prepares a meeting brief, updates an opportunity, reviews a renewal, or writes back to a system of record, it needs confirmed, authorized customer context.
 
 It needs to know what is true, what is stale, what is inferred, what requires approval, and which system owns the record.
 
-#### CRMy gives agents one trusted customer briefing before they act.
+#### CRMy gives agents one evidence-backed customer briefing before they act.
 
 A `briefing_get` call returns typed customer context across accounts, contacts, opportunities, activities, risks, commitments, next steps, evidence, stale warnings, and open handoffs.
 
@@ -60,7 +60,7 @@ Use it when your agent needs to know account state, inspect evidence, remember d
 
 ### 1. Observe Freely
 
-Ingest customer context from calls, meetings, emails, notes, CRM changes, Slack, support cases, product usage, docs, REST, CLI, and MCP.
+Ingest customer context from calls, meetings, emails, notes, calendar activity, CRM/warehouse sync, REST, CLI, MCP, and manual Add Context flows. Source metadata can represent support, product, Slack, document, and custom sources when those systems feed CRMy through API, MCP, or future adapters.
 
 Raw Context stays messy. CRMy resolves visible customer records, extracts evidence-backed Signals, and keeps receipts for what was processed, skipped, matched, or failed.
 
@@ -70,7 +70,7 @@ The same account-first resolver powers Raw Context, customer email, calendar/act
 
 Store typed GTM Memory for accounts, contacts, opportunities, use cases, stakeholders, risks, objections, commitments, next steps, buying process, success criteria, and forecast signals.
 
-Memory is persistent, scoped, searchable, versioned, auditable, and designed for agent action. Signals remain separate until they are trusted enough to become Memory.
+Memory is persistent, scoped, searchable, versioned, auditable, and designed for agent action. Signals remain separate until evidence, source quality, typed detail, policy, and readiness allow them to become confirmed Memory.
 
 ### 3. Act Safely
 
@@ -104,7 +104,7 @@ flowchart LR
   audit["Audit + Lineage"]
 
   sources --> raw --> signals
-  signals -->|trusted enough| memory
+  signals -->|confirmed + ready| memory
   signals -->|uncertain or sensitive| handoff
   memory --> active --> agent
   agent -->|needs approval| handoff
@@ -127,7 +127,7 @@ Use CRMy when you want agents that can:
 - route sensitive decisions to a human with evidence attached
 - prepare CRM or warehouse updates without bypassing policy
 - operate with member, manager, and admin visibility boundaries
-- expose the same capabilities through Web UI, REST, CLI, and MCP
+- expose the core loop through Web UI, REST, MCP, and curated CLI workflows
 
 ## The Core Context Engine
 
@@ -374,11 +374,13 @@ Common first tools:
 |---|---|
 | Decide which tool path to use | `tool_guide` |
 | Resolve customer records | `customer_record_resolve` |
-| Brief an agent before action | `briefing_get` |
+| Brief an agent before analysis | `briefing_get` |
+| Check whether action is ready | `action_context_get` |
 | Find Memory, Signals, stale context, or search results | `context_find` |
 | Ingest messy customer context | `context_ingest_auto` |
 | Review evidence-backed Signals | `context_signal_group_list` |
-| Confirm a Signal as trusted Memory | `context_signal_group_promote` |
+| Repair missing Signal details | `context_signal_group_complete_details` |
+| Confirm a Signal as Memory | `context_signal_group_promote` |
 | Route uncertain work to review | `context_signal_handoff` |
 | Draft a customer email | `email_draft_preview` |
 | Draft a new record from natural language | `record_draft_preview` |
@@ -410,7 +412,8 @@ Supported connector paths include:
 - Salesforce
 - Databricks SQL Warehouse
 - Snowflake
-- Other Postgres-compatible systems through custom mapping
+
+Custom source and writeback integrations can also feed CRMy through REST, MCP, or webhooks. They are not first-class systems-of-record connectors unless they use one of the supported connector types above.
 
 Connections can read external records into typed CRMy objects, preserve external references, detect conflicts, and request governed writebacks. New mappings default to read-only. Writeback must be explicitly enabled field by field and still passes through preview, policy, approval, audit, and execution receipts.
 

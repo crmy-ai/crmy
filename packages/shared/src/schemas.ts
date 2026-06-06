@@ -64,6 +64,33 @@ export const signalReadiness = z.object({
     conflict_penalty: z.number(),
   }),
 });
+export const signalResolutionTargetType = z.enum([
+  'mentioned_person',
+  'mentioned_entity',
+  'subject_record',
+  'signal_detail',
+  'evidence',
+  'conflict',
+  'approval',
+]);
+export const signalResolutionPrimaryAction = z.enum([
+  'add_signal_detail',
+  'add_evidence',
+  'resolve_conflict',
+  'request_approval',
+  'confirm_signal',
+  'view_only',
+]);
+export const signalResolution = z.object({
+  target_type: signalResolutionTargetType,
+  target_label: z.string(),
+  subject_label: z.string(),
+  subject_type: subjectType,
+  subject_id: uuid,
+  primary_missing_field: z.string().optional(),
+  primary_action: signalResolutionPrimaryAction,
+  helper_text: z.string(),
+});
 
 const tags = z.array(z.string()).default([]);
 const customFields = z.record(z.unknown()).default({});

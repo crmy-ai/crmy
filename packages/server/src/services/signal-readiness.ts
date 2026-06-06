@@ -6,6 +6,8 @@ import type {
   SignalReadiness,
   SignalReadinessNextAction,
   SignalReadinessStatus,
+  SignalResolution,
+  SubjectType,
 } from '@crmy/shared';
 
 export const SIGNAL_READINESS_VERSION = 'crmy.signal_readiness.v1' as const;
@@ -16,6 +18,12 @@ const MIN_TYPED_COMPLETENESS = 0.75;
 export type ReadableSignalGroupStatus = 'gathering' | 'ready' | 'promoted' | 'blocked' | 'dismissed' | 'conflicting' | 'merged';
 
 export interface ReadableSignalGroup {
+  subject_type?: SubjectType;
+  subject_id?: string;
+  subject_name?: string | null;
+  context_type?: string;
+  title?: string | null;
+  normalized_claim?: string;
   status: ReadableSignalGroupStatus;
   aggregate_confidence: number;
   support_count: number;
@@ -234,6 +242,160 @@ function missingDetailsFromEntries(entries: ContextEntry[]): string[] {
   return unique(entries.flatMap(entry => stringArray(entryStructuredData(entry).missing_details)));
 }
 
+function humanizeKey(key: string): string {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function normalizeFieldKey(value: string): string {
+  return value
+    .replace(/\.$/, '')
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+}
+
+function possessive(label: string): string {
+  return label.endsWith('s') ? `${label}'` : `${label}'s`;
+}
+
+function subjectTypeLabel(subjectType?: SubjectType): string {
+  if (subjectType === 'use_case') return 'use case';
+  return subjectType ?? 'record';
+}
+
+function groupSubjectLabel(group: ReadableSignalGroup): string {
+  if (group.subject_name) return group.subject_name;
+  const type = group.subject_type === 'use_case' ? 'Use Case' : humanizeKey(group.subject_type ?? 'Record');
+  return group.subject_id ? `${type} ${group.subject_id.slice(0, 8)}` : type;
+}
+
+function firstSupportingEntry(group: ReadableSignalGroup): ContextEntry | undefined {
+  const supportingEntries = (group.members ?? [])
+    .filter(member => member.relation === 'supports')
+    .map(member => member.context_entry)
+    .filter(Boolean) as ContextEntry[];
+  const latestId = (group as { latest_signal_id?: string | null }).latest_signal_id;
+  return (latestId ? supportingEntries.find(entry => entry.id === latestId) : undefined) ?? supportingEntries[0];
+}
+
+function missingDetailsForResolution(group: ReadableSignalGroup, readiness: SignalReadiness): string[] {
+  const facts = signalReadinessFactsForGroup(group);
+  const fromReasons = readiness.reasons.flatMap(reason => {
+    const match = reason.match(/Missing typed detail:\s*(.+?)\.?$/i);
+    return match?.[1] ? match[1].split(',').map(value => value.trim()) : [];
+  });
+  const fromBlockers = readiness.blockers.flatMap(blocker => {
+    const match = blocker.match(/^Missing\s+(.+?)\.?$/i);
+    return match?.[1] ? [match[1]] : [];
+  });
+  return unique([
+    ...(facts.missing_details ?? []),
+    ...fromReasons,
+    ...fromBlockers,
+  ]);
+}
+
+function primaryActionForReadiness(readiness: SignalReadiness): SignalResolution['primary_action'] {
+  if (readiness.status === 'confirmed' || readiness.status === 'dismissed') return 'view_only';
+  if (readiness.status === 'ready_to_confirm') return 'confirm_signal';
+  if (readiness.status === 'needs_more_detail') return 'add_signal_detail';
+  if (readiness.status === 'needs_more_evidence') return 'add_evidence';
+  if (readiness.status === 'blocked_by_conflict') return 'resolve_conflict';
+  if (readiness.status === 'approval_required') return readiness.can_confirm ? 'confirm_signal' : 'request_approval';
+  return 'view_only';
+}
+
+function targetForGroup(
+  group: ReadableSignalGroup,
+  readiness: SignalReadiness,
+): Pick<SignalResolution, 'target_type' | 'target_label' | 'primary_missing_field'> {
+  const entry = firstSupportingEntry(group);
+  const structured = entryStructuredData(entry);
+  const subjectLabel = groupSubjectLabel(group);
+  const missingField = missingDetailsForResolution(group, readiness)[0];
+  const primaryMissingField = missingField ? normalizeFieldKey(missingField) : undefined;
+  const personName = typeof structured.person_name === 'string' && structured.person_name.trim()
+    ? structured.person_name.trim()
+    : undefined;
+  const entityName = typeof structured.entity_name === 'string' && structured.entity_name.trim()
+    ? structured.entity_name.trim()
+    : typeof structured.company_name === 'string' && structured.company_name.trim()
+      ? structured.company_name.trim()
+      : undefined;
+
+  if (readiness.status === 'needs_more_evidence') {
+    return { target_type: 'evidence', target_label: subjectLabel, primary_missing_field: primaryMissingField };
+  }
+  if (readiness.status === 'blocked_by_conflict') {
+    return { target_type: 'conflict', target_label: subjectLabel, primary_missing_field: primaryMissingField };
+  }
+  if (readiness.status === 'approval_required') {
+    return { target_type: 'approval', target_label: subjectLabel, primary_missing_field: primaryMissingField };
+  }
+  if (personName) {
+    return { target_type: 'mentioned_person', target_label: personName, primary_missing_field: primaryMissingField };
+  }
+  if (entityName) {
+    return { target_type: 'mentioned_entity', target_label: entityName, primary_missing_field: primaryMissingField };
+  }
+  if (readiness.status === 'needs_more_detail' && primaryMissingField) {
+    return { target_type: 'signal_detail', target_label: subjectLabel, primary_missing_field: primaryMissingField };
+  }
+  return { target_type: 'subject_record', target_label: subjectLabel, primary_missing_field: primaryMissingField };
+}
+
+function helperTextForResolution(
+  group: ReadableSignalGroup,
+  readiness: SignalReadiness,
+  target: Pick<SignalResolution, 'target_type' | 'target_label' | 'primary_missing_field'>,
+): string {
+  const fieldLabel = target.primary_missing_field ? humanizeKey(target.primary_missing_field).toLowerCase() : 'detail';
+  const recordType = subjectTypeLabel(group.subject_type);
+  if (readiness.status === 'needs_more_detail' && target.target_type === 'mentioned_person') {
+    return `Add ${possessive(target.target_label)} ${fieldLabel} in this Signal. This does not edit the ${recordType} record.`;
+  }
+  if (readiness.status === 'needs_more_detail') {
+    return `Add the missing Signal detail before confirming this as Memory.`;
+  }
+  if (readiness.status === 'needs_more_evidence') {
+    return 'Add source evidence before confirming this Signal as Memory.';
+  }
+  if (readiness.status === 'blocked_by_conflict') {
+    return 'Resolve conflicting evidence before confirming this Signal as Memory.';
+  }
+  if (readiness.status === 'approval_required') {
+    return readiness.can_confirm
+      ? 'Confirm this Signal if the evidence is enough, or request approval from someone else.'
+      : 'Request approval before this Signal becomes confirmed Memory.';
+  }
+  if (readiness.status === 'ready_to_confirm') {
+    return 'This Signal can be confirmed as Memory.';
+  }
+  return readiness.status === 'confirmed'
+    ? 'This Signal already became confirmed Memory.'
+    : 'This Signal is view-only.';
+}
+
+export function deriveSignalResolution(
+  group: ReadableSignalGroup,
+  readiness: SignalReadiness = signalReadinessForGroup(group),
+): SignalResolution {
+  const subjectLabel = groupSubjectLabel(group);
+  const target = targetForGroup(group, readiness);
+  return {
+    target_type: target.target_type,
+    target_label: target.target_label,
+    subject_label: subjectLabel,
+    subject_type: group.subject_type ?? 'account',
+    subject_id: group.subject_id ?? '',
+    ...(target.primary_missing_field ? { primary_missing_field: target.primary_missing_field } : {}),
+    primary_action: primaryActionForReadiness(readiness),
+    helper_text: helperTextForResolution(group, readiness, target),
+  };
+}
+
 export function signalReadinessFactsForGroup(group: ReadableSignalGroup): SignalReadinessFacts {
   const metadata = metadataRecord(group.metadata);
   const cached = metadataRecord(metadata.readiness) as Partial<SignalReadiness>;
@@ -281,9 +443,11 @@ export function signalReadinessForGroup(group: ReadableSignalGroup): SignalReadi
   return deriveSignalReadiness(signalReadinessFactsForGroup(group));
 }
 
-export function withSignalReadiness<T extends ReadableSignalGroup>(group: T): T & { readiness: SignalReadiness } {
+export function withSignalReadiness<T extends ReadableSignalGroup>(group: T): T & { readiness: SignalReadiness; resolution: SignalResolution } {
+  const readiness = signalReadinessForGroup(group);
   return {
     ...group,
-    readiness: signalReadinessForGroup(group),
+    readiness,
+    resolution: deriveSignalResolution(group, readiness),
   };
 }

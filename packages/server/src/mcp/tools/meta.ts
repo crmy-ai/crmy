@@ -18,6 +18,7 @@ import {
   redactSubjectPii,
 } from '../../services/privacy-governance.js';
 import type { ToolDef } from '../server.js';
+import { runToolOperation } from '../tool-operation.js';
 
 const opsStatusGet = z.object({
   include_samples: z.boolean().optional().default(true),
@@ -41,6 +42,7 @@ const opsJobRecover = z.object({
   job_id: z.string().uuid(),
   action: z.enum(['retry', 'park', 'mark_failed']),
   reason: z.string().max(1000).optional(),
+  idempotency_key: z.string().max(128).optional(),
 });
 
 const opsDataQualityGet = z.object({
@@ -60,6 +62,7 @@ const opsDataQualityRepair = z.object({
   ]),
   dry_run: z.boolean().optional().default(true),
   limit: z.number().int().min(1).max(1000).optional().default(100),
+  idempotency_key: z.string().max(128).optional(),
 });
 
 const opsAuditGet = z.object({
@@ -83,6 +86,7 @@ const opsPiiRedact = z.object({
   subject_id: z.string().uuid(),
   reason: z.string().min(1).max(1000),
   dry_run: z.boolean().optional().default(true),
+  idempotency_key: z.string().max(128).optional(),
 });
 
 const opsPrivacyDelete = z.object({
@@ -90,12 +94,14 @@ const opsPrivacyDelete = z.object({
   subject_id: z.string().uuid(),
   reason: z.string().min(1).max(1000),
   dry_run: z.boolean().optional().default(true),
+  idempotency_key: z.string().max(128).optional(),
 });
 
 const opsRetentionApply = z.object({
   older_than_days: z.number().int().min(1),
   targets: z.array(z.enum(['events', 'ops_recovery_log', 'context_outbox_complete', 'idempotency_keys'])).min(1),
   dry_run: z.boolean().optional().default(true),
+  idempotency_key: z.string().max(128).optional(),
 });
 
 const FIELD_SCHEMAS: Record<string, { name: string; type: string; required: boolean }[]> = {
@@ -550,19 +556,21 @@ export function metaTools(db: DbPool): ToolDef[] {
       description: 'Retry, park, or mark failed a durable async job for the current tenant, and write an audit record to ops_recovery_log. Use retry to return recoverable jobs to worker pickup, park to stop noisy jobs from being retried while preserving them for inspection, and mark_failed to terminate stuck running/pending work with an operator reason. workflow_runs can be parked or marked failed, but cannot be retried from this tool because replaying workflow side effects requires a new workflow event.',
       inputSchema: opsJobRecover,
       handler: async (input: z.infer<typeof opsJobRecover>, actor: ActorContext) => {
-        const result = await recoverOperationalJob(
-          db,
-          actor,
-          input.queue_name,
-          input.job_id,
-          input.action,
-          input.reason,
-        );
+        return runToolOperation(db, actor, 'ops_job_recover', input, async () => {
+          const result = await recoverOperationalJob(
+            db,
+            actor,
+            input.queue_name,
+            input.job_id,
+            input.action,
+            input.reason,
+          );
 
-        return {
-          ...result,
-          recovered_at: new Date().toISOString(),
-        };
+          return {
+            ...result,
+            recovered_at: new Date().toISOString(),
+          };
+        });
       },
     },
     {
@@ -584,9 +592,11 @@ export function metaTools(db: DbPool): ToolDef[] {
       description: 'Repair safe tenant-scoped data-quality findings. Supports dry-run-first canonical activity subject backfill, current-context search-index backfill enqueueing, retrying stuck context outbox jobs, requeueing stale or retryable Raw Context processing receipts, and failing/requeueing stuck Raw Context extraction attempts. Higher-risk findings remain report-only and require operator review. Admin/owner only.',
       inputSchema: opsDataQualityRepair,
       handler: async (input: z.infer<typeof opsDataQualityRepair>, actor: ActorContext) => {
-        return repairDataQualityFinding(db, actor, input.check_name, {
-          dry_run: input.dry_run,
-          limit: input.limit,
+        return runToolOperation(db, actor, 'ops_data_quality_repair', input, async () => {
+          return repairDataQualityFinding(db, actor, input.check_name, {
+            dry_run: input.dry_run,
+            limit: input.limit,
+          });
         });
       },
     },
@@ -618,7 +628,9 @@ export function metaTools(db: DbPool): ToolDef[] {
       description: 'Redact direct PII fields from a contact or account. Defaults to dry_run=true so operators can preview affected fields before applying. Contact redaction clears name/email/phone/title/source/custom fields; account redaction clears domain/website/custom fields. Admin/owner only.',
       inputSchema: opsPiiRedact,
       handler: async (input: z.infer<typeof opsPiiRedact>, actor: ActorContext) => {
-        return redactSubjectPii(db, actor, input.subject_type, input.subject_id, input.reason, input.dry_run);
+        return runToolOperation(db, actor, 'ops_pii_redact', input, async () => {
+          return redactSubjectPii(db, actor, input.subject_type, input.subject_id, input.reason, input.dry_run);
+        });
       },
     },
     {
@@ -627,7 +639,9 @@ export function metaTools(db: DbPool): ToolDef[] {
       description: 'Delete a CRM subject for privacy compliance after export/review. Defaults to dry_run=true and reports affected linked rows before deletion. Admin/owner only.',
       inputSchema: opsPrivacyDelete,
       handler: async (input: z.infer<typeof opsPrivacyDelete>, actor: ActorContext) => {
-        return deleteSubjectForPrivacy(db, actor, input.subject_type, input.subject_id, input.reason, input.dry_run);
+        return runToolOperation(db, actor, 'ops_privacy_delete', input, async () => {
+          return deleteSubjectForPrivacy(db, actor, input.subject_type, input.subject_id, input.reason, input.dry_run);
+        });
       },
     },
     {
@@ -636,7 +650,9 @@ export function metaTools(db: DbPool): ToolDef[] {
       description: 'Apply tenant retention cleanup to audit events, recovery logs, completed context outbox jobs, and idempotency keys older than a configured age. Defaults to dry_run=true so operators can preview counts before deleting. Admin/owner only.',
       inputSchema: opsRetentionApply,
       handler: async (input: z.infer<typeof opsRetentionApply>, actor: ActorContext) => {
-        return applyRetentionPolicy(db, actor, input);
+        return runToolOperation(db, actor, 'ops_retention_apply', input, async () => {
+          return applyRetentionPolicy(db, actor, input);
+        });
       },
     },
   ];

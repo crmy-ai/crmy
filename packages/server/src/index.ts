@@ -15,7 +15,7 @@ import { authMiddleware } from './auth/middleware.js';
 import { apiRouter, inboundRouter } from './rest/router.js';
 import { agentRouter } from './agent/routes.js';
 import { createMcpServer } from './mcp/server.js';
-import { mcpSessions, registerMcpSession, removeMcpSession, touchMcpSession, evictStaleMcpSessions } from './mcp/session-registry.js';
+import { mcpSessions, registerMcpSession, removeMcpSession, touchMcpSession, evictStaleMcpSessions, isSameMcpActor } from './mcp/session-registry.js';
 import { autoApproveExpired, expireOldRequests } from './db/repos/hitl.js';
 import { cleanExpiredSessions } from './db/repos/agent.js';
 import { processPendingExtractions } from './agent/extraction.js';
@@ -230,11 +230,17 @@ export async function createApp(config: ServerConfig) {
     try {
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
 
-      // Reuse existing session (subsequent GET/POST from same client)
-      if (sessionId && mcpSessions.has(sessionId)) {
+      // Reuse existing session (subsequent GET/POST from same client).
+      // Session ids are state handles, not bearer credentials; every request
+      // must still authenticate as the actor that initialized the session.
+      const existingSession = sessionId ? mcpSessions.get(sessionId) : undefined;
+      if (sessionId && existingSession) {
+        const actor = await extractMcpActor(req);
+        if (!isSameMcpActor(actor, existingSession.actor)) {
+          throw unauthorized('MCP session belongs to a different actor or scope set');
+        }
         touchMcpSession(sessionId); // reset idle TTL
-        const session = mcpSessions.get(sessionId)!;
-        await session.transport.handleRequest(req, res, req.body);
+        await existingSession.transport.handleRequest(req, res, req.body);
         return;
       }
 

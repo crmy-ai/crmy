@@ -227,6 +227,7 @@ export const Req = {
   ContextEntrySearch: registry.register('ContextEntrySearch', S.contextEntrySearch),
   ContextStaleList: registry.register('ContextStaleList', S.contextStaleList),
   SignalReadiness: registry.register('SignalReadiness', S.signalReadiness),
+  SignalResolution: registry.register('SignalResolution', S.signalResolution),
   ContextSignalGroupCompleteDetails: registry.register('ContextSignalGroupCompleteDetails', S.contextSignalGroupCompleteDetails.omit({ id: true })),
   ContextSignalGroupHandoff: registry.register('ContextSignalGroupHandoff', S.contextSignalGroupHandoff.omit({ id: true })),
 

@@ -4,7 +4,7 @@ This plan hardens the core CRMy loop without widening the product surface:
 
 `Raw Context -> Signals -> Memory -> Briefing -> Handoff / governed action`
 
-The goal is simple: extraction should become boring. Messy GTM input can be unpredictable, but CRMy’s processing should be durable, replayable, scoped, observable, and conservative about trust.
+The goal is simple: extraction should become boring. Messy GTM input can be unpredictable, but CRMy’s processing should be durable, replayable, scoped, observable, and conservative about confirmation.
 
 ## Principles
 
@@ -61,13 +61,13 @@ The custom-registry corpus proves tenant-admin changes remain compatible with th
 - stricter required fields;
 - incomplete custom Signals remaining reviewable instead of becoming Memory.
 
-## Phase 4: Source Independence And Trust Calibration
+## Phase 4: Source Independence And Readiness Calibration
 
-Status: implemented for duplicate event protection and event-time-aware trust scoring.
+Status: implemented for duplicate event protection and event-time-aware readiness/source-quality scoring.
 
 - Treat repeated copies of the same source event as one evidence unit.
 - Treat same claim from a later event as a refresh, not blind corroboration.
-- Increase trust only when evidence is meaningfully independent: different event, source channel, participant, or system.
+- Increase readiness only when evidence is meaningfully independent: different event, source channel, participant, or system.
 - Normalize raw event labels such as call transcripts, meeting notes, manual Add Context, and MCP Raw Context so wording differences do not create fake source independence.
 - Keep source weights visible and testable.
 - Add regression tests that prove duplicate uploads cannot manufacture Memory.
@@ -109,7 +109,7 @@ This capability is ready for v0.9 confidence when:
 
 - the golden corpus passes in CI;
 - retry/reprocess is idempotent and permission-safe;
-- duplicate source events cannot inflate trust;
+- duplicate source events cannot inflate readiness;
 - Operations can recover common failures without DB access;
 - agent, CLI, REST, and UI ingestion all produce equivalent receipts;
 - extraction failure modes are visible, coded, and actionable.

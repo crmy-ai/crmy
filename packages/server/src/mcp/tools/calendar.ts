@@ -91,8 +91,8 @@ export function calendarTools(db: DbPool): ToolDef[] {
       name: 'calendar_event_process',
       tier: 'extended',
       description: 'Process a ready customer meeting artifact as Raw Context so CRMy can extract Signals and Memory.',
-      inputSchema: z.object({ id: z.string().uuid() }),
-      handler: async (input: { id: string }, actor: ActorContext) => {
+      inputSchema: z.object({ id: z.string().uuid(), idempotency_key: z.string().max(128).optional() }),
+      handler: async (input: { id: string; idempotency_key?: string }, actor: ActorContext) => {
         return runToolOperation(db, actor, 'calendar_event_process', input, async () => {
           const event = await calendarRepo.getCalendarEvent(db, actor.tenant_id, input.id);
           if (!event) throw notFound('CalendarEvent', input.id);
@@ -111,6 +111,7 @@ export function calendarTools(db: DbPool): ToolDef[] {
         text_content: z.string().min(1),
         source_label: z.string().optional(),
         process: z.boolean().optional().default(true),
+        idempotency_key: z.string().max(128).optional(),
       }),
       handler: async (input, actor: ActorContext) => {
         return runToolOperation(db, actor, 'calendar_event_add_context', input, async () => {

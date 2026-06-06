@@ -36,6 +36,19 @@ export interface McpSession {
 
 export const mcpSessions = new Map<string, McpSession>();
 
+function scopeKey(actor: ActorContext): string {
+  if (!actor.scopes) return '<jwt-user-full-access>';
+  return [...new Set(actor.scopes)].sort().join('\n');
+}
+
+export function isSameMcpActor(a: ActorContext, b: ActorContext): boolean {
+  return a.tenant_id === b.tenant_id
+    && a.actor_id === b.actor_id
+    && a.actor_type === b.actor_type
+    && a.role === b.role
+    && scopeKey(a) === scopeKey(b);
+}
+
 export function registerMcpSession(
   sessionId: string,
   server: McpServer,

@@ -33,6 +33,7 @@ import {
   Tag,
   Sparkles,
   FileText,
+  Eye,
   Loader2,
   X,
   Plus,
@@ -89,10 +90,12 @@ import { MoreHorizontal, Trash2, Edit3 } from 'lucide-react';
 
 const SUBJECT_TYPES = ['contact', 'account', 'opportunity', 'use_case'] as const;
 
-function ConfidencePill({ value }: { value: number | null | undefined }) {
+function ConfidencePill({ value, variant = 'toned' }: { value: number | null | undefined; variant?: 'toned' | 'neutral' }) {
   if (value == null) return null;
   const pct = Math.round(value * 100);
-  const cls = pct >= 80
+  const cls = variant === 'neutral'
+    ? 'rounded-full bg-muted px-2 text-muted-foreground'
+    : pct >= 80
     ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
     : pct >= 50
     ? 'bg-warning/15 text-warning'
@@ -1406,7 +1409,7 @@ export function ContextBrowser({
                         )}
                         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                           <SubjectChip subjectType={entry.subject_type} subjectId={entry.subject_id} subjectName={entry.subject_name} />
-                          <ConfidencePill value={entry.confidence_score} />
+                          <ConfidencePill value={entry.confidence_score} variant="neutral" />
                           {Array.isArray(entry.evidence) && entry.evidence.length > 0 && (
                             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 font-medium text-emerald-700 dark:text-emerald-300">
                               <FileText className="h-3 w-3" />
@@ -1429,8 +1432,13 @@ export function ContextBrowser({
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2 border-t border-border bg-surface-sunken/30 px-3 py-2" onClick={event => event.stopPropagation()}>
-                      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => openEntryDrawer(entry)}>
-                        <Edit3 className="mr-1 h-3.5 w-3.5" />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                        onClick={() => openEntryDrawer(entry)}
+                      >
+                        <Eye className="mr-1 h-3.5 w-3.5" />
                         Details
                       </Button>
                       {expired && (

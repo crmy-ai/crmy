@@ -143,7 +143,7 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
     {
       name: 'sor_system_delete',
       tier: 'extended',
-      description: 'Delete a system-of-record connection and its mappings, refs, conflicts, sync runs, and writeback queue.',
+      description: 'Admin-only destructive tool for removing a system-of-record connection and its mappings, refs, conflicts, sync runs, and writeback queue. Prefer disabling or pausing sync when historical integration state should remain available.',
       inputSchema: sorSystemDelete,
       handler: async (input: z.infer<typeof sorSystemDelete>, actor: ActorContext) =>
         runToolOperation(db, actor, 'sor_system_delete', input, async () => {
@@ -159,7 +159,7 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
             objectId: input.id,
             beforeData: before,
           });
-          return { deleted, event_id };
+          return { deleted, event_id, mutation: mutationReceipt(actor, { objectType: 'external_system', objectId: input.id, eventId: event_id }) };
         }),
     },
     {
@@ -235,7 +235,7 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
     {
       name: 'sor_mapping_delete',
       tier: 'extended',
-      description: 'Delete one external object mapping.',
+      description: 'Admin-only destructive tool for deleting one external object mapping. Use only after reviewing affected sync and writeback behavior for the mapped object.',
       inputSchema: sorMappingDelete,
       handler: async (input: z.infer<typeof sorMappingDelete>, actor: ActorContext) =>
         runToolOperation(db, actor, 'sor_mapping_delete', input, async () => {
@@ -251,7 +251,7 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
             objectId: input.id,
             beforeData: before,
           });
-          return { deleted, event_id };
+          return { deleted, event_id, mutation: mutationReceipt(actor, { objectType: 'external_mapping', objectId: input.id, eventId: event_id }) };
         }),
     },
     {

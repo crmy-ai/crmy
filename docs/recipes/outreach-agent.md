@@ -49,7 +49,7 @@ Call `context_semantic_search` for the core objection or goal behind the outreac
 ### 4. Draft the outreach
 Use the context entries to personalize the message:
 
-**Objections** → Address proactively. If the contact raised a concern, lead with the answer. Do not ignore known objections — that erodes trust.
+**Objections** -> Address proactively. If the contact raised a concern, lead with the answer. Do not ignore known objections; that hurts credibility.
 
 **Preferences** → Match the contact's communication style. If they prefer brevity, be brief. If they want data, lead with numbers. If they prefer async, do not ask for a call.
 

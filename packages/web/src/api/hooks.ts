@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { ActionContext, ActionContextGetInput, ProviderId, SignalReadiness } from '@crmy/shared';
+import type { ActionContext, ActionContextGetInput, ProviderId, SignalReadiness, SignalResolution } from '@crmy/shared';
 import { api, getUser } from './client';
 
 // Generic list hook with pagination
@@ -1335,6 +1335,7 @@ export interface SignalGroup {
   blocked_reason?: string | null;
   metadata?: Record<string, unknown>;
   readiness?: SignalReadiness;
+  resolution?: SignalResolution;
   subject_name?: string | null;
   updated_at: string;
   created_at: string;

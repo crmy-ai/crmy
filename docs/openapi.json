@@ -2886,6 +2886,114 @@
           "components"
         ]
       },
+      "SignalResolution": {
+        "type": "object",
+        "properties": {
+          "target_type": {
+            "type": "string",
+            "enum": [
+              "mentioned_person",
+              "mentioned_entity",
+              "subject_record",
+              "signal_detail",
+              "evidence",
+              "conflict",
+              "approval"
+            ]
+          },
+          "target_label": {
+            "type": "string"
+          },
+          "subject_label": {
+            "type": "string"
+          },
+          "subject_type": {
+            "type": "string",
+            "enum": [
+              "contact",
+              "account",
+              "opportunity",
+              "use_case"
+            ]
+          },
+          "subject_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "primary_missing_field": {
+            "type": "string"
+          },
+          "primary_action": {
+            "type": "string",
+            "enum": [
+              "add_signal_detail",
+              "add_evidence",
+              "resolve_conflict",
+              "request_approval",
+              "confirm_signal",
+              "view_only"
+            ]
+          },
+          "helper_text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "target_type",
+          "target_label",
+          "subject_label",
+          "subject_type",
+          "subject_id",
+          "primary_action",
+          "helper_text"
+        ]
+      },
+      "ContextSignalGroupCompleteDetails": {
+        "type": "object",
+        "properties": {
+          "structured_data_patch": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "structured_data_patch"
+        ]
+      },
+      "ContextSignalGroupHandoff": {
+        "type": "object",
+        "properties": {
+          "assignee_actor_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 5000
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "urgent"
+            ]
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
+          }
+        }
+      },
       "BriefingGet": {
         "type": "object",
         "properties": {
@@ -9514,6 +9622,140 @@
                     "type": "string"
                   }
                 }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context/signal-groups/{id}/complete-details": {
+      "post": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "Add missing typed Signal details and recompute readiness",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextSignalGroupCompleteDetails"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/context/signal-groups/{id}/handoff": {
+      "post": {
+        "tags": [
+          "Context"
+        ],
+        "summary": "Send a grouped Signal to an explicit Handoff reviewer",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContextSignalGroupHandoff"
               }
             }
           }

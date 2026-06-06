@@ -1,6 +1,6 @@
 # Build a context governance agent with CRMy
 
-An agent that keeps customer memory trustworthy. It reviews stale entries, detects contradictions, consolidates redundant context, and creates human review assignments when confidence is not high enough for autonomous cleanup.
+An agent that keeps customer memory current and evidence-backed. It reviews stale entries, detects contradictions, consolidates redundant context, and creates human review assignments when confidence is not high enough for autonomous cleanup.
 
 **What you will build:** A governance loop that improves the quality of the context layer without deleting audit history or silently rewriting facts.
 

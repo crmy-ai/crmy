@@ -632,6 +632,13 @@ Inspect one corroborated Signal with supporting/conflicting source evidence.
 - **Input**: `id` (required)
 - **Output**: `{ signal_group }`, including full `readiness` details for “why not Memory yet?”
 
+### context_signal_group_complete_details
+Add missing typed Signal detail and recompute readiness before confirmation.
+- **Input**: `id` (required), `structured_data_patch` (required object), optional `idempotency_key`
+- **Output**: `{ signal_group, context_entry, validation_warnings, event_id, mutation }`; `signal_group` includes recomputed readiness.
+- **Use when**: readiness says a Signal needs more detail, such as stakeholder role, stakeholder sentiment, risk severity, buying-process stage, or another schema-backed field.
+- **Boundary**: updates only unconfirmed Signal structured data. It does not edit CRM records, promote Memory, create activities, or execute writebacks.
+
 ### context_lineage_get
 Trace Raw Context through Signals, Memory, Active Context retrievals, Handoffs, governed writebacks, and audit events.
 - **Input**: one of `subject_type` + `subject_id`, `context_entry_id`, `signal_group_id`, or `raw_context_source_id`
@@ -645,7 +652,7 @@ Promote a confirmed corroborated Signal into Current Memory.
 
 ### context_signal_handoff
 Route a Signal to Handoff when policy, conflict, or risk requires human review before it becomes Memory.
-- **Input**: `id` (required)
+- **Input**: `id` (required), optional `assignee_actor_id`, `reason`, `note`, `priority` (`low` | `normal` | `high` | `urgent`), `idempotency_key`
 - **Output**: `{ signal_group, hitl_request, mutation }`
 - **Use when**: the Signal is useful but should not yet guide forecast, customer engagement, assignment, or system-of-record writeback without approval.
 

@@ -1,6 +1,6 @@
 # Run the GTM agent demo
 
-This recipe is the fastest way to see CRMy's purpose: a GTM agent can inspect account state, ingest messy customer context, see Signals emerge, promote trusted Memory, route risky work to Handoff, and prepare governed system-of-record action.
+This recipe is the fastest way to see CRMy's purpose: a GTM agent can inspect account state, ingest messy customer context, see Signals emerge, promote confirmed Memory, route risky work to Handoff, and prepare governed system-of-record action.
 
 **Use this when:** you are evaluating CRMy for the first time or building your first agent on top of it.
 
@@ -24,10 +24,10 @@ Use CRMy's lifecycle:
 Raw Context -> Signals -> Memory -> Active Context -> Handoffs -> Systems of Record.
 
 Rules:
-- Start with briefing_get before recommending action so trusted Memory is loaded into Active Context.
+- Start with briefing_get before recommending action so confirmed Memory is loaded into Active Context.
 - Use context_ingest_auto for messy transcripts, emails, notes, or research.
 - Treat Signals as unconfirmed until promoted to Memory or approved by Handoff.
-- Use Memory as the trusted context for recommendations, assignments, and writeback planning.
+- Use confirmed Memory for recommendations, assignments, and writeback planning.
 - Use Handoffs for sensitive, uncertain, or high-impact decisions.
 - Never write to a system of record without governed writeback preview, policy, and approval when required.
 ```
@@ -88,7 +88,7 @@ In the web UI:
 /app/context?tab=signals
 ```
 
-Signals show inferred GTM claims with trust score, evidence count, source count, and readiness. CRMy combines related evidence across sources so users do not have to review every extracted line manually.
+Signals show inferred GTM claims with readiness score, evidence count, source count, and blockers. CRMy combines related evidence across sources so users do not have to review every extracted line manually.
 
 ---
 

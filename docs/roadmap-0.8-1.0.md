@@ -9,7 +9,7 @@ The goal is not to replace Salesforce, HubSpot, Databricks, Snowflake, or future
 Chosen defaults for the 0.8-1.0 line:
 
 - **0.8 supports CRM and warehouse systems of record.** Salesforce, HubSpot, Databricks SQL Warehouse / Delta-backed tables, and Snowflake are the first targets.
-- **0.9 hardens the source-to-action loop.** The priority is not more surface area. The priority is proving that messy customer context reliably becomes Signals, trusted Memory, governed human decisions, and auditable action.
+- **0.9 hardens the source-to-action loop.** The priority is not more surface area. The priority is proving that messy customer context reliably becomes Signals, confirmed Memory, governed human decisions, and auditable action.
 - **1.0 is resilience at scale.** The priority is making CRMy dependable on serverless Postgres with high-volume Raw Context, Signals, Memory, source sync, agent work, MCP traffic, and audit history.
 - **Warehouses can be authoritative.** CRMy should not assume the CRM is always the primary system of record.
 - **Warehouse writeback is governed.** Agents cannot run arbitrary SQL writes. Writes must use configured mappings and approved write modes.
@@ -32,7 +32,7 @@ CRMy has plugins, webhooks, REST, MCP, imports, and a strong internal event mode
 - governed writeback requests
 - connector health and replay
 
-Without this layer, CRMy risks becoming another operational store instead of the trusted bridge between agents and enterprise systems.
+Without this layer, CRMy risks becoming another operational store instead of the governed bridge between agents and enterprise systems.
 
 ### 2. Warehouses are not modeled as operational sources
 
@@ -280,12 +280,14 @@ Completed in the 0.8.x hardening line:
 - **Scoped safety checks:** hardening tests cover Raw Context no-subject receipt visibility, MCP resource subject access, explicit tool scope mappings, and Workspace Agent write-object policy defaults.
 - **Source and navigation cleanup:** primary navigation is focused on the core loop; Customer Email and Customer Activity are framed as Context Sources; Automations/Sequences are moved into admin settings surfaces while compatible routes remain available.
 - **Docs alignment:** README, guide, MCP tool reference, examples, recipes, Raw Context reliability plan, record-resolution plan, and contributor “what belongs where” guidance now describe the same Observe -> Signals -> Memory -> Briefing/Active Context -> Handoff/Writeback -> Proof model.
+- **Action Context v1:** `POST /api/v1/action-context` and MCP `action_context_get` assemble action-aware context, readiness, policy/source-authority checks, and compact retrieval proof without mutating CRM records or executing writebacks.
+- **Signal Readiness v1:** Signal group responses include deterministic readiness and resolution metadata. The web workflow can repair missing typed Signal details inline through `context_signal_group_complete_details`.
 
 Still planned for 0.9:
 
-- Full action-readiness packet/API that extends `briefing_get` with write policy, source authority, tool allowance, expected receipts, and risk state.
-- Persisted retrieval events so high-impact Active Context use appears directly in Lineage.
-- More calibrated trust scoring and source-trust configuration beyond the current conservative defaults and tests.
+- Broader Action Context adoption inside specific writeback, outreach, assignment, and automation flows.
+- More calibrated readiness/source-quality scoring beyond the current conservative defaults and tests.
+- Tenant-visible source quality settings with conservative defaults.
 - More complete durable agent task orchestration across browser navigation, deploys, and multi-instance routing.
 - Live-environment certification for first-party SOR connectors and provider-specific mailbox/calendar OAuth behavior.
 - Broader synthetic large-tenant scale testing; the current 0.8.5 gate verifies correctness and drift, not 1.0-scale latency budgets.
@@ -353,23 +355,23 @@ Add a shared action-readiness service, exposed through REST and MCP, that return
 - evidence and lineage links
 - expected audit receipts after action
 
-Candidate interface:
+Current interface:
 
-- REST: `GET /api/v1/action-context`
+- REST: `POST /api/v1/action-context`
 - MCP: `action_context_get`
-- internal service used by Workspace Agent, Handoffs, draft email generation, record create/edit previews, Automations, and writeback planning
+- internal service available for Workspace Agent, Handoffs, draft email generation, record create/edit previews, Automations, and writeback planning
 
 This should not replace `briefing_get`; it should make `briefing_get` safer and more action-aware.
 
-### 4. Signal Trust Calibration And Grouping Proof
+### 4. Signal Readiness Calibration And Grouping Proof
 
 Signals should be understandable and reliable enough for users to confirm, route to review, or ignore.
 
 Key changes:
 
-- Calibrated trust-score tests against the golden extraction corpus.
-- Tenant-visible source trust settings with conservative defaults.
-- Clear distinction between model confidence, source trust, evidence count, independent sources, conflicts, typed completeness, and promotion threshold.
+- Calibrated readiness-score tests against the golden extraction corpus.
+- Tenant-visible source quality settings with conservative defaults.
+- Clear distinction between model confidence, source quality, evidence count, independent sources, conflicts, typed completeness, and promotion threshold.
 - Semantic candidate retrieval for related account/contact/opportunity/use-case evidence when embeddings are ready, with deterministic fallback when they are not.
 - Catch-up regrouping when delayed embeddings arrive.
 - Explicit non-merge rules for distinct GTM claims such as stakeholder role, risk, next step, buying process, commitment, and success criteria.
@@ -404,7 +406,7 @@ Key changes:
 - Handoffs support decision rationale, reassignment, comments, linked evidence, SLA, and task history.
 - Agent conversations can propose Memory, but Memory still requires evidence, policy, and review gates.
 
-Acceptance target: a user can delegate work, leave, return, inspect what happened, approve or reject actions, and trust that permissions were enforced.
+Acceptance target: a user can delegate work, leave, return, inspect what happened, approve or reject actions, and verify that permissions were enforced.
 
 ### 7. Scoped Access Parity Across Every Surface
 
@@ -482,7 +484,7 @@ Recommended feature altitude:
 |---|---|---|
 | Raw Context | Core | Intake layer for messy customer material. |
 | Signals | Core | Reasoning layer for inferred claims. |
-| Memory | Core | Trusted operational context agents can rely on. |
+| Memory | Core | Confirmed operational context agents can rely on. |
 | Handoffs | Core | Human review and safety layer. |
 | Workspace Agent | Core | Primary user-facing action surface. |
 | Briefings / Active Context | Core | The agent intelligence packet. |
@@ -525,7 +527,7 @@ Implementation order:
 4. **Workflow polish:** make Overview and record drawers surface source issues, Signals, Handoffs, stale Memory, and missing context as work to do.
 5. **Docs alignment:** organize docs around Observe -> Signals -> Memory -> Briefing -> Handoff / Writeback -> Proof, with advanced features moved out of the first-run path.
 
-Acceptance target: a new user sees one product story, not a collection of adjacent apps. The power remains available, but the default path explains CRMy as the trusted context and action layer for agents.
+Acceptance target: a new user sees one product story, not a collection of adjacent apps. The power remains available, but the default path explains CRMy as the confirmed context and governed action layer for agents.
 
 ### 0.9 Non-Goals
 
@@ -706,7 +708,7 @@ Key changes:
 - Add data minimization defaults so low-value raw source material is not stored indefinitely.
 - Add event replay and dedupe controls for workflow, sequence, webhook, plugin/custom API, context outbox, and writeback events.
 
-Acceptance target: CRMy keeps enough proof for trust and compliance while controlling storage, query cost, and sensitive-data exposure.
+Acceptance target: CRMy keeps enough proof for compliance and review while controlling storage, query cost, and sensitive-data exposure.
 
 ### 10. Observability, Limits, And Scale Gates
 
@@ -746,7 +748,7 @@ Acceptance target: 1.0 ships with measurable scale budgets, release gates, and r
 
 - Raw Context from app, REST, MCP, CLI, email, activity, and agent attachments flows through one durable ingestion path with consistent receipts.
 - A non-trivial customer source creates useful Signals or an actionable failure reason, without brittle JSON/provider failures becoming dead ends.
-- Signal trust and promotion readiness are calibrated, explainable, and tested against a realistic GTM corpus.
+- Signal readiness and promotion behavior are calibrated, explainable, and tested against a realistic GTM corpus.
 - Agents can request one action-readiness packet that explains Memory, Signals, stale context, policy, system ownership, allowed actions, required approvals, and proof trail.
 - A non-trivial agent request produces durable work with visible progress, tool transparency, approval checkpoints, permission enforcement, and final changed-record summary.
 - Risky writes are never silent. Users can preview, approve, reject, retry, or inspect them.
@@ -774,7 +776,7 @@ Acceptance target: 1.0 ships with measurable scale budgets, release gates, and r
 - **Automation tests:** external sync emits expected CRMy events, filters match source metadata, workflows dedupe replayed events, and source-loop guards work.
 - **Sequence tests:** external events enroll contacts, complete goal events, branch correctly, pause for approval, and avoid duplicate sends.
 - **Extraction tests:** golden GTM corpus covers transcripts, emails, call notes, activity debriefs, buying process, success criteria, forecast signals, stakeholders, commitments, risks, next steps, and proposed records.
-- **Signal tests:** calibrated trust scoring, account-scoped grouping, duplicate Memory avoidance, conflict creation, source weighting, typed completeness, and manual confirmation behavior.
+- **Signal tests:** calibrated readiness scoring, account-scoped grouping, duplicate Memory avoidance, conflict creation, source weighting, typed completeness, and manual confirmation behavior.
 - **Agent tests:** action-readiness packets include Memory, Signals, stale context, policy, SOR ownership, proof links, and approval requirements; write plans preview external changes; HITL gates risky actions; task summaries include source-system effects; and audit links resolve correctly.
 - **Lineage tests:** source-to-action proof trails connect Raw Context, activity/email/meeting, Signal, Memory, briefing retrieval, Handoff, writeback, and audit for first-class workflows.
 - **Scope parity tests:** REST, MCP, CLI, Workspace Agent, search, graph, lineage, Handoffs, email, activity, systems-of-record, Automations, and Sequences enforce the same member/manager/admin visibility model.

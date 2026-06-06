@@ -1275,7 +1275,7 @@ Returns `{ extracted_count, memory_created, signals_created, skipped, signals, m
 
 CRMy separates messy Raw Context from Current Memory:
 
-- **Raw Context** is raw source material: calls, emails, notes, transcripts, CRM/warehouse changes, Slack messages, support records, product usage, and documents.
+- **Raw Context** is raw source material: calls, emails, notes, transcripts, calendar meetings, CRM/warehouse changes, REST/API payloads, MCP submissions, and manual Add Context flows. Source metadata can represent Slack, support, product usage, documents, and custom systems when those systems feed CRMy through API, MCP, or adapters.
 - **Signals** are inferred context extracted from Raw Context. They include confidence and evidence, but they are not confirmed truth.
 - CRMy combines related Signals into one evidence-backed claim so multiple sources can support, strengthen, or contradict the same inference.
 - **Memory** is Current typed operational context. Briefings and normal context search return Memory by default.
@@ -1368,6 +1368,7 @@ Returns:
 | `context_signal_group_list` | List corroborated Signal claims with aggregate confidence, support count, source count, status, and conflict state. |
 | `context_signal_group_get` | Inspect one corroborated Signal with supporting/conflicting evidence. |
 | `context_lineage_get` | Trace Raw Context through Signals, Memory, Handoffs, writebacks, and audit events. |
+| `context_signal_group_complete_details` | Add missing typed Signal detail, such as stakeholder role or deal-risk severity, and recompute readiness. This updates only unconfirmed Signal structured data; it does not edit CRM records or promote Memory. |
 | `context_signal_group_promote` | Confirm a corroborated Signal into Current Memory. |
 | `context_signal_handoff` | Route a Signal to Handoff when policy, conflict, or risk requires human review before promotion. |
 | `context_signal_group_reject` | Dismiss a corroborated Signal while preserving evidence for audit. |
@@ -1764,9 +1765,9 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 | `use_case_get`, `use_case_search`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` | `accounts:read` |
 | `use_case_create`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_unlink_contact` | `accounts:write` |
 | `use_case_link_contact` | `accounts:write`, `contacts:read` |
-| `context_get`, `context_search`, `context_list`, `context_raw_source_list`, `context_raw_source_get`, `context_signal_group_list`, `context_signal_group_get`, `context_stale`, `context_diff`, `briefing_get` | `context:read` |
+| `context_get`, `context_search`, `context_list`, `context_raw_source_list`, `context_raw_source_get`, `context_signal_group_list`, `context_signal_group_get`, `context_stale`, `context_diff`, `briefing_get`, `action_context_get` | `context:read` |
 | `context_add`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_review`, `context_extract`, `context_ingest`, `context_ingest_auto`, `context_bulk_mark_stale`, `context_embed_backfill`, `context_stale_assign`, `context_review_batch`, `context_resolve_contradiction`, `context_consolidate` | `context:write` |
-| `context_signal_group_promote`, `context_signal_handoff`, `context_signal_group_reject`, `context_raw_source_reprocess` | `context:write` |
+| `context_signal_group_promote`, `context_signal_group_complete_details`, `context_signal_handoff`, `context_signal_group_reject`, `context_raw_source_reprocess` | `context:write` |
 | `context_detect_contradictions`, `context_semantic_search`, `context_lineage_get`, `customer_record_resolve` | `context:read` |
 | `context_contradiction_assign` | `context:read`, `assignments:write` |
 | `email_get`, `email_search`, `email_message_search`, `email_message_get`, `mailbox_connection_list`, `email_draft_preview` | `activities:read` plus `context:read` for draft preview |
@@ -2696,7 +2697,7 @@ claude mcp add crmy -- npx -y @crmy/cli mcp
 codex mcp add crmy -- npx -y @crmy/cli mcp
 ```
 
-For more control, add CRMy to `~/.codex/config.toml` or a trusted project-scoped `.codex/config.toml`:
+For more control, add CRMy to `~/.codex/config.toml` or a project-scoped `.codex/config.toml`:
 
 ```toml
 [mcp_servers.crmy]
@@ -2804,8 +2805,8 @@ Uses the MCP Streamable HTTP transport. Each request creates a new session.
 
 | Category | Tools |
 |---|---|
-| Briefing | `briefing_get` |
-| Context | `context_ingest_auto`, `context_ingest`, `context_raw_source_list`, `context_raw_source_get`, `context_raw_source_reprocess`, `context_add`, `context_get`, `context_list`, `context_lineage_get`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_promote`, `context_signal_handoff`, `context_signal_group_reject`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_stale`, `context_diff`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
+| Briefing | `briefing_get`, `action_context_get` |
+| Context | `context_ingest_auto`, `context_ingest`, `context_raw_source_list`, `context_raw_source_get`, `context_raw_source_reprocess`, `context_add`, `context_get`, `context_list`, `context_lineage_get`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_complete_details`, `context_signal_group_promote`, `context_signal_handoff`, `context_signal_group_reject`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_stale`, `context_diff`, `context_extract`, `context_stale_assign`, `context_embed_backfill` |
 | Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise` |
 | Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |

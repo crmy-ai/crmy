@@ -50,6 +50,7 @@ export const emailDraftSaveSchema = emailDraftPreviewSchema.extend({
   draft_target: z.enum(['crmy', 'provider_draft']).default('crmy'),
   delivery_action: z.enum(['save_draft', 'request_approval', 'send_now']).default('save_draft'),
   generation_metadata: z.record(z.unknown()).optional().default({}),
+  idempotency_key: z.string().max(128).optional(),
 });
 
 export type EmailDraftPreviewInput = z.infer<typeof emailDraftPreviewSchema>;

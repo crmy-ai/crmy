@@ -1,16 +1,18 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useMemo, useState } from 'react';
+import { type ComponentType, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
+  ArrowRight,
   ArrowUpRight,
   CheckCircle2,
   Eye,
   FileText,
   GitBranch,
   Loader2,
+  MoreHorizontal,
   PenLine,
   PlusCircle,
   ShieldCheck,
@@ -32,6 +34,12 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -40,6 +48,7 @@ import {
 } from '@/components/ui/sheet';
 import { toast } from '@/hooks/use-toast';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
+import { ClaimScoreBar, ContextClaimPanel, DetailDisclosure } from '@/components/crm/ContextClaimPanel';
 import { useAppStore } from '@/store/appStore';
 
 function pct(value: number | null | undefined) {
@@ -57,14 +66,27 @@ function statusTone(status: SignalGroup['status']) {
 
 type SignalReadiness = NonNullable<SignalGroup['readiness']>;
 type SignalReadinessStatus = SignalReadiness['status'];
+type SignalResolution = NonNullable<SignalGroup['resolution']>;
 type DrawerRecordType = 'contact' | 'account' | 'opportunity' | 'use-case';
 type JsonSchema = Record<string, any>;
 type RepairField = {
   key: string;
   label: string;
   description?: string;
+  placeholder?: string;
   type: 'string' | 'number' | 'boolean';
   enum?: string[];
+};
+type SignalDrawerActionTone = 'default' | 'success' | 'outline' | 'danger' | 'destructive';
+type SignalDrawerAction = {
+  key: string;
+  label: string;
+  Icon: ComponentType<{ className?: string }>;
+  tone?: SignalDrawerActionTone;
+  onClick?: () => void;
+  to?: string;
+  disabled?: boolean;
+  title?: string;
 };
 
 const DRAWER_TYPE_MAP: Record<string, DrawerRecordType> = {
@@ -80,6 +102,123 @@ const STRUCTURED_READINESS_KEYS = new Set([
   'extraction_completeness',
   'validation_warnings',
 ]);
+const REPAIR_FIELD_GUIDANCE: Record<string, Pick<RepairField, 'description' | 'placeholder' | 'enum'>> = {
+  role: {
+    description: 'Enter the role shown by the evidence, such as Security lead, Economic buyer, or Implementation owner.',
+    placeholder: 'Security lead',
+  },
+  influence: {
+    description: 'Choose how this person affects the decision process.',
+    enum: ['decision_maker', 'influencer', 'champion', 'evaluator', 'gatekeeper', 'end_user'],
+  },
+  sentiment: {
+    description: 'Choose the attitude shown in the evidence: strong advocate, supportive, neutral, skeptical, or blocker.',
+    enum: ['strong_advocate', 'supportive', 'neutral', 'skeptical', 'blocker'],
+  },
+};
+const DEFAULT_CONTEXT_TYPE_SCHEMAS: Record<string, JsonSchema> = {
+  commitment: {
+    type: 'object',
+    properties: {
+      commitment_type: { type: 'string', enum: ['budget_approved', 'timeline_confirmed', 'resource_allocated', 'decision_made', 'other'], description: 'Category of commitment' },
+      committed_by: { type: 'string', description: 'Name and/or role of the person who made the commitment' },
+      value: { type: 'string', description: 'Specific value, amount, or detail of the commitment' },
+      due_date: { type: 'string', description: 'When this commitment is expected to be fulfilled' },
+    },
+    required: ['commitment_type', 'committed_by', 'value'],
+  },
+  next_step: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', description: 'What needs to happen' },
+      owner: { type: 'string', description: 'Who is responsible' },
+      due_date: { type: 'string', description: 'Target completion date' },
+      depends_on: { type: 'string', description: 'Any blocker or prerequisite' },
+    },
+    required: ['action', 'owner'],
+  },
+  stakeholder: {
+    type: 'object',
+    properties: {
+      person_name: { type: 'string', description: 'Name of the individual' },
+      role: { type: 'string', description: 'Job title or role in the organization' },
+      influence: { type: 'string', enum: ['decision_maker', 'influencer', 'champion', 'evaluator', 'gatekeeper', 'end_user'], description: 'Their role in the buying/decision process' },
+      sentiment: { type: 'string', enum: ['strong_advocate', 'supportive', 'neutral', 'skeptical', 'blocker'], description: 'Their attitude toward moving forward' },
+      key_concern: { type: 'string', description: 'Their primary concern, question, or interest' },
+    },
+    required: ['person_name', 'role', 'influence', 'sentiment'],
+  },
+  deal_risk: {
+    type: 'object',
+    properties: {
+      risk_type: { type: 'string', enum: ['budget', 'timeline', 'technical', 'champion_loss', 'competitive', 'legal_compliance', 'organizational', 'other'], description: 'Category of risk' },
+      severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low'], description: 'How likely this risk is to derail the deal' },
+      description: { type: 'string', description: 'Specific details about the risk' },
+      mitigation: { type: 'string', description: 'Agreed or suggested mitigation steps' },
+    },
+    required: ['risk_type', 'severity', 'description'],
+  },
+  competitive_intel: {
+    type: 'object',
+    properties: {
+      competitor: { type: 'string', description: 'Competitor name' },
+      status: { type: 'string', enum: ['actively_competing', 'shortlisted', 'eliminated', 'incumbent', 'mentioned'], description: 'Competitor status in this deal' },
+      customer_concern: { type: 'string', description: 'Why the customer is considering this competitor' },
+      our_differentiator: { type: 'string', description: 'Our key advantage vs. this competitor' },
+    },
+    required: ['competitor', 'status'],
+  },
+  objection: {
+    type: 'object',
+    properties: {
+      objection_category: { type: 'string', enum: ['price', 'timing', 'features', 'trust', 'competition', 'internal_politics', 'technical', 'other'], description: 'Type of objection' },
+      raised_by: { type: 'string', description: 'Who raised the objection' },
+      status: { type: 'string', enum: ['open', 'addressed', 'resolved', 'recurring'], description: 'Current state of the objection' },
+      response: { type: 'string', description: 'How the objection was or could be addressed' },
+    },
+    required: ['objection_category', 'status'],
+  },
+  methodology_gap: {
+    type: 'object',
+    properties: {
+      gap_area: { type: 'string', enum: ['buyer', 'process', 'criteria', 'budget', 'timeline', 'security', 'legal', 'procurement', 'success_criteria', 'other'], description: 'The area where GTM context is missing or unclear' },
+      description: { type: 'string', description: 'What is missing, unclear, or needs verification' },
+      needed_from: { type: 'string', description: 'Who or what team can clarify the gap, if known' },
+      impact: { type: 'string', description: 'Why this gap matters' },
+    },
+    required: ['gap_area', 'description'],
+  },
+  success_criteria: {
+    type: 'object',
+    properties: {
+      criterion: { type: 'string', description: 'The outcome, requirement, or value measure the customer cares about' },
+      owner: { type: 'string', description: 'Person or team that owns or cares about this criterion' },
+      measurement: { type: 'string', description: 'How success will be measured, if stated' },
+      priority: { type: 'string', enum: ['critical', 'high', 'medium', 'low'], description: 'How important this criterion appears to be' },
+    },
+    required: ['criterion'],
+  },
+  buying_process: {
+    type: 'object',
+    properties: {
+      process_step: { type: 'string', description: 'The buying, approval, review, or evaluation step' },
+      owner: { type: 'string', description: 'Person, role, or team responsible for this step' },
+      status: { type: 'string', enum: ['not_started', 'in_progress', 'blocked', 'completed', 'unknown'], description: 'Current status of the process step' },
+      due_date: { type: 'string', description: 'When this step should happen or complete' },
+    },
+    required: ['process_step', 'status'],
+  },
+  forecast_signal: {
+    type: 'object',
+    properties: {
+      signal_type: { type: 'string', enum: ['pull_forward', 'push_out', 'confidence_up', 'confidence_down', 'timing_risk', 'scope_change', 'other'], description: 'Type of forecast-relevant signal' },
+      direction: { type: 'string', enum: ['positive', 'negative', 'neutral', 'unknown'], description: 'Whether the signal improves, hurts, or does not clearly change forecast confidence' },
+      reason: { type: 'string', description: 'Why this affects forecast or timing' },
+      effective_date: { type: 'string', description: 'Relevant date or period, if stated' },
+    },
+    required: ['signal_type', 'direction', 'reason'],
+  },
+};
 
 function readinessTone(status: SignalReadinessStatus) {
   if (status === 'ready_to_confirm' || status === 'confirmed') return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
@@ -126,6 +265,24 @@ function humanizeKey(key: string) {
   return key.replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
 }
 
+function sentenceKey(key: string) {
+  return humanizeKey(key).toLowerCase();
+}
+
+function possessive(label: string) {
+  return label.endsWith('s') ? `${label}'` : `${label}'s`;
+}
+
+function normalizeFieldKey(value: string) {
+  return value
+    .replace(/\.$/, '')
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+}
+
 function normalizeFieldText(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
@@ -142,6 +299,10 @@ function schemaProperties(schema?: JsonSchema | null): Record<string, JsonSchema
 
 function schemaRequired(schema?: JsonSchema | null): string[] {
   return Array.isArray(schema?.required) ? schema.required.map(String) : [];
+}
+
+function schemaEnumValues(property?: JsonSchema | null) {
+  return Array.isArray(property?.enum) ? property.enum.map(String) : undefined;
 }
 
 function cleanStructuredData(data: Record<string, any> | undefined | null) {
@@ -178,8 +339,14 @@ function missingDetailLabels(group: SignalGroup, readiness: SignalReadiness) {
     if (Array.isArray(details)) values.push(...details.map(String));
   }
   for (const blocker of readiness.blockers) {
-    const match = blocker.match(/^Missing\s+(.+?)\.?$/i);
-    if (match?.[1]) values.push(match[1]);
+    const missingMatch = blocker.match(/^Missing\s+(.+?)\.?$/i);
+    if (missingMatch?.[1]) values.push(missingMatch[1]);
+
+    const needsMatch = blocker.match(/^Needs(?:\s+a|\s+an)?\s+(.+?)\s+before\b/i);
+    if (needsMatch?.[1]) values.push(needsMatch[1]);
+
+    const supportedMatch = blocker.match(/^Needs\s+a\s+supported\s+(.+?)\s+value\b/i);
+    if (supportedMatch?.[1]) values.push(supportedMatch[1]);
   }
   for (const reason of readiness.reasons) {
     const match = reason.match(/Missing typed detail:\s*(.+?)\.?$/i);
@@ -196,35 +363,266 @@ function fieldRepairType(property: JsonSchema): RepairField['type'] | null {
   return null;
 }
 
-function repairFieldsForGroup(group: SignalGroup, readiness: SignalReadiness, schema?: JsonSchema | null): RepairField[] {
+function resolutionFieldLabel(field: string, resolution?: SignalResolution | null) {
+  const base = sentenceKey(field);
+  if (resolution?.target_type === 'mentioned_person') return `${possessive(resolution.target_label)} ${base}`;
+  return humanizeKey(field);
+}
+
+function repairFieldGuidance(field: string) {
+  return REPAIR_FIELD_GUIDANCE[normalizeFieldKey(field)] ?? {};
+}
+
+function fieldMatchesMissingLabel(field: string, property: JsonSchema | undefined, label: string) {
+  const normalizedLabel = normalizeFieldText(label);
+  if (!normalizedLabel) return false;
+  const names = [
+    field,
+    humanizeKey(field),
+    property?.title,
+    property?.description,
+  ].filter(Boolean).map(String).map(normalizeFieldText);
+  return names.some(name => name && (name.includes(normalizedLabel) || normalizedLabel.includes(name)));
+}
+
+function repairFieldFromSchema(field: string, property: JsonSchema, resolution?: SignalResolution | null): RepairField | null {
+  const type = fieldRepairType(property);
+  if (!type) return null;
+  const guidance = repairFieldGuidance(field);
+  return {
+    key: field,
+    label: resolution?.primary_missing_field === normalizeFieldKey(field)
+      ? resolutionFieldLabel(field, resolution)
+      : String(property.title ?? resolutionFieldLabel(field, resolution)),
+    description: typeof property.description === 'string' ? property.description : guidance.description,
+    placeholder: guidance.placeholder,
+    type,
+    enum: schemaEnumValues(property) ?? guidance.enum,
+  };
+}
+
+function repairFieldFromMissingLabel(label: string, resolution?: SignalResolution | null): RepairField | null {
+  const field = normalizeFieldKey(label);
+  if (!field) return null;
+  const guidance = repairFieldGuidance(field);
+  return {
+    key: field,
+    label: resolution?.primary_missing_field === field
+      ? resolutionFieldLabel(field, resolution)
+      : humanizeKey(field),
+    description: guidance.description ?? `Add the missing ${sentenceKey(field)} detail before confirming this as Memory.`,
+    placeholder: guidance.placeholder,
+    type: 'string',
+    enum: guidance.enum,
+  };
+}
+
+function repairFieldsForGroup(group: SignalGroup, readiness: SignalReadiness, schema?: JsonSchema | null, resolution?: SignalResolution | null): RepairField[] {
   if (readiness.status !== 'needs_more_detail') return [];
   const properties = schemaProperties(schema);
   const current = currentSignalDetails(group);
-  const labels = missingDetailLabels(group, readiness).map(normalizeFieldText);
+  const rawLabels = missingDetailLabels(group, readiness);
+  const labels = rawLabels.map(normalizeFieldText).filter(Boolean);
+  const blankSchemaFields = Object.keys(properties).filter(field => isBlank(current[field]));
   const required = schemaRequired(schema).filter(field => properties[field] && isBlank(current[field]));
-  const candidates = required.filter(field => {
-    if (labels.length === 0) return true;
-    const property = properties[field];
-    const names = [
-      field,
-      humanizeKey(field),
-      property.title,
-      property.description,
-    ].filter(Boolean).map(String).map(normalizeFieldText);
-    return names.some(name => labels.some(label => label && (name.includes(label) || label.includes(name))));
+  const candidateFields = labels.length > 0
+    ? blankSchemaFields.filter(field => labels.some(label => fieldMatchesMissingLabel(field, properties[field], label)))
+    : required;
+  const orderedFields = Array.from(new Set([
+    ...required.filter(field => candidateFields.includes(field)),
+    ...candidateFields,
+  ]));
+  const fields = orderedFields.flatMap(field => {
+    const repairField = repairFieldFromSchema(field, properties[field], resolution);
+    return repairField ? [repairField] : [];
   });
-  return candidates.flatMap(field => {
-    const property = properties[field];
-    const type = fieldRepairType(property);
-    if (!type) return [];
+  if (fields.length > 0) return fields;
+  const fallbackField = resolution?.primary_missing_field;
+  if (fallbackField && isBlank(current[fallbackField])) {
+    const guidance = repairFieldGuidance(fallbackField);
     return [{
-      key: field,
-      label: String(property.title ?? humanizeKey(field)),
-      description: typeof property.description === 'string' ? property.description : undefined,
-      type,
-      enum: Array.isArray(property.enum) ? property.enum.map(String) : undefined,
+      key: fallbackField,
+      label: resolution?.target_type === 'mentioned_person'
+        ? resolutionFieldLabel(fallbackField, resolution)
+        : humanizeKey(fallbackField),
+      description: guidance.description ?? `Add the missing ${sentenceKey(fallbackField)} detail before confirming this as Memory.`,
+      placeholder: guidance.placeholder,
+      type: 'string',
+      enum: guidance.enum,
     }];
+  }
+  const fallbackFields = rawLabels.flatMap(label => {
+    const key = normalizeFieldKey(label);
+    if (!key || !isBlank(current[key])) return [];
+    const repairField = repairFieldFromMissingLabel(label, resolution);
+    return repairField ? [repairField] : [];
   });
+  if (fallbackFields.length > 0) {
+    const seen = new Set<string>();
+    return fallbackFields.filter(field => {
+      if (seen.has(field.key)) return false;
+      seen.add(field.key);
+      return true;
+    });
+  }
+  return [];
+}
+
+function fallbackResolution(group: SignalGroup, readiness: SignalReadiness): SignalResolution {
+  const structured = currentSignalDetails(group) as Record<string, unknown>;
+  const missing = missingDetailLabels(group, readiness)[0];
+  const primaryMissingField = missing ? normalizeFieldKey(missing) : undefined;
+  const personName = typeof structured.person_name === 'string' && structured.person_name.trim()
+    ? structured.person_name.trim()
+    : undefined;
+  const subject = subjectLabel(group);
+  const targetType: SignalResolution['target_type'] = readiness.status === 'needs_more_evidence'
+    ? 'evidence'
+    : readiness.status === 'blocked_by_conflict'
+      ? 'conflict'
+      : readiness.status === 'approval_required'
+        ? 'approval'
+        : personName
+          ? 'mentioned_person'
+          : primaryMissingField && readiness.status === 'needs_more_detail'
+            ? 'signal_detail'
+            : 'subject_record';
+  const primaryAction: SignalResolution['primary_action'] = readiness.status === 'confirmed' || readiness.status === 'dismissed'
+    ? 'view_only'
+    : readiness.status === 'ready_to_confirm'
+      ? 'confirm_signal'
+      : readiness.status === 'needs_more_detail'
+        ? 'add_signal_detail'
+        : readiness.status === 'needs_more_evidence'
+          ? 'add_evidence'
+          : readiness.status === 'blocked_by_conflict'
+            ? 'resolve_conflict'
+            : readiness.can_confirm
+              ? 'confirm_signal'
+              : 'request_approval';
+  const recordType = subjectTypeLabel(group.subject_type).toLowerCase();
+  const helper = targetType === 'mentioned_person' && primaryMissingField
+    ? `Add ${possessive(personName ?? subject)} ${sentenceKey(primaryMissingField)} in this Signal. This does not edit the ${recordType} record.`
+    : readiness.reasons[0] ?? 'Resolve this Signal before confirming it as Memory.';
+  return {
+    target_type: targetType,
+    target_label: personName ?? subject,
+    subject_label: subject,
+    subject_type: group.subject_type as SignalResolution['subject_type'],
+    subject_id: group.subject_id,
+    ...(primaryMissingField ? { primary_missing_field: primaryMissingField } : {}),
+    primary_action: primaryAction,
+    helper_text: helper,
+  };
+}
+
+function resolutionForGroup(group: SignalGroup, readiness: SignalReadiness): SignalResolution {
+  return group.resolution ?? fallbackResolution(group, readiness);
+}
+
+function resolutionTitle(resolution: SignalResolution, readiness: SignalReadiness) {
+  const field = resolution.primary_missing_field ? sentenceKey(resolution.primary_missing_field) : 'detail';
+  if (resolution.primary_action === 'view_only') {
+    return readiness.status === 'confirmed' ? 'Signal confirmed' : 'Signal dismissed';
+  }
+  if (readiness.status === 'needs_more_detail') {
+    if (resolution.target_type === 'mentioned_person') return `${resolution.target_label} is missing a ${field}.`;
+    return `Signal is missing ${field}.`;
+  }
+  if (readiness.status === 'needs_more_evidence') return 'Signal needs more evidence.';
+  if (readiness.status === 'blocked_by_conflict') return 'Conflicting evidence needs resolution.';
+  if (readiness.status === 'approval_required') return 'Signal needs approval.';
+  return 'Signal is ready to confirm.';
+}
+
+function memoryCandidateState(readiness: SignalReadiness) {
+  if (readiness.status === 'confirmed') {
+    return {
+      label: 'Confirmed',
+      className: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+      helper: 'This Signal has become confirmed Memory.',
+    };
+  }
+  if (readiness.status === 'dismissed') {
+    return {
+      label: 'Rejected',
+      className: 'border-muted bg-muted text-muted-foreground',
+      helper: 'This Signal was rejected as Memory. Evidence and audit history remain.',
+    };
+  }
+  if (readiness.status === 'ready_to_confirm') {
+    return {
+      label: 'Ready',
+      className: 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+      helper: 'This candidate is ready to become confirmed Memory.',
+    };
+  }
+  return {
+    label: readiness.status === 'approval_required' ? 'Needs approval' : 'Blocked',
+    className: 'border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400',
+    helper: 'Repair the blocker below before this can become confirmed Memory.',
+  };
+}
+
+function SignalReadinessBar({ readiness }: { readiness: SignalReadiness }) {
+  const threshold = Math.round(Math.min(1, Math.max(0, readiness.threshold)) * 100);
+  return (
+    <ClaimScoreBar
+      label="Signal readiness"
+      value={readiness.score}
+      trailing={<span className="text-muted-foreground">Threshold {threshold}%</span>}
+      marker={{ value: readiness.threshold, label: 'confirm threshold' }}
+    />
+  );
+}
+
+function SignalReadinessDetails({ readiness, group }: { readiness: SignalReadiness; group: SignalGroup }) {
+  return (
+    <DetailDisclosure title="Signal readiness details">
+      <div className="space-y-2 text-sm">
+        <div className="flex justify-between gap-3">
+          <span className="text-muted-foreground">Signal readiness score</span>
+          <span className="font-medium text-foreground">{pct(readiness.score)}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-muted-foreground">Threshold</span>
+          <span className="font-medium text-foreground">{pct(readiness.threshold)}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-muted-foreground">Model confidence</span>
+          <span className="font-medium text-foreground">{pct(readiness.components.model_confidence)}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-muted-foreground">Source quality</span>
+          <span className="font-medium text-foreground">{pct(readiness.components.source_quality)}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-muted-foreground">Independent sources</span>
+          <span className="font-medium text-foreground">{readiness.components.independent_source_count}</span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-muted-foreground">Typed detail</span>
+          <span className="font-medium text-foreground">
+            {readiness.components.typed_completeness == null ? 'Not typed' : pct(readiness.components.typed_completeness)}
+          </span>
+        </div>
+        <div className="flex justify-between gap-3">
+          <span className="text-muted-foreground">Conflicts</span>
+          <span className="font-medium text-foreground">{readiness.components.conflict_count}</span>
+        </div>
+        {readiness.blockers.length > 0 && (
+          <ul className="space-y-2 pt-2 text-muted-foreground">
+            {readiness.blockers.map(blocker => (
+              <li key={blocker} className="flex gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
+                <span>{friendlyPromotionBlocker(group, blocker)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </DetailDisclosure>
+  );
 }
 
 function primaryActionLabel(readiness: SignalReadiness) {
@@ -382,7 +780,7 @@ function friendlyPromotionBlocker(group: SignalGroup, blocker: string) {
       : 'This is a sensitive customer claim and needs another independent source or an approval before agents rely on it.';
   }
   if (blocker.toLowerCase().startsWith('trust score is') || blocker.toLowerCase().startsWith('readiness score is')) {
-    return `${blocker.replace(/^trust score/i, 'Readiness score')} You can still confirm this Signal when the evidence is enough.`;
+    return `${blocker.replace(/^trust score/i, 'Signal readiness score').replace(/^readiness score/i, 'Signal readiness score')} You can still confirm this Signal when the evidence is enough.`;
   }
   return blocker;
 }
@@ -405,6 +803,51 @@ function signalActionClass(color: 'success' | 'warning' | 'ghost') {
     ghost: 'border border-border text-muted-foreground hover:bg-muted/50',
   };
   return `h-7 px-2.5 inline-flex items-center gap-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 ${colorMap[color]}`;
+}
+
+const CONFIRM_SIGNAL_BUTTON_CLASS = 'bg-success text-white hover:bg-success/90 disabled:bg-muted disabled:text-muted-foreground';
+const REJECT_SIGNAL_BUTTON_CLASS = 'border-rose-500/30 text-rose-600 hover:bg-rose-500/10 hover:text-rose-600 dark:text-rose-400';
+
+function SignalDrawerActionButton({ action }: { action: SignalDrawerAction }) {
+  const Icon = action.Icon;
+  const variant = action.tone === 'outline' || action.tone === 'danger'
+    ? 'outline'
+    : action.tone === 'destructive'
+      ? 'destructive'
+      : undefined;
+  const toneClass = action.tone === 'success'
+    ? CONFIRM_SIGNAL_BUTTON_CLASS
+    : action.tone === 'danger'
+      ? REJECT_SIGNAL_BUTTON_CLASS
+      : action.tone === 'destructive'
+        ? 'bg-rose-600 text-white hover:bg-rose-500'
+        : '';
+  const className = `h-8 text-xs gap-1.5 ${toneClass}`.trim();
+  const content = (
+    <>
+      <Icon className="h-3.5 w-3.5" />
+      {action.label}
+    </>
+  );
+  if (action.to) {
+    return (
+      <Button variant={variant} size="sm" className={className} title={action.title} asChild>
+        <Link to={action.to}>{content}</Link>
+      </Button>
+    );
+  }
+  return (
+    <Button
+      variant={variant}
+      size="sm"
+      className={className}
+      onClick={action.onClick}
+      disabled={action.disabled}
+      title={action.title}
+    >
+      {content}
+    </Button>
+  );
 }
 
 function sourceTypes(group: SignalGroup) {
@@ -589,7 +1032,7 @@ export function SignalGroupsBrowser({
 
   const sortOptions: SortOption[] = [
     { key: 'updated_at', label: 'Updated' },
-    { key: 'aggregate_confidence', label: 'Readiness score' },
+    { key: 'aggregate_confidence', label: 'Signal readiness score' },
     { key: 'evidence_count', label: 'Evidence' },
     { key: 'independent_source_count', label: 'Sources' },
   ];
@@ -652,11 +1095,11 @@ export function SignalGroupsBrowser({
 
   const onDismiss = async (id: string) => {
     try {
-      await reject.mutateAsync({ id, reason: 'Dismissed from Signal intervention.' });
-      toast({ title: 'Signal dismissed', description: 'CRMy will not promote this Signal to Memory. Evidence is preserved for audit.' });
+      await reject.mutateAsync({ id, reason: 'Rejected as Memory from Signal intervention.' });
+      toast({ title: 'Signal rejected as Memory', description: 'CRMy will not promote this Signal to Memory. Evidence is preserved for audit.' });
       closeSignalDrawer();
     } catch (err) {
-      toast({ title: 'Could not dismiss Signal', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' });
+      toast({ title: 'Could not reject Signal as Memory', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' });
     }
   };
 
@@ -672,7 +1115,8 @@ export function SignalGroupsBrowser({
 
   const onOpenSubject = (group: SignalGroup) => {
     const drawerType = DRAWER_TYPE_MAP[group.subject_type] ?? 'account';
-    openDrawer(drawerType, group.subject_id);
+    closeSignalDrawer();
+    window.requestAnimationFrame(() => openDrawer(drawerType, group.subject_id));
   };
 
   const onCompleteDetails = async (group: SignalGroup, fields: RepairField[]) => {
@@ -726,8 +1170,121 @@ export function SignalGroupsBrowser({
   };
 
   const detailedReadiness = detailedGroup ? readinessForGroup(detailedGroup) : null;
-  const detailedSchema = detailedGroup ? contextTypeByName.get(detailedGroup.context_type)?.json_schema as JsonSchema | undefined : undefined;
-  const repairFields = detailedGroup && detailedReadiness ? repairFieldsForGroup(detailedGroup, detailedReadiness, detailedSchema) : [];
+  const detailedResolution = detailedGroup && detailedReadiness ? resolutionForGroup(detailedGroup, detailedReadiness) : null;
+  const detailedMemoryState = detailedReadiness ? memoryCandidateState(detailedReadiness) : null;
+  const detailedSchema = detailedGroup
+    ? (contextTypeByName.get(detailedGroup.context_type)?.json_schema as JsonSchema | undefined) ?? DEFAULT_CONTEXT_TYPE_SCHEMAS[detailedGroup.context_type]
+    : undefined;
+  const repairFields = detailedGroup && detailedReadiness ? repairFieldsForGroup(detailedGroup, detailedReadiness, detailedSchema, detailedResolution) : [];
+  const signalActions = (() => {
+    if (!detailedGroup || !detailedReadiness || !detailedResolution) {
+      return { primaryActions: [] as SignalDrawerAction[], utilityActions: [] as SignalDrawerAction[], secondaryActions: [] as SignalDrawerAction[] };
+    }
+    const terminal = ['confirmed', 'dismissed'].includes(detailedReadiness.status);
+    const primaryActions: SignalDrawerAction[] = [];
+    if (!terminal) {
+      if (detailedReadiness.status === 'needs_more_detail' && repairFields.length === 0) {
+        primaryActions.push({
+          key: 'add-evidence-for-detail',
+          label: 'Add evidence',
+          Icon: PlusCircle,
+          tone: 'outline',
+          onClick: () => onAddEvidence(detailedGroup),
+        });
+      } else if (detailedReadiness.status === 'needs_more_evidence') {
+        primaryActions.push({
+          key: 'add-evidence',
+          label: 'Add evidence',
+          Icon: PlusCircle,
+          tone: 'outline',
+          onClick: () => onAddEvidence(detailedGroup),
+        });
+      } else if (detailedReadiness.status === 'blocked_by_conflict') {
+        primaryActions.push({
+          key: 'send-conflict-handoff',
+          label: 'Send to Handoff',
+          Icon: Users,
+          tone: 'outline',
+          onClick: () => setShowDelegation(true),
+        });
+      } else if (detailedReadiness.status === 'approval_required') {
+        if (canPromote(detailedGroup)) {
+          primaryActions.push({
+            key: 'confirm-approval-signal',
+            label: 'Confirm Signal',
+            Icon: promote.isPending ? Loader2 : CheckCircle2,
+            tone: 'success',
+            onClick: () => onPromote(detailedGroup.id),
+            disabled: promote.isPending,
+          });
+        }
+        primaryActions.push({
+          key: 'request-approval',
+          label: 'Request approval',
+          Icon: ShieldCheck,
+          tone: 'outline',
+          onClick: () => setShowDelegation(true),
+        });
+      } else if (detailedReadiness.status === 'ready_to_confirm') {
+        primaryActions.push({
+          key: 'confirm-ready-signal',
+          label: 'Confirm Signal',
+          Icon: promote.isPending ? Loader2 : CheckCircle2,
+          tone: 'success',
+          onClick: () => onPromote(detailedGroup.id),
+          disabled: promote.isPending || !canPromote(detailedGroup),
+        });
+      }
+    }
+    const utilityActions: SignalDrawerAction[] = [
+      {
+        key: 'open-record',
+        label: `Open ${subjectTypeLabel(detailedResolution.subject_type).toLowerCase()}`,
+        Icon: ArrowUpRight,
+        tone: 'outline',
+        onClick: () => onOpenSubject(detailedGroup),
+      },
+      {
+        key: 'view-evidence',
+        label: 'Evidence',
+        Icon: Eye,
+        tone: 'outline',
+        onClick: () => setDrawerView('evidence'),
+      },
+      {
+        key: 'view-lineage',
+        label: 'Lineage',
+        Icon: GitBranch,
+        tone: 'outline',
+        to: `/context?tab=lineage&signal_group_id=${detailedGroup.id}`,
+      },
+    ];
+    const secondaryActions: SignalDrawerAction[] = [];
+    if (!terminal && !['approval_required', 'blocked_by_conflict'].includes(detailedReadiness.status)) {
+      secondaryActions.push({
+        key: 'delegate',
+        label: 'Delegate',
+        Icon: Users,
+        tone: 'outline',
+        onClick: () => setShowDelegation(value => !value),
+      });
+    }
+    if (!terminal) {
+      secondaryActions.push({
+        key: 'reject',
+        label: confirmDismiss ? 'Confirm reject' : 'Reject as Memory',
+        Icon: reject.isPending ? Loader2 : X,
+        tone: confirmDismiss ? 'destructive' : 'danger',
+        onClick: () => {
+          if (confirmDismiss) onDismiss(detailedGroup.id);
+          else setConfirmDismiss(true);
+        },
+        disabled: reject.isPending,
+        title: 'Reject this Signal as Memory. This does not delete evidence or audit history.',
+      });
+    }
+    return { primaryActions, utilityActions, secondaryActions };
+  })();
 
   return (
     <>
@@ -804,7 +1361,7 @@ export function SignalGroupsBrowser({
                   <tr className="border-b border-border bg-surface-sunken/50">
                     <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Signal</th>
                     <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Subject</th>
-                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Readiness</th>
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Signal readiness</th>
                     <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Evidence</th>
                     <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Updated</th>
@@ -814,6 +1371,7 @@ export function SignalGroupsBrowser({
                 <tbody>
                   {groupedByStatus.map((group, index) => {
                     const readiness = readinessForGroup(group);
+                    const resolution = resolutionForGroup(group, readiness);
                     return (
                       <tr
                         key={group.id}
@@ -822,15 +1380,15 @@ export function SignalGroupsBrowser({
                       >
                         <td className="max-w-[28rem] px-4 py-3">
                           <div className="font-semibold text-foreground line-clamp-1">{group.title || group.normalized_claim}</div>
-                          <div className="text-xs text-muted-foreground line-clamp-1">{readinessReason(group)}</div>
+                          <div className="text-xs text-muted-foreground line-clamp-1">{resolutionTitle(resolution, readiness)}</div>
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">{subjectLabel(group)}</td>
                         <td className="px-4 py-3 font-semibold text-foreground">{pct(readiness.score)}</td>
                         <td className="px-4 py-3 text-muted-foreground">
                           {readiness.components.evidence_count} item{readiness.components.evidence_count === 1 ? '' : 's'} · {readiness.components.independent_source_count} source{readiness.components.independent_source_count === 1 ? '' : 's'}
                         </td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className={readinessTone(readiness.status)}>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <Badge variant="outline" className={`${readinessTone(readiness.status)} whitespace-nowrap`}>
                             {readinessLabel(readiness.status)}
                           </Badge>
                         </td>
@@ -861,6 +1419,7 @@ export function SignalGroupsBrowser({
             {groupedByStatus.map(group => {
               const canAct = !['promoted', 'dismissed'].includes(group.status);
               const readiness = readinessForGroup(group);
+              const resolution = resolutionForGroup(group, readiness);
               return (
                 <article
                   key={group.id}
@@ -883,11 +1442,11 @@ export function SignalGroupsBrowser({
                       <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">
                         {group.title || group.normalized_claim}
                       </h3>
-                      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{readinessReason(group)}</p>
+                      <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{resolutionTitle(resolution, readiness)}</p>
                       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground">{subjectLabel(group)}</span>
-                        <span className="rounded-full bg-violet-500/10 px-2 py-0.5 font-semibold text-violet-600 dark:text-violet-300">
-                          {pct(readiness.score)} readiness
+                        <span className="rounded-full bg-muted px-2 py-0.5 font-semibold text-muted-foreground">
+                          {pct(readiness.score)} signal readiness
                         </span>
                         <span>{readiness.components.evidence_count} evidence</span>
                         <span>{readiness.components.independent_source_count} source{readiness.components.independent_source_count === 1 ? '' : 's'}</span>
@@ -930,6 +1489,29 @@ export function SignalGroupsBrowser({
                         {primaryActionLabel(readiness)}
                       </button>
                     )}
+                    {canAct && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                            aria-label="Signal actions"
+                          >
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuItem
+                            onClick={() => onDismiss(group.id)}
+                            className="text-rose-600 focus:text-rose-600 dark:text-rose-400"
+                          >
+                            <X className="mr-2 h-3.5 w-3.5" />
+                            Reject as Memory
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
                 </article>
               );
@@ -940,7 +1522,7 @@ export function SignalGroupsBrowser({
 
       <Sheet open={!!selectedId} onOpenChange={open => { if (!open) closeSignalDrawer(); }}>
         <SheetContent side="right" className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
-          {detailedGroup && detailedReadiness ? (
+          {detailedGroup && detailedReadiness && detailedResolution && detailedMemoryState ? (
             <>
               <SheetHeader className="border-b border-border px-5 pb-4 pt-5 text-left">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -964,172 +1546,128 @@ export function SignalGroupsBrowser({
                 <SheetDescription>
                   {drawerView === 'evidence'
                     ? 'Source lineage and confidence for each supporting or conflicting item.'
-                    : 'Confirm this Signal when the evidence is enough, or repair the blocker before it becomes confirmed Memory.'}
+                    : `${readinessLabel(detailedReadiness.status)} on ${subjectLabel(detailedGroup)}.`}
                 </SheetDescription>
               </SheetHeader>
 
               <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
                 {drawerView === 'details' ? (
                   <>
-                    <div className="rounded-2xl border border-border bg-surface p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Readiness score</p>
-                          <p className="mt-1 text-3xl font-bold text-foreground">{pct(detailedReadiness.score)}</p>
+                    <ContextClaimPanel
+                      label="Memory candidate"
+                      tone="signal"
+                      title={detailedGroup.title || detailedGroup.normalized_claim}
+                      chips={(
+                        <div className="flex flex-wrap items-center justify-end gap-2 text-xs font-medium">
+                          <span className="rounded-full border border-border/70 bg-background/50 px-2.5 py-1 text-muted-foreground">
+                            {detailedReadiness.components.evidence_count} evidence
+                          </span>
+                          <span className="rounded-full border border-border/70 bg-background/50 px-2.5 py-1 text-muted-foreground">
+                            {detailedReadiness.components.independent_source_count} source{detailedReadiness.components.independent_source_count === 1 ? '' : 's'}
+                          </span>
                         </div>
-                        <Sparkles className="h-8 w-8 text-violet-500" />
-                      </div>
-                      <p className="mt-3 text-sm text-muted-foreground">{detailedGroup.normalized_claim}</p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setDrawerView('evidence')}>
-                          <Eye className="mr-1 h-3.5 w-3.5" />
-                          View Evidence
-                        </Button>
-                        <Button variant="ghost" size="sm" asChild>
-                          <Link to={`/context?tab=lineage&signal_group_id=${detailedGroup.id}`}>
-                            <GitBranch className="mr-1 h-3.5 w-3.5" />
-                            View Lineage
-                          </Link>
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div className="rounded-xl bg-muted p-3">
-                        <p className="text-lg font-bold text-foreground">{supportingSignalCount(detailedGroup)}</p>
-                        <p className="text-[11px] text-muted-foreground">Signals</p>
-                      </div>
-                      <div className="rounded-xl bg-muted p-3">
-                        <p className="text-lg font-bold text-foreground">{independentSourceCount(detailedGroup)}</p>
-                        <p className="text-[11px] text-muted-foreground">Sources</p>
-                      </div>
-                      <div className="rounded-xl bg-muted p-3">
-                        <p className="text-lg font-bold text-foreground">{evidenceItemCount(detailedGroup)}</p>
-                        <p className="text-[11px] text-muted-foreground">Evidence</p>
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-border bg-card p-4">
-                      <p className="text-sm font-semibold text-foreground">Why not Memory yet?</p>
-                      <div className="mt-2 rounded-xl bg-muted p-3 text-sm">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-muted-foreground">Readiness</span>
-                          <span className="font-medium text-foreground">{readinessLabel(detailedReadiness.status)}</span>
-                        </div>
-                        <div className="mt-2 flex items-center justify-between gap-3">
-                          <span className="text-muted-foreground">Confirmation threshold</span>
-                          <span className="font-medium text-foreground">{pct(detailedReadiness.threshold)}</span>
-                        </div>
-                      </div>
-                      {detailedReadiness.blockers.length > 0 ? (
-                        <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
-                          {detailedReadiness.blockers.map(blocker => (
-                            <li key={blocker} className="flex gap-2">
-                              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
-                              <span>{friendlyPromotionBlocker(detailedGroup, blocker)}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="mt-2 text-sm text-muted-foreground">
-                          {detailedReadiness.reasons[0] ?? 'This Signal can be confirmed as Memory.'}
-                        </p>
                       )}
-                    </div>
+                      score={<SignalReadinessBar readiness={detailedReadiness} />}
+                      lifecycle={(
+                        <>
+                          <span className="rounded-full border border-border bg-background px-2.5 py-1 text-muted-foreground">Signal</span>
+                          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className={`rounded-full border px-2.5 py-1 ${detailedMemoryState.className}`}>
+                            {detailedMemoryState.label}
+                          </span>
+                          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="rounded-full border border-border bg-background px-2.5 py-1 text-muted-foreground">Confirmed Memory</span>
+                        </>
+                      )}
+                      helper={detailedMemoryState.helper}
+                    />
+
+                    <SignalReadinessDetails readiness={detailedReadiness} group={detailedGroup} />
 
                     <div className="rounded-2xl border border-border bg-card p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <p className="text-sm font-semibold text-foreground">Resolve this Signal</p>
-                          <p className="mt-1 text-sm text-muted-foreground">{readinessReason(detailedGroup)}</p>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Next action for this Signal</p>
+                          <h3 className="mt-1 text-base font-semibold leading-snug text-foreground">
+                            {resolutionTitle(detailedResolution, detailedReadiness)}
+                          </h3>
+                          <p className="mt-1 text-sm text-muted-foreground">{detailedResolution.helper_text}</p>
                         </div>
-                        <Badge variant="outline" className={readinessTone(detailedReadiness.status)}>
-                          {primaryActionLabel(detailedReadiness)}
-                        </Badge>
                       </div>
 
-                      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-muted p-3 text-sm">
-                        <span className="text-muted-foreground">{subjectTypeLabel(detailedGroup.subject_type)}</span>
-                        <span className="font-medium text-foreground">{subjectLabel(detailedGroup)}</span>
-                        <Button variant="outline" size="sm" className="ml-auto h-8" onClick={() => onOpenSubject(detailedGroup)}>
-                          <ArrowUpRight className="mr-1 h-3.5 w-3.5" />
-                          Open record
-                        </Button>
+                      <div className="mt-3 grid gap-2 rounded-xl bg-muted p-3 text-sm">
+                        {detailedResolution.target_label !== detailedResolution.subject_label && (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-muted-foreground">Signal focus</span>
+                            <span className="font-medium text-foreground">{detailedResolution.target_label}</span>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">Attached record</span>
+                          <span className="font-medium text-foreground">
+                            {subjectTypeLabel(detailedResolution.subject_type)}: {detailedResolution.subject_label}
+                          </span>
+                        </div>
                       </div>
 
                       {detailedReadiness.status === 'needs_more_detail' && repairFields.length > 0 && (
                         <div className="mt-3 space-y-3">
-                          {repairFields.map(field => {
+                          {repairFields.map((field, index) => {
                             const value = detailPatch[field.key] ?? '';
-                            const commonClass = 'mt-1 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30';
+                            const commonClass = 'h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30';
+                            const isLastField = index === repairFields.length - 1;
                             return (
-                              <label key={field.key} className="block text-xs font-medium text-muted-foreground">
-                                {field.label}
-                                {field.enum ? (
-                                  <select
-                                    value={value}
-                                    onChange={event => setDetailPatch(prev => ({ ...prev, [field.key]: event.target.value }))}
-                                    className={`${commonClass} h-9`}
-                                  >
-                                    <option value="">Select...</option>
-                                    {field.enum.map(option => (
-                                      <option key={option} value={option}>{humanizeKey(option)}</option>
-                                    ))}
-                                  </select>
-                                ) : field.type === 'boolean' ? (
-                                  <select
-                                    value={value}
-                                    onChange={event => setDetailPatch(prev => ({ ...prev, [field.key]: event.target.value }))}
-                                    className={`${commonClass} h-9`}
-                                  >
-                                    <option value="">Select...</option>
-                                    <option value="true">Yes</option>
-                                    <option value="false">No</option>
-                                  </select>
-                                ) : (
-                                  <input
-                                    type={field.type === 'number' ? 'number' : 'text'}
-                                    value={value}
-                                    onChange={event => setDetailPatch(prev => ({ ...prev, [field.key]: event.target.value }))}
-                                    className={`${commonClass} h-9`}
-                                  />
-                                )}
-                                {field.description && <span className="mt-1 block text-[11px] text-muted-foreground">{field.description}</span>}
-                              </label>
+                              <div key={field.key} className="space-y-1">
+                                <label htmlFor={`signal-repair-${field.key}`} className="block text-xs font-medium text-muted-foreground">
+                                  {field.label}
+                                </label>
+                                <div className="flex items-center gap-2">
+                                  <div className="min-w-0 flex-1">
+                                    {field.enum ? (
+                                      <select
+                                        id={`signal-repair-${field.key}`}
+                                        value={value}
+                                        onChange={event => setDetailPatch(prev => ({ ...prev, [field.key]: event.target.value }))}
+                                        className={commonClass}
+                                      >
+                                        <option value="">Choose {sentenceKey(field.key)}...</option>
+                                        {field.enum.map(option => (
+                                          <option key={option} value={option}>{humanizeKey(option)}</option>
+                                        ))}
+                                      </select>
+                                    ) : field.type === 'boolean' ? (
+                                      <select
+                                        id={`signal-repair-${field.key}`}
+                                        value={value}
+                                        onChange={event => setDetailPatch(prev => ({ ...prev, [field.key]: event.target.value }))}
+                                        className={commonClass}
+                                      >
+                                        <option value="">Select...</option>
+                                        <option value="true">Yes</option>
+                                        <option value="false">No</option>
+                                      </select>
+                                    ) : (
+                                      <input
+                                        id={`signal-repair-${field.key}`}
+                                        type={field.type === 'number' ? 'number' : 'text'}
+                                        value={value}
+                                        placeholder={field.placeholder}
+                                        onChange={event => setDetailPatch(prev => ({ ...prev, [field.key]: event.target.value }))}
+                                        className={commonClass}
+                                      />
+                                    )}
+                                  </div>
+                                  {isLastField && (
+                                    <Button className="h-9 shrink-0 px-3" size="sm" onClick={() => onCompleteDetails(detailedGroup, repairFields)} disabled={completeDetails.isPending}>
+                                      {completeDetails.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
+                                      Save
+                                    </Button>
+                                  )}
+                                </div>
+                                {field.description && <span className="block text-[11px] text-muted-foreground">{field.description}</span>}
+                              </div>
                             );
                           })}
-                          <div className="flex flex-wrap gap-2">
-                            <Button size="sm" onClick={() => onCompleteDetails(detailedGroup, repairFields)} disabled={completeDetails.isPending}>
-                              {completeDetails.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
-                              Save details
-                            </Button>
-                            <Button variant="outline" size="sm" onClick={() => setDrawerView('evidence')}>
-                              <Eye className="mr-1 h-3.5 w-3.5" />
-                              View Evidence
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-
-                      {detailedReadiness.status === 'needs_more_detail' && repairFields.length === 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <Button variant="outline" size="sm" onClick={() => onAddEvidence(detailedGroup)}>
-                            <PlusCircle className="mr-1 h-3.5 w-3.5" />
-                            Add evidence
-                          </Button>
-                        </div>
-                      )}
-
-                      {detailedReadiness.status === 'needs_more_evidence' && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <Button size="sm" onClick={() => onAddEvidence(detailedGroup)}>
-                            <PlusCircle className="mr-1 h-3.5 w-3.5" />
-                            Add evidence
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={() => setDrawerView('evidence')}>
-                            <Eye className="mr-1 h-3.5 w-3.5" />
-                            View Evidence
-                          </Button>
                         </div>
                       )}
 
@@ -1141,45 +1679,22 @@ export function SignalGroupsBrowser({
                               {item.snippet && <p className="mt-1 line-clamp-2 text-muted-foreground">{item.snippet}</p>}
                             </div>
                           ))}
-                          <Button variant="outline" size="sm" onClick={() => setShowDelegation(true)}>
-                            <Users className="mr-1 h-3.5 w-3.5" />
-                            Ask someone else
-                          </Button>
                         </div>
                       )}
+                    </div>
 
-                      {detailedReadiness.status === 'approval_required' && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {canPromote(detailedGroup) && (
-                            <Button size="sm" onClick={() => onPromote(detailedGroup.id)} disabled={promote.isPending}>
-                              {promote.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
-                              Confirm Signal
-                            </Button>
-                          )}
-                          <Button variant="outline" size="sm" onClick={() => setShowDelegation(true)}>
-                            <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-                            Request approval
-                          </Button>
-                        </div>
-                      )}
-
-                      {detailedReadiness.status === 'ready_to_confirm' && (
-                        <div className="mt-3">
-                          <Button size="sm" onClick={() => onPromote(detailedGroup.id)} disabled={promote.isPending || !canPromote(detailedGroup)}>
-                            {promote.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
-                            Confirm Signal
-                          </Button>
-                        </div>
-                      )}
-
-                      {!['confirmed', 'dismissed'].includes(detailedReadiness.status) && detailedReadiness.status !== 'blocked_by_conflict' && detailedReadiness.status !== 'approval_required' && (
-                        <div className="mt-3">
-                          <Button variant="ghost" size="sm" onClick={() => setShowDelegation(value => !value)}>
-                            <Users className="mr-1 h-3.5 w-3.5" />
-                            Ask someone else
-                          </Button>
-                        </div>
-                      )}
+                    <div className="rounded-2xl border border-border bg-card p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Signal actions
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {signalActions.primaryActions.map(action => (
+                          <SignalDrawerActionButton key={action.key} action={action} />
+                        ))}
+                        {[...signalActions.utilityActions, ...signalActions.secondaryActions].map(action => (
+                          <SignalDrawerActionButton key={action.key} action={action} />
+                        ))}
+                      </div>
 
                       {showDelegation && (
                         <div className="mt-3 rounded-xl border border-border bg-surface p-3">
@@ -1229,11 +1744,11 @@ export function SignalGroupsBrowser({
                             </label>
                           </div>
                           <div className="mt-3 flex flex-wrap gap-2">
-                            <Button size="sm" onClick={() => onHandoff(detailedGroup)} disabled={handoff.isPending}>
-                              {handoff.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="mr-1 h-3.5 w-3.5" />}
+                            <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => onHandoff(detailedGroup)} disabled={handoff.isPending}>
+                              {handoff.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
                               Send to Handoff
                             </Button>
-                            <Button variant="outline" size="sm" onClick={() => setShowDelegation(false)}>
+                            <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setShowDelegation(false)}>
                               Cancel
                             </Button>
                           </div>
@@ -1241,62 +1756,20 @@ export function SignalGroupsBrowser({
                       )}
 
                       {lastHandoffId && (
-                        <Button variant="outline" size="sm" className="mt-3" asChild>
+                        <Button variant="outline" size="sm" className="mt-3 h-8 text-xs gap-1.5" asChild>
                           <Link to={`/handoffs?hitl=${lastHandoffId}`}>
-                            <ArrowUpRight className="mr-1 h-3.5 w-3.5" />
+                            <ArrowUpRight className="h-3.5 w-3.5" />
                             Open Handoff
                           </Link>
                         </Button>
                       )}
                     </div>
 
-                    <div className="rounded-2xl border border-border bg-card p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">Why this score?</p>
-                          <p className="mt-1 text-sm text-muted-foreground">{detailedReadiness.reasons[0] ?? trustExplanation(detailedGroup)}</p>
-                        </div>
-                      </div>
-                      <div className="mt-3 space-y-2 text-sm">
-                        <div className="flex justify-between gap-3">
-                          <span className="text-muted-foreground">Model confidence</span>
-                          <span className="font-medium text-foreground">{pct(detailedReadiness.components.model_confidence)}</span>
-                        </div>
-                        <div className="flex justify-between gap-3">
-                          <span className="text-muted-foreground">Source quality</span>
-                          <span className="font-medium text-foreground">
-                            {pct(detailedReadiness.components.source_quality)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between gap-3">
-                          <span className="text-muted-foreground">
-                            Independent sources
-                            <span className="ml-1 text-xs">
-                              ({detailedReadiness.components.evidence_count} evidence item{detailedReadiness.components.evidence_count === 1 ? '' : 's'})
-                            </span>
-                          </span>
-                          <span className="font-medium text-foreground">{detailedReadiness.components.independent_source_count}</span>
-                        </div>
-                        <div className="flex justify-between gap-3">
-                          <span className="text-muted-foreground">Typed detail</span>
-                          <span className="font-medium text-foreground">
-                            {detailedReadiness.components.typed_completeness == null ? 'Not typed' : pct(detailedReadiness.components.typed_completeness)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between gap-3">
-                          <span className="text-muted-foreground">Conflicts</span>
-                          <span className="font-medium text-foreground">{detailedReadiness.components.conflict_count}</span>
-                        </div>
-                        <div className="flex justify-between gap-3">
-                          <span className="text-muted-foreground">Threshold</span>
-                          <span className="font-medium text-foreground">{pct(detailedReadiness.threshold)}</span>
-                        </div>
-                      </div>
-                    </div>
-
                     {relatedSignals.length > 0 && (
-                      <div className="rounded-2xl border border-border bg-card p-4">
-                        <p className="text-sm font-semibold text-foreground">Related Signals</p>
+                      <details className="rounded-2xl border border-border bg-card p-4">
+                        <summary className="cursor-pointer text-sm font-semibold text-foreground">
+                          Related Signals ({relatedSignals.length})
+                        </summary>
                         <div className="mt-3 space-y-2">
                           {relatedSignals.map(group => (
                             <button
@@ -1316,7 +1789,7 @@ export function SignalGroupsBrowser({
                             </button>
                           ))}
                         </div>
-                      </div>
+                      </details>
                     )}
                   </>
                 ) : (
@@ -1353,43 +1826,14 @@ export function SignalGroupsBrowser({
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-2 border-t border-border bg-card p-4">
-                <Button
-                  onClick={() => onPromote(detailedGroup.id)}
-                  disabled={promote.isPending || !canPromote(detailedGroup)}
-                  className="bg-emerald-600 text-white hover:bg-emerald-500 disabled:bg-muted disabled:text-muted-foreground"
-                >
-                  {promote.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
-                  Confirm Signal
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowDelegation(true)}
-                  disabled={handoff.isPending || detailedGroup.status === 'promoted' || detailedGroup.status === 'dismissed'}
-                >
-                  <Users className="mr-1 h-3.5 w-3.5" />
-                  Ask someone else
-                </Button>
-                <Button
-                  variant={confirmDismiss ? 'destructive' : 'outline'}
-                  onClick={() => {
-                    if (confirmDismiss) onDismiss(detailedGroup.id);
-                    else setConfirmDismiss(true);
-                  }}
-                  disabled={reject.isPending || detailedGroup.status === 'promoted' || detailedGroup.status === 'dismissed'}
-                  title="Dismiss this Signal so it will not become Memory. Evidence is preserved for audit."
-                  className={confirmDismiss
-                    ? 'bg-rose-600 text-white hover:bg-rose-500'
-                    : 'border-rose-500/30 text-rose-600 hover:bg-rose-500/10 hover:text-rose-600 dark:text-rose-400'}
-                >
-                  {reject.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <X className="mr-1 h-3.5 w-3.5" />}
-                  {confirmDismiss ? 'Confirm Dismiss' : 'Dismiss Signal'}
-                </Button>
-                <Button variant="outline" onClick={() => setDrawerView(drawerView === 'evidence' ? 'details' : 'evidence')}>
-                  <Eye className="mr-1 h-3.5 w-3.5" />
-                  {drawerView === 'evidence' ? 'View Details' : 'View Evidence'}
-                </Button>
-              </div>
+              {drawerView === 'evidence' && (
+                <div className="border-t border-border bg-card p-4">
+                  <Button variant="outline" className="w-full" onClick={() => setDrawerView('details')}>
+                    <Eye className="mr-1 h-3.5 w-3.5" />
+                    View Details
+                  </Button>
+                </div>
+              )}
             </>
           ) : (
             <div className="flex h-full items-center justify-center text-muted-foreground">
