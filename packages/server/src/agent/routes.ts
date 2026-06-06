@@ -1096,6 +1096,9 @@ export function agentRouter(db: DbPool): Router {
       for (const f of intFields) {
         if (typeof body[f] === 'number') update[f] = body[f];
       }
+      if (typeof body.llm_timeout_ms === 'number') {
+        update.llm_timeout_ms = Math.min(300_000, Math.max(5_000, Math.round(body.llm_timeout_ms)));
+      }
       if (typeof body.signal_auto_promote_threshold === 'number') {
         const threshold = Math.min(0.98, Math.max(0.7, body.signal_auto_promote_threshold));
         update.signal_auto_promote_threshold = Number(threshold.toFixed(2));

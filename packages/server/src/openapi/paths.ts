@@ -22,6 +22,7 @@ import {
 } from './registry.js';
 
 const idParam = z.object({ id: S.uuid.openapi({ description: 'Record UUID' }) });
+const toolNameParam = z.object({ tool_name: z.string().regex(/^[a-z0-9_]+$/).openapi({ description: 'MCP tool name' }) });
 const bearer = [{ BearerAuth: [] }];
 const err400 = { description: 'Validation error', content: { 'application/json': { schema: ProblemDetail } } };
 const err401 = { description: 'Unauthorized', content: { 'application/json': { schema: ProblemDetail } } };
@@ -106,6 +107,59 @@ registry.registerPath({
   security: bearer,
   request: { params: idParam },
   responses: { 200: ok(SuccessResult), 404: err404 },
+});
+
+// -- Tool bridge --
+
+registry.registerPath({
+  method: 'get', path: '/tools',
+  tags: ['Tools'],
+  summary: 'List MCP tools available to the current actor',
+  security: bearer,
+  responses: {
+    200: ok(z.object({
+      data: z.array(z.object({
+        name: z.string(),
+        tier: z.string().optional(),
+        description: z.string().optional(),
+      })),
+      total: z.number().int(),
+    })),
+    401: err401,
+  },
+});
+
+registry.registerPath({
+  method: 'get', path: '/tools/{tool_name}',
+  tags: ['Tools'],
+  summary: 'Describe one actor-scoped MCP tool and its input shape',
+  security: bearer,
+  request: { params: toolNameParam },
+  responses: {
+    200: ok(GenericObject),
+    400: err400,
+    401: err401,
+    403: err403,
+    404: err404,
+  },
+});
+
+registry.registerPath({
+  method: 'post', path: '/tools/{tool_name}/call',
+  tags: ['Tools'],
+  summary: 'Call an actor-scoped MCP tool by name',
+  security: bearer,
+  request: {
+    params: toolNameParam,
+    body: jsonBody(z.record(z.unknown()), false),
+  },
+  responses: {
+    200: ok(GenericObject),
+    400: err400,
+    401: err401,
+    403: err403,
+    404: err404,
+  },
 });
 
 // -- Contacts --
@@ -807,7 +861,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/action-context',
   tags: ['Briefing'],
-  summary: 'Assess whether a record has enough current, confirmed, authorized context for action',
+  summary: 'Assemble action-aware customer context, warnings, policy checks, and review requirements',
   security: bearer,
   request: { body: jsonBody(Req.ActionContextGet) },
   responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },

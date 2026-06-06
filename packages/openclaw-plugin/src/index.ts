@@ -166,6 +166,8 @@ const ROUTES: Record<string, RouteHandler> = {
     c.get(`/context/signal-groups/${req(p.id, 'id')}`),
   'context.get': async (c, p) =>
     c.get(`/context/${req(p.id, 'id')}`),
+  'context.ingest_auto': async (c, p) =>
+    c.post('/context/ingest-auto', p),
   'context.add': async (c, p) =>
     c.post('/context', p),
   'context.supersede': async (c, { id, ...rest }) =>

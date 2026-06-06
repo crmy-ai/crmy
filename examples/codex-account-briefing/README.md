@@ -83,6 +83,7 @@ Run:
 
 ```bash
 npx -y @crmy/cli agent-smoke --json
+npx -y @crmy/cli tools describe briefing_get
 ```
 
 If this fails, fix local CRMy setup before debugging Codex. If it passes but Codex does not show CRMy tools, run `/mcp`, inspect `~/.codex/config.toml`, and restart the Codex session after config changes.

@@ -36,7 +36,9 @@ import { createWorkflowEngine, dryRunWorkflowDefinition, matchesFilter } from '.
 import { buildVariableContext, interpolate } from '../dist/workflows/variables.js';
 import { __testSignalGrouping } from '../dist/services/signal-groups.js';
 import { evaluateMemoryReadiness } from '../dist/services/memory-readiness.js';
-import { buildAgentScopes } from '../dist/agent/engine.js';
+import { buildAgentScopes, runAgentTurn } from '../dist/agent/engine.js';
+import { resolveLlmTimeoutMs } from '../dist/agent/provider-utils.js';
+import { callLLM } from '../dist/agent/providers/llm.js';
 import { previewRecordDraft } from '../dist/services/record-drafts.js';
 
 const baseInput = {
@@ -2429,6 +2431,253 @@ class FakeAgentConfigDb {
   }
 }
 
+const toolChoiceAgentConfig = {
+  id: 'agent-config-tool-choice',
+  tenant_id: baseInput.tenantId,
+  enabled: true,
+  provider: 'openai_compatible',
+  base_url: 'http://model.local/v1',
+  api_key_enc: null,
+  model: 'primary-tool-model',
+  system_prompt: null,
+  max_tokens_per_turn: 1200,
+  llm_timeout_ms: 60000,
+  history_retention_days: 90,
+  can_write_objects: true,
+  can_log_activities: true,
+  can_create_assignments: true,
+  auto_extract_context: true,
+  auto_promote_signals: false,
+  signal_auto_promote_threshold: 0.85,
+  backup_enabled: false,
+  backup_provider: null,
+  backup_base_url: null,
+  backup_api_key_enc: null,
+  backup_model: null,
+};
+
+test('Workspace Agent model timeout defaults to 60 seconds and is stored in model settings', async () => {
+  assert.equal(resolveLlmTimeoutMs(null), 60000);
+  assert.equal(resolveLlmTimeoutMs({ llm_timeout_ms: 1000 }), 5000);
+  assert.equal(resolveLlmTimeoutMs({ llm_timeout_ms: 999999 }), 300000);
+
+  const migration = await readFile(new URL('../migrations/070_agent_llm_timeout.sql', import.meta.url), 'utf8');
+  assert.match(migration, /llm_timeout_ms INTEGER NOT NULL DEFAULT 60000/);
+  assert.match(migration, /CHECK \(llm_timeout_ms BETWEEN 5000 AND 300000\)/);
+
+  const routesSource = await readFile(new URL('../src/agent/routes.ts', import.meta.url), 'utf8');
+  assert.match(routesSource, /body\.llm_timeout_ms/);
+  assert.match(routesSource, /300_000/);
+  assert.match(routesSource, /5_000/);
+
+  const telemetryMigration = await readFile(new URL('../migrations/071_agent_model_telemetry.sql', import.meta.url), 'utf8');
+  assert.match(telemetryMigration, /CREATE TABLE IF NOT EXISTS agent_model_call_log/);
+  assert.match(telemetryMigration, /route IN \('primary', 'backup'\)/);
+  assert.match(telemetryMigration, /outcome IN \('success', 'error'\)/);
+});
+
+test('Workspace Agent falls back to backup model after primary model timeout', async () => {
+  const events = [];
+  const modelsCalled = [];
+  const telemetryRows = [];
+  const db = {
+    async query(sql, params = []) {
+      const text = sql.replace(/\s+/g, ' ').trim();
+      if (text.startsWith('INSERT INTO agent_model_call_log')) {
+        telemetryRows.push({
+          provider: params[5],
+          model: params[6],
+          route: params[7],
+          attempt_number: params[8],
+          outcome: params[9],
+          is_transient: params[10],
+          error_message: params[11],
+          timeout_ms: params[13],
+        });
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error(`Unexpected query: ${text}`);
+    },
+  };
+  const config = {
+    ...toolChoiceAgentConfig,
+    backup_enabled: true,
+    backup_provider: 'openai_compatible',
+    backup_base_url: 'http://backup-model.local/v1',
+    backup_model: 'backup-tool-model',
+  };
+
+  await runAgentTurn(
+    [{ role: 'user', content: 'Brief me on the Nike renewal risk.' }],
+    config,
+    memberActor,
+    db,
+    event => events.push(event),
+    {
+      modelCaller: async ({ config: runtimeConfig }) => {
+        modelsCalled.push(runtimeConfig.model);
+        if (runtimeConfig.model === 'primary-tool-model') {
+          throw new Error(`LLM request timed out after ${runtimeConfig.llm_timeout_ms}ms`);
+        }
+        assert.equal(runtimeConfig.llm_timeout_ms, 60000);
+        return { content: 'Backup model is available.', tool_calls: [] };
+      },
+      sessionId: '44444444-4444-4444-8444-444444444444',
+      turnId: '55555555-5555-4555-8555-555555555555',
+      transientRetryDelayMs: 0,
+    },
+  );
+
+  assert.deepEqual(modelsCalled, ['primary-tool-model', 'primary-tool-model', 'backup-tool-model']);
+  assert.ok(events.some(event => event.type === 'tool_status' && event.name === 'model_failover'));
+  assert.ok(events.some(event => event.type === 'tool_status' && event.name === 'model_retry'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(telemetryRows.map(row => [row.route, row.model, row.attempt_number, row.outcome, row.is_transient]), [
+    ['primary', 'primary-tool-model', 1, 'error', true],
+    ['primary', 'primary-tool-model', 2, 'error', true],
+    ['backup', 'backup-tool-model', 1, 'success', false],
+  ]);
+  assert.equal(telemetryRows[0].timeout_ms, 60000);
+});
+
+test('one-shot LLM calls retry transient provider errors before backup failover', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url, init) => {
+    requests.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) });
+    if (requests.length === 1) {
+      return new Response('temporary upstream outage', { status: 503 });
+    }
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: 'retry succeeded' } }],
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
+  try {
+    const db = {
+      async query(sql) {
+        const text = sql.replace(/\s+/g, ' ').trim();
+        if (text === 'SELECT * FROM agent_configs WHERE tenant_id = $1') {
+          return {
+            rows: [{
+              ...toolChoiceAgentConfig,
+              provider: 'openai_compatible',
+              model: 'one-shot-primary',
+              base_url: 'http://primary.local/v1',
+            }],
+            rowCount: 1,
+          };
+        }
+        throw new Error(`Unexpected query: ${text}`);
+      },
+    };
+
+    const result = await callLLM(db, baseInput.tenantId, {
+      system: 'Return text.',
+      user: 'Please respond.',
+      maxTokens: 32,
+    });
+
+    assert.equal(result, 'retry succeeded');
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].body.model, 'one-shot-primary');
+    assert.equal(requests[1].body.model, 'one-shot-primary');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('GTM tool-choice evals route first calls to the right MCP front door', async () => {
+  const cases = [
+    {
+      name: 'resolve ambiguous customer names before acting',
+      prompt: 'Before I email Nike about the Pegasus expansion, find the right customer record.',
+      expected_tool: 'customer_record_resolve',
+      arguments: { text: 'Nike Pegasus expansion', limit: 5 },
+      guidance: /Use customer_record_resolve as the primary customer-record resolver/,
+      forbidden_tools: ['entity_resolve'],
+    },
+    {
+      name: 'ingest messy meeting notes through Raw Context',
+      prompt: 'These meeting notes mention procurement blockers and a new champion. Add the useful context.',
+      expected_tool: 'context_ingest_auto',
+      arguments: { document_text: 'Procurement is blocked until security signs off. Maya is the champion.', source_label: 'Tool choice eval notes' },
+      guidance: /Context memory.*context_ingest_auto/s,
+      forbidden_tools: ['context_add'],
+    },
+    {
+      name: 'review unconfirmed Signals through consolidated retrieval',
+      prompt: 'Show me the Signals that need review for this account.',
+      expected_tool: 'context_find',
+      arguments: { mode: 'signals', subject_type: 'account', subject_id: '33333333-3333-4333-8333-333333333333' },
+      guidance: /review unconfirmed Signals/i,
+      forbidden_tools: ['context_signal_group_list'],
+    },
+    {
+      name: 'check readiness before customer outreach',
+      prompt: 'Can I send a customer outreach email about the renewal risk?',
+      expected_tool: 'action_context_get',
+      arguments: {
+        subject_type: 'account',
+        subject_id: '33333333-3333-4333-8333-333333333333',
+        proposed_action: { action_type: 'customer_outreach' },
+      },
+      guidance: /call `action_context_get`/,
+      forbidden_tools: ['email_create', 'message_send'],
+    },
+    {
+      name: 'answer product usage questions from the guide',
+      prompt: 'How should agents use Signals versus Memory in CRMy?',
+      expected_tool: 'guide_search',
+      arguments: { query: 'Signals Memory' },
+      guidance: /complete CRMy user guide/,
+      forbidden_tools: ['context_add'],
+    },
+  ];
+
+  for (const item of cases) {
+    const events = [];
+    let round = 0;
+    await runAgentTurn(
+      [{ role: 'user', content: item.prompt }],
+      toolChoiceAgentConfig,
+      memberActor,
+      {},
+      event => events.push(event),
+      {
+        modelCaller: async ({ history, toolDefs, config }) => {
+          round += 1;
+          assert.equal(config.llm_timeout_ms, 60000);
+          if (round > 1) return { content: `Completed ${item.name}.`, tool_calls: [] };
+
+          const toolNames = new Set(toolDefs.map(tool => tool.name));
+          assert.equal(toolNames.has('tool_guide'), true);
+          assert.equal(toolNames.has(item.expected_tool), true);
+          const systemPrompt = history.find(message => message.role === 'system')?.content ?? '';
+          assert.match(systemPrompt, item.guidance);
+
+          return {
+            content: `Route eval: ${item.name}`,
+            tool_calls: [{
+              id: `eval-${round}`,
+              name: item.expected_tool,
+              arguments: JSON.stringify(item.arguments),
+            }],
+          };
+        },
+      },
+    );
+
+    const toolCalls = events.filter(event => event.type === 'tool_call').map(event => event.name);
+    assert.equal(toolCalls[0], item.expected_tool, item.name);
+    for (const forbidden of item.forbidden_tools) {
+      assert.equal(toolCalls.includes(forbidden), false, `${item.name} should not call ${forbidden}`);
+    }
+  }
+});
+
 test('recoverOperationalJob retries context outbox jobs and records an audit entry', async () => {
   const db = new FakeRecoveryDb();
   const result = await recoverOperationalJob(
@@ -3879,12 +4128,15 @@ test('action readiness is ready when context, policy, and source checks are clea
   });
 
   assert.equal(result.readiness.status, 'ready');
+  assert.equal(result.operating_mode, 'inform');
+  assert.equal(result.readiness.review_required, false);
+  assert.equal(result.guidance.can_execute, true);
   assert.equal(result.readiness.risk_level, 'low');
   assert.equal(result.checks.memory.confirmed_count, 1);
   assert.equal(result.required_handoffs.length, 0);
 });
 
-test('action readiness asks for review when confirmed Memory is stale', () => {
+test('action readiness warns when confirmed Memory is stale', () => {
   const staleEntry = actionReadinessBriefing().context_entries.preference[0];
   const result = deriveActionReadiness({
     briefing: actionReadinessBriefing({ staleness_warnings: [staleEntry] }),
@@ -3892,22 +4144,47 @@ test('action readiness asks for review when confirmed Memory is stale', () => {
   });
 
   assert.equal(result.readiness.status, 'review_needed');
+  assert.equal(result.operating_mode, 'warn');
+  assert.equal(result.readiness.review_required, false);
+  assert.equal(result.guidance.can_execute, true);
+  assert.match(result.guidance.summary, /Proceed/);
   assert.equal(result.checks.memory.stale_count, 1);
   assert.match(result.readiness.reasons.join(' '), /review/);
 });
 
-test('action readiness asks for review when no confirmed Memory is loaded', () => {
+test('action readiness warns when no confirmed Memory is loaded', () => {
   const result = deriveActionReadiness({
     briefing: actionReadinessBriefing({ context_entries: {} }),
     systems: actionReadinessSystems(),
   });
 
   assert.equal(result.readiness.status, 'review_needed');
+  assert.equal(result.operating_mode, 'warn');
+  assert.equal(result.readiness.review_required, false);
   assert.equal(result.checks.memory.confirmed_count, 0);
   assert.match(result.readiness.reasons.join(' '), /No confirmed Memory/);
 });
 
-test('action readiness asks for review when Signal readiness is unresolved', () => {
+test('action readiness keeps open assignments as warnings unless execution needs review', () => {
+  const result = deriveActionReadiness({
+    briefing: actionReadinessBriefing({
+      open_assignments: [{
+        id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        status: 'pending',
+        title: 'Review follow-up',
+      }],
+    }),
+    systems: actionReadinessSystems(),
+  });
+
+  assert.equal(result.readiness.status, 'review_needed');
+  assert.equal(result.operating_mode, 'warn');
+  assert.equal(result.readiness.review_required, false);
+  assert.equal(result.checks.assignments.open_count, 1);
+  assert.equal(result.required_handoffs.length, 0);
+});
+
+test('action readiness warns when Signal readiness is unresolved', () => {
   const result = deriveActionReadiness({
     briefing: actionReadinessBriefing({
       signal_groups: [{
@@ -3943,9 +4220,11 @@ test('action readiness asks for review when Signal readiness is unresolved', () 
   });
 
   assert.equal(result.readiness.status, 'review_needed');
+  assert.equal(result.operating_mode, 'warn');
+  assert.equal(result.readiness.review_required, false);
   assert.equal(result.checks.signals.unresolved_readiness_count, 1);
   assert.match(result.checks.signals.readiness_reasons.join(' '), /below the 85% confirmation threshold/);
-  assert.equal(result.required_handoffs[0].type, 'signal_review');
+  assert.equal(result.required_handoffs.length, 0);
 });
 
 test('action readiness blocks when source authority or policy blocks action', () => {
@@ -3963,6 +4242,33 @@ test('action readiness blocks when source authority or policy blocks action', ()
   });
 
   assert.equal(result.readiness.status, 'blocked');
+  assert.equal(result.operating_mode, 'require_review');
+  assert.equal(result.readiness.review_required, true);
+  assert.equal(result.guidance.can_execute, false);
   assert.equal(result.readiness.risk_level, 'high');
   assert.match(result.readiness.blockers.join(' '), /read-only|forecast_cat/);
+});
+
+test('action readiness requires review when policy requires approval', () => {
+  const result = deriveActionReadiness({
+    briefing: actionReadinessBriefing(),
+    systems: actionReadinessSystems(),
+    policy: {
+      decision: 'approval_required',
+      reasons: ['External writeback requires approval before execution.'],
+      required_approval: true,
+      risk_level: 'high',
+      policy: 'crmy.action_policy.v1',
+    },
+    proposed_action: {
+      action_type: 'external_writeback',
+    },
+  });
+
+  assert.equal(result.readiness.status, 'review_needed');
+  assert.equal(result.operating_mode, 'require_review');
+  assert.equal(result.readiness.review_required, true);
+  assert.equal(result.guidance.can_execute, false);
+  assert.match(result.guidance.review_reasons.join(' '), /requires approval/);
+  assert.equal(result.required_handoffs.at(-1).type, 'policy_approval');
 });

@@ -52,6 +52,7 @@ Run:
 
 ```bash
 npx -y @crmy/cli agent-smoke --json
+npx -y @crmy/cli tools describe briefing_get
 ```
 
 If this fails, fix local CRMy setup before debugging Claude Code.

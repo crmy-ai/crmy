@@ -84,6 +84,11 @@ function deriveSessionLabel(message: string): string {
 }
 
 function humanizeToolName(name: string): string {
+  const displayNames: Record<string, string> = {
+    model_retry: 'Retrying model',
+    model_failover: 'Using backup model',
+  };
+  if (displayNames[name]) return displayNames[name];
   return name
     .replace(/^crm_/, '')
     .replace(/_/g, ' ')

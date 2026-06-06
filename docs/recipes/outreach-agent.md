@@ -8,8 +8,9 @@ The agent should treat the briefing as Active Context: the temporary working set
 
 **Prerequisites:**
 
-- A running CRMy instance with demo data seeded (`crmy seed-demo`)
+- A running CRMy workspace. Seed demo data with `crmy seed-demo` for a quick Northstar Labs test, or replace the illustrative records below with your own workspace records.
 - MCP connection configured (`claude mcp add crmy -- npx -y @crmy/cli mcp`)
+- Optional: inspect exact tool inputs with `crmy tools describe <tool_name>`
 
 **Context engine capabilities used:** `briefing_get`, `context_semantic_search`, `context_search`, `activity_create`, `hitl_submit_request`, `hitl_check_status`, and `assignment_create`.
 
@@ -162,7 +163,7 @@ briefing_get {
 **CLI equivalent:**
 
 ```bash
-crmy briefing contact:d0000000-0000-4000-c000-000000000003 --format json
+crmy briefing "contact:Priya Nair" --format json
 ```
 
 **CLI note:** `context_radius` and `token_budget` are MCP/REST options for agent runs. Use the MCP call above when the agent needs adjacent account and opportunity context.

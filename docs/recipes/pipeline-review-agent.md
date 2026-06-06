@@ -6,8 +6,9 @@ An agent that runs on a schedule. It reviews all open opportunities, surfaces at
 
 **Prerequisites:**
 
-- A running CRMy instance with demo data seeded (`crmy seed-demo`)
+- A running CRMy workspace. Seed demo data with `crmy seed-demo` for a quick Northstar Labs test, or replace the illustrative records below with your own workspace records.
 - MCP connection configured (`claude mcp add crmy -- npx -y @crmy/cli mcp`)
+- Optional: inspect exact tool inputs with `crmy tools describe <tool_name>`
 
 **Context engine capabilities used:** `pipeline_forecast`, `opportunity_search`, `briefing_get`, `context_stale`, `context_stale_assign`, `context_detect_contradictions`, `context_contradiction_assign`, `account_health_report`, and `assignment_create`.
 
@@ -305,7 +306,7 @@ briefing_get {
 **CLI equivalent:**
 
 ```bash
-crmy briefing opportunity:d0000000-0000-4000-d000-000000000003 --format json
+crmy briefing "opportunity:Vertex Logistics Expansion" --format json
 ```
 
 **CLI note:** `context_radius` and `token_budget` are MCP/REST options for agent runs. Use the MCP call above when the agent needs account-wide context.
@@ -415,7 +416,7 @@ briefing_get {
 **CLI equivalent:**
 
 ```bash
-crmy briefing opportunity:d0000000-0000-4000-d000-000000000002 --format json
+crmy briefing "opportunity:Brightside Health Platform Deal" --format json
 ```
 
 **CLI note:** `context_radius` and `token_budget` are MCP/REST options for agent runs. Use the MCP call above when the agent needs account-wide context.
@@ -654,7 +655,7 @@ account_health_report {
 }
 ```
 
-**CLI note:** account health reports are currently exposed through the MCP `account_health_report` tool and REST API. Use `crmy accounts get <id>` for a terminal record view.
+**CLI note:** account health reports are currently exposed through the MCP `account_health_report` tool and REST API. Resolve the account by name first, then use `crmy accounts get <resolved-id>` for a terminal record view.
 
 **Response:**
 
@@ -679,7 +680,7 @@ account_health_report {
 }
 ```
 
-**CLI note:** account health reports are currently exposed through the MCP `account_health_report` tool and REST API. Use `crmy accounts get <id>` for a terminal record view.
+**CLI note:** account health reports are currently exposed through the MCP `account_health_report` tool and REST API. Resolve the account by name first, then use `crmy accounts get <resolved-id>` for a terminal record view.
 
 **Response:**
 
@@ -704,7 +705,7 @@ account_health_report {
 }
 ```
 
-**CLI note:** account health reports are currently exposed through the MCP `account_health_report` tool and REST API. Use `crmy accounts get <id>` for a terminal record view.
+**CLI note:** account health reports are currently exposed through the MCP `account_health_report` tool and REST API. Resolve the account by name first, then use `crmy accounts get <resolved-id>` for a terminal record view.
 
 **Response:**
 

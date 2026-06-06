@@ -14,9 +14,17 @@ import type { AgentConfig } from '../../agent/types.js';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
+function normalizeConfig(row: AgentConfig | undefined): AgentConfig | null {
+  if (!row) return null;
+  return {
+    ...row,
+    llm_timeout_ms: row.llm_timeout_ms ?? 60_000,
+  };
+}
+
 export async function getConfig(db: DbPool, tenantId: string): Promise<AgentConfig | null> {
   const { rows } = await db.query('SELECT * FROM agent_configs WHERE tenant_id = $1', [tenantId]);
-  return rows[0] ?? null;
+  return normalizeConfig(rows[0]);
 }
 
 export async function upsertConfig(
@@ -33,7 +41,7 @@ export async function upsertConfig(
       'INSERT INTO agent_configs (tenant_id) VALUES ($1) RETURNING *',
       [tenantId],
     );
-    return rows[0];
+    return normalizeConfig(rows[0])!;
   }
 
   const setClauses = fields.map((f, i) => `${f} = $${i + 2}`);
@@ -47,7 +55,7 @@ export async function upsertConfig(
      RETURNING *`,
     [tenantId, ...values],
   );
-  return rows[0];
+  return normalizeConfig(rows[0])!;
 }
 
 // ── Sessions ────────────────────────────────────────────────────────────────

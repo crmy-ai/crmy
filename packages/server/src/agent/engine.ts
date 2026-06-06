@@ -4,12 +4,13 @@
 import type { ActorContext } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
 import { getAllTools, type ToolDef } from '../mcp/server.js';
+import { zodToJsonSchema } from '../mcp/tool-describe.js';
 import { enforceToolScopes } from '../auth/scopes.js';
 import { decrypt } from './crypto.js';
 import { callAnthropic } from './providers/anthropic.js';
 import { callOpenAICompat } from './providers/openai-compat.js';
-import { backupRuntimeConfig, providerUsesAnthropicFormat } from './provider-utils.js';
-import { logToolCall } from '../db/repos/agent-activity.js';
+import { backupRuntimeConfig, isTransientModelError, modelErrorMessage, providerUsesAnthropicFormat, resolveLlmTimeoutMs, wait } from './provider-utils.js';
+import { logModelCall, logToolCall } from '../db/repos/agent-activity.js';
 import { needsCompaction, compactHistory } from './compaction.js';
 import type {
   AgentConfig,
@@ -20,6 +21,8 @@ import type {
 } from './types.js';
 
 const MAX_TOOL_ROUNDS = 10; // prevent runaway loops
+const MODEL_TRANSIENT_RETRY_DELAY_MS = 250;
+const MODEL_MAX_TRANSIENT_RETRIES = 1;
 
 /**
  * Hard timeout per tool call. If a handler doesn't resolve within this window
@@ -60,15 +63,18 @@ function escapeXml(s: string): string {
  * error that the LLM can read and relay to the user.
  */
 function withTimeout<T>(promise: Promise<T>, ms: number, toolName: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   return Promise.race([
     promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(
         () => reject(new Error(`Tool '${toolName}' did not respond within ${ms / 1000}s`)),
         ms,
-      ),
-    ),
-  ]);
+      );
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 function normalizeToolErrorMessage(err: unknown): string {
@@ -431,102 +437,6 @@ function normalizeToolCalls(toolCalls: ToolCallRecord[], handlers: Map<string, T
   return { valid, invalid };
 }
 
-// ── Zod → JSON Schema ────────────────────────────────────────────────────────
-
-/**
- * Minimal Zod-to-JSON-Schema converter for tool input schemas.
- * Handles the ZodObject shapes used by CRMy tools.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function zodToJsonSchema(schema: any): Record<string, unknown> {
-  if (schema?._def) {
-    const def = schema._def;
-    const typeName = def.typeName;
-
-    if (typeName === 'ZodObject') {
-      const shape = typeof schema.shape === 'function' ? schema.shape() : schema.shape;
-      const properties: Record<string, unknown> = {};
-      const required: string[] = [];
-
-      for (const [key, val] of Object.entries(shape)) {
-        properties[key] = zodToJsonSchema(val);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const childType = (val as any)?._def?.typeName;
-        // Defaults are optional at the API boundary: omitting the field lets the
-        // tool handler apply its schema default. Marking them required makes
-        // model tool calls unnecessarily brittle.
-        if (childType !== 'ZodOptional' && childType !== 'ZodDefault') {
-          required.push(key);
-        }
-      }
-
-      return {
-        type: 'object',
-        properties,
-        additionalProperties: false,
-        ...(required.length > 0 ? { required } : {}),
-        ...(schema.description ? { description: schema.description } : {}),
-      };
-    }
-
-    if (typeName === 'ZodString') {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const checks: any[] = def.checks ?? [];
-      const result: Record<string, unknown> = { type: 'string' };
-      for (const check of checks) {
-        if (check.kind === 'min' && check.value > 0) result.minLength = check.value;
-        if (check.kind === 'max') result.maxLength = check.value;
-        if (check.kind === 'email') result.format = 'email';
-        if (check.kind === 'uuid') result.format = 'uuid';
-        if (check.kind === 'regex') result.pattern = check.regex?.source;
-      }
-      return { ...result, ...(schema.description ? { description: schema.description } : {}) };
-    }
-    if (typeName === 'ZodNumber') {
-      const checks: any[] = def.checks ?? [];
-      const result: Record<string, unknown> = { type: checks.some(check => check.kind === 'int') ? 'integer' : 'number' };
-      for (const check of checks) {
-        if (check.kind === 'min') result.minimum = check.value;
-        if (check.kind === 'max') result.maximum = check.value;
-      }
-      return { ...result, ...(schema.description ? { description: schema.description } : {}) };
-    }
-    if (typeName === 'ZodBoolean') return { type: 'boolean', ...(schema.description ? { description: schema.description } : {}) };
-    if (typeName === 'ZodEnum') return { type: 'string', enum: def.values };
-    if (typeName === 'ZodNativeEnum') return { type: 'string', enum: Object.values(def.values ?? {}) };
-    if (typeName === 'ZodArray') return { type: 'array', items: zodToJsonSchema(def.type) };
-
-    if (typeName === 'ZodOptional' || typeName === 'ZodNullable') {
-      return zodToJsonSchema(def.innerType);
-    }
-
-    if (typeName === 'ZodDefault') {
-      return zodToJsonSchema(def.innerType);
-    }
-
-    if (typeName === 'ZodEffects' || typeName === 'ZodPipeline' || typeName === 'ZodCatch') {
-      return zodToJsonSchema(def.schema ?? def.in ?? def.innerType);
-    }
-
-    if (typeName === 'ZodRecord') {
-      return { type: 'object', additionalProperties: true };
-    }
-
-    if (typeName === 'ZodUnion' || typeName === 'ZodDiscriminatedUnion') {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const options = (def.options ?? []).map((o: any) => zodToJsonSchema(o));
-      return { anyOf: options };
-    }
-
-    if (typeName === 'ZodLiteral') {
-      return { type: typeof def.value, const: def.value };
-    }
-  }
-
-  // Fallback
-  return { type: 'string' };
-}
-
 // ── System prompt builder ────────────────────────────────────────────────────
 
 interface ContextMeta {
@@ -653,6 +563,9 @@ function buildSystemPrompt(
     '  2. Plan — in one sentence, tell the user what you are about to do',
     '  3. Execute — call write tools in sequence',
     '  4. Confirm — show what changed with the key new values, audit trail, and suggested next action',
+    'When `action_context_get` returns `operating_mode: "inform"`, proceed normally and use the briefing/proof context.',
+    'When it returns `operating_mode: "warn"`, proceed only while making stale, inferred, conflicting, or low-confidence context explicit. Do not turn warnings into approval work unless the action will affect customers, records, systems of record, or commitments.',
+    'When it returns `operating_mode: "require_review"`, stop before execution and route the action to Handoff/policy review, or explain what must be resolved first.',
     'Never call a write tool on a record you have not fetched in this session via `action_context_get`, `briefing_get`, or the relevant object read tool.',
     'Treat Signals as unconfirmed: cite them with uncertainty, but promote them or request approval before using them to update records, forecast, assign work, or guide customer-facing action.',
     'When you learn useful customer context in conversation, propose it for review before treating it as saved memory unless you explicitly call a context write tool.',
@@ -756,9 +669,22 @@ function buildSystemPrompt(
 
 export interface RunAgentTurnOpts {
   sessionId?: string;
+  turnId?: string;
   contextMeta?: ContextMeta;
   abortSignal?: AbortSignal;
+  modelCaller?: AgentModelCaller;
+  transientRetryDelayMs?: number;
 }
+
+export interface AgentModelCallInput {
+  history: ConversationMessage[];
+  toolDefs: AgentToolDef[];
+  config: AgentConfig;
+  apiKey: string;
+  turnId: string;
+}
+
+export type AgentModelCaller = (input: AgentModelCallInput) => Promise<{ content: string; tool_calls: ToolCallRecord[] }>;
 
 /**
  * Run a single agent turn: send user message → LLM → tool calls → loop → final response.
@@ -849,6 +775,15 @@ export async function runAgentTurn(
       runtimeConfig: AgentConfig,
       runtimeApiKey: string,
     ): Promise<{ content: string; tool_calls: ToolCallRecord[] }> => {
+      if (opts?.modelCaller) {
+        return opts.modelCaller({
+          history,
+          toolDefs,
+          config: runtimeConfig,
+          apiKey: runtimeApiKey,
+          turnId,
+        });
+      }
       if (providerUsesAnthropicFormat(runtimeConfig.provider)) {
         result = await callAnthropic(
           history,
@@ -877,9 +812,70 @@ export async function runAgentTurn(
       }
     };
 
+    const recordModelAttempt = (
+      runtimeConfig: AgentConfig,
+      route: 'primary' | 'backup',
+      attemptNumber: number,
+      outcome: 'success' | 'error',
+      startedAt: number,
+      err?: unknown,
+    ) => {
+      if (!sessionId && !opts?.turnId) return;
+      const message = err ? modelErrorMessage(err).slice(0, 1000) : undefined;
+      logModelCall(db, {
+        tenantId: actor.tenant_id,
+        sessionId,
+        turnId: opts?.turnId,
+        userId: actor.actor_id,
+        roundIndex: round,
+        provider: runtimeConfig.provider,
+        model: runtimeConfig.model,
+        route,
+        attemptNumber,
+        outcome,
+        isTransient: err ? isTransientModelError(err) : false,
+        errorMessage: message,
+        durationMs: Date.now() - startedAt,
+        timeoutMs: resolveLlmTimeoutMs(runtimeConfig),
+        metadata: { tool_count: toolDefs.length },
+      }).catch((logErr) => console.error('[agent-model-telemetry] logModelCall error:', logErr));
+    };
+
+    const callModelWithTransientRetry = async (
+      runtimeConfig: AgentConfig,
+      runtimeApiKey: string,
+      route: 'primary' | 'backup',
+    ): Promise<{ content: string; tool_calls: ToolCallRecord[] }> => {
+      let lastErr: unknown;
+      for (let attempt = 1; attempt <= MODEL_MAX_TRANSIENT_RETRIES + 1; attempt++) {
+        const startedAt = Date.now();
+        try {
+          const output = await callModelOnce(runtimeConfig, runtimeApiKey);
+          recordModelAttempt(runtimeConfig, route, attempt, 'success', startedAt);
+          return output;
+        } catch (err) {
+          lastErr = err;
+          recordModelAttempt(runtimeConfig, route, attempt, 'error', startedAt, err);
+          const canRetry = attempt <= MODEL_MAX_TRANSIENT_RETRIES
+            && isTransientModelError(err)
+            && !opts?.abortSignal?.aborted;
+          if (!canRetry) break;
+          onEvent({
+            type: 'tool_status',
+            id: 'model-retry',
+            name: 'model_retry',
+            status: `${route === 'primary' ? 'Primary' : 'Backup'} model had a transient error; retrying once`,
+            turn_id: turnId,
+          });
+          await wait(opts?.transientRetryDelayMs ?? MODEL_TRANSIENT_RETRY_DELAY_MS);
+        }
+      }
+      throw lastErr;
+    };
+
     try {
       try {
-        result = await callModelOnce(config, apiKey);
+        result = await callModelWithTransientRetry(config, apiKey, 'primary');
       } catch (primaryErr) {
         const backup = backupRuntimeConfig(config);
         if (!backup || opts?.abortSignal?.aborted) throw primaryErr;
@@ -891,7 +887,7 @@ export async function runAgentTurn(
           status: 'Primary model unavailable, using backup provider',
           turn_id: turnId,
         });
-        result = await callModelOnce(backup, backupApiKey);
+        result = await callModelWithTransientRetry(backup, backupApiKey, 'backup');
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'LLM call failed';

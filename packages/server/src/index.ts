@@ -604,6 +604,7 @@ if (isMain && !process.env.CRMY_IMPORTED) {
 export { getPool, initPool, closePool } from './db/pool.js';
 export { runMigrations, getMigrationStatus } from './db/migrate.js';
 export { createMcpServer, getAllTools, getToolsForActor, normalizeToolInput } from './mcp/server.js';
+export { describeTool, zodToJsonSchema } from './mcp/tool-describe.js';
 export { emitEvent } from './events/emitter.js';
 export { createWorkflowEngine } from './workflows/engine.js';
 export { getSampleDataStatus, resetSampleData, seedSampleData } from './services/sample-data.js';

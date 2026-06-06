@@ -31,6 +31,24 @@ export interface LogActivityInput {
   durationMs?: number;
 }
 
+export interface LogModelCallInput {
+  tenantId: string;
+  sessionId?: string;
+  turnId?: string;
+  userId: string;
+  roundIndex: number;
+  provider: string;
+  model: string;
+  route: 'primary' | 'backup';
+  attemptNumber: number;
+  outcome: 'success' | 'error';
+  isTransient: boolean;
+  errorMessage?: string;
+  durationMs?: number;
+  timeoutMs?: number;
+  metadata?: Record<string, unknown>;
+}
+
 export interface ListActivityFilters {
   userId?: string;
   toolName?: string;
@@ -55,6 +73,32 @@ export async function logToolCall(db: DbPool, input: LogActivityInput): Promise<
       input.toolResult !== undefined ? JSON.stringify(input.toolResult) : null,
       input.isError,
       input.durationMs ?? null,
+    ],
+  );
+}
+
+export async function logModelCall(db: DbPool, input: LogModelCallInput): Promise<void> {
+  await db.query(
+    `INSERT INTO agent_model_call_log
+       (tenant_id, session_id, turn_id, user_id, round_index, provider, model, route,
+        attempt_number, outcome, is_transient, error_message, duration_ms, timeout_ms, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+    [
+      input.tenantId,
+      input.sessionId ?? null,
+      input.turnId ?? null,
+      input.userId,
+      input.roundIndex,
+      input.provider,
+      input.model,
+      input.route,
+      input.attemptNumber,
+      input.outcome,
+      input.isTransient,
+      input.errorMessage ?? null,
+      input.durationMs ?? null,
+      input.timeoutMs ?? null,
+      JSON.stringify(input.metadata ?? {}),
     ],
   );
 }

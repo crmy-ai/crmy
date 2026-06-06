@@ -665,7 +665,7 @@ Agents should retrieve Memory into Active Context with `briefing_get`, `context_
 
 ### MCP-First Architecture
 
-All customer-context operations are defined as **MCP tools**. The REST API and CLI mostly call the same tool handlers, while a few UI-first admin wizards (mailbox/calendar OAuth, provider setup, and other connection flows) remain REST/UI surfaces because they involve redirects or secrets. MCP is the complete agent-facing surface; the CLI is curated for setup, demos, Raw Context ingestion, activity/email review, systems, workflows, and operational QA.
+All customer-context operations are defined as **MCP tools**. REST exposes the same actor-scoped tool surface, and the CLI is a thin wrapper over those tools. Friendly CLI commands cover setup, demos, Raw Context ingestion, activity/email review, systems, workflows, and operational QA; `crmy tools list`, `crmy tools describe <tool_name>`, and `crmy tools call <tool_name>` provide direct access to the full visible MCP tool set. UI-first admin wizards such as mailbox/calendar OAuth and provider setup remain REST/UI surfaces because they involve redirects or secrets.
 
 Use high-level tools for most revenue agents: `briefing_get`, `customer_record_resolve`, `crm_search`, `context_ingest_auto`, `context_ingest`, `activity_create`, Signal promotion/handoff tools, compound actions, assignments, and HITL. Use `context_ingest_auto` for messy transcripts, emails, notes, and research; use `customer_record_resolve` when an agent needs to resolve a customer record before briefing or action. Reserve `context_add`, setup, mapping, operations, workflow administration, compatibility lookup tools, and systems-of-record tools for operator agents or human admins with explicit scopes.
 
@@ -674,7 +674,7 @@ Use high-level tools for most revenue agents: `briefing_get`, `customer_record_r
 1. **MCP (stdio)** — `crmy mcp` starts an MCP server over stdio for Claude Code
 2. **MCP (HTTP)** — `POST /mcp` endpoint for remote MCP clients (Streamable HTTP transport)
 3. **REST API** — `GET/POST/PATCH/DELETE /api/v1/*` endpoints for traditional integrations
-4. **CLI** — `crmy <command>` for terminal workflows and smoke tests
+4. **CLI** — `crmy <command>` for friendly terminal workflows, or `crmy tools describe <tool_name>` and `crmy tools call <tool_name>` for direct access to any visible MCP tool
 
 ### Multi-Tenancy
 
@@ -1280,11 +1280,21 @@ CRMy separates messy Raw Context from Current Memory:
 - CRMy combines related Signals into one evidence-backed claim so multiple sources can support, strengthen, or contradict the same inference.
 - **Memory** is Current typed operational context. Briefings and normal context search return Memory by default.
 
+Source support levels:
+
+| Level | Sources | Current behavior |
+|---|---|---|
+| First-class ingestion | Add Context, REST, MCP, CLI, Customer Email, Customer Activity/calendar, systems-of-record sync | Creates Raw Context receipts, Signals, Memory candidates, and lineage/audit metadata. |
+| Metadata-supported sources | Support records, product usage, Slack, documents, research packets, custom source types | Can be represented in source/evidence metadata when fed through first-class ingestion paths. |
+| Future first-class adapters | Inbound Slack, support desk, product telemetry, document repositories | Planned adapter surface; not currently built-in inbound connectors. |
+
 Every Signal and important Memory entry should read as a **claim with evidence**. The claim is the entry body. Evidence records source type, source ID/reference, source URL when available, source label, speaker or author, snippet, observed timestamp, captured timestamp, support confidence, rationale, and optional verification metadata. This lets an agent explain, for example, “Budget approval is a risk” together with the meeting excerpt and date that support the claim.
 
 Extraction stays tolerant of messy customer context. CRMy can keep an incomplete but useful Signal, then mark what it needs before it becomes Memory. Readiness language is intentionally operational: **Ready for Memory**, **Needs more detail**, **Needs supporting evidence**, **Needs review before agents can act**, or **Could affect forecast, approval required**. Internally, context type registries define the typed details that make a Signal actionable; developer/API docs may call these JSON schemas, but the product concept is typed Memory readiness.
 
 Corroborated Signals should be promoted before they are used to coordinate work, influence forecast, update external systems, assign tasks, or guide customer engagement. Use `context_signal_group_promote` for grouped/corroborated claims, `context_signal_promote` for a single reviewed Signal, and the reject tools when a claim should stay out of Memory.
+
+Signal auto-promotion is intentionally narrow. A Signal can auto-promote only when extraction auto-promotion is enabled, supporting evidence exists, the claim is not speculative, typed Memory readiness is complete enough for its context type, the group score meets the configured confirmation threshold, no unresolved conflict or duplicate-source inflation blocks the group, and policy allows promotion for the current actor without approval. If any gate fails, the Signal remains reviewable and can be repaired with `context_signal_group_complete_details`, strengthened with more evidence, sent to Handoff, rejected, or confirmed manually when allowed.
 
 The lifecycle is first-class:
 
@@ -1405,6 +1415,8 @@ crmy context review <id>
 crmy context stale
 ```
 
+Friendly CLI commands cover common operator and demo workflows. For full parity with MCP and REST, use `crmy tools list`, `crmy tools describe <tool_name>`, and `crmy tools call <tool_name>` to inspect and invoke any tool visible to the current actor.
+
 ### REST API
 
 ```
@@ -1419,6 +1431,14 @@ GET    /api/v1/context/semantic-search?q=...&subject_type=...
 POST   /api/v1/context/ingest           { text, subject_type, subject_id, source_label }
 POST   /api/v1/context/detect-subjects  { text }          → { subjects: [{ type, id, name, confidence, match_tier }] }
 POST   /api/v1/context/ingest-file      { filename, data (base64), source_label }  → { text_preview, subjects, truncated }
+POST   /api/v1/context/signal-groups/:id/complete-details
+POST   /api/v1/action-context
+```
+
+The generated OpenAPI contract lives at `docs/openapi.json` and is served by the API at `/api/v1/openapi.json`. Regenerate it only when REST paths, shared schemas, or OpenAPI source definitions change:
+
+```bash
+npm run generate:openapi --workspace=packages/server
 ```
 
 ---
@@ -2447,7 +2467,19 @@ DELETE /api/v1/custom-fields/:id
 
 ## Action Policies and HITL (Human-in-the-Loop)
 
-CRMy is the policy boundary between agent inference and operational change. Agents can infer Signals, draft recommendations, and prepare work freely, but actions that affect forecast, customer engagement, assignments, Current Memory, or systems of record pass through scopes, Action Policies, HITL approvals, and audit receipts.
+CRMy is the policy boundary between agent inference and operational change. Agents can infer Signals, draft recommendations, search, summarize, ingest Raw Context, and prepare work freely. Actions that affect customers, forecast, assignments, Current Memory, or systems of record pass through scopes, Action Policies, review when required, and audit receipts.
+
+Action Context is the tool agents should use before preparing meaningful customer action. It is not a blanket approval requirement. It gives the agent one compact packet with Memory, Signals, stale or conflicting context, source authority, allowed actions, warnings, expected proof, and review requirements when risk demands them.
+
+Use the result in three practical modes:
+
+| Mode | Agent behavior | Typical use |
+|---|---|---|
+| `inform` | Proceed with better context. | Briefing, search, summarization, internal notes, draft preparation, Add Context, reviewable Signal creation. |
+| `warn` | Proceed, but call out stale, inferred, conflicting, or low-confidence context. | Drafting outreach from unconfirmed Signals, recommending a next step with stale Memory, preparing a record update preview. |
+| `require_review` | Stop before execution and route to Handoff or policy review. | Automatic customer send, forecast/stage/amount/owner changes, external writeback, external commitments, out-of-scope records, or using unconfirmed Signals as fact. |
+
+Warnings do not automatically become Handoffs. `required_handoffs` should mean the action cannot execute without review; non-blocking issues stay visible in `guidance.warning_reasons` and `checks`.
 
 Built-in Action Policies protect high-risk actions before custom rules run:
 

@@ -6,6 +6,7 @@ import type {
   ActionContextAllowedAction,
   ActionContextCheckStatus,
   ActionContextGetInput,
+  ActionContextOperatingMode,
   ActionContextPolicySummary,
   ActionContextProposedAction,
   ActionContextReadinessStatus,
@@ -40,6 +41,14 @@ export interface DeriveActionReadinessInput {
   policy?: ActionContextPolicySummary;
   scope_blockers?: string[];
   proposed_action?: ActionContextProposedAction;
+}
+
+interface ActionContextGuidanceInput {
+  operating_mode: ActionContextOperatingMode;
+  blockers: string[];
+  review_reasons: string[];
+  proposed_action?: ActionContextProposedAction;
+  policy?: ActionContextPolicySummary;
 }
 
 function unique<T>(items: T[]): T[] {
@@ -286,7 +295,86 @@ function maxRisk(...levels: Array<ActionContextRiskLevel | undefined>): ActionCo
   return 'low';
 }
 
-export function deriveActionReadiness(input: DeriveActionReadinessInput): Pick<ActionContext, 'readiness' | 'checks' | 'required_handoffs'> {
+function requiresExecutionReview(input: Pick<ActionContextGuidanceInput, 'blockers' | 'policy'>): boolean {
+  if (input.blockers.length > 0) return true;
+  return input.policy?.decision === 'approval_required'
+    || input.policy?.decision === 'blocked'
+    || input.policy?.decision === 'draft_only';
+}
+
+function deriveOperatingMode(input: Pick<ActionContextGuidanceInput, 'blockers' | 'review_reasons' | 'policy'>): ActionContextOperatingMode {
+  if (requiresExecutionReview(input)) return 'require_review';
+  if (input.review_reasons.length > 0) return 'warn';
+  return 'inform';
+}
+
+function proposedActionLabel(action?: ActionContextProposedAction): string {
+  if (!action) return 'this work';
+  switch (action.action_type) {
+    case 'customer_outreach':
+      return 'customer outreach';
+    case 'assignment_create':
+      return 'assignment creation';
+    case 'memory_promote':
+      return 'Memory confirmation';
+    case 'record_update':
+      return 'record update';
+    case 'external_writeback':
+      return 'external writeback';
+    default:
+      return 'this work';
+  }
+}
+
+function buildActionGuidance(input: ActionContextGuidanceInput): ActionContext['guidance'] {
+  const actionLabel = proposedActionLabel(input.proposed_action);
+  if (input.operating_mode === 'require_review') {
+    const reviewReasons = unique([
+      ...input.blockers,
+      ...(input.policy?.decision === 'approval_required' ? input.policy.reasons : []),
+      ...(input.policy?.decision === 'blocked' ? input.policy.reasons : []),
+      ...(input.policy?.decision === 'draft_only' ? input.policy.reasons : []),
+    ]);
+    return {
+      summary: `Stop before executing ${actionLabel}; CRMy requires review or cannot allow this action yet.`,
+      can_execute: false,
+      warning_reasons: input.review_reasons,
+      review_reasons: reviewReasons,
+      recommended_next_steps: [
+        'Route the action to Handoff or resolve the policy/scope blocker before execution.',
+        'Use confirmed Memory and evidence links when explaining why review is required.',
+        'Do not write to customer records or systems of record until the review condition is cleared.',
+      ],
+    };
+  }
+
+  if (input.operating_mode === 'warn') {
+    return {
+      summary: `Proceed with ${actionLabel} if appropriate, but make the warnings visible to the user or agent.`,
+      can_execute: true,
+      warning_reasons: input.review_reasons,
+      review_reasons: [],
+      recommended_next_steps: [
+        'Use confirmed Memory as the source of truth.',
+        'Treat unconfirmed Signals, stale Memory, conflicts, and pending work as caveats.',
+        'Route to Handoff only if the warning will affect an external customer action, operational record, or system-of-record write.',
+      ],
+    };
+  }
+
+  return {
+    summary: `Proceed with ${actionLabel}; Action Context is informational for this request.`,
+    can_execute: true,
+    warning_reasons: [],
+    review_reasons: [],
+    recommended_next_steps: [
+      'Use the briefing, proof links, and source authority summary to complete the work.',
+      'Keep any resulting customer or system-impacting write on the normal governed path.',
+    ],
+  };
+}
+
+export function deriveActionReadiness(input: DeriveActionReadinessInput): Pick<ActionContext, 'operating_mode' | 'guidance' | 'readiness' | 'checks' | 'required_handoffs'> {
   const memoryCount = briefingMemoryEntries(input.briefing).length;
   const signalEntries = briefingSignalEntries(input.briefing);
   const signalGroups = input.briefing.signal_groups ?? [];
@@ -331,6 +419,14 @@ export function deriveActionReadiness(input: DeriveActionReadinessInput): Pick<A
     : reviewReasons.length > 0
     ? 'review_needed'
     : 'ready';
+  const operatingMode = deriveOperatingMode({ blockers, review_reasons: reviewReasons, policy: input.policy });
+  const guidance = buildActionGuidance({
+    operating_mode: operatingMode,
+    blockers,
+    review_reasons: reviewReasons,
+    proposed_action: input.proposed_action,
+    policy: input.policy,
+  });
   const riskLevel = maxRisk(
     blockers.length > 0 || contradictionCount > 0 || input.systems.source_blockers.length > 0 ? 'high' : undefined,
     unresolvedSignalGroups.some(group => group.readiness?.status === 'blocked_by_conflict') ? 'high' : undefined,
@@ -338,20 +434,29 @@ export function deriveActionReadiness(input: DeriveActionReadinessInput): Pick<A
     reviewReasons.length > 0 || unresolvedSignalGroups.length > 0 ? 'medium' : undefined,
   );
 
+  const proposedSignalGroupIds = new Set(input.proposed_action?.signal_group_ids ?? []);
+  const signalGroupsRequiringReview = operatingMode === 'require_review'
+    ? unresolvedSignalGroups.filter(group => {
+      if (input.proposed_action?.action_type === 'memory_promote') {
+        return proposedSignalGroupIds.size === 0 || proposedSignalGroupIds.has(group.id);
+      }
+      return proposedSignalGroupIds.has(group.id);
+    })
+    : [];
   const required_handoffs: ActionContext['required_handoffs'] = [
-    ...input.briefing.open_assignments.map(assignment => ({
+    ...(operatingMode === 'require_review' ? input.briefing.open_assignments.map(assignment => ({
       type: 'assignment' as const,
       id: assignment.id,
       status: assignment.status,
       title: assignment.title,
-    })),
-    ...unresolvedSignalGroups.map(group => ({
+    })) : []),
+    ...signalGroupsRequiringReview.map(group => ({
       type: 'signal_review' as const,
       id: group.id,
       status: group.readiness?.status ?? group.status,
       title: group.title ?? group.normalized_claim,
     })),
-    ...(input.systems.open_conflict_count > 0 ? [{
+    ...(operatingMode === 'require_review' && input.systems.open_conflict_count > 0 ? [{
       type: 'source_conflict' as const,
       status: 'open',
       title: `${input.systems.open_conflict_count} source conflict${input.systems.open_conflict_count === 1 ? '' : 's'} need resolution`,
@@ -373,8 +478,10 @@ export function deriveActionReadiness(input: DeriveActionReadinessInput): Pick<A
       risk_level: riskLevel,
       reasons,
       blockers: unique(blockers),
-      review_required: status !== 'ready',
+      review_required: operatingMode === 'require_review',
     },
+    operating_mode: operatingMode,
+    guidance,
     checks: {
       memory: {
         ...check(memoryCount === 0 || staleCount > 0 || contradictionCount > 0 ? 'review_needed' : 'ready', [
@@ -500,6 +607,8 @@ export async function getActionContext(
     subject_type: input.subject_type,
     subject_id: input.subject_id,
     generated_at: new Date().toISOString(),
+    operating_mode: derived.operating_mode,
+    guidance: derived.guidance,
     briefing,
     readiness: derived.readiness,
     checks: derived.checks,
@@ -522,6 +631,8 @@ export async function getActionContext(
       objectId: input.subject_id,
       afterData: {
         readiness_status: actionContext.readiness.status,
+        operating_mode: actionContext.operating_mode,
+        review_required: actionContext.readiness.review_required,
         risk_level: actionContext.readiness.risk_level,
         stale_count: actionContext.checks.memory.stale_count,
         contradiction_count: actionContext.checks.memory.contradiction_count,
@@ -542,6 +653,8 @@ export async function getActionContext(
         contradiction_count: actionContext.checks.memory.contradiction_count,
         unresolved_signal_readiness_count: actionContext.checks.signals.unresolved_readiness_count ?? 0,
         readiness_status: actionContext.readiness.status,
+        operating_mode: actionContext.operating_mode,
+        review_required: actionContext.readiness.review_required,
         risk_level: actionContext.readiness.risk_level,
       },
     });

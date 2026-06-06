@@ -47,13 +47,13 @@ CRMy gives agents that operating layer.
 
 CRMy is for builders creating sales, CS, RevOps, support, or GTM (AI) agents that need to work with humans and revenue systems safely.
 
-Use it when your agent needs to know account state, inspect evidence, remember durable customer context, respect user scope, request approval, or prepare governed CRM/writeback actions.
+Use it when your agent needs to know account state, inspect evidence, remember durable customer context, respect user scope, act with the right warnings, request approval when risk requires it, or prepare governed CRM/writeback actions.
 
 ## What CRMy Is Not
 
 - Not a CRM replacement. Salesforce, HubSpot, warehouses, and support desks stay the systems of record.
 - Not generic chatbot memory. CRMy stores typed, evidence-backed GTM Memory with lifecycle, ownership, freshness, and audit.
-- Not a workflow toy. Agents can prepare action, but CRMy keeps policy, Handoffs, writeback receipts, and human review in the path.
+- Not a workflow toy. Agents can prepare action, but CRMy keeps policy, Handoffs, writeback receipts, and human review in the path when risk requires it.
 - Not a sales methodology lock-in. Registries and Memory types are extensible, so teams can model their own GTM language.
 
 ## Three Pillars
@@ -74,9 +74,9 @@ Memory is persistent, scoped, searchable, versioned, auditable, and designed for
 
 ### 3. Act Safely
 
-Brief agents before action, route sensitive decisions through Handoffs, enforce user and team scope, preview writebacks, apply policy, and emit audit receipts.
+Brief agents before action, warn when context is stale or inferred, route sensitive decisions through Handoffs, enforce user and team scope, preview writebacks, apply policy, and emit audit receipts.
 
-Agents can prepare work freely. CRMy decides what can be written, what needs approval, and what must stay reviewable.
+Agents can prepare work freely. CRMy decides what can proceed, what needs a warning, what can be written, what needs approval, and what must stay reviewable.
 
 ## Core Concepts
 
@@ -127,7 +127,7 @@ Use CRMy when you want agents that can:
 - route sensitive decisions to a human with evidence attached
 - prepare CRM or warehouse updates without bypassing policy
 - operate with member, manager, and admin visibility boundaries
-- expose the core loop through Web UI, REST, MCP, and curated CLI workflows
+- expose the core loop through Web UI, REST, MCP, and CLI tool calls
 
 ## The Core Context Engine
 
@@ -140,6 +140,10 @@ Raw Context -> Subject Graph -> Signals -> Memory -> Briefing -> Handoff / Write
 That engine keeps customer context useful without pretending messy source material is instantly true. It resolves customer scope, extracts evidence-backed Signals, separates inferred claims from confirmed Memory, retrieves the right context into an agent briefing, and governs action through Handoffs, writeback policy, receipts, audit, and Lineage.
 
 The most important community contributions are real-world tests of this loop: messy transcripts, customer emails, calendar meetings, CRM/warehouse sync, custom systems of record, writeback previews, approval flows, and agent harnesses. See [Context Engine](docs/context-engine.md) and [Contributing](CONTRIBUTING.md) for where testing helps most.
+
+## API, MCP, And CLI Parity
+
+MCP is the agent-facing tool contract. REST exposes the same tool surface through actor-scoped endpoints, and the CLI is a thin wrapper over those tools. Friendly CLI commands cover common workflows, while `crmy tools list`, `crmy tools describe <tool_name>`, and `crmy tools call <tool_name>` provide direct access to the full visible MCP tool set for the current actor.
 
 ## Quickstart
 
@@ -402,6 +406,30 @@ See [MCP tools](docs/mcp-tools.md) for the full tool catalog and scoped-access m
 | **Systems of Record** | Admin setup for CRMs and warehouses, field mappings, sync, conflicts, and governed writeback. |
 | **Settings → Automations** | Admin/advanced event rules and sequences that request governed action instead of bypassing policy. |
 
+## Source Support Levels
+
+| Level | Sources | Current behavior |
+|---|---|---|
+| First-class ingestion | Add Context, REST, MCP, CLI, Customer Email, Customer Activity/calendar, systems-of-record sync | Creates Raw Context receipts, Signals, Memory candidates, and lineage/audit metadata. |
+| Metadata-supported sources | Support records, product usage, Slack, documents, research packets, custom source types | Can be represented in source/evidence metadata when fed through first-class ingestion paths. |
+| Future first-class adapters | Inbound Slack, support desk, product telemetry, document repositories | Planned adapter surface; not currently presented as built-in inbound connectors. |
+
+## Signal Promotion Gates
+
+Signals can be created freely from useful customer evidence, but they become Memory conservatively.
+
+A Signal can auto-promote only when all of these are true:
+
+- extraction auto-promotion is enabled for the Workspace Agent;
+- at least one supporting evidence item exists;
+- the claim is not speculative;
+- typed Memory readiness is complete enough for the Signal's context type;
+- the Signal/group score meets the configured confirmation threshold;
+- the Signal group is ready, without unresolved conflict or duplicate-source inflation;
+- policy allows promotion for the current actor without approval.
+
+Otherwise, the Signal remains reviewable. Users or agents can add missing detail, add evidence, send it to Handoff, reject it as Memory, or confirm it manually when allowed.
+
 ## Systems of Record
 
 CRM remains the system of record. CRMy makes it safer for agents to work with it.
@@ -463,9 +491,11 @@ crmy hitl list
 crmy systems list
 crmy workflows list
 crmy sequences list
+crmy tools describe action_context_get
+crmy tools call action_context_get --json '{"subject_type":"account","subject_id":"..."}'
 ```
 
-The CLI is curated for setup, demos, Raw Context ingestion, activity/email review, systems, workflows, and operational QA. MCP is the complete agent-facing surface.
+Friendly CLI commands cover setup, demos, Raw Context ingestion, activity/email review, systems, workflows, and operational QA. `crmy tools list`, `crmy tools describe <tool_name>`, and `crmy tools call <tool_name>` expose the same actor-scoped MCP tool surface through the CLI.
 
 ## REST API
 
@@ -563,6 +593,7 @@ npm test
 
 - [Guide](docs/guide.md)
 - [MCP tools](docs/mcp-tools.md)
+- [Agent recipes](docs/recipes/README.md)
 - [Examples](examples/README.md)
 - [Claude Code account briefing example](examples/claude-code-account-briefing/README.md)
 - [Claude Desktop account briefing example](examples/claude-desktop-account-briefing/README.md)
@@ -581,7 +612,7 @@ npm test
 
 ## Release
 
-Current version: `0.8.5`
+Current version: `0.8.6`
 
 v0.8.x focuses on making CRMy a usable, scoped GTM agent workspace:
 

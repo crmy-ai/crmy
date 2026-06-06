@@ -131,6 +131,7 @@ export async function runAgentTurnById(db: DbPool, turnId: string): Promise<void
 
     const updatedHistory = await runAgentTurn(history, config, actor, db, sendEvent, {
       sessionId: session.id,
+      turnId: turn.id,
       contextMeta,
       abortSignal: controller.signal,
     });

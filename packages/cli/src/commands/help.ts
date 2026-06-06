@@ -59,8 +59,9 @@ const HELP_TEXT = `
     $ crmy contacts list            List all contacts
     $ crmy mcp                      Start stdio MCP for local agents
 
-  MCP is CRMy's complete agent-facing tool surface. The CLI is curated for
-  setup, demos, ingestion, activity/email review, systems, workflows, and QA.
+  Friendly commands cover common workflows. For full tool parity, use
+  crmy tools list, crmy tools describe <tool_name>, and crmy tools call
+  <tool_name> with JSON input.
   OAuth connection wizards and provider setup remain UI-first admin flows.
 
   Run crmy <command> --help for detailed usage of any command.

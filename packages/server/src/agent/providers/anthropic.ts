@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentConfig, ConversationMessage, AgentToolDef, ToolCallRecord } from '../types.js';
+import { DEFAULT_LLM_TIMEOUT_MS, resolveLlmTimeoutMs } from '../provider-utils.js';
 
-const AGENT_STREAM_TIMEOUT_MS = Number(process.env.AGENT_STREAM_TIMEOUT_MS ?? 120_000);
+const AGENT_STREAM_TIMEOUT_MS = Number(process.env.AGENT_STREAM_TIMEOUT_MS ?? DEFAULT_LLM_TIMEOUT_MS);
 
 // ── Thinking support ──────────────────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ export interface CallAnthropicOpts {
    */
   enableThinking?: boolean;
   abortSignal?: AbortSignal;
+  timeoutMs?: number;
 }
 
 function timeoutSignal(timeoutMs = AGENT_STREAM_TIMEOUT_MS, externalSignal?: AbortSignal): { signal: AbortSignal; done: () => void } {
@@ -93,7 +95,7 @@ export async function callAnthropic(
     headers['anthropic-beta'] = 'interleaved-thinking-2025-05-14';
   }
 
-  const timeout = timeoutSignal(AGENT_STREAM_TIMEOUT_MS, opts?.abortSignal);
+  const timeout = timeoutSignal(opts?.timeoutMs ?? resolveLlmTimeoutMs(config, AGENT_STREAM_TIMEOUT_MS), opts?.abortSignal);
   try {
     const res = await fetch(`${baseUrl}/messages`, {
       method: 'POST',

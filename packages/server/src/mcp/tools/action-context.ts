@@ -12,7 +12,7 @@ export function actionContextTools(db: DbPool): ToolDef[] {
     {
       name: 'action_context_get',
       tier: 'core',
-      description: 'Assess whether a customer record has enough current, confirmed, authorized context for action. Returns the briefing, readiness status, policy/source-authority checks, allowed action gates, required handoffs, and a compact retrieval proof event. This does not mutate CRM records or execute writebacks.',
+      description: 'Assemble action-aware customer context before an agent prepares work. Returns the briefing, operating_mode (inform, warn, require_review), readiness, policy/source-authority checks, allowed actions, required handoffs, guidance, and a compact retrieval proof event. This does not mutate CRM records or execute writebacks.',
       inputSchema: actionContextGet,
       handler: async (input: z.infer<typeof actionContextGet>, actor: ActorContext) => {
         return {

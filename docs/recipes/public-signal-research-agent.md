@@ -87,6 +87,7 @@ Run the one-minute smoke test before debugging OpenClaw or TweetClaw:
 
 ```bash
 npx -y @crmy/cli agent-smoke
+npx -y @crmy/cli tools describe context_ingest_auto
 ```
 
 This verifies the seeded demo path: `customer_record_resolve` -> `briefing_get` -> `context_signal_group_list`.

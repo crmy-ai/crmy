@@ -16,8 +16,8 @@ crmy({ action: "<action>", params: { ... } })
 Use CRMy to:
 
 - Get a one-call briefing before acting on a customer record.
-- Search and update contacts, companies, opportunities, use cases, activities, context entries, assignments, and HITL requests.
-- Store persistent context entries with confidence, source, tags, and review metadata.
+- Search and update contacts, accounts, opportunities, use cases, activities, context entries, assignments, and HITL requests.
+- Ingest messy customer context as Raw Context, then review Signals before they become Memory.
 - Route work to humans or agents through assignments and approval requests.
 - Check audit events and operations health when trust matters.
 
@@ -79,9 +79,9 @@ If there are contradictions, do not pick a truth unless the evidence is explicit
 crmy({ action: "context.contradictions_assign", params: { subject_type: "account", subject_id: "<uuid>", limit: 5 } })
 ```
 
-### 5. Write with provenance
+### 5. Capture context with provenance
 
-When logging activities or adding context, include source, subject, confidence, and useful detail.
+When logging activities, include source, subject, and useful detail.
 
 ```js
 crmy({
@@ -98,21 +98,22 @@ crmy({
 })
 ```
 
+For transcripts, emails, notes, call debriefs, research, or any messy source material, use Raw Context ingestion:
+
 ```js
 crmy({
-  action: "context.add",
+  action: "context.ingest_auto",
   params: {
-    subject_type: "account",
-    subject_id: "<account-uuid>",
-    context_type: "next_step",
-    title: "Demo requested for May 20",
-    body: "Cody Harris from Databricks requested a CRMy demo on May 20.",
-    confidence: 0.95,
-    source: "call",
-    tags: ["demo", "next-step"]
+    document: "Cody Harris from Databricks requested a CRMy demo on May 20.",
+    source_label: "Call debrief - Databricks - 2026-05-20",
+    source_occurred_at: "2026-05-20T17:00:00.000Z",
+    subjects: [{ type: "contact", id: "<contact-uuid>", name: "Cody Harris" }],
+    idempotency_key: "databricks-call-debrief-2026-05-20"
   }
 })
 ```
+
+Use `context.add` only for advanced direct writes when a human explicitly asks you to create already-reviewed Memory or an evidence-backed Signal.
 
 ### 6. Escalate risky actions
 
@@ -163,7 +164,7 @@ Subject types: `contact`, `account`, `opportunity`, `use_case`.
 | Action | Purpose |
 |---|---|
 | `contact.search`, `contact.get`, `contact.create`, `contact.update`, `contact.set_stage`, `contact.timeline` | Contacts with lead lifecycle stages |
-| `account.search`, `account.get`, `account.create`, `account.update` | Companies/accounts |
+| `account.search`, `account.get`, `account.create`, `account.update` | Accounts |
 | `opportunity.search`, `opportunity.get`, `opportunity.create`, `opportunity.update`, `opportunity.advance` | Deals/pipeline |
 | `use_case.search`, `use_case.get`, `use_case.create`, `use_case.update` | Use cases/deployments |
 
@@ -192,7 +193,8 @@ Prefer `subject_type` + `subject_id`. Use `detail` for structured extras like at
 | `context.signal_groups`, `context.signal_group.get` | Review grouped Signals with evidence and readiness |
 | `context.search` | Keyword search |
 | `context.semantic_search` | Semantic memory search when pgvector is enabled |
-| `context.add` | Store typed customer memory |
+| `context.ingest_auto` | Ingest messy Raw Context and let CRMy extract Signals and Memory readiness |
+| `context.add` | Advanced direct Memory or Signal write |
 | `context.supersede` | Replace stale/wrong context while preserving audit history |
 | `context.stale` | Find expired context |
 | `context.review_batch` | Mark stale entries reviewed |
@@ -201,12 +203,12 @@ Prefer `subject_type` + `subject_id`. Use `detail` for structured extras like at
 | `context.contradictions_assign` | Create review assignments for conflicts |
 | `context.contradictions_resolve` | Resolve a conflict when evidence is clear |
 
-Context write guidance:
+Context guidance:
 
-- Use confidence from `0.0` to `1.0`.
-- Use `source` and `source_activity_id` when possible.
+- Prefer `context.ingest_auto` for transcripts, emails, notes, research, debriefs, and support updates.
+- Use `source_label`, `source_occurred_at`, selected `subjects`, and `idempotency_key` when possible.
+- Use `context.add` only for already-reviewed direct Memory/Signal writes.
 - Use `valid_until` for time-sensitive facts.
-- Use tags for retrieval.
 - Do not create duplicate context if CRMy reports convergence warnings; supersede, consolidate, or ask for review.
 
 ### Assignments And HITL
@@ -238,7 +240,7 @@ Use assignments for work that should be done later. Use HITL for approval before
 1. `search` or `contact.search` to resolve the person.
 2. `briefing.get` for current context.
 3. `activity.create` with the call summary and structured `detail`.
-4. `context.add` for explicit persistent facts: objections, next steps, commitments, preferences, stakeholders, or risk.
+4. `context.ingest_auto` for messy notes or transcript excerpts. Review resulting Signals before confirming Memory.
 5. `assignment.create` for the follow-up.
 
 ### Prepare outreach

@@ -18,7 +18,7 @@ const STATUS_CONFIG = {
     dotClassName: 'bg-emerald-500',
   },
   review_needed: {
-    label: 'Review needed',
+    label: 'Warnings',
     icon: AlertTriangle,
     className: 'border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300',
     dotClassName: 'bg-amber-500',
@@ -31,15 +31,36 @@ const STATUS_CONFIG = {
   },
 } as const;
 
+const MODE_CONFIG = {
+  inform: {
+    label: 'Inform',
+    icon: CheckCircle2,
+    className: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+  },
+  warn: {
+    label: 'Warn',
+    icon: AlertTriangle,
+    className: 'border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+  },
+  require_review: {
+    label: 'Review required',
+    icon: ShieldCheck,
+    className: 'border-violet-500/25 bg-violet-500/10 text-violet-700 dark:text-violet-300',
+  },
+} as const;
+
 function countLabel(count: number, singular: string, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
 function reasonText(actionContext: ActionContext) {
-  const reasons = actionContext.readiness.reasons.length > 0
-    ? actionContext.readiness.reasons
-    : ['Action Context is available for this record.'];
-  return reasons.slice(0, 3);
+  const guidance = actionContext.guidance;
+  const reasons = [
+    guidance?.summary,
+    ...(guidance?.review_reasons ?? []),
+    ...(guidance?.warning_reasons ?? []),
+  ].filter((reason): reason is string => Boolean(reason));
+  return reasons.length > 0 ? reasons.slice(0, 3) : ['Action Context is available for this record.'];
 }
 
 export function ActionReadinessPanel({ actionContext, isLoading, isError }: ActionReadinessPanelProps) {
@@ -48,7 +69,7 @@ export function ActionReadinessPanel({ actionContext, isLoading, isError }: Acti
       <div className="rounded-xl border border-border bg-card p-3">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Checking action readiness...
+          Checking Action Context...
         </div>
       </div>
     );
@@ -59,14 +80,16 @@ export function ActionReadinessPanel({ actionContext, isLoading, isError }: Acti
       <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-destructive">
           <AlertTriangle className="h-4 w-4" />
-          Action readiness unavailable
+          Action Context unavailable
         </div>
       </div>
     );
   }
 
-  const config = STATUS_CONFIG[actionContext.readiness.status];
-  const Icon = config.icon;
+  const mode = actionContext.operating_mode ?? (actionContext.readiness.review_required ? 'require_review' : actionContext.readiness.status === 'ready' ? 'inform' : 'warn');
+  const modeConfig = MODE_CONFIG[mode];
+  const readinessConfig = STATUS_CONFIG[actionContext.readiness.status];
+  const Icon = modeConfig.icon;
   const checks = actionContext.checks;
   const mappings = checks.systems_of_record.mappings;
   const unresolvedSignalCount = checks.signals.unresolved_readiness_count ?? checks.signals.conflicting_count;
@@ -74,14 +97,17 @@ export function ActionReadinessPanel({ actionContext, isLoading, isError }: Acti
   return (
     <div className="rounded-xl border border-border bg-card p-3 space-y-3">
       <div className="flex items-start gap-3">
-        <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border ${config.className}`}>
+        <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border ${modeConfig.className}`}>
           <Icon className="h-4 w-4" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-display font-bold text-foreground">Action Readiness</p>
-            <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${config.className}`}>
-              {config.label}
+            <p className="text-sm font-display font-bold text-foreground">Action Context</p>
+            <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${modeConfig.className}`}>
+              {modeConfig.label}
+            </span>
+            <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${readinessConfig.className}`}>
+              {readinessConfig.label}
             </span>
             <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-muted-foreground">
               {actionContext.readiness.risk_level} risk
@@ -96,10 +122,10 @@ export function ActionReadinessPanel({ actionContext, isLoading, isError }: Acti
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <Metric icon={FileText} label="Confirmed Memory" value={checks.memory.confirmed_count} detail={countLabel(checks.memory.stale_count, 'review')} />
+        <Metric icon={FileText} label="Confirmed Memory" value={checks.memory.confirmed_count} detail={countLabel(checks.memory.stale_count, 'warning')} />
         <Metric icon={Sparkles} label="Signals" value={checks.signals.signal_count} detail={countLabel(unresolvedSignalCount, 'readiness check')} />
         <Metric icon={ClipboardList} label="Handoffs" value={actionContext.required_handoffs.length} detail={countLabel(checks.assignments.open_count, 'assignment')} />
-        <Metric icon={Database} label="Source Gates" value={mappings.length} detail={countLabel(checks.systems_of_record.open_conflict_count, 'conflict')} />
+        <Metric icon={Database} label="Source Authority" value={mappings.length} detail={countLabel(checks.systems_of_record.open_conflict_count, 'conflict')} />
       </div>
 
       {mappings.length > 0 && (

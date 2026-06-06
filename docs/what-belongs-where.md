@@ -12,7 +12,7 @@ CRMy should stay lifecycle-first. New features should make it easier to understa
 | **Customer Email** | Customer-facing email review, unmatched messages, draft replies, approvals, mailbox connection state. | General inbox replacement, internal mail archive, spam processing. |
 | **Customer Activity** | Customer meetings, calls, notes, missing context, debriefs, calendar connection state. | Full calendar replacement, internal meeting management. |
 | **Customer Records** | Account/contact/opportunity/use-case facts, Memory coverage, briefings, scoped actions, record-specific Add Context. | Global context review or system setup. |
-| **Handoffs** | Human decisions: approve, reject, reassign, complete, and inspect decision packets. | General task management unrelated to governed agent/customer action. |
+| **Handoffs** | Human decisions for risky, uncertain, delegated, or externally impactful work: approve, reject, reassign, complete, and inspect decision packets. | General task management, or low-risk agent work that only needs context and warnings. |
 | **Workspace Agent** | Scoped GTM workbench, Active Context, tool work, draft assistance, record-bound questions. | Admin configuration, unrestricted record access, silent writes. |
 | **Settings** | Workspace configuration, profile, model setup, systems of record, registries, policies, source filters. | Daily seller/customer-success workflow. |
 | **Settings → Automations** | Action rules, sequences, webhooks, and advanced automation utilities. | First-run onboarding or primary user navigation. |
@@ -35,6 +35,7 @@ When in doubt, ask: does this help a user understand or move the source-to-actio
 - Scope every read and write by tenant, actor, role, owner visibility, and tool permissions.
 - Keep provider-specific behavior in provider adapters; the core engine should consume CRMy-shaped data.
 - Keep durable invariants in PostgreSQL: idempotency, uniqueness, current/stale state, row versions, replay safety, and transaction boundaries.
+- Use Action Context to make agents more effective first: inform low-risk work, warn on stale or inferred context, and require review only when action risk, authority, or evidence quality demands it.
 - Route external writes through preview, policy checks, allowed-field checks, approval when required, idempotency, execution receipts, and audit.
 - Preserve Lineage whenever source material becomes Signals, Memory, Handoffs, writebacks, or operator-facing recovery state.
 - Keep user-facing contracts stable across REST, CLI, MCP, and Web UI surfaces.

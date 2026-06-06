@@ -26,11 +26,17 @@ import {
   backupRuntimeConfig,
   buildOpenAICompatibleHeaders,
   chatCompletionsUrl,
+  DEFAULT_LLM_TIMEOUT_MS,
+  isTransientModelError,
   providerUsesAnthropicFormat,
+  resolveLlmTimeoutMs,
+  wait,
 } from '../provider-utils.js';
 
-/** Default timeout for background LLM calls (30 seconds). */
-const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? 30_000);
+/** Default timeout for background LLM calls. Tenant model settings override it. */
+const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS ?? DEFAULT_LLM_TIMEOUT_MS);
+const LLM_TRANSIENT_RETRY_DELAY_MS = Number(process.env.LLM_TRANSIENT_RETRY_DELAY_MS ?? 250);
+const LLM_MAX_TRANSIENT_RETRIES = Number(process.env.LLM_MAX_TRANSIENT_RETRIES ?? 1);
 
 /**
  * Wrapper around fetch that aborts after `timeoutMs` milliseconds.
@@ -91,7 +97,7 @@ export async function callLLM(
   const config = await loadConfig(db, tenantId);
   const model = opts.modelOverride ?? config?.model ?? 'claude-3-5-haiku-20241022';
   const maxTokens = opts.maxTokens ?? 1024;
-  const timeoutMs = opts.timeoutMs ?? LLM_TIMEOUT_MS;
+  const timeoutMs = opts.timeoutMs ?? resolveLlmTimeoutMs(config, LLM_TIMEOUT_MS);
 
   const callConfigured = async (runtimeConfig: AgentConfig | null): Promise<string> => {
     if (!runtimeConfig || providerUsesAnthropicFormat(runtimeConfig.provider)) {
@@ -119,13 +125,27 @@ export async function callLLM(
     );
   };
 
+  const callWithTransientRetry = async (runtimeConfig: AgentConfig | null): Promise<string> => {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= LLM_MAX_TRANSIENT_RETRIES + 1; attempt++) {
+      try {
+        return await callConfigured(runtimeConfig);
+      } catch (err) {
+        lastErr = err;
+        if (attempt > LLM_MAX_TRANSIENT_RETRIES || !isTransientModelError(err)) break;
+        await wait(LLM_TRANSIENT_RETRY_DELAY_MS);
+      }
+    }
+    throw lastErr;
+  };
+
   try {
-    return await callConfigured(config);
+    return await callWithTransientRetry(config);
   } catch (err) {
     const backup = config ? backupRuntimeConfig(config) : null;
     if (!backup) throw err;
     try {
-      return await callConfigured(backup);
+      return await callWithTransientRetry(backup);
     } catch (backupErr) {
       const primaryMessage = err instanceof Error ? err.message : 'primary provider failed';
       const backupMessage = backupErr instanceof Error ? backupErr.message : 'backup provider failed';

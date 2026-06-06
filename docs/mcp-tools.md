@@ -730,11 +730,15 @@ Get a unified briefing for any customer record — assembles the record, related
 - **Note**: `token_budget` enables priority-ranked, budget-constrained packing. Entries are scored by `effective_confidence × priority_weight` (with per-type half-life decay) and greedily packed. Pass `context_radius: "adjacent"` or `"account_wide"` to pull in context from related entities. When entries are dropped due to budget exhaustion, `dropped_entries` summarizes what was cut (context_type, title, confidence) so agents can request specific entries via `context_get`.
 
 ### action_context_get
-Assess whether a customer record has enough current, confirmed, authorized context for action.
+Assemble action-aware customer context before an agent prepares work. This is an intelligence packet first: it helps the agent understand Memory, Signals, stale context, policy, source ownership, warnings, proof, and whether review is needed for the proposed action.
 - **Input**: `subject_type` (required), `subject_id` (required), `since`, `context_types`, `include_stale`, `context_radius`, `token_budget`, `emit_retrieval_event` (default `true`), and optional `proposed_action`
 - **Proposed action types**: `customer_outreach`, `assignment_create`, `memory_promote`, `record_update`, `external_writeback`
-- **Output**: `{ action_context: { briefing, readiness, checks, allowed_actions, required_handoffs, proof } }`
+- **Output**: `{ action_context: { operating_mode, guidance, briefing, readiness, checks, allowed_actions, required_handoffs, proof } }`
 - **Readiness states**: `ready`, `review_needed`, or `blocked`
+- **Operating modes**: use the readiness and checks as `inform` for low-risk work, `warn` when stale/inferred/conflicting context should be visible but not blocking, and `require_review` when execution needs human approval.
+- **Handoffs**: `required_handoffs` contains execution-blocking review work. Non-blocking stale Memory, unconfirmed Signals, and open-work warnings remain in `guidance.warning_reasons` and `checks`.
+- **Low-friction examples**: briefing, search, summarization, internal notes, draft preparation, Raw Context ingest, and reviewable Signal creation should generally remain fast.
+- **Review examples**: automatic customer email send, forecast/stage/amount/owner changes, external writeback, external commitments, out-of-scope records, or using unconfirmed Signals as fact should require review when policy or risk says so.
 - **Proof**: when `emit_retrieval_event` is true, CRMy records an `action_context.retrieved` event with compact metadata: context IDs, Signal group IDs, stale count, contradiction count, readiness status, risk level, and proposed action type.
 - **Boundary**: this tool does not create activities, promote Memory, update records, create handoffs, or execute writebacks. It only assesses readiness and records retrieval proof.
 

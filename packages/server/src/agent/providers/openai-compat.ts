@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentConfig, ConversationMessage, AgentToolDef, ToolCallRecord } from '../types.js';
-import { buildOpenAICompatibleHeaders, chatCompletionsUrl } from '../provider-utils.js';
+import { buildOpenAICompatibleHeaders, chatCompletionsUrl, DEFAULT_LLM_TIMEOUT_MS, resolveLlmTimeoutMs } from '../provider-utils.js';
 
-const AGENT_STREAM_TIMEOUT_MS = Number(process.env.AGENT_STREAM_TIMEOUT_MS ?? 120_000);
+const AGENT_STREAM_TIMEOUT_MS = Number(process.env.AGENT_STREAM_TIMEOUT_MS ?? DEFAULT_LLM_TIMEOUT_MS);
 
 function timeoutSignal(timeoutMs = AGENT_STREAM_TIMEOUT_MS, externalSignal?: AbortSignal): { signal: AbortSignal; done: () => void } {
   const controller = new AbortController();
@@ -30,7 +30,7 @@ export async function callOpenAICompat(
   config: AgentConfig,
   apiKey: string | null,
   onDelta: (text: string) => void,
-  opts?: { abortSignal?: AbortSignal },
+  opts?: { abortSignal?: AbortSignal; timeoutMs?: number },
 ): Promise<{ content: string; tool_calls: ToolCallRecord[] }> {
   const openaiMessages = toOpenAIFormat(messages);
   const openaiTools = tools.length > 0 ? tools.map(t => ({
@@ -54,7 +54,7 @@ export async function callOpenAICompat(
   const url = chatCompletionsUrl(baseUrl);
   const headers = buildOpenAICompatibleHeaders(config.provider, baseUrl, apiKey ?? '');
 
-  const timeout = timeoutSignal(AGENT_STREAM_TIMEOUT_MS, opts?.abortSignal);
+  const timeout = timeoutSignal(opts?.timeoutMs ?? resolveLlmTimeoutMs(config, AGENT_STREAM_TIMEOUT_MS), opts?.abortSignal);
   try {
     const res = await fetch(url, {
       method: 'POST',

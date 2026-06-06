@@ -56,7 +56,13 @@ Agents do not use the whole Memory store directly. They call retrieval tools suc
 
 That temporary working set is Active Context. It is not the same thing as persistent Memory.
 
-`action_context_get` is the action-aware retrieval boundary. It assembles the same briefing context, adds readiness, policy, source-authority, scope, and expected-proof checks, and records a compact `action_context.retrieved` event. It can assess proposed actions such as outreach, assignment creation, Memory promotion, record update, or external writeback, but it does not perform those actions.
+`action_context_get` is the action-aware retrieval boundary. It assembles the same briefing context, adds readiness, policy, source-authority, scope, warnings, and expected-proof checks, and records a compact `action_context.retrieved` event. It can assess proposed actions such as outreach, assignment creation, Memory promotion, record update, or external writeback, but it does not perform those actions.
+
+Action Context is first an intelligence packet, not an approval step. Most agent work should stay low-friction:
+
+- `inform`: provide the right Memory, Signals, source ownership, and proof hints without blocking the agent;
+- `warn`: allow the action, but make stale, inferred, conflicting, or low-confidence context visible;
+- `require_review`: require human review before actions that affect customers, records, systems of record, external commitments, or trust boundaries.
 
 ### 6. Govern action
 
@@ -70,7 +76,7 @@ When an agent prepares action, CRMy should know:
 - whether approval is required;
 - what proof will exist after the action.
 
-Handoffs, writeback previews, policy checks, idempotency, execution receipts, audit events, and Lineage make this safe for humans and agents working together.
+Handoffs, writeback previews, policy checks, idempotency, execution receipts, audit events, and Lineage make this safe for humans and agents working together. The default posture should be exception-based review: brief, draft, search, summarize, add context, and prepare work quickly; require review only when risk, authority, or evidence quality makes it necessary.
 
 ## Current capabilities
 
@@ -85,7 +91,7 @@ The current 0.8.x engine includes:
 - duplicate-source idempotency and duplicate-corroboration protection;
 - proposed-record Handoffs when context implies a new contact, account, opportunity, or use case;
 - typed Memory retrieval through `briefing_get`;
-- Action Readiness retrieval through `action_context_get`;
+- Action Context retrieval through `action_context_get`;
 - Context Lineage from source to Signal, Memory, Active Context retrieval, Handoff, writeback, and audit;
 - optional pgvector-backed candidate retrieval when embeddings are configured;
 - scoped REST, MCP, CLI, and Workspace Agent tool access.

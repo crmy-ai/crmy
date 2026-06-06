@@ -114,7 +114,7 @@ const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
   first_steps: {
     summary: 'Start with identity, record resolution, and a briefing before choosing specialized tools.',
     recommended_tools: ['actor_whoami', 'customer_record_resolve', 'action_context_get', 'briefing_get', 'context_find', 'guide_search'],
-    avoid_tools: ['context_add for raw notes', 'direct record writes before action_context_get', 'admin/ops tools unless doing incident response'],
+    avoid_tools: ['context_add for raw notes', 'direct record writes before fetching the record and relevant Action Context', 'admin/ops tools unless doing incident response'],
     next_step: 'If you have a customer name or text, call customer_record_resolve. If you already have a subject_id, call briefing_get or action_context_get.',
   },
   record_lookup: {
@@ -124,10 +124,10 @@ const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
     next_step: 'Call customer_record_resolve with query or text, then use the resolved subject with briefing_get.',
   },
   brief_before_action: {
-    summary: 'Load current Memory, Signals, stale warnings, policy gates, and retrieval proof before acting.',
+    summary: 'Load current Memory, Signals, stale warnings, source authority, policy checks, and retrieval proof before acting.',
     recommended_tools: ['action_context_get', 'briefing_get', 'context_find', 'context_get'],
-    avoid_tools: ['customer-facing actions before checking readiness', 'record_update/writeback tools without policy/source checks'],
-    next_step: 'Call action_context_get with the proposed_action when you are deciding whether an action is safe.',
+    avoid_tools: ['customer-facing actions that ignore Action Context warnings', 'record_update/writeback tools without policy/source checks'],
+    next_step: 'Call action_context_get with proposed_action when you need the operating mode: inform, warn, or require_review.',
   },
   ingest_raw_context: {
     summary: 'Send transcripts, emails, meeting notes, research, and other messy source text through Raw Context ingestion.',
@@ -148,16 +148,16 @@ const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
     next_step: 'Use context_find mode="signals" or context_signal_group_get to confirm evidence/readiness first, then promote the Signal group.',
   },
   customer_outreach: {
-    summary: 'Prepare customer communication from confirmed context and policy checks.',
+    summary: 'Prepare customer communication from confirmed context, visible warnings, and policy checks.',
     recommended_tools: ['action_context_get', 'briefing_get', 'email_draft_preview', 'activity_create', 'contact_outreach'],
     avoid_tools: ['message_send or email_draft_save before user approval unless your policy explicitly allows it'],
-    next_step: 'Call action_context_get with proposed_action="customer_outreach" before drafting or logging outreach.',
+    next_step: 'Call action_context_get with proposed_action="customer_outreach"; draft freely when mode is inform/warn, and route execution to review when mode is require_review.',
   },
   record_update: {
     summary: 'Preview governed record changes before mutating CRM objects.',
     recommended_tools: ['action_context_get', 'record_draft_preview', 'contact_update', 'account_update', 'opportunity_update'],
     avoid_tools: ['direct updates based only on unconfirmed Signals', 'allow_duplicates without presenting candidates'],
-    next_step: 'Call action_context_get with proposed_action="record_update", then preview or update only when policy permits.',
+    next_step: 'Call action_context_get with proposed_action="record_update", then preview changes; execute only when the operating mode and policy permit it.',
   },
   systems_writeback: {
     summary: 'External system writes require systems scopes, object write scopes, source authority checks, and review.',

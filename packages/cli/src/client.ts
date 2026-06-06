@@ -7,6 +7,15 @@ import type { ActorContext } from '@crmy/shared';
 
 export interface CliClient {
   call(toolName: string, input: Record<string, unknown>): Promise<string>;
+  listTools?(): Promise<Array<{ name: string; tier?: string; description?: string }>>;
+  describeTool?(toolName: string): Promise<{
+    name: string;
+    tier?: string;
+    description?: string;
+    input_schema?: Record<string, unknown>;
+    required?: string[];
+    example?: Record<string, unknown>;
+  }>;
   close(): Promise<void>;
 }
 
@@ -233,9 +242,7 @@ function createHttpClient(serverUrl: string, token: string): CliClient {
   return {
     async call(toolName: string, input: Record<string, unknown>): Promise<string> {
       const mapping = TOOL_REST_MAP[toolName];
-      if (!mapping) {
-        throw new Error(`Unknown tool: ${toolName} (no REST mapping)`);
-      }
+      if (!mapping) return callGenericTool(serverUrl, token, toolName, input);
 
       const { method, path } = mapping;
       const url = `${serverUrl.replace(/\/$/, '')}${path(input)}`;
@@ -275,7 +282,85 @@ function createHttpClient(serverUrl: string, token: string): CliClient {
     async close() {
       // No cleanup needed for HTTP client
     },
+    async listTools() {
+      const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/v1/tools`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const responseBody = await res.text();
+      if (!res.ok) {
+        let detail = responseBody;
+        try {
+          detail = JSON.parse(responseBody).detail ?? responseBody;
+        } catch {}
+        throw new Error(`API error (${res.status}): ${detail}`);
+      }
+      const parsed = JSON.parse(responseBody) as { data?: Array<{ name: string; tier?: string; description?: string }> };
+      return parsed.data ?? [];
+    },
+    async describeTool(toolName: string) {
+      if (!/^[a-z0-9_]+$/.test(toolName)) {
+        throw new Error(`Invalid tool name: ${toolName}`);
+      }
+      const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/v1/tools/${toolName}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      const responseBody = await res.text();
+      if (!res.ok) {
+        let detail = responseBody;
+        try {
+          detail = JSON.parse(responseBody).detail ?? responseBody;
+        } catch {}
+        throw new Error(`API error (${res.status}): ${detail}`);
+      }
+      return JSON.parse(responseBody) as {
+        name: string;
+        tier?: string;
+        description?: string;
+        input_schema?: Record<string, unknown>;
+        required?: string[];
+        example?: Record<string, unknown>;
+      };
+    },
   };
+}
+
+async function callGenericTool(
+  serverUrl: string,
+  token: string,
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<string> {
+  if (!/^[a-z0-9_]+$/.test(toolName)) {
+    throw new Error(`Invalid tool name: ${toolName}`);
+  }
+  const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/v1/tools/${toolName}/call`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input ?? {}),
+  });
+  if (res.status === 401) {
+    throw new Error('Authentication expired. Run `crmy login` to re-authenticate.');
+  }
+  const responseBody = await res.text();
+  if (!res.ok) {
+    let detail = responseBody;
+    try {
+      detail = JSON.parse(responseBody).detail ?? responseBody;
+    } catch {}
+    throw new Error(`API error (${res.status}): ${detail}`);
+  }
+  return responseBody;
 }
 
 /**
@@ -288,7 +373,7 @@ async function createDbClient(
 ): Promise<CliClient> {
   process.env.CRMY_IMPORTED = '1';
 
-  const { initPool, closePool, getToolsForActor, normalizeToolInput } = await import('@crmy/server');
+  const { initPool, closePool, describeTool, getToolsForActor, normalizeToolInput } = await import('@crmy/server');
   const db = await initPool(databaseUrl);
 
   let actor: ActorContext | null = null;
@@ -339,6 +424,18 @@ async function createDbClient(
       if (!tool) throw new Error(`Unknown tool: ${toolName}`);
       const result = await tool.handler(normalizeToolInput(input), actor);
       return JSON.stringify(result, null, 2);
+    },
+    async listTools() {
+      return tools.map(tool => ({
+        name: tool.name,
+        tier: tool.tier,
+        description: tool.description,
+      }));
+    },
+    async describeTool(toolName: string) {
+      const tool = tools.find(t => t.name === toolName);
+      if (!tool) throw new Error(`Unknown tool: ${toolName}`);
+      return describeTool(tool);
     },
     async close() {
       await closePool();

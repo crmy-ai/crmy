@@ -2003,6 +2003,7 @@ export interface AgentConfigData {
   model: string;
   system_prompt: string | null;
   max_tokens_per_turn: number;
+  llm_timeout_ms: number;
   history_retention_days: number;
   can_write_objects: boolean;
   can_log_activities: boolean;

@@ -73,7 +73,7 @@ function SourcesTab() {
       Icon: Bot,
       color: ENTITY_COLORS.agents,
       status: 'Best for external agents and scripts',
-      description: 'Use context_ingest_auto to send customer context into CRMy, then action_context_get to check confirmed Memory, Signals, and source gates before an agent acts.',
+      description: 'Use context_ingest_auto to send customer context into CRMy, then action_context_get to load Memory, Signals, warnings, source authority, and review requirements before an agent acts.',
       primary: 'Manage API Keys',
       primaryHref: '/settings/api-keys',
       primaryClassName: 'bg-[#6366f1] text-white hover:bg-[#6366f1]/90',

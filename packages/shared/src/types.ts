@@ -1117,6 +1117,7 @@ export interface ActionContextGetInput {
 
 export type ActionContextReadinessStatus = 'ready' | 'review_needed' | 'blocked';
 export type ActionContextRiskLevel = 'low' | 'medium' | 'high';
+export type ActionContextOperatingMode = 'inform' | 'warn' | 'require_review';
 
 export interface ActionContextPolicySummary {
   decision: 'allowed' | 'approval_required' | 'blocked' | 'draft_only';
@@ -1155,6 +1156,14 @@ export interface ActionContext {
   subject_type: SubjectType;
   subject_id: UUID;
   generated_at: string;
+  operating_mode: ActionContextOperatingMode;
+  guidance: {
+    summary: string;
+    can_execute: boolean;
+    warning_reasons: string[];
+    review_reasons: string[];
+    recommended_next_steps: string[];
+  };
   briefing: Briefing;
   readiness: {
     status: ActionContextReadinessStatus;

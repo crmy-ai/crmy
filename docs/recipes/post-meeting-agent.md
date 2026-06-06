@@ -9,6 +9,7 @@ An agent that runs after a sales or customer-success call. It turns a messy tran
 - A running CRMy instance with demo data seeded (`crmy seed-demo`)
 - Workspace Agent configured for local model extraction
 - MCP connection configured (`claude mcp add crmy -- npx -y @crmy/cli mcp`)
+- Optional: inspect exact tool inputs with `crmy tools describe <tool_name>`
 
 **Context engine capabilities used:** `actor_whoami`, `briefing_get`, `context_ingest_auto`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_promote`, `context_signal_handoff`, `assignment_create`, and `hitl_submit_request`.
 
@@ -82,9 +83,19 @@ crmy actors whoami
 Before processing the call, get the current state for the primary record. Demo data includes Northstar Labs:
 
 ```text
+customer_record_resolve {
+  "query": "Northstar Agent Context Rollout",
+  "subject_type": "opportunity",
+  "limit": 5
+}
+```
+
+Use the returned opportunity ID in the briefing call.
+
+```text
 briefing_get {
   "subject_type": "opportunity",
-  "subject_id": "d0000000-0000-4000-d000-000000000101",
+  "subject_id": "<resolved-opportunity-id>",
   "context_radius": "account_wide",
   "format": "json"
 }
@@ -93,7 +104,7 @@ briefing_get {
 **CLI equivalent:**
 
 ```bash
-crmy briefing opportunity:d0000000-0000-4000-d000-000000000101 --format json
+crmy briefing "opportunity:Northstar Agent Context Rollout" --format json
 ```
 
 **What to inspect:**
@@ -160,7 +171,7 @@ List the evidence-backed Signals CRMy assembled from the transcript and any prio
 ```text
 context_signal_group_list {
   "subject_type": "account",
-  "subject_id": "d0000000-0000-4000-b000-000000000101",
+  "subject_id": "<resolved-account-id>",
   "attention_only": true,
   "limit": 20
 }
@@ -169,7 +180,7 @@ context_signal_group_list {
 **CLI equivalent:**
 
 ```bash
-crmy context signal-groups --subject account:d0000000-0000-4000-b000-000000000101
+crmy context signal-groups --subject "account:Northstar Labs"
 ```
 
 Look for:
@@ -234,7 +245,7 @@ Create assignments only from confirmed Memory or reviewed/Handoff-approved conte
 ```text
 assignment_create {
   "subject_type": "opportunity",
-  "subject_id": "d0000000-0000-4000-d000-000000000101",
+  "subject_id": "<resolved-opportunity-id>",
   "title": "Schedule Northstar follow-up workshop",
   "priority": "high",
   "context": "Northstar wants a workshop covering audit logs, HITL review, and Salesforce writeback controls. Security still needs data residency answers before pilot approval.",
@@ -253,7 +264,7 @@ Pull another briefing:
 ```text
 briefing_get {
   "subject_type": "opportunity",
-  "subject_id": "d0000000-0000-4000-d000-000000000101",
+  "subject_id": "<resolved-opportunity-id>",
   "context_radius": "account_wide",
   "format": "json"
 }

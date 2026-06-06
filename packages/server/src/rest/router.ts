@@ -24,7 +24,8 @@ import { resolveSubjectGraph } from '../services/subject-graph-resolver.js';
 import * as ucRepo from '../db/repos/use-cases.js';
 import * as actorRepo from '../db/repos/actors.js';
 import { emitEvent } from '../events/emitter.js';
-import { getAllTools, normalizeToolInput } from '../mcp/server.js';
+import { getAllTools, getToolsForActor, normalizeToolInput } from '../mcp/server.js';
+import { describeTool } from '../mcp/tool-describe.js';
 import { enforceToolScopes, requireScopes } from '../auth/scopes.js';
 import * as governorLimits from '../db/repos/governor-limits.js';
 import { getSpec } from '../openapi/spec.js';
@@ -209,6 +210,61 @@ export function apiRouter(db: DbPool): Router {
   // --- OpenAPI spec (no auth required) ---
   router.get('/openapi.json', (_req, res) => {
     res.json(getSpec());
+  });
+
+  // --- MCP-compatible tool bridge ---
+  router.get('/tools', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const tools = getToolsForActor(db, actor);
+      res.json({
+        data: tools.map(tool => ({
+          name: tool.name,
+          tier: tool.tier,
+          description: tool.description,
+        })),
+        total: tools.length,
+      });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/tools/:tool_name', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const toolName = String(req.params.tool_name ?? '');
+      if (!/^[a-z0-9_]+$/.test(toolName)) {
+        throw new CrmyError('VALIDATION_ERROR', 'Invalid tool name', 400);
+      }
+
+      const tool = getToolsForActor(db, actor).find(candidate => candidate.name === toolName);
+      if (!tool) {
+        throw new CrmyError('NOT_FOUND', 'Tool not available for this actor', 404);
+      }
+
+      enforceToolScopes(tool.name, actor);
+      res.json(describeTool(tool));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/tools/:tool_name/call', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const toolName = String(req.params.tool_name ?? '');
+      if (!/^[a-z0-9_]+$/.test(toolName)) {
+        throw new CrmyError('VALIDATION_ERROR', 'Invalid tool name', 400);
+      }
+
+      const tool = getToolsForActor(db, actor).find(candidate => candidate.name === toolName);
+      if (!tool) {
+        throw new CrmyError('NOT_FOUND', 'Tool not available for this actor', 404);
+      }
+
+      enforceToolScopes(tool.name, actor);
+      const input = z.record(z.unknown()).default({}).parse(req.body ?? {});
+      const parsedInput = tool.inputSchema.parse(normalizeToolInput(input));
+      const result = await tool.handler(parsedInput, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
   });
 
   // --- Operations ---

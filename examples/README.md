@@ -4,6 +4,18 @@ Examples are copy-pasteable harness setups that prove a narrow CRMy path quickly
 
 Recipes in `docs/recipes/` explain broader agent workflows. Examples are smaller: connect one agent harness, run one prompt, and verify that CRMy can retrieve operational customer context.
 
+## Before Debugging A Harness
+
+Run these checks first:
+
+```bash
+npx -y @crmy/cli agent-smoke
+npx -y @crmy/cli tools describe briefing_get
+npx -y @crmy/cli tools describe context_signal_group_list
+```
+
+`agent-smoke` proves seeded demo data and the core MCP path. `tools describe` shows the current input shape for a tool, which is useful when an agent harness is choosing the wrong arguments.
+
 ## Available Examples
 
 - [Claude Code account briefing](claude-code-account-briefing/README.md)

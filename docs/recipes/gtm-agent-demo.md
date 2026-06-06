@@ -47,7 +47,7 @@ You should see counts for accounts, contacts, opportunities, Raw Context sources
 ## Step 2 - Inspect the opportunity
 
 ```bash
-crmy briefing opportunity:d0000000-0000-4000-d000-000000000101 --format text
+crmy briefing "opportunity:Northstar Agent Context Rollout" --format text
 ```
 
 In the web UI, open:
@@ -79,7 +79,7 @@ Raw Context shows the source material CRMy received before it became Signals or 
 ## Step 4 - Review Signals
 
 ```bash
-crmy context signal-groups --subject account:d0000000-0000-4000-b000-000000000101
+crmy context signal-groups --subject "account:Northstar Labs"
 ```
 
 In the web UI:
@@ -114,7 +114,7 @@ The product intent is exception-based review: high-confidence, low-risk context 
 ## Step 6 - Ask for a new briefing
 
 ```bash
-crmy briefing account:d0000000-0000-4000-b000-000000000101 --format text
+crmy briefing "account:Northstar Labs" --format text
 ```
 
 Confirmed Memory should now be available to agents. Unpromoted Signals remain separate and should be referenced as uncertain.

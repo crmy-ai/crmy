@@ -6,8 +6,9 @@ An agent that keeps customer memory current and evidence-backed. It reviews stal
 
 **Prerequisites:**
 
-- A running CRMy instance with demo data seeded (`crmy seed-demo`)
+- A running CRMy workspace. Seed demo data with `crmy seed-demo` for a quick Northstar Labs test, or replace the illustrative records below with your own workspace records.
 - MCP connection configured (`claude mcp add crmy -- npx -y @crmy/cli mcp`)
+- Optional: inspect exact tool inputs with `crmy tools describe <tool_name>`
 - Optional: pgvector and embeddings for `context_semantic_search`
 
 **Context engine capabilities used:** `context_stale`, `context_review_batch`, `context_detect_contradictions`, `context_contradiction_assign`, `context_consolidate`, `context_semantic_search`, `briefing_get`, and `assignment_create`.

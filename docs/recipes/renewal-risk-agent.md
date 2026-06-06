@@ -8,11 +8,12 @@ This recipe treats `briefing_get` as the retrieval step: it loads persistent Mem
 
 **Prerequisites:**
 
-- A running CRMy instance with demo data seeded (`crmy seed-demo`)
+- A running CRMy workspace. Seed demo data with `crmy seed-demo` for a quick Northstar Labs test, or replace the illustrative records below with your own workspace records.
 - MCP connection configured (`claude mcp add crmy -- npx -y @crmy/cli mcp`)
+- Optional: inspect exact tool inputs with `crmy tools describe <tool_name>`
 - pgvector and embeddings enabled for semantic search, or use the keyword fallback shown below
 
-**Context engine capabilities used:** `briefing_get`, `context_semantic_search`, `context_search`, `context_detect_contradictions`, `activity_create`, `context_add`, `assignment_create`, and `hitl_submit_request`.
+**Context engine capabilities used:** `briefing_get`, `context_semantic_search`, `context_search`, `context_detect_contradictions`, `activity_create`, `context_ingest_auto`, `context_signal_group_list`, `context_signal_group_promote`, `context_signal_handoff`, `assignment_create`, and `hitl_submit_request`.
 
 ---
 
@@ -27,7 +28,7 @@ Workflow:
 3. Call `context_semantic_search` for renewal risk, adoption blockers, executive sponsor changes, competitive threats, and pricing concerns. Fall back to `context_search` if semantic search is unavailable.
 4. Call `context_detect_contradictions` before writing conclusions. If contradictions exist, call `context_contradiction_assign` and do not rely on disputed facts.
 5. Log the review with `activity_create`.
-6. Store one focused `deal_risk` context entry. Use `context_supersede` or `context_consolidate` if CRMy reports an overlapping current entry.
+6. Ingest one focused renewal-risk packet with `context_ingest_auto` so CRMy can create evidence-backed Signals and apply Memory readiness.
 7. Create a human assignment with clear next steps, due date, and evidence from the briefing.
 8. Use `hitl_submit_request` before recommending discounts, contract changes, or commitments.
 
@@ -35,7 +36,8 @@ Rules:
 - Never summarize renewal risk without an account-wide briefing.
 - Never act on stale or contradictory context without review.
 - Never authorize discounts, legal terms, or commercial commitments.
-- Prefer structured context entries over long untyped notes.
+- Prefer concise, source-linked renewal packets over long untyped notes.
+- Do not use `context_add` for model-generated renewal conclusions unless a human explicitly asks you to write already-reviewed Memory.
 - Every write should create a useful audit trail for the next agent run.
 ```
 
@@ -83,7 +85,7 @@ briefing_get {
 **CLI equivalent:**
 
 ```bash
-crmy briefing account:d0000000-0000-4000-b000-000000000002 --format json
+crmy briefing "account:Brightside Health" --format json
 ```
 
 **CLI note:** `context_radius` and `token_budget` are MCP/REST options for agent runs. Use the MCP call above when the agent needs account-wide renewal context.
@@ -228,27 +230,43 @@ activity_create {
 
 ---
 
-## Step 6 — Store structured renewal risk
+## Step 6 — Ingest structured renewal risk as Raw Context
 
-Write one focused `deal_risk` entry. Do not bury multiple risks in a giant note.
+Create one focused renewal-risk packet and ingest it through Raw Context. This lets CRMy extract Signals, check readiness, prevent duplicate-source inflation, and keep the source-to-Memory trail visible.
 
 **MCP tool call:**
 
 ```
-context_add {
-  "subject_type": "account",
-  "subject_id": "d0000000-0000-4000-b000-000000000002",
+context_ingest_auto {
+  "document": "Renewal risk review for Brightside Health. Evidence reviewed: account-wide briefing, semantic context search, stale warnings, open assignments, and contradiction status. Candidate Signal: Brightside may be a high-risk renewal or expansion account because health score is 45, Priya Nair has an unresolved vendor lock-in objection, the account has active competitive alternatives, and org-chart research is stale. Recommended next step: refresh research and address open MCP/multi-model concerns before the next executive touch. Treat this as reviewable renewal-risk context, not an approved commercial commitment.",
+  "source_label": "Renewal risk review - Brightside Health",
+  "source_occurred_at": "2026-03-26T17:00:00.000Z",
   "context_type": "deal_risk",
-  "title": "Brightside renewal risk: low health, unresolved objection, active alternatives",
-  "body": "Brightside Health is a high-risk renewal/expansion candidate. Health score is 45. Priya Nair still has an unresolved vendor lock-in objection, the account is evaluating HubSpot and Attio, and org-chart research is stale. Next action should refresh research and address open MCP/multi-model concerns before the next executive touch.",
-  "confidence": 0.9,
-  "source": "renewal_risk_review",
-  "tags": ["renewal-risk", "competitive", "objection", "stale-research"],
-  "valid_until": "2026-05-15"
+  "confidence_threshold": 0.6,
+  "subjects": [
+    {
+      "type": "account",
+      "id": "d0000000-0000-4000-b000-000000000002",
+      "name": "Brightside Health"
+    }
+  ],
+  "idempotency_key": "renewal-risk-brightside-2026-03-26"
 }
 ```
 
-If CRMy returns a context convergence warning, follow it. Use `context_supersede` for an updated risk, or `context_consolidate` if the account already has many overlapping `deal_risk` entries.
+Then review the grouped Signal:
+
+```
+context_signal_group_list {
+  "subject_type": "account",
+  "subject_id": "d0000000-0000-4000-b000-000000000002",
+  "context_type": "deal_risk",
+  "attention_only": true,
+  "limit": 10
+}
+```
+
+If the Signal is complete, evidence-backed, and safe to use operationally, confirm it with `context_signal_group_promote`. If it is sensitive, conflicting, or likely to affect forecast or commercial action, send it to Handoff with `context_signal_handoff`.
 
 ---
 

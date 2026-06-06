@@ -77,6 +77,7 @@ Run:
 
 ```bash
 npx -y @crmy/cli agent-smoke --json
+npx -y @crmy/cli tools describe briefing_get
 ```
 
 If this fails, fix local CRMy setup before debugging ChatGPT. If it passes but ChatGPT cannot connect, check that the MCP URL is public HTTPS, the auth mode matches your CRMy deployment, and the app tools were refreshed in ChatGPT settings.

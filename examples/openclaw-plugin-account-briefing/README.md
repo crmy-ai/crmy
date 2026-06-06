@@ -54,7 +54,7 @@ export CRMY_API_KEY=crmy_...
 Paste this into OpenClaw:
 
 ```text
-Use the CRMy plugin to brief the account "Northstar Labs". First call crmy with action "account.search" to find the account, then call action "briefing.get" with context_radius "account_wide", then call action "context.signal_groups" with attention_only true. Tell me the safest next action with the evidence you used.
+Use the CRMy plugin to brief the account "Northstar Labs". First call crmy with action "account.search" to find the account, then call action "briefing.get" with context_radius "account_wide", then call action "context.signal_groups" for the resolved account with attention_only true. Tell me the safest next action with the evidence you used.
 ```
 
 ## Expected Tool Calls
@@ -82,6 +82,8 @@ crmy({
 crmy({
   action: "context.signal_groups",
   params: {
+    subject_type: "account",
+    subject_id: "<resolved-account-id>",
     attention_only: true,
     limit: 5
   }
@@ -100,6 +102,7 @@ Run:
 
 ```bash
 npx -y @crmy/cli agent-smoke --json
+npx -y @crmy/cli tools describe briefing_get
 ```
 
 If this fails, fix CRMy setup before debugging OpenClaw.

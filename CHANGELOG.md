@@ -4,6 +4,27 @@ All notable changes to CRMy are documented here.
 
 ---
 
+## [0.8.6] — 2026-06-05
+
+### Release Focus
+
+0.8.6 is a follow-up 0.8.x hardening release focused on proving CRMy from external agent harnesses. It improves MCP/API/CLI parity, refreshes recipes and examples, and aligns OpenClaw support with the current Raw Context -> Signals -> Memory model.
+
+### Highlights
+
+- **MCP/API/CLI parity**: added actor-scoped REST endpoints for listing, describing, and calling MCP tools, plus `crmy tools list`, `crmy tools describe`, and `crmy tools call`.
+- **Tool-surface coverage**: CLI coverage now verifies direct HTTP mappings, generic actor-scoped tool fallback, and the one-minute `agent-smoke` path.
+- **Recipe cleanup**: added a recipes index, clarified seeded Northstar demo data, and updated runnable CLI examples to prefer friendly record references over UUIDs.
+- **Raw Context guidance**: recipes now steer messy transcripts, emails, notes, research, and debriefs through `context_ingest_auto`, keeping direct `context_add` for advanced reviewed writes.
+- **OpenClaw support**: the OpenClaw plugin now exposes `context.ingest_auto`, and its skill guidance uses accounts terminology plus the current Signal/Memory/Handoff model.
+- **Docs alignment**: README, guide, MCP docs, OpenAPI, roadmap, examples, and release notes now describe the same MCP/API/CLI and Action Context behavior.
+
+### Notes
+
+This is not the 0.9 release. It is the next 0.8.x package release on the path to 0.9.
+
+---
+
 ## [0.8.5] — 2026-05-31
 
 ### Release Focus

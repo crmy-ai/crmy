@@ -31,7 +31,34 @@ test('CLI HTTP client maps every directly-called tool', async () => {
   assert.deepEqual(missing, []);
 });
 
-test('curated MCP-to-CLI coverage stays mapped in HTTP mode', async () => {
+test('CLI HTTP mode falls back to actor-scoped generic MCP tool bridge', async () => {
+  const clientSource = await read('packages/cli/src/client.ts');
+  const routerSource = await read('packages/server/src/rest/router.ts');
+  const openApiSource = await read('packages/server/src/openapi/paths.ts');
+  const indexSource = await read('packages/cli/src/index.ts');
+  const toolsCommandSource = await read('packages/cli/src/commands/tools.ts');
+  const describeSource = await read('packages/server/src/mcp/tool-describe.ts');
+
+  assert.match(clientSource, /callGenericTool/);
+  assert.match(clientSource, /\/api\/v1\/tools\/\$\{toolName\}\/call/);
+  assert.doesNotMatch(clientSource, /no REST mapping/);
+  assert.match(routerSource, /router\.get\('\/tools'/);
+  assert.match(routerSource, /router\.get\('\/tools\/:tool_name'/);
+  assert.match(routerSource, /router\.post\('\/tools\/:tool_name\/call'/);
+  assert.match(routerSource, /getToolsForActor\(db, actor\)/);
+  assert.match(routerSource, /describeTool\(tool\)/);
+  assert.match(routerSource, /tool\.inputSchema\.parse\(normalizeToolInput\(input\)\)/);
+  assert.match(openApiSource, /path: '\/tools\/\{tool_name\}'/);
+  assert.match(openApiSource, /path: '\/tools\/\{tool_name\}\/call'/);
+  assert.match(indexSource, /toolsCommand/);
+  assert.match(clientSource, /describeTool\?/);
+  assert.match(toolsCommandSource, /command\('call <tool_name>'\)/);
+  assert.match(toolsCommandSource, /command\('describe <tool_name>'\)/);
+  assert.match(describeSource, /export function zodToJsonSchema/);
+  assert.match(describeSource, /export function describeTool/);
+});
+
+test('friendly CLI commands stay mapped to efficient HTTP routes', async () => {
   const clientSource = await read('packages/cli/src/client.ts');
   const mappedTools = new Set([...clientSource.matchAll(/^\s+([a-z0-9_]+):\s*\{/gm)].map(match => match[1]));
   const expected = [

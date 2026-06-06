@@ -1,76 +1,60 @@
-# CRMy v0.8.5
+# CRMy v0.8.6
 
-CRMy v0.8.5 is the most important hardening checkpoint on the path to 0.9.
+CRMy v0.8.6 is a follow-up 0.8.x hardening release, not the 0.9 release.
 
-This release tightens the core context-and-action loop without expanding the product surface: messy Raw Context becomes evidence-backed Signals, trusted Memory, scoped briefings, governed Handoffs/writeback, and auditable proof.
+This release makes CRMy easier to prove and operate from external agent harnesses. It tightens MCP/API/CLI parity, refreshes recipes and examples, and aligns OpenClaw support with the current Raw Context -> Signals -> Memory workflow.
 
 Before any agent acts on a customer, CRMy can tell it what is true, what is stale, what is inferred, what is approved, what system owns the record, what action is allowed, and what proof or audit trail will exist afterward.
 
 ## Release Focus
 
-v0.8.5 focuses on reliability, resolution, and install-to-value:
+v0.8.6 focuses on tool-surface confidence and install-to-value:
 
-- make Raw Context processing more durable, replayable, and recoverable;
-- make customer-record resolution safer in ambiguous GTM scenarios;
-- prove the agent-facing MCP path quickly through CLI smoke tests;
-- simplify the product surface around the core Context engine;
-- prepare the project for deeper v0.9 real-world integration testing.
+- expose the actor-scoped MCP tool surface through REST and CLI;
+- let users inspect exact tool input shapes with `crmy tools describe`;
+- keep agent harness examples aligned with the current demo path;
+- clarify when to use Raw Context ingestion instead of direct context writes;
+- keep `0.8.x` documentation aligned while the broader `0.9` roadmap remains in progress.
 
 ## Highlights
 
-### Raw Context reliability
+### MCP/API/CLI parity
 
-- Added durable receipt semantics for Raw Context processing.
-- Preserved replayable source payloads for recovery and debugging.
-- Added retry metadata, stale-processing recovery, and data-quality repair paths.
-- Improved malformed JSON recovery for extraction responses.
-- Standardized app, REST, MCP, CLI, file, email, activity, and reprocess flows around the same Raw Context behavior.
+- Added REST endpoints to list, describe, and call actor-scoped MCP tools.
+- Added `crmy tools list`, `crmy tools describe <tool_name>`, and `crmy tools call <tool_name>`.
+- Kept friendly CLI commands for common workflows while making the full visible MCP tool surface reachable from the CLI.
+- Added coverage so CLI HTTP mode continues to map direct tool calls and falls back to the generic actor-scoped tool bridge safely.
 
-### Safer record resolution
+### Recipes and examples
 
-- Standardized the account-first Subject Graph resolver across Raw Context, reprocess, file ingestion, Customer Email, Customer Activity, MCP, CLI, and agent guidance.
-- Improved account-scoped matching for contacts, opportunities, and use cases.
-- Added ambiguity safety for duplicate names, partial transcript references, and uncertain child-record matches.
-- Kept uncertain child records reviewable instead of over-linking them.
+- Added a recipes index explaining recipes vs deterministic examples.
+- Clarified seeded demo records around Northstar Labs.
+- Updated runnable recipe CLI commands to use friendly record references instead of requiring UUIDs.
+- Added `agent-smoke` and `tools describe` checks to Claude Code, Claude Desktop, Codex, ChatGPT Developer Mode, Hermes, and OpenClaw examples.
+- Reworked the renewal-risk recipe to use Raw Context ingestion, Signal review, promotion, or Handoff instead of direct model-derived Memory writes.
 
-### Signal and Memory trust
+### OpenClaw support
 
-- Added golden extraction and record-resolution coverage for messy GTM scenarios.
-- Prevented duplicate ingestion of the same source from artificially corroborating a Signal.
-- Kept incomplete, unresolved, or policy-sensitive Signals reviewable instead of promoting them too early.
-- Preserved the Signal -> Memory boundary as the trust boundary agents rely on.
+- Added `context.ingest_auto` to the OpenClaw plugin action surface.
+- Updated the OpenClaw skill to use accounts terminology and Raw Context ingestion for messy notes, transcripts, emails, and research.
+- Reframed `context.add` as an advanced direct write path for already-reviewed Memory or evidence-backed Signals.
 
-### MCP and CLI confidence
+### Action Context and docs
 
-- Added and verified the one-minute agent smoke path:
-  `customer_record_resolve -> briefing_get -> context_signal_group_list`.
-- Improved `crmy doctor` so stale or mismatched `CRMY_API_KEY` values are caught before agent harness setup fails.
-- Refreshed agent harness examples and MCP guidance.
-- Regenerated OpenAPI docs.
-
-### Product surface cleanup
-
-- Reframed Context around Raw Context, Signals, Memory, Lineage, and Context Sources.
-- Moved Customer Email and Customer Activity into the supporting Context Sources mental model.
-- Demoted Automations and Sequences into admin/settings surfaces while keeping compatible routes.
-- Added a deeper Context Engine doc and stronger contribution guidance around real-world integration testing.
-
-### Web performance and UX
-
-- Lazy-loaded major routes, drawers, and editors.
-- Reduced the initial web bundle below Vite's warning threshold.
-- Fixed lingering Signal action wording: users now see `Confirm Signal` and `Dismiss Signal`.
+- Updated README, guide, MCP docs, OpenAPI, and roadmap language around MCP/API/CLI parity.
+- Clarified Action Context as a context-and-policy packet that informs, warns, or requires review based on risk rather than adding red tape to every action.
+- Added a `0.8.6` roadmap checkpoint while preserving `0.8.5` as the prior hardening checkpoint.
 
 ## Published Packages
 
 Published to npm:
 
-- `@crmy/core@0.8.5`
-- `@crmy/shared@0.8.5`
-- `@crmy/server@0.8.5`
-- `@crmy/web@0.8.5`
-- `@crmy/cli@0.8.5`
-- `@crmy/openclaw-plugin@0.8.5`
+- `@crmy/core@0.8.6`
+- `@crmy/shared@0.8.6`
+- `@crmy/server@0.8.6`
+- `@crmy/web@0.8.6`
+- `@crmy/cli@0.8.6`
+- `@crmy/openclaw-plugin@0.8.6`
 
 ## Quick Validation
 
@@ -80,6 +64,7 @@ For a fresh local demo:
 npx -y @crmy/cli init --yes
 npx -y @crmy/cli doctor
 npx -y @crmy/cli agent-smoke
+npx -y @crmy/cli tools describe briefing_get
 ```
 
 Then connect an agent harness and ask:
@@ -100,21 +85,18 @@ Expected path:
 Before publish, the release gate passed:
 
 - `npm run lint`
-- `npm run build --workspace=packages/web`
-- `npm run build --workspace=packages/server`
 - `npm run build --workspace=packages/cli`
-- `npm test`
+- `npm run build --workspace=packages/server`
+- `npm run build --workspace=packages/web`
+- `npm run build --workspace=packages/openclaw-plugin`
 - `npm run test:cli-coverage`
-- `crmy agent-smoke`
-- npm pack dry-runs for all published packages
-- npm registry verification for all published packages
+- `npm run test:durability --workspace=packages/server`
 
 ## Notes And Caveats
 
 - pgvector remains optional. Semantic search improves retrieval when configured, but lexical and deterministic paths continue to work without it.
 - Live connector certification remains environment-dependent. HubSpot is the primary certified path today; Salesforce, Databricks, Snowflake, mailbox/calendar OAuth, and custom provider flows should be smoke-tested against real tenant credentials before production claims.
-- If `crmy doctor` reports that `CRMY_API_KEY` does not match the database, regenerate setup with `crmy init`, update the key, or remove the stale local key so direct local MCP mode can resolve the local actor.
-- v0.8.5 verifies correctness, drift, packaging, and local install-to-value. Full high-volume/serverless Postgres scale certification is planned for the 1.0 resilience-at-scale line.
+- v0.8.6 improves tool-surface confidence and documentation alignment. Full high-volume/serverless Postgres scale certification remains planned for the 1.0 resilience-at-scale line.
 
 ## Community Testing Wanted
 

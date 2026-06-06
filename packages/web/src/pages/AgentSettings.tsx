@@ -120,6 +120,7 @@ export default function AgentSettings() {
   const [editingPrompt,       setEditingPrompt]       = useState(false);
   const [promptDraft,         setPromptDraft]         = useState(defaultSystemPrompt);
   const [maxTokens,           setMaxTokens]           = useState(4000);
+  const [llmTimeoutSeconds,   setLlmTimeoutSeconds]   = useState(60);
   const [canCreateAssignments, setCanCreateAssignments] = useState(true);
   const [canLogActivities,    setCanLogActivities]    = useState(true);
   const [canWriteObjects,     setCanWriteObjects]     = useState(true);
@@ -161,6 +162,7 @@ export default function AgentSettings() {
     setSystemPrompt(config.system_prompt ?? defaultSystemPrompt);
     setPromptDraft(config.system_prompt ?? defaultSystemPrompt);
     setMaxTokens(config.max_tokens_per_turn);
+    setLlmTimeoutSeconds(Math.round((config.llm_timeout_ms ?? 60000) / 1000));
     setCanCreateAssignments(config.can_create_assignments);
     setCanLogActivities(config.can_log_activities);
     setCanWriteObjects(config.can_write_objects !== false);
@@ -239,6 +241,7 @@ export default function AgentSettings() {
       model:                  resolvedModel,
       system_prompt:          systemPrompt,
       max_tokens_per_turn:    maxTokens,
+      llm_timeout_ms:         Math.min(300, Math.max(5, Math.round(llmTimeoutSeconds))) * 1000,
       history_retention_days: historyRetention,
       can_write_objects:      canWriteObjects,
       can_log_activities:     canLogActivities,
@@ -656,6 +659,31 @@ export default function AgentSettings() {
             )}
             <p className="text-xs text-muted-foreground">
               Choose a recommended model or enter a custom model ID. Test verifies the model is reachable and can call tools before saving.
+            </p>
+          </div>
+
+          {/* Model timeout */}
+          <div className="py-4 space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Model timeout</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={5}
+                max={300}
+                step={5}
+                value={llmTimeoutSeconds}
+                onChange={e => {
+                  const next = Number(e.target.value);
+                  setLlmTimeoutSeconds(Number.isFinite(next) ? next : 60);
+                  resetTest();
+                  resetBackupTest();
+                }}
+                className="h-9 w-28 px-3 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+              />
+              <span className="text-sm text-muted-foreground">seconds</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              CRMy retries brief provider interruptions once, then uses the backup provider when the primary model exceeds this timeout. Default is 60 seconds.
             </p>
           </div>
 
