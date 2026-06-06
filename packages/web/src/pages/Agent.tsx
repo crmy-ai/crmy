@@ -784,11 +784,11 @@ export default function Agent() {
     }
   }, [entityContext, refetchSessions]);
 
-  const sendMessage = useCallback(async (overrideText?: string, opts?: { skipUserMessage?: boolean }) => {
+  const sendMessage = useCallback(async (overrideText?: string, opts?: { skipUserMessage?: boolean; clearInput?: boolean }) => {
     const text = (overrideText !== undefined ? overrideText : input).trim();
     if (!text || streaming) return;
     const resetVersion = chatResetRef.current;
-    if (overrideText === undefined) setInput('');
+    if (overrideText === undefined || opts?.clearInput) setInput('');
 
     setLastSentMessage(text);
     setIsSessionPending(true);
@@ -1090,8 +1090,7 @@ export default function Agent() {
   const sendComposerMessage = useCallback(() => {
     const resolved = resolveShortcutInput(input, workflowCommands);
     if (!resolved) return;
-    if (resolved !== input.trim()) setInput('');
-    sendMessage(resolved);
+    sendMessage(resolved, { clearInput: true });
   }, [input, sendMessage, workflowCommands]);
 
   const handleComposerKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
