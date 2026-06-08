@@ -374,7 +374,7 @@ function ActionCard({
           onChange={type => onChange({ type, config: {} })}
         />
 
-        {/* HITL / Auto badge */}
+        {/* Human review / Auto badge */}
         {isHITL ? (
           <Badge className="shrink-0 text-xs px-1.5 bg-amber-500/20 text-amber-700 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20">
             <UserCheck className="w-2.5 h-2.5 mr-0.5" />Human
@@ -670,7 +670,7 @@ function ActionCard({
             <span>
               {def.isHITL
                 ? 'This step creates a review request in Handoffs. Subsequent actions run only after a human approves.'
-                : 'This email will not send until a human approves the HITL request in Handoffs.'}
+                : 'This email will not send until a human approves the review request in Handoffs.'}
             </span>
           </div>
         )}

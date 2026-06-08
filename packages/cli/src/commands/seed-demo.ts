@@ -77,7 +77,7 @@ export function seedDemoCommand(): Command {
         spinner.succeed('Sample data ready');
         const counts = status.counts;
         console.log(`  ${counts.accounts} accounts · ${counts.contacts} contacts · ${counts.opportunities} opportunities`);
-        console.log(`  ${counts.raw_context_sources} Raw Context sources · ${counts.signals} Signals · ${counts.signal_groups} Signal groups · ${counts.memory} Memory entries · ${counts.handoffs} Handoffs`);
+        console.log(`  ${counts.raw_context_sources} Raw Context sources · ${counts.signals} Signals · ${counts.signal_groups} reviewable Signal sets · ${counts.memory} Memory entries · ${counts.handoffs} Handoffs`);
         console.log('');
         console.log('Try it:');
         console.log('  crmy briefing "contact:Maya Patel"');

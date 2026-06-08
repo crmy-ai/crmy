@@ -100,7 +100,7 @@ const SCOPE_GROUPS = [
     { value: 'context:read', label: 'Read context' },
     { value: 'context:write', label: 'Write context' },
   ]},
-  { label: 'HITL / Handoff', scopes: [
+  { label: 'Approvals / Handoffs', scopes: [
     { value: 'hitl:read', label: 'Read approvals' },
     { value: 'hitl:write', label: 'Write approvals' },
     { value: 'hitl:admin', label: 'Manage approval rules' },

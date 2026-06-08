@@ -40,9 +40,9 @@ export const TRIGGER_EVENTS = [
   // Email
   { value: 'email.sent',                 label: 'Email sent',                 group: 'Email'         },
   { value: 'email.failed',               label: 'Email failed',               group: 'Email'         },
-  // HITL / Handoffs
-  { value: 'hitl.submitted',             label: 'HITL request submitted',     group: 'Handoffs'      },
-  { value: 'hitl.resolved',              label: 'HITL request resolved',      group: 'Handoffs'      },
+  // Human review / Handoffs
+  { value: 'hitl.submitted',             label: 'Review request submitted',   group: 'Handoffs'      },
+  { value: 'hitl.resolved',              label: 'Review request resolved',    group: 'Handoffs'      },
   // Systems of Record
   { value: 'system_of_record.created',   label: 'System of record created',   group: 'Systems'       },
   { value: 'system_of_record.updated',   label: 'System of record updated',   group: 'Systems'       },
@@ -117,7 +117,7 @@ export const ACTION_TYPES: ActionTypeDef[] = [
       { key: 'ai_generate',      label: 'AI generate content', placeholder: '', required: false, type: 'boolean', hint: 'Requires the Workspace Agent to be configured.' },
       { key: 'ai_prompt',        label: 'AI prompt',        placeholder: 'Describe what to write. CRMy will use this prompt with current customer context.', required: false, type: 'textarea', hint: 'Supports {{variables}}' },
       { key: 'body_text',        label: 'Body',             placeholder: 'Email body. Supports {{variables}}.',          required: true,  type: 'textarea', hint: 'Supports {{variables}}', aiControlled: true },
-      { key: 'require_approval', label: 'Require human approval before sending', placeholder: '', required: false, type: 'boolean', hint: 'A HITL review request is created; email only sends after approval' },
+      { key: 'require_approval', label: 'Require human approval before sending', placeholder: '', required: false, type: 'boolean', hint: 'A review request is created in Handoffs; email only sends after approval' },
     ],
   },
   {

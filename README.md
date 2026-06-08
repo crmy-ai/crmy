@@ -4,12 +4,10 @@
 
 <h1 align="center">CRMy</h1>
 
-<p align="center">
-  <strong>Messy customer context in. Agent-ready briefings, Signals, Memory, and Action Context out.</strong>
-</p>
+<h3 align="center">Before an agent acts on a customer, it needs trusted context.</h3>
 
 <p align="center">
-  CRMy turns transcripts, emails, notes, CRM changes, and other messy GTM context into the briefing a customer-facing agent needs before it acts.
+  CRMy turns transcripts, emails, notes, CRM changes, and other messy GTM context into the briefing a customer-facing agent needs before it acts. Messy customer context in. Agent-ready Signals, Memory, and action guidance out.
 </p>
 
 <p align="center">
@@ -49,19 +47,19 @@ They fail because the context around the customer is messy:
 
 CRMy is the context engine for that gap.
 
-It accepts **Raw Context**, resolves the customer, extracts evidence-backed **Signals**, keeps inferred Signals separate until evidence, readiness, and policy gates allow them to become typed **Memory**, and retrieves the right briefing and **Action Context** before an agent drafts, decides, requests approval, or writes back.
+It accepts **Raw Context**, resolves the customer, extracts evidence-backed **Signals**, keeps inferred Signals separate until evidence, readiness, and review requirements allow them to become typed **Memory**, and retrieves the right briefing and action guidance before an agent drafts, decides, requests approval, or writes back.
 
 ```text
-Raw Context -> Signals -> Memory -> Briefing + Action Context -> Handoff / Writeback -> Proof
+Raw Context -> Signals -> Memory -> Briefing + Action Guidance -> Handoff / Writeback -> Audit Trail
 ```
 
 A customer-facing agent should be able to ask one high-level question before work:
 
 > What do I need to know about this customer, what is uncertain or stale, what am I allowed to do, and what proof backs it?
 
-CRMy gives that answer through MCP, CLI, REST, and UI surfaces on top of PostgreSQL.
+CRMy gives that answer through agent tools, CLI, REST, and UI surfaces on top of PostgreSQL.
 
-> **Run the seeded demo path:** after quickstart, run the smoke path. It is not just a CRM lookup. It exercises the source-to-action loop an agent needs: resolve the customer, retrieve a briefing with Memory and Signals, surface reviewable context, and trace source context into agent-ready output.
+> **Run the demo agent check:** after quickstart, verify the source-to-action loop. It is not just a CRM lookup. It resolves the customer, retrieves a briefing with Memory and Signals, surfaces reviewable context, and shows the evidence behind the agent-ready output.
 >
 > ```bash
 > npx -y @crmy/cli agent-smoke
@@ -85,7 +83,7 @@ flowchart LR
   memory["Memory\nconfirmed customer truth"]
   retrieve["One retrieval path\nbriefing_get / action_context_get"]
   action["Agent action\nwith warnings + policy"]
-  proof["Handoff / Writeback / Proof"]
+  proof["Handoff / Writeback / Audit Trail"]
 
   raw --> signals --> memory --> retrieve --> action --> proof
 ```
@@ -310,23 +308,23 @@ npx -y @crmy/cli context signal-groups
 npx -y @crmy/cli context lineage --subject "account:Northstar Labs"
 ```
 
-Representative `agent-smoke` output:
+Representative demo check output:
 
 ```text
 Resolved account "Northstar Labs"
-Briefing returned Memory, activity, open assignments, and Signal groups
+Briefing returned Memory, activity, open assignments, and related Signals
 Found Signals needing attention
 ```
 
 You should see:
 
-1. **Resolution**: `agent-smoke` resolves `Northstar Labs` through the same account-first resolver agents use for ambiguous customer references.
-2. **Briefing**: `briefing_get` returns Current Memory, recent activity, open assignments, stale warnings, and reviewable Signal groups in one agent-ready payload.
+1. **Resolution**: the demo check resolves `Northstar Labs` through the same account-first resolver agents use for ambiguous customer references.
+2. **Briefing**: the briefing tool returns Current Memory, recent activity, open assignments, stale warnings, and reviewable Signals in one agent-ready payload.
 3. **Signals**: `context signal-groups` shows inferred claims that need attention across the customer graph; direct `context signals --subject ...` is narrower and only lists raw Signal entries attached to that exact record.
 4. **Memory**: confirmed context is available to briefings and search across sessions.
 5. **Lineage**: source material can be traced into Signals, Memory, related records, and later review/writeback/audit receipts when those actions happen.
 
-With a Workspace Agent model configured, prove live Raw Context extraction:
+With a Workspace Agent model configured, check live Raw Context extraction:
 
 ```bash
 cat > /tmp/northstar-note.txt <<'EOF'
@@ -337,7 +335,7 @@ EOF
 npx -y @crmy/cli context ingest --subject "account:Northstar Labs" --file /tmp/northstar-note.txt
 npx -y @crmy/cli context signals --subject "account:Northstar Labs"
 npx -y @crmy/cli context signal-groups
-npx -y @crmy/cli agent-smoke --with-model   # optional: proves live Raw Context extraction with your configured model
+npx -y @crmy/cli agent-smoke --with-model   # optional: checks live Raw Context extraction with your configured model
 ```
 
 This is the core behavior: messy source material becomes reviewable Signals with evidence before it becomes trusted Memory.
@@ -457,7 +455,7 @@ mcp_servers:
 
 If Hermes runs outside the shell where `crmy init` wrote config, add `DATABASE_URL` and `CRMY_API_KEY` under `env:` or connect to CRMy over HTTP with `url: "http://localhost:3000/mcp"` and an `Authorization` header. Restart Hermes or run `/reload-mcp` after editing the config.
 
-Agent smoke prompt:
+Demo Prompt - Ask your agent to run this with CRMy MCP tools:
 
 ```bash
 npx -y @crmy/cli agent-smoke
@@ -528,7 +526,7 @@ A Signal can auto-promote only when all of these are true:
 - the claim is not speculative;
 - typed Memory readiness is complete enough for the Signal's context type;
 - the Signal/group score meets the configured confirmation threshold;
-- the Signal group is ready, without unresolved conflict or duplicate-source inflation;
+- the related Signals are ready, without unresolved conflict or duplicate-source inflation;
 - policy allows promotion for the current actor without approval.
 
 Otherwise, the Signal remains reviewable. Users or agents can add missing detail, add evidence, send it to Handoff, reject it as Memory, or confirm it manually when allowed.

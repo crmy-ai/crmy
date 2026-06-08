@@ -35,11 +35,11 @@ Configuration lookup order:
 Agent guidance:
   Use context_ingest_auto for messy transcripts, emails, notes, and research.
   Use context_add only for advanced direct Memory or evidence-backed Signal writes.
-  Run \`crmy agent-smoke\` or \`crmy mcp doctor\` to verify the seeded agent path.
+  Run \`crmy agent-smoke\` or \`crmy mcp doctor\` to check the seeded demo agent workflow.
 `);
 
   cmd.command('doctor')
-    .description('Verify the seeded MCP agent path against demo data')
+    .description('Check the seeded demo agent workflow against demo data')
     .option('--account <name>', 'Demo account name to resolve', 'Northstar Labs')
     .option('--signal-limit <n>', 'Signals to request from context_signal_group_list', '5')
     .option('--with-model', 'Also ingest a small Raw Context source through the configured Workspace Agent model')

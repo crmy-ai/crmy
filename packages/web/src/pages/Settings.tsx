@@ -2910,7 +2910,7 @@ function SystemsOfRecordSettings() {
 
   const discoverExternalObjects = () => {
     if (!mappingSystemId) {
-      toast({ title: 'Choose a connection first', description: 'Select a system of record before discovering schema.', variant: 'destructive' });
+      toast({ title: 'Choose a connection first', description: 'Select a system of record before discovering external fields.', variant: 'destructive' });
       return;
     }
     setDiscoveryObjectName('');
@@ -4504,7 +4504,7 @@ function SystemsOfRecordSettings() {
               <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-semibold text-foreground">Discover schema</p>
+                    <p className="text-sm font-semibold text-foreground">Discover fields</p>
                     <p className="text-sm text-muted-foreground mt-0.5">Use the live connection to choose external objects and field names.</p>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
@@ -4517,7 +4517,7 @@ function SystemsOfRecordSettings() {
                     {discovery.isFetching ? (
                       <p className="text-sm text-muted-foreground">Discovering {discoveryMode}...</p>
                     ) : discovery.error ? (
-                      <p className="text-sm text-destructive">{discovery.error instanceof Error ? discovery.error.message : 'Could not discover schema. Test the connection and try again.'}</p>
+                      <p className="text-sm text-destructive">{discovery.error instanceof Error ? discovery.error.message : 'Could not discover external fields. Test the connection and try again.'}</p>
                     ) : discoveryItems.length === 0 ? (
                       <p className="text-sm text-muted-foreground">No {discoveryMode} returned for this connection.</p>
                     ) : (

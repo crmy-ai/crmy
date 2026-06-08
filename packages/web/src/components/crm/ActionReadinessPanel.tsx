@@ -60,7 +60,7 @@ function reasonText(actionContext: ActionContext) {
     ...(guidance?.review_reasons ?? []),
     ...(guidance?.warning_reasons ?? []),
   ].filter((reason): reason is string => Boolean(reason));
-  return reasons.length > 0 ? reasons.slice(0, 3) : ['Action Context is available for this record.'];
+  return reasons.length > 0 ? reasons.slice(0, 3) : ['Action guidance is available for this record.'];
 }
 
 export function ActionReadinessPanel({ actionContext, isLoading, isError }: ActionReadinessPanelProps) {
@@ -69,7 +69,7 @@ export function ActionReadinessPanel({ actionContext, isLoading, isError }: Acti
       <div className="rounded-xl border border-border bg-card p-3">
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Checking Action Context...
+          Checking action guidance...
         </div>
       </div>
     );
@@ -80,7 +80,7 @@ export function ActionReadinessPanel({ actionContext, isLoading, isError }: Acti
       <div className="rounded-xl border border-destructive/20 bg-destructive/10 p-3">
         <div className="flex items-center gap-2 text-sm font-semibold text-destructive">
           <AlertTriangle className="h-4 w-4" />
-          Action Context unavailable
+          Action guidance unavailable
         </div>
       </div>
     );
@@ -102,7 +102,7 @@ export function ActionReadinessPanel({ actionContext, isLoading, isError }: Acti
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-display font-bold text-foreground">Action Context</p>
+            <p className="text-sm font-display font-bold text-foreground">Action guidance</p>
             <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${modeConfig.className}`}>
               {modeConfig.label}
             </span>
@@ -145,10 +145,10 @@ export function ActionReadinessPanel({ actionContext, isLoading, isError }: Acti
       <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1">
           <ShieldCheck className="h-3 w-3" />
-          Proof {actionContext.proof.retrieval_event_id ? `#${actionContext.proof.retrieval_event_id}` : 'pending'}
+          Audit event {actionContext.proof.retrieval_event_id ? `#${actionContext.proof.retrieval_event_id}` : 'pending'}
         </span>
         <span>{countLabel(actionContext.proof.used_context_entry_ids.length, 'context item')}</span>
-        <span>{countLabel(actionContext.proof.used_signal_group_ids.length, 'Signal group')}</span>
+        <span>{countLabel(actionContext.proof.used_signal_group_ids.length, 'related Signal')}</span>
       </div>
     </div>
   );

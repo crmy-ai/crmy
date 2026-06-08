@@ -157,7 +157,7 @@ export async function runAgentSmoke(options: {
         name: 'briefing_get',
         ok: hasBriefingContent,
         detail: hasBriefingContent
-          ? `Briefing returned ${memoryCount} Memory item(s), ${activityCount} activity item(s), ${assignmentCount} open assignment(s), and ${briefingSignalGroupCount} Signal group(s).`
+          ? `Briefing returned ${memoryCount} Memory item(s), ${activityCount} activity item(s), ${assignmentCount} open assignment(s), and ${briefingSignalGroupCount} reviewable Signal set(s).`
           : `Briefing resolved but contains no demo context for "${accountName}".`,
         fix: hasBriefingContent ? undefined : 'Run `crmy seed-demo` to load the Northstar Labs source-to-action demo.',
       });
@@ -167,7 +167,7 @@ export async function runAgentSmoke(options: {
           info('Running model-backed Raw Context extraction. Local models can take 30-60 seconds...');
         }
         const ingestResult = await runTool(client, 'context_ingest_auto', {
-          source_label: 'Agent smoke model-backed extraction demo',
+          source_label: 'Demo agent check model extraction',
           source_occurred_at: '2026-01-15T17:00:00.000Z',
           idempotency_key: `agent-smoke-model:${accountId}`,
           confidence_threshold: 0.6,
@@ -257,7 +257,7 @@ export async function runAgentSmoke(options: {
     return result;
   }
 
-  console.log('\n  CRMy Agent Smoke Test\n  ══════════════════════════════════════\n');
+  console.log('\n  CRMy Demo Agent Check\n  ══════════════════════════════════════\n');
   for (const check of checks) {
     if (check.ok) pass(check.detail);
     else fail(check.detail, check.fix);
@@ -277,11 +277,11 @@ export async function runAgentSmoke(options: {
     console.log(`\n  Model-backed extraction: ${modelExtraction.extracted_count} item(s)${duplicate}`);
   }
 
-  console.log('\n  One-minute agent prompt:');
+  console.log('\n  Demo Prompt - Ask your agent to run this with CRMy MCP tools enabled:');
   console.log(`  \x1b[1m${prompt}\x1b[0m\n`);
 
   if (result.ok) {
-    pass('Agent-facing CRMy tools are ready for the seeded demo path.');
+    pass('CRMy agent tools are ready for the seeded demo workflow.');
   } else {
     info('This check expects seeded demo data. Run `crmy seed-demo` if Northstar Labs is missing.');
     process.exitCode = 1;
@@ -292,7 +292,7 @@ export async function runAgentSmoke(options: {
 
 export function agentSmokeCommand(): Command {
   return new Command('agent-smoke')
-    .description('Verify the seeded agent path: resolve account, get briefing, list Signals')
+    .description('Check the seeded demo agent workflow: resolve an account, get a briefing, and list Signals')
     .option('--account <name>', 'Demo account name to resolve', 'Northstar Labs')
     .option('--signal-limit <n>', 'Signals to request from context_signal_group_list', '5')
     .option('--with-model', 'Also ingest a small Raw Context source through the configured Workspace Agent model')

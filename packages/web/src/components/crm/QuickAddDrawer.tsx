@@ -575,7 +575,7 @@ function LightweightRecordAgentPanel({ type, onClose, context }: { type: string;
                       ? 'bg-amber-500/10 text-amber-400'
                       : 'bg-success/10 text-success'
                   }`}>
-                    Action Context · {actionContext.readiness_status === 'review_needed' ? 'Review needed' : actionContext.readiness_status === 'blocked' ? 'Blocked' : 'Ready'}
+                    Safety check · {actionContext.readiness_status === 'review_needed' ? 'Review needed' : actionContext.readiness_status === 'blocked' ? 'Blocked' : 'Ready'}
                   </span>
                   <span className="text-xs text-muted-foreground">{actionContext.guidance_summary}</span>
                 </div>

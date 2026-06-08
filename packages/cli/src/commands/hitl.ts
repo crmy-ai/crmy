@@ -20,7 +20,7 @@ async function resolveHitlRef(client: Awaited<ReturnType<typeof getClient>>, ref
 }
 
 export function hitlCommand(): Command {
-  const cmd = new Command('hitl').description('Manage HITL approval requests');
+  const cmd = new Command('hitl').description('Manage approval and handoff requests');
 
   cmd.command('list')
     .action(async () => {
@@ -29,7 +29,7 @@ export function hitlCommand(): Command {
       const data = JSON.parse(result);
       const requests = data.requests ?? data.data ?? (Array.isArray(data) ? data : []);
       if (requests.length === 0) {
-        console.log('No pending HITL requests.');
+        console.log('No pending approval requests.');
         await client.close();
         return;
       }

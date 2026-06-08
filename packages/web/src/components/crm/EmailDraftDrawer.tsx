@@ -319,7 +319,7 @@ export function EmailDraftDrawer() {
                       : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200'}
                     title={actionContext.guidance_summary}
                   >
-                    Action Context · {actionContext.review_required ? 'Review before send' : 'Ready'}
+                    Send readiness · {actionContext.review_required ? 'Review before send' : 'Ready'}
                   </Badge>
                 )}
                 {warnings.map(warning => (
@@ -350,7 +350,7 @@ export function EmailDraftDrawer() {
               onClick={() => save('send_now')}
               disabled={saveDraft.isPending || directSendBlocked}
               className="gap-1.5"
-              title={directSendBlocked ? 'Action Context requires review before this email can be sent.' : undefined}
+              title={directSendBlocked ? 'This email needs review before it can be sent.' : undefined}
             >
               <Send className="h-3.5 w-3.5" /> Send now
             </Button>

@@ -372,7 +372,7 @@ export function initCommand(): Command {
   return new Command('init')
     .description('Set up CRMy: database, migrations, owner account, API key, Workspace Agent model, and demo data')
     .option('-y, --yes', 'Use defaults non-interactively (requires CRMY_ADMIN_EMAIL + CRMY_ADMIN_PASSWORD; DATABASE_URL optional)')
-    .option('--demo', 'Seed the rich demo proof state for a fast first run')
+    .option('--demo', 'Load demo customer data and context for a fast first run')
     .option('--no-demo', 'Skip demo data seeding')
     .action(async (opts, command: Command) => {
       const yesMode = !!opts.yes;
@@ -775,14 +775,14 @@ export function initCommand(): Command {
           const status = await seedSampleData(db, tenantId);
           const counts = status.counts;
           spinner.succeed(
-            `Demo data seeded  \x1b[2m(${counts.accounts} accounts, ${counts.contacts} contacts, ${counts.opportunities} opportunities, ${counts.raw_context_sources} Raw Context sources, ${counts.memory} Memory, ${counts.signals} Signals, ${counts.signal_groups} Signal groups)\x1b[0m`,
+            `Demo data seeded  \x1b[2m(${counts.accounts} accounts, ${counts.contacts} contacts, ${counts.opportunities} opportunities, ${counts.raw_context_sources} Raw Context sources, ${counts.memory} Memory, ${counts.signals} Signals, ${counts.signal_groups} reviewable Signal sets)\x1b[0m`,
           );
         } catch {
           spinner.fail('Demo data seeding failed');
           console.log('  \x1b[33m⚠\x1b[0m  You can run it later with: crmy seed-demo\n');
         }
       } else {
-        console.log('  Demo data skipped. Run `crmy seed-demo` later to load the proof state.\n');
+        console.log('  Demo data skipped. Run `crmy seed-demo` later to load demo customer data and context.\n');
       }
 
       await closePool();
@@ -815,13 +815,13 @@ export function initCommand(): Command {
       console.log('    Connect to Claude Code:');
       console.log('    \x1b[1mclaude mcp add crmy -- npx -y @crmy/cli mcp\x1b[0m\n');
       if (seedDemo) {
-        console.log('    Verify the agent path:');
+        console.log('    Check the demo agent workflow:');
         console.log('    \x1b[1mnpx -y @crmy/cli agent-smoke\x1b[0m\n');
         if (configuredAgent) {
-          console.log('    Verify model-backed extraction:');
+          console.log('    Check live extraction with your model:');
           console.log('    \x1b[1mnpx -y @crmy/cli agent-smoke --with-model\x1b[0m\n');
         }
-        console.log('    Agent smoke prompt:');
+        console.log('    Demo Prompt - Ask your agent to run this with CRMy MCP tools:');
         console.log('    \x1b[1mUse the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.\x1b[0m\n');
       }
     });
