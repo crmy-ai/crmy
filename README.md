@@ -4,13 +4,13 @@
 
 <h1 align="center">CRMy</h1>
 
-<h3 align="center">Before an agent acts on a customer, it needs trusted context.</h3>
+<h2 align="center">Customer memory for AI sales agents.</h2>
 
 <p align="center">
-  CRMy turns transcripts, emails, notes, CRM changes, and other raw customer context into the trusted briefing a customer-facing agent needs before it acts.
+  Before an agent acts on a customer, it needs trusted context. CRMy turns transcripts, emails, notes, CRM changes, and other raw customer context into the trusted briefing any customer-facing agent needs before it acts.
 </p>
 <p align="center">
-  <strong>Messy customer context in. Agent-ready Signals, Memory, and action guidance out.</strong>
+  <strong>Messy customer context in. Agent-ready Signals, Memory, and action guidance out.</strong> 
 </p>
 
 <p align="center">
