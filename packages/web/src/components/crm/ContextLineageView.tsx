@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useRef, useState } from 'react';
+import { type ReactNode, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   Activity,
@@ -345,7 +345,7 @@ function ConnectionRow({ edge, other, direction }: { edge: ContextLineageEdge; o
   );
 }
 
-export function ContextLineageView() {
+export function ContextLineageView({ headerContent }: { headerContent?: ReactNode } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
@@ -565,10 +565,11 @@ export function ContextLineageView() {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-24 md:px-6 md:pb-6">
+        {headerContent}
         <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-card/70 px-3 py-2.5 text-sm text-muted-foreground">
+          <p className="text-xs text-muted-foreground">
             Trace how source material becomes Signals, confirmed Memory, Active Context, handoffs, writebacks, and audit history.
-          </div>
+          </p>
 
           {visibleData && nonRecordNodes.length > 0 && (
             <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm md:flex-row md:items-center md:justify-between">

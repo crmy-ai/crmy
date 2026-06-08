@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ComponentType, useEffect, useMemo, useState } from 'react';
+import { type ComponentType, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -916,8 +916,10 @@ type SignalViewMode = 'cards' | 'table';
 
 export function SignalGroupsBrowser({
   viewMode: controlledViewMode,
+  headerContent,
 }: {
   viewMode?: SignalViewMode;
+  headerContent?: ReactNode;
 } = {}) {
   const navigate = useNavigate();
   const openDrawer = useAppStore(s => s.openDrawer);
@@ -1340,6 +1342,7 @@ export function SignalGroupsBrowser({
       />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">
+        {headerContent}
         {!isLoading && groups.length > 0 && (
           <p className="mb-3 text-xs text-muted-foreground">
             Showing {groups.length.toLocaleString()} of {total.toLocaleString()} {query ? 'matching' : attentionOnly ? 'attention' : ''} Signals. Use search, record, status, and type filters to narrow large workspaces.

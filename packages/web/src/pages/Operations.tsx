@@ -1,10 +1,9 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { TopBar } from '@/components/layout/TopBar';
 import { useOpsDataQuality, useOpsStatus, useRepairOpsDataQuality, useSystemConflicts, useSystemSyncRuns, useSystemsOfRecord, useSystemWritebacks } from '@/api/hooks';
-import { countLabel } from '@/lib/headerCopy';
 import { toast } from '@/hooks/use-toast';
 import {
   AlertTriangle,
@@ -17,6 +16,8 @@ import {
   RefreshCw,
   Server,
 } from 'lucide-react';
+
+const OPERATIONS_SHOW_ALL_KEY = 'crmy_operations_show_all';
 
 function statusClass(counts: Record<string, number>, available: boolean) {
   if (!available) return 'border-destructive/30 bg-destructive/5';
@@ -120,6 +121,48 @@ function systemHealthClass(status?: string, issues = 0) {
   return 'border-border bg-card';
 }
 
+function queueFailureCount(queue: any) {
+  const counts = queue.counts_by_status ?? {};
+  return (counts.failed ?? 0) + (counts.retrying ?? 0) + (counts.parked ?? 0);
+}
+
+function queueNeedsAttention(queue: any) {
+  return queue.available === false || queueFailureCount(queue) > 0 || Boolean(queue.oldest_pending_at) || Boolean(queue.error);
+}
+
+function getDataQualityKey(check: any) {
+  return check.name ?? check.check_name ?? check.label ?? 'data_quality_check';
+}
+
+function dataQualityHasIssue(check: any) {
+  return Number(check.count ?? 0) > 0 || Boolean(check.error);
+}
+
+function getDataQualityCopy(check: any) {
+  const key = getDataQualityKey(check);
+  return DATA_QUALITY_COPY[key] ?? {
+    label: check.label ?? humanizeName(key),
+    description: check.description ?? 'This check found data that may reduce agent context quality.',
+  };
+}
+
+function systemIssueCount(status?: string, latestRun?: any, openConflicts = 0, pendingWritebacks = 0) {
+  return openConflicts + pendingWritebacks + (latestRun?.status === 'failed' ? 1 : 0) + (status && status !== 'connected' ? 1 : 0);
+}
+
+function schedulerMetricValue(value: unknown) {
+  return Number(value ?? 0);
+}
+
+function schedulerNeedsAttention(schedulerHealth: any) {
+  if (!schedulerHealth) return false;
+  return Boolean(schedulerHealth.last_tick_error)
+    || schedulerMetricValue(schedulerHealth.due_sequence_backlog) > 0
+    || schedulerMetricValue(schedulerHealth.workflow_catchup_backlog) > 0
+    || schedulerMetricValue(schedulerHealth.recent_failed_workflow_runs) > 0
+    || schedulerMetricValue(schedulerHealth.recent_failed_sequence_steps) > 0;
+}
+
 function SystemOfRecordCard({
   system,
   latestRun,
@@ -131,7 +174,7 @@ function SystemOfRecordCard({
   openConflicts: number;
   pendingWritebacks: number;
 }) {
-  const issueCount = openConflicts + pendingWritebacks + (latestRun?.status === 'failed' ? 1 : 0);
+  const issueCount = systemIssueCount(system.status, latestRun, openConflicts, pendingWritebacks);
   const healthy = system.status === 'connected' && issueCount === 0;
   return (
     <div className={`rounded-xl border p-4 ${systemHealthClass(system.status, issueCount)}`}>
@@ -173,7 +216,7 @@ function SystemOfRecordCard({
 
 function QueueCard({ queue }: { queue: any }) {
   const counts = queue.counts_by_status ?? {};
-  const failureCount = (counts.failed ?? 0) + (counts.retrying ?? 0) + (counts.parked ?? 0);
+  const failureCount = queueFailureCount(queue);
   return (
     <div className={`rounded-xl border p-4 ${statusClass(counts, queue.available !== false)}`}>
       <div className="flex items-start gap-3">
@@ -223,21 +266,120 @@ function QueueCard({ queue }: { queue: any }) {
 
 function RawContextReliabilityNote() {
   return (
-    <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+    <details className="rounded-xl border border-border bg-card px-4 py-3">
+      <summary className="cursor-pointer text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground">
+        Raw Context replay and dedupe
+      </summary>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">
+        Re-sending the same source returns the existing receipt instead of extracting again. When a source includes the real event time,
+        repeated or lightly reworded uploads from that same event count as one evidence source for trust scoring; later events can still
+        strengthen a Signal.
+      </p>
+    </details>
+  );
+}
+
+function IssueSummaryCard({
+  label,
+  value,
+  tone = 'default',
+}: {
+  label: string;
+  value: number | string;
+  tone?: 'default' | 'warning' | 'danger';
+}) {
+  const valueClass = tone === 'danger'
+    ? 'text-destructive'
+    : tone === 'warning'
+    ? 'text-warning'
+    : 'text-foreground';
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={`mt-1 text-2xl font-display font-bold ${valueClass}`}>{value}</p>
+    </div>
+  );
+}
+
+function SectionHeader({
+  title,
+  count,
+  total,
+  showAll,
+  right,
+}: {
+  title: string;
+  count?: number;
+  total?: number;
+  showAll?: boolean;
+  right?: ReactNode;
+}) {
+  const countCopy = typeof count === 'number' && typeof total === 'number'
+    ? showAll ? `${total} monitored` : `${count} need attention`
+    : null;
+  return (
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-display font-bold text-foreground">{title}</h2>
+        {countCopy && <span className="text-xs text-muted-foreground">{countCopy}</span>}
+      </div>
+      {right}
+    </div>
+  );
+}
+
+function EmptyHealthyState({ onShowAll }: { onShowAll: () => void }) {
+  return (
+    <div className="rounded-xl border border-success/30 bg-success/5 p-5">
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 rounded-lg bg-primary/10 p-2 text-primary">
-          <RefreshCw className="h-4 w-4" />
+        <div className="mt-0.5 rounded-lg bg-success/15 p-2 text-success">
+          <CheckCircle2 className="h-4 w-4" />
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-foreground">Raw Context replay and dedupe</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Re-sending the same source returns the existing receipt instead of extracting again. When a source includes the real event time,
-            repeated or lightly reworded uploads from that same event count as one evidence source for trust scoring; later events can still
-            strengthen a Signal.
+          <p className="text-sm font-semibold text-foreground">Reliability looks clear</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            No queues, syncs, scheduler work, or data-quality checks need attention right now.
           </p>
+          <button
+            type="button"
+            onClick={onShowAll}
+            className="mt-3 inline-flex h-8 items-center rounded-lg border border-border bg-background px-3 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            Show all monitored work
+          </button>
         </div>
       </div>
     </div>
+  );
+}
+
+function NeedsAttentionList({ items }: { items: { id: string; type: string; title: string; detail: string; tone?: 'warning' | 'danger' }[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section className="overflow-hidden rounded-xl border border-warning/30 bg-warning/5">
+      <div className="border-b border-warning/20 px-4 py-3">
+        <h2 className="text-sm font-display font-bold text-foreground">Needs Attention</h2>
+        <p className="mt-1 text-xs text-muted-foreground">Issues below are grouped again in their source sections for details and repair actions.</p>
+      </div>
+      <div className="divide-y divide-border/70 bg-card/70">
+        {items.map(item => (
+          <div key={item.id} className="flex items-start gap-3 px-4 py-3">
+            <div className={`mt-0.5 rounded-md p-1.5 ${item.tone === 'danger' ? 'bg-destructive/10 text-destructive' : 'bg-warning/15 text-warning'}`}>
+              <AlertTriangle className="h-3.5 w-3.5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-md border border-border bg-background px-1.5 py-0.5 text-xs font-semibold text-muted-foreground">
+                  {item.type}
+                </span>
+                <p className="text-sm font-semibold text-foreground">{item.title}</p>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">{item.detail}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -245,12 +387,9 @@ function DataQualityRow({ check }: { check: any }) {
   const [expanded, setExpanded] = useState(false);
   const repairMutation = useRepairOpsDataQuality();
   const count = Number(check.count ?? 0);
-  const hasIssue = count > 0 || Boolean(check.error);
-  const key = check.name ?? check.check_name ?? check.label ?? 'data_quality_check';
-  const copy = DATA_QUALITY_COPY[key] ?? {
-    label: check.label ?? humanizeName(key),
-    description: check.description ?? 'This check found data that may reduce agent context quality.',
-  };
+  const hasIssue = dataQualityHasIssue(check);
+  const key = getDataQualityKey(check);
+  const copy = getDataQualityCopy(check);
   const samples: Record<string, unknown>[] = Array.isArray(check.sample) ? check.sample : [];
   const canExpand = samples.length > 0 || Boolean(check.error);
   const canRepair = REPAIRABLE_DATA_QUALITY_CHECKS.has(key) && count > 0;
@@ -418,8 +557,18 @@ function DataQualitySummary({ checks }: { checks: any[] }) {
 }
 
 export default function OperationsPage() {
+  const [showAll, setShowAll] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(OPERATIONS_SHOW_ALL_KEY) === 'true';
+  });
+  function updateShowAll(value: boolean) {
+    setShowAll(value);
+    if (value) window.localStorage.setItem(OPERATIONS_SHOW_ALL_KEY, 'true');
+    else window.localStorage.removeItem(OPERATIONS_SHOW_ALL_KEY);
+  }
+
   const statusQ = useOpsStatus({ sample_limit: 3, include_samples: true }) as any;
-  const qualityQ = useOpsDataQuality({ sample_limit: 5, include_clean: false }) as any;
+  const qualityQ = useOpsDataQuality({ sample_limit: 5, include_clean: showAll }) as any;
   const systemsQ = useSystemsOfRecord({ limit: 50 }) as any;
   const syncRunsQ = useSystemSyncRuns({ limit: 50 }) as any;
   const conflictsQ = useSystemConflicts({ status: 'open', limit: 50 }) as any;
@@ -433,15 +582,6 @@ export default function OperationsPage() {
   const writebacks: any[] = writebacksQ.data?.data ?? [];
   const schedulerHealth = statusQ.data?.scheduler_health;
 
-  const queueSummary = useMemo(() => {
-    const unavailable = queues.filter(q => q.available === false).length;
-    const failureQueues = queues.filter(q => {
-      const counts = q.counts_by_status ?? {};
-      return (counts.failed ?? 0) + (counts.retrying ?? 0) + (counts.parked ?? 0) > 0;
-    }).length;
-    return { unavailable, failureQueues };
-  }, [queues]);
-
   const isLoading = statusQ.isLoading || qualityQ.isLoading;
   const isError = statusQ.isError || qualityQ.isError;
   const error = statusQ.error ?? qualityQ.error;
@@ -454,6 +594,92 @@ export default function OperationsPage() {
     }
     return map;
   }, [syncRuns]);
+  const attentionQueues = useMemo(() => queues.filter(queueNeedsAttention), [queues]);
+  const visibleQueues = showAll ? queues : attentionQueues;
+  const systemRows = useMemo(() => systems.map(system => {
+    const latestRun = latestRunBySystem.get(system.id);
+    const openConflicts = conflicts.filter(conflict => conflict.system_id === system.id).length;
+    const pendingWritebacks = writebacks.filter(writeback => writeback.system_id === system.id).length;
+    return {
+      system,
+      latestRun,
+      openConflicts,
+      pendingWritebacks,
+      issueCount: systemIssueCount(system.status, latestRun, openConflicts, pendingWritebacks),
+    };
+  }), [conflicts, latestRunBySystem, systems, writebacks]);
+  const systemsNeedingAttention = systemRows.filter(row => row.issueCount > 0);
+  const visibleSystems = showAll ? systemRows : systemsNeedingAttention;
+  const dataQualityFindings = useMemo(() => checks.filter(dataQualityHasIssue), [checks]);
+  const visibleChecks = showAll ? checks : dataQualityFindings;
+  const totalDataQualityFindings = dataQualityFindings.reduce((sum, check) => {
+    const count = Number(check.count ?? 0);
+    return sum + (count > 0 ? count : check.error ? 1 : 0);
+  }, 0);
+  const schedulerHasAttention = schedulerNeedsAttention(schedulerHealth);
+  const rawContextHasFindings = dataQualityFindings.some(check => {
+    const key = getDataQualityKey(check);
+    return key.includes('raw_context') || key.includes('extraction');
+  });
+  const attentionItems = useMemo(() => {
+    const queueItems = attentionQueues.map(queue => {
+      const failures = queueFailureCount(queue);
+      return {
+        id: `queue-${queue.name}`,
+        type: 'Work queue',
+        title: queue.label ?? queue.name,
+        detail: queue.available === false
+          ? 'Queue is unavailable.'
+          : failures > 0
+          ? `${failures} failed, retrying, or parked job${failures === 1 ? '' : 's'}.`
+          : queue.oldest_pending_at
+          ? `Oldest pending work started ${new Date(queue.oldest_pending_at).toLocaleString()}.`
+          : queue.error ?? 'Queue needs operator review.',
+        tone: queue.available === false || failures > 0 ? 'danger' as const : 'warning' as const,
+      };
+    });
+    const systemItems = systemsNeedingAttention.map(row => {
+      const details = [
+        row.system.status && row.system.status !== 'connected' ? `Status ${row.system.status}` : null,
+        row.latestRun?.status === 'failed' ? 'Latest sync failed' : null,
+        row.openConflicts > 0 ? `${row.openConflicts} open conflict${row.openConflicts === 1 ? '' : 's'}` : null,
+        row.pendingWritebacks > 0 ? `${row.pendingWritebacks} pending writeback${row.pendingWritebacks === 1 ? '' : 's'}` : null,
+      ].filter(Boolean);
+      return {
+        id: `system-${row.system.id}`,
+        type: 'System of Record',
+        title: row.system.name,
+        detail: details.join(' • ') || 'System needs operator review.',
+        tone: 'warning' as const,
+      };
+    });
+    const schedulerItems = schedulerHasAttention ? [{
+      id: 'scheduler',
+      type: 'Scheduler',
+      title: 'Automation Scheduler',
+      detail: schedulerHealth?.last_tick_error
+        ? `Last scheduler error: ${schedulerHealth.last_tick_error}`
+        : 'Automation or sequence work has backlog or recent failures.',
+      tone: schedulerHealth?.last_tick_error ? 'danger' as const : 'warning' as const,
+    }] : [];
+    const qualityItems = dataQualityFindings.map(check => {
+      const copy = getDataQualityCopy(check);
+      const count = Number(check.count ?? 0);
+      return {
+        id: `quality-${getDataQualityKey(check)}`,
+        type: 'Data quality',
+        title: copy.label,
+        detail: check.error
+          ? String(check.error)
+          : `${count} sampled finding${count === 1 ? '' : 's'}. ${copy.description}`,
+        tone: check.severity === 'critical' ? 'danger' as const : 'warning' as const,
+      };
+    });
+    return [...queueItems, ...systemItems, ...schedulerItems, ...qualityItems];
+  }, [attentionQueues, dataQualityFindings, schedulerHasAttention, schedulerHealth, systemsNeedingAttention]);
+  const needsAttentionCount = attentionItems.length;
+  const queueFailureCountTotal = attentionQueues.filter(queue => queue.available === false || queueFailureCount(queue) > 0).length;
+  const showEmptyHealthyState = !showAll && needsAttentionCount === 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -461,8 +687,14 @@ export default function OperationsPage() {
         title="Reliability"
         icon={Database}
         iconClassName="text-[#a78bfa]"
-        description={`Review queues, system sync, and data quality • ${countLabel(queues.length, 'queue')} • ${countLabel(systems.length, 'system')} • ${countLabel(checks.length, 'check')}`}
+        description="Monitor durable work, sync health, and data quality."
       >
+        <button
+          onClick={() => updateShowAll(!showAll)}
+          className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        >
+          {showAll ? 'Show attention only' : 'Show all'}
+        </button>
         <button
           onClick={() => { statusQ.refetch(); qualityQ.refetch(); }}
           className="hidden md:flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
@@ -483,87 +715,95 @@ export default function OperationsPage() {
           </div>
         ) : (
           <div className="space-y-5">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="rounded-xl border border-border bg-card p-4">
-                <p className="text-xs text-muted-foreground">Queues monitored</p>
-                <p className="mt-1 text-2xl font-display font-bold text-foreground">{queues.length}</p>
-              </div>
-              <div className="rounded-xl border border-border bg-card p-4">
-                <p className="text-xs text-muted-foreground">Need attention</p>
-                <p className={`mt-1 text-2xl font-display font-bold ${attention.length > 0 ? 'text-warning' : 'text-foreground'}`}>{attention.length}</p>
-              </div>
-              <div className="rounded-xl border border-border bg-card p-4">
-                <p className="text-xs text-muted-foreground">Queue failures</p>
-                <p className={`mt-1 text-2xl font-display font-bold ${queueSummary.failureQueues > 0 || queueSummary.unavailable > 0 ? 'text-destructive' : 'text-foreground'}`}>
-                  {queueSummary.failureQueues + queueSummary.unavailable}
-                </p>
-              </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+              <IssueSummaryCard label="Needs attention" value={needsAttentionCount} tone={needsAttentionCount > 0 ? 'warning' : 'default'} />
+              <IssueSummaryCard label="Queue issues" value={queueFailureCountTotal} tone={queueFailureCountTotal > 0 ? 'danger' : 'default'} />
+              <IssueSummaryCard label="Data quality findings" value={totalDataQualityFindings} tone={totalDataQualityFindings > 0 ? 'warning' : 'default'} />
+              <IssueSummaryCard label="Systems with issues" value={systemsNeedingAttention.length} tone={systemsNeedingAttention.length > 0 ? 'warning' : 'default'} />
             </div>
 
-            <section>
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-display font-bold text-foreground">Systems of Record</h2>
-                {systemsQ.isError ? (
-                  <span className="text-xs text-warning">Requires systems access</span>
-                ) : (
-                  <span className="text-xs text-muted-foreground">
-                    {systems.length} connected system{systems.length === 1 ? '' : 's'}
-                  </span>
-                )}
-              </div>
-              {systemsQ.isLoading ? (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  <div className="h-32 rounded-xl bg-muted/50 animate-pulse" />
-                  <div className="h-32 rounded-xl bg-muted/50 animate-pulse" />
-                </div>
-              ) : systemsQ.isError ? (
-                <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 text-sm text-muted-foreground">
-                  Systems of Record health is available to actors with <span className="font-mono text-foreground">systems:read</span> access.
-                </div>
-              ) : systems.length === 0 ? (
-                <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-                  No systems connected yet. Add one in Settings to monitor sync health here.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  {systems.map(system => (
-                    <SystemOfRecordCard
-                      key={system.id}
-                      system={system}
-                      latestRun={latestRunBySystem.get(system.id)}
-                      openConflicts={conflicts.filter(conflict => conflict.system_id === system.id).length}
-                      pendingWritebacks={writebacks.filter(writeback => writeback.system_id === system.id).length}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
+            {showEmptyHealthyState ? <EmptyHealthyState onShowAll={() => updateShowAll(true)} /> : <NeedsAttentionList items={attentionItems} />}
 
-            <section>
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-display font-bold text-foreground">Work Queues</h2>
-                {statusQ.data?.generated_at && (
-                  <span className="text-xs text-muted-foreground">Updated {new Date(statusQ.data.generated_at).toLocaleTimeString()}</span>
-                )}
-              </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                {queues.map(queue => <QueueCard key={queue.name} queue={queue} />)}
-              </div>
-              <div className="mt-3">
-                <RawContextReliabilityNote />
-              </div>
-            </section>
-
-            {schedulerHealth && (
+            {(showAll || systemsNeedingAttention.length > 0 || systemsQ.isError) && (
               <section>
-                <div className="mb-3 flex items-center justify-between">
-                  <h2 className="text-sm font-display font-bold text-foreground">Automation Scheduler</h2>
-                  <span className="text-xs text-muted-foreground">
+                <SectionHeader
+                  title="Systems of Record"
+                  count={systemsNeedingAttention.length}
+                  total={systems.length}
+                  showAll={showAll}
+                  right={systemsQ.isError ? (
+                    <span className="text-xs text-warning">Requires systems access</span>
+                  ) : null}
+                />
+                {systemsQ.isLoading ? (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    <div className="h-32 rounded-xl bg-muted/50 animate-pulse" />
+                    <div className="h-32 rounded-xl bg-muted/50 animate-pulse" />
+                  </div>
+                ) : systemsQ.isError ? (
+                  <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 text-sm text-muted-foreground">
+                    Systems of Record health is available to actors with <span className="font-mono text-foreground">systems:read</span> access.
+                  </div>
+                ) : visibleSystems.length === 0 ? (
+                  <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+                    No systems connected yet. Add one in Settings to monitor sync health here.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    {visibleSystems.map(row => (
+                      <SystemOfRecordCard
+                        key={row.system.id}
+                        system={row.system}
+                        latestRun={row.latestRun}
+                        openConflicts={row.openConflicts}
+                        pendingWritebacks={row.pendingWritebacks}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {(showAll || attentionQueues.length > 0) && (
+              <section>
+                <SectionHeader
+                  title="Work Queues"
+                  count={attentionQueues.length}
+                  total={queues.length}
+                  showAll={showAll}
+                  right={statusQ.data?.generated_at ? (
+                    <span className="text-xs text-muted-foreground">Updated {new Date(statusQ.data.generated_at).toLocaleTimeString()}</span>
+                  ) : null}
+                />
+                {visibleQueues.length === 0 ? (
+                  <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+                    No monitored queues returned by the server.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    {visibleQueues.map(queue => <QueueCard key={queue.name} queue={queue} />)}
+                  </div>
+                )}
+                {(showAll || rawContextHasFindings) && (
+                  <div className="mt-3">
+                    <RawContextReliabilityNote />
+                  </div>
+                )}
+              </section>
+            )}
+
+            {schedulerHealth && (showAll || schedulerHasAttention) && (
+              <section>
+                <SectionHeader
+                  title="Automation Scheduler"
+                  right={(
+                    <span className="text-xs text-muted-foreground">
                     {schedulerHealth.last_successful_tick_at
                       ? `Last tick ${new Date(schedulerHealth.last_successful_tick_at).toLocaleTimeString()}`
                       : 'Waiting for first tick'}
-                  </span>
-                </div>
+                    </span>
+                  )}
+                />
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
                   {[
                     ['Due sequence steps', schedulerHealth.due_sequence_backlog],
@@ -587,28 +827,30 @@ export default function OperationsPage() {
               </section>
             )}
 
-            <section>
-              <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-display font-bold text-foreground">Data Quality</h2>
-                <span className="text-xs text-muted-foreground">
-                  {checks.length} active check{checks.length === 1 ? '' : 's'}
-                </span>
-              </div>
-              {checks.length > 0 && <DataQualitySummary checks={checks} />}
-              <div className="overflow-hidden rounded-xl border border-border bg-card">
-                {checks.length === 0 ? (
-                  <div className="flex items-center gap-2 px-4 py-6 text-sm text-muted-foreground">
-                    <CheckCircle2 className="w-4 h-4 text-success" />
-                    No data-quality findings.
-                  </div>
-                ) : checks.map((check, index) => (
-                  <DataQualityRow
-                    key={`${check.name ?? check.check_name ?? check.label ?? 'check'}-${index}`}
-                    check={check}
-                  />
-                ))}
-              </div>
-            </section>
+            {(showAll || visibleChecks.length > 0) && (
+              <section>
+                <SectionHeader
+                  title="Data Quality"
+                  count={dataQualityFindings.length}
+                  total={checks.length}
+                  showAll={showAll}
+                />
+                {visibleChecks.length > 0 && <DataQualitySummary checks={visibleChecks} />}
+                <div className="overflow-hidden rounded-xl border border-border bg-card">
+                  {visibleChecks.length === 0 ? (
+                    <div className="flex items-center gap-2 px-4 py-6 text-sm text-muted-foreground">
+                      <CheckCircle2 className="w-4 h-4 text-success" />
+                      No data-quality findings.
+                    </div>
+                  ) : visibleChecks.map((check, index) => (
+                    <DataQualityRow
+                      key={`${getDataQualityKey(check)}-${index}`}
+                      check={check}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         )}
       </div>

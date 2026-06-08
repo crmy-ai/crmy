@@ -83,7 +83,7 @@ Summarize confirmed Memory separately from unconfirmed Signals. Include the sour
 
 ## Step 1 - Verify CRMy Can Serve Agents
 
-Run the one-minute smoke test before debugging OpenClaw or TweetClaw:
+Run the seeded agent smoke test before debugging OpenClaw or TweetClaw:
 
 ```bash
 npx -y @crmy/cli agent-smoke

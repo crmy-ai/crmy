@@ -64,7 +64,7 @@ function ContextProofStrip({
   ];
 
   return (
-    <div className="border-b border-border px-4 py-3 md:px-6">
+    <div className="mb-4">
       <div className="flex flex-col gap-3 rounded-xl border border-border bg-card px-3 py-3 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-semibold text-foreground">Context engine path</p>
@@ -241,6 +241,13 @@ export default function ContextPage() {
   const contextTotal = Number(contextData?.total ?? 0);
   const signalGroupTotal = Number(signalGroupData?.total ?? 0);
   const observationTotal = Number(activitiesData?.total ?? 0);
+  const contextProofStrip = (
+    <ContextProofStrip
+      observationTotal={observationTotal}
+      signalGroupTotal={signalGroupTotal}
+      contextTotal={contextTotal}
+    />
+  );
 
   const setTab = (nextTab: ContextTab) => {
     const existing = Object.fromEntries(searchParams.entries());
@@ -336,30 +343,22 @@ export default function ContextPage() {
         </div>
       </div>
 
-      {!['sources', 'graph'].includes(tab) && (
-        <ContextProofStrip
-          observationTotal={observationTotal}
-          signalGroupTotal={signalGroupTotal}
-          contextTotal={contextTotal}
-        />
-      )}
-
       {tab === 'observations'
         ? (
           <>
-            <ObservationsDashboard onAddContext={openAddContext} />
+            <ObservationsDashboard onAddContext={openAddContext} headerContent={contextProofStrip} />
             <ContextBrowser drawerOnly />
           </>
         )
         : tab === 'signals'
-        ? <SignalGroupsBrowser viewMode={signalViewMode} />
+        ? <SignalGroupsBrowser viewMode={signalViewMode} headerContent={contextProofStrip} />
         : tab === 'lineage'
-        ? <ContextLineageView />
+        ? <ContextLineageView headerContent={contextProofStrip} />
         : tab === 'sources'
         ? <SourcesTab />
         : tab === 'graph'
         ? <GraphTab />
-        : <ContextBrowser memoryStatus="active" allowAddContext={false} viewMode={memoryViewMode} />}
+        : <ContextBrowser memoryStatus="active" allowAddContext={false} viewMode={memoryViewMode} headerContent={contextProofStrip} />}
     </div>
   );
 }

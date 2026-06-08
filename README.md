@@ -23,7 +23,7 @@
 <p align="center">
   <a href="#quickstart">Quickstart</a>
   ·
-  <a href="#prove-the-loop">30-second proof</a>
+  <a href="#prove-the-loop">Demo path</a>
   ·
   <a href="#why-crmy">Why CRMy?</a>
   ·
@@ -61,7 +61,7 @@ A customer-facing agent should be able to ask one high-level question before wor
 
 CRMy gives that answer through MCP, CLI, REST, and UI surfaces on top of PostgreSQL.
 
-> **Seeded 30-second proof:** after quickstart, run the smoke path. It is not just a CRM lookup. It exercises the source-to-action loop an agent needs: resolve the customer, retrieve a briefing with Memory and Signals, surface reviewable context, and trace source context into agent-ready output.
+> **Run the seeded demo path:** after quickstart, run the smoke path. It is not just a CRM lookup. It exercises the source-to-action loop an agent needs: resolve the customer, retrieve a briefing with Memory and Signals, surface reviewable context, and trace source context into agent-ready output.
 >
 > ```bash
 > npx -y @crmy/cli agent-smoke
@@ -457,7 +457,7 @@ mcp_servers:
 
 If Hermes runs outside the shell where `crmy init` wrote config, add `DATABASE_URL` and `CRMY_API_KEY` under `env:` or connect to CRMy over HTTP with `url: "http://localhost:3000/mcp"` and an `Authorization` header. Restart Hermes or run `/reload-mcp` after editing the config.
 
-One-minute agent smoke test:
+Agent smoke prompt:
 
 ```bash
 npx -y @crmy/cli agent-smoke

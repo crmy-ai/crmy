@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { type ReactNode, useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import {
@@ -562,11 +562,13 @@ export function ContextBrowser({
   drawerOnly = false,
   allowAddContext = true,
   viewMode: controlledViewMode,
+  headerContent,
 }: {
   memoryStatus?: 'signal' | 'active';
   drawerOnly?: boolean;
   allowAddContext?: boolean;
   viewMode?: 'cards' | 'table';
+  headerContent?: ReactNode;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const isSignalMode = memoryStatus === 'signal';
@@ -1179,6 +1181,7 @@ export function ContextBrowser({
       />
 
       <div className="flex-1 overflow-y-auto px-4 md:px-6 pb-24 md:pb-6">
+        {headerContent}
         {ingestSummary && (
           <div className="mb-4 rounded-xl border border-border bg-card px-4 py-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1608,7 +1611,7 @@ export function ContextBrowser({
                   setIngestText(e.target.value);
                   runDetect(e.target.value, 'text');
                 }}
-                className="min-h-[150px] text-sm"
+                className="min-h-[320px] resize-y text-sm leading-6 md:min-h-[46vh]"
               />
 
               <div className="rounded-xl border border-border bg-muted/30 p-3">

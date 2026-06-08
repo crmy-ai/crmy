@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useRef, useState } from 'react';
+import { type ReactNode, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertCircle,
@@ -223,7 +223,7 @@ function ObservationRow({ row }: {
   return <Link to={row.href ?? '/context'} className={className}>{content}</Link>;
 }
 
-export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => void }) {
+export function ObservationsDashboard({ onAddContext, headerContent }: { onAddContext?: () => void; headerContent?: ReactNode }) {
   const { openDrawer } = useAppStore();
   const [sourceFilter, setSourceFilter] = useState<'all' | ObservationSource>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | ObservationStatus>('all');
@@ -436,6 +436,7 @@ export function ObservationsDashboard({ onAddContext }: { onAddContext?: () => v
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-24 md:pb-6 space-y-4 md:space-y-6">
+      {headerContent}
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="rounded-2xl border border-border bg-card p-4 md:p-5 shadow-sm lg:col-span-2">
           <div className="mb-4">

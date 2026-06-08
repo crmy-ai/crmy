@@ -396,35 +396,6 @@ function CommandStatusChip({
   );
 }
 
-function LifecycleStripStep({
-  icon: Icon,
-  title,
-  value,
-  href,
-  color,
-}: {
-  icon: React.ElementType;
-  title: string;
-  value: number | string;
-  href: string;
-  color: string;
-}) {
-  return (
-    <Link
-      to={href}
-      className="group flex min-w-[8rem] items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 transition-colors hover:border-primary/30 hover:bg-muted/25"
-    >
-      <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg ${color}`}>
-        <Icon className="h-4 w-4" />
-      </span>
-      <span className="min-w-0">
-        <span className="block font-display text-base font-semibold leading-5 text-foreground">{value}</span>
-        <span className="block truncate text-xs text-muted-foreground group-hover:text-foreground">{title}</span>
-      </span>
-    </Link>
-  );
-}
-
 function formatMoney(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '$0';
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
@@ -1399,12 +1370,14 @@ function AdminDashboard() {
       color: 'bg-emerald-500/15 text-emerald-500',
     },
     {
-      icon: Bot,
-      label: 'Action Context',
-      value: pendingHITL.length > 0 ? `${pendingHITL.length} gated` : 'Ready',
-      detail: 'One retrieval call returns Memory, Signals, stale warnings, evidence, and action boundaries.',
-      href: '/agent',
-      color: 'bg-[#6366f1]/15 text-[#6366f1]',
+      icon: pendingHITL.length > 0 ? ShieldCheck : Bot,
+      label: pendingHITL.length > 0 ? 'Action Boundary' : 'Action Context',
+      value: pendingHITL.length > 0 ? `${pendingHITL.length} review` : 'Ready',
+      detail: pendingHITL.length > 0
+        ? 'Resolve pending approvals in Handoffs before agents complete governed actions.'
+        : 'One retrieval call returns Memory, Signals, stale warnings, evidence, and action boundaries.',
+      href: pendingHITL.length > 0 ? '/handoffs' : '/agent',
+      color: pendingHITL.length > 0 ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' : 'bg-[#6366f1]/15 text-[#6366f1]',
     },
   ];
 
@@ -1463,43 +1436,12 @@ function AdminDashboard() {
       ) : (
       <div className="flex-1 overflow-y-auto p-4 pb-24 md:p-6 md:pb-6">
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.01 }}>
-          <div className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-sm md:mb-6 md:p-5">
-            <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div className="max-w-3xl">
-                <p className="text-xs font-semibold uppercase tracking-wide text-primary">30 second proof</p>
-                <h2 className="mt-1 font-display text-lg font-bold text-foreground">
-                  Messy customer context becomes action context agents can use.
-                </h2>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  Throw raw source material at CRMy, then inspect how it turns into reviewable Signals, confirmed Memory, and governed action context before a customer-facing agent acts.
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Link to="/context?tab=observations&add=context" className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-[#0ea5e9] px-3 text-sm font-semibold text-white transition-colors hover:bg-[#0284c7]">
-                  <PlusCircle className="h-4 w-4" />
-                  Add Context
-                </Link>
-                <Link to="/context?tab=signals" className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
-                  <GitCompareArrows className="h-4 w-4" />
-                  Review Signals
-                </Link>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
-              {proofPathSteps.map(step => (
-                <ProofPathStep key={step.label} {...step} />
-              ))}
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 }}>
           <div className="mb-4 rounded-2xl border border-border bg-surface p-4 shadow-sm md:mb-6 md:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="max-w-2xl">
-                <h2 className="font-display text-lg font-bold text-foreground">Command Center</h2>
+                <h2 className="font-display text-lg font-bold text-foreground">Workspace Status</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Is CRMy set up, is context flowing, and what needs action?
+                  CRMy setup, context flow, and action readiness in one view.
                 </p>
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:min-w-[36rem]">
@@ -1586,6 +1528,44 @@ function AdminDashboard() {
           </div>
         </motion.div>
 
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 }}>
+          <div className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-sm md:mb-6 md:p-5">
+            <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-3xl">
+                <h2 className="mt-1 font-display text-lg font-bold text-foreground">
+                  Context Flow
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  This panel shows recent source material, reviewable Signals, confirmed Memory, and the action context agents use before customer-facing work.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Link to="/context?tab=observations&add=context" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                  <PlusCircle className="h-4 w-4" />
+                  Add Context
+                </Link>
+                <Link to="/context?tab=signals" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                  <GitCompareArrows className="h-4 w-4" />
+                  Review Signals
+                </Link>
+                <Link to="/automations" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                  <Zap className="h-3.5 w-3.5" />
+                  Automations
+                </Link>
+                <Link to="/settings/systems" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                  <Server className="h-3.5 w-3.5" />
+                  Systems of Record
+                </Link>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
+              {proofPathSteps.map(step => (
+                <ProofPathStep key={step.label} {...step} />
+              ))}
+            </div>
+          </div>
+        </motion.div>
+
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 }}>
           <div className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-sm md:mb-6 md:p-5">
             <div className="mb-3 flex items-center justify-between gap-3">
@@ -1615,62 +1595,6 @@ function AdminDashboard() {
                 </div>
               </div>
             )}
-          </div>
-        </motion.div>
-
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.06 }}>
-          <div className="mb-4 rounded-2xl border border-border bg-surface p-4 shadow-sm md:mb-6 md:p-5">
-            <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h2 className="font-display font-bold text-foreground">Context Flow</h2>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Raw Context becomes Signals, confirmed Memory, and governed Handoffs.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Link to="/automations" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground">
-                  <Zap className="h-3.5 w-3.5" />
-                  Automations
-                </Link>
-                <Link to="/settings/systems" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground">
-                  <Server className="h-3.5 w-3.5" />
-                  Systems of Record
-                </Link>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] xl:items-center">
-              <LifecycleStripStep
-                icon={FileText}
-                title="Raw Context"
-                value={observationsTotal}
-                href="/context?tab=observations&add=context"
-                color="bg-sky-500/15 text-sky-500"
-              />
-              <ArrowRight className="hidden h-4 w-4 text-muted-foreground/40 xl:block" />
-              <LifecycleStripStep
-                icon={Sparkles}
-                title="Signals"
-                value={signalGroupTotal}
-                href="/context?tab=signals"
-                color="bg-violet-500/15 text-violet-500"
-              />
-              <ArrowRight className="hidden h-4 w-4 text-muted-foreground/40 xl:block" />
-              <LifecycleStripStep
-                icon={Library}
-                title="Memory"
-                value={memoryTotal}
-                href="/context"
-                color="bg-emerald-500/15 text-emerald-500"
-              />
-              <ArrowRight className="hidden h-4 w-4 text-muted-foreground/40 xl:block" />
-              <LifecycleStripStep
-                icon={Inbox}
-                title="Handoffs"
-                value={pendingHITL.length}
-                href="/handoffs"
-                color={`${ENTITY_COLORS.assignments.bg} ${ENTITY_COLORS.assignments.text}`}
-              />
-            </div>
           </div>
         </motion.div>
 

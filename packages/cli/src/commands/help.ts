@@ -44,7 +44,7 @@ const HELP_TEXT = `
     seed-demo           Load demo customer data for a fast first run
     reset-password      Reset a local user's password through Postgres
     doctor              Check database, config, migrations, port, and secrets
-    agent-smoke         Verify the one-minute agent demo path with MCP tools
+    agent-smoke         Verify the seeded agent path with MCP tools
 
   Options
     -V, --version       Output the version number

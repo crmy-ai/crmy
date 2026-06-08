@@ -292,7 +292,7 @@ export async function runAgentSmoke(options: {
 
 export function agentSmokeCommand(): Command {
   return new Command('agent-smoke')
-    .description('Verify the one-minute agent demo path: resolve account, get briefing, list Signals')
+    .description('Verify the seeded agent path: resolve account, get briefing, list Signals')
     .option('--account <name>', 'Demo account name to resolve', 'Northstar Labs')
     .option('--signal-limit <n>', 'Signals to request from context_signal_group_list', '5')
     .option('--with-model', 'Also ingest a small Raw Context source through the configured Workspace Agent model')

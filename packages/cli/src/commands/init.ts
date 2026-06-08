@@ -821,7 +821,7 @@ export function initCommand(): Command {
           console.log('    Verify model-backed extraction:');
           console.log('    \x1b[1mnpx -y @crmy/cli agent-smoke --with-model\x1b[0m\n');
         }
-        console.log('    One-minute agent smoke test:');
+        console.log('    Agent smoke prompt:');
         console.log('    \x1b[1mUse the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.\x1b[0m\n');
       }
     });

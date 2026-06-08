@@ -423,7 +423,7 @@ export default function HITLRulesSettings() {
   const rules = data?.data ?? [];
 
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="space-y-8">
       <div>
         <h2 className="font-display font-bold text-lg text-foreground mb-1">Action Policies</h2>
         <p className="text-sm text-muted-foreground">

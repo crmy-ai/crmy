@@ -148,53 +148,63 @@ function ConfigForm({
   onChange: (values: Record<string, unknown>) => void;
 }) {
   const [revealed, setRevealed] = useState<Set<string>>(new Set());
+  const valueFields = fields.filter(field => field.type !== 'boolean');
+  const booleanFields = fields.filter(field => field.type === 'boolean');
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      {fields.map((f) => {
-        const val = getNestedValue(values, f.key);
-        if (f.type === 'boolean') {
+    <div className="space-y-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {valueFields.map((f) => {
+          const val = getNestedValue(values, f.key);
+          const isPassword = f.type === 'password';
+          const show = revealed.has(f.key);
           return (
-            <label key={f.key} className="flex items-center gap-2 col-span-1 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={!!val}
-                onChange={(e) => onChange(setNestedValue(values, f.key, e.target.checked))}
-                className="rounded border-border"
-              />
-              <span className="text-sm text-foreground">{f.label}</span>
-            </label>
-          );
-        }
-        const isPassword = f.type === 'password';
-        const show = revealed.has(f.key);
-        return (
-          <div key={f.key} className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{f.label}</label>
-            <div className="relative">
-              <input
-                type={isPassword && !show ? 'password' : f.type === 'number' ? 'number' : 'text'}
-                value={val != null ? String(val) : ''}
-                placeholder={f.placeholder}
-                onChange={(e) => {
-                  const v = f.type === 'number' ? Number(e.target.value) || 0 : e.target.value;
-                  onChange(setNestedValue(values, f.key, v));
-                }}
-                className={`${inputCls} ${isPassword ? 'pr-9' : ''}`}
-              />
-              {isPassword && (
-                <button
-                  type="button"
-                  onClick={() => setRevealed((s) => { const n = new Set(s); n.has(f.key) ? n.delete(f.key) : n.add(f.key); return n; })}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
-              )}
+            <div key={f.key} className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{f.label}</label>
+              <div className="relative">
+                <input
+                  type={isPassword && !show ? 'password' : f.type === 'number' ? 'number' : 'text'}
+                  value={val != null ? String(val) : ''}
+                  placeholder={f.placeholder}
+                  onChange={(e) => {
+                    const v = f.type === 'number' ? Number(e.target.value) || 0 : e.target.value;
+                    onChange(setNestedValue(values, f.key, v));
+                  }}
+                  className={`${inputCls} ${isPassword ? 'pr-9' : ''}`}
+                />
+                {isPassword && (
+                  <button
+                    type="button"
+                    onClick={() => setRevealed((s) => { const n = new Set(s); n.has(f.key) ? n.delete(f.key) : n.add(f.key); return n; })}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+      {booleanFields.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg bg-muted/30 px-3 py-2">
+          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Connection security</span>
+          {booleanFields.map((f) => {
+            const val = getNestedValue(values, f.key);
+            return (
+              <label key={f.key} className="inline-flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={!!val}
+                  onChange={(e) => onChange(setNestedValue(values, f.key, e.target.checked))}
+                  className="h-3.5 w-3.5 rounded border-border"
+                />
+                <span>{f.label}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -865,7 +875,7 @@ function InboundEmailSection() {
 
 export default function MessagingSettings() {
   return (
-    <div className="space-y-8 max-w-3xl">
+    <div className="space-y-8">
       <div>
         <h2 className="font-display font-bold text-lg text-foreground mb-1">Messaging</h2>
         <p className="text-sm text-muted-foreground">Configure email delivery and notification channels for your customer context workspace.</p>

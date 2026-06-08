@@ -457,7 +457,7 @@ export default function AgentSettings() {
   // ── Loading skeleton ──────────────────────────────────────────────────────
   if (isLoading) {
     return (
-      <div className="space-y-5 max-w-2xl">
+      <div className="space-y-5">
         <div className="h-8 bg-muted rounded animate-pulse" />
         <div className="h-48 bg-muted rounded animate-pulse" />
       </div>
@@ -474,7 +474,7 @@ export default function AgentSettings() {
     : 'Paste backup API key…';
 
   return (
-    <div className="space-y-5 max-w-2xl">
+    <div className="space-y-5">
       <div>
         <h2 className="font-display font-bold text-lg text-foreground mb-1">Model Settings</h2>
         <p className="text-sm text-muted-foreground">Configure the model that powers in-app reasoning over your operational state layer.</p>
