@@ -7,7 +7,10 @@
 <h3 align="center">Before an agent acts on a customer, it needs trusted context.</h3>
 
 <p align="center">
-  CRMy turns transcripts, emails, notes, CRM changes, and other raw GTM context into the trusted briefing a customer-facing agent needs before it acts. Messy customer context in. Agent-ready Signals, Memory, and action guidance out.
+  CRMy turns transcripts, emails, notes, CRM changes, and other raw GTM context into the trusted briefing a customer-facing agent needs before it acts. 
+</p>
+<p align="center">
+  <strong>Messy customer context in. Agent-ready Signals, Memory, and action guidance out.</strong>
 </p>
 
 <p align="center">
