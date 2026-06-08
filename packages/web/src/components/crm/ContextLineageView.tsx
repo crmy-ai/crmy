@@ -66,6 +66,9 @@ function resultName(record: Record<string, unknown>, type: SubjectType) {
 
 function phaseFor(node: ContextLineageNode): LineagePhase | 'record' {
   if (node.type === 'record') return 'record';
+  if (node.stage === 'action') return 'actions';
+  if (node.stage === 'active_context') return 'active_context';
+  if (node.stage === 'audit') return 'audit';
   if (node.type === 'raw_context' || node.type === 'activity') return 'sources';
   if (node.type === 'signal' || node.type === 'signal_group') return 'signals';
   if (node.type === 'memory') return 'memory';
@@ -79,7 +82,7 @@ function phaseSummary(summary: Record<string, number>, phase: LineagePhase) {
   if (phase === 'signals') return (summary.signals ?? 0) + (summary.signal_groups ?? 0);
   if (phase === 'memory') return summary.memory ?? 0;
   if (phase === 'active_context') return summary.retrievals ?? 0;
-  if (phase === 'actions') return (summary.handoffs ?? 0) + (summary.writebacks ?? 0);
+  if (phase === 'actions') return (summary.handoffs ?? 0) + (summary.writebacks ?? 0) + (summary.action_receipts ?? 0);
   return summary.audit_events ?? 0;
 }
 
@@ -97,6 +100,9 @@ function relationLabel(relation: string) {
     requested_writeback: 'written back',
     loaded_into_active_context: 'loaded',
     audits: 'audited',
+    informed_action: 'informed action',
+    used_as_proof: 'used as proof',
+    receipted: 'receipt',
   };
   return labels[relation] ?? relation.replace(/_/g, ' ');
 }
@@ -120,6 +126,7 @@ function journeySummary(summary: Record<string, number>) {
   const retrievals = summary.retrievals ?? 0;
   const handoffs = summary.handoffs ?? 0;
   const writebacks = summary.writebacks ?? 0;
+  const actionReceipts = summary.action_receipts ?? 0;
   const parts = [
     `${sources} source${sources === 1 ? '' : 's'}`,
     `${signals} Signal${signals === 1 ? '' : 's'}`,
@@ -127,6 +134,7 @@ function journeySummary(summary: Record<string, number>) {
     `${retrievals} Active Context retrieval${retrievals === 1 ? '' : 's'}`,
     `${handoffs} Handoff${handoffs === 1 ? '' : 's'}`,
     `${writebacks} writeback${writebacks === 1 ? '' : 's'}`,
+    `${actionReceipts} action receipt${actionReceipts === 1 ? '' : 's'}`,
   ];
   return `${parts[0]} produced ${parts.slice(1).join(', ')}.`;
 }

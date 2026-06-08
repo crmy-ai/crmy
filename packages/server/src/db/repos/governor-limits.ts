@@ -5,12 +5,14 @@ import type { UUID } from '@crmy/shared';
 import { GOVERNOR_DEFAULTS } from '@crmy/shared';
 import { CrmyError } from '@crmy/shared';
 
+type Queryable = Pick<DbPool, 'query'>;
+
 /**
  * Get the effective limit for a given tenant and limit name.
  * Falls back to plan defaults, then to 'team' tier defaults.
  */
 export async function getLimit(
-  db: DbPool,
+  db: Queryable,
   tenantId: UUID,
   limitName: string,
 ): Promise<number> {
@@ -32,7 +34,7 @@ export async function getLimit(
  * Enforce a governor limit. Throws CrmyError if limit exceeded.
  */
 export async function enforceLimit(
-  db: DbPool,
+  db: Queryable,
   tenantId: UUID,
   limitName: string,
   currentCount: number,

@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
@@ -63,6 +65,38 @@ export interface ServerConfig {
   onMigration?: (name: string, index: number, total: number) => void;
 }
 
+function parseTrustProxy(value: string | undefined): boolean | number | string {
+  if (!value) return false;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') return true;
+  if (normalized === 'false') return false;
+  const numeric = Number(normalized);
+  return Number.isInteger(numeric) && numeric >= 0 ? numeric : value;
+}
+
+function parseCorsOrigins(value: string | undefined): Set<string> | true | false {
+  if (!value?.trim()) return false;
+  const trimmed = value.trim();
+  if (trimmed === '*') return true;
+  return new Set(trimmed.split(',').map(origin => origin.trim()).filter(Boolean));
+}
+
+function isAllowedLocalDevOrigin(origin: string): boolean {
+  if (process.env.NODE_ENV === 'production') return false;
+  return origin === 'http://localhost:5173'
+    || origin === 'http://127.0.0.1:5173'
+    || origin === 'http://[::1]:5173';
+}
+
+function isSameRequestOrigin(req: express.Request, origin: string): boolean {
+  try {
+    const requestOrigin = new URL(origin);
+    return requestOrigin.protocol.replace(':', '') === req.protocol && requestOrigin.host === req.get('host');
+  } catch {
+    return false;
+  }
+}
+
 export function loadConfig(): ServerConfig {
   const databaseUrl = process.env.DATABASE_URL;
   const jwtSecret = process.env.JWT_SECRET;
@@ -74,6 +108,12 @@ export function loadConfig(): ServerConfig {
   if (KNOWN_BAD_SECRETS.includes(jwtSecret) && process.env.NODE_ENV === 'production') {
     throw new Error(
       'JWT_SECRET is set to a known default — this is not safe for production.\n' +
+      '  Generate a real secret:  openssl rand -hex 32',
+    );
+  }
+  if (process.env.NODE_ENV === 'production' && !process.env.CRMY_ENCRYPTION_KEY && !process.env.AGENT_ENCRYPTION_KEY) {
+    throw new Error(
+      'CRMY_ENCRYPTION_KEY is required in production for stored secrets.\n' +
       '  Generate a real secret:  openssl rand -hex 32',
     );
   }
@@ -139,14 +179,69 @@ export async function createApp(config: ServerConfig) {
   }
 
   const app = express();
+  app.set('trust proxy', parseTrustProxy(process.env.CRMY_TRUST_PROXY ?? process.env.TRUST_PROXY));
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'", 'data:'],
+        frameAncestors: ["'none'"],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        objectSrc: ["'none'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+  }));
+  const allowedCorsOrigins = parseCorsOrigins(process.env.CRMY_CORS_ORIGINS ?? process.env.CORS_ORIGINS);
+  app.use(cors((req, callback) => {
+    callback(null, {
+      origin(origin: string | undefined, originCallback: (err: Error | null, allow?: boolean) => void) {
+        if (!origin) {
+          originCallback(null, true);
+          return;
+        }
+        if (isSameRequestOrigin(req, origin)) {
+          originCallback(null, true);
+          return;
+        }
+        if (isAllowedLocalDevOrigin(origin)) {
+          originCallback(null, true);
+          return;
+        }
+        if (allowedCorsOrigins === true || (allowedCorsOrigins instanceof Set && allowedCorsOrigins.has(origin))) {
+          originCallback(null, true);
+          return;
+        }
+        originCallback(new Error('Origin is not allowed by CRMy CORS policy'));
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['authorization', 'content-type', 'mcp-session-id', 'x-crmy-tenant-id', 'x-crmy-signature'],
+      exposedHeaders: ['mcp-session-id'],
+      maxAge: 600,
+    });
+  }));
   // Limit JSON payloads to 1 MB to prevent DoS via oversized bodies.
   // MCP tool calls may include context blobs — 1 MB is generous but bounded.
   app.use(express.json({ limit: '1mb' }));
 
-  // Health check (no auth)
+  // Health check (no auth). Production returns only liveness/readiness signals;
+  // local/dev keeps setup metadata so first-run onboarding can stay smooth.
   app.get('/health', async (_req, res) => {
     try {
       await db.query('SELECT 1');
+      if (process.env.NODE_ENV === 'production') {
+        res.json({
+          status: 'ok',
+          db: 'ok',
+          version: SERVER_VERSION,
+        });
+        return;
+      }
       const userCountResult = await db.query('SELECT COUNT(*)::int AS count FROM users');
       const userCount = Number(userCountResult.rows[0]?.count ?? 0);
       const hasUsers = userCount > 0;
@@ -175,12 +270,14 @@ export async function createApp(config: ServerConfig) {
         },
       });
     } catch {
-      res.status(503).json({
-        status: 'error',
-        db: 'error',
-        version: SERVER_VERSION,
-        environment: process.env.NODE_ENV ?? 'development',
-      });
+      res.status(503).json(process.env.NODE_ENV === 'production'
+        ? { status: 'error', db: 'error', version: SERVER_VERSION }
+        : {
+          status: 'error',
+          db: 'error',
+          version: SERVER_VERSION,
+          environment: process.env.NODE_ENV ?? 'development',
+        });
     }
   });
 

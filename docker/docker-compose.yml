@@ -7,11 +7,12 @@ services:
       - "3000:3000"
     environment:
       DATABASE_URL: postgres://crmy:crmy@db:5432/crmy
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET before starting. Generate one with: openssl rand -hex 32}
+      JWT_SECRET: "${JWT_SECRET:?Set JWT_SECRET before starting. Generate one with: openssl rand -hex 32}"
+      CRMY_ENCRYPTION_KEY: "${CRMY_ENCRYPTION_KEY:?Set CRMY_ENCRYPTION_KEY before starting. Generate one with: openssl rand -hex 32}"
       # First-run: set these to auto-create the initial admin account.
       # Remove after first boot or use a secrets manager.
       # CRMY_ADMIN_EMAIL: admin@yourcompany.com
-      # CRMY_ADMIN_PASSWORD: choose-a-strong-password
+      # CRMY_ADMIN_PASSWORD: ${CRMY_ADMIN_PASSWORD:?Set a unique 12+ character admin password before first boot}
       # CRMY_ADMIN_NAME: Admin
       # Seed demo data on container start (set to "true" to enable)
       # CRMY_SEED_DEMO: "true"

@@ -25,19 +25,19 @@ type NavRole = 'member' | 'manager' | 'admin' | 'owner';
 const settingsNavConfig: { icon: React.ElementType; label: string; path: string; roles: NavRole[]; group: string }[] = [
   { icon: CircleUser, label: 'Profile',       path: '/settings',              roles: ['member', 'manager', 'admin', 'owner'], group: 'Personal' },
   { icon: Lock,       label: 'API Keys',      path: '/settings/api-keys',     roles: ['member', 'manager', 'admin', 'owner'], group: 'Personal' },
-  { icon: Sparkles,   label: 'Model Settings', path: '/settings/model',       roles: ['admin', 'owner'], group: 'Agent & Memory' },
-  { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'], group: 'Agent & Memory' },
-  { icon: Tags,       label: 'Registries',    path: '/settings/registries',   roles: ['admin', 'owner'], group: 'Agent & Memory' },
-  { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'], group: 'Agent & Memory' },
-  { icon: Server,     label: 'Systems of Record', path: '/settings/systems', roles: ['admin', 'owner'], group: 'Sources & Systems' },
-  { icon: MessageSquare, label: 'Messaging', path: '/settings/messaging',     roles: ['admin', 'owner'], group: 'Sources & Systems' },
-  { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'], group: 'Sources & Systems' },
-  { icon: ShieldCheck, label: 'Action Policies', path: '/settings/hitl-rules', roles: ['admin', 'owner'], group: 'Governance' },
-  { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'], group: 'Automations' },
-  { icon: Zap,        label: 'Automations',   path: '/settings/advanced',     roles: ['admin', 'owner'], group: 'Automations' },
+  { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'], group: 'Setup' },
+  { icon: Sparkles,   label: 'Workspace Agent', path: '/settings/model',      roles: ['admin', 'owner'], group: 'Setup' },
+  { icon: Server,     label: 'Systems of Record', path: '/settings/systems', roles: ['admin', 'owner'], group: 'Sources' },
+  { icon: MessageSquare, label: 'Messaging', path: '/settings/messaging',     roles: ['admin', 'owner'], group: 'Sources' },
+  { icon: ShieldCheck, label: 'Action Policies', path: '/settings/hitl-rules', roles: ['admin', 'owner'], group: 'Safety' },
+  { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'], group: 'Safety' },
+  { icon: Tags,       label: 'Memory Types',  path: '/settings/registries',   roles: ['admin', 'owner'], group: 'Advanced' },
+  { icon: ListFilter, label: 'Custom Fields', path: '/settings/custom-fields',roles: ['admin', 'owner'], group: 'Advanced' },
+  { icon: Link2,      label: 'Webhooks',      path: '/settings/webhooks',     roles: ['admin', 'owner'], group: 'Advanced' },
+  { icon: Zap,        label: 'Automations',   path: '/settings/advanced',     roles: ['admin', 'owner'], group: 'Advanced' },
 ];
 
-const settingsGroupOrder = ['Personal', 'Agent & Memory', 'Sources & Systems', 'Governance', 'Automations'];
+const settingsGroupOrder = ['Personal', 'Setup', 'Sources', 'Safety', 'Advanced'];
 
 function AccessDenied() {
   return (
@@ -140,8 +140,8 @@ function ProfileSettings() {
       toast({ title: 'Passwords do not match', variant: 'destructive' });
       return;
     }
-    if (newPassword && newPassword.length < 8) {
-      toast({ title: 'Password too short', description: 'Must be at least 8 characters.', variant: 'destructive' });
+    if (newPassword && newPassword.length < 12) {
+      toast({ title: 'Password too short', description: 'Must be at least 12 characters.', variant: 'destructive' });
       return;
     }
     try {
@@ -228,7 +228,7 @@ function ProfileSettings() {
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">New Password</label>
-                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} className={inputCls} placeholder="Min. 8 characters" />
+                <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} className={inputCls} placeholder="Min. 12 characters" />
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Confirm New Password</label>
@@ -1857,7 +1857,7 @@ function CustomFieldsSettings() {
 }
 
 const PASSWORD_RULES = [
-  { label: 'At least 8 characters', test: (p: string) => p.length >= 8 },
+  { label: 'At least 12 characters', test: (p: string) => p.length >= 12 },
   { label: 'One uppercase letter', test: (p: string) => /[A-Z]/.test(p) },
   { label: 'One number', test: (p: string) => /\d/.test(p) },
   { label: 'One special character', test: (p: string) => /[^A-Za-z0-9]/.test(p) },
@@ -1926,7 +1926,7 @@ function UserForm({
           <div className="relative">
             <input type={form.showPassword ? 'text' : 'password'} value={form.password}
               onChange={e => onChange({ password: e.target.value })} onBlur={() => onTouch('password')}
-              placeholder={isEdit ? '••••••••' : 'Min. 8 characters'} className={`${fieldCls(passwordErr || optionalPasswordErr)} pr-9`} />
+              placeholder={isEdit ? '••••••••' : 'Min. 12 characters'} className={`${fieldCls(passwordErr || optionalPasswordErr)} pr-9`} />
             <button type="button" onClick={() => onChange({ showPassword: !form.showPassword })}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
               {form.showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
@@ -5294,10 +5294,11 @@ function DatabaseSettings() {
     pgvector_column_ready?: boolean;
     pgvector_env_enabled?: boolean;
     embedding_configured?: boolean;
-    embedding_provider?: string | null;
-    embedding_model?: string | null;
-    ready?: boolean;
-    sample_data?: {
+	    embedding_provider?: string | null;
+	    embedding_model?: string | null;
+	    ready?: boolean;
+	    local_setup_enabled?: boolean;
+	    sample_data?: {
       seeded: boolean;
       counts: {
         accounts: number;
@@ -5313,9 +5314,10 @@ function DatabaseSettings() {
   } | undefined;
   const currentProvider = detectDbProvider(dbInfo?.host);
   const selectedGuide = DB_PROVIDER_GUIDES[provider];
-  const sampleCounts = dbInfo?.sample_data?.counts;
-  const hasWorkspaceData = !!sampleCounts && Object.values(sampleCounts).some(count => count > 0);
-  const semanticReady = Boolean(dbInfo?.ready);
+	  const sampleCounts = dbInfo?.sample_data?.counts;
+	  const hasWorkspaceData = !!sampleCounts && Object.values(sampleCounts).some(count => count > 0);
+	  const semanticReady = Boolean(dbInfo?.ready);
+	  const localSetupEnabled = dbInfo?.local_setup_enabled !== false;
 
   useEffect(() => {
     setProvider(currentProvider);
@@ -5371,21 +5373,25 @@ function DatabaseSettings() {
       <div>
         <h2 className="font-display font-bold text-lg text-foreground">Database Connection</h2>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Connect CRMy to the Postgres database that stores operational state for agents. Changes are saved to <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">.env.db</code> and take effect after a server restart.
-        </p>
-      </div>
+	          Connect CRMy to the Postgres database that stores operational state for agents. Local setup can save changes to <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">.env.db</code>; hosted production manages this through server environment configuration.
+	        </p>
+	      </div>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        {!editing ? (
-          <button onClick={() => { setEditing(true); setSaveSuccess(''); setTestResult('idle'); }}
-            className="h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale">
-            <Database className="w-4 h-4" /> Edit Connection
-          </button>
-        ) : (
-          <span className="h-9 px-3 inline-flex items-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
-            Editing connection
-          </span>
-        )}
+	      <div className="flex items-center gap-2 flex-wrap">
+	        {localSetupEnabled && !editing ? (
+	          <button onClick={() => { setEditing(true); setSaveSuccess(''); setTestResult('idle'); }}
+	            className="h-9 px-4 flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-primary to-primary/80 text-primary-foreground text-sm font-semibold hover:shadow-md transition-all flex-shrink-0 press-scale">
+	            <Database className="w-4 h-4" /> Edit Connection
+	          </button>
+	        ) : localSetupEnabled ? (
+	          <span className="h-9 px-3 inline-flex items-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
+	            Editing connection
+	          </span>
+	        ) : (
+	          <span className="h-9 px-3 inline-flex items-center rounded-xl border border-border bg-card text-sm text-muted-foreground">
+	            Managed by server environment
+	          </span>
+	        )}
         <span className={`h-9 inline-flex items-center px-3 rounded-xl border text-sm font-medium ${semanticReady ? 'border-success/30 bg-success/5 text-success' : 'border-amber-500/30 bg-amber-500/10 text-amber-700'}`}>
           Semantic retrieval {semanticReady ? 'ready' : 'needs setup'}
         </span>
@@ -5533,8 +5539,14 @@ EMBEDDING_MODEL=text-embedding-3-small`}</code></pre>
           </div>
         )}
 
-        {editing && (
-          <div className="space-y-4 p-5 rounded-xl border border-border bg-card shadow-sm">
+	        {!localSetupEnabled && (
+	          <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground shadow-sm">
+	            Runtime connection testing and <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">.env.db</code> writes are disabled for this deployment. Update <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">DATABASE_URL</code> in the server environment and restart CRMy.
+	          </div>
+	        )}
+
+	        {editing && localSetupEnabled && (
+	          <div className="space-y-4 p-5 rounded-xl border border-border bg-card shadow-sm">
             <div>
               <h3 className="text-sm font-semibold text-foreground">New connection string</h3>
               <p className="text-sm text-muted-foreground mt-0.5">Paste a Postgres URL, test it, then save when the connection succeeds.</p>
@@ -5999,6 +6011,60 @@ function AutomationsSettings() {
   );
 }
 
+function SettingsSetupStrip({ userRole }: { userRole: NavRole }) {
+  if (userRole !== 'admin' && userRole !== 'owner') return null;
+  const steps = [
+    {
+      title: '1. Connect data',
+      description: 'Database first, then optional systems and source connections.',
+      href: '/settings/database',
+      Icon: Database,
+    },
+    {
+      title: '2. Enable agent',
+      description: 'Configure the Workspace Agent and retrieval behavior.',
+      href: '/settings/model',
+      Icon: Sparkles,
+    },
+    {
+      title: '3. Gate actions',
+      description: 'Set policies for approvals, writebacks, and risky decisions.',
+      href: '/settings/hitl-rules',
+      Icon: ShieldCheck,
+    },
+  ];
+
+  return (
+    <section className="mb-5 rounded-xl border border-border bg-card p-4">
+      <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-primary">Setup path</p>
+          <h2 className="mt-1 font-display text-base font-bold text-foreground">Fast path to a working CRMy workspace</h2>
+        </div>
+        <Link to="/context?tab=sources" className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+          Context sources
+          <ChevronRight className="h-3.5 w-3.5" />
+        </Link>
+      </div>
+      <div className="grid gap-2 lg:grid-cols-3">
+        {steps.map(step => (
+          <Link key={step.title} to={step.href} className="group rounded-lg border border-border bg-background/70 p-3 transition-colors hover:border-primary/30 hover:bg-muted/30">
+            <div className="flex items-start gap-3">
+              <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <step.Icon className="h-4 w-4" />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-foreground">{step.title}</span>
+                <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">{step.description}</span>
+              </span>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function Settings() {
   const location = useLocation();
   const user = getUser();
@@ -6056,6 +6122,7 @@ export default function Settings() {
           ))}
         </nav>
         <div className="flex-1 overflow-y-auto p-6 pb-20 md:pb-6">
+          <SettingsSetupStrip userRole={userRole} />
           <Routes>
             <Route index element={<ProfileSettings />} />
             <Route path="appearance" element={<Navigate to="/settings" replace />} />

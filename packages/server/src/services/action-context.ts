@@ -55,6 +55,29 @@ function unique<T>(items: T[]): T[] {
   return [...new Set(items)];
 }
 
+function metadataRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function metadataStringArray(metadata: unknown, key: string): string[] {
+  const record = metadataRecord(metadata);
+  const value = record?.[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
+function nestedMetadataNumber(metadata: unknown, keys: string[]): number | null {
+  let current: unknown = metadata;
+  for (const key of keys) {
+    const record = metadataRecord(current);
+    if (!record) return null;
+    current = record[key];
+  }
+  const numeric = typeof current === 'number' ? current : typeof current === 'string' ? Number(current) : NaN;
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
 function flattenEntryGroups(groups?: Record<string, ContextEntry[]>): ContextEntry[] {
   return Object.values(groups ?? {}).flat();
 }
@@ -107,6 +130,12 @@ function requiredScopesForAction(actionType: ActionContextProposedAction['action
       return [writeScopeForSubject(subjectType)];
     case 'external_writeback':
       return ['systems:write'];
+    case 'sequence_step':
+      return [readScopeForSubject(subjectType), 'activities:write'];
+    case 'workflow_action':
+      return [readScopeForSubject(subjectType)];
+    case 'agent_task':
+      return [readScopeForSubject(subjectType), 'context:read'];
     default:
       return [];
   }
@@ -235,6 +264,9 @@ function policyActionType(actionType: ActionContextProposedAction['action_type']
   if (actionType === 'external_writeback') return 'external.writeback';
   if (actionType === 'record_update') return 'record.update';
   if (actionType === 'assignment_create') return 'assignment.create';
+  if (actionType === 'sequence_step') return 'sequence.step';
+  if (actionType === 'workflow_action') return 'workflow.action';
+  if (actionType === 'agent_task') return 'agent.task';
   return 'customer.outreach';
 }
 
@@ -572,6 +604,9 @@ export async function getActionContext(
     'memory_promote',
     'record_update',
     'external_writeback',
+    'sequence_step',
+    'workflow_action',
+    'agent_task',
   ];
   const allowedActions = baseActions.map(actionType => {
     const action = actionScopeStatus(actor, actionType, input.subject_type);
@@ -600,6 +635,9 @@ export async function getActionContext(
     ...(input.proposed_action?.action_type === 'external_writeback' ? ['external_writeback_request'] : []),
     ...(input.proposed_action?.action_type === 'assignment_create' ? ['assignment'] : []),
     ...(input.proposed_action?.action_type === 'customer_outreach' ? ['activity'] : []),
+    ...(input.proposed_action?.action_type === 'sequence_step' ? ['sequence_step_execution', 'activity'] : []),
+    ...(input.proposed_action?.action_type === 'workflow_action' ? ['workflow_action_log'] : []),
+    ...(input.proposed_action?.action_type === 'agent_task' ? ['agent_turn'] : []),
     'audit_event',
   ];
 
@@ -662,4 +700,51 @@ export async function getActionContext(
   }
 
   return actionContext;
+}
+
+export async function verifiedActionContextMetadataForReceipt(
+  db: DbPool,
+  actor: ActorContext,
+  subjectType: SubjectType,
+  subjectId: UUID | string,
+  submitted: unknown,
+): Promise<Record<string, unknown> | undefined> {
+  const submittedRecord = metadataRecord(submitted);
+  if (!submittedRecord) return undefined;
+  const retrievalEventId = nestedMetadataNumber(submittedRecord, ['proof', 'retrieval_event_id']);
+  if (retrievalEventId === null) return undefined;
+
+  const result = await db.query(
+    `SELECT id, after_data, metadata
+     FROM events
+     WHERE tenant_id = $1
+       AND id = $2
+       AND event_type = 'action_context.retrieved'
+       AND actor_id = $3
+       AND object_type = $4
+       AND object_id = $5::uuid
+     LIMIT 1`,
+    [actor.tenant_id, retrievalEventId, actor.actor_id, subjectType, subjectId],
+  ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+  const event = result.rows[0];
+  if (!event) return undefined;
+
+  const afterData = metadataRecord(event.after_data);
+  const eventMetadata = metadataRecord(event.metadata);
+  return {
+    subject_type: subjectType,
+    subject_id: subjectId,
+    operating_mode: eventMetadata?.operating_mode ?? afterData?.operating_mode,
+    readiness_status: eventMetadata?.readiness_status ?? afterData?.readiness_status,
+    risk_level: eventMetadata?.risk_level ?? afterData?.risk_level,
+    review_required: eventMetadata?.review_required ?? afterData?.review_required,
+    proposed_action_type: eventMetadata?.proposed_action_type ?? afterData?.proposed_action_type,
+    proof: {
+      retrieval_event_id: retrievalEventId,
+      used_context_entry_ids: metadataStringArray(eventMetadata, 'used_context_entry_ids'),
+      used_signal_group_ids: metadataStringArray(eventMetadata, 'used_signal_group_ids'),
+      expected_receipts: metadataStringArray(eventMetadata, 'expected_receipts'),
+    },
+    verified: true,
+  };
 }

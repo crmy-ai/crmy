@@ -53,6 +53,7 @@ export function registerSystemsOfRecordHitlHandler(db: DbPool): void {
           system_id: writeback.system_id,
           external_record_id: writeback.external_record_id,
           hitl_request_id: request.id,
+          action_context: policyResult.action_context,
         },
       });
       return;
@@ -83,6 +84,7 @@ export function registerSystemsOfRecordHitlHandler(db: DbPool): void {
         system_id: writeback.system_id,
         external_record_id: writeback.external_record_id,
         hitl_request_id: request.id,
+        action_context: policyResult.action_context,
       },
     });
   });

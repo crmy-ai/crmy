@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ActorContext } from '@crmy/shared';
+import { createHash, randomUUID } from 'node:crypto';
 import type { DbPool } from '../db/pool.js';
 import { getAllTools, type ToolDef } from '../mcp/server.js';
 import { zodToJsonSchema } from '../mcp/tool-describe.js';
 import { enforceToolScopes } from '../auth/scopes.js';
 import { decrypt } from './crypto.js';
+import { listTurnEventsAfter } from '../db/repos/agent.js';
 import { callAnthropic } from './providers/anthropic.js';
 import { callOpenAICompat } from './providers/openai-compat.js';
 import { backupRuntimeConfig, isTransientModelError, modelErrorMessage, providerUsesAnthropicFormat, resolveLlmTimeoutMs, wait } from './provider-utils.js';
@@ -40,6 +42,11 @@ const TOOL_TIMEOUT_MS = 30_000;
  * within a turn even if we trim more aggressively when writing to the DB.
  */
 const TOOL_RESULT_LIVE_MAX_CHARS = 15_000;
+const ACTION_SUMMARY_MAX_ITEMS = 8;
+const READ_ONLY_ACTION_NAME_EXCEPTIONS = new Set([
+  'customer_record_resolve',
+  'entity_resolve',
+]);
 
 // ── XML escaping ─────────────────────────────────────────────────────────────
 
@@ -437,6 +444,159 @@ function normalizeToolCalls(toolCalls: ToolCallRecord[], handlers: Map<string, T
   return { valid, invalid };
 }
 
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const obj = value as Record<string, unknown>;
+  return `{${Object.keys(obj).sort().map(key => `${JSON.stringify(key)}:${stableStringify(obj[key])}`).join(',')}}`;
+}
+
+function toolAcceptsIdempotencyKey(handler?: ToolDef): boolean {
+  return Boolean(handler?.inputSchema?.shape?.idempotency_key);
+}
+
+function buildAgentToolIdempotencyKey(input: {
+  executionId: string;
+  round: number;
+  callIndex: number;
+  toolName: string;
+  args: Record<string, unknown>;
+}): string {
+  const argsWithoutKey = { ...input.args };
+  delete argsWithoutKey.idempotency_key;
+  const hash = createHash('sha256')
+    .update(stableStringify({
+      tool: input.toolName,
+      args: argsWithoutKey,
+    }))
+    .digest('hex')
+    .slice(0, 16);
+  return `agent:${input.executionId.slice(0, 48)}:r${input.round}:c${input.callIndex}:${hash}`;
+}
+
+function toolReplayKey(toolName: string, args: Record<string, unknown>): string {
+  return stableStringify({
+    name: toolName,
+    arguments: args,
+  });
+}
+
+function withAgentToolIdempotencyKey(input: {
+  handler?: ToolDef;
+  args: Record<string, unknown>;
+  executionId: string;
+  round: number;
+  callIndex: number;
+  toolName: string;
+}): Record<string, unknown> {
+  if (!toolAcceptsIdempotencyKey(input.handler)) return input.args;
+  if (typeof input.args.idempotency_key === 'string' && input.args.idempotency_key.trim()) return input.args;
+
+  return {
+    ...input.args,
+    idempotency_key: buildAgentToolIdempotencyKey(input),
+  };
+}
+
+function isActionTool(toolName: string): boolean {
+  if (READ_ONLY_ACTION_NAME_EXCEPTIONS.has(toolName)) return false;
+  return /(create|update|delete|log|add|advance|approve|reject|complete|assign|handoff|supersede|resolve|send|enroll|unenroll|pause|resume|trigger|execute|request|submit|process|ignore|link|unlink|set|block|decline|cancel)/.test(toolName);
+}
+
+function recordNameFrom(value: unknown): string | null {
+  if (!value || typeof value !== 'object') return null;
+  const body = value as Record<string, unknown>;
+  for (const key of ['name', 'title', 'subject', 'display_name', 'label', 'id']) {
+    if (body[key] != null) return String(body[key]);
+  }
+  return null;
+}
+
+function summarizeActionResult(toolName: string, result: unknown): string | null {
+  if (!isActionTool(toolName) || !result || typeof result !== 'object') return null;
+  const body = result as Record<string, unknown>;
+  const data = body.data && typeof body.data === 'object' ? body.data as Record<string, unknown> : body;
+
+  const candidates = [
+    'account',
+    'contact',
+    'opportunity',
+    'use_case',
+    'activity',
+    'assignment',
+    'request',
+    'email',
+    'message',
+    'draft',
+    'memory_entry',
+    'context_entry',
+    'signal_group',
+    'writeback',
+    'system',
+    'mapping',
+    'workflow',
+    'sequence',
+  ];
+  for (const key of candidates) {
+    if (data[key] && typeof data[key] === 'object') {
+      const name = recordNameFrom(data[key]);
+      if (name) return `${toolName.replace(/_/g, ' ')}: ${name}`;
+    }
+  }
+
+  const directName = recordNameFrom(data);
+  if (directName) return `${toolName.replace(/_/g, ' ')}: ${directName}`;
+
+  const mutation = data.mutation && typeof data.mutation === 'object' ? data.mutation as Record<string, unknown> : null;
+  if (mutation?.object_type || mutation?.object_id) {
+    return `${toolName.replace(/_/g, ' ')}: ${String(mutation.object_type ?? 'record')} ${String(mutation.object_id ?? '')}`.trim();
+  }
+
+  return toolName.replace(/_/g, ' ');
+}
+
+function appendActionSummaryMessage(history: ConversationMessage[], summaries: string[]): void {
+  if (summaries.length === 0) return;
+  const unique = Array.from(new Set(summaries)).slice(-ACTION_SUMMARY_MAX_ITEMS);
+  history.push({
+    role: 'user',
+    content: [
+      '[CRMY_ACTION_SUMMARY]',
+      'Successful CRMy tool actions in this turn:',
+      ...unique.map(item => `- ${item}`),
+      '',
+      'In your final answer, include a concise "Changed" or "Completed" summary using only these successful tool results, then include the next useful step or any approval/review state.',
+    ].join('\n'),
+  });
+}
+
+type ToolReplayCache = Map<string, unknown>;
+
+async function loadToolReplayCache(db: DbPool, tenantId: string, turnId?: string): Promise<ToolReplayCache> {
+  const cache: ToolReplayCache = new Map();
+  if (!turnId) return cache;
+
+  const events = await listTurnEventsAfter(db, tenantId, turnId, 0).catch(err => {
+    console.warn('[agent] failed to load prior tool results for replay:', err);
+    return [];
+  });
+  const callsById = new Map<string, { name: string; arguments: Record<string, unknown> }>();
+
+  for (const row of events) {
+    const payload = row.payload;
+    if (payload.type === 'tool_call') {
+      callsById.set(payload.id, { name: payload.name, arguments: payload.arguments });
+      continue;
+    }
+    if (payload.type !== 'tool_result' || payload.is_error) continue;
+    const call = callsById.get(payload.id);
+    if (!call || call.name !== payload.name) continue;
+    cache.set(toolReplayKey(call.name, call.arguments), payload.result);
+  }
+
+  return cache;
+}
+
 // ── System prompt builder ────────────────────────────────────────────────────
 
 interface ContextMeta {
@@ -728,15 +888,19 @@ export async function runAgentTurn(
   }
 
   const sessionId = opts?.sessionId;
+  const executionId = opts?.turnId ?? randomUUID();
+  const toolReplayCache = await loadToolReplayCache(db, actor.tenant_id, opts?.turnId);
   let turnIndex = 0;
   let malformedToolRetryUsed = false;
+  const actionSummaries: string[] = [];
+  let actionSummaryCursor = 0;
 
   // ── Auto-compaction ────────────────────────────────────────────────────────
   // If the accumulated history exceeds the threshold, summarise the old portion
   // before making the first LLM call. This keeps the context window healthy for
   // long sessions without losing what was worked on earlier.
   if (needsCompaction(history)) {
-    const compactTurnId = crypto.randomUUID();
+    const compactTurnId = randomUUID();
     onEvent({
       type: 'tool_status',
       id: 'compact',
@@ -768,7 +932,7 @@ export async function runAgentTurn(
     }
     // Each loop round gets a unique turn_id so the UI can group all tool calls
     // from the same round into a single collapsible "Working…" row.
-    const turnId = crypto.randomUUID();
+    const turnId = randomUUID();
     let result: { content: string; tool_calls: ToolCallRecord[] };
 
     const callModelOnce = async (
@@ -943,13 +1107,23 @@ export async function runAgentTurn(
     });
 
     // Execute each tool call
-    for (const tc of toolCalls) {
+    for (let callIndex = 0; callIndex < toolCalls.length; callIndex++) {
+      const tc = toolCalls[callIndex];
       let args: Record<string, unknown>;
       try {
         args = JSON.parse(tc.arguments);
       } catch {
         args = {};
       }
+      const handler = handlers.get(tc.name);
+      args = withAgentToolIdempotencyKey({
+        handler,
+        args,
+        executionId,
+        round,
+        callIndex,
+        toolName: tc.name,
+      });
 
       // Emit human-readable status BEFORE the tool_call event so the UI can
       // show progress immediately (mirrors the Windsurf toolSummary pattern).
@@ -957,12 +1131,22 @@ export async function runAgentTurn(
       onEvent({ type: 'tool_status', id: tc.id, name: tc.name, status: toolStatusText(tc.name), turn_id: turnId });
       onEvent({ type: 'tool_call', id: tc.id, name: tc.name, arguments: args, turn_id: turnId });
 
-      const handler = handlers.get(tc.name);
       let toolResult: unknown;
       let isError = false;
       const callStart = Date.now();
+      const replayKey = toolReplayKey(tc.name, args);
+      const hasReplay = toolReplayCache.has(replayKey);
 
-      if (!handler) {
+      if (hasReplay) {
+        toolResult = toolReplayCache.get(replayKey);
+        onEvent({
+          type: 'tool_status',
+          id: `${tc.id}:replay`,
+          name: tc.name,
+          status: `Reused previous ${tc.name.replace(/_/g, ' ')} result`,
+          turn_id: turnId,
+        });
+      } else if (!handler) {
         toolResult = { error: `Unknown tool: ${tc.name}` };
         isError = true;
       } else {
@@ -995,6 +1179,11 @@ export async function runAgentTurn(
       const resultStr = JSON.stringify(toolResult, null, 2);
       onEvent({ type: 'tool_result', id: tc.id, name: tc.name, result: toolResult, is_error: isError, turn_id: turnId });
 
+      const actionSummary = !isError ? summarizeActionResult(tc.name, toolResult) : null;
+      if (actionSummary && !actionSummaries.includes(actionSummary)) {
+        actionSummaries.push(actionSummary);
+      }
+
       history.push({
         role: 'tool',
         content: resultStr,
@@ -1002,6 +1191,10 @@ export async function runAgentTurn(
         tool_name: tc.name,
       });
     }
+
+    const newActionSummaries = actionSummaries.slice(actionSummaryCursor);
+    actionSummaryCursor = actionSummaries.length;
+    appendActionSummaryMessage(history, newActionSummaries);
   }
 
   // If we exhausted MAX_TOOL_ROUNDS, add an error
@@ -1012,3 +1205,8 @@ export async function runAgentTurn(
 
   return history;
 }
+
+export const __testAgentEngine = {
+  buildAgentToolIdempotencyKey,
+  summarizeActionResult,
+};

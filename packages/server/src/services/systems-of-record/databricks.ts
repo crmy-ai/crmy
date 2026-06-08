@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ConnectorAdapter, ConnectorContext } from './adapters.js';
-import { adapterError, assertWriteMode, checkpointWatermark, connectorHttpError, readJsonResponse, requireString, safeIdentifier, safeQualifiedIdentifier, writebackParameters } from './adapters.js';
+import { adapterError, assertWriteMode, checkpointWatermark, connectorFetch, connectorHttpError, readJsonResponse, requireString, safeIdentifier, safeQualifiedIdentifier, writebackParameters } from './adapters.js';
 
 function host(credentials: Record<string, unknown>): string {
   return requireString(credentials.host, 'Databricks host').replace(/\/$/, '');
@@ -17,7 +17,7 @@ function warehouseId(credentials: Record<string, unknown>, config: Record<string
 }
 
 async function statement(ctx: ConnectorContext, sql: string, parameters: unknown[] = []): Promise<unknown> {
-  const res = await fetch(`${host(ctx.credentials)}/api/2.0/sql/statements`, {
+  const res = await connectorFetch(`${host(ctx.credentials)}/api/2.0/sql/statements`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token(ctx.credentials)}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({

@@ -11,6 +11,7 @@ export interface CrmyConfig {
   tenantId?: string;
   database?: { url?: string };
   jwtSecret?: string;
+  encryptionKey?: string;
   hitl?: { requireApproval?: string[]; autoApproveSeconds?: number };
 }
 

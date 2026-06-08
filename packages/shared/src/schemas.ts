@@ -8,6 +8,7 @@ import { z } from 'zod';
 export const uuid = z.string().uuid();
 export const cursor = z.string().optional();
 export const limit = z.number().int().min(1).max(100).default(20);
+export const actionContextMetadata = z.record(z.unknown()).optional();
 export const lifecycleStage = z.enum(['lead', 'prospect', 'customer', 'churned']);
 export const oppStage = z.enum(['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost']);
 export const forecastCat = z.enum(['pipeline', 'best_case', 'commit', 'closed']);
@@ -131,6 +132,7 @@ export const contactUpdate = z.object({
   id: uuid,
   idempotency_key: idempotencyKey,
   expected_version: expectedVersion,
+  action_context: actionContextMetadata,
   patch: z.object({
     first_name: z.string().min(1).optional(),
     last_name: z.string().optional(),
@@ -195,6 +197,7 @@ export const accountUpdate = z.object({
   id: uuid,
   idempotency_key: idempotencyKey,
   expected_version: expectedVersion,
+  action_context: actionContextMetadata,
   patch: z.object({
     name: z.string().min(1).optional(),
     domain: z.string().optional(),
@@ -250,6 +253,7 @@ export const opportunityUpdate = z.object({
   id: uuid,
   idempotency_key: idempotencyKey,
   expected_version: expectedVersion,
+  action_context: actionContextMetadata,
   patch: z.object({
     name: z.string().min(1).optional(),
     account_id: uuid.nullable().optional(),
@@ -320,6 +324,7 @@ export const activityCreate = z.object({
 export const activityUpdate = z.object({
   id: uuid,
   idempotency_key: idempotencyKey,
+  action_context: actionContextMetadata,
   patch: z.object({
     subject: z.string().min(1).optional(),
     body: z.string().nullable().optional(),
@@ -608,7 +613,7 @@ export const sorWritebackStatus = z.object({
 export const authRegister = z.object({
   name: z.string().trim().min(1),
   email: z.string().trim().email(),
-  password: z.string().min(8),
+  password: z.string().min(12),
   tenant_name: z.string().trim().min(1),
 });
 
@@ -653,6 +658,7 @@ export const useCaseUpdate = z.object({
   id: uuid,
   idempotency_key: idempotencyKey,
   expected_version: expectedVersion,
+  action_context: actionContextMetadata,
   patch: z.object({
     name: z.string().min(1).optional(),
     stage: useCaseStage.optional(),
@@ -1409,6 +1415,9 @@ export const actionContextProposedAction = z.object({
     'memory_promote',
     'record_update',
     'external_writeback',
+    'sequence_step',
+    'workflow_action',
+    'agent_task',
   ]),
   object_type: externalObjectType.or(subjectType).optional(),
   field_names: z.array(z.string().min(1)).optional(),
@@ -1558,12 +1567,14 @@ export const assignmentCreate = z.object({
   due_at: z.string().optional(),
   context: z.string().optional(),
   metadata: z.record(z.unknown()).default({}),
+  action_context: actionContextMetadata,
   idempotency_key: idempotencyKey,
 });
 
 export const assignmentUpdate = z.object({
   id: uuid,
   idempotency_key: idempotencyKey,
+  action_context: actionContextMetadata,
   patch: z.object({
     title: z.string().min(1).optional(),
     description: z.string().nullable().optional(),

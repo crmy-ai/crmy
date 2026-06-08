@@ -48,6 +48,8 @@ export type RenderItem = DisplayMessage | ToolGroupItem;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
+const DEFAULT_AGENT_REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_CRMY_AGENT_API_TIMEOUT_MS ?? 120_000);
+
 /** Prefix for internal auto-greet prompts. Filtered out of displayed history. */
 export const SYSTEM_INIT_PREFIX = '[SYSTEM_INIT]';
 
@@ -85,6 +87,27 @@ export type AgentAttachmentSummary = {
   error_message?: string | null;
   created_at: string;
 };
+
+export type AgentSessionDetail = {
+  messages?: { role: string; content: string }[];
+  active_turn?: AgentTurnSummary | null;
+  attachments?: AgentAttachmentSummary[];
+};
+
+async function fetchAgentJson(url: string, init: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), DEFAULT_AGENT_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: init.signal ?? controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`Agent request timed out after ${Math.round(DEFAULT_AGENT_REQUEST_TIMEOUT_MS / 1000)} seconds`);
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
 
 // ── SSE stream helper ─────────────────────────────────────────────────────────
 
@@ -143,7 +166,7 @@ export async function createAgentTurn(
   opts?: { context_detail?: string },
 ): Promise<AgentTurnSummary> {
   const token = localStorage.getItem('crmy_token');
-  const res = await fetch(`/api/v1/agent/sessions/${sessionId}/turns`, {
+  const res = await fetchAgentJson(`/api/v1/agent/sessions/${sessionId}/turns`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -160,6 +183,19 @@ export async function createAgentTurn(
   }
   const json = await res.json();
   return json.data as AgentTurnSummary;
+}
+
+export async function getAgentSession(sessionId: string): Promise<AgentSessionDetail> {
+  const token = localStorage.getItem('crmy_token');
+  const res = await fetchAgentJson(`/api/v1/agent/sessions/${sessionId}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  return json.data as AgentSessionDetail;
 }
 
 export async function streamAgentTurn(
@@ -200,7 +236,7 @@ export async function streamAgentTurn(
 
 export async function cancelAgentTurn(sessionId: string, turnId: string): Promise<void> {
   const token = localStorage.getItem('crmy_token');
-  const res = await fetch(`/api/v1/agent/sessions/${sessionId}/turns/${turnId}/cancel`, {
+  const res = await fetchAgentJson(`/api/v1/agent/sessions/${sessionId}/turns/${turnId}/cancel`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
@@ -215,7 +251,7 @@ export async function uploadAgentAttachment(
   payload: { filename: string; data: string; mode: 'active_context' | 'raw_context'; source_label?: string },
 ): Promise<{ data: AgentAttachmentSummary; result?: unknown }> {
   const token = localStorage.getItem('crmy_token');
-  const res = await fetch(`/api/v1/agent/sessions/${sessionId}/attachments`, {
+  const res = await fetchAgentJson(`/api/v1/agent/sessions/${sessionId}/attachments`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -232,7 +268,7 @@ export async function uploadAgentAttachment(
 
 export async function deleteAgentAttachment(sessionId: string, attachmentId: string): Promise<void> {
   const token = localStorage.getItem('crmy_token');
-  const res = await fetch(`/api/v1/agent/sessions/${sessionId}/attachments/${attachmentId}`, {
+  const res = await fetchAgentJson(`/api/v1/agent/sessions/${sessionId}/attachments/${attachmentId}`, {
     method: 'DELETE',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

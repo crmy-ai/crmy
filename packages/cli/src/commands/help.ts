@@ -25,8 +25,9 @@ const HELP_TEXT = `
     opps                Manage opportunities (list, get, create, update, delete)
     pipeline            View and manage the sales pipeline
     activities          Review Customer Activity, meetings, transcripts, and notes
-    context             Manage Signals and Memory attached to customer records
-    custom-fields       Manage custom field definitions
+	    context             Manage Signals and Memory attached to customer records
+	    action-context      Get briefing plus action readiness in one call
+	    custom-fields       Manage custom field definitions
     search              Search across contacts, accounts, and opportunities
 
   Automation
@@ -53,9 +54,10 @@ const HELP_TEXT = `
     $ crmy init                     Set up a new CRMy instance
     $ crmy server                   Start the server on :3000
     $ crmy doctor                   Check setup health
-    $ crmy agent-smoke              Prove the seeded agent path works
-    $ crmy briefing "contact:Maya Patel"  Get customer context before action
-    $ crmy context ingest -f call.txt --auto
+	    $ crmy agent-smoke              Prove the seeded agent path works
+	    $ crmy briefing "contact:Maya Patel"  Get customer context before action
+	    $ crmy action-context "account:Northstar Labs" --action customer_outreach
+	    $ crmy context ingest -f call.txt --auto
     $ crmy contacts list            List all contacts
     $ crmy mcp                      Start stdio MCP for local agents
 

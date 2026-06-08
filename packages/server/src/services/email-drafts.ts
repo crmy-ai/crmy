@@ -3,6 +3,8 @@
 
 import { z } from 'zod';
 import {
+  type ActionContext,
+  type ActionContextProposedAction,
   type ActorContext,
   type SubjectType,
   type UUID,
@@ -17,12 +19,13 @@ import { emitEvent } from '../events/emitter.js';
 import { deliverEmail } from '../email/delivery.js';
 import { createProviderDraft } from '../email/provider-drafts.js';
 import { callLLM, requireTenantLLMConfig } from '../agent/providers/llm.js';
-import { assembleBriefing, formatBriefingText } from './briefing.js';
+import { formatBriefingText } from './briefing.js';
 import {
   assertSubjectAccess,
   getActorUserId,
   isGlobalActor,
 } from './access-control.js';
+import { getActionContext } from './action-context.js';
 
 const subjectType = z.enum(['account', 'contact', 'opportunity', 'use_case', 'use-case']).transform(v => v === 'use-case' ? 'use_case' : v);
 
@@ -63,6 +66,20 @@ type LinkedRecords = {
   use_case_id?: UUID;
 };
 
+type DraftActionContextSummary = {
+  subject_type: SubjectType;
+  subject_id: UUID;
+  operating_mode: ActionContext['operating_mode'];
+  readiness_status: ActionContext['readiness']['status'];
+  risk_level: ActionContext['readiness']['risk_level'];
+  review_required: boolean;
+  guidance_summary: string;
+  warning_reasons: string[];
+  review_reasons: string[];
+  source_authority: ActionContext['checks']['systems_of_record'];
+  proof: ActionContext['proof'];
+};
+
 async function assertEmailMessageAccess(db: DbPool, actor: ActorContext, message: emailMessageRepo.EmailMessage): Promise<void> {
   if (isGlobalActor(actor)) return;
   const actorUserId = await getActorUserId(db, actor);
@@ -88,6 +105,48 @@ function primarySubject(input: LinkedRecords & { subject_type?: SubjectType; sub
   if (input.contact_id) return { subject_type: 'contact', subject_id: input.contact_id };
   if (input.account_id) return { subject_type: 'account', subject_id: input.account_id };
   return {};
+}
+
+function summarizeActionContext(actionContext: ActionContext): DraftActionContextSummary {
+  return {
+    subject_type: actionContext.subject_type,
+    subject_id: actionContext.subject_id,
+    operating_mode: actionContext.operating_mode,
+    readiness_status: actionContext.readiness.status,
+    risk_level: actionContext.readiness.risk_level,
+    review_required: actionContext.readiness.review_required,
+    guidance_summary: actionContext.guidance.summary,
+    warning_reasons: actionContext.guidance.warning_reasons,
+    review_reasons: actionContext.guidance.review_reasons,
+    source_authority: actionContext.checks.systems_of_record,
+    proof: actionContext.proof,
+  };
+}
+
+async function getEmailActionContext(
+  db: DbPool,
+  actor: ActorContext,
+  ctx: { subject_type?: SubjectType; subject_id?: UUID; to_address?: string; sourceMessage?: emailMessageRepo.EmailMessage },
+  input: Pick<EmailDraftPreviewInput, 'intent' | 'target'>,
+): Promise<ActionContext | null> {
+  if (!ctx.subject_type || !ctx.subject_id) return null;
+  const proposedAction: ActionContextProposedAction = {
+    action_type: 'customer_outreach',
+    object_type: ctx.subject_type,
+    payload: {
+      intent: input.intent,
+      target: input.target,
+      to_address: ctx.to_address,
+      source_email_message_id: ctx.sourceMessage?.id,
+    },
+  };
+  return getActionContext(db, actor, {
+    subject_type: ctx.subject_type,
+    subject_id: ctx.subject_id,
+    context_radius: ctx.subject_type === 'account' ? 'account_wide' : ctx.subject_type === 'contact' ? 'adjacent' : 'direct',
+    token_budget: 2500,
+    proposed_action: proposedAction,
+  });
 }
 
 async function getContactRecipient(db: DbPool, tenantId: UUID, contactId?: UUID): Promise<{ to_address?: string; to_name?: string }> {
@@ -172,14 +231,12 @@ async function buildResponsePacket(
   let briefingText = '';
   let memoryCount = 0;
   let signalCount = 0;
-  if (ctx.subject_type && ctx.subject_id) {
-    const briefing = await assembleBriefing(db, actor.tenant_id, ctx.subject_type, ctx.subject_id, {
-      context_radius: ctx.subject_type === 'account' ? 'account_wide' : ctx.subject_type === 'contact' ? 'adjacent' : 'direct',
-      token_budget: 2500,
-    });
-    briefingText = formatBriefingText(briefing).slice(0, 12000);
-    memoryCount = Object.values(briefing.context_entries ?? {}).reduce((sum, entries) => sum + entries.length, 0);
-    signalCount = briefing.signal_groups?.length ?? 0;
+  const actionContext = await getEmailActionContext(db, actor, ctx, input);
+  const actionContextSummary = actionContext ? summarizeActionContext(actionContext) : undefined;
+  if (actionContext) {
+    briefingText = formatBriefingText(actionContext.briefing).slice(0, 12000);
+    memoryCount = Object.values(actionContext.briefing.context_entries ?? {}).reduce((sum, entries) => sum + entries.length, 0);
+    signalCount = actionContext.briefing.signal_groups?.length ?? 0;
   }
 
   return {
@@ -205,9 +262,11 @@ async function buildResponsePacket(
         received_at: ctx.sourceMessage.received_at,
       } : null,
       briefing: briefingText,
+      action_context: actionContextSummary ?? null,
       guardrails: [
         'Use confirmed Memory as facts.',
         'Treat Signals as unconfirmed and do not overstate them.',
+        'Follow the Action Context guidance. If review is required, draft the message but do not imply it can be sent without approval.',
         'Be concise, specific, and useful.',
         'Do not invent customer commitments, dates, pricing, or approvals.',
       ],
@@ -219,6 +278,7 @@ async function buildResponsePacket(
       memory_count: memoryCount,
       signal_count: signalCount,
       used_unconfirmed_signals: signalCount > 0,
+      action_context: actionContextSummary,
     },
   };
 }
@@ -281,12 +341,19 @@ export async function previewEmailDraft(db: DbPool, actor: ActorContext, input: 
   return {
     ...draft,
     context_used,
-    warnings: context_used.used_unconfirmed_signals
-      ? ['Relevant Signals were available. CRMy treated them as unconfirmed context while drafting.']
-      : [],
+    warnings: [
+      ...(context_used.used_unconfirmed_signals
+        ? ['Relevant Signals were available. CRMy treated them as unconfirmed context while drafting.']
+        : []),
+      ...(context_used.action_context?.warning_reasons ?? []),
+      ...(context_used.action_context?.review_required
+        ? ['Action Context says this email should go through review before sending.']
+        : []),
+    ],
     model_metadata: {
       draft_origin: 'agent_generated',
       generated_at: new Date().toISOString(),
+      action_context: context_used.action_context,
     },
   };
 }
@@ -294,6 +361,13 @@ export async function previewEmailDraft(db: DbPool, actor: ActorContext, input: 
 export async function saveEmailDraft(db: DbPool, actor: ActorContext, input: EmailDraftSaveInput) {
   const ctx = await resolveDraftContext(db, actor, input);
   if (!ctx.to_address) throw validationError('A recipient email address is required.');
+  const actionContext = await getEmailActionContext(db, actor, ctx, input);
+  const actionContextSummary = actionContext ? summarizeActionContext(actionContext) : undefined;
+  const generationMetadata = { ...input.generation_metadata };
+  delete generationMetadata.action_context;
+  if (input.delivery_action === 'send_now' && actionContext && !actionContext.guidance.can_execute) {
+    throw validationError('Action Context requires review before this email can be sent. Save the draft or send it for approval instead.');
+  }
   if (input.draft_target === 'provider_draft') {
     await emitEvent(db, {
       tenantId: actor.tenant_id,
@@ -330,6 +404,7 @@ export async function saveEmailDraft(db: DbPool, actor: ActorContext, input: Ema
         ...ctx.linked,
         source_email_message_id: input.source_email_message_id,
         draft_origin: input.draft_origin,
+        action_context: actionContextSummary,
       },
       priority: 'normal',
       sla_minutes: 1440,
@@ -351,7 +426,10 @@ export async function saveEmailDraft(db: DbPool, actor: ActorContext, input: Ema
     draft_target: input.draft_target,
     source_email_message_id: input.source_email_message_id as UUID | undefined,
     provider_draft_status: 'not_requested',
-    generation_metadata: input.generation_metadata,
+    generation_metadata: {
+      ...generationMetadata,
+      ...(actionContextSummary ? { action_context: actionContextSummary } : {}),
+    },
   });
 
   const providerConfig = await emailRepo.getProvider(db, actor.tenant_id);
@@ -377,6 +455,7 @@ export async function saveEmailDraft(db: DbPool, actor: ActorContext, input: Ema
       draft_origin: input.draft_origin,
       draft_target: input.draft_target,
       source_email_message_id: input.source_email_message_id,
+      action_context: actionContextSummary,
     },
   });
 
@@ -388,7 +467,10 @@ export async function saveEmailDraft(db: DbPool, actor: ActorContext, input: Ema
     objectType: 'email',
     objectId: email.id,
     afterData: { id: email.id, to: email.to_email, subject: email.subject, status: email.status },
-    metadata: input.generation_metadata,
+    metadata: {
+      ...generationMetadata,
+      ...(actionContextSummary ? { action_context: actionContextSummary } : {}),
+    },
   });
   await emitEvent(db, {
     tenantId: actor.tenant_id,

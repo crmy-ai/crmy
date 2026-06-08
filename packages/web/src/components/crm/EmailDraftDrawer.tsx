@@ -65,6 +65,8 @@ export function EmailDraftDrawer() {
   const { data: contactData } = useContact(contactId) as any;
   const contact = contactData?.contact ?? contactData;
   const agentReady = agentEnabled && connectivity !== 'offline';
+  const actionContext = contextUsed?.action_context as { review_required?: boolean; readiness_status?: string; risk_level?: string; guidance_summary?: string } | undefined;
+  const directSendBlocked = Boolean(actionContext?.review_required);
 
   useEffect(() => {
     if (!emailDraftOpen) return;
@@ -309,6 +311,17 @@ export function EmailDraftDrawer() {
                     {Number(contextUsed.memory_count ?? 0)} Memory · {Number(contextUsed.signal_count ?? 0)} Signals
                   </Badge>
                 )}
+                {actionContext && (
+                  <Badge
+                    variant="outline"
+                    className={actionContext.review_required
+                      ? 'border-amber-500/25 bg-amber-500/10 text-amber-200'
+                      : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200'}
+                    title={actionContext.guidance_summary}
+                  >
+                    Action Context · {actionContext.review_required ? 'Review before send' : 'Ready'}
+                  </Badge>
+                )}
                 {warnings.map(warning => (
                   <Badge key={warning} variant="outline" className="border-amber-500/25 bg-amber-500/10 text-amber-200">
                     {warning}
@@ -332,7 +345,13 @@ export function EmailDraftDrawer() {
               {saveDraft.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Send for approval
             </Button>
-            <Button variant="outline" onClick={() => save('send_now')} disabled={saveDraft.isPending} className="gap-1.5">
+            <Button
+              variant="outline"
+              onClick={() => save('send_now')}
+              disabled={saveDraft.isPending || directSendBlocked}
+              className="gap-1.5"
+              title={directSendBlocked ? 'Action Context requires review before this email can be sent.' : undefined}
+            >
               <Send className="h-3.5 w-3.5" /> Send now
             </Button>
           </div>

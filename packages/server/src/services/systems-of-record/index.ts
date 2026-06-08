@@ -157,6 +157,35 @@ function equivalentValue(a: unknown, b: unknown): boolean {
   return stableJson(a ?? null) === stableJson(b ?? null);
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  return Boolean(err && typeof err === 'object' && 'code' in err && (err as { code?: unknown }).code === '23505');
+}
+
+function sameWritebackRequest(
+  existing: { object_type: string; object_id?: string | null; external_object: string; external_record_id?: string | null; operation: string; writeback_mode: string; payload?: unknown },
+  input: {
+    object_type: string;
+    object_id?: UUID;
+    external_object: string;
+    external_record_id?: string;
+    operation: ExternalWritebackModeOperation;
+    writeback_mode: WritebackMode;
+    payload: Record<string, unknown>;
+  },
+): boolean {
+  return existing.object_type === input.object_type
+    && existing.object_id === (input.object_id ?? null)
+    && existing.external_object === input.external_object
+    && existing.external_record_id === (input.external_record_id ?? null)
+    && existing.operation === input.operation
+    && existing.writeback_mode === input.writeback_mode
+    && equivalentValue(existing.payload, input.payload);
+}
+
+function throwWritebackIdempotencyMismatch(): never {
+  throw validationError('This writeback idempotency key was already used for a different request. Reuse the same payload or provide a new idempotency key.');
+}
+
 function cleanPatch<T extends Record<string, unknown>>(patch: T): T {
   return Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) as T;
 }
@@ -1086,21 +1115,13 @@ export async function requestExternalWriteback(
     system_id: UUID; mapping_id?: UUID; object_type: string; object_id?: UUID; external_object: string;
     external_record_id?: string; operation: ExternalWritebackModeOperation; writeback_mode: WritebackMode;
     payload: Record<string, unknown>; require_approval?: boolean; idempotency_key?: string;
+    action_context?: Record<string, unknown>;
   },
 ) {
   if (input.idempotency_key) {
     const existing = await sorRepo.getWritebackByIdempotencyKey(db, tenantId, input.system_id, input.idempotency_key);
     if (existing) {
-      const sameRequest = existing.object_type === input.object_type
-        && existing.object_id === (input.object_id ?? null)
-        && existing.external_object === input.external_object
-        && existing.external_record_id === (input.external_record_id ?? null)
-        && existing.operation === input.operation
-        && existing.writeback_mode === input.writeback_mode
-        && equivalentValue(existing.payload, input.payload);
-      if (!sameRequest) {
-        throw validationError('This writeback idempotency key was already used for a different request. Reuse the same payload or provide a new idempotency key.');
-      }
+      if (!sameWritebackRequest(existing, input)) throwWritebackIdempotencyMismatch();
       return existing;
     }
   }
@@ -1110,62 +1131,78 @@ export async function requestExternalWriteback(
     : input.require_approval === false && !preview.requires_approval
       ? 'approved'
       : 'approval_required';
-  const writeback = await sorRepo.createWriteback(db, tenantId, {
-    ...input,
-    operation: input.operation,
-    preview: preview as unknown as Record<string, unknown>,
-    policy_result: {
-      allowed: preview.allowed,
-      requires_approval: preview.requires_approval || input.require_approval !== false,
-      action_policy: (preview as { policy?: unknown }).policy,
-    },
-    status,
-    requested_by: actorId,
-  });
-
-  if (status === 'rejected') {
-    return writeback;
-  }
-
-  if (status === 'approval_required') {
-    const hitl = await hitlRepo.createHITLRequest(db, tenantId, {
-      agent_id: actorId,
-      action_type: 'external.writeback',
-      action_summary: `Approve ${input.operation} writeback to ${input.external_object}`,
-      action_payload: {
-        writeback_id: writeback.id,
-        system_id: input.system_id,
-        mapping_id: input.mapping_id,
-        object_type: input.object_type,
-        object_id: input.object_id,
-        external_object: input.external_object,
-        external_record_id: input.external_record_id,
+  try {
+    return await withTransaction(db, async tx => {
+      const writeback = await sorRepo.createWriteback(tx, tenantId, {
+        ...input,
         operation: input.operation,
-        writeback_mode: input.writeback_mode,
-        preview,
-      },
-      priority: preview.allowed ? 'normal' : 'high',
-      sla_minutes: 1440,
-    });
-    const nextStatus = hitl.status === 'approved' || hitl.status === 'auto_approved'
-      ? 'approved'
-      : hitl.status === 'rejected'
-        ? 'rejected'
-        : 'approval_required';
-    const linked = await sorRepo.updateWriteback(db, tenantId, writeback.id, {
-      status: nextStatus,
-      hitl_request_id: hitl.id,
-      policy_result: {
-        allowed: preview.allowed,
-        requires_approval: preview.requires_approval || input.require_approval !== false,
-        hitl_status: hitl.status,
-        action_policy: (preview as { policy?: unknown }).policy,
-      },
-    });
-    return linked ?? writeback;
-  }
+        preview: preview as unknown as Record<string, unknown>,
+        policy_result: {
+          allowed: preview.allowed,
+          requires_approval: preview.requires_approval || input.require_approval !== false,
+          action_policy: (preview as { policy?: unknown }).policy,
+          action_context: input.action_context,
+        },
+        status,
+        requested_by: actorId,
+      });
 
-  return writeback;
+      if (status === 'rejected') {
+        return writeback;
+      }
+
+      if (status === 'approval_required') {
+        const hitl = await hitlRepo.createHITLRequest(tx, tenantId, {
+          agent_id: actorId,
+          action_type: 'external.writeback',
+          action_summary: `Approve ${input.operation} writeback to ${input.external_object}`,
+          action_payload: {
+            writeback_id: writeback.id,
+            system_id: input.system_id,
+            mapping_id: input.mapping_id,
+            object_type: input.object_type,
+            object_id: input.object_id,
+            external_object: input.external_object,
+            external_record_id: input.external_record_id,
+            operation: input.operation,
+            writeback_mode: input.writeback_mode,
+            preview,
+            action_context: input.action_context,
+          },
+          priority: preview.allowed ? 'normal' : 'high',
+          sla_minutes: 1440,
+        });
+        const nextStatus = hitl.status === 'approved' || hitl.status === 'auto_approved'
+          ? 'approved'
+          : hitl.status === 'rejected'
+            ? 'rejected'
+            : 'approval_required';
+        const linked = await sorRepo.updateWriteback(tx, tenantId, writeback.id, {
+          status: nextStatus,
+          hitl_request_id: hitl.id,
+          policy_result: {
+            allowed: preview.allowed,
+            requires_approval: preview.requires_approval || input.require_approval !== false,
+            hitl_status: hitl.status,
+            action_policy: (preview as { policy?: unknown }).policy,
+            action_context: input.action_context,
+          },
+        });
+        return linked ?? writeback;
+      }
+
+      return writeback;
+    });
+  } catch (err) {
+    if (input.idempotency_key && isUniqueViolation(err)) {
+      const existing = await sorRepo.getWritebackByIdempotencyKey(db, tenantId, input.system_id, input.idempotency_key);
+      if (existing) {
+        if (!sameWritebackRequest(existing, input)) throwWritebackIdempotencyMismatch();
+        return existing;
+      }
+    }
+    throw err;
+  }
 }
 
 export async function reviewExternalWriteback(
@@ -1226,6 +1263,8 @@ export async function reviewExternalWriteback(
       origin: 'crmy',
       system_id: writeback.system_id,
       external_record_id: writeback.external_record_id,
+      hitl_request_id: writeback.hitl_request_id,
+      action_context: policyResult.action_context,
     },
   });
   return { writeback, event_id };
@@ -1238,6 +1277,17 @@ export async function executeExternalWriteback(
 ) {
   const writeback = await sorRepo.getWriteback(db, tenantId, writebackId);
   if (!writeback) throw notFound('External writeback', writebackId);
+  if (writeback.status === 'executing') {
+    const executionResult = writeback.execution_result && typeof writeback.execution_result === 'object'
+      ? writeback.execution_result as Record<string, unknown>
+      : {};
+    const providerCall = executionResult.provider_call && typeof executionResult.provider_call === 'object'
+      ? executionResult.provider_call as Record<string, unknown>
+      : {};
+    if (providerCall.status === 'started') {
+      throw validationError('This writeback has a provider call in progress or interrupted after the provider call started. Reconcile the provider result before retrying to avoid duplicate external writes.');
+    }
+  }
   if (writeback.status === 'approval_required' || writeback.status === 'pending') {
     throw validationError('This writeback requires approval before it can be executed.');
   }
@@ -1292,7 +1342,51 @@ export async function executeExternalWriteback(
     throw validationError(`Writeback blocked by current mapping policy: ${latestPreview.warnings.join('; ') || 'not allowed'}`);
   }
 
-  await sorRepo.updateWriteback(db, tenantId, writeback.id, { status: 'executing' });
+  const providerCallStartedAt = new Date().toISOString();
+  const providerCallReceipt = redactSecrets({
+    status: 'started',
+    started_at: providerCallStartedAt,
+    provider: ctx.system.system_type,
+    system_id: writeback.system_id,
+    mapping_id: writeback.mapping_id,
+    writeback_id: writeback.id,
+    sync_run_id: writebackRun.id,
+    operation: writeback.operation,
+    writeback_mode: writeback.writeback_mode,
+    object_type: writeback.object_type,
+    object_id: writeback.object_id,
+    external_object: writeback.external_object,
+    external_record_id: writeback.external_record_id,
+    idempotency_key: writeback.idempotency_key,
+    reconciliation_supported: false,
+    replay_policy: 'manual_reconciliation_required',
+  });
+  const startedExecutionResult = {
+    ok: null,
+    writeback_id: writeback.id,
+    sync_run_id: writebackRun.id,
+    provider_call: providerCallReceipt,
+  };
+  const executingWriteback = await sorRepo.claimWritebackForExecution(db, tenantId, writeback.id, startedExecutionResult);
+  if (!executingWriteback) {
+    await sorRepo.updateSyncRun(db, tenantId, writebackRun.id, {
+      status: 'failed',
+      error: 'Writeback was already claimed or is no longer approved.',
+      records_skipped: 1,
+      metadata: {
+        writeback_id: writeback.id,
+        provider_call: providerCallReceipt,
+      },
+    });
+    throw validationError('This writeback was already claimed for execution or is no longer approved.');
+  }
+  await sorRepo.updateSyncRun(db, tenantId, writebackRun.id, {
+    status: 'running',
+    metadata: {
+      writeback_id: writeback.id,
+      provider_call: providerCallReceipt,
+    },
+  });
 
   try {
     const result = await adapter.executeWrite(ctx, mapping, {
@@ -1367,6 +1461,11 @@ export async function executeExternalWriteback(
       external_record_id: externalRecordId,
       idempotency_key: writeback.idempotency_key,
       executed_at: executedAt,
+      provider_call: {
+        ...providerCallReceipt,
+        status: result.ok ? 'completed' : 'failed',
+        completed_at: executedAt,
+      },
       reference: referenceResult,
       result: result.result,
     });
@@ -1408,6 +1507,8 @@ export async function executeExternalWriteback(
         system_type: ctx.system.system_type,
         external_record_id: externalRecordId,
         sync_run_id: writebackRun.id,
+        hitl_request_id: writeback.hitl_request_id,
+        action_context: writeback.policy_result?.action_context,
         changed_fields: Object.keys(writeback.payload ?? {}),
       },
     });
@@ -1433,6 +1534,11 @@ export async function executeExternalWriteback(
         retryable: normalized.retryable,
         details: normalized.details,
         sync_run_id: writebackRun.id,
+        provider_call: {
+          ...providerCallReceipt,
+          status: 'failed',
+          failed_at: new Date().toISOString(),
+        },
       }),
     });
     await sorRepo.updateSystem(db, tenantId, writeback.system_id, {
@@ -1460,6 +1566,8 @@ export async function executeExternalWriteback(
         system_type: ctx.system.system_type,
         external_record_id: writeback.external_record_id,
         sync_run_id: writebackRun.id,
+        hitl_request_id: writeback.hitl_request_id,
+        action_context: writeback.policy_result?.action_context,
       },
     });
     throw err;

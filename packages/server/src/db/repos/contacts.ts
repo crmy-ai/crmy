@@ -55,7 +55,7 @@ export async function getContact(db: DbPool, tenantId: UUID, id: UUID): Promise<
     `SELECT c.*, a.name AS account_name
      FROM contacts c
      LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
-     WHERE c.id = $1 AND c.tenant_id = $2 AND c.merged_into IS NULL`,
+     WHERE c.id = $1 AND c.tenant_id = $2 AND c.merged_into IS NULL AND c.archived_at IS NULL`,
     [id, tenantId],
   );
   return (result.rows[0] as Contact) ?? null;
@@ -66,7 +66,7 @@ export async function getContactByEmail(db: DbPool, tenantId: UUID, email: strin
   if (!normalized) return null;
   const result = await db.query(
     `SELECT * FROM contacts
-     WHERE tenant_id = $1 AND lower(email) = $2 AND merged_into IS NULL
+     WHERE tenant_id = $1 AND lower(email) = $2 AND merged_into IS NULL AND archived_at IS NULL
      LIMIT 1`,
     [tenantId, normalized],
   );
@@ -87,7 +87,7 @@ export async function searchContacts(
     cursor?: string;
   },
 ): Promise<PaginatedResponse<Contact>> {
-  const conditions: string[] = ['c.tenant_id = $1', 'c.merged_into IS NULL'];
+  const conditions: string[] = ['c.tenant_id = $1', 'c.merged_into IS NULL', 'c.archived_at IS NULL'];
   const params: unknown[] = [tenantId];
   let idx = 2;
 
@@ -201,7 +201,7 @@ export async function updateContact(
   }
 
   const result = await db.query(
-    `UPDATE contacts SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2${versionClause} RETURNING *`,
+    `UPDATE contacts SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2 AND archived_at IS NULL${versionClause} RETURNING *`,
     params,
   );
   if (result.rows.length === 0 && options.expectedVersion !== undefined) {
@@ -223,7 +223,11 @@ export async function deleteContact(
     params.push(options.expectedVersion);
   }
   const result = await db.query(
-    `DELETE FROM contacts WHERE tenant_id = $1 AND id = $2${versionClause}`,
+    `UPDATE contacts
+        SET archived_at = COALESCE(archived_at, now()),
+            updated_at = now(),
+            row_version = row_version + 1
+      WHERE tenant_id = $1 AND id = $2 AND archived_at IS NULL${versionClause}`,
     params,
   );
   if ((result.rowCount ?? 0) === 0 && options.expectedVersion !== undefined) {

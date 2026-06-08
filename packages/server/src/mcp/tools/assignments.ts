@@ -8,7 +8,7 @@ import {
   assignmentStart, assignmentBlock, assignmentCancel,
 } from '@crmy/shared';
 import type { DbPool } from '../../db/pool.js';
-import type { ActorContext } from '@crmy/shared';
+import type { ActionContext, ActionContextProposedAction, ActorContext, SubjectType, UUID } from '@crmy/shared';
 import * as assignmentRepo from '../../db/repos/assignments.js';
 import * as governorLimits from '../../db/repos/governor-limits.js';
 import { emitEvent } from '../../events/emitter.js';
@@ -18,6 +18,14 @@ import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import { indexDocument } from '../../search/SearchIndexerService.js';
 import type { ToolDef } from '../server.js';
+import {
+  assertActivityAccess,
+  assertAssignmentAccess,
+  assertSubjectAccess,
+  filterVisibleAssignments,
+  isGlobalActor,
+} from '../../services/access-control.js';
+import { getActionContext, verifiedActionContextMetadataForReceipt } from '../../services/action-context.js';
 
 function runAssignmentOperation<T>(
   db: DbPool,
@@ -67,7 +75,7 @@ async function assertActorExists(db: DbPool, tenantId: string, actorId: string) 
 
 async function validateAssignmentSubject(
   db: DbPool,
-  tenantId: string,
+  actor: ActorContext,
   subjectType?: keyof typeof assignmentSubjectTables | null,
   subjectId?: string | null,
 ) {
@@ -77,11 +85,59 @@ async function validateAssignmentSubject(
       { field: 'subject_id', message: 'Choose a record for the selected type' },
     ]);
   }
-  await assertAssignmentSubjectExists(db, tenantId, subjectType, subjectId);
+  await assertAssignmentSubjectExists(db, actor.tenant_id, subjectType, subjectId);
+  await assertSubjectAccess(db, actor, subjectType, subjectId);
 }
 
 function queueAssignmentIndex(db: DbPool, assignment: Record<string, unknown>) {
   indexDocument(db, 'assignment', assignment).catch(() => {});
+}
+
+function sanitizeAssignmentMetadata(metadata: unknown): Record<string, unknown> {
+  const record = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+    ? { ...(metadata as Record<string, unknown>) }
+    : {};
+  delete record.action_context;
+  return record;
+}
+
+function summarizeAssignmentActionContext(actionContext: ActionContext) {
+  return {
+    subject_type: actionContext.subject_type,
+    subject_id: actionContext.subject_id,
+    operating_mode: actionContext.operating_mode,
+    readiness_status: actionContext.readiness.status,
+    risk_level: actionContext.readiness.risk_level,
+    review_required: actionContext.readiness.review_required,
+    guidance_summary: actionContext.guidance.summary,
+    warning_reasons: actionContext.guidance.warning_reasons,
+    review_reasons: actionContext.guidance.review_reasons,
+    proof: actionContext.proof,
+  };
+}
+
+async function getAssignmentActionContext(
+  db: DbPool,
+  actor: ActorContext,
+  input: { subject_type?: SubjectType | null; subject_id?: UUID | string | null; assignment_type?: string; title?: string; priority?: string },
+): Promise<ActionContext | null> {
+  if (!input.subject_type || !input.subject_id) return null;
+  const proposedAction: ActionContextProposedAction = {
+    action_type: 'assignment_create',
+    object_type: input.subject_type,
+    payload: {
+      assignment_type: input.assignment_type,
+      title: input.title,
+      priority: input.priority,
+    },
+  };
+  return getActionContext(db, actor, {
+    subject_type: input.subject_type,
+    subject_id: input.subject_id as UUID,
+    context_radius: input.subject_type === 'account' ? 'account_wide' : 'adjacent',
+    token_budget: 1800,
+    proposed_action: proposedAction,
+  });
 }
 
 export function assignmentTools(db: DbPool): ToolDef[] {
@@ -98,11 +154,17 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         await governorLimits.enforceLimit(db, actor.tenant_id, 'assignments_active', activeCount);
 
         await assertActorExists(db, actor.tenant_id, input.assigned_to);
-        await validateAssignmentSubject(db, actor.tenant_id, input.subject_type, input.subject_id);
+        await validateAssignmentSubject(db, actor, input.subject_type, input.subject_id);
+        const actionContext = await getAssignmentActionContext(db, actor, input);
+        const actionContextMetadata = actionContext ? summarizeAssignmentActionContext(actionContext) : undefined;
 
         const assignment = await assignmentRepo.createAssignment(db, actor.tenant_id, {
           ...input,
           assigned_by: actor.actor_id,
+          metadata: {
+            ...sanitizeAssignmentMetadata(input.metadata),
+            ...(actionContextMetadata ? { action_context: actionContextMetadata } : {}),
+          },
         });
         queueAssignmentIndex(db, assignment as unknown as Record<string, unknown>);
         const event_id = await emitEvent(db, {
@@ -113,6 +175,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
           objectType: 'assignment',
           objectId: assignment.id,
           afterData: assignment,
+          metadata: actionContextMetadata ? { action_context: actionContextMetadata } : undefined,
         });
         return {
           assignment,
@@ -134,6 +197,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       handler: async (input: z.infer<typeof assignmentGet>, actor: ActorContext) => {
         const assignment = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!assignment) throw notFound('Assignment', input.id);
+        await assertAssignmentAccess(db, actor, assignment);
         return { assignment };
       },
     },
@@ -145,9 +209,10 @@ export function assignmentTools(db: DbPool): ToolDef[] {
       handler: async (input: z.infer<typeof assignmentSearch>, actor: ActorContext) => {
         const result = await assignmentRepo.searchAssignments(db, actor.tenant_id, {
           ...input,
-          limit: input.limit ?? 20,
+          limit: Math.min((input.limit ?? 20) * 3, 100),
         });
-        return { assignments: result.data, next_cursor: result.next_cursor, total: result.total };
+        const visible = await filterVisibleAssignments(db, actor, result.data, input.limit ?? 20);
+        return { assignments: visible, next_cursor: result.next_cursor, total: isGlobalActor(actor) ? result.total : visible.length };
       },
     },
     {
@@ -159,6 +224,8 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         return runAssignmentOperation(db, actor, 'assignment_update', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
+        await assertAssignmentAccess(db, actor, before);
+        const submittedActionContext = input.action_context;
 
         if (input.patch.assigned_to) {
           await assertActorExists(db, actor.tenant_id, input.patch.assigned_to);
@@ -167,15 +234,21 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         if ('subject_type' in input.patch || 'subject_id' in input.patch) {
           await validateAssignmentSubject(
             db,
-            actor.tenant_id,
+            actor,
             input.patch.subject_type as keyof typeof assignmentSubjectTables | null | undefined,
             input.patch.subject_id as string | null | undefined,
           );
+        }
+        if (input.patch.metadata) {
+          input.patch.metadata = sanitizeAssignmentMetadata(input.patch.metadata);
         }
 
         const assignment = await assignmentRepo.updateAssignment(db, actor.tenant_id, input.id, input.patch);
         if (!assignment) throw notFound('Assignment', input.id);
         queueAssignmentIndex(db, assignment as unknown as Record<string, unknown>);
+        const actionContextMetadata = assignment.subject_type && assignment.subject_id
+          ? await verifiedActionContextMetadataForReceipt(db, actor, assignment.subject_type, assignment.subject_id, submittedActionContext)
+          : undefined;
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -186,6 +259,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
           objectId: assignment.id,
           beforeData: before,
           afterData: assignment,
+          metadata: actionContextMetadata ? { action_context: actionContextMetadata } : undefined,
         });
         return {
           assignment,
@@ -208,6 +282,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         return runAssignmentOperation(db, actor, 'assignment_accept', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
+        await assertAssignmentAccess(db, actor, before);
 
         const acceptBlocker = validateAssignmentAction('accept', before.status);
         if (acceptBlocker) throw validationError(acceptBlocker);
@@ -247,6 +322,10 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         return runAssignmentOperation(db, actor, 'assignment_complete', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
+        await assertAssignmentAccess(db, actor, before);
+        if (input.completed_by_activity_id) {
+          await assertActivityAccess(db, actor, input.completed_by_activity_id);
+        }
 
         const completeBlocker = validateAssignmentAction('complete', before.status);
         if (completeBlocker) throw validationError(completeBlocker);
@@ -288,6 +367,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         return runAssignmentOperation(db, actor, 'assignment_decline', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
+        await assertAssignmentAccess(db, actor, before);
 
         const declineBlocker = validateAssignmentAction('decline', before.status);
         if (declineBlocker) throw validationError(declineBlocker);
@@ -336,6 +416,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         return runAssignmentOperation(db, actor, 'assignment_start', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
+        await assertAssignmentAccess(db, actor, before);
 
         const startBlocker = validateAssignmentAction('start', before.status);
         if (startBlocker) throw validationError(startBlocker);
@@ -375,6 +456,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         return runAssignmentOperation(db, actor, 'assignment_block', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
+        await assertAssignmentAccess(db, actor, before);
 
         const blockBlocker = validateAssignmentAction('block', before.status);
         if (blockBlocker) throw validationError(blockBlocker);
@@ -422,6 +504,7 @@ export function assignmentTools(db: DbPool): ToolDef[] {
         return runAssignmentOperation(db, actor, 'assignment_cancel', input, async () => {
         const before = await assignmentRepo.getAssignment(db, actor.tenant_id, input.id);
         if (!before) throw notFound('Assignment', input.id);
+        await assertAssignmentAccess(db, actor, before);
 
         const cancelBlocker = validateAssignmentAction('cancel', before.status);
         if (cancelBlocker) throw validationError(cancelBlocker);

@@ -4,22 +4,31 @@
 import { Command } from 'commander';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { randomBytes } from 'node:crypto';
 import path from 'node:path';
-import { loadConfigFile } from '../config.js';
+import { loadConfigFile, saveConfigFile } from '../config.js';
 import { printBanner } from '../banner.js';
 import { createSpinner, type Spinner } from '../spinner.js';
 import { logToFile, LOG_FILE } from '../logger.js';
 
 const _require = createRequire(import.meta.url);
 function getCLIVersion(): string {
-  try {
-    const pkg = _require(
-      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../package.json'),
-    ) as { version: string };
-    return pkg.version;
-  } catch {
-    return 'unknown';
+  const baseDir = path.dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    // Bundled CLI: packages/cli/dist/index.js -> packages/cli/package.json
+    path.resolve(baseDir, '../package.json'),
+    // Source/tsx CLI: packages/cli/src/commands/server.ts -> packages/cli/package.json
+    path.resolve(baseDir, '../../package.json'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const pkg = _require(candidate) as { version?: string };
+      if (pkg.version) return pkg.version;
+    } catch {
+      // Try the next runtime layout.
+    }
   }
+  return 'unknown';
 }
 
 function printReadyBox(port: number): void {
@@ -64,9 +73,32 @@ export function serverCommand(): Command {
         process.exit(1);
       }
 
-      process.env.DATABASE_URL  = config.database?.url ?? process.env.DATABASE_URL;
-      process.env.JWT_SECRET    = config.jwtSecret     ?? process.env.JWT_SECRET ?? 'dev-secret';
-      process.env.PORT          = String(port);
+      process.env.DATABASE_URL = config.database?.url ?? process.env.DATABASE_URL;
+      process.env.JWT_SECRET = config.jwtSecret ?? process.env.JWT_SECRET;
+      if (!process.env.JWT_SECRET) {
+        process.env.JWT_SECRET = randomBytes(32).toString('hex');
+        console.warn(
+          '\n  Warning: .crmy.json has no jwtSecret. Using an ephemeral local JWT secret for this server process.\n' +
+          '  Run `npx -y @crmy/cli init` to persist a stable local secret.\n',
+        );
+        logToFile('WARN: .crmy.json missing jwtSecret; using ephemeral local JWT secret');
+      }
+      if (!process.env.CRMY_ENCRYPTION_KEY && !process.env.AGENT_ENCRYPTION_KEY) {
+        if (config.encryptionKey) {
+          process.env.CRMY_ENCRYPTION_KEY = config.encryptionKey;
+        } else {
+          const encryptionKey = randomBytes(32).toString('hex');
+          config = { ...config, encryptionKey };
+          saveConfigFile(config);
+          process.env.CRMY_ENCRYPTION_KEY = encryptionKey;
+          console.log(
+            '\n  Generated a dedicated stored-secret encryption key and saved it to .crmy.json.\n' +
+            '  This key protects connector credentials, OAuth tokens, and Workspace Agent provider keys.\n',
+          );
+          logToFile('Generated missing CRMY_ENCRYPTION_KEY and saved it to config');
+        }
+      }
+      process.env.PORT = String(port);
       process.env.CRMY_IMPORTED = '1';
 
       if (!process.env.DATABASE_URL) {

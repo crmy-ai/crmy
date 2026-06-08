@@ -102,7 +102,7 @@ export function doctorCommand(): Command {
                 pass(`Migrations up to date (${status.applied.length} applied, pgvector optional)`);
                 passed++;
               } else {
-                fail(`${realPending.length} pending migration(s)`, 'Run: crmy migrate');
+                fail(`${realPending.length} pending migration(s)`, 'Run: crmy migrate run');
                 failed++;
               }
             }
@@ -288,6 +288,22 @@ export function doctorCommand(): Command {
         failed++;
       } else {
         fail('JWT_SECRET not configured', 'Run: crmy init');
+        failed++;
+      }
+
+      // ── Check 10: Stored-secret encryption key ────────────────────────────
+      const encryptionKey = config.encryptionKey ?? process.env.CRMY_ENCRYPTION_KEY ?? process.env.AGENT_ENCRYPTION_KEY;
+      if (encryptionKey && !KNOWN_BAD_SECRETS.includes(encryptionKey)) {
+        pass('Stored-secret encryption key is configured');
+        passed++;
+      } else if (encryptionKey && KNOWN_BAD_SECRETS.includes(encryptionKey)) {
+        fail('Stored-secret encryption key is a known default value', 'Generate a new one: openssl rand -hex 32');
+        failed++;
+      } else {
+        fail(
+          'Stored-secret encryption key is not configured',
+          'Run: crmy init, or run crmy server once to generate and save a local key',
+        );
         failed++;
       }
 

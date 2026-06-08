@@ -79,21 +79,19 @@ export function sequencesCommand(): Command {
       await client.close();
     });
 
-  cmd.command('unenroll <sequence_id>')
-    .requiredOption('--contact <id>', 'Contact ID')
-    .option('--reason <reason>', 'Reason')
-    .action(async (sequenceId, opts) => {
+  cmd.command('unenroll <enrollment_id>')
+    .description('Cancel an active enrollment')
+    .action(async (enrollmentId) => {
       const client = await getClient();
       const result = await client.call('sequence_unenroll', {
-        sequence_id: sequenceId,
-        contact_id: opts.contact,
-        reason: opts.reason,
+        id: enrollmentId,
       });
       console.log(JSON.parse(result));
       await client.close();
     });
 
   cmd.command('pause <id>')
+    .description('Pause an active enrollment')
     .action(async (id) => {
       const client = await getClient();
       console.log(JSON.parse(await client.call('sequence_pause', { id })));
@@ -101,6 +99,7 @@ export function sequencesCommand(): Command {
     });
 
   cmd.command('resume <id>')
+    .description('Resume a paused enrollment')
     .action(async (id) => {
       const client = await getClient();
       console.log(JSON.parse(await client.call('sequence_resume', { id })));

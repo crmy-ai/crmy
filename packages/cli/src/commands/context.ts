@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises';
 import { getClient } from '../client.js';
 import { resolveSubjectRef } from './subject-ref.js';
 import { resolveShortId } from './id-ref.js';
+import { createSpinner } from '../spinner.js';
 
 function printEntries(entries: Record<string, unknown>[], total?: number, limit = 20): void {
   if (entries.length === 0) {
@@ -181,19 +182,36 @@ export function contextCommand(): Command {
       }
       const client = await getClient();
       const subject = opts.subject ? await resolveSubjectRef(client, opts.subject) : {};
-      const result = await client.call(opts.auto || !subject.subject_type ? 'context_ingest_auto' : 'context_ingest', {
-        document,
-        text: document,
-        subject_type: subject.subject_type,
-        subject_id: subject.subject_id,
-        source_label: opts.source,
-        source: opts.source,
-        confidence_threshold: parseFloat(opts.threshold),
-      });
-      const data = JSON.parse(result);
-      if (data.subjects_resolved) {
-        console.log(`\n  Resolved subjects: ${data.subjects_resolved.length}`);
-        console.table(data.subjects_resolved.map((s: Record<string, unknown>) => ({
+      const toolName = opts.auto || !subject.subject_type ? 'context_ingest_auto' : 'context_ingest';
+      const spinner = createSpinner(
+        toolName === 'context_ingest_auto'
+          ? 'Resolving subjects and extracting Raw Context with the Workspace Agent...'
+          : 'Extracting Raw Context with the Workspace Agent...',
+      );
+      let data: Record<string, unknown>;
+      try {
+        const result = await client.call(toolName, {
+          document,
+          text: document,
+          subject_type: subject.subject_type,
+          subject_id: subject.subject_id,
+          source_label: opts.source,
+          source: opts.source,
+          confidence_threshold: parseFloat(opts.threshold),
+        });
+        data = JSON.parse(result);
+        spinner.succeed('Raw Context extraction complete');
+      } catch (err) {
+        spinner.fail('Raw Context extraction failed');
+        await client.close();
+        throw err;
+      }
+      const subjectsResolved = Array.isArray(data.subjects_resolved)
+        ? data.subjects_resolved as Record<string, unknown>[]
+        : [];
+      if (subjectsResolved.length > 0) {
+        console.log(`\n  Resolved subjects: ${subjectsResolved.length}`);
+        console.table(subjectsResolved.map((s: Record<string, unknown>) => ({
           subject: `${s.entity_type}:${((s.id as string) ?? '').slice(0, 8)}`,
           name: s.name,
           memory: s.memory_created ?? 0,

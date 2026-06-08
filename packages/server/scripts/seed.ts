@@ -7,7 +7,7 @@ import pg from 'pg';
 
 const BASE = process.env.API_BASE ?? 'http://localhost:3000';
 const DB_URL = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/crmy';
-const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 async function api(token: string, method: string, path: string, body?: unknown) {
   const res = await fetch(`${BASE}/api/v1${path}`, {
@@ -25,18 +25,25 @@ async function api(token: string, method: string, path: string, body?: unknown) 
 async function getToken(): Promise<string> {
   // First try HTTP login
   const email = process.env.SEED_EMAIL ?? 'admin@crmy.dev';
-  const password = process.env.SEED_PASSWORD ?? 'password123';
-  const loginRes = await fetch(`${BASE}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  if (loginRes.ok) {
-    const data = await loginRes.json();
-    return data.token;
+  const password = process.env.SEED_PASSWORD;
+  if (password) {
+    const loginRes = await fetch(`${BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (loginRes.ok) {
+      const data = await loginRes.json();
+      return data.token;
+    }
   }
 
   // Fall back: generate a JWT directly from the DB using jose
+  if (!JWT_SECRET) {
+    throw new Error(
+      'Set SEED_PASSWORD to log in through /auth/login, or set JWT_SECRET to generate a direct local seed token.',
+    );
+  }
   const pool = new pg.Pool({ connectionString: DB_URL });
   try {
     const r = await pool.query(

@@ -228,9 +228,10 @@ async function loadSubjectResolutionDirectory(
               c.account_id, a.domain AS account_domain, c.aliases, a.aliases AS account_aliases
        FROM contacts c
        LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
-       WHERE c.tenant_id = $1
-         AND c.merged_into IS NULL
-         ${contactOwnerFilter}
+	       WHERE c.tenant_id = $1
+	         AND c.merged_into IS NULL
+	         AND c.archived_at IS NULL
+	         ${contactOwnerFilter}
        ORDER BY c.updated_at DESC
        LIMIT $2`,
       params,
@@ -238,9 +239,10 @@ async function loadSubjectResolutionDirectory(
     db.query(
       `SELECT id, name, domain, industry, aliases
        FROM accounts
-       WHERE tenant_id = $1
-         AND merged_into IS NULL
-         ${accountOwnerFilter}
+	       WHERE tenant_id = $1
+	         AND merged_into IS NULL
+	         AND archived_at IS NULL
+	         ${accountOwnerFilter}
        ORDER BY updated_at DESC
       LIMIT $2`,
       params,
@@ -252,8 +254,9 @@ async function loadSubjectResolutionDirectory(
        FROM opportunities o
        LEFT JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
        LEFT JOIN contacts c ON c.id = o.contact_id AND c.tenant_id = o.tenant_id
-       WHERE o.tenant_id = $1
-         ${opportunityOwnerFilter}
+	       WHERE o.tenant_id = $1
+	         AND o.archived_at IS NULL
+	         ${opportunityOwnerFilter}
        ORDER BY o.updated_at DESC
        LIMIT $2`,
       params,
@@ -264,8 +267,9 @@ async function loadSubjectResolutionDirectory(
        FROM use_cases uc
        LEFT JOIN accounts a ON a.id = uc.account_id AND a.tenant_id = uc.tenant_id
        LEFT JOIN opportunities o ON o.id = uc.opportunity_id AND o.tenant_id = uc.tenant_id
-       WHERE uc.tenant_id = $1
-         ${useCaseOwnerFilter}
+	       WHERE uc.tenant_id = $1
+	         AND uc.archived_at IS NULL
+	         ${useCaseOwnerFilter}
        ORDER BY uc.updated_at DESC
        LIMIT $2`,
       params,
@@ -717,9 +721,9 @@ async function resolveCandidateByRecordId(
     : ['contact', 'account', 'opportunity', 'use_case'];
   if (allowedTypes.includes('contact')) {
     const result = await db.query(
-      `SELECT c.id, c.first_name || ' ' || c.last_name AS name
-       FROM contacts c
-       WHERE c.tenant_id = $1 AND c.id = $2 AND c.merged_into IS NULL ${ownerFilter}`,
+	      `SELECT c.id, c.first_name || ' ' || c.last_name AS name
+	       FROM contacts c
+	       WHERE c.tenant_id = $1 AND c.id = $2 AND c.merged_into IS NULL AND c.archived_at IS NULL ${ownerFilter}`,
       params,
     );
     if (result.rows[0]) {
@@ -734,9 +738,9 @@ async function resolveCandidateByRecordId(
   }
   if (allowedTypes.includes('account')) {
     const result = await db.query(
-      `SELECT id, name
-       FROM accounts
-       WHERE tenant_id = $1 AND id = $2 AND merged_into IS NULL ${ownerFilter}`,
+	      `SELECT id, name
+	       FROM accounts
+	       WHERE tenant_id = $1 AND id = $2 AND merged_into IS NULL AND archived_at IS NULL ${ownerFilter}`,
       params,
     );
     if (result.rows[0]) {
@@ -751,10 +755,10 @@ async function resolveCandidateByRecordId(
   }
   if (allowedTypes.includes('opportunity')) {
     const result = await db.query(
-      `SELECT o.id, o.name, o.account_id, a.name AS account_name
-       FROM opportunities o
-       LEFT JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
-       WHERE o.tenant_id = $1 AND o.id = $2 ${ownerFilter.replace('owner_id', 'o.owner_id')}`,
+	      `SELECT o.id, o.name, o.account_id, a.name AS account_name
+	       FROM opportunities o
+	       LEFT JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
+	       WHERE o.tenant_id = $1 AND o.id = $2 AND o.archived_at IS NULL ${ownerFilter.replace('owner_id', 'o.owner_id')}`,
       params,
     );
     if (result.rows[0]) {
@@ -774,10 +778,10 @@ async function resolveCandidateByRecordId(
   }
   if (allowedTypes.includes('use_case')) {
     const result = await db.query(
-      `SELECT uc.id, uc.name, uc.account_id, a.name AS account_name
-       FROM use_cases uc
-       LEFT JOIN accounts a ON a.id = uc.account_id AND a.tenant_id = uc.tenant_id
-       WHERE uc.tenant_id = $1 AND uc.id = $2 ${ownerFilter.replace('owner_id', 'uc.owner_id')}`,
+	      `SELECT uc.id, uc.name, uc.account_id, a.name AS account_name
+	       FROM use_cases uc
+	       LEFT JOIN accounts a ON a.id = uc.account_id AND a.tenant_id = uc.tenant_id
+	       WHERE uc.tenant_id = $1 AND uc.id = $2 AND uc.archived_at IS NULL ${ownerFilter.replace('owner_id', 'uc.owner_id')}`,
       params,
     );
     if (result.rows[0]) {

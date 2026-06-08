@@ -1,15 +1,23 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ActorContext } from '@crmy/shared';
+import type { ActionContext, ActorContext } from '@crmy/shared';
+import { randomUUID } from 'node:crypto';
+import os from 'node:os';
 import type { DbPool } from '../db/pool.js';
 import * as agentRepo from '../db/repos/agent.js';
 import { runAgentTurn } from './engine.js';
 import { trimForPersistence, estimateHistoryChars } from './compaction.js';
 import type { AgentEvent, AgentSessionAttachment, ConversationMessage } from './types.js';
+import { getActionContext } from '../services/action-context.js';
+import { emitEvent } from '../events/emitter.js';
 
 const ATTACHED_CONTEXT_PREFIX = '[ATTACHED_CONTEXT]';
 const activeTurnControllers = new Map<string, AbortController>();
+const AGENT_TURN_WORKER_ID = process.env.CRMY_AGENT_WORKER_ID
+  ?? `${os.hostname()}:${process.pid}:${randomUUID()}`;
+const AGENT_TURN_LEASE_MS = Number(process.env.AGENT_TURN_LEASE_MS ?? 120_000);
+const AGENT_TURN_HEARTBEAT_MS = Number(process.env.AGENT_TURN_HEARTBEAT_MS ?? 15_000);
 
 function normalizeAgentContextType(contextType?: string | null): 'account' | 'contact' | 'opportunity' | 'use_case' | null {
   if (!contextType) return null;
@@ -20,6 +28,49 @@ function normalizeAgentContextType(contextType?: string | null): 'account' | 'co
 
 function safeErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : 'Agent turn failed';
+}
+
+function summarizeAgentActionContext(actionContext: ActionContext) {
+  return {
+    subject_type: actionContext.subject_type,
+    subject_id: actionContext.subject_id,
+    operating_mode: actionContext.operating_mode,
+    readiness_status: actionContext.readiness.status,
+    risk_level: actionContext.readiness.risk_level,
+    review_required: actionContext.readiness.review_required,
+    guidance_summary: actionContext.guidance.summary,
+    warning_reasons: actionContext.guidance.warning_reasons,
+    review_reasons: actionContext.guidance.review_reasons,
+    proof: actionContext.proof,
+  };
+}
+
+async function getAgentTaskActionContext(
+  db: DbPool,
+  actor: ActorContext,
+  input: {
+    session_id: string;
+    turn_id: string;
+    context_type: 'account' | 'contact' | 'opportunity' | 'use_case';
+    context_id: string;
+    message: string;
+  },
+): Promise<Record<string, unknown> | undefined> {
+  const actionContext = await getActionContext(db, actor, {
+    subject_type: input.context_type,
+    subject_id: input.context_id,
+    context_radius: input.context_type === 'account' ? 'account_wide' : 'adjacent',
+    proposed_action: {
+      action_type: 'agent_task',
+      object_type: input.context_type,
+      payload: {
+        session_id: input.session_id,
+        turn_id: input.turn_id,
+        request_preview: input.message.slice(0, 500),
+      },
+    },
+  }).catch(() => null);
+  return actionContext ? summarizeAgentActionContext(actionContext) : undefined;
 }
 
 async function actorForUser(db: DbPool, tenantId: string, userId: string): Promise<ActorContext | null> {
@@ -79,16 +130,31 @@ export async function runAgentTurnById(db: DbPool, turnId: string): Promise<void
   const turn = (await db.query('SELECT * FROM agent_turns WHERE id = $1 LIMIT 1', [turnId])).rows[0];
   if (!turn) return;
 
-  const claimed = turn.status === 'queued'
-    ? await agentRepo.claimTurn(db, turn.tenant_id, turn.id)
-    : turn;
-  if (!claimed || claimed.status === 'cancelled') return;
-
+  if (activeTurnControllers.has(turn.id)) return;
   const controller = new AbortController();
   activeTurnControllers.set(turn.id, controller);
+
   const eventChain = { current: Promise.resolve() as Promise<unknown> };
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
 
   try {
+    const claimed = turn.status === 'running' && turn.worker_id === AGENT_TURN_WORKER_ID
+      ? (await agentRepo.heartbeatTurn(db, turn.tenant_id, turn.id, AGENT_TURN_WORKER_ID, AGENT_TURN_LEASE_MS) ? turn : null)
+      : await agentRepo.claimTurn(db, turn.tenant_id, turn.id, AGENT_TURN_WORKER_ID, AGENT_TURN_LEASE_MS);
+    if (!claimed || claimed.status === 'cancelled') return;
+
+    heartbeat = setInterval(() => {
+      void agentRepo.heartbeatTurn(db, claimed.tenant_id, claimed.id, AGENT_TURN_WORKER_ID, AGENT_TURN_LEASE_MS)
+        .then(active => {
+          if (!active) controller.abort();
+        })
+        .catch(err => {
+          console.warn('[agent-turn] heartbeat failed:', { turnId: claimed.id, err });
+        });
+    }, Math.max(5_000, AGENT_TURN_HEARTBEAT_MS));
+
+    await agentRepo.heartbeatTurn(db, claimed.tenant_id, claimed.id, AGENT_TURN_WORKER_ID, AGENT_TURN_LEASE_MS);
+
     const session = await agentRepo.getSession(db, turn.tenant_id, turn.session_id);
     if (!session || session.user_id !== turn.user_id) {
       throw new Error('Session not found for queued agent turn');
@@ -116,12 +182,26 @@ export async function runAgentTurnById(db: DbPool, turnId: string): Promise<void
     history.push({ role: 'user', content: turn.input_message });
 
     const normalizedContextType = normalizeAgentContextType(session.context_type);
+    const actionContextSummary = normalizedContextType && session.context_id
+      ? await getAgentTaskActionContext(db, actor, {
+        session_id: session.id,
+        turn_id: turn.id,
+        context_type: normalizedContextType,
+        context_id: session.context_id,
+        message: turn.input_message,
+      })
+      : undefined;
     const contextMeta = normalizedContextType
       ? {
         type: normalizedContextType,
         id: session.context_id ?? '',
         name: session.context_name ?? '',
-        detail: turn.context_detail ?? undefined,
+        detail: [
+          turn.context_detail ?? '',
+          actionContextSummary
+            ? `Action Context for this task: ${JSON.stringify(actionContextSummary).slice(0, 4000)}`
+            : '',
+        ].filter(Boolean).join('\n\n') || undefined,
       }
       : undefined;
 
@@ -153,13 +233,41 @@ export async function runAgentTurnById(db: DbPool, turnId: string): Promise<void
       token_count: tokenCount,
     });
 
-    await agentRepo.completeTurn(db, turn.tenant_id, turn.id, { final_label: label });
+    const completed = await agentRepo.completeTurn(db, turn.tenant_id, turn.id, { final_label: label, worker_id: AGENT_TURN_WORKER_ID });
+    if (!completed) {
+      await appendEventSerially(db, turn.tenant_id, turn.id, { type: 'error', message: 'Agent turn lease was lost before completion.' }, eventChain);
+      return;
+    }
+    if (actionContextSummary) {
+      emitEvent(db, {
+        tenantId: turn.tenant_id,
+        eventType: 'agent.turn.completed',
+        actorId: actor.actor_id,
+        actorType: actor.actor_type,
+        objectType: 'agent_turn',
+        objectId: turn.id,
+        afterData: {
+          session_id: session.id,
+          context_type: normalizedContextType,
+          context_id: session.context_id,
+          label,
+        },
+        metadata: {
+          origin: 'workspace_agent',
+          session_id: session.id,
+          action_context: actionContextSummary,
+        },
+      }).catch(err => console.warn('[agent-turn] completion audit event failed:', { turnId: turn.id, err }));
+    }
     await appendEventSerially(db, turn.tenant_id, turn.id, { type: 'done', session_id: session.id, label }, eventChain);
   } catch (err) {
     const message = safeErrorMessage(err);
-    await agentRepo.failTurn(db, turn.tenant_id, turn.id, message);
-    await appendEventSerially(db, turn.tenant_id, turn.id, { type: 'error', message }, eventChain);
+    const failed = await agentRepo.failTurn(db, turn.tenant_id, turn.id, message, AGENT_TURN_WORKER_ID);
+    if (failed) {
+      await appendEventSerially(db, turn.tenant_id, turn.id, { type: 'error', message }, eventChain);
+    }
   } finally {
+    if (heartbeat) clearInterval(heartbeat);
     await eventChain.current.catch(() => undefined);
     activeTurnControllers.delete(turn.id);
   }
@@ -182,7 +290,7 @@ export async function cancelRunningAgentTurn(db: DbPool, tenantId: string, turnI
 }
 
 export async function processPendingAgentTurns(db: DbPool, limit = 5): Promise<void> {
-  const turns = await agentRepo.claimPendingTurns(db, limit);
+  const turns = await agentRepo.claimPendingTurns(db, limit, AGENT_TURN_WORKER_ID, AGENT_TURN_LEASE_MS);
   for (const turn of turns) {
     if (activeTurnControllers.has(turn.id)) continue;
     startAgentTurnRunner(db, turn.id);

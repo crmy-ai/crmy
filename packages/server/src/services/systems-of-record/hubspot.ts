@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ConnectorAdapter, ConnectorContext, ExternalRecord, WritePreview } from './adapters.js';
-import { adapterError, assertWriteMode, readJsonResponse, requireString } from './adapters.js';
+import { adapterError, assertWriteMode, connectorFetch, readJsonResponse, requireString } from './adapters.js';
 import type { ExternalObjectMapping } from '@crmy/shared';
 
 const HUBSPOT_BASE = 'https://api.hubapi.com';
@@ -72,7 +72,7 @@ export async function exchangeHubSpotOAuthCredentials(credentials: Record<string
     client_secret: clientSecret,
   });
 
-  const res = await fetch(HUBSPOT_TOKEN_URL, {
+  const res = await connectorFetch(HUBSPOT_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
@@ -134,7 +134,7 @@ export async function refreshHubSpotOAuthCredentials(
     client_secret: clientSecret,
   });
 
-  const res = await fetch(HUBSPOT_TOKEN_URL, {
+  const res = await connectorFetch(HUBSPOT_TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
@@ -193,7 +193,7 @@ async function hubspotFetch(ctx: ConnectorContext, path: string, init: RequestIn
   let lastError: unknown;
   for (let attempt = 0; attempt < MAX_FETCH_ATTEMPTS; attempt++) {
     try {
-      const res = await fetch(`${HUBSPOT_BASE}${path}`, {
+      const res = await connectorFetch(`${HUBSPOT_BASE}${path}`, {
         ...init,
         headers: {
           Authorization: `Bearer ${token(ctx)}`,

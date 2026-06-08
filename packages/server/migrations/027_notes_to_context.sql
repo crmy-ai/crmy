@@ -11,6 +11,21 @@ ALTER TABLE context_entries
   ADD COLUMN IF NOT EXISTS pinned BOOLEAN NOT NULL DEFAULT FALSE;
 
 -- 2. Migrate all existing notes → context_entries
+INSERT INTO actors (tenant_id, actor_type, display_name, agent_identifier, metadata)
+SELECT DISTINCT
+  n.tenant_id,
+  'agent',
+  'CRMy Migration',
+  'crmy-migration-' || n.tenant_id::text,
+  jsonb_build_object('purpose', 'notes_to_context_author_fallback')
+FROM notes n
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM actors a
+  WHERE a.tenant_id = n.tenant_id
+)
+ON CONFLICT DO NOTHING;
+
 INSERT INTO context_entries (
   id, tenant_id, subject_type, subject_id, context_type,
   title, body, confidence, is_current,
@@ -31,13 +46,28 @@ SELECT
     'author_type', n.author_type,
     'migrated_from_notes', TRUE
   )                                                         AS structured_data,
-  COALESCE(n.author_id, (SELECT id FROM actors ORDER BY created_at LIMIT 1)) AS authored_by,
+  COALESCE(author_actor.id, fallback_actor.id)                AS authored_by,
   n.created_at,
   n.updated_at,
   n.visibility,
   COALESCE(n.mentions, '{}'),
   COALESCE(n.pinned, FALSE)
 FROM notes n
+LEFT JOIN LATERAL (
+  SELECT id
+  FROM actors
+  WHERE tenant_id = n.tenant_id
+    AND user_id = n.author_id
+  ORDER BY created_at
+  LIMIT 1
+) author_actor ON TRUE
+LEFT JOIN LATERAL (
+  SELECT id
+  FROM actors
+  WHERE tenant_id = n.tenant_id
+  ORDER BY created_at
+  LIMIT 1
+) fallback_actor ON TRUE
 ON CONFLICT (id) DO NOTHING;
 
 -- 3. Wire up threaded reply links (second pass — all rows exist now)

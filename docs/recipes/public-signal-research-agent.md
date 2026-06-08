@@ -23,7 +23,7 @@ CRMy:
 
 ```bash
 export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crmy
-npx -y @crmy/cli init --yes
+npx -y @crmy/cli init --demo
 npx -y @crmy/cli agent-smoke
 ```
 

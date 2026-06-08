@@ -231,10 +231,10 @@ function readinessTone(status: SignalReadinessStatus) {
 function readinessLabel(status: SignalReadinessStatus) {
   const labels: Record<SignalReadinessStatus, string> = {
     ready_to_confirm: 'Ready to confirm',
-    needs_more_evidence: 'Needs evidence',
+    needs_more_evidence: 'Needs another source',
     needs_more_detail: 'Needs detail',
     blocked_by_conflict: 'Conflict',
-    approval_required: 'Approval required',
+    approval_required: 'Needs approval',
     confirmed: 'Confirmed',
     dismissed: 'Dismissed',
   };
@@ -529,9 +529,9 @@ function resolutionTitle(resolution: SignalResolution, readiness: SignalReadines
     if (resolution.target_type === 'mentioned_person') return `${resolution.target_label} is missing a ${field}.`;
     return `Signal is missing ${field}.`;
   }
-  if (readiness.status === 'needs_more_evidence') return 'Signal needs more evidence.';
+  if (readiness.status === 'needs_more_evidence') return 'Needs another source before becoming Memory.';
   if (readiness.status === 'blocked_by_conflict') return 'Conflicting evidence needs resolution.';
-  if (readiness.status === 'approval_required') return 'Signal needs approval.';
+  if (readiness.status === 'approval_required') return 'Approval required before this becomes Memory.';
   return 'Signal is ready to confirm.';
 }
 
@@ -560,7 +560,9 @@ function memoryCandidateState(readiness: SignalReadiness) {
   return {
     label: readiness.status === 'approval_required' ? 'Needs approval' : 'Blocked',
     className: 'border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400',
-    helper: 'Repair the blocker below before this can become confirmed Memory.',
+    helper: readiness.status === 'approval_required'
+      ? 'A reviewer should approve this before agents rely on it as Memory.'
+      : 'Repair the blocker below before this can become confirmed Memory.',
   };
 }
 
@@ -568,17 +570,17 @@ function SignalReadinessBar({ readiness }: { readiness: SignalReadiness }) {
   const threshold = Math.round(Math.min(1, Math.max(0, readiness.threshold)) * 100);
   return (
     <ClaimScoreBar
-      label="Signal readiness"
+      label="Memory readiness"
       value={readiness.score}
       trailing={<span className="text-muted-foreground">Threshold {threshold}%</span>}
-      marker={{ value: readiness.threshold, label: 'confirm threshold' }}
+      marker={{ value: readiness.threshold, label: 'Memory threshold' }}
     />
   );
 }
 
 function SignalReadinessDetails({ readiness, group }: { readiness: SignalReadiness; group: SignalGroup }) {
   return (
-    <DetailDisclosure title="Signal readiness details">
+    <DetailDisclosure title="Why this can or cannot become Memory">
       <div className="space-y-2 text-sm">
         <div className="flex justify-between gap-3">
           <span className="text-muted-foreground">Signal readiness score</span>
@@ -630,7 +632,7 @@ function primaryActionLabel(readiness: SignalReadiness) {
   if (readiness.status === 'needs_more_detail') return 'Add missing details';
   if (readiness.status === 'needs_more_evidence') return 'Add evidence';
   if (readiness.status === 'blocked_by_conflict') return 'Resolve conflict';
-  if (readiness.status === 'approval_required') return readiness.can_confirm ? 'Confirm Signal' : 'Request approval';
+  if (readiness.status === 'approval_required') return 'Request approval';
   return 'View details';
 }
 
@@ -771,6 +773,12 @@ function readinessForGroup(group: SignalGroup): SignalReadiness {
 function readinessReason(group: SignalGroup) {
   const readiness = readinessForGroup(group);
   return readiness.reasons[0] ?? 'Readiness is available for this Signal.';
+}
+
+function readinessBlockerSummary(group: SignalGroup, readiness: SignalReadiness) {
+  const blocker = readiness.blockers[0] ?? readiness.reasons[0];
+  if (!blocker || readiness.status === 'ready_to_confirm' || readiness.status === 'confirmed' || readiness.status === 'dismissed') return null;
+  return friendlyPromotionBlocker(group, blocker);
 }
 
 function friendlyPromotionBlocker(group: SignalGroup, blocker: string) {
@@ -1208,16 +1216,6 @@ export function SignalGroupsBrowser({
           onClick: () => setShowDelegation(true),
         });
       } else if (detailedReadiness.status === 'approval_required') {
-        if (canPromote(detailedGroup)) {
-          primaryActions.push({
-            key: 'confirm-approval-signal',
-            label: 'Confirm Signal',
-            Icon: promote.isPending ? Loader2 : CheckCircle2,
-            tone: 'success',
-            onClick: () => onPromote(detailedGroup.id),
-            disabled: promote.isPending,
-          });
-        }
         primaryActions.push({
           key: 'request-approval',
           label: 'Request approval',
@@ -1225,6 +1223,17 @@ export function SignalGroupsBrowser({
           tone: 'outline',
           onClick: () => setShowDelegation(true),
         });
+        if (canPromote(detailedGroup)) {
+          primaryActions.push({
+            key: 'confirm-approval-signal',
+            label: 'Confirm manually',
+            Icon: promote.isPending ? Loader2 : CheckCircle2,
+            tone: 'outline',
+            onClick: () => onPromote(detailedGroup.id),
+            disabled: promote.isPending,
+            title: 'Manual confirmation is allowed, but CRMy will not auto-confirm this sensitive Signal.',
+          });
+        }
       } else if (detailedReadiness.status === 'ready_to_confirm') {
         primaryActions.push({
           key: 'confirm-ready-signal',
@@ -1372,6 +1381,7 @@ export function SignalGroupsBrowser({
                   {groupedByStatus.map((group, index) => {
                     const readiness = readinessForGroup(group);
                     const resolution = resolutionForGroup(group, readiness);
+                    const blockerSummary = readinessBlockerSummary(group, readiness);
                     return (
                       <tr
                         key={group.id}
@@ -1381,6 +1391,9 @@ export function SignalGroupsBrowser({
                         <td className="max-w-[28rem] px-4 py-3">
                           <div className="font-semibold text-foreground line-clamp-1">{group.title || group.normalized_claim}</div>
                           <div className="text-xs text-muted-foreground line-clamp-1">{resolutionTitle(resolution, readiness)}</div>
+                          {blockerSummary && (
+                            <div className="mt-1 line-clamp-1 text-xs text-amber-600 dark:text-amber-400">Why: {blockerSummary}</div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">{subjectLabel(group)}</td>
                         <td className="px-4 py-3 font-semibold text-foreground">{pct(readiness.score)}</td>
@@ -1420,6 +1433,7 @@ export function SignalGroupsBrowser({
               const canAct = !['promoted', 'dismissed'].includes(group.status);
               const readiness = readinessForGroup(group);
               const resolution = resolutionForGroup(group, readiness);
+              const blockerSummary = readinessBlockerSummary(group, readiness);
               return (
                 <article
                   key={group.id}
@@ -1443,6 +1457,11 @@ export function SignalGroupsBrowser({
                         {group.title || group.normalized_claim}
                       </h3>
                       <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{resolutionTitle(resolution, readiness)}</p>
+                      {blockerSummary && (
+                        <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-xs leading-5 text-amber-700 dark:text-amber-300">
+                          <span className="font-semibold">Why blocked:</span> {blockerSummary}
+                        </div>
+                      )}
                       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground">{subjectLabel(group)}</span>
                         <span className="rounded-full bg-muted px-2 py-0.5 font-semibold text-muted-foreground">
@@ -1464,13 +1483,19 @@ export function SignalGroupsBrowser({
                       <Eye className="mr-1 h-3.5 w-3.5" />
                       Details
                     </button>
-                    {canPromote(group) && (
+                    {canAct && readiness.status === 'approval_required' && (
+                      <button type="button" className={signalActionClass('warning')} onClick={() => openSignal(group.id)}>
+                        <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+                        Review approval
+                      </button>
+                    )}
+                    {canPromote(group) && readiness.status !== 'approval_required' && (
                       <button type="button" className={signalActionClass('success')} onClick={() => onPromote(group.id)} disabled={promote.isPending}>
                         {promote.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
                         Confirm Signal
                       </button>
                     )}
-                    {canAct && !canPromote(group) && (
+                    {canAct && !canPromote(group) && readiness.status !== 'approval_required' && (
                       <button
                         type="button"
                         className={signalActionClass(readiness.status === 'needs_more_evidence' ? 'ghost' : 'warning')}

@@ -21,6 +21,17 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 
+function safeHref(href?: string): string | undefined {
+  if (!href) return undefined;
+  if (href.startsWith('/') || href.startsWith('#')) return href;
+  try {
+    const parsed = new URL(href);
+    return ['http:', 'https:', 'mailto:'].includes(parsed.protocol) ? href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // Prose component map — each key maps to a styled wrapper for that HTML element.
 const components: Components = {
   // ── Block elements ───────────────────────────────────────────────────────────
@@ -145,9 +156,11 @@ const components: Components = {
   },
 
   a({ href, children }) {
+    const safe = safeHref(href);
+    if (!safe) return <span className="text-foreground/80">{children}</span>;
     return (
       <a
-        href={href}
+        href={safe}
         target="_blank"
         rel="noopener noreferrer"
         className="text-primary underline underline-offset-2 hover:text-primary/80 transition-colors"

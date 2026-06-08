@@ -51,7 +51,7 @@ export async function createOpportunity(
 
 export async function getOpportunity(db: DbPool, tenantId: UUID, id: UUID): Promise<Opportunity | null> {
   const result = await db.query(
-    'SELECT * FROM opportunities WHERE id = $1 AND tenant_id = $2',
+    'SELECT * FROM opportunities WHERE id = $1 AND tenant_id = $2 AND archived_at IS NULL',
     [id, tenantId],
   );
   return (result.rows[0] as Opportunity) ?? null;
@@ -82,7 +82,7 @@ export async function searchOpportunities(
     cursor?: string;
   },
 ): Promise<PaginatedResponse<Opportunity>> {
-  const conditions: string[] = ['o.tenant_id = $1'];
+  const conditions: string[] = ['o.tenant_id = $1', 'o.archived_at IS NULL'];
   const params: unknown[] = [tenantId];
   let idx = 2;
 
@@ -211,7 +211,7 @@ export async function updateOpportunity(
   }
 
   const result = await db.query(
-    `UPDATE opportunities SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2${versionClause} RETURNING *`,
+    `UPDATE opportunities SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2 AND archived_at IS NULL${versionClause} RETURNING *`,
     params,
   );
   if (result.rows.length === 0 && options.expectedVersion !== undefined) {
@@ -227,6 +227,7 @@ export async function getPipelineSummary(
 ): Promise<{ total_value: number; count: number; by_stage: { stage: string; value: number; count: number }[] }> {
   const conditions: string[] = [
     'tenant_id = $1',
+    'archived_at IS NULL',
     "stage NOT IN ('closed_won', 'closed_lost')",
   ];
   const params: unknown[] = [tenantId];
@@ -286,7 +287,7 @@ export async function getPipelineForecast(
   avg_deal_size: number;
   avg_cycle_days: number;
 }> {
-  const conditions: string[] = ['tenant_id = $1'];
+  const conditions: string[] = ['tenant_id = $1', 'archived_at IS NULL'];
   const params: unknown[] = [tenantId];
   let idx = 2;
 
@@ -367,7 +368,11 @@ export async function deleteOpportunity(
     params.push(options.expectedVersion);
   }
   const result = await db.query(
-    `DELETE FROM opportunities WHERE tenant_id = $1 AND id = $2${versionClause}`,
+    `UPDATE opportunities
+        SET archived_at = COALESCE(archived_at, now()),
+            updated_at = now(),
+            row_version = row_version + 1
+      WHERE tenant_id = $1 AND id = $2 AND archived_at IS NULL${versionClause}`,
     params,
   );
   if ((result.rowCount ?? 0) === 0 && options.expectedVersion !== undefined) {

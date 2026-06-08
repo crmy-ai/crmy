@@ -211,7 +211,7 @@ export default function Accounts() {
                     <SortHeader label="Revenue" sortKey="annual_revenue" />
                     <SortHeader label="Employees" sortKey="employee_count" />
                     <SortHeader label="Health" sortKey="health_score" />
-                    <th className="px-2 py-3 w-16"></th>
+                    <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Briefing</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -231,15 +231,16 @@ export default function Accounts() {
                       <td className="px-4 py-3 text-foreground font-medium">{a.annual_revenue ? formatRevenue(a.annual_revenue as number) : '—'}</td>
                       <td className="px-4 py-3 text-muted-foreground">{(a.employee_count as number) || '—'}</td>
                       <td className="px-4 py-3">{a.health_score ? <HealthBadge score={a.health_score as number} /> : '—'}</td>
-                      <td className="px-2 py-3">
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
                           <button onClick={(e) => { e.stopPropagation(); openDrawerBriefing('account', a.id as string); }}
-                            className="p-1.5 rounded-lg hover:bg-primary/10 transition-colors" title="View briefing">
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-2.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/15" title="View briefing">
                             <FileText className="w-3.5 h-3.5 text-primary" />
+                            Brief
                           </button>
                           {agentEnabled && (
                             <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'account', id: a.id as string, name: a.name as string, detail: a.industry as string }); navigate('/agent'); }}
-                              className="p-1.5 rounded-lg hover:bg-violet-500/10 transition-colors">
+                              className="p-1.5 rounded-lg hover:bg-violet-500/10 transition-colors" title="Open with agent">
                               <Bot className="w-3.5 h-3.5 text-violet-500" />
                             </button>
                           )}
@@ -261,9 +262,9 @@ export default function Accounts() {
               <motion.div key={a.id as string} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
                 onClick={() => openDrawer('account', a.id as string)}
                 className="bg-card border border-border rounded-2xl p-4 cursor-pointer hover:shadow-lg hover:border-primary/20 transition-all press-scale group relative">
-                <div className="absolute top-3 right-3 flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-all">
+                <div className="absolute top-3 right-3 flex items-center gap-0.5 transition-all">
                   <button onClick={(e) => { e.stopPropagation(); openDrawerBriefing('account', a.id as string); }}
-                    className="p-1.5 rounded-lg hover:bg-primary/10 transition-colors" title="View briefing">
+                    className="p-1.5 rounded-lg bg-primary/10 hover:bg-primary/15 transition-colors" title="View briefing">
                     <FileText className="w-3.5 h-3.5 text-primary" />
                   </button>
                   {agentEnabled && (

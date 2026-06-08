@@ -51,7 +51,7 @@ export async function createAccount(
 
 export async function getAccount(db: DbPool, tenantId: UUID, id: UUID): Promise<Account | null> {
   const result = await db.query(
-    'SELECT * FROM accounts WHERE id = $1 AND tenant_id = $2 AND merged_into IS NULL',
+    'SELECT * FROM accounts WHERE id = $1 AND tenant_id = $2 AND merged_into IS NULL AND archived_at IS NULL',
     [id, tenantId],
   );
   return (result.rows[0] as Account) ?? null;
@@ -62,7 +62,7 @@ export async function getAccountByDomain(db: DbPool, tenantId: UUID, domain: str
   if (!normalized) return null;
   const result = await db.query(
     `SELECT * FROM accounts
-     WHERE tenant_id = $1 AND lower(domain) = $2 AND merged_into IS NULL
+     WHERE tenant_id = $1 AND lower(domain) = $2 AND merged_into IS NULL AND archived_at IS NULL
      LIMIT 1`,
     [tenantId, normalized],
   );
@@ -71,7 +71,7 @@ export async function getAccountByDomain(db: DbPool, tenantId: UUID, domain: str
 
 export async function getAccountContacts(db: DbPool, tenantId: UUID, accountId: UUID): Promise<Contact[]> {
   const result = await db.query(
-    'SELECT * FROM contacts WHERE account_id = $1 AND tenant_id = $2 AND merged_into IS NULL ORDER BY created_at DESC',
+    'SELECT * FROM contacts WHERE account_id = $1 AND tenant_id = $2 AND merged_into IS NULL AND archived_at IS NULL ORDER BY created_at DESC',
     [accountId, tenantId],
   );
   return result.rows as Contact[];
@@ -81,6 +81,7 @@ export async function getAccountOpenOpps(db: DbPool, tenantId: UUID, accountId: 
   const result = await db.query(
     `SELECT * FROM opportunities
      WHERE account_id = $1 AND tenant_id = $2
+       AND archived_at IS NULL
        AND stage NOT IN ('closed_won', 'closed_lost')
      ORDER BY close_date ASC NULLS LAST`,
     [accountId, tenantId],
@@ -102,7 +103,7 @@ export async function searchAccounts(
     cursor?: string;
   },
 ): Promise<PaginatedResponse<Account>> {
-  const conditions: string[] = ['a.tenant_id = $1', 'a.merged_into IS NULL'];
+  const conditions: string[] = ['a.tenant_id = $1', 'a.merged_into IS NULL', 'a.archived_at IS NULL'];
   const params: unknown[] = [tenantId];
   let idx = 2;
 
@@ -209,7 +210,7 @@ export async function updateAccount(
   }
 
   const result = await db.query(
-    `UPDATE accounts SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2${versionClause} RETURNING *`,
+    `UPDATE accounts SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2 AND archived_at IS NULL${versionClause} RETURNING *`,
     params,
   );
   if (result.rows.length === 0 && options.expectedVersion !== undefined) {
@@ -231,12 +232,12 @@ export async function getAccountHierarchy(
     `WITH RECURSIVE chain AS (
        SELECT *, 0 AS hop
          FROM accounts
-        WHERE id = $1 AND tenant_id = $2
+        WHERE id = $1 AND tenant_id = $2 AND archived_at IS NULL
        UNION ALL
        SELECT a.*, c.hop + 1
          FROM accounts a
          JOIN chain c ON a.id = c.parent_id
-        WHERE a.tenant_id = $2
+        WHERE a.tenant_id = $2 AND a.archived_at IS NULL
      )
      SELECT * FROM chain ORDER BY hop DESC LIMIT 1`,
     [id, tenantId],
@@ -252,7 +253,7 @@ export async function getAccountHierarchy(
 
   // Fetch direct children of the root in the same query
   const childrenResult = await db.query(
-    'SELECT * FROM accounts WHERE parent_id = $1 AND tenant_id = $2 ORDER BY name',
+    'SELECT * FROM accounts WHERE parent_id = $1 AND tenant_id = $2 AND archived_at IS NULL ORDER BY name',
     [root.id, tenantId],
   );
 
@@ -276,7 +277,11 @@ export async function deleteAccount(
     params.push(options.expectedVersion);
   }
   const result = await db.query(
-    `DELETE FROM accounts WHERE tenant_id = $1 AND id = $2${versionClause}`,
+    `UPDATE accounts
+        SET archived_at = COALESCE(archived_at, now()),
+            updated_at = now(),
+            row_version = row_version + 1
+      WHERE tenant_id = $1 AND id = $2 AND archived_at IS NULL${versionClause}`,
     params,
   );
   if ((result.rowCount ?? 0) === 0 && options.expectedVersion !== undefined) {

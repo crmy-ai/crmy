@@ -18,16 +18,27 @@ export const SAMPLE_DATA_IDS = {
   OPPORTUNITY: 'd0000000-0000-4000-d000-000000000101',
   USE_CASE: 'd0000000-0000-4000-f200-000000000101',
   ACTIVITY: 'd0000000-0000-4000-e000-000000000101',
+  ACTIVITY_INGESTED_NOTE: 'd0000000-0000-4000-e000-000000000102',
+  ACTIVITY_MODEL_NOTE: 'd0000000-0000-4000-e000-000000000103',
   CONTEXT: 'd0000000-0000-4000-f000-000000000101',
   MEMORY_CRITERIA: 'd0000000-0000-4000-f000-000000000102',
   SIGNAL_SECURITY: 'd0000000-0000-4000-f000-000000000103',
   SIGNAL_BUYER: 'd0000000-0000-4000-f000-000000000104',
+  MEMORY_SECURITY_BLOCKER: 'd0000000-0000-4000-f000-000000000105',
+  MEMORY_TECH_VALIDATION: 'd0000000-0000-4000-f000-000000000106',
+  SIGNAL_TRUST_PACKET: 'd0000000-0000-4000-f000-000000000107',
+  SIGNAL_ROLLOUT_SECURITY: 'd0000000-0000-4000-f000-000000000108',
   SIGNAL_GROUP_SECURITY: 'd0000000-0000-4000-f500-000000000101',
   SIGNAL_GROUP_BUYER: 'd0000000-0000-4000-f500-000000000102',
+  SIGNAL_GROUP_TRUST_PACKET: 'd0000000-0000-4000-f500-000000000103',
   SIGNAL_GROUP_MEMBER_SECURITY: 'd0000000-0000-4000-f600-000000000101',
   SIGNAL_GROUP_MEMBER_BUYER: 'd0000000-0000-4000-f600-000000000102',
+  SIGNAL_GROUP_MEMBER_TRUST_PACKET: 'd0000000-0000-4000-f600-000000000103',
+  SIGNAL_GROUP_MEMBER_ROLLOUT_SECURITY: 'd0000000-0000-4000-f600-000000000104',
   ASSIGNMENT: 'd0000000-0000-4000-f100-000000000101',
   RAW_CONTEXT: 'd0000000-0000-4000-f300-000000000101',
+  RAW_INGESTED_NOTE: 'd0000000-0000-4000-f300-000000000102',
+  RAW_MODEL_NOTE: 'd0000000-0000-4000-f300-000000000103',
   HANDOFF: 'd0000000-0000-4000-f400-000000000101',
   PEER_ACCOUNT: 'd0000000-0000-4000-b000-000000000202',
   PEER_OPPORTUNITY: 'd0000000-0000-4000-d000-000000000202',
@@ -141,6 +152,71 @@ export async function resetSampleData(db: DbPool, tenantId: string, options?: { 
     await db.query('DELETE FROM opportunities WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
     await db.query('DELETE FROM contacts WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
     await db.query('DELETE FROM accounts WHERE tenant_id = $1 AND id = ANY($2::uuid[])', [tenantId, ids]);
+    await db.query(
+      `DELETE FROM signal_groups
+       WHERE tenant_id = $1
+         AND claim_key = ANY($2::text[])`,
+      [tenantId, [
+        'security-review-may-block-pilot-approval',
+        'maya-may-be-evaluation-sponsor',
+        'send-trust-packet-to-unblock-pilot-approval',
+        'maya-patel-contingent-on-providing-trust-packet-by-friday',
+        'security-review-required-before-rollout-expansion',
+      ]],
+    );
+    await db.query(
+      `DELETE FROM context_entries
+       WHERE tenant_id = $1
+         AND (
+           title = ANY($2::text[])
+           OR source_ref IN (
+             SELECT id::text FROM raw_context_sources
+             WHERE tenant_id = $1
+               AND source_label = ANY($3::text[])
+           )
+         )`,
+      [tenantId, [
+        'Security review is the blocker for the pilot.',
+        'Schedule technical validation next Friday',
+        'Send trust packet to unblock pilot approval',
+        'Security review required before rollout expansion',
+        'Maya Patel is contingent on providing trust packet by Friday',
+      ], [
+        'Ingested document',
+        'Agent smoke model-backed extraction demo',
+      ]],
+    );
+    await db.query(
+      `DELETE FROM raw_context_sources
+       WHERE tenant_id = $1
+         AND source_label = ANY($2::text[])`,
+      [tenantId, [
+        'Ingested document',
+        'Agent smoke model-backed extraction demo',
+      ]],
+    );
+    await db.query(
+      `DELETE FROM context_entries
+       WHERE tenant_id = $1
+         AND source_activity_id IN (
+           SELECT id FROM activities
+           WHERE tenant_id = $1
+             AND subject = ANY($2::text[])
+         )`,
+      [tenantId, [
+        'Ingested document',
+        'Agent smoke model-backed extraction demo',
+      ]],
+    );
+    await db.query(
+      `DELETE FROM activities
+       WHERE tenant_id = $1
+         AND subject = ANY($2::text[])`,
+      [tenantId, [
+        'Ingested document',
+        'Agent smoke model-backed extraction demo',
+      ]],
+    );
     await db.query('COMMIT');
   } catch (err) {
     await db.query('ROLLBACK');
@@ -150,6 +226,8 @@ export async function resetSampleData(db: DbPool, tenantId: string, options?: { 
 
 export async function seedSampleData(db: DbPool, tenantId: string) {
   const callBody = 'Maya wants agents to remember account priorities, open risks, and human handoffs without re-querying the CRM every run. She said security and data residency need review before the buying team will approve a pilot. Maya can likely sponsor the evaluation, but Finance still needs proof that the agent workflow reduces manual CRM updates. She asked for a demo focused on governed writebacks and human approval.';
+  const ingestedNoteBody = 'Maya told us Security is now the blocker for the pilot. She can sponsor the evaluation if we send the trust packet by Friday.';
+  const modelNoteBody = 'Northstar customer call note: Maya Patel may be the evaluation sponsor. The team wants a security review before expanding the rollout, and the next step is to schedule a technical validation session next Friday.';
   const callEvidence = {
     source_type: 'activity',
     source_id: IDS.ACTIVITY,
@@ -159,18 +237,46 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
     observed_at: new Date().toISOString(),
     confidence: 0.78,
   };
+  const ingestedNoteEvidence = {
+    source_type: 'add_context',
+    source_id: IDS.RAW_INGESTED_NOTE,
+    source_label: 'Ingested document',
+    speaker: 'Maya',
+    snippet: 'Maya told us Security is now the blocker for the pilot.',
+    observed_at: new Date().toISOString(),
+    confidence: 0.9,
+  };
+  const modelNoteEvidence = {
+    source_type: 'activity',
+    source_id: IDS.ACTIVITY_MODEL_NOTE,
+    source_label: 'Agent smoke model-backed extraction demo',
+    speaker: 'Maya Patel',
+    snippet: 'The team wants a security review before expanding the rollout, and the next step is to schedule a technical validation session next Friday.',
+    observed_at: new Date().toISOString(),
+    confidence: 0.9,
+  };
 
   await db.query('BEGIN');
   try {
   const sampleIds = Object.values(SAMPLE_DATA_IDS);
-  const sampleUserIds = [IDS.USER_ADMIN, IDS.USER_MANAGER, IDS.USER_MEMBER, IDS.USER_PEER];
+  const existingSampleAdmin = await db.query(
+    `SELECT id
+     FROM users
+     WHERE tenant_id = $1
+       AND LOWER(email) = LOWER('sample.admin@crmy.local')
+     LIMIT 1`,
+    [tenantId],
+  );
+  const sampleAdminUserId = existingSampleAdmin.rows[0]?.id ?? IDS.USER_ADMIN;
+  const sampleUserIds = [sampleAdminUserId, IDS.USER_MANAGER, IDS.USER_MEMBER, IDS.USER_PEER];
+  const sampleTenantCheckUserIds = Array.from(new Set([...sampleUserIds, IDS.USER_ADMIN]));
   const existingSampleTenant = await db.query(
     `SELECT tenant_id
      FROM users
      WHERE id = ANY($1::uuid[])
        AND tenant_id <> $2
      LIMIT 1`,
-    [sampleUserIds, tenantId],
+    [sampleTenantCheckUserIds, tenantId],
   );
   if (existingSampleTenant.rows.length > 0) {
     throw new Error('Sample data already exists in another tenant. Use that tenant or reset the existing sample workspace first.');
@@ -203,13 +309,13 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
      ON CONFLICT (id) DO UPDATE SET
        email = EXCLUDED.email,
        name = EXCLUDED.name,
-       role = EXCLUDED.role,
+       role = CASE WHEN users.role = 'owner' THEN users.role ELSE EXCLUDED.role END,
        manager_id = EXCLUDED.manager_id,
        password_hash = EXCLUDED.password_hash,
        is_active = true,
        password_set_at = now(),
        updated_at = now()`,
-    [IDS.USER_ADMIN, IDS.USER_MANAGER, IDS.USER_MEMBER, IDS.USER_PEER, tenantId, demoPasswordHash],
+    [sampleAdminUserId, IDS.USER_MANAGER, IDS.USER_MEMBER, IDS.USER_PEER, tenantId, demoPasswordHash],
   );
 
   await db.query(
@@ -410,6 +516,101 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
     ],
   );
   await db.query(
+    `INSERT INTO activities (id, tenant_id, type, subject, body, performed_by, subject_type, subject_id, account_id, contact_id, opportunity_id, occurred_at, outcome, detail, owner_id)
+     VALUES
+       ($1, $2, 'note', 'Ingested document', $3, $4, 'account', $5, $5, $6, NULL, now(), 'processed', $7, $8),
+       ($9, $2, 'note', 'Agent smoke model-backed extraction demo', $10, $4, 'account', $5, $5, $6, NULL, '2026-01-15T17:00:00.000Z', 'processed', $11, $8)
+     ON CONFLICT (id) DO UPDATE SET
+       subject = EXCLUDED.subject,
+       body = EXCLUDED.body,
+       performed_by = EXCLUDED.performed_by,
+       subject_type = EXCLUDED.subject_type,
+       subject_id = EXCLUDED.subject_id,
+       account_id = EXCLUDED.account_id,
+       contact_id = EXCLUDED.contact_id,
+       opportunity_id = EXCLUDED.opportunity_id,
+       occurred_at = EXCLUDED.occurred_at,
+       outcome = EXCLUDED.outcome,
+       detail = EXCLUDED.detail,
+       owner_id = EXCLUDED.owner_id`,
+    [
+      IDS.ACTIVITY_INGESTED_NOTE,
+      tenantId,
+      ingestedNoteBody,
+      IDS.ACTOR_AGENT,
+      IDS.ACCOUNT,
+      IDS.CONTACT,
+      JSON.stringify({
+        processing: {
+          raw_context_source_id: IDS.RAW_INGESTED_NOTE,
+          signals_created: 2,
+          memory_created: 1,
+        },
+      }),
+      IDS.USER_MEMBER,
+      IDS.ACTIVITY_MODEL_NOTE,
+      modelNoteBody,
+      JSON.stringify({
+        processing: {
+          raw_context_source_id: IDS.RAW_MODEL_NOTE,
+          signals_created: 2,
+          memory_created: 1,
+        },
+      }),
+    ],
+  );
+  await db.query(
+    `INSERT INTO raw_context_sources (
+       id, tenant_id, source_type, source_ref, source_label, subject_type, subject_id,
+       actor_id, status, stage, raw_excerpt, detected_subjects, signals_created,
+       memory_created, skipped, metadata, processed_at
+     )
+     VALUES
+       ($1::uuid, $2, 'add_context', $1::uuid::text, 'Ingested document', 'account', $3,
+        $4, 'needs_review', 'promote_or_review', $5, $6, 2, 1, 0, $7, now()),
+       ($8::uuid, $2, 'activity', $9::uuid::text, 'Agent smoke model-backed extraction demo', 'account', $3,
+        $4, 'needs_review', 'promote_or_review', $10, $6, 2, 1, 0, $11, now())
+     ON CONFLICT (tenant_id, source_type, source_ref) DO UPDATE SET
+       source_label = EXCLUDED.source_label,
+       subject_type = EXCLUDED.subject_type,
+       subject_id = EXCLUDED.subject_id,
+       actor_id = EXCLUDED.actor_id,
+       status = EXCLUDED.status,
+       stage = EXCLUDED.stage,
+       raw_excerpt = EXCLUDED.raw_excerpt,
+       detected_subjects = EXCLUDED.detected_subjects,
+       signals_created = EXCLUDED.signals_created,
+       memory_created = EXCLUDED.memory_created,
+       skipped = EXCLUDED.skipped,
+       metadata = EXCLUDED.metadata,
+       processed_at = now(),
+       updated_at = now()`,
+    [
+      IDS.RAW_INGESTED_NOTE,
+      tenantId,
+      IDS.ACCOUNT,
+      IDS.ACTOR_AGENT,
+      ingestedNoteBody,
+      JSON.stringify([
+        { subject_type: 'account', subject_id: IDS.ACCOUNT, label: 'Northstar Labs', confidence: 0.96 },
+        { subject_type: 'contact', subject_id: IDS.CONTACT, label: 'Maya Patel', confidence: 0.9 },
+      ]),
+      JSON.stringify({
+        sample: true,
+        extraction_summary: 'Messy note produced one Memory item and two Signals for the account briefing.',
+        created_context_entry_ids: [IDS.MEMORY_SECURITY_BLOCKER, IDS.SIGNAL_TRUST_PACKET],
+      }),
+      IDS.RAW_MODEL_NOTE,
+      IDS.ACTIVITY_MODEL_NOTE,
+      modelNoteBody,
+      JSON.stringify({
+        sample: true,
+        extraction_summary: 'Model-smoke note is pre-seeded so first-run proof does not depend on a model call.',
+        created_context_entry_ids: [IDS.MEMORY_TECH_VALIDATION, IDS.SIGNAL_ROLLOUT_SECURITY],
+      }),
+    ],
+  );
+  await db.query(
     `INSERT INTO context_entries (
        id, tenant_id, subject_type, subject_id, context_type, authored_by, title, body,
        confidence, memory_status, evidence, source, source_ref, source_activity_id,
@@ -548,6 +749,91 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
     ],
   );
   await db.query(
+    `INSERT INTO context_entries (
+       id, tenant_id, subject_type, subject_id, context_type, authored_by, title, body,
+       confidence, memory_status, evidence, source, source_ref, source_activity_id,
+       tags, promoted_at, promoted_by, valid_until
+     )
+     VALUES
+       ($1, $2, 'account', $3, 'deal_risk', $4, 'Security review is the blocker for the pilot.',
+        'Security has become the primary blocker preventing pilot approval for Northstar Labs.',
+        0.91, 'active', $5, 'sample_data', $6, $7, $8, now(), $4, now() + interval '45 days'),
+       ($9, $2, 'account', $3, 'next_step', $4, 'Schedule technical validation next Friday',
+        'The next concrete step is to schedule a technical validation session for the following Friday.',
+        0.96, 'active', $10, 'sample_data', $11, $12, $13, now(), $4, now() + interval '30 days')
+     ON CONFLICT (id) DO UPDATE SET
+       title = EXCLUDED.title,
+       body = EXCLUDED.body,
+       confidence = EXCLUDED.confidence,
+       memory_status = EXCLUDED.memory_status,
+       evidence = EXCLUDED.evidence,
+       source = EXCLUDED.source,
+       source_ref = EXCLUDED.source_ref,
+       source_activity_id = EXCLUDED.source_activity_id,
+       tags = EXCLUDED.tags,
+       promoted_at = COALESCE(context_entries.promoted_at, EXCLUDED.promoted_at),
+       promoted_by = COALESCE(context_entries.promoted_by, EXCLUDED.promoted_by),
+       valid_until = EXCLUDED.valid_until,
+       is_current = true,
+       updated_at = now()`,
+    [
+      IDS.MEMORY_SECURITY_BLOCKER,
+      tenantId,
+      IDS.ACCOUNT,
+      IDS.ACTOR_AGENT,
+      JSON.stringify([{ ...ingestedNoteEvidence, confidence: 0.91 }]),
+      IDS.RAW_INGESTED_NOTE,
+      IDS.ACTIVITY_INGESTED_NOTE,
+      JSON.stringify(['sample', 'security', 'memory', 'first-run-proof']),
+      IDS.MEMORY_TECH_VALIDATION,
+      JSON.stringify([{ ...modelNoteEvidence, snippet: 'the next step is to schedule a technical validation session next Friday.', confidence: 0.96 }]),
+      IDS.RAW_MODEL_NOTE,
+      IDS.ACTIVITY_MODEL_NOTE,
+      JSON.stringify(['sample', 'next-step', 'memory', 'first-run-proof']),
+    ],
+  );
+  await db.query(
+    `INSERT INTO context_entries (
+       id, tenant_id, subject_type, subject_id, context_type, authored_by, title, body,
+       confidence, memory_status, evidence, source, source_ref, source_activity_id, tags, valid_until
+     )
+     VALUES
+       ($1, $2, 'account', $3, 'next_step', $4, 'Send trust packet to unblock pilot approval',
+        'The next agreed step is to send the trust packet to Northstar Labs by Friday to help unblock the security review.',
+        0.9, 'signal', $5, 'sample_data', $6, $7, $8, now() + interval '30 days'),
+       ($9, $2, 'account', $3, 'deal_risk', $4, 'Security review required before rollout expansion',
+        'The customer requires a security review before proceeding with expansion of the rollout.',
+        0.9, 'signal', $10, 'sample_data', $11, $12, $13, now() + interval '30 days')
+     ON CONFLICT (id) DO UPDATE SET
+       title = EXCLUDED.title,
+       body = EXCLUDED.body,
+       confidence = EXCLUDED.confidence,
+       memory_status = EXCLUDED.memory_status,
+       evidence = EXCLUDED.evidence,
+       source = EXCLUDED.source,
+       source_ref = EXCLUDED.source_ref,
+       source_activity_id = EXCLUDED.source_activity_id,
+       tags = EXCLUDED.tags,
+       valid_until = EXCLUDED.valid_until,
+       is_current = true,
+       updated_at = now()`,
+    [
+      IDS.SIGNAL_TRUST_PACKET,
+      tenantId,
+      IDS.ACCOUNT,
+      IDS.ACTOR_AGENT,
+      JSON.stringify([{ ...ingestedNoteEvidence, snippet: 'She can sponsor the evaluation if we send the trust packet by Friday.', confidence: 0.9 }]),
+      IDS.RAW_INGESTED_NOTE,
+      IDS.ACTIVITY_INGESTED_NOTE,
+      JSON.stringify(['sample', 'next-step', 'signal', 'needs-review']),
+      IDS.SIGNAL_ROLLOUT_SECURITY,
+      JSON.stringify([{ ...modelNoteEvidence, snippet: 'The team wants a security review before expanding the rollout.', confidence: 0.9 }]),
+      IDS.RAW_MODEL_NOTE,
+      IDS.ACTIVITY_MODEL_NOTE,
+      JSON.stringify(['sample', 'security', 'signal', 'needs-review']),
+    ],
+  );
+  await db.query(
     `INSERT INTO signal_groups (
        id, tenant_id, subject_type, subject_id, context_type, claim_key, title,
        normalized_claim, status, aggregate_confidence, support_count,
@@ -557,7 +843,7 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
      VALUES ($1, $2, 'opportunity', $3, 'deal_risk', 'security-review-may-block-pilot-approval',
        'Security review may block pilot approval',
        'Security and data residency may be the main blocker before Northstar approves a pilot.',
-       'blocked', 0.78, 1, 1, 0, 1, $4,
+       'blocked', 0.84, 2, 2, 0, 2, $4,
        'Sensitive deal risk needs corroboration or approval before becoming Memory.',
        $5
      )
@@ -618,13 +904,48 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
     ],
   );
   await db.query(
+    `INSERT INTO signal_groups (
+       id, tenant_id, subject_type, subject_id, context_type, claim_key, title,
+       normalized_claim, status, aggregate_confidence, support_count,
+       independent_source_count, conflict_count, evidence_count, latest_signal_id,
+       metadata
+     )
+     VALUES ($1, $2, 'account', $3, 'next_step', 'send-trust-packet-to-unblock-pilot-approval',
+       'Send trust packet to unblock pilot approval',
+       'Northstar needs the trust packet by Friday to unblock the security review.',
+       'ready', 0.9, 1, 1, 0, 1, $4,
+       $5
+     )
+     ON CONFLICT (tenant_id, subject_type, subject_id, context_type, claim_key) DO UPDATE SET
+       title = EXCLUDED.title,
+       normalized_claim = EXCLUDED.normalized_claim,
+       status = EXCLUDED.status,
+       aggregate_confidence = EXCLUDED.aggregate_confidence,
+       support_count = EXCLUDED.support_count,
+       independent_source_count = EXCLUDED.independent_source_count,
+       conflict_count = EXCLUDED.conflict_count,
+       evidence_count = EXCLUDED.evidence_count,
+       latest_signal_id = EXCLUDED.latest_signal_id,
+       metadata = EXCLUDED.metadata,
+       updated_at = now()`,
+    [
+      IDS.SIGNAL_GROUP_TRUST_PACKET,
+      tenantId,
+      IDS.ACCOUNT,
+      IDS.SIGNAL_TRUST_PACKET,
+      JSON.stringify({ sample: true, first_run_proof: true, threshold: 0.85 }),
+    ],
+  );
+  await db.query(
     `INSERT INTO signal_group_members (
        id, tenant_id, signal_group_id, context_entry_id, relation,
        similarity_score, evidence_weight, source_key
      )
      VALUES
        ($1, $2, $3, $4, 'supports', 1, 1, $5),
-       ($6, $2, $7, $8, 'supports', 1, 1, $5)
+       ($6, $2, $7, $8, 'supports', 1, 1, $5),
+       ($9, $2, $10, $11, 'supports', 1, 1, $12),
+       ($13, $2, $3, $14, 'supports', 0.82, 0.7, $12)
      ON CONFLICT (tenant_id, signal_group_id, context_entry_id) DO UPDATE SET
        relation = EXCLUDED.relation,
        similarity_score = EXCLUDED.similarity_score,
@@ -639,6 +960,12 @@ export async function seedSampleData(db: DbPool, tenantId: string) {
       IDS.SIGNAL_GROUP_MEMBER_BUYER,
       IDS.SIGNAL_GROUP_BUYER,
       IDS.SIGNAL_BUYER,
+      IDS.SIGNAL_GROUP_MEMBER_TRUST_PACKET,
+      IDS.SIGNAL_GROUP_TRUST_PACKET,
+      IDS.SIGNAL_TRUST_PACKET,
+      `raw:${IDS.RAW_INGESTED_NOTE}:maya`,
+      IDS.SIGNAL_GROUP_MEMBER_ROLLOUT_SECURITY,
+      IDS.SIGNAL_ROLLOUT_SECURITY,
     ],
   );
   await db.query(

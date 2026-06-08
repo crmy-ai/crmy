@@ -64,9 +64,9 @@ async function findContactByEmail(
   }
   const result = await db.query(
     `SELECT c.id, c.account_id, a.name AS account_name, c.owner_id
-     FROM contacts c
-     LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
-     WHERE c.tenant_id = $1 AND lower(c.email) = $2 AND c.merged_into IS NULL
+	     FROM contacts c
+	     LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
+	     WHERE c.tenant_id = $1 AND lower(c.email) = $2 AND c.merged_into IS NULL AND c.archived_at IS NULL
        ${ownerClause}
      LIMIT 1`,
     params,
@@ -90,10 +90,11 @@ async function findAccountByDomain(
   }
   const result = await db.query(
     `SELECT id, name, owner_id
-     FROM accounts
-     WHERE tenant_id = $1
-       AND merged_into IS NULL
-       AND lower(domain) = $2
+	     FROM accounts
+	     WHERE tenant_id = $1
+	       AND merged_into IS NULL
+	       AND archived_at IS NULL
+	       AND lower(domain) = $2
        ${ownerClause}
      LIMIT 1`,
     params,

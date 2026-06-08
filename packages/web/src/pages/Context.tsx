@@ -47,6 +47,53 @@ function HeaderViewToggle({
   );
 }
 
+function ContextProofStrip({
+  observationTotal,
+  signalGroupTotal,
+  contextTotal,
+}: {
+  observationTotal: number;
+  signalGroupTotal: number;
+  contextTotal: number;
+}) {
+  const steps = [
+    { label: 'Raw Context', value: observationTotal, href: '/context?tab=observations', Icon: FileText, className: 'bg-[#0ea5e9]/15 text-[#0ea5e9]' },
+    { label: 'Signals', value: signalGroupTotal, href: '/context?tab=signals', Icon: Sparkles, className: 'bg-violet-500/15 text-violet-500' },
+    { label: 'Memory', value: contextTotal, href: '/context?tab=browser', Icon: Library, className: 'bg-emerald-500/15 text-emerald-500' },
+    { label: 'Action Context', value: '1 call', href: '/agent', Icon: Bot, className: 'bg-[#6366f1]/15 text-[#6366f1]' },
+  ];
+
+  return (
+    <div className="border-b border-border px-4 py-3 md:px-6">
+      <div className="flex flex-col gap-3 rounded-xl border border-border bg-card px-3 py-3 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">Context engine path</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Raw source material becomes Signals, confirmed Memory, and agent-ready action context with evidence and review boundaries.
+          </p>
+        </div>
+        <div className="flex min-w-0 gap-1 overflow-x-auto md:flex-shrink-0">
+          {steps.map((step, index) => (
+            <div key={step.label} className="flex items-center gap-1">
+              <Link
+                to={step.href}
+                className="inline-flex h-8 min-w-max items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-xs font-semibold text-foreground transition-colors hover:border-primary/30 hover:bg-muted"
+              >
+                <span className={`flex h-5 w-5 items-center justify-center rounded-md ${step.className}`}>
+                  <step.Icon className="h-3 w-3" />
+                </span>
+                {step.label}
+                <span className="font-mono text-muted-foreground">{typeof step.value === 'number' ? step.value.toLocaleString() : step.value}</span>
+              </Link>
+              {index < steps.length - 1 && <ArrowRight className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/40" />}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SourcesTab() {
   const { data: mailboxData } = useMailboxConnections() as any;
   const { data: calendarData } = useCalendarConnections() as any;
@@ -187,7 +234,7 @@ export default function ContextPage() {
     ? (normalizedTab as ContextTab)
     : 'observations';
   const { data: dbInfo } = useDbConfig() as any;
-  const { data: contextData } = useContextEntries({ limit: 1 }) as any;
+  const { data: contextData } = useContextEntries({ memory_status: 'active', limit: 1 }) as any;
   const { data: signalGroupData } = useSignalGroups({ attention_only: true, limit: 1 }) as any;
   const { data: activitiesData } = useActivities({ limit: 1 }) as any;
   const semanticRetrievalReady = Boolean(dbInfo?.ready ?? dbInfo?.pgvector_enabled);
@@ -288,6 +335,14 @@ export default function ContextPage() {
           </button>
         </div>
       </div>
+
+      {!['sources', 'graph'].includes(tab) && (
+        <ContextProofStrip
+          observationTotal={observationTotal}
+          signalGroupTotal={signalGroupTotal}
+          contextTotal={contextTotal}
+        />
+      )}
 
       {tab === 'observations'
         ? (

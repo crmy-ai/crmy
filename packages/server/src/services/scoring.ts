@@ -103,7 +103,7 @@ export async function computeLeadScore(
 
   // 4. Lifecycle stage (0–15)
   const contactResult = await db.query(
-    'SELECT lifecycle_stage FROM contacts WHERE id = $1 AND tenant_id = $2',
+    'SELECT lifecycle_stage FROM contacts WHERE id = $1 AND tenant_id = $2 AND archived_at IS NULL',
     [contactId, tenantId],
   );
   const stage = contactResult.rows[0]?.lifecycle_stage ?? 'lead';
@@ -156,7 +156,7 @@ export async function computeDealHealthScore(
   opportunityId: UUID,
 ): Promise<{ score: number; breakdown: DealScoreBreakdown; risk_factors: string[] }> {
   const oppResult = await db.query(
-    'SELECT stage, close_date, account_id FROM opportunities WHERE id = $1 AND tenant_id = $2',
+    'SELECT stage, close_date, account_id FROM opportunities WHERE id = $1 AND tenant_id = $2 AND archived_at IS NULL',
     [opportunityId, tenantId],
   );
   if (oppResult.rows.length === 0) return { score: 0, breakdown: { stage_progression: 0, activity_recency: 0, context_completeness: 0, close_date_proximity: 0, risk_penalty: 0, total: 0 }, risk_factors: [] };

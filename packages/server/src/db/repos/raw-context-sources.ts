@@ -352,10 +352,10 @@ export async function listRawContextSources(
     } else {
       conditions.push(`(
         (r.subject_id IS NULL AND ${actorIds.length > 0 ? `r.actor_id = ANY($${idx + 1}::uuid[])` : 'FALSE'})
-        OR EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = r.tenant_id AND r.subject_type = 'account' AND a.id = r.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM contacts c WHERE c.tenant_id = r.tenant_id AND r.subject_type = 'contact' AND c.id = r.subject_id AND c.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = r.tenant_id AND r.subject_type = 'opportunity' AND o.id = r.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = r.tenant_id AND r.subject_type = 'use_case' AND uc.id = r.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
+	        OR EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = r.tenant_id AND r.subject_type = 'account' AND a.id = r.subject_id AND a.owner_id = ANY($${idx}::uuid[]) AND a.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM contacts c WHERE c.tenant_id = r.tenant_id AND r.subject_type = 'contact' AND c.id = r.subject_id AND c.owner_id = ANY($${idx}::uuid[]) AND c.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = r.tenant_id AND r.subject_type = 'opportunity' AND o.id = r.subject_id AND o.owner_id = ANY($${idx}::uuid[]) AND o.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = r.tenant_id AND r.subject_type = 'use_case' AND uc.id = r.subject_id AND uc.owner_id = ANY($${idx}::uuid[]) AND uc.archived_at IS NULL)
       )`);
       params.push(filters.owner_ids);
       if (actorIds.length > 0) params.push(actorIds);

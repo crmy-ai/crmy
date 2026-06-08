@@ -27,8 +27,10 @@
     "@crmy/shared": "*",
     "@modelcontextprotocol/sdk": "^1.27.0",
     "@sendgrid/mail": "^8.1.6",
+    "cors": "^2.8.6",
     "express": "^4.21.0",
     "form-data": "^4.0.5",
+    "helmet": "^8.2.0",
     "jose": "^5.9.0",
     "mailgun.js": "^12.7.1",
     "mammoth": "^1.12.0",
@@ -41,6 +43,7 @@
     "zod": "^3.23.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
     "@types/express": "^5.0.0",
     "@types/nodemailer": "^6.4.0",
     "@types/pg": "^8.11.0",

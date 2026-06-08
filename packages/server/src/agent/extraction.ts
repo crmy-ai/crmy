@@ -512,25 +512,25 @@ async function loadSubjectSummary(
 ): Promise<ExtractionPacketRecordSummary | null> {
   const queries: Record<string, string> = {
     contact: `
-      SELECT c.*, a.name AS account_name, a.domain AS account_domain
-      FROM contacts c
-      LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
-      WHERE c.tenant_id = $1 AND c.id = $2
-    `,
-    account: `SELECT * FROM accounts WHERE tenant_id = $1 AND id = $2`,
+	      SELECT c.*, a.name AS account_name, a.domain AS account_domain
+	      FROM contacts c
+	      LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
+	      WHERE c.tenant_id = $1 AND c.id = $2 AND c.archived_at IS NULL
+	    `,
+	    account: `SELECT * FROM accounts WHERE tenant_id = $1 AND id = $2 AND archived_at IS NULL`,
     opportunity: `
       SELECT o.*, a.name AS account_name, c.first_name || ' ' || c.last_name AS contact_name, c.email AS contact_email
       FROM opportunities o
       LEFT JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
       LEFT JOIN contacts c ON c.id = o.contact_id AND c.tenant_id = o.tenant_id
-      WHERE o.tenant_id = $1 AND o.id = $2
+	      WHERE o.tenant_id = $1 AND o.id = $2 AND o.archived_at IS NULL
     `,
     use_case: `
       SELECT uc.*, a.name AS account_name, o.name AS opportunity_name
       FROM use_cases uc
       LEFT JOIN accounts a ON a.id = uc.account_id AND a.tenant_id = uc.tenant_id
       LEFT JOIN opportunities o ON o.id = uc.opportunity_id AND o.tenant_id = uc.tenant_id
-      WHERE uc.tenant_id = $1 AND uc.id = $2
+	      WHERE uc.tenant_id = $1 AND uc.id = $2 AND uc.archived_at IS NULL
     `,
   };
   const sql = queries[subjectType];
@@ -553,9 +553,9 @@ async function loadRelatedRecords(
 
   if (subjectType === 'contact') {
     const account = await db.query(
-      `SELECT a.* FROM accounts a
-       JOIN contacts c ON c.account_id = a.id AND c.tenant_id = a.tenant_id
-       WHERE c.tenant_id = $1 AND c.id = $2`,
+	      `SELECT a.* FROM accounts a
+	       JOIN contacts c ON c.account_id = a.id AND c.tenant_id = a.tenant_id
+	       WHERE c.tenant_id = $1 AND c.id = $2 AND c.archived_at IS NULL AND a.archived_at IS NULL`,
       [tenantId, subjectId],
     );
     pushRows('account', account.rows as Record<string, unknown>[]);
@@ -563,9 +563,10 @@ async function loadRelatedRecords(
       `SELECT o.*, a.name AS account_name
        FROM opportunities o
        LEFT JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
-       WHERE o.tenant_id = $1 AND (o.contact_id = $2 OR o.account_id IN (
-         SELECT account_id FROM contacts WHERE tenant_id = $1 AND id = $2 AND account_id IS NOT NULL
-       ))
+	       WHERE o.tenant_id = $1 AND (o.contact_id = $2 OR o.account_id IN (
+	         SELECT account_id FROM contacts WHERE tenant_id = $1 AND id = $2 AND account_id IS NOT NULL AND archived_at IS NULL
+	       ))
+	       AND o.archived_at IS NULL
        ORDER BY o.updated_at DESC
        LIMIT 8`,
       [tenantId, subjectId],
@@ -573,52 +574,52 @@ async function loadRelatedRecords(
     pushRows('opportunity', opps.rows as Record<string, unknown>[]);
   } else if (subjectType === 'account') {
     const contacts = await db.query(
-      `SELECT * FROM contacts WHERE tenant_id = $1 AND account_id = $2 ORDER BY updated_at DESC LIMIT 8`,
+	      `SELECT * FROM contacts WHERE tenant_id = $1 AND account_id = $2 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 8`,
       [tenantId, subjectId],
     );
     pushRows('contact', contacts.rows as Record<string, unknown>[]);
     const opps = await db.query(
-      `SELECT * FROM opportunities WHERE tenant_id = $1 AND account_id = $2 ORDER BY updated_at DESC LIMIT 8`,
+	      `SELECT * FROM opportunities WHERE tenant_id = $1 AND account_id = $2 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 8`,
       [tenantId, subjectId],
     );
     pushRows('opportunity', opps.rows as Record<string, unknown>[]);
     const useCases = await db.query(
-      `SELECT * FROM use_cases WHERE tenant_id = $1 AND account_id = $2 ORDER BY updated_at DESC LIMIT 8`,
+	      `SELECT * FROM use_cases WHERE tenant_id = $1 AND account_id = $2 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 8`,
       [tenantId, subjectId],
     );
     pushRows('use_case', useCases.rows as Record<string, unknown>[]);
   } else if (subjectType === 'opportunity') {
     const rows = await db.query(
       `SELECT 'account' AS relation_type, to_jsonb(a.*) AS record
-       FROM opportunities o
-       JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
-       WHERE o.tenant_id = $1 AND o.id = $2
-       UNION ALL
-       SELECT 'contact' AS relation_type, to_jsonb(c.*) AS record
-       FROM opportunities o
-       JOIN contacts c ON c.id = o.contact_id AND c.tenant_id = o.tenant_id
-       WHERE o.tenant_id = $1 AND o.id = $2`,
+	       FROM opportunities o
+	       JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
+	       WHERE o.tenant_id = $1 AND o.id = $2 AND o.archived_at IS NULL AND a.archived_at IS NULL
+	       UNION ALL
+	       SELECT 'contact' AS relation_type, to_jsonb(c.*) AS record
+	       FROM opportunities o
+	       JOIN contacts c ON c.id = o.contact_id AND c.tenant_id = o.tenant_id
+	       WHERE o.tenant_id = $1 AND o.id = $2 AND o.archived_at IS NULL AND c.archived_at IS NULL`,
       [tenantId, subjectId],
     );
     for (const row of rows.rows as { relation_type: string; record: Record<string, unknown> }[]) {
       related.push(recordSummary(row.relation_type, row.record));
     }
     const useCases = await db.query(
-      `SELECT * FROM use_cases WHERE tenant_id = $1 AND opportunity_id = $2 ORDER BY updated_at DESC LIMIT 8`,
+	      `SELECT * FROM use_cases WHERE tenant_id = $1 AND opportunity_id = $2 AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 8`,
       [tenantId, subjectId],
     );
     pushRows('use_case', useCases.rows as Record<string, unknown>[]);
   } else if (subjectType === 'use_case') {
     const rows = await db.query(
       `SELECT 'account' AS relation_type, to_jsonb(a.*) AS record
-       FROM use_cases uc
-       JOIN accounts a ON a.id = uc.account_id AND a.tenant_id = uc.tenant_id
-       WHERE uc.tenant_id = $1 AND uc.id = $2
-       UNION ALL
-       SELECT 'opportunity' AS relation_type, to_jsonb(o.*) AS record
-       FROM use_cases uc
-       JOIN opportunities o ON o.id = uc.opportunity_id AND o.tenant_id = uc.tenant_id
-       WHERE uc.tenant_id = $1 AND uc.id = $2`,
+	       FROM use_cases uc
+	       JOIN accounts a ON a.id = uc.account_id AND a.tenant_id = uc.tenant_id
+	       WHERE uc.tenant_id = $1 AND uc.id = $2 AND uc.archived_at IS NULL AND a.archived_at IS NULL
+	       UNION ALL
+	       SELECT 'opportunity' AS relation_type, to_jsonb(o.*) AS record
+	       FROM use_cases uc
+	       JOIN opportunities o ON o.id = uc.opportunity_id AND o.tenant_id = uc.tenant_id
+	       WHERE uc.tenant_id = $1 AND uc.id = $2 AND uc.archived_at IS NULL AND o.archived_at IS NULL`,
       [tenantId, subjectId],
     );
     for (const row of rows.rows as { relation_type: string; record: Record<string, unknown> }[]) {

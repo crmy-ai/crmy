@@ -58,6 +58,8 @@ That temporary working set is Active Context. It is not the same thing as persis
 
 `action_context_get` is the action-aware retrieval boundary. It assembles the same briefing context, adds readiness, policy, source-authority, scope, warnings, and expected-proof checks, and records a compact `action_context.retrieved` event. It can assess proposed actions such as outreach, assignment creation, Memory promotion, record update, or external writeback, but it does not perform those actions.
 
+The same Action Context model applies whether the work starts in the UI, Workspace Agent, MCP/CLI, an automation workflow, or a sequence send. A sequence email, for example, can carry the same readiness summary and proof metadata as a manually drafted customer email, and it can route to Handoff when policy or risk requires review.
+
 Action Context is first an intelligence packet, not an approval step. Most agent work should stay low-friction:
 
 - `inform`: provide the right Memory, Signals, source ownership, and proof hints without blocking the agent;
@@ -92,6 +94,7 @@ The current 0.8.x engine includes:
 - proposed-record Handoffs when context implies a new contact, account, opportunity, or use case;
 - typed Memory retrieval through `briefing_get`;
 - Action Context retrieval through `action_context_get`;
+- Action Context receipts on email drafts, record create/edit previews, assignments, workflow-triggered actions, sequence email sends, and systems-of-record writeback requests;
 - Context Lineage from source to Signal, Memory, Active Context retrieval, Handoff, writeback, and audit;
 - optional pgvector-backed candidate retrieval when embeddings are configured;
 - scoped REST, MCP, CLI, and Workspace Agent tool access.

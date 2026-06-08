@@ -104,6 +104,9 @@ const SPECS: Record<RecoverableQueue, RecoverySpec> = {
       retry: `
         UPDATE agent_turns
         SET status = 'queued',
+            worker_id = NULL,
+            lease_expires_at = NULL,
+            heartbeat_at = NULL,
             started_at = NULL,
             completed_at = NULL,
             cancelled_at = NULL,
@@ -117,6 +120,7 @@ const SPECS: Record<RecoverableQueue, RecoverySpec> = {
         UPDATE agent_turns
         SET status = 'failed',
             completed_at = COALESCE(completed_at, now()),
+            lease_expires_at = NULL,
             error_message = COALESCE($3, error_message),
             updated_at = now()
         WHERE tenant_id = $1 AND id = $2

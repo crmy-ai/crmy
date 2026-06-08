@@ -15,7 +15,7 @@
  */
 
 import type { DbPool } from '../db/pool.js';
-import type { UUID } from '@crmy/shared';
+import type { ActionContext, ActorContext, UUID } from '@crmy/shared';
 import { emitEvent } from '../events/emitter.js';
 import * as seqRepo from '../db/repos/email-sequences.js';
 import * as emailRepo from '../db/repos/emails.js';
@@ -26,6 +26,7 @@ import { deliverEmail } from '../email/delivery.js';
 import { interpolate, buildVariableContext } from '../workflows/variables.js';
 import { callLLM, requireTenantLLMConfig } from '../agent/providers/llm.js';
 import { triggerExtraction } from '../agent/extraction.js';
+import { getActionContext } from './action-context.js';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -96,6 +97,89 @@ interface AiActionStep {
 }
 
 type SequenceStep = EmailStep | NotificationStep | TaskStep | WebhookStep | WaitStep | BranchStep | AiActionStep;
+
+function sequenceActionActor(tenantId: UUID): ActorContext {
+  return {
+    tenant_id: tenantId,
+    actor_id: 'sequence',
+    actor_type: 'system',
+    role: 'owner',
+    scopes: ['read', 'write', 'context:read', 'activities:write'],
+  };
+}
+
+function summarizeSequenceActionContext(actionContext: ActionContext) {
+  return {
+    subject_type: actionContext.subject_type,
+    subject_id: actionContext.subject_id,
+    operating_mode: actionContext.operating_mode,
+    readiness_status: actionContext.readiness.status,
+    risk_level: actionContext.readiness.risk_level,
+    review_required: actionContext.readiness.review_required,
+    guidance_summary: actionContext.guidance.summary,
+    warning_reasons: actionContext.guidance.warning_reasons,
+    review_reasons: actionContext.guidance.review_reasons,
+    proof: actionContext.proof,
+  };
+}
+
+async function getSequenceEmailActionContext(
+  db: DbPool,
+  tenantId: UUID,
+  enrollment: { contact_id: UUID; id: UUID; sequence_id: UUID },
+  sequence: { name: string },
+  stepIndex: number,
+  subject: string,
+  toEmail: string,
+): Promise<Record<string, unknown> | undefined> {
+  const actionContext = await getActionContext(db, sequenceActionActor(tenantId), {
+    subject_type: 'contact',
+    subject_id: enrollment.contact_id,
+    context_radius: 'adjacent',
+    proposed_action: {
+      action_type: 'customer_outreach',
+      object_type: 'contact',
+      payload: {
+        to_address: toEmail,
+        subject,
+        sequence_name: sequence.name,
+        enrollment_id: enrollment.id,
+        sequence_id: enrollment.sequence_id,
+        step_index: stepIndex,
+      },
+    },
+  }).catch(() => null);
+  return actionContext ? summarizeSequenceActionContext(actionContext) : undefined;
+}
+
+async function getSequenceStepActionContext(
+  db: DbPool,
+  tenantId: UUID,
+  enrollment: { contact_id: UUID; id: UUID; sequence_id: UUID },
+  sequence: { name: string },
+  stepIndex: number,
+  stepType: string,
+  payload: Record<string, unknown> = {},
+): Promise<Record<string, unknown> | undefined> {
+  const actionContext = await getActionContext(db, sequenceActionActor(tenantId), {
+    subject_type: 'contact',
+    subject_id: enrollment.contact_id,
+    context_radius: 'adjacent',
+    proposed_action: {
+      action_type: stepType === 'task' ? 'assignment_create' : 'sequence_step',
+      object_type: 'contact',
+      payload: {
+        sequence_name: sequence.name,
+        enrollment_id: enrollment.id,
+        sequence_id: enrollment.sequence_id,
+        step_index: stepIndex,
+        step_type: stepType,
+        ...payload,
+      },
+    },
+  }).catch(() => null);
+  return actionContext ? summarizeSequenceActionContext(actionContext) : undefined;
+}
 
 // ── Main pump ──────────────────────────────────────────────────────────────────
 
@@ -198,13 +282,13 @@ async function executeStep(
         await executeEmailStep(db, enrollment, sequence, step as EmailStep, stepIndex, varContext, contact);
         break;
       case 'notification':
-        await executeNotificationStep(db, enrollment, step as NotificationStep, stepIndex, varContext);
+        await executeNotificationStep(db, enrollment, sequence, step as NotificationStep, stepIndex, varContext);
         break;
       case 'task':
         await executeTaskStep(db, enrollment, sequence, step as TaskStep, stepIndex, varContext);
         break;
       case 'webhook':
-        await executeWebhookStep(db, enrollment, step as WebhookStep, stepIndex, varContext);
+        await executeWebhookStep(db, enrollment, sequence, step as WebhookStep, stepIndex, varContext);
         break;
       case 'wait':
         await executeWaitStep(db, enrollment, step as WaitStep, stepIndex);
@@ -368,8 +452,20 @@ async function executeEmailStep(
     return;
   }
 
+  const actionContextSummary = await getSequenceEmailActionContext(
+    db,
+    enrollment.tenant_id,
+    enrollment,
+    sequence,
+    stepIndex,
+    subject,
+    toEmail,
+  );
+  const effectiveRequireApproval = step.require_approval === true
+    || (actionContextSummary?.review_required === true);
+
   // HITL approval gate
-  if (step.require_approval) {
+  if (effectiveRequireApproval) {
     const { createHITLRequest } = await import('../db/repos/hitl.js');
     const hitl = await createHITLRequest(db, enrollment.tenant_id, {
       action_type: 'sequence.step.send',
@@ -380,6 +476,7 @@ async function executeEmailStep(
         to_email: toEmail,
         subject,
         body_text: bodyText,
+        action_context: actionContextSummary,
       },
       agent_id: 'system',
       priority: 'normal',
@@ -397,7 +494,7 @@ async function executeEmailStep(
       step_index: stepIndex,
       step_type: 'email',
       status: 'approval_pending',
-      metadata: { hitl_request_id: hitl.id },
+      metadata: { hitl_request_id: hitl.id, action_context: actionContextSummary },
     });
     return;
   }
@@ -411,6 +508,14 @@ async function executeEmailStep(
     body_text: bodyText,
     body_html: step.body_html ? interpolate(step.body_html, varContext) : undefined,
     status: 'draft',
+    generation_metadata: {
+      origin: 'sequence',
+      sequence_id: sequence.id,
+      enrollment_id: enrollment.id,
+      step_index: stepIndex,
+      ai_generated: step.ai_generate === true,
+      action_context: actionContextSummary,
+    },
   } as any);
 
   await deliverEmail(db, enrollment.tenant_id, email.id);
@@ -454,7 +559,7 @@ async function executeEmailStep(
     step_type: 'email',
     status: 'sent',
     email_id: email.id,
-    metadata: { to: toEmail, subject },
+    metadata: { to: toEmail, subject, action_context: actionContextSummary },
   });
 
   // Back-link step execution → activity
@@ -470,18 +575,29 @@ async function executeEmailStep(
     objectType: 'sequence_enrollment',
     objectId: enrollment.id,
     afterData: { step_index: stepIndex, step_type: 'email', email_id: email.id, activity_id: activity.id },
+    metadata: { origin: 'sequence', action_context: actionContextSummary },
   }).catch((err) => console.warn('[sequences] step_executed event failed:', { enrollmentId: enrollment.id, stepIndex, err }));
 }
 
 async function executeNotificationStep(
   db: DbPool,
   enrollment: any,
+  sequence: seqRepo.SequenceRow,
   step: NotificationStep,
   stepIndex: number,
   varContext: Record<string, unknown>,
 ): Promise<void> {
   const { sendMessage } = await import('../messaging/delivery.js');
   const message = interpolate(step.message, varContext);
+  const actionContextSummary = await getSequenceStepActionContext(
+    db,
+    enrollment.tenant_id,
+    enrollment,
+    sequence,
+    stepIndex,
+    'notification',
+    { channel_id: step.channel_id, message_preview: message.slice(0, 200) },
+  );
 
   if (!step.channel_id) {
     throw new Error('Notification step requires a channel_id');
@@ -491,6 +607,7 @@ async function executeNotificationStep(
     channel_id: step.channel_id,
     subject: `Sequence: ${message.slice(0, 80)}`,
     body: message,
+    metadata: { origin: 'sequence', action_context: actionContextSummary },
   });
 
   // Create Activity so this notification appears in the contact timeline
@@ -509,6 +626,7 @@ async function executeNotificationStep(
       enrollment_id: enrollment.id,
       step_index: stepIndex,
       channel_id: step.channel_id,
+      action_context: actionContextSummary,
     },
   });
 
@@ -518,13 +636,23 @@ async function executeNotificationStep(
     step_index: stepIndex,
     step_type: 'notification',
     status: 'sent',
-    metadata: { message: message.slice(0, 200) },
+    metadata: { message: message.slice(0, 200), action_context: actionContextSummary },
   });
 
   await db.query(
     `UPDATE sequence_step_executions SET activity_id = $1 WHERE id = $2`,
     [activity.id, execution.id],
   );
+
+  emitEvent(db, {
+    tenantId: enrollment.tenant_id,
+    eventType: 'sequence.step_executed',
+    actorType: 'system',
+    objectType: 'sequence_enrollment',
+    objectId: enrollment.id,
+    afterData: { step_index: stepIndex, step_type: 'notification', activity_id: activity.id },
+    metadata: { origin: 'sequence', action_context: actionContextSummary },
+  }).catch((err) => console.warn('[sequences] notification step_executed event failed:', { enrollmentId: enrollment.id, stepIndex, err }));
 }
 
 async function executeTaskStep(
@@ -537,6 +665,15 @@ async function executeTaskStep(
 ): Promise<void> {
   const title = interpolate(step.title, varContext);
   const description = step.description ? interpolate(step.description, varContext) : undefined;
+  const actionContextSummary = await getSequenceStepActionContext(
+    db,
+    enrollment.tenant_id,
+    enrollment,
+    sequence,
+    stepIndex,
+    'task',
+    { title, priority: step.priority ?? 'normal', assign_to: step.assign_to },
+  );
 
   // Resolve assignee — 'contact_owner' means we look up the contact's assigned owner
   let assignedTo: UUID | undefined;
@@ -548,7 +685,7 @@ async function executeTaskStep(
   const ownerActor = (enrollment as any).owner_actor_id as UUID | undefined;
   const assignedByActor = enrolledByActor ?? ownerActor ?? ('system' as unknown as UUID);
 
-  await assignmentRepo.createAssignment(db, enrollment.tenant_id, {
+  const assignment = await assignmentRepo.createAssignment(db, enrollment.tenant_id, {
     title,
     description,
     assignment_type: 'task',
@@ -558,7 +695,7 @@ async function executeTaskStep(
     subject_id: enrollment.contact_id,
     priority: step.priority ?? 'normal',
     context: `Sequence: ${sequence.name} — step ${stepIndex + 1}`,
-    metadata: { sequence_id: enrollment.sequence_id, enrollment_id: enrollment.id, step_index: stepIndex },
+    metadata: { sequence_id: enrollment.sequence_id, enrollment_id: enrollment.id, step_index: stepIndex, action_context: actionContextSummary },
   });
 
   // Create Activity so the task appears in the contact timeline
@@ -579,6 +716,8 @@ async function executeTaskStep(
       enrollment_id: enrollment.id,
       step_index: stepIndex,
       assign_to: step.assign_to,
+      assignment_id: assignment.id,
+      action_context: actionContextSummary,
     },
   });
 
@@ -588,18 +727,29 @@ async function executeTaskStep(
     step_index: stepIndex,
     step_type: 'task',
     status: 'sent',
-    metadata: { title },
+    metadata: { title, assignment_id: assignment.id, action_context: actionContextSummary },
   });
 
   await db.query(
     `UPDATE sequence_step_executions SET activity_id = $1 WHERE id = $2`,
     [activity.id, execution.id],
   );
+
+  emitEvent(db, {
+    tenantId: enrollment.tenant_id,
+    eventType: 'sequence.step_executed',
+    actorType: 'system',
+    objectType: 'sequence_enrollment',
+    objectId: enrollment.id,
+    afterData: { step_index: stepIndex, step_type: 'task', assignment_id: assignment.id, activity_id: activity.id },
+    metadata: { origin: 'sequence', action_context: actionContextSummary },
+  }).catch((err) => console.warn('[sequences] task step_executed event failed:', { enrollmentId: enrollment.id, stepIndex, err }));
 }
 
 async function executeWebhookStep(
   db: DbPool,
   enrollment: any,
+  sequence: seqRepo.SequenceRow,
   step: WebhookStep,
   stepIndex: number,
   varContext: Record<string, unknown>,
@@ -611,6 +761,15 @@ async function executeWebhookStep(
     : JSON.stringify({ enrollment_id: enrollment.id, contact_id: enrollment.contact_id, step_index: stepIndex });
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...step.headers };
+  const actionContextSummary = await getSequenceStepActionContext(
+    db,
+    enrollment.tenant_id,
+    enrollment,
+    sequence,
+    stepIndex,
+    'webhook',
+    { method, url },
+  );
 
   const res = await Promise.race([
     fetch(url, { method, headers, body: method !== 'GET' ? body : undefined }),
@@ -636,6 +795,7 @@ async function executeWebhookStep(
       step_index: stepIndex,
       url,
       http_status: res.status,
+      action_context: actionContextSummary,
     },
   });
 
@@ -645,13 +805,23 @@ async function executeWebhookStep(
     step_index: stepIndex,
     step_type: 'webhook',
     status: 'sent',
-    metadata: { url, status: res.status },
+    metadata: { url, status: res.status, action_context: actionContextSummary },
   });
 
   await db.query(
     `UPDATE sequence_step_executions SET activity_id = $1 WHERE id = $2`,
     [activity.id, execution.id],
   );
+
+  emitEvent(db, {
+    tenantId: enrollment.tenant_id,
+    eventType: 'sequence.step_executed',
+    actorType: 'system',
+    objectType: 'sequence_enrollment',
+    objectId: enrollment.id,
+    afterData: { step_index: stepIndex, step_type: 'webhook', activity_id: activity.id, http_status: res.status },
+    metadata: { origin: 'sequence', action_context: actionContextSummary },
+  }).catch((err) => console.warn('[sequences] webhook step_executed event failed:', { enrollmentId: enrollment.id, stepIndex, err }));
 }
 
 async function executeWaitStep(
@@ -816,6 +986,15 @@ async function executeAiActionStep(
   contact: any,
 ): Promise<void> {
   const prompt = interpolate(step.prompt, varContext);
+  const actionContextSummary = await getSequenceStepActionContext(
+    db,
+    enrollment.tenant_id,
+    enrollment,
+    sequence,
+    stepIndex,
+    'ai_action',
+    { prompt: prompt.slice(0, 500), tool_names: step.tool_names ?? [] },
+  );
 
   // Build a concise context summary for the LLM
   const contextSummary = JSON.stringify({
@@ -828,6 +1007,7 @@ async function executeAiActionStep(
     sequence: sequence.name,
     step: stepIndex + 1,
     enrollment_variables: (enrollment as any).variables ?? {},
+    action_context: actionContextSummary,
   }, null, 2);
 
   await requireTenantLLMConfig(db, enrollment.tenant_id);
@@ -854,6 +1034,7 @@ async function executeAiActionStep(
       enrollment_id: enrollment.id,
       step_index: stepIndex,
       prompt: prompt.slice(0, 500),
+      action_context: actionContextSummary,
     },
   });
 
@@ -867,13 +1048,23 @@ async function executeAiActionStep(
     step_index: stepIndex,
     step_type: 'ai_action',
     status: 'sent',
-    metadata: { prompt: prompt.slice(0, 200), result: result.slice(0, 500) },
+    metadata: { prompt: prompt.slice(0, 200), result: result.slice(0, 500), action_context: actionContextSummary },
   });
 
   await db.query(
     `UPDATE sequence_step_executions SET activity_id = $1 WHERE id = $2`,
     [activity.id, execution.id],
   );
+
+  emitEvent(db, {
+    tenantId: enrollment.tenant_id,
+    eventType: 'sequence.step_executed',
+    actorType: 'system',
+    objectType: 'sequence_enrollment',
+    objectId: enrollment.id,
+    afterData: { step_index: stepIndex, step_type: 'ai_action', activity_id: activity.id },
+    metadata: { origin: 'sequence', action_context: actionContextSummary },
+  }).catch((err) => console.warn('[sequences] ai_action step_executed event failed:', { enrollmentId: enrollment.id, stepIndex, err }));
 }
 
 // ── AI content generation helper ───────────────────────────────────────────────
@@ -1060,6 +1251,9 @@ export async function resumeEnrollmentAfterHITL(
   const toEmail      = payload.to_email      as string | undefined;
   const subject      = payload.subject       as string | undefined;
   const bodyText     = payload.body_text     as string | undefined;
+  const actionContextSummary = payload.action_context && typeof payload.action_context === 'object' && !Array.isArray(payload.action_context)
+    ? payload.action_context as Record<string, unknown>
+    : undefined;
 
   if (!enrollmentId || stepIndex == null) {
     console.warn('[sequences] resumeEnrollmentAfterHITL: missing enrollment_id or step_index in payload', payload);
@@ -1093,6 +1287,13 @@ export async function resumeEnrollmentAfterHITL(
         subject,
         body_text: bodyText ?? '',
         status: 'draft',
+        generation_metadata: {
+          origin: 'sequence',
+          sequence_id: enrollment.sequence_id,
+          enrollment_id: enrollmentId,
+          step_index: stepIndex,
+          action_context: actionContextSummary,
+        },
       } as any);
 
       await deliverEmail(db, hitlRequest.tenant_id as UUID, email.id);
@@ -1102,14 +1303,50 @@ export async function resumeEnrollmentAfterHITL(
         [enrollmentId, enrollment.sequence_id, email.id],
       );
 
+      const activity = await activityRepo.createActivity(db, hitlRequest.tenant_id as UUID, {
+        type: 'outreach_email',
+        subject,
+        body: (bodyText ?? '').slice(0, 500),
+        direction: 'outbound',
+        status: 'completed',
+        subject_type: 'contact',
+        subject_id: enrollment.contact_id,
+        contact_id: enrollment.contact_id,
+        performed_by: enrollment.enrolled_by_actor_id ?? undefined,
+        source_agent: `sequence:${sequence.id}`,
+        occurred_at: new Date().toISOString(),
+        detail: {
+          sequence_id: sequence.id,
+          sequence_name: sequence.name,
+          enrollment_id: enrollmentId,
+          step_index: stepIndex,
+          email_id: email.id,
+          hitl_request_id: hitlRequest.id,
+          action_context: actionContextSummary,
+        },
+      });
+
+      triggerExtraction(db, hitlRequest.tenant_id as UUID, activity.id).catch((err) =>
+        console.warn('[sequences] context extraction failed after approved email step:', { enrollmentId, stepIndex, err }));
+
       // Update the step execution from approval_pending → sent
       await db.query(
         `UPDATE sequence_step_executions
-         SET status = 'sent', executed_at = now(), email_id = $1,
-             metadata = metadata || jsonb_build_object('approved_at', $2)
-         WHERE enrollment_id = $3 AND step_index = $4`,
-        [email.id, new Date().toISOString(), enrollmentId, stepIndex],
+         SET status = 'sent', executed_at = now(), email_id = $1, activity_id = $2,
+             metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('approved_at', $3, 'action_context', $4::jsonb)
+         WHERE enrollment_id = $5 AND step_index = $6`,
+        [email.id, activity.id, new Date().toISOString(), JSON.stringify(actionContextSummary ?? null), enrollmentId, stepIndex],
       );
+
+      emitEvent(db, {
+        tenantId: hitlRequest.tenant_id as UUID,
+        eventType: 'sequence.step_executed',
+        actorType: 'system',
+        objectType: 'sequence_enrollment',
+        objectId: enrollmentId,
+        afterData: { step_index: stepIndex, step_type: 'email', email_id: email.id, activity_id: activity.id, resumed_from_hitl: true },
+        metadata: { origin: 'sequence', action_context: actionContextSummary },
+      }).catch((err) => console.warn('[sequences] step_executed event failed after HITL resume:', { enrollmentId, stepIndex, err }));
 
       console.info('[sequences] HITL-approved email sent', { enrollmentId, stepIndex, toEmail });
     } catch (err) {
@@ -1128,7 +1365,7 @@ export async function resumeEnrollmentAfterHITL(
     await db.query(
       `UPDATE sequence_step_executions
        SET status = 'skipped', executed_at = now(),
-           metadata = metadata || jsonb_build_object('rejected_at', $1)
+           metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('rejected_at', $1)
        WHERE enrollment_id = $2 AND step_index = $3 AND status = 'approval_pending'`,
       [new Date().toISOString(), enrollmentId, stepIndex],
     );

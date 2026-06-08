@@ -166,6 +166,7 @@ async function streamTurnEvents(
   let closed = false;
   res.on('close', () => { closed = true; });
   let afterIndex = startAfterIndex;
+  let idleDelayMs = 750;
 
   while (!closed && !res.writableEnded) {
     const turn = await loadOwnedTurn(db, actor, sessionId, turnId);
@@ -178,10 +179,11 @@ async function streamTurnEvents(
       afterIndex = row.event_index;
       writeSse(res, row.payload);
     }
+    idleDelayMs = events.length > 0 ? 250 : Math.min(Math.round(idleDelayMs * 1.5), 5_000);
     if (['succeeded', 'failed', 'cancelled'].includes(turn.status) && events.length === 0) {
       break;
     }
-    await new Promise(resolve => setTimeout(resolve, 750));
+    await new Promise(resolve => setTimeout(resolve, idleDelayMs));
   }
 
   setImmediate(() => res.end());
@@ -1103,6 +1105,16 @@ export function agentRouter(db: DbPool): Router {
         const threshold = Math.min(0.98, Math.max(0.7, body.signal_auto_promote_threshold));
         update.signal_auto_promote_threshold = Number(threshold.toFixed(2));
       }
+      if (body.signal_source_quality && typeof body.signal_source_quality === 'object' && !Array.isArray(body.signal_source_quality)) {
+        const raw = body.signal_source_quality as Record<string, unknown>;
+        const current = existingConfig?.signal_source_quality ?? { high: 1.0, medium: 0.9, lower: 0.75, fallback: 0.85 };
+        const next: Record<string, number> = { ...current };
+        for (const key of ['high', 'medium', 'lower', 'fallback']) {
+          if (typeof raw[key] !== 'number') continue;
+          next[key] = Number(Math.min(1, Math.max(0.4, raw[key])).toFixed(2));
+        }
+        update.signal_source_quality = next;
+      }
 
       // Encrypt API key if a new one was provided (non-empty string)
       if (typeof body.api_key === 'string' && body.api_key.trim()) {
@@ -1624,6 +1636,16 @@ export function agentRouter(db: DbPool): Router {
         : message;
       if (!effectiveMessage?.trim()) {
         res.status(400).json({ error: 'message is required' });
+        return;
+      }
+      const config = await agentRepo.getConfig(db, actor.tenant_id);
+      if (!config?.enabled) {
+        res.status(400).json({ error: 'Agent is not enabled for this workspace' });
+        return;
+      }
+      const active = await agentRepo.getActiveTurnForSession(db, actor.tenant_id, session.id);
+      if (active) {
+        res.status(409).json({ error: 'An agent turn is already running for this session', active_turn: active });
         return;
       }
       const turn = await agentRepo.createTurn(db, actor.tenant_id, actor.actor_id, session.id, {

@@ -163,6 +163,9 @@ export async function runAgentSmoke(options: {
       });
 
       if (options.withModel) {
+        if (!options.json) {
+          info('Running model-backed Raw Context extraction. Local models can take 30-60 seconds...');
+        }
         const ingestResult = await runTool(client, 'context_ingest_auto', {
           source_label: 'Agent smoke model-backed extraction demo',
           source_occurred_at: '2026-01-15T17:00:00.000Z',

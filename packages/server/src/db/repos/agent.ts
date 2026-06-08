@@ -19,6 +19,7 @@ function normalizeConfig(row: AgentConfig | undefined): AgentConfig | null {
   return {
     ...row,
     llm_timeout_ms: row.llm_timeout_ms ?? 60_000,
+    signal_source_quality: row.signal_source_quality ?? { high: 1.0, medium: 0.9, lower: 0.75, fallback: 0.85 },
   };
 }
 
@@ -73,7 +74,8 @@ export async function listSessions(
      FROM agent_sessions s
      LEFT JOIN LATERAL (
        SELECT id, tenant_id, session_id, user_id, status, input_message, context_detail,
-              error_message, final_label, started_at, completed_at, cancelled_at,
+              error_message, final_label, worker_id, lease_expires_at, heartbeat_at, attempt_count,
+              started_at, completed_at, cancelled_at,
               created_at, updated_at
        FROM agent_turns
        WHERE session_id = s.id
@@ -101,7 +103,8 @@ export async function getSession(
      FROM agent_sessions s
      LEFT JOIN LATERAL (
        SELECT id, tenant_id, session_id, user_id, status, input_message, context_detail,
-              error_message, final_label, started_at, completed_at, cancelled_at,
+              error_message, final_label, worker_id, lease_expires_at, heartbeat_at, attempt_count,
+              started_at, completed_at, cancelled_at,
               created_at, updated_at
        FROM agent_turns
        WHERE session_id = s.id
@@ -256,27 +259,58 @@ export async function getActiveTurnForSession(db: DbPool, tenantId: string, sess
   return rows[0] ?? null;
 }
 
-export async function claimTurn(db: DbPool, tenantId: string, turnId: string): Promise<AgentTurn | null> {
+export async function claimTurn(
+  db: DbPool,
+  tenantId: string,
+  turnId: string,
+  workerId: string,
+  leaseMs: number,
+): Promise<AgentTurn | null> {
   const { rows } = await db.query(
     `UPDATE agent_turns
-     SET status = 'running', started_at = COALESCE(started_at, now()), updated_at = now()
+     SET status = 'running',
+         started_at = COALESCE(started_at, now()),
+         worker_id = $3,
+         lease_expires_at = now() + ($4::int || ' milliseconds')::interval,
+         heartbeat_at = now(),
+         attempt_count = attempt_count + 1,
+         updated_at = now()
      WHERE tenant_id = $1
        AND id = $2
-       AND status = 'queued'
+       AND (
+         status = 'queued'
+         OR (
+           status = 'running'
+           AND (
+             worker_id = $3
+             OR lease_expires_at IS NULL
+             OR lease_expires_at < now()
+           )
+         )
+       )
      RETURNING *`,
-    [tenantId, turnId],
+    [tenantId, turnId, workerId, leaseMs],
   );
   return rows[0] ?? null;
 }
 
-export async function claimPendingTurns(db: DbPool, limit = 5): Promise<AgentTurn[]> {
+export async function claimPendingTurns(db: DbPool, limit = 5, workerId = 'agent-worker', leaseMs = 120_000): Promise<AgentTurn[]> {
   const staleMinutes = Number(process.env.AGENT_TURN_STALE_MINUTES ?? 10);
   const { rows } = await db.query(
     `WITH claim AS (
        SELECT id
        FROM agent_turns
        WHERE status = 'queued'
-          OR (status = 'running' AND updated_at < now() - ($2::int || ' minutes')::interval)
+          OR (
+            status = 'running'
+            AND (
+              lease_expires_at < now()
+              OR (
+                lease_expires_at IS NULL
+                AND updated_at < now() - ($4::int || ' minutes')::interval
+              )
+            )
+          )
        ORDER BY created_at
        FOR UPDATE SKIP LOCKED
        LIMIT $1
@@ -284,27 +318,60 @@ export async function claimPendingTurns(db: DbPool, limit = 5): Promise<AgentTur
      UPDATE agent_turns t
      SET status = 'running',
          started_at = COALESCE(t.started_at, now()),
+         worker_id = $2,
+         lease_expires_at = now() + ($3::int || ' milliseconds')::interval,
+         heartbeat_at = now(),
+         attempt_count = attempt_count + 1,
          updated_at = now()
      FROM claim
      WHERE t.id = claim.id
      RETURNING t.*`,
-    [limit, staleMinutes],
+    [limit, workerId, leaseMs, staleMinutes],
   );
   return rows;
+}
+
+export async function heartbeatTurn(
+  db: DbPool,
+  tenantId: string,
+  turnId: string,
+  workerId: string,
+  leaseMs: number,
+): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `UPDATE agent_turns
+     SET heartbeat_at = now(),
+         lease_expires_at = now() + ($4::int || ' milliseconds')::interval,
+         updated_at = now()
+     WHERE tenant_id = $1
+       AND id = $2
+       AND worker_id = $3
+       AND status = 'running'`,
+    [tenantId, turnId, workerId, leaseMs],
+  );
+  return (rowCount ?? 0) > 0;
 }
 
 export async function completeTurn(
   db: DbPool,
   tenantId: string,
   turnId: string,
-  data: { final_label?: string | null },
+  data: { final_label?: string | null; worker_id?: string },
 ): Promise<AgentTurn | null> {
   const { rows } = await db.query(
     `UPDATE agent_turns
-     SET status = 'succeeded', completed_at = now(), final_label = $3, updated_at = now()
-     WHERE tenant_id = $1 AND id = $2 AND status <> 'cancelled'
+     SET status = 'succeeded',
+         completed_at = now(),
+         final_label = $3,
+         lease_expires_at = NULL,
+         heartbeat_at = now(),
+         updated_at = now()
+     WHERE tenant_id = $1
+       AND id = $2
+       AND status = 'running'
+       AND ($4::text IS NULL OR worker_id = $4)
      RETURNING *`,
-    [tenantId, turnId, data.final_label ?? null],
+    [tenantId, turnId, data.final_label ?? null, data.worker_id ?? null],
   );
   return rows[0] ?? null;
 }
@@ -314,13 +381,22 @@ export async function failTurn(
   tenantId: string,
   turnId: string,
   errorMessage: string,
+  workerId?: string,
 ): Promise<AgentTurn | null> {
   const { rows } = await db.query(
     `UPDATE agent_turns
-     SET status = 'failed', completed_at = now(), error_message = $3, updated_at = now()
-     WHERE tenant_id = $1 AND id = $2 AND status <> 'cancelled'
+     SET status = 'failed',
+         completed_at = now(),
+         error_message = $3,
+         lease_expires_at = NULL,
+         heartbeat_at = now(),
+         updated_at = now()
+     WHERE tenant_id = $1
+       AND id = $2
+       AND status <> 'cancelled'
+       AND ($4::text IS NULL OR worker_id = $4)
      RETURNING *`,
-    [tenantId, turnId, errorMessage],
+    [tenantId, turnId, errorMessage, workerId ?? null],
   );
   return rows[0] ?? null;
 }
@@ -328,7 +404,11 @@ export async function failTurn(
 export async function cancelTurn(db: DbPool, tenantId: string, turnId: string): Promise<AgentTurn | null> {
   const { rows } = await db.query(
     `UPDATE agent_turns
-     SET status = 'cancelled', cancelled_at = now(), completed_at = now(), updated_at = now()
+     SET status = 'cancelled',
+         cancelled_at = now(),
+         completed_at = now(),
+         lease_expires_at = NULL,
+         updated_at = now()
      WHERE tenant_id = $1 AND id = $2 AND status IN ('queued', 'running')
      RETURNING *`,
     [tenantId, turnId],

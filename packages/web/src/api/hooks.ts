@@ -1089,10 +1089,11 @@ export function useDbConfig() {
       pgvector_column_ready?: boolean;
       pgvector_env_enabled?: boolean;
       embedding_configured?: boolean;
-      embedding_provider?: string | null;
-      embedding_model?: string | null;
-      ready?: boolean;
-      sample_data?: {
+	      embedding_provider?: string | null;
+	      embedding_model?: string | null;
+	      ready?: boolean;
+	      local_setup_enabled?: boolean;
+	      sample_data?: {
         seeded: boolean;
         counts: {
           accounts: number;
@@ -2011,6 +2012,7 @@ export interface AgentConfigData {
   auto_extract_context: boolean;
   auto_promote_signals: boolean;
   signal_auto_promote_threshold: number;
+  signal_source_quality?: Record<string, number>;
   backup_enabled: boolean;
   backup_provider: ProviderId | null;
   backup_base_url: string | null;
@@ -2032,6 +2034,9 @@ export interface AgentSessionSummary {
     id: string;
     status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
     input_message: string;
+    heartbeat_at?: string | null;
+    lease_expires_at?: string | null;
+    attempt_count?: number;
     created_at: string;
     updated_at: string;
   } | null;

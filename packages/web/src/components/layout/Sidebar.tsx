@@ -28,7 +28,7 @@ export { ENTITY_COLORS };
 
 // Agent-facing tier — top of nav
 const agentNavItems = [
-  { icon: Brain,       label: 'Overview',     path: '/',             color: ENTITY_COLORS.sequences },
+  { icon: Brain,       label: 'Overview',     path: '/',             color: ENTITY_COLORS.dashboard },
   { icon: Library,     label: 'Context',      path: '/context',      color: ENTITY_COLORS.context },
   { icon: Inbox,       label: 'Handoffs',     path: '/handoffs',     color: ENTITY_COLORS.assignments },
 ];

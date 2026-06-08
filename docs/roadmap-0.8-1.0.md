@@ -23,6 +23,10 @@ Chosen defaults for the 0.8-1.0 line:
 - **CRMy remains the typed operational overlay.** External systems feed and receive governed state, but agents operate through CRMy's typed objects, policies, tools, and audit trail.
 - **The README promise remains future-proof.** v0.9 should close the reliability gaps underneath that promise rather than weakening the positioning.
 
+Related 1.0 runtime plan:
+
+- [CRMy 1.0 Multi-Instance Runtime Plan](multi-instance-runtime-plan.md)
+
 ## What Prevents CRMy From Being The Default Today
 
 ### 1. System-of-record connectivity is not first-class yet
@@ -66,7 +70,7 @@ Sequences already handle enrollment, AI-generated steps, branch/wait logic, HITL
 
 ### 5. External writes require stronger governance
 
-Status: **In progress.** Governed writeback preview/request/review/execute paths exist. Remaining work is broader Action Context adoption, provider certification, and workflow-level proof polish.
+Status: **In progress.** Governed writeback preview/request/review/execute paths exist, and first-class customer outreach/writeback paths now carry Action Context receipts. Remaining work is provider certification, live-environment proof polish, and adoption inside remaining long-running or non-email action flows.
 
 CRMy already has scopes, HITL, idempotency, optimistic concurrency, and audit. External writes need the same safety plus:
 
@@ -241,7 +245,7 @@ Connector-originated events must not create infinite loops.
 Default rules:
 
 - Sync-originated events cannot write back to the same source unless explicitly allowed.
-- Workflow and sequence writebacks carry origin metadata and idempotency keys.
+- Workflow-triggered writebacks and sequence sends carry origin metadata, proof receipts, and idempotency where the action can be retried.
 - Replayed sync events do not create duplicate workflow runs.
 - Writeback receipts are emitted separately from user-facing object changes.
 
@@ -296,15 +300,17 @@ Completed in the 0.8.x hardening line:
 - **Scoped safety checks:** hardening tests cover Raw Context no-subject receipt visibility, MCP resource subject access, explicit tool scope mappings, and Workspace Agent write-object policy defaults.
 - **Source and navigation cleanup:** primary navigation is focused on the core loop; Customer Email and Customer Activity are framed as Context Sources; Automations/Sequences are moved into admin settings surfaces while compatible routes remain available.
 - **Docs alignment:** README, guide, MCP tool reference, examples, recipes, Raw Context reliability plan, record-resolution plan, and contributor “what belongs where” guidance now describe the same Observe -> Signals -> Memory -> Briefing/Active Context -> Handoff/Writeback -> Proof model.
-- **Action Context v1:** `POST /api/v1/action-context` and MCP `action_context_get` assemble action-aware context, readiness, policy/source-authority checks, and compact retrieval proof without mutating CRM records or executing writebacks.
+- **Action Context v1:** `POST /api/v1/action-context` and MCP `action_context_get` assemble action-aware context, readiness, policy/source-authority checks, and compact retrieval proof without mutating CRM records or executing writebacks. Email drafts, record create/edit previews, record updates, assignment creation, workflow-triggered email/writeback actions, sequence email sends, and systems-of-record writeback previews/requests now carry verified Action Context receipts.
 - **Signal Readiness v1:** Signal group responses include deterministic readiness and resolution metadata. The web workflow can repair missing typed Signal details inline through `context_signal_group_complete_details`.
+- **Actor-scoped aggregate safety:** search and stats surfaces now respect member/manager/admin visibility so external agents cannot use aggregate tools as a tenant-wide data leak.
+- **Durable Workspace Agent turns:** agent turns are persisted with ordered events, worker leases, heartbeats, expired-lease recovery, active-turn blocking, automatic operation keys for idempotent tools, persisted successful-tool-result replay, side-effecting tool coverage tests, and final action summaries so users can navigate away and workers can recover long-running turns without starting duplicate session work or duplicating supported writes.
 
 Still planned for 0.9:
 
-- Broader Action Context adoption inside specific writeback, outreach, assignment, and automation flows.
+- Broader Action Context adoption inside remaining long-running agent task flows and non-email sequence actions.
 - More calibrated readiness/source-quality scoring beyond the current conservative defaults and tests.
 - Tenant-visible source quality settings with conservative defaults.
-- More complete durable agent task orchestration across browser navigation, deploys, and multi-instance routing.
+- Richer durable agent task orchestration: keep broadening idempotency coverage as new side-effecting tools are added, add receipt-first recovery for the small crash window before a tool result is persisted, and make final changed-record summaries richer for multi-step tasks.
 - Live-environment certification for first-party SOR connectors and provider-specific mailbox/calendar OAuth behavior.
 - Broader synthetic large-tenant scale testing; the current 0.8.5 gate verifies correctness and drift, not 1.0-scale latency budgets.
 
@@ -385,7 +391,7 @@ Key changes:
 
 ### 3. Unified Agent Action Context Packet
 
-Status: **Landed for v1, expanding.** `POST /api/v1/action-context` and MCP `action_context_get` exist. Remaining work is adoption inside specific action flows and live workflow proof.
+Status: **Landed for v1, expanding.** `POST /api/v1/action-context` and MCP `action_context_get` exist. Email drafts, record create/edit previews, assignments, workflow-triggered outreach/writeback, sequence email sends, and systems-of-record writeback requests carry Action Context receipts. Remaining work is live proof polish and adoption inside long-running agent tasks and non-email sequence actions.
 
 Agents need one packet that helps them act intelligently on customer work. This is not meant to gate every step. It should make low-risk work faster by giving the agent the right Memory, Signals, source ownership, policy, and proof context up front, while reserving review for actions that can affect customers, records, systems of record, or trust boundaries.
 
@@ -414,7 +420,7 @@ Current interface:
 
 - REST: `POST /api/v1/action-context`
 - MCP: `action_context_get`
-- internal service available for Workspace Agent, Handoffs, draft email generation, record create/edit previews, Automations, and writeback planning
+- internal service available for Workspace Agent, Handoffs, draft email generation, record create/edit previews, Automations, Sequences, and writeback planning
 
 This should not replace `briefing_get`. Use `briefing_get` for customer understanding and `action_context_get` when an agent is preparing a specific action and needs policy, source authority, warnings, proof, or review requirements.
 
@@ -454,14 +460,14 @@ Acceptance target: admins and builders can answer what happened, why it happened
 
 ### 6. Durable Agent Work And Human Collaboration
 
-Status: **In progress.** Workspace Agent, Handoffs, assignments, HITL, and tool transparency exist. Remaining work is durable task continuity across navigation, deploys, and multi-instance routing.
+Status: **In progress.** Workspace Agent, Handoffs, assignments, HITL, and tool transparency exist. Durable turn continuity now has a database-backed foundation with persisted events, worker leases, heartbeats, expired-lease recovery, active-turn blocking, stable operation keys for tools that expose `idempotency_key`, replay of already-persisted successful tool results, coverage tests for side-effecting MCP tools, and final action-summary hints. Remaining work is richer task orchestration and receipt-first recovery for the narrow crash window before a tool result event is persisted.
 
 The Workspace Agent should be a durable workbench, not just a chat surface.
 
 Key changes:
 
 - Durable agent tasks with goal, subject, plan, steps, tool calls, status, approvals, retries, and final change summary.
-- Work can continue in the background and resume after browser navigation or server restart without duplicate writes.
+- Work can continue in the background and resume after browser navigation or server restart; worker leases prevent two instances from intentionally running the same turn at once, stable agent operation keys prevent duplicate writes for idempotency-aware tools, persisted tool results are reused on recovered turns, and final responses can summarize successful changed records/actions.
 - Write plans before risky changes across CRMy objects, CRM writebacks, warehouse writebacks, sequence sends, automation-triggered writes, and customer email sends.
 - HITL approvals native inside agent task execution, Automations, Sequences, email drafts, record create/edit previews, and connector writeback.
 - Handoffs support decision rationale, reassignment, comments, linked evidence, SLA, and task history.
@@ -482,6 +488,7 @@ Key changes:
 - Members see their book of business, managers see team scope, admins/owners see tenant scope.
 - Agent sessions and background tasks re-check access when run, not only when created.
 - Permission-denied tool calls return friendly messages without leaking hidden record names or IDs.
+- Pre-1.0 hosted auth hardening: move browser auth away from long-lived localStorage bearer tokens, or pair short-lived browser tokens with refresh/session controls, logout/session revocation, and CSRF-safe mutation behavior while preserving the current smooth local setup path.
 
 Acceptance target: the Workspace Agent and external MCP clients cannot become an admin bypass.
 
@@ -607,6 +614,56 @@ Acceptance target: a new user sees one product story, not a collection of adjace
 - Do not require mailbox/calendar connections for emails, transcripts, or notes to feed Memory.
 - Do not let agents write directly to systems of record without policy, preview, idempotency, approval where required, and audit.
 
+## Post-0.9: Optional Governed Product Knowledge Retrieval
+
+Status: **Planned after 0.9, before 1.0.** See
+[Governed Product Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
+
+After 0.9 hardens customer Memory, Action Context, source reliability, proof,
+and surface consistency, CRMy should evaluate an optional governed retrieval
+layer for product, service, solution, and competitive knowledge.
+
+This should not become a required dependency for core CRMy behavior. Customer
+briefings, Action Context, Workspace Agent flows, email drafts, and writeback
+safety must continue to work when no product knowledge sources are configured.
+Actors may still compile product knowledge at the edge. CRMy should provide
+additional value when actors choose to retrieve this knowledge through CRMy:
+freshness checks, approval filtering, external-use visibility, evidence,
+citations, warnings, and retrieval proof.
+
+Recommended direction:
+
+- Build a shared backend `KnowledgeRetrievalService` rather than a local-agent
+  or MCP-only dependency.
+- Expose that service through MCP first for external agents, with REST, CLI,
+  Workspace Agent, briefing, Action Context, and UI surfaces calling the same
+  retrieval contract.
+- Keep external systems authoritative for product docs, battlecards, changelogs,
+  pricing, roadmap, security, and compliance material.
+- Store source metadata, optional source-derived claim envelopes, freshness,
+  approval, visibility, citations, and retrieval receipts in CRMy.
+- Add product context to briefings and Action Context only when explicitly
+  requested or configured.
+- Treat edge-provided product knowledge as allowed but not CRMy-verified unless
+  it passes through the governed retrieval path.
+
+Non-goals for this post-0.9 work:
+
+- Do not require users to maintain product knowledge manually in CRMy.
+- Do not turn CRMy into a generic knowledge base, CMS, battlecard platform,
+  roadmap system, or CPQ source of truth.
+- Do not merge global product truth into customer Memory without a separate
+  namespace.
+- Do not let stale, unapproved, internal-only, deprecated, or conflicting claims
+  reach customer-facing draft packets.
+- Do not require pgvector, embeddings, mailbox/calendar, or local MCP setup for
+  the core product to function.
+
+Acceptance target: when configured, agents can retrieve product and competitive
+context through CRMy in a way that is more specific, safer, cited, policy-aware,
+and auditable than edge-only retrieval. When not configured, CRMy behaves like
+the 0.9 customer Memory and Action Context product.
+
 ## 1.0: Resilience At Scale
 
 Goal: make CRMy reliable as the default context and action engine when a tenant has hundreds of thousands of Raw Context sources and Signals, tens of thousands of Memory entries, active mailbox/calendar/system-of-record sync, multiple Workspace Agent users, and external MCP clients.
@@ -622,12 +679,12 @@ Assumed production shape:
 ### What Breaks First Without 1.0 Hardening
 
 - **Database connections exhaust.** App instances currently create normal Postgres pools. In serverless deployments, per-instance pools can exceed provider connection limits quickly.
-- **Background work starves or stalls.** A single in-process worker loop and global advisory lock can let one slow task block extraction, embeddings, source sync, outbox retries, and agent-turn recovery.
+- **Background work starves or stalls.** A single in-process worker loop and global advisory lock can let one slow task block extraction, embeddings, source sync, outbox retries, and agent-turn recovery. The 1.0 target is documented in the [Multi-Instance Runtime Plan](multi-instance-runtime-plan.md).
 - **Lists and dashboards get expensive.** Large pages that request counts, broad totals, or client-filtered batches become slow and costly as tenants reach hundreds of thousands of rows.
 - **Search becomes uneven.** Global search, Context Browser, Signals, Memory, Graph, and Lineage need consistent server-side filtering, stable cursors, and search indexes instead of loading recent records and filtering locally.
 - **Raw Context processing becomes request-bound.** LLM extraction, JSON repair, subject resolution, and signal grouping must survive timeouts, cold starts, provider failures, and retries without duplicate Signals or stuck sources.
 - **Source sync becomes too chunky.** Mailbox, calendar, CRM, and warehouse sync need page-level checkpoints and backoff. A provider page failure should not replay or lose an entire sync run.
-- **Agent and MCP sessions become fragile.** In-memory session registries and long SSE streams do not survive multi-instance routing, serverless freezes, or deploys without resumable persisted events.
+- **Agent and MCP sessions become fragile.** In-memory session registries and long SSE streams do not survive multi-instance routing, serverless freezes, or deploys without durable session identity, explicit routing/expiry behavior, and resumable persisted events.
 - **Lineage and audit become heavy.** Source-to-action proof trails and audit logs grow quickly and need indexed edges, retention/export, and precomputed summaries.
 - **Scoped access checks get expensive.** Visibility filters that rely on per-row joins or `EXISTS` checks will degrade unless ownership/scope metadata is materialized on high-volume context tables.
 
@@ -638,7 +695,7 @@ Current code signals behind these findings:
 - `packages/server/src/db/repos/context-outbox.ts` should gain the same stale-lock and retry scheduling guarantees as newer durable queues.
 - `packages/server/src/db/repos/search.ts` and high-volume list repos should converge on indexed, scoped, server-side search rather than broad unions or client-filtered recent batches.
 - `packages/server/src/services/customer-email.ts` and `packages/server/src/services/customer-activity.ts` need page-level sync checkpoints and pre-storage filtering before large mailbox/calendar deployments.
-- The MCP session registry in `packages/server/src/index.ts` is in-memory today; production multi-instance deployments need persisted or explicitly sticky sessions.
+- The MCP session registry in `packages/server/src/mcp/session-registry.ts` is in-memory today; production multi-instance deployments need the durable catalog, sticky/forward/expire behavior, and recovery gates described in the [Multi-Instance Runtime Plan](multi-instance-runtime-plan.md).
 
 ### 1. Serverless Postgres Runtime
 
@@ -667,6 +724,8 @@ Key changes:
 - Make extraction, embeddings, source sync, context outbox, agent turns, workflow runs, sequence steps, and writebacks resumable in small chunks.
 - Add queue health metrics: pending, running, failed, dead-lettered, oldest pending age, oldest locked age, retry rate, and last successful processor heartbeat.
 - Add safe admin recovery actions: retry, reprocess, unlock stale job, dead-letter, replay sync page, and inspect failure payload.
+- Run app/API instances, worker instances, and migration jobs as separate production roles. Local development can keep the current in-app worker path.
+- Use the [Multi-Instance Runtime Plan](multi-instance-runtime-plan.md) as the 1.0 implementation contract for processor names, queue contracts, worker behavior, deployment modes, observability, and crash-recovery tests.
 
 Acceptance target: killing a worker mid-job cannot permanently strand Raw Context, embeddings, outbox events, source sync, or agent work.
 
@@ -739,13 +798,15 @@ Make agent work reliable across browser navigation, deploys, provider errors, an
 
 Key changes:
 
-- Keep durable agent turns as the source of truth for messages, events, tool calls, reasoning summaries, and final outputs.
-- Add polling fallback for every streamed turn so clients can recover when SSE is interrupted.
-- Move MCP session state out of process memory or make session affinity/expiry explicit for production deployments.
-- Add persisted tool-call idempotency keys for write tools so retries cannot duplicate creates, updates, sends, handoffs, or writebacks.
+- Keep durable agent turns as the source of truth for messages, events, tool calls, reasoning summaries, changed-record summaries, and final outputs. **Landed foundation:** persisted turn rows, ordered events, worker leases, heartbeats, expired-lease recovery, active-turn blocking, stable operation keys for idempotency-aware tools, replay of prior successful tool results, and final action-summary hints.
+- Add polling fallback for every streamed turn so clients can recover when SSE is interrupted. **Landed foundation:** the app can reload session state and active-turn metadata while streamed events remain persisted.
+- Move MCP session identity, actor/scope validation, ownership, TTL, and expiry out of process memory. Live SDK transports may remain process-local, but hosted production must use durable session catalog state plus sticky routing, internal forwarding, or explicit session-expired/reinitialize behavior.
+- Deliver MCP resource notifications across instances through a shared notification path, or make notification loss explicitly recoverable by durable resource reads and clear reconnect behavior.
+- Add persisted tool-call idempotency keys for write tools so retries cannot duplicate creates, updates, sends, handoffs, or writebacks. **Landed foundation:** Workspace Agent injects deterministic keys for tools whose schemas expose `idempotency_key`, and tests now fail when side-effecting MCP tool names omit idempotency support without an explicit read-only exception.
 - Budget every tool call: default limits, explicit filters, timeouts, and clear “too broad” responses.
 - Add MCP doctor and agent smoke tests that prove `customer_record_resolve -> briefing_get -> signal list -> handoff/action` against demo data in under one minute.
 - Keep every tool scoped to the current human actor, including background continuation and delayed tool execution.
+- Treat [CRMy 1.0 Multi-Instance Runtime Plan](multi-instance-runtime-plan.md) as the release gate for MCP session routing, stale-session behavior, cross-instance notifications, and multi-instance crash tests.
 
 Acceptance target: a user or external agent can leave, reconnect, retry, or switch clients without losing work, duplicating writes, or bypassing permissions.
 
@@ -773,6 +834,7 @@ Key changes:
 - Persist retrieval events for high-impact agent actions so Active Context use appears in Lineage.
 - Precompute or cache lineage edges for common source-to-action paths instead of rebuilding everything from raw joins at read time.
 - Add audit retention/export policies, optional partitions, and archived audit search.
+- Archive semantics now exist for accounts, contacts, opportunities, and use cases: user-facing delete commands hide records from active workflows while preserving evidence, lineage, Handoffs, and writeback anchors. Remaining lifecycle work is activity archive semantics, retention/export policy, restore UX, and archived audit search.
 - Add tenant-level retention controls for raw payloads, email/message bodies, meeting artifacts, extracted snippets, and generated drafts.
 - Add data minimization defaults so low-value raw source material is not stored indefinitely.
 - Add event replay and dedupe controls for workflow, sequence, webhook, plugin/custom API, context outbox, and writeback events.
@@ -787,6 +849,7 @@ Key changes:
 
 - Add first-class metrics for request latency, query latency, queue lag, extraction throughput, model latency, provider sync latency, writeback latency, and agent tool latency.
 - Add tenant quotas and soft limits for Raw Context ingestion, extraction jobs, mailbox/calendar sync volume, embedding jobs, agent turns, and MCP traffic.
+- Add global REST, MCP, and Workspace Agent rate limiting after 0.9: tenant, actor/API-key, IP, and cost-aware request budgets backed by a shared store for multi-instance deployments.
 - Add graceful degradation states: retrieval degraded, extraction queued, sync throttled, model unavailable, embeddings catching up, and writeback delayed.
 - Add load tests and synthetic large-tenant fixtures to CI or release gates.
 - Add `EXPLAIN`/index review fixtures for high-volume queries that must stay bounded.
@@ -833,8 +896,10 @@ Acceptance target: 1.0 ships with measurable scale budgets, release gates, and r
 - Durable jobs recover after worker crashes, cold starts, provider timeouts, and deploys without duplicate Signals, duplicate writes, or permanently stuck processing states.
 - Mailbox, calendar, CRM, warehouse, and custom API/MCP source sync can resume from page-level checkpoints and explain skipped/internal/low-value sources.
 - Workspace Agent and MCP work can resume through persisted turn events and safe polling when streams disconnect or instances restart.
+- Hosted multi-instance deployments satisfy the [Multi-Instance Runtime Plan](multi-instance-runtime-plan.md): separate app/worker/migration roles, durable queue leases, durable MCP session catalog, explicit session routing or expiry behavior, and cross-instance recovery tests.
 - Lineage, audit, retrieval, and writeback proof trails remain queryable through indexed edges, retention/export, and precomputed summaries.
 - CRMy can be deployed self-hosted by an enterprise team, connected to CRM and warehouse systems, governed by scoped actors/policies, and used by agents for read/write revenue workflows with audit-safe execution.
+- Hosted browser deployments use session storage patterns appropriate for production SaaS, not long-lived bearer tokens in `localStorage`, while local/dev/self-hosted setup remains fast and understandable.
 - Developers can build against stable SDKs and MCP tools without reverse-engineering app behavior.
 - Admins can prove what happened, why it happened, who approved it, which systems changed, and what context the agent used.
 
@@ -851,7 +916,9 @@ Acceptance target: 1.0 ships with measurable scale budgets, release gates, and r
 - **Scope parity tests:** REST, MCP, CLI, Workspace Agent, search, graph, lineage, Handoffs, email, activity, systems-of-record, Automations, and Sequences enforce the same member/manager/admin visibility model.
 - **Retrieval tests:** lexical fallback and pgvector retrieval both find account-scoped candidates without leaking inaccessible records.
 - **Security tests:** no arbitrary SQL writes, scoped actors cannot access unmapped systems, field-level authority is enforced, and secrets are never exposed in logs or audit payloads.
+- **Hosted browser auth tests:** production browser auth uses httpOnly/session-backed or equivalent short-lived token handling, rejects CSRF-risky mutations, supports logout/session revocation, and still allows the documented local setup path to work without extra manual security setup.
 - **Product-surface tests:** member, manager, and admin navigation show the correct core/supporting/admin/advanced surfaces; legacy routes still resolve; user-facing labels avoid `Signal Group`, generic workflow-builder framing, inbox replacement framing, and CRM replacement framing.
+- **First-run smoke tests:** start from an empty database, migrate, run `init --demo`, prove the seeded Raw Context -> Signal -> Memory -> briefing/action-context path through CLI/API/MCP, and load the UI against that workspace.
 - **Serverless Postgres tests:** pooled connection budget, statement timeouts, startup without runtime migrations, shallow/deep health behavior, and provider-specific migration guidance.
 - **Scale fixtures:** synthetic tenants with 500k Raw Context sources, 500k Signals, 50k Memory entries, large audit history, and active mailbox/calendar/SOR sync history.
 - **Query-plan tests:** `EXPLAIN` gates for high-volume list/search/detail endpoints, including Context Browser, Signals, Memory, Handoffs, Email Messages, Calendar Events, Audit, Search, Graph, and Lineage.

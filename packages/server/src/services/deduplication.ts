@@ -104,7 +104,7 @@ export async function checkContactDuplicate(
     const { rows } = await db.query(
       `SELECT id, first_name || COALESCE(' ' || NULLIF(last_name, ''), '') AS name
        FROM contacts
-       WHERE tenant_id=$1 AND lower(email)=lower($2) AND id!=$3 AND merged_into IS NULL
+	       WHERE tenant_id=$1 AND lower(email)=lower($2) AND id!=$3 AND merged_into IS NULL AND archived_at IS NULL
        LIMIT 5`,
       [tenantId, input.email, excl],
     );
@@ -118,7 +118,7 @@ export async function checkContactDuplicate(
       const { rows } = await db.query(
         `SELECT id, first_name || COALESCE(' ' || NULLIF(last_name, ''), '') AS name
          FROM contacts
-         WHERE tenant_id=$1 AND regexp_replace(COALESCE(phone,''), '\\D', '', 'g')=$2 AND id!=$3 AND merged_into IS NULL
+	         WHERE tenant_id=$1 AND regexp_replace(COALESCE(phone,''), '\\D', '', 'g')=$2 AND id!=$3 AND merged_into IS NULL AND archived_at IS NULL
          LIMIT 5`,
         [tenantId, digits, excl],
       );
@@ -133,7 +133,7 @@ export async function checkContactDuplicate(
        FROM contacts
        WHERE tenant_id=$1 AND account_id=$2
          AND lower(first_name || COALESCE(' ' || NULLIF(last_name, ''), ''))=lower($3)
-         AND id!=$4 AND merged_into IS NULL
+	         AND id!=$4 AND merged_into IS NULL AND archived_at IS NULL
        LIMIT 5`,
       [tenantId, input.account_id, fullName, excl],
     );
@@ -148,7 +148,7 @@ export async function checkContactDuplicate(
        WHERE tenant_id=$1
          AND lower(company_name)=lower($2)
          AND lower(first_name || COALESCE(' ' || NULLIF(last_name, ''), ''))=lower($3)
-         AND id!=$4 AND merged_into IS NULL
+	         AND id!=$4 AND merged_into IS NULL AND archived_at IS NULL
        LIMIT 5`,
       [tenantId, input.company_name, fullName, excl],
     );
@@ -160,7 +160,7 @@ export async function checkContactDuplicate(
     const { rows } = await db.query(
       `SELECT id, first_name || COALESCE(' ' || NULLIF(last_name, ''), '') AS name
        FROM contacts
-       WHERE tenant_id=$1 AND $2=ANY(aliases) AND id!=$3 AND merged_into IS NULL
+	       WHERE tenant_id=$1 AND $2=ANY(aliases) AND id!=$3 AND merged_into IS NULL AND archived_at IS NULL
        LIMIT 5`,
       [tenantId, input.email.toLowerCase(), excl],
     );
@@ -172,7 +172,7 @@ export async function checkContactDuplicate(
     const { rows } = await db.query(
       `SELECT id, first_name || COALESCE(' ' || NULLIF(last_name, ''), '') AS name
        FROM contacts
-       WHERE tenant_id=$1 AND lower($2)=ANY(aliases) AND id!=$3 AND merged_into IS NULL
+	       WHERE tenant_id=$1 AND lower($2)=ANY(aliases) AND id!=$3 AND merged_into IS NULL AND archived_at IS NULL
        LIMIT 5`,
       [tenantId, fullName.toLowerCase(), excl],
     );
@@ -186,7 +186,7 @@ export async function checkContactDuplicate(
        FROM contacts
        WHERE tenant_id=$1
          AND lower(first_name || COALESCE(' ' || NULLIF(last_name, ''), ''))=lower($2)
-         AND id!=$3 AND merged_into IS NULL
+	       AND id!=$3 AND merged_into IS NULL AND archived_at IS NULL
        LIMIT 5`,
       [tenantId, fullName, excl],
     );
@@ -200,7 +200,7 @@ export async function checkContactDuplicate(
      FROM contacts
      WHERE tenant_id=$1
        AND similarity(lower(first_name || COALESCE(' ' || NULLIF(last_name, ''), '')), lower($2)) > 0.80
-       AND id!=$3 AND merged_into IS NULL
+	       AND id!=$3 AND merged_into IS NULL AND archived_at IS NULL
      ORDER BY sim DESC
      LIMIT 5`,
     [tenantId, fullName, excl],
@@ -240,8 +240,8 @@ export async function checkAccountDuplicate(
   // ── Domain exact match (score 100 — definitive) ──
   if (resolvedDomain) {
     const { rows } = await db.query(
-      `SELECT id, name FROM accounts
-       WHERE tenant_id=$1 AND lower(domain)=$2 AND id!=$3 AND merged_into IS NULL
+	      `SELECT id, name FROM accounts
+	       WHERE tenant_id=$1 AND lower(domain)=$2 AND id!=$3 AND merged_into IS NULL AND archived_at IS NULL
        LIMIT 5`,
       [tenantId, resolvedDomain, excl],
     );
@@ -253,7 +253,7 @@ export async function checkAccountDuplicate(
        WHERE tenant_id=$1
          AND lower(regexp_replace(website, '^https?://(www\\.)?', '')) LIKE $2
          AND domain IS NULL
-         AND id!=$3 AND merged_into IS NULL
+	         AND id!=$3 AND merged_into IS NULL AND archived_at IS NULL
        LIMIT 5`,
       [tenantId, `${resolvedDomain}%`, excl],
     );
@@ -263,8 +263,8 @@ export async function checkAccountDuplicate(
   // ── Name exact match, case-insensitive (score 90 — definitive) ──
   {
     const { rows } = await db.query(
-      `SELECT id, name FROM accounts
-       WHERE tenant_id=$1 AND lower(name)=lower($2) AND id!=$3 AND merged_into IS NULL
+	      `SELECT id, name FROM accounts
+	       WHERE tenant_id=$1 AND lower(name)=lower($2) AND id!=$3 AND merged_into IS NULL AND archived_at IS NULL
        LIMIT 5`,
       [tenantId, input.name, excl],
     );
@@ -275,8 +275,8 @@ export async function checkAccountDuplicate(
   const aliasChecks = [input.name.toLowerCase(), ...(resolvedDomain ? [resolvedDomain] : [])];
   for (const alias of aliasChecks) {
     const { rows } = await db.query(
-      `SELECT id, name FROM accounts
-       WHERE tenant_id=$1 AND lower($2)=ANY(aliases) AND id!=$3 AND merged_into IS NULL
+	      `SELECT id, name FROM accounts
+	       WHERE tenant_id=$1 AND lower($2)=ANY(aliases) AND id!=$3 AND merged_into IS NULL AND archived_at IS NULL
        LIMIT 5`,
       [tenantId, alias, excl],
     );
@@ -289,7 +289,7 @@ export async function checkAccountDuplicate(
      FROM accounts
      WHERE tenant_id=$1
        AND similarity(lower(COALESCE(name, '')), lower($2)) > 0.75
-       AND id!=$3 AND merged_into IS NULL
+	       AND id!=$3 AND merged_into IS NULL AND archived_at IS NULL
      ORDER BY sim DESC
      LIMIT 5`,
     [tenantId, input.name, excl],

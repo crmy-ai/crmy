@@ -16,18 +16,34 @@ import {
   ContextEntryRecord,
   AssignmentRecord,
   ActorRecord,
+  MessagingChannelRecord,
+  SequenceRecord,
+  SequenceEnrollmentRecord,
   GenericList,
   GenericObject,
   SuccessResult,
 } from './registry.js';
 
 const idParam = z.object({ id: S.uuid.openapi({ description: 'Record UUID' }) });
+const enrollmentIdParam = z.object({ enrollmentId: S.uuid.openapi({ description: 'Sequence enrollment UUID' }) });
+const setupTokenParam = z.object({ token: z.string().min(1).openapi({ description: 'One-time invite or password-reset token' }) });
 const toolNameParam = z.object({ tool_name: z.string().regex(/^[a-z0-9_]+$/).openapi({ description: 'MCP tool name' }) });
+const checkNameParam = z.object({ check_name: z.string().min(1).openapi({ description: 'Data-quality check name' }) });
+const providerParam = z.object({ provider: z.enum(['google', 'microsoft']) });
 const bearer = [{ BearerAuth: [] }];
+const rootServer = [{ url: '/', description: 'Server root; auth endpoints are not mounted under /api/v1' }];
 const err400 = { description: 'Validation error', content: { 'application/json': { schema: ProblemDetail } } };
 const err401 = { description: 'Unauthorized', content: { 'application/json': { schema: ProblemDetail } } };
 const err403 = { description: 'Forbidden — missing scope', content: { 'application/json': { schema: ProblemDetail } } };
 const err404 = { description: 'Not found', content: { 'application/json': { schema: ProblemDetail } } };
+const err409 = { description: 'Conflict', content: { 'application/json': { schema: ProblemDetail } } };
+
+const AgentRegisterRequest = z.object({
+  display_name: z.string().min(1).max(200),
+  agent_identifier: z.string().min(1).max(200),
+  agent_model: z.string().max(200).optional(),
+  requested_scopes: z.array(z.string()).optional(),
+});
 
 function ok(schema: z.ZodTypeAny, description = 'Success') {
   return { description, content: { 'application/json': { schema } } };
@@ -47,6 +63,7 @@ registry.registerPath({
   method: 'post', path: '/auth/register',
   tags: ['Auth'],
   summary: 'Register a new user and tenant',
+  servers: rootServer,
   request: { body: jsonBody(Req.AuthRegister) },
   responses: { 201: ok(z.object({ token: z.string(), tenant_id: S.uuid }), 'JWT token'), 400: err400 },
 });
@@ -55,19 +72,44 @@ registry.registerPath({
   method: 'post', path: '/auth/login',
   tags: ['Auth'],
   summary: 'Login and receive a JWT',
+  servers: rootServer,
   request: { body: jsonBody(Req.AuthLogin) },
   responses: { 200: ok(z.object({ token: z.string() }), 'JWT token'), 401: err401 },
 });
 
 registry.registerPath({
+  method: 'get', path: '/auth/setup/{token}',
+  tags: ['Auth'],
+  summary: 'Inspect an invite or password-reset setup token',
+  servers: rootServer,
+  request: { params: setupTokenParam },
+  responses: { 200: ok(GenericObject), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/auth/setup/{token}',
+  tags: ['Auth'],
+  summary: 'Complete invite or password-reset setup',
+  servers: rootServer,
+  request: {
+    params: setupTokenParam,
+    body: jsonBody(z.object({ password: z.string().min(12) })),
+  },
+  responses: { 200: ok(SuccessResult), 400: err400, 404: err404 },
+});
+
+registry.registerPath({
   method: 'post', path: '/auth/register-agent',
   tags: ['Auth'],
-  summary: 'Agent self-registration — idempotent, returns actor + bound API key',
+  summary: 'Agent self-registration — creates or reuses a pending agent actor and returns a bound read-only API key',
   security: bearer,
-  request: { body: jsonBody(Req.ActorCreate) },
+  servers: rootServer,
+  request: { body: jsonBody(AgentRegisterRequest) },
   responses: {
     201: ok(z.object({ actor: ActorRecord, api_key: z.object({ id: S.uuid, label: z.string(), key: z.string(), scopes: z.array(z.string()) }) })),
     400: err400,
+    403: err403,
+    409: err409,
   },
 });
 
@@ -76,6 +118,7 @@ registry.registerPath({
   tags: ['Auth'],
   summary: 'List API keys for the current tenant',
   security: bearer,
+  servers: rootServer,
   responses: { 200: ok(GenericList), 401: err401 },
 });
 
@@ -84,6 +127,7 @@ registry.registerPath({
   tags: ['Auth'],
   summary: 'Create a scoped API key',
   security: bearer,
+  servers: rootServer,
   request: { body: jsonBody(Req.ApiKeyCreate) },
   responses: {
     201: ok(z.object({ id: S.uuid, label: z.string(), key: z.string(), scopes: z.array(z.string()) }), 'Key shown once'),
@@ -96,6 +140,7 @@ registry.registerPath({
   tags: ['Auth'],
   summary: 'Update API key label, scopes, or expiry',
   security: bearer,
+  servers: rootServer,
   request: { params: idParam, body: jsonBody(z.object({ label: z.string().optional(), scopes: z.array(z.string()).optional(), expires_at: z.string().optional() })) },
   responses: { 200: ok(GenericObject), 404: err404 },
 });
@@ -105,8 +150,26 @@ registry.registerPath({
   tags: ['Auth'],
   summary: 'Revoke an API key',
   security: bearer,
+  servers: rootServer,
   request: { params: idParam },
   responses: { 200: ok(SuccessResult), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/auth/profile',
+  tags: ['Auth'],
+  summary: "Update the authenticated user's profile",
+  security: bearer,
+  servers: rootServer,
+  request: {
+    body: jsonBody(z.object({
+      name: z.string().optional(),
+      email: z.string().email().optional(),
+      current_password: z.string().optional(),
+      new_password: z.string().min(12).optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 404: err404 },
 });
 
 // -- Tool bridge --
@@ -160,6 +223,51 @@ registry.registerPath({
     403: err403,
     404: err404,
   },
+});
+
+// -- Operations --
+
+registry.registerPath({
+  method: 'get', path: '/ops/status',
+  tags: ['Operations'],
+  summary: 'Get tenant-scoped operational health for durable queues and async jobs',
+  security: bearer,
+  request: {
+    query: z.object({
+      sample_limit: z.coerce.number().int().min(0).max(50).optional(),
+      include_samples: z.coerce.boolean().optional(),
+    }),
+  },
+  responses: { 200: ok(GenericObject), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/ops/data-quality',
+  tags: ['Operations'],
+  summary: 'List tenant data-quality checks and repair candidates',
+  security: bearer,
+  request: {
+    query: z.object({
+      sample_limit: z.coerce.number().int().min(0).max(100).optional(),
+      include_clean: z.coerce.boolean().optional(),
+    }),
+  },
+  responses: { 200: ok(GenericObject), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/ops/data-quality/{check_name}/repair',
+  tags: ['Operations'],
+  summary: 'Run or preview a data-quality repair action',
+  security: bearer,
+  request: {
+    params: checkNameParam,
+    body: jsonBody(z.object({
+      dry_run: z.boolean().optional(),
+      limit: z.number().int().min(1).max(1000).optional(),
+    }), false),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
 });
 
 // -- Contacts --
@@ -219,6 +327,15 @@ registry.registerPath({
     query: z.object({ limit: z.number().int().optional(), types: z.array(z.string()).optional() }),
   },
   responses: { 200: ok(GenericList), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/contacts/{id}/score',
+  tags: ['Contacts'],
+  summary: 'Score a contact and update scoring metadata',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(ContactRecord), 400: err400, 403: err403, 404: err404 },
 });
 
 // -- Accounts --
@@ -315,6 +432,15 @@ registry.registerPath({
   responses: { 200: ok(SuccessResult), 403: err403, 404: err404 },
 });
 
+registry.registerPath({
+  method: 'post', path: '/opportunities/{id}/health-score',
+  tags: ['Opportunities'],
+  summary: 'Calculate and persist an opportunity health score',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(OpportunityRecord), 400: err400, 403: err403, 404: err404 },
+});
+
 // -- Activities --
 
 registry.registerPath({
@@ -324,6 +450,15 @@ registry.registerPath({
   security: bearer,
   request: { query: Req.ActivitySearch },
   responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/activities/{id}',
+  tags: ['Activities'],
+  summary: 'Get an activity by ID',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 404: err404 },
 });
 
 registry.registerPath({
@@ -342,6 +477,22 @@ registry.registerPath({
   security: bearer,
   request: { params: idParam, body: jsonBody(Req.ActivityUpdate) },
   responses: { 200: ok(GenericObject), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/activities/{id}/context',
+  tags: ['Activities'],
+  summary: 'Extract or attach Raw Context from an activity',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      document: z.string().optional(),
+      text: z.string().optional(),
+      source_label: z.string().optional(),
+    }), false),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
 });
 
 // -- Use Cases --
@@ -466,12 +617,56 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'get', path: '/hitl/rules',
+  tags: ['HITL'],
+  summary: 'List HITL approval rules',
+  security: bearer,
+  responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/hitl/rules',
+  tags: ['HITL'],
+  summary: 'Create a HITL approval rule',
+  security: bearer,
+  request: { body: jsonBody(GenericObject) },
+  responses: { 201: created(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/hitl/rules/{id}',
+  tags: ['HITL'],
+  summary: 'Update a HITL approval rule',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'delete', path: '/hitl/rules/{id}',
+  tags: ['HITL'],
+  summary: 'Delete a HITL approval rule',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(SuccessResult), 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
   method: 'get', path: '/hitl/{id}',
   tags: ['HITL'],
   summary: 'Check status of a HITL request',
   security: bearer,
   request: { params: idParam },
   responses: { 200: ok(GenericObject), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/hitl/{id}',
+  tags: ['HITL'],
+  summary: 'Update HITL request metadata or assignment state',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
 });
 
 registry.registerPath({
@@ -527,6 +722,40 @@ registry.registerPath({
   security: bearer,
   request: { params: idParam, body: jsonBody(Req.ActorUpdate) },
   responses: { 200: ok(ActorRecord), 400: err400, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/actors/{id}/specializations',
+  tags: ['Actors'],
+  summary: 'List an actor’s skill specializations',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericList), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/actors/{id}/specializations',
+  tags: ['Actors'],
+  summary: 'Create or update an actor skill specialization',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      skill_tag: z.string().min(1),
+      proficiency: z.enum(['novice', 'intermediate', 'expert']).optional(),
+      description: z.string().optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'delete', path: '/actors/{id}/specializations/{skill_tag}',
+  tags: ['Actors'],
+  summary: 'Remove an actor skill specialization',
+  security: bearer,
+  request: { params: z.object({ id: S.uuid, skill_tag: z.string().min(1) }) },
+  responses: { 200: ok(SuccessResult), 403: err403, 404: err404 },
 });
 
 // -- Assignments --
@@ -636,6 +865,15 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'post', path: '/context/raw-sources/{id}/reprocess',
+  tags: ['Context'],
+  summary: 'Reprocess a Raw Context source',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
   method: 'post', path: '/context/ingest',
   tags: ['Context'],
   summary: 'Ingest Raw Context for a known record',
@@ -691,6 +929,48 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'post', path: '/subjects/resolve',
+  tags: ['Context'],
+  summary: 'Resolve customer records mentioned by query, hint, or free text using the Subject Graph resolver',
+  security: bearer,
+  request: {
+    body: jsonBody(z.object({
+      query: z.string().optional(),
+      text: z.string().optional(),
+      subject_type: z.union([S.subjectType, z.literal('any')]).optional(),
+      account_hint: z.string().optional(),
+      confidence_threshold: z.number().min(0).max(1).optional(),
+      limit: z.number().int().min(1).max(50).optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/detect-subjects',
+  tags: ['Context'],
+  summary: 'Detect customer records mentioned in free text',
+  security: bearer,
+  request: { body: jsonBody(z.object({ text: z.string() })) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/ingest-file',
+  tags: ['Context'],
+  summary: 'Extract text from a base64 file upload and detect mentioned customer records',
+  security: bearer,
+  request: {
+    body: jsonBody(z.object({
+      filename: z.string().min(1),
+      data: z.string().min(1).openapi({ description: 'Base64-encoded file contents' }),
+      source_label: z.string().optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
   method: 'get', path: '/context/search',
   tags: ['Context'],
   summary: 'Full-text search across Memory and Signals',
@@ -700,12 +980,36 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'get', path: '/context/semantic-search',
+  tags: ['Context'],
+  summary: 'Semantic search across Memory and Signals when embeddings are available',
+  security: bearer,
+  request: { query: Req.ContextSearch },
+  responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
   method: 'get', path: '/context/stale',
   tags: ['Context'],
   summary: 'List Current Memory that needs review',
   security: bearer,
   request: { query: Req.ContextStaleList },
   responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/context/contradictions',
+  tags: ['Context'],
+  summary: 'Detect contradictions among Memory and Signals',
+  security: bearer,
+  request: {
+    query: z.object({
+      subject_type: S.subjectType.optional(),
+      subject_id: S.uuid.optional(),
+      context_type: z.string().optional(),
+    }),
+  },
+  responses: { 200: ok(GenericObject), 401: err401, 403: err403 },
 });
 
 registry.registerPath({
@@ -856,6 +1160,51 @@ registry.registerPath({
   responses: { 200: ok(ContextEntryRecord), 404: err404 },
 });
 
+registry.registerPath({
+  method: 'post', path: '/context/review-batch',
+  tags: ['Context'],
+  summary: 'Review multiple stale Memory entries in one request',
+  security: bearer,
+  request: { body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/mark-stale',
+  tags: ['Context'],
+  summary: 'Mark matching Memory entries stale in bulk',
+  security: bearer,
+  request: { body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/consolidate',
+  tags: ['Context'],
+  summary: 'Consolidate related Signals or Memory candidates',
+  security: bearer,
+  request: { body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/contradictions/assign',
+  tags: ['Context'],
+  summary: 'Assign a contradiction for human review',
+  security: bearer,
+  request: { body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context/contradictions/resolve',
+  tags: ['Context'],
+  summary: 'Resolve a contradiction and update affected Memory or Signals',
+  security: bearer,
+  request: { body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
 // -- Briefing --
 
 registry.registerPath({
@@ -889,6 +1238,21 @@ registry.registerPath({
     })),
     404: err404,
   },
+});
+
+registry.registerPath({
+  method: 'post', path: '/briefing/{subject_type}/{subject_id}/summary',
+  tags: ['Briefing'],
+  summary: 'Generate a briefing summary for a customer record',
+  security: bearer,
+  request: {
+    params: z.object({ subject_type: S.subjectType, subject_id: S.uuid }),
+    body: jsonBody(z.object({
+      objective: z.string().optional(),
+      format: z.string().optional(),
+    }), false),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
 });
 
 // -- Webhooks --
@@ -1017,6 +1381,158 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'get', path: '/source-filters',
+  tags: ['Source Filters'],
+  summary: 'Get email and activity source-filter settings',
+  security: bearer,
+  responses: { 200: ok(GenericObject), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'put', path: '/source-filters',
+  tags: ['Source Filters'],
+  summary: 'Update email and activity source-filter settings',
+  security: bearer,
+  request: {
+    body: jsonBody(z.object({
+      internal_domains: z.array(z.string()).optional(),
+      excluded_domains: z.array(z.string()).optional(),
+      excluded_senders: z.array(z.string()).optional(),
+      excluded_local_parts: z.array(z.string()).optional(),
+      included_mailbox_labels: z.array(z.string()).optional(),
+      excluded_mailbox_labels: z.array(z.string()).optional(),
+      skip_spam_trash: z.boolean().optional(),
+      skip_promotions: z.boolean().optional(),
+      skip_newsletters: z.boolean().optional(),
+      include_internal_calendar: z.boolean().optional(),
+      email_initial_backfill_days: z.number().int().optional(),
+      calendar_initial_past_days: z.number().int().optional(),
+      calendar_initial_future_days: z.number().int().optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/calendar/connections',
+  tags: ['Calendar'],
+  summary: 'List calendar connections and customer-meeting processing summary',
+  security: bearer,
+  responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/calendar/connections/{provider}/start',
+  tags: ['Calendar'],
+  summary: 'Start a Google or Microsoft calendar connection',
+  security: bearer,
+  request: {
+    params: providerParam,
+    body: jsonBody(z.object({
+      email_address: z.string().email().optional(),
+      display_name: z.string().optional(),
+    }), false),
+  },
+  responses: { 202: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'delete', path: '/calendar/connections/{id}',
+  tags: ['Calendar'],
+  summary: 'Delete a calendar connection',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 204: { description: 'Deleted' }, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/calendar/connections/{id}/sync',
+  tags: ['Calendar'],
+  summary: 'Queue a calendar sync job',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 202: ok(GenericObject), 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/calendar-events',
+  tags: ['Calendar'],
+  summary: 'List customer meeting events with validation and processing state',
+  security: bearer,
+  request: {
+    query: z.object({
+      q: z.string().optional(),
+      tab: z.string().optional(),
+      classification: z.string().optional(),
+      validation_status: z.string().optional(),
+      processing_status: z.string().optional(),
+      contact_id: S.uuid.optional(),
+      account_id: S.uuid.optional(),
+      opportunity_id: S.uuid.optional(),
+      use_case_id: S.uuid.optional(),
+      include_internal: z.coerce.boolean().optional(),
+      limit: z.coerce.number().int().min(1).max(100).optional(),
+      cursor: z.string().optional(),
+    }),
+  },
+  responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/calendar-events/{id}',
+  tags: ['Calendar'],
+  summary: 'Get a calendar event and its meeting artifacts',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/calendar-events/{id}',
+  tags: ['Calendar'],
+  summary: 'Update calendar event classification, status, or customer links',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/calendar-events/{id}/process',
+  tags: ['Calendar'],
+  summary: 'Process a calendar event as Raw Context',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/calendar-events/{id}/artifacts',
+  tags: ['Calendar'],
+  summary: 'Attach meeting notes, transcript, summary, recording, or other artifact to a calendar event',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      artifact_type: z.enum(['transcript', 'notes', 'summary', 'recording', 'other']).optional(),
+      source: z.string().optional(),
+      source_label: z.string().optional(),
+      text_content: z.string().optional(),
+      process: z.boolean().optional(),
+    })),
+  },
+  responses: { 201: created(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/calendar-events/{id}/ignore',
+  tags: ['Calendar'],
+  summary: 'Ignore a calendar event and skip Raw Context processing',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(z.object({ reason: z.string().optional() }), false) },
+  responses: { 200: ok(GenericObject), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
   method: 'get', path: '/emails/{id}',
   tags: ['Emails'],
   summary: 'Get an email by ID',
@@ -1052,6 +1568,15 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'delete', path: '/mailbox/connections/{id}',
+  tags: ['Emails'],
+  summary: 'Delete a mailbox connection',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 204: { description: 'Deleted' }, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
   method: 'get', path: '/email-messages',
   tags: ['Emails'],
   summary: 'List customer email messages with classification and processing state',
@@ -1081,12 +1606,266 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'patch', path: '/email-messages/{id}',
+  tags: ['Emails'],
+  summary: 'Update customer email classification or customer-record links',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/email-messages/{id}/classification',
+  tags: ['Emails'],
+  summary: 'Update customer email classification',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      classification: z.enum(['customer', 'mixed', 'internal', 'automated', 'unknown']),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
   method: 'post', path: '/email-messages/{id}/process',
   tags: ['Emails'],
   summary: 'Process a customer email message as Raw Context',
   security: bearer,
   request: { params: idParam },
   responses: { 200: ok(GenericObject), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/email-messages/{id}/ignore',
+  tags: ['Emails'],
+  summary: 'Ignore a customer email and skip Raw Context processing',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(z.object({ reason: z.string().optional() }), false) },
+  responses: { 200: ok(GenericObject), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/email-provider',
+  tags: ['Emails'],
+  summary: 'Get outbound email provider configuration status',
+  security: bearer,
+  responses: { 200: ok(GenericObject), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'put', path: '/email-provider',
+  tags: ['Emails'],
+  summary: 'Configure the outbound email provider',
+  security: bearer,
+  request: { body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/email-provider/inbound',
+  tags: ['Emails'],
+  summary: 'Get inbound email webhook status',
+  security: bearer,
+  responses: { 200: ok(GenericObject), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/email-provider/inbound/secret',
+  tags: ['Emails'],
+  summary: 'Generate or rotate the inbound email webhook secret',
+  security: bearer,
+  responses: { 200: ok(GenericObject), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/handoff-snapshots/{id}',
+  tags: ['HITL'],
+  summary: 'Get a persisted handoff snapshot',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 403: err403, 404: err404 },
+});
+
+// -- Messaging Channels --
+
+registry.registerPath({
+  method: 'get', path: '/messaging-channels',
+  tags: ['Messaging'],
+  summary: 'List configured messaging channels',
+  security: bearer,
+  request: { query: Req.MessagingChannelList },
+  responses: { 200: ok(z.object({ data: z.array(MessagingChannelRecord), next_cursor: z.string().nullable().optional(), total: z.number().optional() })), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/messaging-channels',
+  tags: ['Messaging'],
+  summary: 'Create a messaging channel',
+  security: bearer,
+  request: { body: jsonBody(Req.MessagingChannelCreate) },
+  responses: { 201: created(MessagingChannelRecord), 400: err400, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/messaging-channels/{id}',
+  tags: ['Messaging'],
+  summary: 'Get a messaging channel',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(MessagingChannelRecord), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/messaging-channels/{id}',
+  tags: ['Messaging'],
+  summary: 'Update a messaging channel',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(Req.MessagingChannelUpdate) },
+  responses: { 200: ok(MessagingChannelRecord), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'delete', path: '/messaging-channels/{id}',
+  tags: ['Messaging'],
+  summary: 'Delete a messaging channel',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(SuccessResult), 403: err403, 404: err404 },
+});
+
+// -- Sequences --
+
+registry.registerPath({
+  method: 'get', path: '/sequences',
+  tags: ['Sequences'],
+  summary: 'List customer engagement sequences',
+  security: bearer,
+  request: {
+    query: z.object({
+      is_active: z.boolean().optional(),
+      tags: z.string().optional().openapi({ description: 'Comma-separated tag filter' }),
+      limit: z.number().int().min(1).optional(),
+      cursor: z.string().optional(),
+    }),
+  },
+  responses: { 200: ok(z.object({ data: z.array(SequenceRecord), next_cursor: z.string().nullable().optional(), total: z.number().optional() })), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/sequences',
+  tags: ['Sequences'],
+  summary: 'Create a sequence',
+  security: bearer,
+  request: { body: jsonBody(Req.SequenceCreate) },
+  responses: { 201: created(SequenceRecord), 400: err400, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/sequences/enrollments',
+  tags: ['Sequences'],
+  summary: 'List sequence enrollments',
+  security: bearer,
+  request: { query: Req.SequenceEnrollmentList },
+  responses: { 200: ok(z.object({ data: z.array(SequenceEnrollmentRecord), next_cursor: z.string().nullable().optional(), total: z.number().optional() })), 401: err401, 403: err403 },
+});
+
+for (const [action, summary] of [
+  ['unenroll', 'Cancel an active sequence enrollment'] as const,
+  ['pause', 'Pause an active sequence enrollment'] as const,
+  ['resume', 'Resume a paused sequence enrollment'] as const,
+] as const) {
+  registry.registerPath({
+    method: 'post', path: `/sequences/enrollments/{id}/${action}`,
+    tags: ['Sequences'],
+    summary,
+    security: bearer,
+    request: {
+      params: idParam,
+      body: jsonBody(z.object({ idempotency_key: z.string().optional() }), false),
+    },
+    responses: { 200: ok(SequenceEnrollmentRecord), 400: err400, 403: err403, 404: err404 },
+  });
+}
+
+registry.registerPath({
+  method: 'get', path: '/sequences/{id}',
+  tags: ['Sequences'],
+  summary: 'Get sequence details',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(SequenceRecord), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/sequences/{id}',
+  tags: ['Sequences'],
+  summary: 'Update sequence metadata, steps, settings, or active status',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(Req.SequenceUpdate) },
+  responses: { 200: ok(SequenceRecord), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'delete', path: '/sequences/{id}',
+  tags: ['Sequences'],
+  summary: 'Delete a sequence and cancel active enrollments',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(SuccessResult), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/sequences/{id}/enroll',
+  tags: ['Sequences'],
+  summary: 'Enroll a contact in a sequence',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(Req.SequenceEnroll) },
+  responses: { 201: created(SequenceEnrollmentRecord), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/sequences/{id}/analytics',
+  tags: ['Sequences'],
+  summary: 'Sequence performance analytics',
+  security: bearer,
+  request: { params: idParam, query: Req.SequenceAnalytics },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/sequences/draft-preview',
+  tags: ['Sequences'],
+  summary: 'Generate an unsaved AI draft preview for a sequence email step',
+  security: bearer,
+  request: {
+    body: jsonBody(z.object({
+      subject: z.string().optional(),
+      body_text: z.string().optional(),
+      ai_prompt: z.string().optional(),
+      ai_persona: z.string().optional(),
+    })),
+  },
+  responses: { 200: ok(z.object({ subject: z.string(), body_text: z.string() })), 400: err400, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/sequences/enrollments/{enrollmentId}/activities',
+  tags: ['Sequences'],
+  summary: 'List activities created by a sequence enrollment',
+  security: bearer,
+  request: { params: enrollmentIdParam },
+  responses: { 200: ok(GenericList), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/sequences/enrollments/{enrollmentId}/context',
+  tags: ['Sequences'],
+  summary: 'List context generated by a sequence enrollment',
+  security: bearer,
+  request: { params: enrollmentIdParam },
+  responses: { 200: ok(GenericList), 403: err403, 404: err404 },
 });
 
 // -- Custom Fields --
@@ -1148,6 +1927,24 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'post', path: '/workflows/test-draft',
+  tags: ['Workflows'],
+  summary: 'Test an unsaved workflow draft against a sample payload',
+  security: bearer,
+  request: { body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/workflows/draft-content-preview',
+  tags: ['Workflows'],
+  summary: 'Preview generated content for an unsaved workflow draft',
+  security: bearer,
+  request: { body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
   method: 'get', path: '/workflows/{id}',
   tags: ['Workflows'],
   summary: 'Get a workflow with 5 most recent runs',
@@ -1181,6 +1978,48 @@ registry.registerPath({
   security: bearer,
   request: { params: idParam, query: Req.WorkflowRunList },
   responses: { 200: ok(GenericList), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/workflows/{id}/test',
+  tags: ['Workflows'],
+  summary: 'Test a saved workflow against a sample payload',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({ sample_payload: z.record(z.unknown()).optional() }), false),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/workflows/{id}/clone',
+  tags: ['Workflows'],
+  summary: 'Clone a workflow',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({ name: z.string().optional() }), false),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/workflows/{id}/trigger',
+  tags: ['Workflows'],
+  summary: 'Manually trigger a workflow',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      subject_type: S.subjectType.optional(),
+      subject_id: S.uuid.optional(),
+      objective: z.string().max(500).optional(),
+      variables: z.record(z.unknown()).optional(),
+      idempotency_key: z.string().max(128).optional(),
+    }).passthrough(), false),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
 });
 
 // -- Analytics --
@@ -1239,6 +2078,41 @@ registry.registerPath({
   security: bearer,
   request: { params: z.object({ type_name: z.string() }) },
   responses: { 200: ok(SuccessResult), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/meeting-classifications',
+  tags: ['Registries'],
+  summary: 'List meeting classification rules',
+  security: bearer,
+  responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/meeting-classifications',
+  tags: ['Registries'],
+  summary: 'Create a meeting classification rule',
+  security: bearer,
+  request: { body: jsonBody(GenericObject) },
+  responses: { 201: created(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/meeting-classifications/{type_name}',
+  tags: ['Registries'],
+  summary: 'Update a meeting classification rule',
+  security: bearer,
+  request: { params: z.object({ type_name: z.string() }), body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'delete', path: '/meeting-classifications/{type_name}',
+  tags: ['Registries'],
+  summary: 'Delete a meeting classification rule',
+  security: bearer,
+  request: { params: z.object({ type_name: z.string() }) },
+  responses: { 200: ok(SuccessResult), 401: err401, 403: err403, 404: err404 },
 });
 
 registry.registerPath({
@@ -1458,6 +2332,171 @@ registry.registerPath({
     }),
   },
   responses: { 200: ok(GenericList), 401: err401 },
+});
+
+// -- Admin --
+
+registry.registerPath({
+  method: 'get', path: '/admin/db-config',
+  tags: ['Admin'],
+  summary: 'Inspect database and semantic-search setup status',
+  security: bearer,
+  responses: { 200: ok(GenericObject), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/admin/db-config/test',
+  tags: ['Admin'],
+  summary: 'Test a PostgreSQL connection string in local setup mode',
+  security: bearer,
+  request: { body: jsonBody(z.object({ connection_string: z.string().min(1) })) },
+  responses: { 200: ok(SuccessResult), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/admin/db-config',
+  tags: ['Admin'],
+  summary: 'Save a PostgreSQL connection string to local .env.db in local setup mode',
+  security: bearer,
+  request: { body: jsonBody(z.object({ connection_string: z.string().min(1) })) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/admin/sample-data',
+  tags: ['Admin'],
+  summary: 'Seed or refresh sample data for the current tenant',
+  security: bearer,
+  request: { body: jsonBody(z.object({ confirm: z.boolean().optional() }), false) },
+  responses: { 200: ok(GenericObject), 401: err401, 403: err403, 409: err409 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/admin/actors',
+  tags: ['Admin'],
+  summary: 'List actors with user, API key, registration, and activity metadata',
+  security: bearer,
+  request: { query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional(), cursor: z.string().optional() }) },
+  responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/admin/actors/{id}/approve',
+  tags: ['Admin'],
+  summary: 'Approve a pending actor registration',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      display_name: z.string().optional(),
+      agent_identifier: z.string().optional(),
+      agent_model: z.string().optional(),
+      scopes: z.array(z.string()).optional(),
+      metadata: z.record(z.unknown()).optional(),
+      is_active: z.boolean().optional(),
+    }), false),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/admin/actors/{id}/reject',
+  tags: ['Admin'],
+  summary: 'Reject a pending actor registration',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(z.object({ reason: z.string().optional() }), false) },
+  responses: { 200: ok(GenericObject), 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/admin/users',
+  tags: ['Admin'],
+  summary: 'List workspace users',
+  security: bearer,
+  request: { query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional(), cursor: z.string().optional() }) },
+  responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/admin/users',
+  tags: ['Admin'],
+  summary: 'Create a workspace user or invite',
+  security: bearer,
+  request: {
+    body: jsonBody(z.object({
+      name: z.string().min(1),
+      email: z.string().email(),
+      phone: z.string().optional(),
+      password: z.string().min(12).optional(),
+      role: z.enum(['member', 'manager', 'admin', 'owner']),
+      manager_id: S.uuid.nullable().optional(),
+      send_invite: z.boolean().optional(),
+      metadata: z.record(z.unknown()).optional(),
+    })),
+  },
+  responses: { 201: created(GenericObject), 400: err400, 401: err401, 403: err403, 409: err409 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/admin/users/{id}',
+  tags: ['Admin'],
+  summary: 'Update a workspace user',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      name: z.string().optional(),
+      email: z.string().email().optional(),
+      role: z.enum(['member', 'manager', 'admin', 'owner']).optional(),
+      manager_id: S.uuid.nullable().optional(),
+      password: z.string().min(12).optional(),
+      is_active: z.boolean().optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404, 409: err409 },
+});
+
+registry.registerPath({
+  method: 'delete', path: '/admin/users/{id}',
+  tags: ['Admin'],
+  summary: 'Delete a workspace user and deactivate the linked actor',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(z.object({ deleted: z.boolean() })), 400: err400, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/admin/users/{id}/invite',
+  tags: ['Admin'],
+  summary: 'Issue or resend an invite setup link for a user',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/admin/users/{id}/password-reset',
+  tags: ['Admin'],
+  summary: 'Issue a password-reset setup link for a user',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/resolve',
+  tags: ['Search'],
+  summary: 'Resolve contacts or accounts by natural-language query',
+  security: bearer,
+  request: {
+    body: jsonBody(z.object({
+      query: z.string().min(1),
+      entity_type: z.enum(['contact', 'account', 'any']).optional(),
+      context_hints: z.record(z.string()).optional(),
+      limit: z.number().int().min(1).max(10).optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
 });
 
 // -- Search --

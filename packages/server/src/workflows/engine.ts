@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DbPool } from '../db/pool.js';
-import type { UUID, Activity } from '@crmy/shared';
+import type { ActionContext, ActorContext, SubjectType, UUID, Activity } from '@crmy/shared';
 import * as wfRepo from '../db/repos/workflows.js';
 import type { WorkflowRow } from '../db/repos/workflows.js';
 import * as hitlRepo from '../db/repos/hitl.js';
@@ -10,6 +10,7 @@ import { emitEvent } from '../events/emitter.js';
 import { interpolate, buildVariableContext, resolveConfig } from './variables.js';
 import { resolveSequenceGoalContactId } from '../services/sequence-executor.js';
 import { evaluateActionPolicy } from '../services/action-policy.js';
+import { getActionContext } from '../services/action-context.js';
 
 /** How many consecutive failures trigger a Handoffs alert (configurable via env) */
 const FAILURE_ALERT_THRESHOLD = Number(process.env.WORKFLOW_FAILURE_ALERT_THRESHOLD ?? 3);
@@ -18,6 +19,103 @@ const FAILURE_ALERT_THRESHOLD = Number(process.env.WORKFLOW_FAILURE_ALERT_THRESH
 
 /** Default per-action execution timeout (30 seconds) */
 const ACTION_TIMEOUT_MS = 30_000;
+
+function workflowActionActor(tenantId: UUID): ActorContext {
+  return {
+    tenant_id: tenantId,
+    actor_id: 'workflow',
+    actor_type: 'system',
+    role: 'owner',
+    scopes: [
+      'read',
+      'write',
+      'context:read',
+      'activities:write',
+      'systems:write',
+      'assignments:write',
+    ],
+  };
+}
+
+function workflowSubject(input: {
+  contact_id?: unknown;
+  account_id?: unknown;
+  opportunity_id?: unknown;
+  use_case_id?: unknown;
+  subject_type?: unknown;
+  subject_id?: unknown;
+  object_type?: unknown;
+  object_id?: unknown;
+}): { subject_type?: SubjectType; subject_id?: UUID } {
+  if (typeof input.subject_type === 'string' && typeof input.subject_id === 'string') {
+    const type = input.subject_type === 'use-case' ? 'use_case' : input.subject_type;
+    if (type === 'contact' || type === 'account' || type === 'opportunity' || type === 'use_case') {
+      return { subject_type: type, subject_id: input.subject_id as UUID };
+    }
+  }
+  if (typeof input.object_type === 'string' && typeof input.object_id === 'string') {
+    const type = input.object_type === 'use-case' ? 'use_case' : input.object_type;
+    if (type === 'contact' || type === 'account' || type === 'opportunity' || type === 'use_case') {
+      return { subject_type: type, subject_id: input.object_id as UUID };
+    }
+  }
+  if (typeof input.opportunity_id === 'string') return { subject_type: 'opportunity', subject_id: input.opportunity_id as UUID };
+  if (typeof input.use_case_id === 'string') return { subject_type: 'use_case', subject_id: input.use_case_id as UUID };
+  if (typeof input.contact_id === 'string') return { subject_type: 'contact', subject_id: input.contact_id as UUID };
+  if (typeof input.account_id === 'string') return { subject_type: 'account', subject_id: input.account_id as UUID };
+  return {};
+}
+
+function summarizeWorkflowActionContext(actionContext: ActionContext) {
+  return {
+    subject_type: actionContext.subject_type,
+    subject_id: actionContext.subject_id,
+    operating_mode: actionContext.operating_mode,
+    readiness_status: actionContext.readiness.status,
+    risk_level: actionContext.readiness.risk_level,
+    review_required: actionContext.readiness.review_required,
+    guidance_summary: actionContext.guidance.summary,
+    warning_reasons: actionContext.guidance.warning_reasons,
+    review_reasons: actionContext.guidance.review_reasons,
+    proof: actionContext.proof,
+  };
+}
+
+async function getWorkflowActionContextSummary(
+  db: DbPool,
+  tenantId: UUID,
+  actionType: string,
+  cfg: Record<string, unknown>,
+  payload: unknown,
+  extraPayload: Record<string, unknown> = {},
+): Promise<Record<string, unknown> | undefined> {
+  const eventPayload = payload as Record<string, unknown> | undefined;
+  const subjectRef = workflowSubject({
+    contact_id: cfg.contact_id ?? eventPayload?.contact_id,
+    account_id: cfg.account_id ?? eventPayload?.account_id,
+    opportunity_id: cfg.opportunity_id ?? eventPayload?.opportunity_id,
+    use_case_id: cfg.use_case_id ?? eventPayload?.use_case_id,
+    subject_type: cfg.subject_type ?? eventPayload?.subject_type,
+    subject_id: cfg.subject_id ?? eventPayload?.subject_id,
+    object_type: cfg.object_type ?? eventPayload?.object_type,
+    object_id: cfg.object_id ?? eventPayload?.object_id ?? eventPayload?.id,
+  });
+  if (!subjectRef.subject_type || !subjectRef.subject_id) return undefined;
+  const actionContext = await getActionContext(db, workflowActionActor(tenantId), {
+    subject_type: subjectRef.subject_type,
+    subject_id: subjectRef.subject_id,
+    context_radius: subjectRef.subject_type === 'account' ? 'account_wide' : 'adjacent',
+    proposed_action: {
+      action_type: actionType === 'create_activity' ? 'customer_outreach' : 'workflow_action',
+      object_type: subjectRef.subject_type,
+      payload: {
+        workflow_action: actionType,
+        ...extraPayload,
+      },
+    },
+  }).catch(() => null);
+  return actionContext ? summarizeWorkflowActionContext(actionContext) : undefined;
+}
 
 async function generateWorkflowContent(
   db: DbPool,
@@ -617,12 +715,25 @@ async function executeAction(
     }
     case 'create_activity': {
       const { createActivity } = await import('../db/repos/activities.js');
-      await createActivity(db, tenantId, {
+      const actionContextSummary = await getWorkflowActionContextSummary(db, tenantId, action.type, cfg, payload, {
+        activity_type: cfg.type,
+        subject: cfg.subject,
+      });
+      const activity = await createActivity(db, tenantId, {
         type: (cfg.type as Activity['type']) ?? 'task',
         subject: cfg.subject as string,
         body: cfg.body as string | undefined,
         contact_id: cfg.contact_id as string | undefined,
         account_id: cfg.account_id as string | undefined,
+      });
+      await emitEvent(db, {
+        tenantId,
+        eventType: 'workflow.action.create_activity',
+        actorType: 'system',
+        objectType: 'activity',
+        objectId: activity.id,
+        afterData: activity,
+        metadata: { origin: 'workflow', action_context: actionContextSummary },
       });
       break;
     }
@@ -639,8 +750,15 @@ async function executeAction(
       if (!channelId) {
         const { getDefaultChannel } = await import('../db/repos/messaging.js');
         const defaultChannel = await getDefaultChannel(db, tenantId);
-        if (defaultChannel) channelId = defaultChannel.id;
+          if (defaultChannel) channelId = defaultChannel.id;
       }
+
+      const actionContextSummary = await getWorkflowActionContextSummary(db, tenantId, action.type, cfg, payload, {
+        channel_id: channelId,
+        recipient: cfg.recipient,
+        subject: notificationSubject,
+        message_preview: notificationBody.slice(0, 200),
+      });
 
       if (channelId) {
         const { sendMessage } = await import('../messaging/delivery.js');
@@ -649,7 +767,7 @@ async function executeAction(
           recipient: cfg.recipient as string | undefined,
           subject: notificationSubject,
           body: notificationBody,
-          metadata: { workflow_run: true },
+          metadata: { workflow_run: true, action_context: actionContextSummary },
         });
 
         await emitEvent(db, {
@@ -665,6 +783,7 @@ async function executeAction(
             message: notificationBody,
             recipient: cfg.recipient,
           },
+          metadata: { origin: 'workflow', action_context: actionContextSummary },
         });
       } else {
         await emitEvent(db, {
@@ -673,6 +792,7 @@ async function executeAction(
           actorType: 'system',
           objectType: 'workflow',
           afterData: { channel: 'internal', message: notificationBody, recipient: cfg.recipient },
+          metadata: { origin: 'workflow', action_context: actionContextSummary },
         });
       }
       break;
@@ -693,15 +813,47 @@ async function executeAction(
         bodyText = generated.body_text || bodyText;
       }
 
+      const subjectRef = workflowSubject({
+        contact_id: cfg.contact_id,
+        account_id: cfg.account_id,
+        opportunity_id: cfg.opportunity_id,
+        use_case_id: cfg.use_case_id,
+        object_type: cfg.object_type ?? (payload as Record<string, unknown> | undefined)?.object_type,
+        object_id: cfg.object_id ?? (payload as Record<string, unknown> | undefined)?.object_id,
+      });
+      const actionContext = subjectRef.subject_type && subjectRef.subject_id
+        ? await getActionContext(db, workflowActionActor(tenantId), {
+          subject_type: subjectRef.subject_type,
+          subject_id: subjectRef.subject_id,
+          context_radius: subjectRef.subject_type === 'account' ? 'account_wide' : 'adjacent',
+          proposed_action: {
+            action_type: 'customer_outreach',
+            object_type: subjectRef.subject_type,
+            payload: {
+              to_address: toAddress,
+              subject,
+              workflow_action: 'send_email',
+            },
+          },
+        }).catch(() => null)
+        : null;
+      const actionContextSummary = actionContext ? summarizeWorkflowActionContext(actionContext) : undefined;
+      const effectiveRequireApproval = requireApproval || actionContext?.guidance.can_execute === false;
+
       let hitlRequestId: string | undefined;
       let status = 'draft';
 
-      if (requireApproval) {
+      if (effectiveRequireApproval) {
         const hitl = await hitlRepo.createHITLRequest(db, tenantId, {
           agent_id: 'system',
           action_type: 'email.send',
           action_summary: `Send email to ${toAddress}: "${subject}"`,
-          action_payload: { to_address: toAddress, subject, body_preview: bodyText.slice(0, 200) },
+          action_payload: {
+            to_address: toAddress,
+            subject,
+            body_preview: bodyText.slice(0, 200),
+            action_context: actionContextSummary,
+          },
         });
         hitlRequestId = hitl.id;
         status = 'pending_approval';
@@ -719,6 +871,11 @@ async function executeAction(
         status,
         hitl_request_id: hitlRequestId,
         created_by: 'system',
+        generation_metadata: {
+          origin: 'workflow',
+          ai_generated: cfg.ai_generate === true,
+          action_context: actionContextSummary,
+        },
       });
 
       await emitEvent(db, {
@@ -728,10 +885,10 @@ async function executeAction(
         objectType: 'email',
         objectId: email.id,
         afterData: { id: email.id, to: email.to_email, subject: email.subject, status: email.status },
-        metadata: { origin: 'workflow' },
+        metadata: { origin: 'workflow', action_context: actionContextSummary },
       });
 
-      if (!requireApproval) {
+      if (!effectiveRequireApproval) {
         const { deliverEmail } = await import('../email/delivery.js');
         await deliverEmail(db, tenantId, email.id);
       }
@@ -742,6 +899,16 @@ async function executeAction(
       const objectId = (cfg.object_id as string) || (payload as Record<string, unknown>)?.id as string;
       const field = cfg.field as string;
       const value = cfg.value;
+      const actionContextSummary = objectType && objectId
+        ? await getWorkflowActionContextSummary(db, tenantId, action.type, {
+          ...cfg,
+          object_type: objectType,
+          object_id: objectId,
+        }, payload, {
+          field,
+          value,
+        })
+        : undefined;
 
       if (objectType && objectId && field) {
         const policy = evaluateActionPolicy({
@@ -764,7 +931,7 @@ async function executeAction(
             agent_id: 'system',
             action_type: 'workflow.update_field',
             action_summary: `Approve workflow update to ${objectType}.${field}`,
-            action_payload: { object_type: objectType, object_id: objectId, field, value, policy },
+            action_payload: { object_type: objectType, object_id: objectId, field, value, policy, action_context: actionContextSummary },
             priority: policy.risk_level === 'high' ? 'high' : 'normal',
             sla_minutes: 1440,
           });
@@ -775,6 +942,7 @@ async function executeAction(
             objectType,
             objectId,
             afterData: { action: 'update_field', field, policy },
+            metadata: { origin: 'workflow', action_context: actionContextSummary },
           });
           break;
         }
@@ -793,6 +961,7 @@ async function executeAction(
       await emitEvent(db, {
         tenantId, eventType: 'workflow.action.update_field', actorType: 'system',
         objectType: objectType || 'workflow', objectId, afterData: cfg,
+        metadata: { origin: 'workflow', action_context: actionContextSummary },
       });
       break;
     }
@@ -802,6 +971,13 @@ async function executeAction(
       const objType = (cfg.object_type as string) || tagPayload?.object_type as string;
       const objId = (cfg.object_id as string) || tagPayload?.id as string;
       const tag = cfg.tag as string;
+      const actionContextSummary = objType && objId
+        ? await getWorkflowActionContextSummary(db, tenantId, action.type, {
+          ...cfg,
+          object_type: objType,
+          object_id: objId,
+        }, payload, { tag })
+        : undefined;
 
       if (objType && objId && tag) {
         const repoMap: Record<string, string> = {
@@ -833,6 +1009,7 @@ async function executeAction(
       await emitEvent(db, {
         tenantId, eventType: `workflow.action.${action.type}`, actorType: 'system',
         objectType: objType || 'workflow', objectId: objId, afterData: cfg,
+        metadata: { origin: 'workflow', action_context: actionContextSummary },
       });
       break;
     }
@@ -841,6 +1018,13 @@ async function executeAction(
       const ownerObjType = (cfg.object_type as string) || ownerPayload?.object_type as string;
       const ownerObjId = (cfg.object_id as string) || ownerPayload?.id as string;
       const ownerId = cfg.owner_id as string;
+      const actionContextSummary = ownerObjType && ownerObjId
+        ? await getWorkflowActionContextSummary(db, tenantId, action.type, {
+          ...cfg,
+          object_type: ownerObjType,
+          object_id: ownerObjId,
+        }, payload, { owner_id: ownerId })
+        : undefined;
 
       if (ownerObjType && ownerObjId && ownerId) {
         const repoMap: Record<string, string> = {
@@ -859,12 +1043,16 @@ async function executeAction(
       await emitEvent(db, {
         tenantId, eventType: 'workflow.action.assign_owner', actorType: 'system',
         objectType: ownerObjType || 'workflow', objectId: ownerObjId, afterData: cfg,
+        metadata: { origin: 'workflow', action_context: actionContextSummary },
       });
       break;
     }
     case 'webhook': {
       const url = cfg.url as string;
       if (!url) throw new Error('webhook action requires a url');
+      const actionContextSummary = await getWorkflowActionContextSummary(db, tenantId, action.type, cfg, payload, {
+        url,
+      });
 
       const body = JSON.stringify({
         event_type: 'workflow.action.webhook',
@@ -873,18 +1061,27 @@ async function executeAction(
         config: cfg,
       });
 
-      const res = await Promise.race([
-        fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body,
-        }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Webhook HTTP request timed out')), ACTION_TIMEOUT_MS)
-        ),
-      ]);
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        signal: AbortSignal.timeout(ACTION_TIMEOUT_MS),
+      }).catch((err) => {
+        if (err instanceof Error && err.name === 'TimeoutError') {
+          throw new Error('Webhook HTTP request timed out');
+        }
+        throw err;
+      });
 
       if (!res.ok) throw new Error(`Webhook returned HTTP ${res.status} ${res.statusText}`);
+      await emitEvent(db, {
+        tenantId,
+        eventType: 'workflow.action.webhook',
+        actorType: 'system',
+        objectType: 'workflow',
+        afterData: { url, status: res.status },
+        metadata: { origin: 'workflow', action_context: actionContextSummary },
+      });
       break;
     }
     case 'wait': {
@@ -965,6 +1162,13 @@ async function executeAction(
         console.warn('[workflow] enroll_in_sequence: missing sequence_id or resolvable contact_id — skipping');
         break;
       }
+      const actionContextSummary = await getWorkflowActionContextSummary(db, tenantId, action.type, {
+        ...cfg,
+        contact_id: contactId,
+      }, payload, {
+        sequence_id: sequenceId,
+        objective: cfg.objective,
+      });
       const { enrollContact, getSequence } = await import('../db/repos/email-sequences.js');
       // Skip if contact already has an active or paused enrollment in this sequence (idempotent)
       const seq = await getSequence(db, tenantId, sequenceId);
@@ -991,7 +1195,7 @@ async function executeAction(
         actorType: 'system',
         objectType: 'sequence_enrollment',
         afterData: { sequence_id: sequenceId, contact_id: contactId, via: 'workflow' },
-        metadata: { origin: 'workflow' },
+        metadata: { origin: 'workflow', action_context: actionContextSummary },
       });
       break;
     }
@@ -1012,17 +1216,41 @@ async function executeAction(
         console.warn('[workflow] request_external_writeback skipped to prevent source loop');
         break;
       }
+      const objectType = String(cfg.object_type ?? (payload as Record<string, unknown>)?.object_type ?? 'unknown');
+      const objectId = (cfg.object_id as UUID | undefined) ?? ((payload as Record<string, unknown>)?.id as UUID | undefined);
+      const writebackPayload = parseObject(cfg.payload);
+      const subjectRef = workflowSubject({
+        object_type: objectType,
+        object_id: objectId,
+      });
+      const actionContext = subjectRef.subject_type && subjectRef.subject_id
+        ? await getActionContext(db, workflowActionActor(tenantId), {
+          subject_type: subjectRef.subject_type,
+          subject_id: subjectRef.subject_id,
+          context_radius: subjectRef.subject_type === 'account' ? 'account_wide' : 'adjacent',
+          proposed_action: {
+            action_type: 'external_writeback',
+            object_type: subjectRef.subject_type,
+            system_id: cfg.system_id as UUID | undefined,
+            mapping_id: cfg.mapping_id as UUID | undefined,
+            external_object: typeof cfg.external_object === 'string' ? cfg.external_object : undefined,
+            payload: writebackPayload,
+          },
+        }).catch(() => null)
+        : null;
+      const actionContextSummary = actionContext ? summarizeWorkflowActionContext(actionContext) : undefined;
       const writeback = await requestExternalWriteback(db, tenantId, 'workflow', {
         system_id: cfg.system_id as UUID,
         mapping_id: cfg.mapping_id as UUID | undefined,
-        object_type: String(cfg.object_type ?? (payload as Record<string, unknown>)?.object_type ?? 'unknown'),
-        object_id: (cfg.object_id as UUID | undefined) ?? ((payload as Record<string, unknown>)?.id as UUID | undefined),
+        object_type: objectType,
+        object_id: objectId,
         external_object: String(cfg.external_object ?? ''),
         external_record_id: cfg.external_record_id as string | undefined,
         operation: (cfg.operation as 'create' | 'update' | 'upsert' | 'append_event' | 'stored_procedure') ?? 'upsert',
         writeback_mode: (cfg.writeback_mode as 'append_event' | 'mapped_upsert' | 'stored_procedure') ?? 'mapped_upsert',
-        payload: parseObject(cfg.payload),
-        require_approval: cfg.require_approval !== false,
+        payload: writebackPayload,
+        require_approval: cfg.require_approval !== false || actionContext?.guidance.can_execute === false,
+        action_context: actionContextSummary,
         idempotency_key: (cfg.idempotency_key as string | undefined)
           ?? [
             'workflow',
@@ -1039,7 +1267,12 @@ async function executeAction(
         objectType: 'external_writeback',
         objectId: writeback.id,
         afterData: writeback,
-        metadata: { origin: 'workflow', system_id: writeback.system_id, external_record_id: writeback.external_record_id },
+        metadata: {
+          origin: 'workflow',
+          system_id: writeback.system_id,
+          external_record_id: writeback.external_record_id,
+          action_context: actionContextSummary,
+        },
       });
       break;
     }
@@ -1063,11 +1296,15 @@ async function executeAction(
     }
     case 'create_sync_conflict_review': {
       const hitlRepo = await import('../db/repos/hitl.js');
+      const actionContextSummary = await getWorkflowActionContextSummary(db, tenantId, action.type, cfg, payload, {
+        title: cfg.title,
+        priority: cfg.priority,
+      });
       await hitlRepo.createHITLRequest(db, tenantId, {
         agent_id: 'workflow',
         action_type: 'sync.conflict.review',
         action_summary: String(cfg.title ?? 'Review system-of-record sync conflict'),
-        action_payload: { ...cfg, event_payload: payload },
+        action_payload: { ...cfg, event_payload: payload, action_context: actionContextSummary },
         priority: (cfg.priority as 'low' | 'normal' | 'high' | 'urgent' | undefined) ?? 'normal',
       });
       break;
@@ -1134,6 +1371,15 @@ async function executeAction(
       const title        = interpolate(String(cfg.title ?? 'Human review requested'), variableContext);
       const instructions = cfg.instructions ? interpolate(String(cfg.instructions), variableContext) : undefined;
       const priority     = (cfg.priority as string | undefined) ?? 'normal';
+      const eventPayload = payload as Record<string, unknown> | undefined;
+      const actionContextSummary = await getWorkflowActionContextSummary(db, tenantId, action.type, {
+        ...cfg,
+        subject_type: cfg.subject_type ?? eventPayload?.subject_type ?? eventPayload?.object_type,
+        subject_id: cfg.subject_id ?? eventPayload?.subject_id ?? eventPayload?.object_id ?? eventPayload?.id,
+      }, payload, {
+        title,
+        priority,
+      });
       await hitlRepo.createHITLRequest(db, tenantId, {
         agent_id:       'workflow',
         action_type:    'workflow.checkpoint',
@@ -1143,6 +1389,7 @@ async function executeAction(
           priority,
           subject_type: (payload as Record<string, unknown>)?.subject_type ?? undefined,
           subject_id:   (payload as Record<string, unknown>)?.id ?? undefined,
+          action_context: actionContextSummary,
         },
         priority: priority as 'normal' | 'high' | 'urgent' | undefined,
       });

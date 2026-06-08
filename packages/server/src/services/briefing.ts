@@ -196,11 +196,11 @@ async function resolveRadiusSubjects(
       // Single UNION ALL query instead of two separate repo calls (avoids N+1).
       // Caps to 50 contacts + 20 opportunities to keep briefing manageable.
       const accountRows = await db.query<{ subject_type: string; subject_id: UUID }>(
-        `(SELECT 'contact'     AS subject_type, id AS subject_id
-          FROM contacts      WHERE tenant_id = $1 AND account_id = $2 LIMIT 50)
-         UNION ALL
-         (SELECT 'opportunity' AS subject_type, id AS subject_id
-          FROM opportunities  WHERE tenant_id = $1 AND account_id = $2 LIMIT 20)`,
+	        `(SELECT 'contact'     AS subject_type, id AS subject_id
+	          FROM contacts      WHERE tenant_id = $1 AND account_id = $2 AND archived_at IS NULL LIMIT 50)
+	         UNION ALL
+	         (SELECT 'opportunity' AS subject_type, id AS subject_id
+	          FROM opportunities  WHERE tenant_id = $1 AND account_id = $2 AND archived_at IS NULL LIMIT 20)`,
         [tenantId, accountId],
       );
       for (const row of accountRows.rows) {
@@ -488,8 +488,8 @@ async function getRelatedObjects(
         const contact = await contactRepo.getContact(db, tenantId, subject.contact_id as UUID);
         if (contact) related.contacts = [contact];
       }
-      const ucResult = await db.query(
-        `SELECT * FROM use_cases WHERE tenant_id = $1 AND opportunity_id = $2 LIMIT 10`,
+	      const ucResult = await db.query(
+	        `SELECT * FROM use_cases WHERE tenant_id = $1 AND opportunity_id = $2 AND archived_at IS NULL LIMIT 10`,
         [tenantId, subjectId],
       );
       if (ucResult.rows.length) related.use_cases = ucResult.rows;

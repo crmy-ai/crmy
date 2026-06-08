@@ -59,6 +59,7 @@ interface SyncStats {
 }
 
 const SOURCE_SYNC_MAX_PAGES = Math.max(1, Number(process.env.SOURCE_SYNC_MAX_PAGES ?? 10));
+const SOURCE_SYNC_FETCH_TIMEOUT_MS = Number(process.env.SOURCE_SYNC_FETCH_TIMEOUT_MS ?? 30_000);
 
 function defaultStats(): SyncStats {
   return {
@@ -82,7 +83,7 @@ function base64url(input: Buffer | string): string {
 }
 
 function signingSecret(): string {
-  return process.env.JWT_SECRET ?? process.env.AGENT_ENCRYPTION_KEY ?? 'crmy-dev-oauth-state';
+  return process.env.JWT_SECRET ?? process.env.CRMY_ENCRYPTION_KEY ?? process.env.AGENT_ENCRYPTION_KEY ?? 'crmy-dev-oauth-state';
 }
 
 function signState(payload: string): string {
@@ -117,6 +118,21 @@ function envFirst(names: string[]): string | undefined {
 
 function appBaseUrl(reqOrigin?: string): string {
   return (envFirst(['CRMY_PUBLIC_URL', 'APP_BASE_URL', 'PUBLIC_APP_URL']) ?? reqOrigin ?? 'http://localhost:3000').replace(/\/$/, '');
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs = SOURCE_SYNC_FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`Provider API request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function oauthConfig(kind: SourceKind, provider: Provider, reqOrigin?: string): OAuthConfig | null {
@@ -178,7 +194,7 @@ async function exchangeCode(kind: SourceKind, provider: Provider, code: string, 
     redirect_uri: config.redirectUri,
     grant_type: 'authorization_code',
   });
-  const response = await fetch(config.tokenUrl, {
+  const response = await fetchWithTimeout(config.tokenUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
@@ -201,7 +217,7 @@ async function refreshAccessToken(
     refresh_token: refreshToken,
     grant_type: 'refresh_token',
   });
-  const response = await fetch(config.tokenUrl, {
+  const response = await fetchWithTimeout(config.tokenUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
@@ -365,7 +381,7 @@ function gmailText(payload: any): { text: string; html?: string } {
 }
 
 async function fetchJson(url: string, token: string): Promise<any> {
-  const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  const response = await fetchWithTimeout(url, { headers: { authorization: `Bearer ${token}` } });
   if (!response.ok) throw new Error(`Provider API request failed (${response.status})`);
   return await response.json();
 }

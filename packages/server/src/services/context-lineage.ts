@@ -55,6 +55,149 @@ function metadataStringArray(metadata: unknown, key: string): string[] {
   return value.filter((item): item is string => typeof item === 'string');
 }
 
+function metadataRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function nestedMetadataRecord(value: unknown, keys: string[]): Record<string, unknown> | null {
+  let current: unknown = value;
+  for (const key of keys) {
+    const record = metadataRecord(current);
+    if (!record) return null;
+    current = record[key];
+  }
+  return metadataRecord(current);
+}
+
+function nestedMetadataString(value: unknown, keys: string[]): string | null {
+  let current: unknown = value;
+  for (const key of keys) {
+    const record = metadataRecord(current);
+    if (!record) return null;
+    current = record[key];
+  }
+  return typeof current === 'string' && current.trim() ? current : null;
+}
+
+function nestedMetadataStringArray(value: unknown, keys: string[]): string[] {
+  let current: unknown = value;
+  for (const key of keys) {
+    const record = metadataRecord(current);
+    if (!record) return [];
+    current = record[key];
+  }
+  if (!Array.isArray(current)) return [];
+  return current.filter((item): item is string => typeof item === 'string');
+}
+
+function nestedMetadataNumber(value: unknown, keys: string[]): number | null {
+  let current: unknown = value;
+  for (const key of keys) {
+    const record = metadataRecord(current);
+    if (!record) return null;
+    current = record[key];
+  }
+  const numeric = typeof current === 'number' ? current : typeof current === 'string' ? Number(current) : NaN;
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function directMetadataString(value: unknown, key: string): string | null {
+  const record = metadataRecord(value);
+  const current = record?.[key];
+  return typeof current === 'string' && current.trim() ? current : null;
+}
+
+function actionReceiptOrigin(event: Record<string, unknown>): string | null {
+  return directMetadataString(event.metadata, 'origin')
+    ?? directMetadataString(event.after_data, 'origin')
+    ?? null;
+}
+
+function actionReceiptPresentation(event: Record<string, unknown>): {
+  label: string;
+  stage: 'action' | 'audit';
+  display_order: number;
+  description: string;
+} {
+  const eventType = String(event.event_type ?? '');
+  const objectType = String(event.object_type ?? '');
+  const origin = actionReceiptOrigin(event);
+
+  if (origin === 'workflow' || eventType.startsWith('workflow.')) {
+    return {
+      label: 'Workflow action receipt',
+      stage: 'action',
+      display_order: 46,
+      description: 'Workflow action produced with Action Context proof.',
+    };
+  }
+  if (origin === 'sequence' || eventType.startsWith('sequence.')) {
+    return {
+      label: 'Sequence action receipt',
+      stage: 'action',
+      display_order: 46,
+      description: 'Sequence action produced with Action Context proof.',
+    };
+  }
+  if (eventType.startsWith('email.')) {
+    return {
+      label: 'Email action receipt',
+      stage: 'action',
+      display_order: 46,
+      description: 'Customer email draft or send action produced with Action Context proof.',
+    };
+  }
+  if (objectType === 'external_writeback' || eventType.startsWith('system_writeback.')) {
+    return {
+      label: 'Writeback audit receipt',
+      stage: 'audit',
+      display_order: 50,
+      description: 'System-of-record writeback receipt tied to Action Context proof.',
+    };
+  }
+  if (objectType === 'hitl_request' || eventType.startsWith('hitl.')) {
+    return {
+      label: 'Handoff audit receipt',
+      stage: 'audit',
+      display_order: 50,
+      description: 'Handoff decision receipt tied to Action Context proof.',
+    };
+  }
+  return {
+    label: label(eventType, 'Action receipt'),
+    stage: 'audit',
+    display_order: 50,
+    description: 'Action receipt produced after Action Context was retrieved.',
+  };
+}
+
+function actionReceiptTargetIds(event: Record<string, unknown>): string[] {
+  const ids = new Set<string>();
+  const objectType = typeof event.object_type === 'string' ? event.object_type : null;
+  const objectId = typeof event.object_id === 'string' ? event.object_id : null;
+  if (objectType && objectId && uuidLike(objectId)) {
+    ids.add(lineageNodeIdForObject(objectType, objectId));
+  }
+
+  const metadataHitlId = directMetadataString(event.metadata, 'hitl_request_id');
+  if (uuidLike(metadataHitlId)) ids.add(`handoff:${metadataHitlId}`);
+
+  const afterData = metadataRecord(event.after_data);
+  const afterHitlId = typeof afterData?.hitl_request_id === 'string' ? afterData.hitl_request_id : null;
+  if (uuidLike(afterHitlId)) ids.add(`handoff:${afterHitlId}`);
+  const actionPayload = metadataRecord(afterData?.action_payload);
+  const payloadWritebackId = typeof actionPayload?.writeback_id === 'string' ? actionPayload.writeback_id : null;
+  if (uuidLike(payloadWritebackId)) ids.add(`writeback:${payloadWritebackId}`);
+  const payloadActivityId = typeof actionPayload?.activity_id === 'string' ? actionPayload.activity_id : null;
+  if (uuidLike(payloadActivityId)) ids.add(`activity:${payloadActivityId}`);
+
+  const afterActivityId = typeof afterData?.activity_id === 'string' ? afterData.activity_id : null;
+  if (uuidLike(afterActivityId)) ids.add(`activity:${afterActivityId}`);
+
+  return [...ids];
+}
+
 export async function getContextLineage(
   db: DbPool,
   tenantId: UUID | string,
@@ -520,6 +663,157 @@ export async function getContextLineage(
     }
   }
 
+  const actionReceiptClauses: string[] = [];
+  const actionReceiptParams: unknown[] = [tenantId];
+  let actionReceiptIdx = 2;
+  if (query.subject_type && query.subject_id) {
+    actionReceiptClauses.push(`(
+      metadata->'action_context'->>'subject_type' = $${actionReceiptIdx++}
+      AND metadata->'action_context'->>'subject_id' = $${actionReceiptIdx++}
+    )`);
+    actionReceiptParams.push(query.subject_type, query.subject_id);
+  }
+  if (contextIds.size > 0) {
+    actionReceiptClauses.push(`(coalesce(metadata->'action_context'->'proof'->'used_context_entry_ids', '[]'::jsonb) ?| $${actionReceiptIdx++}::text[])`);
+    actionReceiptParams.push([...contextIds]);
+  }
+  if (groupIds.size > 0) {
+    actionReceiptClauses.push(`(coalesce(metadata->'action_context'->'proof'->'used_signal_group_ids', '[]'::jsonb) ?| $${actionReceiptIdx++}::text[])`);
+    actionReceiptParams.push([...groupIds]);
+  }
+  if (actionReceiptClauses.length > 0) {
+    actionReceiptParams.push(100);
+    const actionReceiptEvents = await db.query(
+      `SELECT id, event_type, actor_id, actor_type, object_type, object_id, after_data, metadata, created_at
+       FROM events
+       WHERE tenant_id = $1
+         AND event_type <> 'action_context.retrieved'
+         AND metadata ? 'action_context'
+         AND (${actionReceiptClauses.join(' OR ')})
+       ORDER BY created_at DESC
+       LIMIT $${actionReceiptIdx}`,
+      actionReceiptParams,
+    ).catch(() => ({ rows: [] as Record<string, unknown>[] }));
+
+    for (const event of actionReceiptEvents.rows) {
+      const actionContext = nestedMetadataRecord(event.metadata, ['action_context']);
+      const subjectType = nestedMetadataString(event.metadata, ['action_context', 'subject_type']);
+      const subjectId = nestedMetadataString(event.metadata, ['action_context', 'subject_id']);
+      const presentation = actionReceiptPresentation(event);
+      const afterData = metadataRecord(event.after_data);
+      if (event.object_type === 'hitl_request' && uuidLike(event.object_id)) {
+        addNode(nodes, {
+          id: `handoff:${event.object_id}`,
+          type: 'handoff',
+          label: label(afterData?.action_summary, 'Handoff'),
+          timestamp: typeof afterData?.created_at === 'string' ? afterData.created_at : event.created_at as string,
+          status: typeof afterData?.status === 'string' ? afterData.status : String(event.event_type ?? 'handoff'),
+          object_id: String(event.object_id),
+          stage: 'action',
+          display_order: 40,
+          description: 'Human review for a Signal, writeback, or high-impact agent decision.',
+          data: afterData ?? event,
+        });
+      }
+      if (event.object_type === 'external_writeback' && uuidLike(event.object_id)) {
+        addNode(nodes, {
+          id: `writeback:${event.object_id}`,
+          type: 'writeback',
+          label: `${afterData?.operation ?? 'writeback'} ${afterData?.external_object ?? 'system record'}`,
+          timestamp: typeof afterData?.executed_at === 'string'
+            ? afterData.executed_at
+            : typeof afterData?.created_at === 'string'
+              ? afterData.created_at
+              : event.created_at as string,
+          status: typeof afterData?.status === 'string' ? afterData.status : String(event.event_type ?? 'writeback'),
+          subject_type: typeof afterData?.object_type === 'string' ? afterData.object_type as never : undefined,
+          subject_id: uuidLike(afterData?.object_id) ? afterData.object_id as never : undefined,
+          object_id: String(event.object_id),
+          stage: 'action',
+          display_order: 45,
+          description: 'Governed system-of-record writeback request or execution.',
+          data: afterData ?? event,
+        });
+      }
+      if (uuidLike(afterData?.activity_id)) {
+        addNode(nodes, {
+          id: `activity:${afterData.activity_id}`,
+          type: 'activity',
+          label: 'Activity created by action',
+          timestamp: event.created_at as string,
+          status: String(event.event_type ?? 'activity'),
+          object_id: afterData.activity_id,
+          stage: 'action',
+          display_order: 46,
+          description: 'Customer activity created by an approved or automated action.',
+          data: { id: afterData.activity_id, source_event: event },
+        });
+      }
+      addNode(nodes, {
+        id: `audit:${event.id}`,
+        type: 'audit',
+        label: presentation.label,
+        timestamp: event.created_at as string,
+        status: String(event.object_type ?? 'action'),
+        subject_type: subjectKey(subjectType, subjectId) ? subjectType as never : undefined,
+        subject_id: subjectKey(subjectType, subjectId) ? subjectId as never : undefined,
+        object_id: String(event.id),
+        stage: presentation.stage,
+        display_order: presentation.display_order,
+        description: presentation.description,
+        data: event,
+      });
+
+      const retrievalEventId = nestedMetadataNumber(actionContext, ['proof', 'retrieval_event_id']);
+      if (retrievalEventId !== null && nodes.has(`retrieval:${retrievalEventId}`)) {
+        addEdge(edges, {
+          id: `retrieval-action-receipt:${retrievalEventId}:${event.id}`,
+          source: `retrieval:${retrievalEventId}`,
+          target: `audit:${event.id}`,
+          relation: 'informed_action',
+          data: { label: 'informed action' },
+        });
+      }
+      for (const targetNodeId of actionReceiptTargetIds(event)) {
+        if (!nodes.has(targetNodeId)) continue;
+        if (retrievalEventId !== null && nodes.has(`retrieval:${retrievalEventId}`)) {
+          addEdge(edges, {
+            id: `retrieval-action-target:${retrievalEventId}:${targetNodeId}`,
+            source: `retrieval:${retrievalEventId}`,
+            target: targetNodeId,
+            relation: 'informed_action',
+            data: { label: 'informed action' },
+          });
+        }
+        addEdge(edges, {
+          id: `action-target-receipt:${targetNodeId}:${event.id}`,
+          source: targetNodeId,
+          target: `audit:${event.id}`,
+          relation: 'receipted',
+          data: { label: 'receipt' },
+        });
+      }
+      for (const contextId of nestedMetadataStringArray(actionContext, ['proof', 'used_context_entry_ids'])) {
+        addEdge(edges, {
+          id: `context-action-proof:${contextId}:${event.id}`,
+          source: `context:${contextId}`,
+          target: `audit:${event.id}`,
+          relation: 'used_as_proof',
+          data: { label: 'used as proof' },
+        });
+      }
+      for (const groupId of nestedMetadataStringArray(actionContext, ['proof', 'used_signal_group_ids'])) {
+        addEdge(edges, {
+          id: `signal-group-action-proof:${groupId}:${event.id}`,
+          source: `signal_group:${groupId}`,
+          target: `audit:${event.id}`,
+          relation: 'used_as_proof',
+          data: { label: 'used as proof' },
+        });
+      }
+    }
+  }
+
   const subjectPairs = new Set<string>();
   if (query.subject_type && query.subject_id) {
     const key = subjectKey(query.subject_type, query.subject_id);
@@ -649,6 +943,7 @@ export async function getContextLineage(
       signal_groups: nodeList.filter(node => node.type === 'signal_group').length,
       memory: nodeList.filter(node => node.type === 'memory').length,
       retrievals: nodeList.filter(node => node.type === 'retrieval').length,
+      action_receipts: nodeList.filter(node => node.type === 'audit' && node.stage === 'action').length,
       handoffs: nodeList.filter(node => node.type === 'handoff').length,
       writebacks: nodeList.filter(node => node.type === 'writeback').length,
       audit_events: nodeList.filter(node => node.type === 'audit').length,

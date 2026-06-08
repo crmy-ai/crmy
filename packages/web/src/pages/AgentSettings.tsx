@@ -47,6 +47,28 @@ function estimateCostPerTurn(maxTokens: number, inputPricePerM: number, outputPr
   return `~$${cost.toFixed(3)} / turn`;
 }
 
+const DEFAULT_SIGNAL_SOURCE_QUALITY = {
+  high: 1,
+  medium: 0.9,
+  lower: 0.75,
+  fallback: 0.85,
+};
+
+type SignalSourceQualityKey = 'high' | 'medium' | 'lower';
+
+const SOURCE_QUALITY_ROWS: Array<{ key: SignalSourceQualityKey; label: string; detail: string }> = [
+  { key: 'high', label: 'High quality sources', detail: 'Customer email, CRM sync, and warehouse sync.' },
+  { key: 'medium', label: 'Medium quality sources', detail: 'Transcripts, meetings, notes, manual Add Context, MCP, support, product usage, Slack, and other trusted operational sources.' },
+  { key: 'lower', label: 'Lower quality sources', detail: 'Research and external sources that are useful but need more confirmation.' },
+];
+
+function normalizeSourceQualitySettings(value?: Record<string, number> | null) {
+  return {
+    ...DEFAULT_SIGNAL_SOURCE_QUALITY,
+    ...(value ?? {}),
+  };
+}
+
 const defaultSystemPrompt = `You are a CRMy workspace assistant with direct API access to typed revenue objects, customer context, and scoped operational tools.
 
 CORE RULES:
@@ -127,6 +149,7 @@ export default function AgentSettings() {
   const [autoExtractContext,  setAutoExtractContext]  = useState(true);
   const [autoPromoteSignals,  setAutoPromoteSignals]  = useState(true);
   const [signalPromotionThreshold, setSignalPromotionThreshold] = useState(0.85);
+  const [signalSourceQuality, setSignalSourceQuality] = useState(DEFAULT_SIGNAL_SOURCE_QUALITY);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // ── Danger Zone ──────────────────────────────────────────────────────────
@@ -169,6 +192,7 @@ export default function AgentSettings() {
     setAutoExtractContext(config.auto_extract_context !== false); // default true
     setAutoPromoteSignals(config.auto_promote_signals !== false);
     setSignalPromotionThreshold(Number(config.signal_auto_promote_threshold ?? 0.85));
+    setSignalSourceQuality(normalizeSourceQualitySettings(config.signal_source_quality));
   }, [config]);
 
   // Focus textarea when prompt editor opens
@@ -191,12 +215,14 @@ export default function AgentSettings() {
       return;
     }
 
-    setPriceSource('unknown');
+	    setPriceSource('unknown');
 
-    if (provider === 'openrouter') {
-      let cancelled = false;
-      fetch('https://openrouter.ai/api/v1/models')
-        .then(r => r.ok ? r.json() : null)
+	    if (provider === 'openrouter') {
+	      let cancelled = false;
+	      const controller = new AbortController();
+	      const timeout = window.setTimeout(() => controller.abort(), 10_000);
+	      fetch('https://openrouter.ai/api/v1/models', { signal: controller.signal })
+	        .then(r => r.ok ? r.json() : null)
         .then((json: { data?: { id: string; pricing?: { prompt?: string; completion?: string } }[] } | null) => {
           if (cancelled || !json?.data) return;
           const found = json.data.find(m => m.id === modelKey);
@@ -209,10 +235,15 @@ export default function AgentSettings() {
             setOutputPricePerM(out.toFixed(out < 1 ? 4 : 2));
             setPriceSource('openrouter');
           }
-        })
-        .catch(() => { /* keep static prices on network failure */ });
-      return () => { cancelled = true; };
-    }
+	        })
+	        .catch(() => { /* keep static prices on network failure */ })
+	        .finally(() => window.clearTimeout(timeout));
+	      return () => {
+	        cancelled = true;
+	        window.clearTimeout(timeout);
+	        controller.abort();
+	      };
+	    }
   }, [provider, modelId, customModel]);
 
   // ── Derived values ────────────────────────────────────────────────────────
@@ -249,6 +280,7 @@ export default function AgentSettings() {
       auto_extract_context:   autoExtractContext,
       auto_promote_signals:   autoPromoteSignals,
       signal_auto_promote_threshold: signalPromotionThreshold,
+      signal_source_quality: signalSourceQuality,
       backup_enabled:        backupEnabled,
       backup_provider:       backupProvider,
       backup_base_url:       backupBaseUrl,
@@ -1150,11 +1182,45 @@ export default function AgentSettings() {
                   Readiness scores combine extracted confidence, source quality, supporting evidence, independent sources, and conflicts. Items below this threshold stay as Signals unless a user confirms them or sends them to Handoff.
                 </div>
                 <details className="rounded-lg border border-border bg-card p-3 text-xs text-muted-foreground">
-                  <summary className="cursor-pointer font-semibold text-foreground">Advanced source quality defaults</summary>
-                  <div className="mt-3 space-y-2">
-                    <p><span className="font-medium text-foreground">High source quality:</span> activities, transcripts, email, CRM sync, and warehouse sync.</p>
-                    <p><span className="font-medium text-foreground">Medium source quality:</span> MCP, Slack, support, product usage, and manual Add Context.</p>
-                    <p><span className="font-medium text-foreground">Lower source quality:</span> research and external sources.</p>
+                  <summary className="cursor-pointer font-semibold text-foreground">Source quality for Signal readiness</summary>
+                  <div className="mt-3 space-y-4">
+                    <p>
+                      Source quality helps CRMy decide whether a Signal is ready for Memory or needs review. Higher values give that source more weight; lower values require more supporting evidence.
+                    </p>
+                    {SOURCE_QUALITY_ROWS.map(row => (
+                      <div key={row.key} className="rounded-lg border border-border bg-background/60 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-foreground">{row.label}</p>
+                            <p className="mt-1">{row.detail}</p>
+                          </div>
+                          <span className="font-semibold text-primary tabular-nums">{Math.round(signalSourceQuality[row.key] * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.4"
+                          max="1"
+                          step="0.01"
+                          value={signalSourceQuality[row.key]}
+                          onChange={(e) => {
+                            const value = Number(e.target.value);
+                            setSignalSourceQuality(prev => ({ ...prev, [row.key]: value }));
+                          }}
+                          onBlur={async (e) => {
+                            const value = Number(e.target.value);
+                            const next = { ...signalSourceQuality, [row.key]: value };
+                            setSignalSourceQuality(next);
+                            try {
+                              await saveConfig.mutateAsync({ signal_source_quality: next });
+                            } catch {
+                              toast({ title: 'Failed to save source quality', variant: 'destructive' });
+                            }
+                          }}
+                          className="mt-3 w-full accent-primary"
+                          aria-label={`${row.label} source quality`}
+                        />
+                      </div>
+                    ))}
                   </div>
                 </details>
               </div>

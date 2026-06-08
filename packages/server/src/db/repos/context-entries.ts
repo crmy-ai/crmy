@@ -274,10 +274,10 @@ export async function fullTextSearch(
       conditions.push('FALSE');
     } else {
       conditions.push(`(
-        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = c.tenant_id AND c.subject_type = 'account' AND a.id = c.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.tenant_id = c.tenant_id AND c.subject_type = 'contact' AND ct.id = c.subject_id AND ct.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = c.tenant_id AND c.subject_type = 'opportunity' AND o.id = c.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = c.tenant_id AND c.subject_type = 'use_case' AND uc.id = c.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
+	        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = c.tenant_id AND c.subject_type = 'account' AND a.id = c.subject_id AND a.owner_id = ANY($${idx}::uuid[]) AND a.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.tenant_id = c.tenant_id AND c.subject_type = 'contact' AND ct.id = c.subject_id AND ct.owner_id = ANY($${idx}::uuid[]) AND ct.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = c.tenant_id AND c.subject_type = 'opportunity' AND o.id = c.subject_id AND o.owner_id = ANY($${idx}::uuid[]) AND o.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = c.tenant_id AND c.subject_type = 'use_case' AND uc.id = c.subject_id AND uc.owner_id = ANY($${idx}::uuid[]) AND uc.archived_at IS NULL)
       )`);
       params.push(filters.owner_ids);
       idx++;
@@ -574,10 +574,10 @@ export async function listStaleEntries(
       conditions.push('FALSE');
     } else {
       conditions.push(`(
-        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = c.tenant_id AND c.subject_type = 'account' AND a.id = c.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.tenant_id = c.tenant_id AND c.subject_type = 'contact' AND ct.id = c.subject_id AND ct.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = c.tenant_id AND c.subject_type = 'opportunity' AND o.id = c.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = c.tenant_id AND c.subject_type = 'use_case' AND uc.id = c.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
+	        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = c.tenant_id AND c.subject_type = 'account' AND a.id = c.subject_id AND a.owner_id = ANY($${idx}::uuid[]) AND a.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.tenant_id = c.tenant_id AND c.subject_type = 'contact' AND ct.id = c.subject_id AND ct.owner_id = ANY($${idx}::uuid[]) AND ct.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = c.tenant_id AND c.subject_type = 'opportunity' AND o.id = c.subject_id AND o.owner_id = ANY($${idx}::uuid[]) AND o.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = c.tenant_id AND c.subject_type = 'use_case' AND uc.id = c.subject_id AND uc.owner_id = ANY($${idx}::uuid[]) AND uc.archived_at IS NULL)
       )`);
       params.push(filters.owner_ids);
       idx++;
@@ -687,10 +687,10 @@ export async function searchContextEntries(
       conditions.push('FALSE');
     } else {
       conditions.push(`(
-        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = c.tenant_id AND c.subject_type = 'account' AND a.id = c.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.tenant_id = c.tenant_id AND c.subject_type = 'contact' AND ct.id = c.subject_id AND ct.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = c.tenant_id AND c.subject_type = 'opportunity' AND o.id = c.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = c.tenant_id AND c.subject_type = 'use_case' AND uc.id = c.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
+	        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = c.tenant_id AND c.subject_type = 'account' AND a.id = c.subject_id AND a.owner_id = ANY($${idx}::uuid[]) AND a.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.tenant_id = c.tenant_id AND c.subject_type = 'contact' AND ct.id = c.subject_id AND ct.owner_id = ANY($${idx}::uuid[]) AND ct.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = c.tenant_id AND c.subject_type = 'opportunity' AND o.id = c.subject_id AND o.owner_id = ANY($${idx}::uuid[]) AND o.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = c.tenant_id AND c.subject_type = 'use_case' AND uc.id = c.subject_id AND uc.owner_id = ANY($${idx}::uuid[]) AND uc.archived_at IS NULL)
       )`);
       params.push(filters.owner_ids);
       idx++;
@@ -817,10 +817,10 @@ export async function semanticSearch(
       conditions.push('FALSE');
     } else {
       conditions.push(`(
-        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = c.tenant_id AND c.subject_type = 'account' AND a.id = c.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.tenant_id = c.tenant_id AND c.subject_type = 'contact' AND ct.id = c.subject_id AND ct.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = c.tenant_id AND c.subject_type = 'opportunity' AND o.id = c.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = c.tenant_id AND c.subject_type = 'use_case' AND uc.id = c.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
+	        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = c.tenant_id AND c.subject_type = 'account' AND a.id = c.subject_id AND a.owner_id = ANY($${idx}::uuid[]) AND a.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM contacts ct WHERE ct.tenant_id = c.tenant_id AND c.subject_type = 'contact' AND ct.id = c.subject_id AND ct.owner_id = ANY($${idx}::uuid[]) AND ct.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = c.tenant_id AND c.subject_type = 'opportunity' AND o.id = c.subject_id AND o.owner_id = ANY($${idx}::uuid[]) AND o.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = c.tenant_id AND c.subject_type = 'use_case' AND uc.id = c.subject_id AND uc.owner_id = ANY($${idx}::uuid[]) AND uc.archived_at IS NULL)
       )`);
       params.push(filters.owner_ids);
       idx++;

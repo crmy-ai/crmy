@@ -30,8 +30,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  cancelAgentTurn, createAgentTurn, deleteAgentAttachment, streamAgentTurn,
-  uploadAgentAttachment, groupToolMessages,
+	  cancelAgentTurn, createAgentTurn, deleteAgentAttachment, streamAgentTurn,
+	  uploadAgentAttachment, groupToolMessages, getAgentSession,
   SYSTEM_INIT_PREFIX, COMPACT_SUMMARY_PREFIX, COMPACT_ACK_PREFIX, ATTACHED_CONTEXT_PREFIX,
   type AgentAttachmentSummary, type AgentTurnSummary,
   type DisplayMessage, type RenderItem, type ToolGroupItem, type ToolGroupStep, type SSEEvent,
@@ -515,6 +515,7 @@ export default function Agent() {
   const [isSessionPending, setIsSessionPending] = useState(false);
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [currentTurnId, setCurrentTurnId] = useState<string | null>(null);
+  const [activeTurnMeta, setActiveTurnMeta] = useState<AgentSessionSummary['active_turn'] | null>(null);
   const [attachments, setAttachments] = useState<AgentAttachmentSummary[]>([]);
   const [attachmentMode, setAttachmentMode] = useState<'active_context' | 'raw_context'>('active_context');
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
@@ -606,6 +607,7 @@ export default function Agent() {
     setActiveSessionId(session.id);
     setIsSessionPending(false);
     setCurrentTurnId(null);
+    setActiveTurnMeta(null);
     setTask(null);
     setMemoryProposals([]);
     setAttachments([]);
@@ -615,32 +617,28 @@ export default function Agent() {
       name: session.context_name ?? '',
     } : null));
 
-    const token = localStorage.getItem('crmy_token');
     try {
-      const res = await fetch(`/api/v1/agent/sessions/${session.id}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (res.ok) {
-        const { data } = await res.json();
-        const rawMsgs: { role: string; content: string }[] = data.messages ?? [];
-        const display = rawMsgsToDisplay(rawMsgs);
-        if (data.active_turn?.input_message) {
-          setMessages([...display, { kind: 'user', content: data.active_turn.input_message }]);
-          setIsSessionPending(true);
-          setCurrentTurnId(data.active_turn.id);
-        } else {
-          setMessages(display);
-        }
-        setAttachments(data.attachments ?? []);
+      const data = await getAgentSession(session.id);
+      const rawMsgs: { role: string; content: string }[] = data.messages ?? [];
+      const display = rawMsgsToDisplay(rawMsgs);
+      if (data.active_turn?.input_message) {
+        setMessages([...display, { kind: 'user', content: data.active_turn.input_message }]);
+        setIsSessionPending(true);
+        setCurrentTurnId(data.active_turn.id);
+        setActiveTurnMeta(data.active_turn);
+      } else {
+        setMessages(display);
+        setActiveTurnMeta(null);
+      }
+      setAttachments(data.attachments ?? []);
 
-        // Detect an incomplete turn: if the last meaningful message is from the user,
-        // the server is still (or was) working on a response. Start polling.
-        const lastMeaningful = [...rawMsgs]
-          .reverse()
-          .find(m => isVisibleMsg(m));
-        if (lastMeaningful?.role === 'user' || data.active_turn) {
-          setIsSessionPending(true);
-        }
+      // Detect an incomplete turn: if the last meaningful message is from the user,
+      // the server is still (or was) working on a response. Start polling.
+      const lastMeaningful = [...rawMsgs]
+        .reverse()
+        .find(m => isVisibleMsg(m));
+      if (lastMeaningful?.role === 'user' || data.active_turn) {
+        setIsSessionPending(true);
       }
     } catch { /* ignore */ }
   }, []);
@@ -656,6 +654,7 @@ export default function Agent() {
     setActiveSessionId(null);
     setIsSessionPending(false);
     setCurrentTurnId(null);
+    setActiveTurnMeta(null);
     setLastSentMessage('');
     setTask(null);
     setMemoryProposals([]);
@@ -696,6 +695,7 @@ export default function Agent() {
     setInput('');
     setIsSessionPending(false);
     setCurrentTurnId(null);
+    setActiveTurnMeta(null);
     setLastSentMessage('');
     setTask(null);
     setMemoryProposals([]);
@@ -774,6 +774,7 @@ export default function Agent() {
       case 'done':
         setIsSessionPending(false);
         setCurrentTurnId(null);
+        setActiveTurnMeta(null);
         setTask(prev => completeTask(prev));
         if (entityContext && opts?.proposeMemory) {
           const proposal = buildMemoryProposal(assistantTextRef.current);
@@ -839,6 +840,7 @@ export default function Agent() {
 
       const turn = await createAgentTurn(sessionId, text, entityContext?.detail ? { context_detail: entityContext.detail } : undefined);
       setCurrentTurnId(turn.id);
+      setActiveTurnMeta(turn);
       queryClient.setQueryData<{ data: AgentSessionSummary[] }>(['agent-sessions'], (old) => {
         if (!old?.data) return old;
         return {
@@ -869,24 +871,22 @@ export default function Agent() {
       if (resolvedSessionId) {
         if (chatResetRef.current !== resetVersion) return;
         const sid = resolvedSessionId;
-        const token = localStorage.getItem('crmy_token');
-        fetch(`/api/v1/agent/sessions/${sid}`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        })
-          .then(r => r.ok ? r.json() : null)
-          .then(json => {
-            if (!json?.data?.messages) return;
-            const display = rawMsgsToDisplay(json.data.messages as { role: string; content: string }[]);
-            if (json.data.active_turn?.input_message) {
-              setMessages([...display, { kind: 'user', content: json.data.active_turn.input_message }]);
-              setCurrentTurnId(json.data.active_turn.id);
+        getAgentSession(sid)
+          .then(data => {
+            if (!data.messages) return;
+            const display = rawMsgsToDisplay(data.messages);
+            if (data.active_turn?.input_message) {
+              setMessages([...display, { kind: 'user', content: data.active_turn.input_message }]);
+              setCurrentTurnId(data.active_turn.id);
+              setActiveTurnMeta(data.active_turn);
               setIsSessionPending(true);
             } else if (display.length > 0) {
               setMessages(display);
               setCurrentTurnId(null);
+              setActiveTurnMeta(null);
               setIsSessionPending(false);
             }
-            setAttachments(json.data.attachments ?? []);
+            setAttachments(data.attachments ?? []);
           })
           .catch(() => { /* ignore */ });
       }
@@ -907,6 +907,7 @@ export default function Agent() {
         await cancelAgentTurn(activeSessionId, currentTurnId);
         setIsSessionPending(false);
         setCurrentTurnId(null);
+        setActiveTurnMeta(null);
       } catch (err) {
         toast({ title: 'Could not stop agent turn', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
       }
@@ -1031,20 +1032,16 @@ export default function Agent() {
       return;
     }
     const sid = activeSessionId;
-    const token = localStorage.getItem('crmy_token');
 
     const check = async () => {
       try {
-        const res = await fetch(`/api/v1/agent/sessions/${sid}`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        });
-        if (!res.ok) return;
-        const { data } = await res.json();
+        const data = await getAgentSession(sid);
         const rawMsgs: { role: string; content: string }[] = data.messages ?? [];
         const display = rawMsgsToDisplay(rawMsgs);
         setAttachments(data.attachments ?? []);
         if (data.active_turn?.input_message) {
           setCurrentTurnId(data.active_turn.id);
+          setActiveTurnMeta(data.active_turn);
           setMessages([...display, { kind: 'user', content: data.active_turn.input_message }]);
           setIsSessionPending(true);
           return;
@@ -1054,6 +1051,7 @@ export default function Agent() {
         if (lastMeaningful?.role === 'assistant') {
           setIsSessionPending(false);
           setCurrentTurnId(null);
+          setActiveTurnMeta(null);
           setMessages(display);
           refetchSessions();
         }
@@ -1067,6 +1065,37 @@ export default function Agent() {
 
   const workflowCommands = useMemo(() => getWorkflowCommands(entityContext), [entityContext]);
   const quickPromptButtons = useMemo(() => getHighValueSuggestions(entityContext), [entityContext]);
+  const starterCards = useMemo(() => {
+    const target = entityContext ? `${typeLabels[entityContext.type]} · ${entityContext.name}` : 'Workspace';
+    return [
+      {
+        label: 'Retrieve a briefing',
+        description: entityContext
+          ? `Load confirmed Memory, open Signals, stale warnings, and next action for ${target}.`
+          : 'Find the highest-priority customer work and retrieve the context behind it.',
+        prompt: entityContext
+          ? `Get a briefing for ${entityContext.name}. Separate confirmed Memory from Signals, call out stale or risky context, cite evidence, and recommend the safest next action.`
+          : 'Show my highest-priority accounts, opportunities, Signals, and handoffs. Retrieve the relevant context and recommend what to do first.',
+        Icon: Search,
+      },
+      {
+        label: 'Explain what is uncertain',
+        description: 'Separate facts, inferred Signals, missing evidence, and approval boundaries.',
+        prompt: entityContext
+          ? `Explain what is confirmed, inferred, stale, or awaiting approval for ${entityContext.name}. Tell me what an agent should not assume.`
+          : 'Explain the unresolved Signals and stale Memory across my workspace. Tell me what agents should not assume before acting.',
+        Icon: ShieldCheck,
+      },
+      {
+        label: 'Prepare a safe action',
+        description: 'Draft or recommend the next move while keeping writebacks review-gated.',
+        prompt: entityContext
+          ? `Recommend the safest customer-facing action for ${entityContext.name}. Ground it in evidence, flag assumptions, and say whether any writeback or handoff needs approval.`
+          : 'Prepare the safest next action for the top customer issue. Ground it in evidence and say whether a writeback, assignment, or handoff needs approval.',
+        Icon: FileCheck2,
+      },
+    ];
+  }, [entityContext]);
   const slashQuery = useMemo(() => {
     const match = input.match(/(?:^|\s)\/([a-z0-9-]*)$/i);
     return match ? match[1].toLowerCase() : null;
@@ -1337,19 +1366,23 @@ export default function Agent() {
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
-                className="px-4 py-2.5 border-b border-amber-500/20 bg-amber-500/8"
+                className="px-4 py-2.5 border-b border-primary/20 bg-primary/8"
               >
                 <div className="flex items-center gap-2.5">
-                  <Loader2 className="w-3.5 h-3.5 text-amber-500 animate-spin flex-shrink-0" />
-                  <p className="text-xs text-amber-700 dark:text-amber-400 flex-1">
-                    Agent is working in the background — checking for a response…
+                  <Loader2 className="w-3.5 h-3.5 text-primary animate-spin flex-shrink-0" />
+                  <p className="text-xs text-primary flex-1">
+                    Agent is working in the background
+                    {activeTurnMeta?.attempt_count && activeTurnMeta.attempt_count > 1
+                      ? ` · retry attempt ${activeTurnMeta.attempt_count}`
+                      : ''}
+                    {' '}— you can leave and return without losing this turn.
                   </p>
                   <button
                     onClick={() => setIsSessionPending(false)}
-                    className="p-1 rounded-md hover:bg-amber-500/15 transition-colors flex-shrink-0"
+                    className="p-1 rounded-md hover:bg-primary/15 transition-colors flex-shrink-0"
                     title="Dismiss"
                   >
-                    <X className="w-3 h-3 text-amber-500" />
+                    <X className="w-3 h-3 text-primary" />
                   </button>
                 </div>
               </motion.div>
@@ -1381,21 +1414,38 @@ export default function Agent() {
               />
             )}
             {messages.length === 0 && (
-              <div className="text-center py-12 text-muted-foreground">
+              <div className="py-8">
                 {entityContext && IconComponent ? (
-                  <>
+                  <div className="mb-4 text-center text-muted-foreground">
                     <div className="w-10 h-10 mx-auto mb-3 rounded-xl bg-accent/10 flex items-center justify-center">
                       <IconComponent className="w-5 h-5 text-accent" />
                     </div>
                     <p className="text-sm font-medium text-foreground">Active Context is bound to this record.</p>
-                    <p className="text-sm mt-1">Ask about this record, or get a briefing to retrieve Current Memory into the chat.</p>
-                  </>
+                    <p className="text-sm mt-1">Choose a starter to retrieve Memory, Signals, evidence, and safety boundaries.</p>
+                  </div>
                 ) : (
-                  <>
+                  <div className="mb-4 text-center text-muted-foreground">
                     <Bot className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                    <p className="text-sm">Ask about customer context, revenue objects, handoffs, or safe next actions.</p>
-                  </>
+                    <p className="text-sm font-medium text-foreground">Start with customer context, not a blank chat.</p>
+                    <p className="text-sm mt-1">Pick a workflow that retrieves CRMy Memory and review boundaries before the agent answers.</p>
+                  </div>
                 )}
+                <div className="mx-auto grid max-w-3xl gap-2 md:grid-cols-3">
+                  {starterCards.map(card => (
+                    <button
+                      key={card.label}
+                      type="button"
+                      onClick={() => applyCommand(card)}
+                      className="rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
+                    >
+                      <span className="mb-2 flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/10 text-violet-500">
+                        <card.Icon className="h-4 w-4" />
+                      </span>
+                      <span className="block text-sm font-semibold text-foreground">{card.label}</span>
+                      <span className="mt-1 block text-xs leading-5 text-muted-foreground">{card.description}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {groupToolMessages(messages).map((item, i) => (
@@ -1611,7 +1661,7 @@ function AgentTrustBar({
   hasSubject?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const actionLabel = canWrite ? 'Can request scoped writes' : 'Read-only by default';
+  const actionLabel = canWrite ? 'writes require policy/audit' : 'read-only by default';
 
   return (
     <div className="border-b border-border bg-card/60">
@@ -1622,7 +1672,7 @@ function AgentTrustBar({
         <ShieldCheck className="w-3.5 h-3.5 text-primary" />
         <span className="font-medium text-foreground">Trust boundary</span>
         <span className="hidden sm:inline">
-          {provider && model ? `${provider} · ${model}` : 'Model configured'} · Active Context {hasSubject ? 'record-bound' : 'session-bound'} · {actionLabel}
+          {provider && model ? `${provider} · ${model}` : 'Model configured'} · reads Memory and Signals · {actionLabel}
         </span>
         <span className="ml-auto inline-flex items-center gap-1 text-primary">
           Details {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}

@@ -17,12 +17,12 @@ const SECRET_KEYS = [
 ];
 
 function getKeyMaterial(): Buffer {
-  const raw = process.env.CRMY_ENCRYPTION_KEY;
+  const raw = process.env.CRMY_ENCRYPTION_KEY ?? process.env.AGENT_ENCRYPTION_KEY;
   if (!raw) {
     if (process.env.NODE_ENV === 'production') {
       throw new CrmyError(
         'INTERNAL_ERROR',
-        'CRMY_ENCRYPTION_KEY is required in production before storing connector credentials.',
+        'CRMY_ENCRYPTION_KEY is required in production before storing secrets.',
         500,
       );
     }

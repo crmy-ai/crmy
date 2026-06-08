@@ -20,6 +20,7 @@ import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
 import { assertOwnedObjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
+import { verifiedActionContextMetadataForReceipt } from '../../services/action-context.js';
 
 function runUseCaseOperation<T>(
   db: DbPool,
@@ -127,6 +128,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
           expectedVersion: input.expected_version,
         });
         if (!uc) throw notFound('UseCase', input.id);
+        const actionContextMetadata = await verifiedActionContextMetadataForReceipt(db, actor, 'use_case', input.id, input.action_context);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -137,6 +139,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
           objectId: uc.id,
           beforeData: before,
           afterData: uc,
+          metadata: actionContextMetadata ? { action_context: actionContextMetadata } : undefined,
         });
         indexDocument(db, 'use_case', uc as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] use_case index ${uc.id}: ${(err as Error).message}`));

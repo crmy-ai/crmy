@@ -17,6 +17,7 @@ import {
   exportSubjectData,
   redactSubjectPii,
 } from '../../services/privacy-governance.js';
+import { resolveOwnerFilter } from '../../services/access-control.js';
 import type { ToolDef } from '../server.js';
 import { runToolOperation } from '../tool-operation.js';
 
@@ -508,10 +509,11 @@ export function metaTools(db: DbPool): ToolDef[] {
     {
       name: 'tenant_get_stats',
       tier: 'analytics',
-      description: 'Get high-level statistics for the current tenant including total counts of contacts, accounts, opportunities, activities, and pipeline value. Useful for quick health checks and dashboard summaries.',
+      description: 'Get high-level statistics for the current actor scope including contacts, accounts, opportunities, activities, and pipeline value. Admins/owners see tenant-wide totals; members and managers see their visible book of business.',
       inputSchema: tenantGetStats,
       handler: async (_input: z.infer<typeof tenantGetStats>, actor: ActorContext) => {
-        return searchRepo.getTenantStats(db, actor.tenant_id);
+        const ownerFilter = await resolveOwnerFilter(db, actor);
+        return searchRepo.getTenantStats(db, actor.tenant_id, ownerFilter.owner_ids);
       },
     },
     {

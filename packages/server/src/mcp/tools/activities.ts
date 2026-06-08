@@ -18,6 +18,7 @@ import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
 import { runToolOperation } from '../tool-operation.js';
 import { assertActivityAccess, assertSubjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
+import { verifiedActionContextMetadataForReceipt } from '../../services/action-context.js';
 
 export function activityTools(db: DbPool): ToolDef[] {
   return [
@@ -190,6 +191,9 @@ export function activityTools(db: DbPool): ToolDef[] {
         }
         const activity = await activityRepo.updateActivity(db, actor.tenant_id, input.id, input.patch);
         if (!activity) throw notFound('Activity', input.id);
+        const actionContextMetadata = activity.subject_type && activity.subject_id
+          ? await verifiedActionContextMetadataForReceipt(db, actor, activity.subject_type, activity.subject_id, input.action_context)
+          : undefined;
 
         // Re-extract if content used by the extraction prompt changed.
         if (input.patch.body != null || input.patch.detail != null || input.patch.outcome != null) {
@@ -207,6 +211,7 @@ export function activityTools(db: DbPool): ToolDef[] {
           objectId: activity.id,
           beforeData: before,
           afterData: activity,
+          metadata: actionContextMetadata ? { action_context: actionContextMetadata } : undefined,
         });
         indexDocument(db, 'activity', activity as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] activity index ${activity.id}: ${(err as Error).message}`));
@@ -233,8 +238,9 @@ export function activityTools(db: DbPool): ToolDef[] {
         text: z.string().min(1),
         artifact_type: z.enum(['notes', 'transcript', 'summary', 'debrief']).optional().default('debrief'),
         source_label: z.string().optional(),
+        idempotency_key: z.string().max(128).optional(),
       }),
-      handler: async (input: { id: string; text: string; artifact_type?: 'notes' | 'transcript' | 'summary' | 'debrief'; source_label?: string }, actor: ActorContext) => {
+      handler: async (input: { id: string; text: string; artifact_type?: 'notes' | 'transcript' | 'summary' | 'debrief'; source_label?: string; idempotency_key?: string }, actor: ActorContext) => {
         return runToolOperation(db, actor, 'activity_add_context', input, async () => {
           const before = await activityRepo.getActivity(db, actor.tenant_id, input.id);
           if (!before) throw notFound('Activity', input.id);

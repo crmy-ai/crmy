@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ConnectorAdapter, ConnectorContext } from './adapters.js';
-import { adapterError, assertWriteMode, checkpointWatermark, connectorHttpError, readJsonResponse, requireString, safeIdentifier, safeQualifiedIdentifier, writebackParameters } from './adapters.js';
+import { adapterError, assertWriteMode, checkpointWatermark, connectorFetch, connectorHttpError, readJsonResponse, requireString, safeIdentifier, safeQualifiedIdentifier, writebackParameters } from './adapters.js';
 
 function accountUrl(credentials: Record<string, unknown>): string {
   return requireString(credentials.account_url ?? credentials.host, 'Snowflake account_url').replace(/\/$/, '');
@@ -13,7 +13,7 @@ function token(credentials: Record<string, unknown>): string {
 }
 
 async function sql(ctx: ConnectorContext, statement: string, bindings: unknown[] = []): Promise<unknown> {
-  const res = await fetch(`${accountUrl(ctx.credentials)}/api/v2/statements`, {
+  const res = await connectorFetch(`${accountUrl(ctx.credentials)}/api/v2/statements`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token(ctx.credentials)}`,

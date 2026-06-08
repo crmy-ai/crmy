@@ -16,7 +16,11 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+      - run: npm run lint
+      - run: npm run build
       - run: npm test
+      - run: npm run test:cli-coverage
+      - run: npm audit --audit-level=moderate --omit=dev
 
   publish-gpr:
     needs: build
@@ -31,6 +35,19 @@ jobs:
           node-version: 20
           registry-url: https://npm.pkg.github.com/
       - run: npm ci
-      - run: npm publish
+      - run: npm run build
+      - run: npm publish --workspace=packages/shared
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      - run: npm publish --workspace=packages/server
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      - run: npm publish --workspace=packages/cli
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      - run: npm publish --workspace=packages/web
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      - run: npm publish --workspace=packages/openclaw-plugin
         env:
           NODE_AUTH_TOKEN: ${{secrets.GITHUB_TOKEN}}

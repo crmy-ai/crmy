@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { z } from 'zod';
-import type { ActorContext } from '@crmy/shared';
+import type { ActionContext, ActionContextProposedAction, ActorContext, SubjectType } from '@crmy/shared';
 import { permissionDenied } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
 import * as agentRepo from '../db/repos/agent.js';
@@ -16,6 +16,7 @@ import { assertSubjectAccess, resolveOwnerFilter } from './access-control.js';
 import { entityResolve } from './entity-resolve.js';
 import { actorHasScope } from '../auth/scopes.js';
 import { callLLM } from '../agent/providers/llm.js';
+import { getActionContext } from './action-context.js';
 
 export type RecordDraftType = 'contact' | 'account' | 'opportunity' | 'use-case' | 'activity' | 'assignment';
 type DraftSubjectType = 'account' | 'contact' | 'opportunity' | 'use_case' | 'use-case';
@@ -47,6 +48,19 @@ type FieldRow = {
   required: boolean;
   confidence_label?: string;
   requires_confirmation?: boolean;
+};
+
+type RecordDraftActionContextSummary = {
+  subject_type: SubjectType;
+  subject_id: string;
+  operating_mode: ActionContext['operating_mode'];
+  readiness_status: ActionContext['readiness']['status'];
+  risk_level: ActionContext['readiness']['risk_level'];
+  review_required: boolean;
+  guidance_summary: string;
+  warning_reasons: string[];
+  review_reasons: string[];
+  proof: ActionContext['proof'];
 };
 
 const recordType = z.enum(['contact', 'account', 'opportunity', 'use-case', 'use_case', 'activity', 'assignment'])
@@ -123,6 +137,51 @@ function normalizeSubjectType(value?: string | null): DraftSubjectType | undefin
   if (value === 'use_case') return 'use-case';
   if (['account', 'contact', 'opportunity', 'use-case'].includes(value)) return value as DraftSubjectType;
   return undefined;
+}
+
+function subjectTypeForRecordDraft(objectType: RecordDraftType): SubjectType | undefined {
+  if (objectType === 'account' || objectType === 'contact' || objectType === 'opportunity') return objectType;
+  if (objectType === 'use-case') return 'use_case';
+  return undefined;
+}
+
+function summarizeRecordActionContext(actionContext: ActionContext): RecordDraftActionContextSummary {
+  return {
+    subject_type: actionContext.subject_type,
+    subject_id: actionContext.subject_id,
+    operating_mode: actionContext.operating_mode,
+    readiness_status: actionContext.readiness.status,
+    risk_level: actionContext.readiness.risk_level,
+    review_required: actionContext.readiness.review_required,
+    guidance_summary: actionContext.guidance.summary,
+    warning_reasons: actionContext.guidance.warning_reasons,
+    review_reasons: actionContext.guidance.review_reasons,
+    proof: actionContext.proof,
+  };
+}
+
+async function getRecordEditActionContext(
+  db: DbPool,
+  actor: ActorContext,
+  objectType: RecordDraftType,
+  recordId: string | undefined,
+  patch: Record<string, unknown>,
+): Promise<ActionContext | null> {
+  const subjectType = subjectTypeForRecordDraft(objectType);
+  if (!subjectType || !recordId || Object.keys(patch).length === 0) return null;
+  const proposedAction: ActionContextProposedAction = {
+    action_type: 'record_update',
+    object_type: subjectType,
+    field_names: Object.keys(patch),
+    payload: patch,
+  };
+  return getActionContext(db, actor, {
+    subject_type: subjectType,
+    subject_id: recordId,
+    context_radius: subjectType === 'account' ? 'account_wide' : 'adjacent',
+    token_budget: 1800,
+    proposed_action: proposedAction,
+  });
 }
 
 function objectTypeForCustomFields(type: RecordDraftType): string {
@@ -969,6 +1028,14 @@ export async function previewRecordDraft(db: DbPool, actor: ActorContext, input:
         .filter(([field]) => !BLOCKED_EDIT_FIELDS.has(field))
         .filter(([field, value]) => !valuesEqual(currentRecord[field], value)),
     );
+    const actionContext = await getRecordEditActionContext(db, actor, objectType, input.record_id, safePatch);
+    const actionContextSummary = actionContext ? summarizeRecordActionContext(actionContext) : undefined;
+    const actionContextBlockers = actionContext && !actionContext.guidance.can_execute
+      ? actionContext.guidance.review_reasons.length > 0
+        ? actionContext.guidance.review_reasons
+        : [actionContext.guidance.summary]
+      : [];
+    const allBlockers = [...blockers, ...actionContextBlockers];
     return {
       data: safePatch,
       draft: safePatch,
@@ -984,13 +1051,17 @@ export async function previewRecordDraft(db: DbPool, actor: ActorContext, input:
       enrichment_suggestions: objectType === 'account' ? enrichmentSuggestionsFromRows(rows) : [],
       resolution_summary: resolved.resolution_summary,
       unresolved_references: resolved.unresolved_references,
-      policy_blockers: blockers,
-      can_write: Object.keys(safePatch).length > 0 && blockers.length === 0,
+      policy_blockers: allBlockers,
+      action_context: actionContextSummary,
+      can_write: Object.keys(safePatch).length > 0 && allBlockers.length === 0,
       can_create: false,
       work_log: [
         'Read current record',
         'Drafted changed fields only',
         blockers.length ? `Found ${blockers.length} guarded change${blockers.length === 1 ? '' : 's'}` : 'No guarded changes found',
+        actionContextSummary
+          ? `Checked Action Context: ${actionContextSummary.readiness_status}`
+          : 'No Action Context was needed for unchanged fields',
       ],
     };
   }

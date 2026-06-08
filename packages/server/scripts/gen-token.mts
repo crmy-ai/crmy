@@ -1,9 +1,12 @@
 import * as jose from 'jose';
 import pg from 'pg';
-const pool = new pg.Pool({ connectionString: 'postgres://postgres:postgres@localhost:5432/crmy' });
+const jwtSecret = process.env.JWT_SECRET;
+if (!jwtSecret) throw new Error('JWT_SECRET is required to generate a CRMy token');
+const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL ?? 'postgres://postgres:postgres@localhost:5432/crmy' });
 const r = await pool.query("SELECT u.id, u.email, u.role, t.id AS tenant_id FROM users u JOIN tenants t ON u.tenant_id = t.id WHERE u.role = 'owner' LIMIT 1");
 const user = r.rows[0];
-const secret = new TextEncoder().encode('dev-secret-change-me');
+if (!user) throw new Error('No owner user found in the configured CRMy database');
+const secret = new TextEncoder().encode(jwtSecret);
 const token = await new jose.SignJWT({ sub: user.id, tenant_id: user.tenant_id, role: user.role })
   .setProtectedHeader({ alg: 'HS256' })
   .setIssuedAt()

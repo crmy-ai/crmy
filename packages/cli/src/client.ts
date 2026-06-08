@@ -5,6 +5,8 @@ import { loadConfigFile, loadAuthState } from './config.js';
 import { resolveLocalActor } from './local-actor.js';
 import type { ActorContext } from '@crmy/shared';
 
+const DEFAULT_HTTP_TIMEOUT_MS = Number(process.env.CRMY_CLI_HTTP_TIMEOUT_MS ?? 30_000);
+
 export interface CliClient {
   call(toolName: string, input: Record<string, unknown>): Promise<string>;
   listTools?(): Promise<Array<{ name: string; tier?: string; description?: string }>>;
@@ -17,6 +19,21 @@ export interface CliClient {
     example?: Record<string, unknown>;
   }>;
   close(): Promise<void>;
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_HTTP_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: init.signal ?? controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`Request timed out after ${DEFAULT_HTTP_TIMEOUT_MS}ms: ${url}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 // Map MCP tool names to REST method + path
@@ -142,10 +159,6 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   entity_resolve: { method: 'POST', path: () => '/api/v1/resolve' },
   customer_record_resolve: { method: 'POST', path: () => '/api/v1/subjects/resolve' },
 
-  // Meta
-  schema_get: { method: 'GET', path: () => '/health' },
-  tenant_get_stats: { method: 'GET', path: () => '/health' },
-
   // Actors
   actor_register: { method: 'POST', path: () => '/api/v1/actors' },
   actor_get: { method: 'GET', path: (i) => `/api/v1/actors/${i.id}` },
@@ -189,9 +202,12 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
     raw_context_source_id: i.raw_context_source_id,
   }).filter(([, value]) => Boolean(value)) as [string, string][]).toString()}` },
   context_semantic_search: { method: 'GET', path: (i) => `/api/v1/context/semantic-search?q=${encodeURIComponent((i.query as string) ?? '')}&limit=${i.limit ?? 10}${i.subject_type ? `&subject_type=${i.subject_type}` : ''}${i.subject_id ? `&subject_id=${i.subject_id}` : ''}` },
-  context_raw_source_reprocess: { method: 'POST', path: (i) => `/api/v1/context/raw-sources/${i.id}/reprocess` },
+	  context_raw_source_reprocess: { method: 'POST', path: (i) => `/api/v1/context/raw-sources/${i.id}/reprocess` },
 
-  // Calendar / Customer Activity
+	  // Action Context
+	  action_context_get: { method: 'POST', path: () => '/api/v1/action-context' },
+
+	  // Calendar / Customer Activity
   calendar_connection_list: { method: 'GET', path: () => '/api/v1/calendar/connections' },
   calendar_event_search: { method: 'GET', path: (i) => `/api/v1/calendar-events?limit=${i.limit ?? 20}${i.q ? `&q=${encodeURIComponent(i.q as string)}` : ''}${i.tab ? `&tab=${i.tab}` : ''}${i.classification ? `&classification=${i.classification}` : ''}${i.validation_status ? `&validation_status=${i.validation_status}` : ''}${i.processing_status ? `&processing_status=${i.processing_status}` : ''}${i.include_internal ? '&include_internal=true' : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
   calendar_event_get: { method: 'GET', path: (i) => `/api/v1/calendar-events/${i.id}` },
@@ -208,9 +224,9 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   sequence_update: { method: 'PATCH', path: (i) => `/api/v1/sequences/${i.id}`, bodyTransform: (i) => (i.patch as Record<string, unknown>) ?? i },
   sequence_enrollment_list: { method: 'GET', path: (i) => `/api/v1/sequences/enrollments?limit=${i.limit ?? 50}${i.sequence_id ? `&sequence_id=${i.sequence_id}` : ''}${i.contact_id ? `&contact_id=${i.contact_id}` : ''}${i.status ? `&status=${i.status}` : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
   sequence_enroll: { method: 'POST', path: (i) => i.sequence_id ? `/api/v1/sequences/${i.sequence_id}/enroll` : '/api/v1/sequences/enroll' },
-  sequence_unenroll: { method: 'POST', path: (i) => `/api/v1/sequences/${i.sequence_id ?? i.id}/unenroll` },
-  sequence_pause: { method: 'PATCH', path: (i) => `/api/v1/sequences/${i.id}`, bodyTransform: () => ({ is_active: false }) },
-  sequence_resume: { method: 'PATCH', path: (i) => `/api/v1/sequences/${i.id}`, bodyTransform: () => ({ is_active: true }) },
+  sequence_unenroll: { method: 'POST', path: (i) => `/api/v1/sequences/enrollments/${i.id}/unenroll` },
+  sequence_pause: { method: 'POST', path: (i) => `/api/v1/sequences/enrollments/${i.id}/pause` },
+  sequence_resume: { method: 'POST', path: (i) => `/api/v1/sequences/enrollments/${i.id}/resume` },
   sequence_analytics: { method: 'GET', path: (i) => `/api/v1/sequences/${i.sequence_id ?? i.id}/analytics?period_type=${i.period_type ?? 'day'}&limit=${i.limit ?? 30}` },
 
   // Activity Type Registry
@@ -262,7 +278,7 @@ function createHttpClient(serverUrl: string, token: string): CliClient {
         fetchOpts.body = JSON.stringify(body);
       }
 
-      const res = await fetch(url, fetchOpts);
+      const res = await fetchWithTimeout(url, fetchOpts);
 
       if (res.status === 401) {
         throw new Error('Authentication expired. Run `crmy login` to re-authenticate.');
@@ -283,7 +299,7 @@ function createHttpClient(serverUrl: string, token: string): CliClient {
       // No cleanup needed for HTTP client
     },
     async listTools() {
-      const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/v1/tools`, {
+      const res = await fetchWithTimeout(`${serverUrl.replace(/\/$/, '')}/api/v1/tools`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -305,7 +321,7 @@ function createHttpClient(serverUrl: string, token: string): CliClient {
       if (!/^[a-z0-9_]+$/.test(toolName)) {
         throw new Error(`Invalid tool name: ${toolName}`);
       }
-      const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/v1/tools/${toolName}`, {
+      const res = await fetchWithTimeout(`${serverUrl.replace(/\/$/, '')}/api/v1/tools/${toolName}`, {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -341,7 +357,7 @@ async function callGenericTool(
   if (!/^[a-z0-9_]+$/.test(toolName)) {
     throw new Error(`Invalid tool name: ${toolName}`);
   }
-  const res = await fetch(`${serverUrl.replace(/\/$/, '')}/api/v1/tools/${toolName}/call`, {
+  const res = await fetchWithTimeout(`${serverUrl.replace(/\/$/, '')}/api/v1/tools/${toolName}/call`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${token}`,

@@ -53,36 +53,47 @@ export function AgentSettingsProvider({ children }: { children: React.ReactNode 
       setConnectivityStatus(undefined);
       setConnectivityError(undefined);
       return;
-    }
+	    }
 
-    const probe = async () => {
-      const token = localStorage.getItem('crmy_token');
-      try {
-        const res = await fetch(PROBE_ENDPOINT, {
+	    const controllers = new Set<AbortController>();
+	    const probe = async () => {
+	      const controller = new AbortController();
+	      controllers.add(controller);
+	      const timeout = window.setTimeout(() => controller.abort(), 20_000);
+	      const token = localStorage.getItem('crmy_token');
+	      try {
+	        const res = await fetch(PROBE_ENDPOINT, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          // Send empty body — the endpoint will use stored config values
-          body: JSON.stringify({}),
-        });
+	          },
+	          // Send empty body — the endpoint will use stored config values
+	          body: JSON.stringify({}),
+	          signal: controller.signal,
+	        });
         const json = await res.json().catch(() => ({}));
         setConnectivityStatus(typeof json.status === 'string' ? json.status : undefined);
         setConnectivityError(typeof json.error === 'string' ? json.error : undefined);
         setConnectivity(res.ok && json.ok ? 'online' : 'offline');
       } catch {
-        setConnectivity('offline');
-        setConnectivityStatus('offline');
-        setConnectivityError('Could not reach the Workspace Agent test endpoint.');
-      }
-      lastProbeRef.current = Date.now();
-    };
+	        setConnectivity('offline');
+	        setConnectivityStatus('offline');
+	        setConnectivityError('Could not reach the Workspace Agent test endpoint.');
+	      } finally {
+	        window.clearTimeout(timeout);
+	        controllers.delete(controller);
+	      }
+	      lastProbeRef.current = Date.now();
+	    };
 
-    // Probe immediately on mount / config change, then on interval
-    probe();
-    const timer = setInterval(() => probe(), PROBE_INTERVAL_MS);
-    return () => clearInterval(timer);
+	    // Probe immediately on mount / config change, then on interval
+	    probe();
+	    const timer = setInterval(() => probe(), PROBE_INTERVAL_MS);
+	    return () => {
+	      clearInterval(timer);
+	      controllers.forEach(controller => controller.abort());
+	    };
   }, [enabled, config?.model, config?.base_url, config?.provider]);
 
   return (

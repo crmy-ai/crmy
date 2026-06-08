@@ -3,6 +3,8 @@
 
 import type { ExternalObjectMapping, ExternalSystem, SystemOfRecordType, WritebackMode } from '@crmy/shared';
 
+const CONNECTOR_FETCH_TIMEOUT_MS = Number(process.env.CONNECTOR_FETCH_TIMEOUT_MS ?? 30_000);
+
 export interface ExternalRecord {
   external_object: string;
   external_record_id: string;
@@ -66,6 +68,21 @@ export async function readJsonResponse(res: Response): Promise<unknown> {
     return JSON.parse(text);
   } catch {
     return { text };
+  }
+}
+
+export async function connectorFetch(url: string, init: RequestInit = {}, timeoutMs = CONNECTOR_FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`Connector HTTP request timed out after ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

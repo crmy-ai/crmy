@@ -13,7 +13,7 @@ import { ListToolbar, type FilterConfig, type SortOption } from '@/components/cr
 import { RecordMemoryIndicator } from '@/components/crm/RecordMemoryIndicator';
 import { DatePicker } from '@/components/ui/date-picker';
 import { motion } from 'framer-motion';
-import { Columns3, List, BarChart3, Plus, Bot, ChevronUp, ChevronDown, Briefcase } from 'lucide-react';
+import { Columns3, List, BarChart3, Plus, Bot, ChevronUp, ChevronDown, Briefcase, FileText } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { useRecordMemoryCounts } from '@/hooks/useRecordMemoryCounts';
@@ -81,7 +81,7 @@ type Opportunity = any;
 export default function Opportunities() {
   const navigate = useNavigate();
   const [view, setView] = useState<ViewMode>('table');
-  const { openDrawer, openQuickAdd, openAIWithContext } = useAppStore();
+  const { openDrawer, openQuickAdd, openAIWithContext, openDrawerBriefing } = useAppStore();
   const { enabled: agentEnabled } = useAgentSettings();
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
@@ -249,12 +249,18 @@ export default function Opportunities() {
                               <p className="truncate text-sm font-display font-bold text-foreground">{opp.name as string}</p>
                               <RecordMemoryIndicator count={memoryCounts.get(opp.id as string)} className="shrink-0" />
                             </div>
-                            {agentEnabled && (
-                              <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: opp.id as string, name: opp.name as string, detail: `$${(amount / 1000).toFixed(0)}K` }); navigate('/agent'); }}
-                                className="p-0.5 rounded-lg md:opacity-0 md:group-hover:opacity-100 hover:bg-violet-500/10 transition-all">
-                                <Bot className="w-3.5 h-3.5 text-violet-500" />
+                            <div className="flex items-center gap-0.5">
+                              <button onClick={(e) => { e.stopPropagation(); openDrawerBriefing('opportunity', opp.id as string); }}
+                                className="p-0.5 rounded-lg hover:bg-primary/10 transition-all" title="View briefing">
+                                <FileText className="w-3.5 h-3.5 text-primary" />
                               </button>
-                            )}
+                              {agentEnabled && (
+                                <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: opp.id as string, name: opp.name as string, detail: `$${(amount / 1000).toFixed(0)}K` }); navigate('/agent'); }}
+                                  className="p-0.5 rounded-lg hover:bg-violet-500/10 transition-all" title="Open with agent">
+                                  <Bot className="w-3.5 h-3.5 text-violet-500" />
+                                </button>
+                              )}
+                            </div>
                           </div>
                           {contactName && (
                             <div className="flex items-center gap-2 mt-2">
@@ -329,6 +335,7 @@ export default function Opportunities() {
                         <SortHeader label="Probability" sortKey="probability" />
                         <SortHeader label="Health" sortKey="deal_health_score" />
                         <SortHeader label="Close Date" sortKey="close_date" />
+                        <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Briefing</th>
                         {agentEnabled && <th className="px-2 py-3 w-8"></th>}
                       </tr>
                     </thead>
@@ -370,10 +377,21 @@ export default function Opportunities() {
                             <td className="px-4 py-3 text-muted-foreground text-xs">
                               {d.close_date ? new Date(d.close_date as string).toLocaleDateString() : '—'}
                             </td>
+                            <td className="px-4 py-3">
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); openDrawerBriefing('opportunity', d.id as string); }}
+                                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-2.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/15"
+                                title="View briefing"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                                Brief
+                              </button>
+                            </td>
                             {agentEnabled && (
                               <td className="px-2 py-3">
                                 <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: d.id as string, name: d.name as string, detail: `$${(amount / 1000).toFixed(0)}K` }); navigate('/agent'); }}
-                                  className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-violet-500/10 transition-all">
+                                  className="p-1.5 rounded-lg hover:bg-violet-500/10 transition-all" title="Open with agent">
                                   <Bot className="w-3.5 h-3.5 text-violet-500" />
                                 </button>
                               </td>

@@ -45,7 +45,7 @@ Update a contact.
 - **Output**: `{ contact, event_id }`
 
 ### contact_delete
-Delete a contact (admin/owner only).
+Archive a contact while preserving evidence and lineage anchors (admin/owner only).
 - **Input**: `id` (required)
 - **Output**: `{ deleted: true, event_id }`
 
@@ -107,7 +107,7 @@ Get parent/child hierarchy for an account.
 - **Output**: `{ root, children, depth }`
 
 ### account_delete
-Delete an account (admin/owner only).
+Archive an account while preserving evidence and lineage anchors (admin/owner only).
 - **Input**: `id` (required)
 - **Output**: `{ deleted: true, event_id }`
 
@@ -139,7 +139,7 @@ Update an opportunity.
 - **Output**: `{ opportunity, event_id }`
 
 ### opportunity_delete
-Delete an opportunity (admin/owner only).
+Archive an opportunity while preserving evidence and lineage anchors (admin/owner only).
 - **Input**: `id` (required)
 - **Output**: `{ deleted: true, event_id }`
 
@@ -255,7 +255,7 @@ Update a use case.
 - **Output**: `{ use_case, event_id }`
 
 ### use_case_delete
-Soft delete a use case.
+Archive a use case while preserving evidence and lineage anchors.
 - **Input**: `id` (required)
 - **Output**: `{ deleted: true }`
 
@@ -738,7 +738,7 @@ Assemble action-aware customer context before an agent prepares work. This is an
 - **Operating modes**: use the readiness and checks as `inform` for low-risk work, `warn` when stale/inferred/conflicting context should be visible but not blocking, and `require_review` when execution needs human approval.
 - **Handoffs**: `required_handoffs` contains execution-blocking review work. Non-blocking stale Memory, unconfirmed Signals, and open-work warnings remain in `guidance.warning_reasons` and `checks`.
 - **Low-friction examples**: briefing, search, summarization, internal notes, draft preparation, Raw Context ingest, and reviewable Signal creation should generally remain fast.
-- **Review examples**: automatic customer email send, forecast/stage/amount/owner changes, external writeback, external commitments, out-of-scope records, or using unconfirmed Signals as fact should require review when policy or risk says so.
+- **Review examples**: automatic customer email send, sequence send, workflow-triggered outreach, forecast/stage/amount/owner changes, external writeback, external commitments, out-of-scope records, or using unconfirmed Signals as fact should require review when policy or risk says so.
 - **Proof**: when `emit_retrieval_event` is true, CRMy records an `action_context.retrieved` event with compact metadata: context IDs, Signal group IDs, stale count, contradiction count, readiness status, risk level, and proposed action type.
 - **Boundary**: this tool does not create activities, promote Memory, update records, create handoffs, or execute writebacks. It only assesses readiness and records retrieval proof.
 
@@ -889,6 +889,6 @@ Get the schema for a customer record type.
 - **Output**: `{ standard_fields, custom_fields_schema }`
 
 ### tenant_get_stats
-Get high-level tenant statistics.
+Get high-level statistics for the current actor scope. Admins and owners see tenant-wide totals; managers and members see their visible book of business.
 - **Input**: (none)
 - **Output**: `{ contacts, accounts, opportunities, activities, open_pipeline_value }`

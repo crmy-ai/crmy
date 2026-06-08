@@ -224,6 +224,35 @@ const CHECKS: CheckSpec[] = [
     `,
   },
   {
+    name: 'stuck_external_writebacks_executing',
+    severity: 'warning',
+    sql: `
+      SELECT id, system_id, object_type, object_id, external_object, external_record_id,
+             status, execution_result->'provider_call' AS provider_call, updated_at
+      FROM external_writeback_requests
+      WHERE tenant_id = $1
+        AND status = 'executing'
+        AND updated_at < now() - interval '15 minutes'
+      ORDER BY updated_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'stuck_emails_sending',
+    severity: 'warning',
+    sql: `
+      SELECT id, to_email, subject, status,
+             generation_metadata->'delivery_attempt' AS delivery_attempt,
+             updated_at
+      FROM emails
+      WHERE tenant_id = $1
+        AND status = 'sending'
+        AND updated_at < now() - interval '15 minutes'
+      ORDER BY updated_at ASC
+      LIMIT $2
+    `,
+  },
+  {
     name: 'stale_mailbox_sync_jobs',
     severity: 'warning',
     sql: `
@@ -620,13 +649,16 @@ const REPAIR_ACTIONS: Record<RepairableDataQualityCheck, {
     `,
   },
   stuck_agent_turns_running: {
-    action: 'Mark agent turns stuck in running as failed so the user can retry without a locked session.',
+    action: 'Mark agent turns with expired leases as failed so the user can retry without a locked session.',
     countSql: `
       SELECT count(*)::int AS count
       FROM agent_turns
       WHERE tenant_id = $1
         AND status = 'running'
-        AND updated_at < now() - interval '20 minutes'
+        AND (
+          lease_expires_at < now()
+          OR (lease_expires_at IS NULL AND updated_at < now() - interval '20 minutes')
+        )
     `,
     repairSql: `
       WITH target AS (
@@ -634,12 +666,17 @@ const REPAIR_ACTIONS: Record<RepairableDataQualityCheck, {
         FROM agent_turns
         WHERE tenant_id = $1
           AND status = 'running'
-          AND updated_at < now() - interval '20 minutes'
+          AND (
+            lease_expires_at < now()
+            OR (lease_expires_at IS NULL AND updated_at < now() - interval '20 minutes')
+          )
         ORDER BY updated_at ASC
         LIMIT $2
       )
       UPDATE agent_turns t
       SET status = 'failed',
+          worker_id = NULL,
+          lease_expires_at = NULL,
           error_message = COALESCE(error_message, 'Agent turn was interrupted and marked failed by recovery.'),
           completed_at = COALESCE(completed_at, now()),
           updated_at = now()

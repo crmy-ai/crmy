@@ -69,6 +69,17 @@ type AgentDraftResult = {
   can_create?: boolean;
   can_write?: boolean;
   policy_blockers?: string[];
+  action_context?: {
+    operating_mode: 'inform' | 'warn' | 'require_review';
+    readiness_status: 'ready' | 'review_needed' | 'blocked';
+    risk_level: 'low' | 'medium' | 'high';
+    review_required: boolean;
+    guidance_summary: string;
+    warning_reasons?: string[];
+    review_reasons?: string[];
+    proof?: Record<string, unknown>;
+    source_authority?: Record<string, unknown>;
+  };
 };
 type CreatedQuickAddRecord = {
   type: 'contact' | 'opportunity' | 'use-case' | 'activity' | 'account';
@@ -263,12 +274,21 @@ function LightweightRecordAgentPanel({ type, onClose, context }: { type: string;
   const enrichmentSuggestions = draftResult?.enrichment_suggestions ?? [];
   const possibleDuplicates = duplicates ?? draftResult?.duplicate_candidates ?? [];
   const policyBlockers = draftResult?.policy_blockers ?? [];
+  const actionContext = draftResult?.action_context;
   const definitiveDuplicate = possibleDuplicates.some(candidate => candidate.score >= 90);
-  const canCreate = Boolean(draft) && missing.length === 0 && !definitiveDuplicate && !isSubmitting && !isExtracting;
+  const serverCanCreate = draftResult?.can_create;
+  const serverCanWrite = draftResult?.can_write;
+  const canCreate = Boolean(draft)
+    && missing.length === 0
+    && !definitiveDuplicate
+    && (serverCanCreate === undefined || serverCanCreate)
+    && !isSubmitting
+    && !isExtracting;
   const canWrite = mode === 'edit'
     && Boolean(draft)
     && Object.keys(draft ?? {}).length > 0
     && policyBlockers.length === 0
+    && (serverCanWrite === undefined || serverCanWrite)
     && !isSubmitting
     && !isExtracting;
   const canConfirm = mode === 'edit' ? canWrite : canCreate;
@@ -409,7 +429,10 @@ function LightweightRecordAgentPanel({ type, onClose, context }: { type: string;
       await assertSubjectReference(payload.subject_type as string | undefined, payload.subject_id as string | undefined);
       await validateReferences(payload);
       if (mode === 'edit') {
-        const result = await updateFromPayload(payload);
+        const updatePayload = draftResult?.action_context
+          ? { patch: payload, action_context: draftResult.action_context }
+          : payload;
+        const result = await updateFromPayload(updatePayload);
         const updatedRecord = normalizeCreatedRecord(type, result) ?? (context?.record_id
           ? { type: type === 'use-case' ? 'use-case' : type as CreatedQuickAddRecord['type'], id: context.record_id, name: context.record_name ?? typeLabels[type] }
           : null);
@@ -542,6 +565,22 @@ function LightweightRecordAgentPanel({ type, onClose, context }: { type: string;
                 {(mode === 'edit' ? policyBlockers.length > 0 : missing.length > 0) ? 'Needs review' : 'Ready'}
               </span>
             </div>
+            {actionContext && (
+              <div className="border-b border-border bg-muted/20 px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                    actionContext.readiness_status === 'blocked'
+                      ? 'bg-destructive/10 text-destructive'
+                      : actionContext.readiness_status === 'review_needed'
+                      ? 'bg-amber-500/10 text-amber-400'
+                      : 'bg-success/10 text-success'
+                  }`}>
+                    Action Context · {actionContext.readiness_status === 'review_needed' ? 'Review needed' : actionContext.readiness_status === 'blocked' ? 'Blocked' : 'Ready'}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{actionContext.guidance_summary}</span>
+                </div>
+              </div>
+            )}
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
                 <thead className="bg-muted/40 text-xs text-muted-foreground">

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ConnectorAdapter } from './adapters.js';
-import { adapterError, assertWriteMode, checkpointWatermark, connectorHttpError, readJsonResponse, requireString, safeIdentifier } from './adapters.js';
+import { adapterError, assertWriteMode, checkpointWatermark, connectorFetch, connectorHttpError, readJsonResponse, requireString, safeIdentifier } from './adapters.js';
 
 const TOKEN_REFRESH_WINDOW_MS = 2 * 60 * 1000;
 
@@ -78,7 +78,7 @@ export async function refreshSalesforceOAuthCredentials(
     client_secret: clientSecret,
   });
 
-  const res = await fetch(tokenUrl(credentials), {
+  const res = await connectorFetch(tokenUrl(credentials), {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
@@ -111,7 +111,7 @@ export async function refreshSalesforceOAuthCredentials(
 }
 
 async function sfFetch(credentials: Record<string, unknown>, path: string, init: RequestInit = {}): Promise<unknown> {
-  const res = await fetch(`${baseUrl(credentials)}${path}`, {
+  const res = await connectorFetch(`${baseUrl(credentials)}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${accessToken(credentials)}`,

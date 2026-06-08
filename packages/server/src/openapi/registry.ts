@@ -157,6 +157,55 @@ export const ActorRecord = registry.register(
   }),
 );
 
+export const MessagingChannelRecord = registry.register(
+  'MessagingChannelRecord',
+  z.object({
+    id: S.uuid,
+    name: z.string(),
+    provider: z.string(),
+    config: z.record(z.unknown()).optional(),
+    is_active: z.boolean(),
+    is_default: z.boolean().optional(),
+    created_at: z.string(),
+    updated_at: z.string().optional(),
+  }),
+);
+
+export const SequenceRecord = registry.register(
+  'SequenceRecord',
+  z.object({
+    id: S.uuid,
+    name: z.string(),
+    description: z.string().optional(),
+    steps: z.array(S.sequenceStep),
+    is_active: z.boolean(),
+    channel_types: z.array(z.string()).optional(),
+    goal_event: z.string().optional(),
+    exit_on_reply: z.boolean().optional(),
+    ai_persona: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    created_at: z.string(),
+    updated_at: z.string().optional(),
+  }),
+);
+
+export const SequenceEnrollmentRecord = registry.register(
+  'SequenceEnrollmentRecord',
+  z.object({
+    id: S.uuid,
+    sequence_id: S.uuid,
+    contact_id: S.uuid,
+    status: z.enum(['active', 'completed', 'paused', 'cancelled']),
+    current_step: z.number().int(),
+    next_send_at: z.string().nullable().optional(),
+    enrolled_by: z.string().optional(),
+    objective: z.string().optional(),
+    variables: z.record(z.unknown()).optional(),
+    created_at: z.string(),
+    updated_at: z.string().optional(),
+  }),
+);
+
 const genericList = z.object({ data: z.array(z.record(z.unknown())), next_cursor: z.string().nullable().optional(), total: z.number().optional() });
 export const GenericList = registry.register('GenericList', genericList);
 export const GenericObject = registry.register('GenericObject', z.record(z.unknown()));
@@ -254,6 +303,19 @@ export const Req = {
   WorkflowUpdate: registry.register('WorkflowUpdate', S.workflowUpdate.shape.patch),
   WorkflowList: registry.register('WorkflowList', S.workflowList),
   WorkflowRunList: registry.register('WorkflowRunList', S.workflowRunList),
+
+  // Messaging
+  MessagingChannelCreate: registry.register('MessagingChannelCreate', S.messagingChannelCreate),
+  MessagingChannelUpdate: registry.register('MessagingChannelUpdate', S.messagingChannelUpdate.shape.patch),
+  MessagingChannelList: registry.register('MessagingChannelList', S.messagingChannelList),
+
+  // Sequences
+  SequenceCreate: registry.register('SequenceCreate', S.sequenceCreate),
+  SequenceUpdate: registry.register('SequenceUpdate', S.sequenceUpdate.shape.patch),
+  SequenceList: registry.register('SequenceList', S.sequenceList),
+  SequenceEnroll: registry.register('SequenceEnroll', S.sequenceEnroll.omit({ sequence_id: true })),
+  SequenceEnrollmentList: registry.register('SequenceEnrollmentList', S.sequenceEnrollmentList),
+  SequenceAnalytics: registry.register('SequenceAnalytics', S.sequenceAnalytics.omit({ sequence_id: true })),
 
   // Registries
   ActivityTypeAdd: registry.register('ActivityTypeAdd', S.activityTypeRegistryAdd),

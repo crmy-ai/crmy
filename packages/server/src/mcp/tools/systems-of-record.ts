@@ -3,6 +3,9 @@
 
 import { z } from 'zod';
 import {
+  type ActionContext,
+  type ActionContextProposedAction,
+  type UUID,
   notFound,
   sorConflictList,
   sorConflictResolve,
@@ -45,6 +48,7 @@ import {
   testSystemConnection,
 } from '../../services/systems-of-record/index.js';
 import { exchangeHubSpotOAuthCredentials } from '../../services/systems-of-record/hubspot.js';
+import { getActionContext } from '../../services/action-context.js';
 
 const OBJECT_WRITE_SCOPES: Record<string, string> = {
   contact: 'contacts:write',
@@ -54,6 +58,51 @@ const OBJECT_WRITE_SCOPES: Record<string, string> = {
   use_case: 'use_cases:write',
   context_entry: 'context:write',
 };
+
+function writableSubjectType(objectType?: string): 'account' | 'contact' | 'opportunity' | 'use_case' | undefined {
+  if (objectType === 'account' || objectType === 'contact' || objectType === 'opportunity' || objectType === 'use_case') return objectType;
+  return undefined;
+}
+
+function summarizeWritebackActionContext(actionContext: ActionContext) {
+  return {
+    subject_type: actionContext.subject_type,
+    subject_id: actionContext.subject_id,
+    operating_mode: actionContext.operating_mode,
+    readiness_status: actionContext.readiness.status,
+    risk_level: actionContext.readiness.risk_level,
+    review_required: actionContext.readiness.review_required,
+    guidance_summary: actionContext.guidance.summary,
+    warning_reasons: actionContext.guidance.warning_reasons,
+    review_reasons: actionContext.guidance.review_reasons,
+    proof: actionContext.proof,
+  };
+}
+
+async function getWritebackActionContext(
+  db: DbPool,
+  actor: ActorContext,
+  input: { object_type?: string; object_id?: string; system_id?: string; mapping_id?: string; external_object?: string; payload?: Record<string, unknown> },
+): Promise<ActionContext | null> {
+  const subjectType = writableSubjectType(input.object_type);
+  if (!subjectType || !input.object_id) return null;
+  const proposedAction: ActionContextProposedAction = {
+    action_type: 'external_writeback',
+    object_type: subjectType,
+    system_id: input.system_id as UUID | undefined,
+    mapping_id: input.mapping_id as UUID | undefined,
+    external_object: input.external_object,
+    field_names: Object.keys(input.payload ?? {}),
+    payload: input.payload,
+  };
+  return getActionContext(db, actor, {
+    subject_type: subjectType,
+    subject_id: input.object_id as UUID,
+    context_radius: subjectType === 'account' ? 'account_wide' : 'adjacent',
+    token_budget: 1800,
+    proposed_action: proposedAction,
+  });
+}
 
 function requireObjectWriteScope(actor: ActorContext, objectType: string | undefined): void {
   const scope = objectType ? OBJECT_WRITE_SCOPES[objectType] : undefined;
@@ -330,8 +379,14 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
       inputSchema: sorWritebackPreview,
       handler: async (input: z.infer<typeof sorWritebackPreview>, actor: ActorContext) => {
         requireObjectWriteScope(actor, input.object_type);
+        const actionContext = await getWritebackActionContext(db, actor, input);
         const preview = await previewExternalWriteback(db, actor.tenant_id, input);
-        return { preview };
+        return {
+          preview: {
+            ...preview,
+            action_context: actionContext ? summarizeWritebackActionContext(actionContext) : undefined,
+          },
+        };
       },
     },
     {
@@ -342,7 +397,16 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
       handler: async (input: z.infer<typeof sorWritebackRequest>, actor: ActorContext) =>
         runToolOperation(db, actor, 'sor_writeback_request', input, async () => {
           requireObjectWriteScope(actor, input.object_type);
-          const writeback = await requestExternalWriteback(db, actor.tenant_id, actor.actor_id, input);
+          const actionContext = await getWritebackActionContext(db, actor, input);
+          const actionContextSummary = actionContext ? summarizeWritebackActionContext(actionContext) : undefined;
+          const writebackInput = {
+            ...input,
+            require_approval: input.require_approval === false && actionContext?.guidance.can_execute === false
+              ? true
+              : input.require_approval,
+            action_context: actionContextSummary,
+          };
+          const writeback = await requestExternalWriteback(db, actor.tenant_id, actor.actor_id, writebackInput);
           const event_id = await emitEvent(db, {
             tenantId: actor.tenant_id,
             eventType: 'system_writeback.requested',
@@ -355,6 +419,7 @@ export function systemsOfRecordTools(db: DbPool): ToolDef[] {
               origin: actor.actor_type === 'agent' ? 'agent' : 'crmy',
               system_id: writeback.system_id,
               external_record_id: writeback.external_record_id,
+              action_context: actionContextSummary,
             },
           });
           return { writeback, event_id, mutation: mutationReceipt(actor, { objectType: 'external_writeback', objectId: writeback.id, eventId: event_id }) };

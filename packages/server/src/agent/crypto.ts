@@ -5,13 +5,14 @@ import crypto from 'node:crypto';
 
 const ALGO = 'aes-256-gcm';
 
-// Warn once at module load if AGENT_ENCRYPTION_KEY is not set independently.
-// This is non-breaking — existing installs using JWT_SECRET continue to work.
-if (!process.env.AGENT_ENCRYPTION_KEY && process.env.JWT_SECRET) {
+// Warn once at module load if no dedicated stored-secret key is configured.
+// This is non-breaking for existing installs using JWT_SECRET, but production
+// startup rejects this fallback before serving traffic.
+if (!process.env.AGENT_ENCRYPTION_KEY && !process.env.CRMY_ENCRYPTION_KEY && process.env.JWT_SECRET) {
   console.warn(
-    '[agent/crypto] AGENT_ENCRYPTION_KEY is not set — falling back to JWT_SECRET for API key encryption. ' +
-    'Set AGENT_ENCRYPTION_KEY to an independent secret (openssl rand -hex 32) so that agent API keys ' +
-    'use a dedicated encryption key, isolated from JWT signing.',
+    '[agent/crypto] CRMY_ENCRYPTION_KEY is not set — falling back to JWT_SECRET for stored agent key encryption. ' +
+    'Set CRMY_ENCRYPTION_KEY to an independent secret (openssl rand -hex 32) so stored secrets ' +
+    'are isolated from JWT signing.',
   );
 }
 const IV_LEN = 12;
@@ -19,7 +20,8 @@ const TAG_LEN = 16;
 
 /**
  * Derive a 256-bit key from the configured secret using HKDF-SHA256.
- * Falls back to JWT_SECRET if AGENT_ENCRYPTION_KEY is not set.
+ * AGENT_ENCRYPTION_KEY remains a legacy override. CRMY_ENCRYPTION_KEY is the
+ * canonical stored-secret key shared with connector credentials.
  *
  * HKDF is the correct primitive for key derivation: it is designed to take
  * high-entropy input material (our secret) and produce a uniformly random key.
@@ -27,8 +29,8 @@ const TAG_LEN = 16;
  * domain separation or entropy expansion guarantees.
  */
 function getKey(): Buffer {
-  const raw = process.env.AGENT_ENCRYPTION_KEY ?? process.env.JWT_SECRET;
-  if (!raw) throw new Error('No encryption key available (set AGENT_ENCRYPTION_KEY or JWT_SECRET)');
+  const raw = process.env.AGENT_ENCRYPTION_KEY ?? process.env.CRMY_ENCRYPTION_KEY ?? process.env.JWT_SECRET;
+  if (!raw) throw new Error('No encryption key available (set CRMY_ENCRYPTION_KEY or JWT_SECRET)');
   // hkdfSync(digest, ikm, salt, info, keylen) → ArrayBuffer
   const keyMaterial = crypto.hkdfSync(
     'sha256',

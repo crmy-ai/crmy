@@ -140,12 +140,49 @@ export async function updateEmailStatus(
   return (result.rows[0] as EmailRow) ?? null;
 }
 
+export async function claimEmailForDelivery(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  deliveryAttempt: Record<string, unknown>,
+): Promise<EmailRow | null> {
+  const result = await db.query(
+    `UPDATE emails
+     SET status = 'sending',
+         generation_metadata = COALESCE(generation_metadata, '{}'::jsonb) || $3::jsonb,
+         updated_at = now()
+     WHERE id = $1
+       AND tenant_id = $2
+       AND status IN ('draft', 'approved')
+     RETURNING *`,
+    [id, tenantId, JSON.stringify({ delivery_attempt: deliveryAttempt })],
+  );
+  return (result.rows[0] as EmailRow) ?? null;
+}
+
 export async function getEmailByHitlRequestId(
   db: DbPool, tenantId: UUID, hitlRequestId: UUID,
 ): Promise<EmailRow | null> {
   const result = await db.query(
     'SELECT * FROM emails WHERE hitl_request_id = $1 AND tenant_id = $2',
     [hitlRequestId, tenantId],
+  );
+  return (result.rows[0] as EmailRow) ?? null;
+}
+
+export async function mergeEmailGenerationMetadata(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  metadata: Record<string, unknown>,
+): Promise<EmailRow | null> {
+  const result = await db.query(
+    `UPDATE emails
+     SET generation_metadata = COALESCE(generation_metadata, '{}'::jsonb) || $3::jsonb,
+         updated_at = now()
+     WHERE id = $1 AND tenant_id = $2
+     RETURNING *`,
+    [id, tenantId, JSON.stringify(metadata)],
   );
   return (result.rows[0] as EmailRow) ?? null;
 }

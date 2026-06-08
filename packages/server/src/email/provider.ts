@@ -15,11 +15,14 @@ export interface EmailMessage {
   subject: string;
   body_html?: string;
   body_text: string;
+  idempotency_key?: string;
 }
 
 export interface EmailProvider {
   /** Provider type identifier, e.g. 'smtp' */
   type: string;
+  /** True only when the provider can safely dedupe/reconcile sends by idempotency_key. */
+  supportsIdempotentSend?: boolean;
   /** Validate that config has the required fields for this provider. */
   validateConfig(config: Record<string, unknown>): { valid: boolean; error?: string };
   /** Send a single email. Must not throw — return success:false on failure. */

@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ActorContext, HITLRequest, UUID } from '@crmy/shared';
+import type { ActorContext, Assignment, HITLRequest, UUID } from '@crmy/shared';
 import { permissionDenied } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
 
@@ -298,6 +298,46 @@ export async function filterVisibleHITLRequests(
   for (const request of requests) {
     if (await canAccessHITLRequest(db, actor, request)) {
       visible.push(request);
+      if (visible.length >= limit) break;
+    }
+  }
+  return visible;
+}
+
+export async function canAccessAssignment(db: DbPool, actor: ActorContext, assignment: Assignment): Promise<boolean> {
+  if (isGlobalActor(actor)) return true;
+
+  const linkedType = assignment.subject_type;
+  const linkedId = assignment.subject_id;
+  if (linkedType && linkedId) {
+    try {
+      await assertSubjectAccess(db, actor, linkedType, linkedId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  return assignment.assigned_to === actor.actor_id || assignment.assigned_by === actor.actor_id;
+}
+
+export async function assertAssignmentAccess(db: DbPool, actor: ActorContext, assignment: Assignment): Promise<void> {
+  if (!await canAccessAssignment(db, actor, assignment)) {
+    throw permissionDenied('You do not have access to this assignment');
+  }
+}
+
+export async function filterVisibleAssignments(
+  db: DbPool,
+  actor: ActorContext,
+  assignments: Assignment[],
+  limit: number,
+): Promise<Assignment[]> {
+  if (isGlobalActor(actor)) return assignments.slice(0, limit);
+  const visible: Assignment[] = [];
+  for (const assignment of assignments) {
+    if (await canAccessAssignment(db, actor, assignment)) {
+      visible.push(assignment);
       if (visible.length >= limit) break;
     }
   }

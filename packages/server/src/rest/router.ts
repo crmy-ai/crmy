@@ -85,6 +85,21 @@ function qcsv(val: unknown): string[] | undefined {
   return s.split(',').map(part => part.trim()).filter(Boolean);
 }
 
+function isLocalDbConfigEnabled(): boolean {
+  return process.env.NODE_ENV !== 'production'
+    || process.env.CRMY_LOCAL_SETUP_MODE === 'true'
+    || process.env.CRMY_ALLOW_DB_CONFIG_WRITE === 'true';
+}
+
+function rejectLocalDbConfigDisabled(res: Response): void {
+  res.status(403).json({
+    type: 'https://crmy.ai/errors/local_setup_disabled',
+    title: 'Local Setup Disabled',
+    status: 403,
+    detail: 'Runtime database connection testing and .env.db writes are only available in local setup mode.',
+  });
+}
+
 function requestOrigin(req: Request): string {
   return `${req.protocol}://${req.get('host')}`;
 }
@@ -98,6 +113,23 @@ function requireAdminActor(actor: ActorContext): void {
 function p(req: Request, name: string): string {
   const val = req.params[name];
   return typeof val === 'string' ? val : Array.isArray(val) ? val[0] : '';
+}
+
+function patchEnvelope(body: unknown): { patch: Record<string, unknown>; action_context?: Record<string, unknown> } {
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    const record = body as Record<string, unknown>;
+    const patch = record.patch;
+    if (patch && typeof patch === 'object' && !Array.isArray(patch)) {
+      return {
+        patch: patch as Record<string, unknown>,
+        action_context: record.action_context && typeof record.action_context === 'object' && !Array.isArray(record.action_context)
+          ? record.action_context as Record<string, unknown>
+          : undefined,
+      };
+    }
+    return { patch: record };
+  }
+  return { patch: {} };
 }
 
 function redactSensitive(value: string): string {
@@ -207,7 +239,7 @@ function adminToolHandler(db: DbPool, toolName: string) {
 export function apiRouter(db: DbPool): Router {
   const router = Router();
 
-  // --- OpenAPI spec (no auth required) ---
+  // --- OpenAPI spec (mounted behind API auth with the rest of /api/v1) ---
   router.get('/openapi.json', (_req, res) => {
     res.json(getSpec());
   });
@@ -345,7 +377,8 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       const handler = toolHandler(db, 'contact_update');
-      const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+      const { patch, action_context } = patchEnvelope(req.body);
+      const result = await handler({ id: p(req, 'id'), patch, action_context }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -419,7 +452,8 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       const handler = toolHandler(db, 'account_update');
-      const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+      const { patch, action_context } = patchEnvelope(req.body);
+      const result = await handler({ id: p(req, 'id'), patch, action_context }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -475,16 +509,17 @@ export function apiRouter(db: DbPool): Router {
   router.patch('/opportunities/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      const { patch, action_context } = patchEnvelope(req.body);
       // Only route to advance_stage when the body is exclusively a stage transition
-      const bodyKeys = Object.keys(req.body);
-      const isStageOnly = bodyKeys.length > 0 && bodyKeys.every(k => ['stage', 'lost_reason', 'note'].includes(k));
-      if (isStageOnly && req.body.stage) {
+      const bodyKeys = Object.keys(patch);
+      const isStageOnly = !action_context && bodyKeys.length > 0 && bodyKeys.every(k => ['stage', 'lost_reason', 'note'].includes(k));
+      if (isStageOnly && patch.stage) {
         const handler = toolHandler(db, 'opportunity_advance_stage');
-        const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+        const result = await handler({ id: p(req, 'id'), ...patch }, actor);
         res.json(result);
       } else {
         const handler = toolHandler(db, 'opportunity_update');
-        const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+        const result = await handler({ id: p(req, 'id'), patch, action_context }, actor);
         res.json(result);
       }
     } catch (err) { handleError(res, err); }
@@ -559,7 +594,8 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       const handler = toolHandler(db, 'activity_update');
-      const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+      const { patch, action_context } = patchEnvelope(req.body);
+      const result = await handler({ id: p(req, 'id'), patch, action_context }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -841,16 +877,17 @@ export function apiRouter(db: DbPool): Router {
   router.patch('/use-cases/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
+      const { patch, action_context } = patchEnvelope(req.body);
       // Only route to advance_stage when the body is exclusively a stage transition
-      const bodyKeys = Object.keys(req.body);
-      const isStageOnly = bodyKeys.length > 0 && bodyKeys.every(k => ['stage', 'note'].includes(k));
-      if (isStageOnly && req.body.stage) {
+      const bodyKeys = Object.keys(patch);
+      const isStageOnly = !action_context && bodyKeys.length > 0 && bodyKeys.every(k => ['stage', 'note'].includes(k));
+      if (isStageOnly && patch.stage) {
         const handler = toolHandler(db, 'use_case_advance_stage');
-        const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+        const result = await handler({ id: p(req, 'id'), ...patch }, actor);
         res.json(result);
       } else {
         const handler = toolHandler(db, 'use_case_update');
-        const result = await handler({ id: p(req, 'id'), patch: req.body }, actor);
+        const result = await handler({ id: p(req, 'id'), patch, action_context }, actor);
         res.json(result);
       }
     } catch (err) { handleError(res, err); }
@@ -1908,6 +1945,33 @@ export function apiRouter(db: DbPool): Router {
         limit: Math.min(qn(req.query.limit, 50), 200),
         cursor: qs(req.query.cursor),
       }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/sequences/enrollments/:id/unenroll', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_unenroll');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/sequences/enrollments/:id/pause', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_pause');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/sequences/enrollments/:id/resume', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'sequence_resume');
+      const result = await handler({ id: p(req, 'id'), ...req.body }, actor);
       res.json(result);
     } catch (err) { handleError(res, err); }
   });
@@ -3397,15 +3461,16 @@ export function apiRouter(db: DbPool): Router {
       const embeddingConfig = loadEmbeddingConfig();
       const pgvectorEnabled = Boolean(pgvectorResult.rows[0]?.extension_enabled);
       const embeddingColumnReady = Boolean(pgvectorResult.rows[0]?.embedding_column_ready);
-      const semanticSearch = {
-        pgvector_enabled: pgvectorEnabled,
-        pgvector_column_ready: embeddingColumnReady,
-        pgvector_env_enabled: process.env.ENABLE_PGVECTOR === 'true',
-        embedding_configured: Boolean(embeddingConfig),
-        embedding_provider: embeddingConfig?.provider ?? null,
-        embedding_model: embeddingConfig?.model ?? null,
-        ready: pgvectorEnabled && embeddingColumnReady && Boolean(embeddingConfig),
-      };
+	      const semanticSearch = {
+	        pgvector_enabled: pgvectorEnabled,
+	        pgvector_column_ready: embeddingColumnReady,
+	        pgvector_env_enabled: process.env.ENABLE_PGVECTOR === 'true',
+	        embedding_configured: Boolean(embeddingConfig),
+	        embedding_provider: embeddingConfig?.provider ?? null,
+	        embedding_model: embeddingConfig?.model ?? null,
+	        ready: pgvectorEnabled && embeddingColumnReady && Boolean(embeddingConfig),
+	        local_setup_enabled: isLocalDbConfigEnabled(),
+	      };
       const sampleData = await getSampleDataStatus(db, actor.tenant_id);
       try {
         const parsed = new URL(url);
@@ -3424,10 +3489,14 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
-  router.post('/admin/db-config/test', async (req: Request, res: Response) => {
-    try {
-      if (!requireAdmin(req, res)) return;
-      const { connection_string } = req.body as { connection_string?: string };
+	  router.post('/admin/db-config/test', async (req: Request, res: Response) => {
+	    try {
+	      if (!requireAdmin(req, res)) return;
+	      if (!isLocalDbConfigEnabled()) {
+	        rejectLocalDbConfigDisabled(res);
+	        return;
+	      }
+	      const { connection_string } = req.body as { connection_string?: string };
       if (!connection_string) {
         res.status(400).json({
           type: 'https://crmy.ai/errors/validation',
@@ -3457,10 +3526,14 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
-  router.patch('/admin/db-config', async (req: Request, res: Response) => {
-    try {
-      if (!requireAdmin(req, res)) return;
-      const { connection_string } = req.body as { connection_string?: string };
+	  router.patch('/admin/db-config', async (req: Request, res: Response) => {
+	    try {
+	      if (!requireAdmin(req, res)) return;
+	      if (!isLocalDbConfigEnabled()) {
+	        rejectLocalDbConfigDisabled(res);
+	        return;
+	      }
+	      const { connection_string } = req.body as { connection_string?: string };
       if (!connection_string) {
         res.status(400).json({
           type: 'https://crmy.ai/errors/validation',
@@ -3539,13 +3612,15 @@ export function apiRouter(db: DbPool): Router {
     };
   }
 
-  router.get('/admin/actors', async (req: Request, res: Response) => {
-    try {
-      if (!requireAdmin(req, res)) return;
-      const actor = getActor(req);
-      const result = await db.query(
-        `SELECT a.*,
-                u.email as user_email,
+	  router.get('/admin/actors', async (req: Request, res: Response) => {
+	    try {
+	      if (!requireAdmin(req, res)) return;
+	      const actor = getActor(req);
+	      const limit = Math.min(qn(req.query.limit, 100), 500);
+	      const cursor = qs(req.query.cursor) ?? null;
+	      const result = await db.query(
+	        `SELECT a.*,
+	                u.email as user_email,
                 u.name as user_name,
                 u.role as user_role,
                 u.is_active as user_is_active,
@@ -3561,31 +3636,49 @@ export function apiRouter(db: DbPool): Router {
                     AND t.expires_at > now()
                 ) as invite_pending,
                 (SELECT count(*)::int FROM api_keys ak WHERE ak.tenant_id = a.tenant_id AND ak.actor_id = a.id) as api_key_count,
-                (SELECT max(e.created_at) FROM events e WHERE e.tenant_id = a.tenant_id AND e.actor_id = a.id::text) as last_activity_at
-         FROM actors a
-         LEFT JOIN users u ON u.id = a.user_id AND u.tenant_id = a.tenant_id
-         WHERE a.tenant_id = $1
-         ORDER BY
-           CASE WHEN a.registration_status = 'pending_review' THEN 0 ELSE 1 END,
-           a.created_at DESC`,
-        [actor.tenant_id],
-      );
-      res.json({ data: result.rows });
-    } catch (err) { handleError(res, err); }
-  });
+	                (SELECT max(e.created_at) FROM events e WHERE e.tenant_id = a.tenant_id AND e.actor_id = a.id::text) as last_activity_at
+	         FROM actors a
+	         LEFT JOIN users u ON u.id = a.user_id AND u.tenant_id = a.tenant_id
+	         WHERE a.tenant_id = $1
+	           AND ($2::timestamptz IS NULL OR a.created_at < $2::timestamptz)
+	         ORDER BY
+	           CASE WHEN a.registration_status = 'pending_review' THEN 0 ELSE 1 END,
+	           a.created_at DESC
+	         LIMIT $3`,
+	        [actor.tenant_id, cursor, limit + 1],
+	      );
+	      const rows = result.rows;
+	      const data = rows.length > limit ? rows.slice(0, limit) : rows;
+	      res.json({
+	        data,
+	        next_cursor: rows.length > limit ? data[data.length - 1]?.created_at ?? null : null,
+	      });
+	    } catch (err) { handleError(res, err); }
+	  });
 
-  router.get('/admin/users', async (req: Request, res: Response) => {
-    try {
-      if (!requireAdmin(req, res)) return;
-      const actor = getActor(req);
-      const result = await db.query(
-        `SELECT id, email, name, role, manager_id, is_active, invited_at, password_set_at, last_login_at, created_at, updated_at
-         FROM users WHERE tenant_id = $1 ORDER BY created_at ASC`,
-        [actor.tenant_id],
-      );
-      res.json({ data: result.rows });
-    } catch (err) { handleError(res, err); }
-  });
+	  router.get('/admin/users', async (req: Request, res: Response) => {
+	    try {
+	      if (!requireAdmin(req, res)) return;
+	      const actor = getActor(req);
+	      const limit = Math.min(qn(req.query.limit, 100), 500);
+	      const cursor = qs(req.query.cursor) ?? null;
+	      const result = await db.query(
+	        `SELECT id, email, name, role, manager_id, is_active, invited_at, password_set_at, last_login_at, created_at, updated_at
+	         FROM users
+	         WHERE tenant_id = $1
+	           AND ($2::timestamptz IS NULL OR created_at > $2::timestamptz)
+	         ORDER BY created_at ASC
+	         LIMIT $3`,
+	        [actor.tenant_id, cursor, limit + 1],
+	      );
+	      const rows = result.rows;
+	      const data = rows.length > limit ? rows.slice(0, limit) : rows;
+	      res.json({
+	        data,
+	        next_cursor: rows.length > limit ? data[data.length - 1]?.created_at ?? null : null,
+	      });
+	    } catch (err) { handleError(res, err); }
+	  });
 
   router.post('/admin/users', async (req: Request, res: Response) => {
     try {
@@ -3610,8 +3703,8 @@ export function apiRouter(db: DbPool): Router {
         res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Valid email is required' });
         return;
       }
-      if (!send_invite && (!password || password.length < 8)) {
-        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Password must be at least 8 characters' });
+      if (!send_invite && (!password || password.length < 12)) {
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Password must be at least 12 characters' });
         return;
       }
       if (!role || !VALID_ROLES.includes(role)) {
@@ -3723,8 +3816,8 @@ export function apiRouter(db: DbPool): Router {
         res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Valid email is required' });
         return;
       }
-      if (password && password.length < 8) {
-        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Password must be at least 8 characters' });
+      if (password && password.length < 12) {
+        res.status(400).json({ type: 'https://crmy.ai/errors/validation', title: 'Validation Error', status: 400, detail: 'Password must be at least 12 characters' });
         return;
       }
       if (manager_id !== undefined && manager_id !== null) {

@@ -9,10 +9,20 @@ import * as webhookRepo from '../db/repos/webhooks.js';
 
 const MAX_ATTEMPTS = 5;
 const RETRY_BATCH_SIZE = 20;
+const REDACTED_RESPONSE_BODY = '[redacted: webhook response body omitted]';
 
 /** Sign a payload with HMAC-SHA256 using the endpoint secret. */
 function signPayload(payload: string, secret: string): string {
   return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+}
+
+function redactedEndpointLabel(endpointId: UUID, url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.protocol}//${parsed.hostname}/… (${endpointId})`;
+  } catch {
+    return `invalid-url (${endpointId})`;
+  }
 }
 
 /** Attempt delivery of a single webhook, returns success status. */
@@ -37,13 +47,13 @@ async function attemptDelivery(
       signal: AbortSignal.timeout(10_000),
     });
 
-    const responseBody = await res.text().catch(() => '');
+    await res.body?.cancel().catch(() => undefined);
 
     if (res.ok) {
       await webhookRepo.updateDeliveryStatus(db, deliveryId, {
         status: 'delivered',
         response_status: res.status,
-        response_body: responseBody.slice(0, 1000),
+        response_body: REDACTED_RESPONSE_BODY,
       });
       return true;
     }
@@ -55,14 +65,14 @@ async function attemptDelivery(
       await webhookRepo.updateDeliveryStatus(db, deliveryId, {
         status: 'retrying',
         response_status: res.status,
-        response_body: responseBody.slice(0, 1000),
+        response_body: REDACTED_RESPONSE_BODY,
         next_retry_at: new Date(Date.now() + backoffMs).toISOString(),
       });
     } else {
       await webhookRepo.updateDeliveryStatus(db, deliveryId, {
         status: 'failed',
         response_status: res.status,
-        response_body: responseBody.slice(0, 1000),
+        response_body: REDACTED_RESPONSE_BODY,
       });
     }
     return false;
@@ -143,9 +153,9 @@ export function registerWebhookDispatcher(db: DbPool): void {
         });
 
         // Fire-and-forget first attempt
-        attemptDelivery(db, delivery.id, endpoint.url, endpoint.secret, payload, 0).catch((err) =>
-          console.error(`[webhook] delivery attempt failed for ${endpoint.url}:`, err),
-        );
+        attemptDelivery(db, delivery.id, endpoint.url, endpoint.secret, payload, 0).catch((err) => {
+          console.error(`[webhook] delivery attempt failed for ${redactedEndpointLabel(endpoint.id, endpoint.url)}:`, err);
+        });
       }
     } catch (err) {
       console.error('[webhook] dispatcher error:', err);

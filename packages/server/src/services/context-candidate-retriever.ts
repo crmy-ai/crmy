@@ -12,6 +12,15 @@ export type RetrievedSignalGroup =
     vector_similarity?: number;
   };
 
+function timestampMs(value: unknown): number {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'string' || typeof value === 'number') {
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
 export async function retrieveSignalGroupCandidates(
   db: DbPool,
   tenantId: UUID | string,
@@ -57,6 +66,6 @@ export async function retrieveSignalGroupCandidates(
   }
 
   return [...byId.values()]
-    .sort((a, b) => (b.vector_similarity ?? 0) - (a.vector_similarity ?? 0) || b.updated_at.localeCompare(a.updated_at))
+    .sort((a, b) => (b.vector_similarity ?? 0) - (a.vector_similarity ?? 0) || timestampMs(b.updated_at) - timestampMs(a.updated_at))
     .slice(0, input.limit ?? 50);
 }

@@ -18,6 +18,7 @@ function showConfig(): void {
     ...config,
     apiKey: config.apiKey ? config.apiKey.slice(0, 10) + '...' : undefined,
     jwtSecret: config.jwtSecret ? '***' : undefined,
+    encryptionKey: config.encryptionKey ? '***' : undefined,
   };
   console.log(JSON.stringify(display, null, 2));
 }

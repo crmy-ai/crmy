@@ -520,8 +520,6 @@ export async function createWriteback(
         operation, writeback_mode, preview, payload, policy_result, status, hitl_request_id,
         idempotency_key, requested_by)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-     ON CONFLICT (tenant_id, system_id, idempotency_key)
-     DO UPDATE SET updated_at=now()
      RETURNING *`,
     [
       tenantId, data.system_id, data.mapping_id ?? null, data.object_type, data.object_id ?? null,
@@ -592,6 +590,26 @@ export async function updateWriteback(
   const result = await db.query(
     `UPDATE external_writeback_requests SET ${sets.join(', ')} WHERE tenant_id=$1 AND id=$2 RETURNING *`,
     params,
+  );
+  return (result.rows[0] as ExternalWritebackRequest) ?? null;
+}
+
+export async function claimWritebackForExecution(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  executionResult: Json,
+): Promise<ExternalWritebackRequest | null> {
+  const result = await db.query(
+    `UPDATE external_writeback_requests
+     SET status = 'executing',
+         execution_result = $3::jsonb,
+         updated_at = now()
+     WHERE tenant_id = $1
+       AND id = $2
+       AND status = 'approved'
+     RETURNING *`,
+    [tenantId, id, JSON.stringify(executionResult)],
   );
   return (result.rows[0] as ExternalWritebackRequest) ?? null;
 }

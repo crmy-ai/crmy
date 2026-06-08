@@ -60,15 +60,17 @@ export async function listCandidateGroups(
   const result = await db.query(
     `WITH subject_scope AS (
        SELECT CASE
-         WHEN $2 = 'account' THEN $3::uuid
-         WHEN $2 = 'contact' THEN (
-           SELECT account_id FROM contacts WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
-         )
-         WHEN $2 = 'opportunity' THEN (
-           SELECT account_id FROM opportunities WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
-         )
-         WHEN $2 = 'use_case' THEN (
-           SELECT account_id FROM use_cases WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
+	         WHEN $2 = 'account' THEN (
+	           SELECT id FROM accounts WHERE tenant_id = $1 AND id = $3 AND archived_at IS NULL
+	         )
+	         WHEN $2 = 'contact' THEN (
+	           SELECT account_id FROM contacts WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL AND archived_at IS NULL
+	         )
+	         WHEN $2 = 'opportunity' THEN (
+	           SELECT account_id FROM opportunities WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL AND archived_at IS NULL
+	         )
+	         WHEN $2 = 'use_case' THEN (
+	           SELECT account_id FROM use_cases WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL AND archived_at IS NULL
          )
        END AS account_id
      )
@@ -86,13 +88,13 @@ export async function listCandidateGroups(
            AND (
              (sg.subject_type = 'account' AND sg.subject_id = ss.account_id)
              OR (sg.subject_type = 'contact' AND sg.subject_id IN (
-               SELECT id FROM contacts WHERE tenant_id = $1 AND account_id = ss.account_id
+	               SELECT id FROM contacts WHERE tenant_id = $1 AND account_id = ss.account_id AND archived_at IS NULL
              ))
              OR (sg.subject_type = 'opportunity' AND sg.subject_id IN (
-               SELECT id FROM opportunities WHERE tenant_id = $1 AND account_id = ss.account_id
+	               SELECT id FROM opportunities WHERE tenant_id = $1 AND account_id = ss.account_id AND archived_at IS NULL
              ))
              OR (sg.subject_type = 'use_case' AND sg.subject_id IN (
-               SELECT id FROM use_cases WHERE tenant_id = $1 AND account_id = ss.account_id
+	               SELECT id FROM use_cases WHERE tenant_id = $1 AND account_id = ss.account_id AND archived_at IS NULL
              ))
            )
          )
@@ -118,15 +120,17 @@ export async function semanticCandidateGroups(
   const result = await db.query(
     `WITH subject_scope AS (
        SELECT CASE
-         WHEN $2 = 'account' THEN $3::uuid
-         WHEN $2 = 'contact' THEN (
-           SELECT account_id FROM contacts WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
-         )
-         WHEN $2 = 'opportunity' THEN (
-           SELECT account_id FROM opportunities WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
-         )
-         WHEN $2 = 'use_case' THEN (
-           SELECT account_id FROM use_cases WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL
+	         WHEN $2 = 'account' THEN (
+	           SELECT id FROM accounts WHERE tenant_id = $1 AND id = $3 AND archived_at IS NULL
+	         )
+	         WHEN $2 = 'contact' THEN (
+	           SELECT account_id FROM contacts WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL AND archived_at IS NULL
+	         )
+	         WHEN $2 = 'opportunity' THEN (
+	           SELECT account_id FROM opportunities WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL AND archived_at IS NULL
+	         )
+	         WHEN $2 = 'use_case' THEN (
+	           SELECT account_id FROM use_cases WHERE tenant_id = $1 AND id = $3 AND account_id IS NOT NULL AND archived_at IS NULL
          )
        END AS account_id
      )
@@ -146,13 +150,13 @@ export async function semanticCandidateGroups(
            AND (
              (sg.subject_type = 'account' AND sg.subject_id = ss.account_id)
              OR (sg.subject_type = 'contact' AND sg.subject_id IN (
-               SELECT id FROM contacts WHERE tenant_id = $1 AND account_id = ss.account_id
+	               SELECT id FROM contacts WHERE tenant_id = $1 AND account_id = ss.account_id AND archived_at IS NULL
              ))
              OR (sg.subject_type = 'opportunity' AND sg.subject_id IN (
-               SELECT id FROM opportunities WHERE tenant_id = $1 AND account_id = ss.account_id
+	               SELECT id FROM opportunities WHERE tenant_id = $1 AND account_id = ss.account_id AND archived_at IS NULL
              ))
              OR (sg.subject_type = 'use_case' AND sg.subject_id IN (
-               SELECT id FROM use_cases WHERE tenant_id = $1 AND account_id = ss.account_id
+	               SELECT id FROM use_cases WHERE tenant_id = $1 AND account_id = ss.account_id AND archived_at IS NULL
              ))
            )
          )
@@ -358,9 +362,10 @@ export async function listSignalGroups(
       OR EXISTS (
         SELECT 1 FROM contacts c
         WHERE c.tenant_id = sg.tenant_id
-          AND sg.subject_type = 'contact'
-          AND c.id = sg.subject_id
-          AND (
+	          AND sg.subject_type = 'contact'
+	          AND c.id = sg.subject_id
+	          AND c.archived_at IS NULL
+	          AND (
             COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, '') ILIKE $${idx + 1}
             OR c.email ILIKE $${idx + 1}
           )
@@ -368,23 +373,26 @@ export async function listSignalGroups(
       OR EXISTS (
         SELECT 1 FROM accounts a
         WHERE a.tenant_id = sg.tenant_id
-          AND sg.subject_type = 'account'
-          AND a.id = sg.subject_id
-          AND a.name ILIKE $${idx + 1}
+	          AND sg.subject_type = 'account'
+	          AND a.id = sg.subject_id
+	          AND a.archived_at IS NULL
+	          AND a.name ILIKE $${idx + 1}
       )
       OR EXISTS (
         SELECT 1 FROM opportunities o
         WHERE o.tenant_id = sg.tenant_id
-          AND sg.subject_type = 'opportunity'
-          AND o.id = sg.subject_id
-          AND o.name ILIKE $${idx + 1}
+	          AND sg.subject_type = 'opportunity'
+	          AND o.id = sg.subject_id
+	          AND o.archived_at IS NULL
+	          AND o.name ILIKE $${idx + 1}
       )
       OR EXISTS (
         SELECT 1 FROM use_cases uc
         WHERE uc.tenant_id = sg.tenant_id
-          AND sg.subject_type = 'use_case'
-          AND uc.id = sg.subject_id
-          AND COALESCE(uc.name, uc.title) ILIKE $${idx + 1}
+	          AND sg.subject_type = 'use_case'
+	          AND uc.id = sg.subject_id
+	          AND uc.archived_at IS NULL
+	          AND COALESCE(uc.name, uc.title) ILIKE $${idx + 1}
       )
     )`);
     params.push(textQuery, likeQuery);
@@ -398,10 +406,10 @@ export async function listSignalGroups(
       conditions.push('FALSE');
     } else {
       conditions.push(`(
-        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = sg.tenant_id AND sg.subject_type = 'account' AND a.id = sg.subject_id AND a.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM contacts c WHERE c.tenant_id = sg.tenant_id AND sg.subject_type = 'contact' AND c.id = sg.subject_id AND c.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = sg.tenant_id AND sg.subject_type = 'opportunity' AND o.id = sg.subject_id AND o.owner_id = ANY($${idx}::uuid[]))
-        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = sg.tenant_id AND sg.subject_type = 'use_case' AND uc.id = sg.subject_id AND uc.owner_id = ANY($${idx}::uuid[]))
+	        EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = sg.tenant_id AND sg.subject_type = 'account' AND a.id = sg.subject_id AND a.owner_id = ANY($${idx}::uuid[]) AND a.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM contacts c WHERE c.tenant_id = sg.tenant_id AND sg.subject_type = 'contact' AND c.id = sg.subject_id AND c.owner_id = ANY($${idx}::uuid[]) AND c.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = sg.tenant_id AND sg.subject_type = 'opportunity' AND o.id = sg.subject_id AND o.owner_id = ANY($${idx}::uuid[]) AND o.archived_at IS NULL)
+	        OR EXISTS (SELECT 1 FROM use_cases uc WHERE uc.tenant_id = sg.tenant_id AND sg.subject_type = 'use_case' AND uc.id = sg.subject_id AND uc.owner_id = ANY($${idx}::uuid[]) AND uc.archived_at IS NULL)
       )`);
       params.push(filters.owner_ids);
       idx++;

@@ -45,6 +45,7 @@ export interface Contact {
   created_by?: UUID;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
   row_version: number;
 }
 
@@ -67,6 +68,7 @@ export interface Account {
   created_by?: UUID;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
   row_version: number;
 }
 
@@ -92,6 +94,7 @@ export interface Opportunity {
   created_by?: UUID;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
   row_version: number;
 }
 
@@ -371,6 +374,7 @@ export interface UseCase {
   created_by?: UUID;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
   row_version: number;
 }
 
@@ -892,6 +896,7 @@ export interface ContextLineage {
     signal_groups: number;
     memory: number;
     retrievals?: number;
+    action_receipts?: number;
     handoffs: number;
     writebacks: number;
     audit_events: number;
@@ -1110,7 +1115,10 @@ export type ActionContextProposedActionType =
   | 'assignment_create'
   | 'memory_promote'
   | 'record_update'
-  | 'external_writeback';
+  | 'external_writeback'
+  | 'sequence_step'
+  | 'workflow_action'
+  | 'agent_task';
 
 export interface ActionContextProposedAction {
   action_type: ActionContextProposedActionType;

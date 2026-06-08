@@ -168,6 +168,11 @@ export function hitlTools(db: DbPool): ToolDef[] {
             objectType: 'hitl_request',
             objectId: request.id,
             afterData: request,
+            metadata: {
+              action_context: request.action_payload && typeof request.action_payload === 'object' && !Array.isArray(request.action_payload)
+                ? (request.action_payload as Record<string, unknown>).action_context
+                : undefined,
+            },
           });
           return { request, applied, event_id };
         });

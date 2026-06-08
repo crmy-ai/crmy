@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 const BASE = '/api/v1';
+const DEFAULT_REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_CRMY_API_TIMEOUT_MS ?? 30_000);
 
 /**
  * Structured API error that preserves the full response body so callers can
@@ -40,6 +41,8 @@ export function setUser(user: { id: string; email: string; name: string; role: s
 
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
   const token = getToken();
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(opts.headers as Record<string, string>),
@@ -51,9 +54,15 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     res = await fetch(path.startsWith('/') ? path : `${BASE}/${path}`, {
       ...opts,
       headers,
+      signal: opts.signal ?? controller.signal,
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`The server did not respond within ${Math.round(DEFAULT_REQUEST_TIMEOUT_MS / 1000)} seconds. Try again or check server health.`);
+    }
     throw new Error('Unable to reach the server. Check your connection and try again.');
+  } finally {
+    window.clearTimeout(timeout);
   }
 
   if (res.status === 401) {

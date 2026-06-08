@@ -20,6 +20,7 @@ import { withTransaction } from '../../db/transaction.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
 import { assertOwnedObjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
+import { verifiedActionContextMetadataForReceipt } from '../../services/action-context.js';
 
 function runContactOperation<T>(
   db: DbPool,
@@ -209,6 +210,7 @@ export function contactTools(db: DbPool): ToolDef[] {
           expectedVersion: input.expected_version,
         });
         if (!contact) throw notFound('Contact', input.id);
+        const actionContextMetadata = await verifiedActionContextMetadataForReceipt(db, actor, 'contact', input.id, input.action_context);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -219,6 +221,7 @@ export function contactTools(db: DbPool): ToolDef[] {
           objectId: contact.id,
           beforeData: before,
           afterData: contact,
+          metadata: actionContextMetadata ? { action_context: actionContextMetadata } : undefined,
         });
         indexDocument(db, 'contact', contact as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] contact index ${contact.id}: ${(err as Error).message}`));

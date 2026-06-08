@@ -22,6 +22,7 @@ export interface AgentConfig {
   auto_extract_context: boolean;
   auto_promote_signals: boolean;
   signal_auto_promote_threshold: number;
+  signal_source_quality: Record<string, number>;
   backup_enabled: boolean;
   backup_provider: ProviderId | null;
   backup_base_url: string | null;
@@ -75,6 +76,10 @@ export interface AgentTurn {
   context_detail: string | null;
   error_message: string | null;
   final_label: string | null;
+  worker_id: string | null;
+  lease_expires_at: string | null;
+  heartbeat_at: string | null;
+  attempt_count: number;
   started_at: string | null;
   completed_at: string | null;
   cancelled_at: string | null;

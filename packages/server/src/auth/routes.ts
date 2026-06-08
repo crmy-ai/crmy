@@ -48,11 +48,7 @@ setInterval(() => {
 }, 600_000).unref(); // .unref() so this timer won't keep the process alive
 
 function clientIp(req: Request): string {
-  return (
-    (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0].trim() ??
-    req.socket.remoteAddress ??
-    'unknown'
-  );
+  return req.ip || req.socket.remoteAddress || 'unknown';
 }
 
 function handleAuthRouteError(res: Response, err: unknown, fallbackDetail: string): void {
@@ -97,11 +93,32 @@ export function authRouter(
       return;
     }
 
+    let data: z.infer<typeof authRegister>;
+    try {
+      data = authRegister.parse(req.body);
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'name' in err && err.name === 'ZodError') {
+        res.status(422).json({
+          type: 'https://crmy.ai/errors/validation',
+          title: 'Validation Error',
+          status: 422,
+          detail: 'Invalid input',
+          errors: (err as unknown as { errors: unknown[] }).errors,
+        });
+        return;
+      }
+      throw err;
+    }
+    const passwordHash = hashPassword(data.password);
     const client = await db.connect();
     try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock($1, $2)', [276207, 1]);
+
       const userCountResult = await client.query('SELECT COUNT(*)::int AS count FROM users');
       const hasUsers = Number(userCountResult.rows[0]?.count ?? 0) > 0;
       if (hasUsers && !options.allowPublicRegistration) {
+        await client.query('ROLLBACK');
         res.status(403).json({
           type: 'https://crmy.ai/errors/registration_closed',
           title: 'Registration Closed',
@@ -110,11 +127,6 @@ export function authRouter(
         });
         return;
       }
-
-      const data = authRegister.parse(req.body);
-      const passwordHash = hashPassword(data.password);
-
-      await client.query('BEGIN');
 
       const tenantResult = await client.query(
         `INSERT INTO tenants (slug, name) VALUES ($1, $2) RETURNING *`,
@@ -165,16 +177,6 @@ export function authRouter(
       });
     } catch (err: unknown) {
       await client.query('ROLLBACK').catch(() => {});
-      if (err && typeof err === 'object' && 'name' in err && err.name === 'ZodError') {
-        res.status(422).json({
-          type: 'https://crmy.ai/errors/validation',
-          title: 'Validation Error',
-          status: 422,
-          detail: 'Invalid input',
-          errors: (err as unknown as { errors: unknown[] }).errors,
-        });
-        return;
-      }
       // Detect unique constraint violations without leaking PG internals
       const pgCode = (err as Record<string, unknown>)?.code;
       if (pgCode === '23505') {
@@ -318,12 +320,12 @@ export function authRouter(
     try {
       const token = typeof req.params.token === 'string' ? req.params.token : '';
       const { password } = req.body as { password?: string };
-      if (!password || password.length < 8) {
+      if (!password || password.length < 12) {
         res.status(400).json({
           type: 'https://crmy.ai/errors/validation',
           title: 'Validation Error',
           status: 400,
-          detail: 'Password must be at least 8 characters',
+          detail: 'Password must be at least 12 characters',
         });
         return;
       }
@@ -377,7 +379,7 @@ export function authRouter(
         type: 'https://crmy.ai/errors/internal',
         title: 'Internal Error',
         status: 500,
-        detail: err instanceof Error ? err.message : 'Failed to complete setup',
+        detail: 'Failed to complete setup',
       });
     } finally {
       client.release();
@@ -401,34 +403,48 @@ export function authRouter(
     try {
       const data = agentRegisterSchema.parse(req.body);
       const actor = req.actor!;
+      requireScopes(actor, 'write');
 
-      // Enforce governor limit on actor count before acquiring the transaction
-      const activeCount = await governorLimits.countActiveActors(db, actor.tenant_id);
-      await governorLimits.enforceLimit(db, actor.tenant_id, 'actors_max', activeCount);
-
-      // Find-or-create the agent actor. ensureActor uses INSERT … ON CONFLICT,
-      // so it is safe to call without a surrounding transaction.
       const minimalScopes = ['read']; // agents start read-only; admin grants more
-      const agentActor = await actorRepo.ensureActor(db, actor.tenant_id, {
-        actor_type: 'agent',
-        display_name: data.display_name,
-        agent_identifier: data.agent_identifier,
-        agent_model: data.agent_model ?? null,
-        scopes: minimalScopes,
-        is_active: false,
-        registration_source: 'self_registered',
-        registration_status: 'pending_review',
-        metadata: {},
-      } as Parameters<typeof actorRepo.ensureActor>[2]);
-
-      // Generate an API key bound to this agent actor.
-      // The actor upsert and key insert are each single statements; we wrap
-      // both under an explicit transaction so that a failed key insert does not
-      // leave the actor without a key (the actor row is rolled back too).
       const rawKey = 'crmy_' + crypto.randomBytes(32).toString('hex');
       const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
 
       await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`crmy:agent-register:${actor.tenant_id}`]);
+
+      const actorCount = await client.query(
+        `SELECT count(*)::int AS count
+         FROM actors
+         WHERE tenant_id = $1
+           AND (is_active = TRUE OR registration_status = 'pending_review')`,
+        [actor.tenant_id],
+      );
+      await governorLimits.enforceLimit(client, actor.tenant_id, 'actors_max', Number(actorCount.rows[0]?.count ?? 0));
+
+      const existingActor = await client.query(
+        `SELECT *
+         FROM actors
+         WHERE tenant_id = $1 AND agent_identifier = $2
+         FOR UPDATE`,
+        [actor.tenant_id, data.agent_identifier],
+      );
+      let agentActor = existingActor.rows[0];
+      if (agentActor?.actor_type && agentActor.actor_type !== 'agent') {
+        throw new CrmyError('CONFLICT', 'Agent identifier is already used by another actor', 409);
+      }
+      if (agentActor?.registration_status === 'rejected') {
+        throw new CrmyError('PERMISSION_DENIED', 'This agent registration was rejected. Ask an admin to review it.', 403);
+      }
+      if (!agentActor) {
+        const createdActor = await client.query(
+          `INSERT INTO actors (tenant_id, actor_type, display_name, agent_identifier, agent_model, scopes,
+                               metadata, is_active, registration_source, registration_status)
+           VALUES ($1, 'agent', $2, $3, $4, $5, '{}'::jsonb, false, 'self_registered', 'pending_review')
+           RETURNING *`,
+          [actor.tenant_id, data.display_name, data.agent_identifier, data.agent_model ?? null, minimalScopes],
+        );
+        agentActor = createdActor.rows[0];
+      }
 
       const keyResult = await client.query(
         `INSERT INTO api_keys (tenant_id, actor_id, key_hash, label, scopes, expires_at)
@@ -690,8 +706,13 @@ export function authRouter(
 
       // Fetch current user record
       const existing = await db.query(
-        'SELECT * FROM users WHERE id = $1 AND tenant_id = $2',
-        [actor.actor_id, actor.tenant_id],
+        `SELECT u.*
+         FROM users u
+         LEFT JOIN actors a ON a.tenant_id = u.tenant_id AND a.user_id = u.id
+         WHERE u.tenant_id = $1
+           AND (u.id::text = $2 OR a.id::text = $2)
+         LIMIT 1`,
+        [actor.tenant_id, actor.actor_id],
       );
       if (existing.rows.length === 0) {
         res.status(404).json({ detail: 'User not found' });
@@ -709,8 +730,8 @@ export function authRouter(
           res.status(400).json({ detail: 'Current password is incorrect' });
           return;
         }
-        if (new_password.length < 8) {
-          res.status(400).json({ detail: 'New password must be at least 8 characters' });
+        if (new_password.length < 12) {
+          res.status(400).json({ detail: 'New password must be at least 12 characters' });
           return;
         }
       }
@@ -734,7 +755,7 @@ export function authRouter(
         return;
       }
 
-      vals.push(actor.actor_id, actor.tenant_id);
+      vals.push(user.id, actor.tenant_id);
       const result = await db.query(
         `UPDATE users SET ${cols.join(', ')}
          WHERE id = $${vals.length - 1} AND tenant_id = $${vals.length}
@@ -743,10 +764,10 @@ export function authRouter(
       );
 
       // Also sync display_name on the linked actor
-      if (name?.trim() && actor.actor_id) {
+      if (name?.trim()) {
         await db.query(
-          'UPDATE actors SET display_name = $1, updated_at = now() WHERE id = $2 AND tenant_id = $3',
-          [name.trim(), actor.actor_id, actor.tenant_id],
+          'UPDATE actors SET display_name = $1, updated_at = now() WHERE user_id = $2 AND tenant_id = $3',
+          [name.trim(), user.id, actor.tenant_id],
         );
       }
 

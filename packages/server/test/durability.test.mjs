@@ -36,7 +36,7 @@ import { createWorkflowEngine, dryRunWorkflowDefinition, matchesFilter } from '.
 import { buildVariableContext, interpolate } from '../dist/workflows/variables.js';
 import { __testSignalGrouping } from '../dist/services/signal-groups.js';
 import { evaluateMemoryReadiness } from '../dist/services/memory-readiness.js';
-import { buildAgentScopes, runAgentTurn } from '../dist/agent/engine.js';
+import { buildAgentScopes, runAgentTurn, __testAgentEngine } from '../dist/agent/engine.js';
 import { resolveLlmTimeoutMs } from '../dist/agent/provider-utils.js';
 import { callLLM } from '../dist/agent/providers/llm.js';
 import { previewRecordDraft } from '../dist/services/record-drafts.js';
@@ -2505,6 +2505,7 @@ test('Workspace Agent falls back to backup model after primary model timeout', a
         });
         return { rows: [], rowCount: 1 };
       }
+      if (text.startsWith('SELECT * FROM agent_turn_events')) return { rows: [], rowCount: 0 };
       throw new Error(`Unexpected query: ${text}`);
     },
   };
@@ -2685,6 +2686,146 @@ test('GTM tool-choice evals route first calls to the right MCP front door', asyn
       assert.equal(toolCalls.includes(forbidden), false, `${item.name} should not call ${forbidden}`);
     }
   }
+});
+
+test('Workspace Agent injects stable idempotency keys for retry-sensitive tools', async () => {
+  const durableTurnId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const db = {
+    async query(sql) {
+      const text = sql.replace(/\s+/g, ' ').trim();
+      if (text.startsWith('INSERT INTO agent_model_call_log')) return { rows: [], rowCount: 1 };
+      if (text.startsWith('SELECT * FROM agent_turn_events')) return { rows: [], rowCount: 0 };
+      throw new Error(`Unexpected test query: ${text}`);
+    },
+  };
+
+  const collectKey = async () => {
+    const events = [];
+    let round = 0;
+    await runAgentTurn(
+      [{ role: 'user', content: 'Add these customer notes as context.' }],
+      toolChoiceAgentConfig,
+      memberActor,
+      db,
+      event => events.push(event),
+      {
+        turnId: durableTurnId,
+        modelCaller: async ({ toolDefs }) => {
+          round += 1;
+          if (round > 1) return { content: 'Context attempt recorded.', tool_calls: [] };
+          assert.equal(toolDefs.some(tool => tool.name === 'context_ingest_auto'), true);
+          return {
+            content: 'I will process this through Raw Context.',
+            tool_calls: [{
+              id: `context-${round}`,
+              name: 'context_ingest_auto',
+              arguments: JSON.stringify({
+                document_text: 'Northstar said security review is the main procurement blocker.',
+                source_label: 'Agent durable replay test',
+              }),
+            }],
+          };
+        },
+      },
+    );
+
+    const call = events.find(event => event.type === 'tool_call' && event.name === 'context_ingest_auto');
+    assert.ok(call, 'expected context_ingest_auto tool call event');
+    return call.arguments.idempotency_key;
+  };
+
+  const first = await collectKey();
+  const replay = await collectKey();
+  assert.equal(first, replay);
+  assert.match(first, /^agent:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:r0:c0:[a-f0-9]{16}$/);
+  assert.ok(first.length <= 128);
+});
+
+test('Workspace Agent reuses persisted tool results on durable turn replay', async () => {
+  const durableTurnId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const toolArgs = {
+    document_text: 'Northstar said legal review is the main procurement blocker.',
+    source_label: 'Agent partial replay test',
+  };
+  const idempotencyKey = __testAgentEngine.buildAgentToolIdempotencyKey({
+    executionId: durableTurnId,
+    round: 0,
+    callIndex: 0,
+    toolName: 'context_ingest_auto',
+    args: toolArgs,
+  });
+  const persistedArgs = { ...toolArgs, idempotency_key: idempotencyKey };
+  const persistedResult = {
+    raw_context_source_id: '99999999-9999-4999-8999-999999999999',
+    signals_created: 1,
+    memory_created: 0,
+  };
+  const db = {
+    async query(sql, params = []) {
+      const text = sql.replace(/\s+/g, ' ').trim();
+      if (text.startsWith('SELECT * FROM agent_turn_events')) {
+        assert.equal(params[1], durableTurnId);
+        return {
+          rows: [
+            {
+              event_index: 1,
+              payload: {
+                type: 'tool_call',
+                id: 'previous-call',
+                name: 'context_ingest_auto',
+                arguments: persistedArgs,
+                turn_id: 'previous-round',
+              },
+            },
+            {
+              event_index: 2,
+              payload: {
+                type: 'tool_result',
+                id: 'previous-call',
+                name: 'context_ingest_auto',
+                result: persistedResult,
+                is_error: false,
+                turn_id: 'previous-round',
+              },
+            },
+          ],
+          rowCount: 2,
+        };
+      }
+      if (text.startsWith('INSERT INTO agent_model_call_log')) return { rows: [], rowCount: 1 };
+      throw new Error(`Replay test should not execute tool handler query: ${text}`);
+    },
+  };
+  const events = [];
+  let round = 0;
+
+  await runAgentTurn(
+    [{ role: 'user', content: 'Retry adding this context.' }],
+    toolChoiceAgentConfig,
+    memberActor,
+    db,
+    event => events.push(event),
+    {
+      turnId: durableTurnId,
+      modelCaller: async () => {
+        round += 1;
+        if (round > 1) return { content: 'Recovered the previous context ingestion.', tool_calls: [] };
+        return {
+          content: 'I will retry context ingestion.',
+          tool_calls: [{
+            id: 'new-call',
+            name: 'context_ingest_auto',
+            arguments: JSON.stringify(toolArgs),
+          }],
+        };
+      },
+    },
+  );
+
+  const replayStatus = events.find(event => event.type === 'tool_status' && event.id === 'new-call:replay');
+  assert.ok(replayStatus, 'expected replay status event');
+  const result = events.find(event => event.type === 'tool_result' && event.id === 'new-call');
+  assert.deepEqual(result?.result, persistedResult);
 });
 
 test('recoverOperationalJob retries context outbox jobs and records an audit entry', async () => {
@@ -3037,6 +3178,7 @@ test('MCP manifests keep scoped agents focused and expose the router first', asy
 test('retry-sensitive MCP operations expose idempotency keys', () => {
   const toolsByName = new Map(getAllTools({}).map(tool => [tool.name, tool]));
   for (const name of [
+    'activity_add_context',
     'context_raw_source_reprocess',
     'email_message_process',
     'email_message_ignore',
@@ -3052,6 +3194,44 @@ test('retry-sensitive MCP operations expose idempotency keys', () => {
   ]) {
     assert.ok(toolsByName.get(name)?.inputSchema.shape.idempotency_key, `${name} should accept idempotency_key`);
   }
+});
+
+test('side-effecting MCP tools expose idempotency keys unless explicitly read-only', () => {
+  const readOnlyNameMatches = new Set([
+    'customer_record_resolve',
+    'entity_resolve',
+  ]);
+  const sideEffectSegment = /(^|_)(create|update|delete|add|remove|set|advance|complete|accept|start|cancel|block|decline|resolve|review|promote|reject|ingest|process|ignore|link|unlink|send|enroll|unenroll|pause|resume|trigger|clone|recover|redact|apply|execute|request|submit)(_|$)/;
+  const missing = getAllTools({})
+    .filter(tool => sideEffectSegment.test(tool.name))
+    .filter(tool => !readOnlyNameMatches.has(tool.name))
+    .filter(tool => !tool.inputSchema.shape.idempotency_key)
+    .map(tool => tool.name)
+    .sort();
+  assert.deepEqual(missing, []);
+});
+
+test('Workspace Agent summarizes successful changed records for final answers', () => {
+  assert.equal(
+    __testAgentEngine.summarizeActionResult('contact_update', {
+      contact: { id: 'c1', name: 'Maya Patel' },
+      mutation: { object_type: 'contact', object_id: 'c1' },
+    }),
+    'contact update: Maya Patel',
+  );
+  assert.equal(
+    __testAgentEngine.summarizeActionResult('activity_add_context', {
+      activity: { id: 'a1', title: 'Discovery call' },
+      extraction: { signals_created: 2 },
+    }),
+    'activity add context: Discovery call',
+  );
+  assert.equal(
+    __testAgentEngine.summarizeActionResult('customer_record_resolve', {
+      subjects: [{ id: 'x', name: 'Northstar Labs' }],
+    }),
+    null,
+  );
 });
 
 test('sensitive tool scopes enforce read/write and object-level boundaries', () => {
@@ -3202,6 +3382,341 @@ test('lite record draft preview respects can_write_objects', async () => {
   );
 });
 
+test('email drafting carries Action Context into preview, save, and approval metadata', async () => {
+  const source = await readFile(new URL('../src/services/email-drafts.ts', import.meta.url), 'utf8');
+  assert.match(source, /getEmailActionContext/);
+  assert.match(source, /action_type:\s*'customer_outreach'/);
+  assert.match(source, /Action Context requires review before this email can be sent/);
+  assert.match(source, /action_context:\s*actionContextSummary/);
+  assert.match(source, /delete generationMetadata\.action_context/);
+  assert.doesNotMatch(source, /input\.generation_metadata\?\.action_context/);
+});
+
+test('lite record edit previews include Action Context and block review-required writes', async () => {
+  const source = await readFile(new URL('../src/services/record-drafts.ts', import.meta.url), 'utf8');
+  assert.match(source, /getRecordEditActionContext/);
+  assert.match(source, /action_type:\s*'record_update'/);
+  assert.match(source, /action_context:\s*actionContextSummary/);
+  assert.match(source, /can_write:\s*Object\.keys\(safePatch\)\.length > 0 && allBlockers\.length === 0/);
+});
+
+test('system-of-record writebacks carry Action Context into previews, HITL, and audit metadata', async () => {
+  const toolSource = await readFile(new URL('../src/mcp/tools/systems-of-record.ts', import.meta.url), 'utf8');
+  const serviceSource = await readFile(new URL('../src/services/systems-of-record/index.ts', import.meta.url), 'utf8');
+  assert.match(toolSource, /getWritebackActionContext/);
+  assert.match(toolSource, /action_type:\s*'external_writeback'/);
+  assert.match(toolSource, /require_approval:\s*input\.require_approval === false && actionContext\?\.guidance\.can_execute === false/);
+  assert.match(serviceSource, /action_context\?: Record<string, unknown>/);
+  assert.match(serviceSource, /action_context:\s*input\.action_context/);
+});
+
+test('Context Lineage connects Action Context receipts back to proof and retrieval events', async () => {
+  const source = await readFile(new URL('../src/services/context-lineage.ts', import.meta.url), 'utf8');
+  assert.match(source, /metadata \? 'action_context'/);
+  assert.match(source, /retrieval-action-receipt/);
+  assert.match(source, /retrieval-action-target/);
+  assert.match(source, /relation:\s*'informed_action'/);
+  assert.match(source, /context-action-proof/);
+  assert.match(source, /signal-group-action-proof/);
+  assert.match(source, /relation:\s*'used_as_proof'/);
+  assert.match(source, /actionReceiptPresentation/);
+  assert.match(source, /Workflow action receipt/);
+  assert.match(source, /Sequence action receipt/);
+  assert.match(source, /Writeback audit receipt/);
+  assert.match(source, /Handoff audit receipt/);
+  assert.match(source, /action-target-receipt/);
+  assert.match(source, /relation:\s*'receipted'/);
+});
+
+test('Handoff and writeback receipts preserve Action Context metadata for lineage proof', async () => {
+  const hitlSource = await readFile(new URL('../src/mcp/tools/hitl.ts', import.meta.url), 'utf8');
+  const writebackSource = await readFile(new URL('../src/services/systems-of-record/index.ts', import.meta.url), 'utf8');
+  const hitlHandlerSource = await readFile(new URL('../src/services/systems-of-record/hitl-handler.ts', import.meta.url), 'utf8');
+
+  assert.match(hitlSource, /eventType: input\.decision === 'approved' \? 'hitl\.approved' : 'hitl\.rejected'/);
+  assert.match(hitlSource, /metadata:\s*\{[\s\S]*action_context:/);
+  assert.match(writebackSource, /eventType: input\.decision === 'approved' \? 'system_writeback\.approved' : 'system_writeback\.rejected'/);
+  assert.match(writebackSource, /hitl_request_id:\s*writeback\.hitl_request_id/);
+  assert.match(writebackSource, /action_context:\s*policyResult\.action_context/);
+  assert.match(writebackSource, /eventType: result\.ok \? 'system_writeback\.completed' : 'system_writeback\.failed'/);
+  assert.match(writebackSource, /action_context:\s*writeback\.policy_result\?\.action_context/);
+  assert.match(hitlHandlerSource, /eventType: nextStatus === 'approved' \? 'system_writeback\.approved' : 'system_writeback\.rejected'/);
+  assert.match(hitlHandlerSource, /action_context:\s*policyResult\.action_context/);
+});
+
+test('external side effects persist provider-call attempt receipts before provider execution', async () => {
+  const writebackSource = await readFile(new URL('../src/services/systems-of-record/index.ts', import.meta.url), 'utf8');
+  const writebackRepoSource = await readFile(new URL('../src/db/repos/systems-of-record.ts', import.meta.url), 'utf8');
+  const emailDeliverySource = await readFile(new URL('../src/email/delivery.ts', import.meta.url), 'utf8');
+  const emailRepoSource = await readFile(new URL('../src/db/repos/emails.ts', import.meta.url), 'utf8');
+  const dataQualitySource = await readFile(new URL('../src/services/data-quality.ts', import.meta.url), 'utf8');
+
+  assert.match(writebackSource, /providerCallReceipt/);
+  assert.match(writebackSource, /status:\s*'started'/);
+  assert.match(writebackSource, /replay_policy:\s*'manual_reconciliation_required'/);
+  assert.match(writebackSource, /Reconcile the provider result before retrying/);
+  assert.match(writebackSource, /startedExecutionResult/);
+  assert.match(writebackSource, /claimWritebackForExecution\(db, tenantId, writeback\.id, startedExecutionResult\)/);
+  assert.match(writebackRepoSource, /export async function claimWritebackForExecution/);
+  assert.match(writebackRepoSource, /AND status = 'approved'/);
+  assert.ok(writebackSource.indexOf('claimWritebackForExecution') < writebackSource.indexOf('adapter.executeWrite'));
+  assert.match(writebackSource, /status: result\.ok \? 'completed' : 'failed'/);
+
+  assert.match(emailRepoSource, /export async function claimEmailForDelivery/);
+  assert.match(emailRepoSource, /status IN \('draft', 'approved'\)/);
+  assert.match(emailRepoSource, /export async function mergeEmailGenerationMetadata/);
+  assert.match(emailDeliverySource, /deliveryAttempt/);
+  assert.match(emailDeliverySource, /provider_call_started/);
+  assert.match(emailDeliverySource, /claimEmailForDelivery\(db, tenantId, emailId, deliveryAttempt\)/);
+  assert.ok(emailDeliverySource.indexOf('claimEmailForDelivery') < emailDeliverySource.indexOf('provider.send'));
+  assert.match(emailDeliverySource, /idempotency_key: deliveryAttempt\.idempotency_key/);
+  assert.match(emailDeliverySource, /manual_reconciliation_required/);
+  assert.match(dataQualitySource, /stuck_external_writebacks_executing/);
+  assert.match(dataQualitySource, /stuck_emails_sending/);
+});
+
+test('production release gates cover packaging, secrets, HTTP hardening, and timeouts', async () => {
+  const dockerfile = await readFile(new URL('../../../docker/Dockerfile', import.meta.url), 'utf8');
+  const compose = await readFile(new URL('../../../docker/docker-compose.yml', import.meta.url), 'utf8');
+  const rootPackage = await readFile(new URL('../../../package.json', import.meta.url), 'utf8');
+  const publishWorkflow = await readFile(new URL('../../../.github/workflows/npm-publish-github-packages.yml', import.meta.url), 'utf8');
+  const envExample = await readFile(new URL('../../../.env.example', import.meta.url), 'utf8');
+  const readme = await readFile(new URL('../../../README.md', import.meta.url), 'utf8');
+  const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
+  const cliServerSource = await readFile(new URL('../../cli/src/commands/server.ts', import.meta.url), 'utf8');
+  const seedScript = await readFile(new URL('../scripts/seed.ts', import.meta.url), 'utf8');
+  const tokenScript = await readFile(new URL('../scripts/gen-token.mts', import.meta.url), 'utf8');
+  const indexSource = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const authSource = await readFile(new URL('../src/auth/routes.ts', import.meta.url), 'utf8');
+  const secretSource = await readFile(new URL('../src/lib/secrets.ts', import.meta.url), 'utf8');
+  const agentCryptoSource = await readFile(new URL('../src/agent/crypto.ts', import.meta.url), 'utf8');
+  const sourceSyncSource = await readFile(new URL('../src/services/source-sync.ts', import.meta.url), 'utf8');
+  const adapterSource = await readFile(new URL('../src/services/systems-of-record/adapters.ts', import.meta.url), 'utf8');
+  const hubspotSource = await readFile(new URL('../src/services/systems-of-record/hubspot.ts', import.meta.url), 'utf8');
+  const salesforceSource = await readFile(new URL('../src/services/systems-of-record/salesforce.ts', import.meta.url), 'utf8');
+  const databricksSource = await readFile(new URL('../src/services/systems-of-record/databricks.ts', import.meta.url), 'utf8');
+  const snowflakeSource = await readFile(new URL('../src/services/systems-of-record/snowflake.ts', import.meta.url), 'utf8');
+  const workflowSource = await readFile(new URL('../src/workflows/engine.ts', import.meta.url), 'utf8');
+  const schemasSource = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
+
+  assert.match(dockerfile, /COPY packages\/web\/package\*\.json packages\/web\//);
+  assert.match(dockerfile, /npm run build --workspace=packages\/web[\s\S]*npm run build --workspace=packages\/server/);
+  assert.match(dockerfile, /COPY --from=build \/app\/packages\/server\/public \.\/public/);
+  assert.match(compose, /CRMY_ENCRYPTION_KEY:\s+"?\$\{CRMY_ENCRYPTION_KEY:\?Set CRMY_ENCRYPTION_KEY/);
+  assert.match(compose, /CRMY_ADMIN_PASSWORD: \$\{CRMY_ADMIN_PASSWORD:\?Set a unique 12\+ character admin password before first boot\}/);
+  assert.ok(rootPackage.indexOf('npm run build --workspace=packages/web') < rootPackage.indexOf('npm run build --workspace=packages/server'));
+
+  assert.match(publishWorkflow, /npm run lint/);
+  assert.match(publishWorkflow, /npm run build/);
+  assert.match(publishWorkflow, /npm run test:cli-coverage/);
+  assert.match(publishWorkflow, /npm audit --audit-level=moderate --omit=dev/);
+  for (const workspace of ['packages/shared', 'packages/server', 'packages/cli', 'packages/web', 'packages/openclaw-plugin']) {
+    assert.match(publishWorkflow, new RegExp(`npm publish --workspace=${workspace}`));
+  }
+
+  assert.match(envExample, /CRMY_ENCRYPTION_KEY=/);
+  assert.match(envExample, /CRMY_CORS_ORIGINS=/);
+  assert.match(envExample, /CRMY_TRUST_PROXY=1/);
+  assert.match(envExample, /LLM_TIMEOUT_MS=60000/);
+  assert.match(envExample, /AGENT_STREAM_TIMEOUT_MS=60000/);
+  assert.match(envExample, /SOURCE_SYNC_FETCH_TIMEOUT_MS=30000/);
+  assert.match(envExample, /CONNECTOR_FETCH_TIMEOUT_MS=30000/);
+  assert.match(envExample, /SLACK_SEND_TIMEOUT_MS=10000/);
+  assert.match(indexSource, /import cors from 'cors'/);
+  assert.match(indexSource, /import helmet from 'helmet'/);
+  assert.match(indexSource, /CRMY_ENCRYPTION_KEY is required in production/);
+  assert.match(indexSource, /app\.set\('trust proxy', parseTrustProxy/);
+  assert.match(indexSource, /CRMY_CORS_ORIGINS/);
+  assert.match(authSource, /return req\.ip \|\| req\.socket\.remoteAddress \|\| 'unknown'/);
+
+  assert.match(secretSource, /process\.env\.CRMY_ENCRYPTION_KEY \?\? process\.env\.AGENT_ENCRYPTION_KEY/);
+  assert.match(agentCryptoSource, /process\.env\.AGENT_ENCRYPTION_KEY \?\? process\.env\.CRMY_ENCRYPTION_KEY \?\? process\.env\.JWT_SECRET/);
+  assert.match(schemasSource, /password: z\.string\(\)\.min\(12\)/);
+  assert.doesNotMatch(authSource, /at least 8 characters/);
+  assert.match(readme, /CRMY_ADMIN_PASSWORD="\$\(openssl rand -base64 24\)"/);
+  assert.match(readme, /`LLM_TIMEOUT_MS` \| Optional \| General Workspace Agent and background LLM timeout\. Default: `60000`\./);
+  assert.match(readme, /`AGENT_STREAM_TIMEOUT_MS` \| Optional \| Streaming Workspace Agent provider timeout\. Default: `60000`\./);
+  assert.match(readme, /`SOURCE_SYNC_FETCH_TIMEOUT_MS`/);
+  assert.match(readme, /`CONNECTOR_FETCH_TIMEOUT_MS`/);
+  assert.match(readme, /`SLACK_SEND_TIMEOUT_MS` \| Optional \| Slack webhook delivery timeout\. Default: `10000`\./);
+  assert.match(guide, /CRMY_ADMIN_PASSWORD="\$\(openssl rand -base64 24\)"/);
+  assert.match(guide, /`LLM_TIMEOUT_MS` \| No \| `60000`/);
+  assert.match(guide, /`AGENT_STREAM_TIMEOUT_MS` \| No \| `60000`/);
+  assert.match(guide, /`SLACK_SEND_TIMEOUT_MS` \| No \| `10000`/);
+  for (const weakExample of [
+    'change-me-please-123',
+    'password123',
+    'strongpassword',
+    'your-secret-here',
+    'your-stored-secret-key-here',
+    'choose-a-strong-password',
+  ]) {
+    const escaped = weakExample.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.doesNotMatch(`${readme}\n${guide}\n${compose}`, new RegExp(escaped));
+  }
+  assert.doesNotMatch(cliServerSource, /dev-secret/);
+  assert.match(cliServerSource, /randomBytes\(32\)\.toString\('hex'\)/);
+  assert.doesNotMatch(seedScript, /dev-secret-change-me|password123/);
+  assert.match(seedScript, /JWT_SECRET = process\.env\.JWT_SECRET/);
+  assert.doesNotMatch(tokenScript, /dev-secret-change-me/);
+  assert.match(tokenScript, /JWT_SECRET is required/);
+
+  assert.match(sourceSyncSource, /SOURCE_SYNC_FETCH_TIMEOUT_MS/);
+  assert.match(sourceSyncSource, /fetchWithTimeout/);
+  assert.match(adapterSource, /CONNECTOR_FETCH_TIMEOUT_MS/);
+  assert.match(adapterSource, /export async function connectorFetch/);
+  for (const connectorSource of [hubspotSource, salesforceSource, databricksSource, snowflakeSource]) {
+    assert.match(connectorSource, /connectorFetch/);
+  }
+  assert.match(workflowSource, /AbortSignal\.timeout\(ACTION_TIMEOUT_MS\)/);
+});
+
+test('agent-assisted record updates carry Action Context proof into audit metadata', async () => {
+  const schemas = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
+  const actionContext = await readFile(new URL('../src/services/action-context.ts', import.meta.url), 'utf8');
+  const router = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  const accountTools = await readFile(new URL('../src/mcp/tools/accounts.ts', import.meta.url), 'utf8');
+  const contactTools = await readFile(new URL('../src/mcp/tools/contacts.ts', import.meta.url), 'utf8');
+  const opportunityTools = await readFile(new URL('../src/mcp/tools/opportunities.ts', import.meta.url), 'utf8');
+  const useCaseTools = await readFile(new URL('../src/mcp/tools/use-cases.ts', import.meta.url), 'utf8');
+  const activityTools = await readFile(new URL('../src/mcp/tools/activities.ts', import.meta.url), 'utf8');
+  const quickAdd = await readFile(new URL('../../web/src/components/crm/QuickAddDrawer.tsx', import.meta.url), 'utf8');
+
+  assert.match(schemas, /export const actionContextMetadata = z\.record\(z\.unknown\(\)\)\.optional\(\)/);
+  assert.match(actionContext, /export async function verifiedActionContextMetadataForReceipt/);
+  assert.match(actionContext, /event_type = 'action_context\.retrieved'/);
+  assert.match(actionContext, /AND actor_id = \$3/);
+  assert.match(router, /function patchEnvelope/);
+  assert.match(router, /patch, action_context/);
+  for (const source of [accountTools, contactTools, useCaseTools, activityTools]) {
+    assert.match(source, /verifiedActionContextMetadataForReceipt/);
+    assert.match(source, /metadata:\s*actionContextMetadata \? \{ action_context: actionContextMetadata \} : undefined/);
+  }
+  assert.match(opportunityTools, /verifiedActionContextMetadataForReceipt/);
+  assert.match(opportunityTools, /action_context: actionContextMetadata/);
+  assert.match(quickAdd, /patch: payload, action_context: draftResult\.action_context/);
+});
+
+test('assignments enforce scoped subject access and carry verified Action Context receipts', async () => {
+  const schemas = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
+  const access = await readFile(new URL('../src/services/access-control.ts', import.meta.url), 'utf8');
+  const assignments = await readFile(new URL('../src/mcp/tools/assignments.ts', import.meta.url), 'utf8');
+
+  assert.match(schemas, /export const assignmentCreate = z\.object\([\s\S]*action_context: actionContextMetadata/);
+  assert.match(schemas, /export const assignmentUpdate = z\.object\([\s\S]*action_context: actionContextMetadata/);
+  assert.match(access, /export async function canAccessAssignment/);
+  assert.match(access, /export async function assertAssignmentAccess/);
+  assert.match(access, /export async function filterVisibleAssignments/);
+  assert.match(assignments, /await assertSubjectAccess\(db, actor, subjectType, subjectId\)/);
+  assert.match(assignments, /await assertAssignmentAccess\(db, actor, before\)/);
+  assert.match(assignments, /filterVisibleAssignments\(db, actor, result\.data/);
+  assert.match(assignments, /getAssignmentActionContext/);
+  assert.match(assignments, /action_type:\s*'assignment_create'/);
+  assert.match(assignments, /sanitizeAssignmentMetadata/);
+  assert.match(assignments, /verifiedActionContextMetadataForReceipt/);
+});
+
+test('tenant stats respect actor owner scope instead of leaking tenant-wide totals', async () => {
+  const metaTools = await readFile(new URL('../src/mcp/tools/meta.ts', import.meta.url), 'utf8');
+  const searchRepo = await readFile(new URL('../src/db/repos/search.ts', import.meta.url), 'utf8');
+
+  assert.match(metaTools, /import \{ resolveOwnerFilter \} from '..\/..\/services\/access-control\.js'/);
+  assert.match(metaTools, /const ownerFilter = await resolveOwnerFilter\(db, actor\)/);
+  assert.match(metaTools, /getTenantStats\(db, actor\.tenant_id, ownerFilter\.owner_ids\)/);
+  assert.match(searchRepo, /export async function getTenantStats\([\s\S]*ownerIds\?: UUID\[\]/);
+  assert.match(searchRepo, /owner_id = ANY\(\$2::uuid\[\]\)/);
+  assert.match(searchRepo, /AND FALSE/);
+});
+
+test('workflow email and writeback actions carry Action Context proof when scoped to a customer record', async () => {
+  const source = await readFile(new URL('../src/workflows/engine.ts', import.meta.url), 'utf8');
+
+  assert.match(source, /import \{ getActionContext \} from '..\/services\/action-context\.js'/);
+  assert.match(source, /function workflowActionActor/);
+  assert.match(source, /function workflowSubject/);
+  assert.match(source, /function summarizeWorkflowActionContext/);
+  assert.match(source, /action_type:\s*'customer_outreach'/);
+  assert.match(source, /const effectiveRequireApproval = requireApproval \|\| actionContext\?\.guidance\.can_execute === false/);
+  assert.match(source, /generation_metadata:\s*\{[\s\S]*action_context: actionContextSummary/);
+  assert.match(source, /action_type:\s*'external_writeback'/);
+  assert.match(source, /require_approval: cfg\.require_approval !== false \|\| actionContext\?\.guidance\.can_execute === false/);
+  assert.match(source, /action_context: actionContextSummary/);
+  assert.match(source, /metadata:\s*\{[\s\S]*origin: 'workflow'[\s\S]*action_context: actionContextSummary/);
+});
+
+test('sequence email sends carry Action Context and approved sends preserve activity receipts', async () => {
+  const source = await readFile(new URL('../src/services/sequence-executor.ts', import.meta.url), 'utf8');
+
+  assert.match(source, /import \{ getActionContext \} from '\.\/action-context\.js'/);
+  assert.match(source, /function sequenceActionActor/);
+  assert.match(source, /function getSequenceEmailActionContext/);
+  assert.match(source, /action_type:\s*'customer_outreach'/);
+  assert.match(source, /const effectiveRequireApproval = step\.require_approval === true[\s\S]*actionContextSummary\?\.review_required === true/);
+  assert.match(source, /action_payload:\s*\{[\s\S]*action_context: actionContextSummary/);
+  assert.match(source, /metadata:\s*\{ hitl_request_id: hitl\.id, action_context: actionContextSummary \}/);
+  assert.match(source, /generation_metadata:\s*\{[\s\S]*origin: 'sequence'[\s\S]*action_context: actionContextSummary/);
+  assert.match(source, /triggerExtraction\(db, hitlRequest\.tenant_id as UUID, activity\.id\)/);
+  assert.match(source, /resumed_from_hitl: true/);
+  assert.match(source, /metadata:\s*\{ origin: 'sequence', action_context: actionContextSummary \}/);
+});
+
+test('non-email sequence steps carry Action Context proof into executions and receipts', async () => {
+  const source = await readFile(new URL('../src/services/sequence-executor.ts', import.meta.url), 'utf8');
+
+  assert.match(source, /function getSequenceStepActionContext/);
+  assert.match(source, /action_type:\s*stepType === 'task' \? 'assignment_create' : 'sequence_step'/);
+  assert.match(source, /executeNotificationStep\(db, enrollment, sequence/);
+  assert.match(source, /metadata:\s*\{ message: message\.slice\(0, 200\), action_context: actionContextSummary \}/);
+  assert.match(source, /metadata:\s*\{ sequence_id: enrollment\.sequence_id, enrollment_id: enrollment\.id, step_index: stepIndex, action_context: actionContextSummary \}/);
+  assert.match(source, /metadata:\s*\{ url, status: res\.status, action_context: actionContextSummary \}/);
+  assert.match(source, /metadata:\s*\{ prompt: prompt\.slice\(0, 200\), result: result\.slice\(0, 500\), action_context: actionContextSummary \}/);
+  assert.match(source, /eventType:\s*'sequence\.step_executed'[\s\S]*metadata:\s*\{ origin: 'sequence', action_context: actionContextSummary \}/);
+});
+
+test('non-email workflow actions carry Action Context proof metadata', async () => {
+  const source = await readFile(new URL('../src/workflows/engine.ts', import.meta.url), 'utf8');
+
+  assert.match(source, /function getWorkflowActionContextSummary/);
+  assert.match(source, /subject_type:\s*cfg\.subject_type/);
+  assert.match(source, /action_type:\s*actionType === 'create_activity' \? 'customer_outreach' : 'workflow_action'/);
+  assert.match(source, /eventType:\s*'workflow\.action\.create_activity'[\s\S]*action_context: actionContextSummary/);
+  assert.match(source, /eventType:\s*'workflow\.notification'[\s\S]*action_context: actionContextSummary/);
+  assert.match(source, /action_payload:\s*\{ object_type: objectType, object_id: objectId, field, value, policy, action_context: actionContextSummary \}/);
+  assert.match(source, /eventType:\s*'workflow\.action\.webhook'[\s\S]*metadata:\s*\{ origin: 'workflow', action_context: actionContextSummary \}/);
+  assert.match(source, /eventType:\s*'sequence\.enrolled'[\s\S]*metadata:\s*\{ origin: 'workflow', action_context: actionContextSummary \}/);
+  assert.match(source, /action_type:\s*'sync\.conflict\.review'[\s\S]*action_context: actionContextSummary/);
+  assert.match(source, /action_type:\s*'workflow\.checkpoint'[\s\S]*action_context: actionContextSummary/);
+});
+
+test('record-bound durable agent turns retrieve and receipt Action Context', async () => {
+  const source = await readFile(new URL('../src/agent/turn-runner.ts', import.meta.url), 'utf8');
+  const types = await readFile(new URL('../../shared/src/types.ts', import.meta.url), 'utf8');
+  const schemas = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
+  const actionContext = await readFile(new URL('../src/services/action-context.ts', import.meta.url), 'utf8');
+
+  assert.match(types, /'sequence_step'[\s\S]*'workflow_action'[\s\S]*'agent_task'/);
+  assert.match(schemas, /'sequence_step'[\s\S]*'workflow_action'[\s\S]*'agent_task'/);
+  assert.match(actionContext, /case 'agent_task':[\s\S]*'context:read'/);
+  assert.match(source, /function getAgentTaskActionContext/);
+  assert.match(source, /action_type:\s*'agent_task'/);
+  assert.match(source, /Action Context for this task:/);
+  assert.match(source, /eventType:\s*'agent\.turn\.completed'/);
+  assert.match(source, /metadata:\s*\{[\s\S]*origin: 'workspace_agent'[\s\S]*action_context: actionContextSummary/);
+});
+
+test('Signal readiness source quality is tenant-configurable instead of static copy', async () => {
+  const migration = await readFile(new URL('../migrations/072_signal_source_quality_settings.sql', import.meta.url), 'utf8');
+  const groupingSource = await readFile(new URL('../src/services/signal-groups.ts', import.meta.url), 'utf8');
+  const routeSource = await readFile(new URL('../src/agent/routes.ts', import.meta.url), 'utf8');
+  const settingsPage = await readFile(new URL('../../web/src/pages/AgentSettings.tsx', import.meta.url), 'utf8');
+  assert.match(migration, /signal_source_quality JSONB/);
+  assert.match(groupingSource, /loadSignalSourceQualitySettings/);
+  assert.match(groupingSource, /source_quality_settings: sourceQualitySettings/);
+  assert.match(routeSource, /body\.signal_source_quality/);
+  assert.match(settingsPage, /High quality sources'[\s\S]*Customer email, CRM sync, and warehouse sync/);
+  assert.match(settingsPage, /Medium quality sources'[\s\S]*Transcripts, meetings, notes/);
+});
+
 test('agent harness setup grants admin systems scopes', async () => {
   const migration = await readFile(new URL('../migrations/065_agent_harness_system_scopes.sql', import.meta.url), 'utf8');
   assert.match(migration, /systems:read/);
@@ -3209,6 +3724,44 @@ test('agent harness setup grants admin systems scopes', async () => {
   assert.match(migration, /systems:admin/);
   assert.match(migration, /actor_type = 'human'/);
   assert.match(migration, /role IN \('admin', 'owner'\)/);
+});
+
+test('durable Workspace Agent turns use leases for restart and multi-instance safety', async () => {
+  const migration = await readFile(new URL('../migrations/073_agent_turn_leases.sql', import.meta.url), 'utf8');
+  const repo = await readFile(new URL('../src/db/repos/agent.ts', import.meta.url), 'utf8');
+  const runner = await readFile(new URL('../src/agent/turn-runner.ts', import.meta.url), 'utf8');
+  const dataQuality = await readFile(new URL('../src/services/data-quality.ts', import.meta.url), 'utf8');
+  const routes = await readFile(new URL('../src/agent/routes.ts', import.meta.url), 'utf8');
+
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS worker_id TEXT/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0/);
+  assert.match(migration, /idx_agent_turns_lease_recovery/);
+
+  assert.match(repo, /export async function claimPendingTurns\([\s\S]*workerId[\s\S]*leaseMs/);
+  assert.match(repo, /FOR UPDATE SKIP LOCKED/);
+  assert.match(repo, /lease_expires_at < now\(\)/);
+  assert.match(repo, /attempt_count = attempt_count \+ 1/);
+  assert.match(repo, /export async function heartbeatTurn/);
+  assert.match(repo, /AND worker_id = \$3[\s\S]*AND status = 'running'/);
+  assert.match(repo, /completeTurn\([\s\S]*worker_id\?: string/);
+  assert.match(repo, /AND \(\$4::text IS NULL OR worker_id = \$4\)/);
+
+  assert.match(runner, /AGENT_TURN_WORKER_ID/);
+  assert.match(runner, /AGENT_TURN_LEASE_MS/);
+  assert.match(runner, /AGENT_TURN_HEARTBEAT_MS/);
+  assert.ok(runner.indexOf('activeTurnControllers.set(turn.id, controller)') < runner.indexOf('agentRepo.claimTurn'));
+  assert.match(runner, /setInterval\(\(\) => \{/);
+  assert.match(runner, /heartbeatTurn\(db, claimed\.tenant_id, claimed\.id, AGENT_TURN_WORKER_ID, AGENT_TURN_LEASE_MS\)/);
+  assert.match(runner, /controller\.abort\(\)/);
+  assert.match(runner, /completeTurn\(db, turn\.tenant_id, turn\.id, \{ final_label: label, worker_id: AGENT_TURN_WORKER_ID \}\)/);
+  assert.match(runner, /Agent turn lease was lost before completion/);
+
+  assert.match(dataQuality, /expired leases/);
+  assert.match(dataQuality, /lease_expires_at < now\(\)/);
+  assert.match(dataQuality, /worker_id = NULL/);
+  assert.match(routes, /An agent turn is already running for this session/);
 });
 
 test('migration runner uses a connection-scoped advisory lock', async () => {
@@ -3856,7 +4409,7 @@ test('executed external writebacks create a receipt, sync run, and record refere
       if (text.startsWith('UPDATE external_writeback_requests')) {
         writebackUpdates.push({ text, params });
         const updated = { ...writeback };
-        if (params.includes('executing')) updated.status = 'executing';
+        if (text.includes("status = 'executing'") || params.includes('executing')) updated.status = 'executing';
         if (params.includes('completed')) updated.status = 'completed';
         const receiptParam = params.find(value => typeof value === 'string' && value.includes('"writeback_id"'));
         if (receiptParam) updated.execution_result = JSON.parse(receiptParam);
@@ -3888,10 +4441,16 @@ test('executed external writebacks create a receipt, sync run, and record refere
     assert.equal(completed.external_record_id, 'hs-101');
     assert.equal(completed.execution_result.writeback_id, writebackId);
     assert.equal(completed.execution_result.sync_run_id, runId);
+    assert.equal(completed.execution_result.provider_call.status, 'completed');
+    assert.equal(completed.execution_result.provider_call.replay_policy, 'manual_reconciliation_required');
     assert.equal(completed.execution_result.reference.updated, true);
     assert.equal(recordRefs.length, 1);
     assert.equal(syncRunUpdates.some(update => update.params.includes('completed')), true);
-    assert.equal(writebackUpdates.some(update => update.params.includes('executing')), true);
+    const startedUpdate = writebackUpdates.find(update => update.text.includes("status = 'executing'") || update.params.includes('executing'));
+    assert.ok(startedUpdate);
+    const startedReceipt = JSON.parse(startedUpdate.params.find(value => typeof value === 'string' && value.includes('"provider_call"')));
+    assert.equal(startedReceipt.provider_call.status, 'started');
+    assert.equal(startedReceipt.provider_call.sync_run_id, runId);
     assert.equal(events.length, 1);
     assert.equal(JSON.parse(events[0].params[8]).sync_run_id, runId);
   } finally {

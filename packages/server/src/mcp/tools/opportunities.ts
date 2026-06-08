@@ -19,6 +19,7 @@ import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
 import { assertOwnedObjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
+import { verifiedActionContextMetadataForReceipt } from '../../services/action-context.js';
 
 function runOpportunityOperation<T>(
   db: DbPool,
@@ -261,6 +262,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
           expectedVersion: input.expected_version,
         });
         if (!opportunity) throw notFound('Opportunity', input.id);
+        const actionContextMetadata = await verifiedActionContextMetadataForReceipt(db, actor, 'opportunity', input.id, input.action_context);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -271,7 +273,10 @@ export function opportunityTools(db: DbPool): ToolDef[] {
           objectId: opportunity.id,
           beforeData: before,
           afterData: opportunity,
-          metadata: { action_policy: policy },
+          metadata: {
+            action_policy: policy,
+            ...(actionContextMetadata ? { action_context: actionContextMetadata } : {}),
+          },
         });
         indexDocument(db, 'opportunity', opportunity as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] opportunity index ${opportunity.id}: ${(err as Error).message}`));

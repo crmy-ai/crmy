@@ -52,6 +52,15 @@ const STRUCTURED_READINESS_KEYS = new Set([
   'validation_warnings',
 ]);
 
+const DEFAULT_SIGNAL_SOURCE_QUALITY = {
+  high: 1.0,
+  medium: 0.9,
+  lower: 0.75,
+  fallback: 0.85,
+};
+
+type SignalSourceQualitySettings = typeof DEFAULT_SIGNAL_SOURCE_QUALITY;
+
 const GTM_CONCEPTS: Record<string, string[]> = {
   budget: ['budget', 'finance', 'financial', 'approval', 'approved', 'procurement', 'commercial', 'business case', 'roi', 'cost', 'pricing'],
   security: ['security', 'compliance', 'data residency', 'residency', 'privacy', 'legal', 'risk review', 'vendor review', 'infosec'],
@@ -191,13 +200,32 @@ function sourceKey(entry: ContextEntry): string {
   return sourceKeyFromEvidence(evidence, entry);
 }
 
-function sourceWeight(entry: ContextEntry): number {
+function normalizedSourceQualitySettings(value: unknown): SignalSourceQualitySettings {
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const normalized = { ...DEFAULT_SIGNAL_SOURCE_QUALITY };
+  for (const key of Object.keys(normalized) as Array<keyof SignalSourceQualitySettings>) {
+    const parsed = Number(input[key]);
+    if (Number.isFinite(parsed)) normalized[key] = Math.max(0.4, Math.min(1, Number(parsed.toFixed(2))));
+  }
+  return normalized;
+}
+
+async function loadSignalSourceQualitySettings(db: DbPool, tenantId: UUID | string): Promise<SignalSourceQualitySettings> {
+  try {
+    const config = await agentRepo.getConfig(db, String(tenantId));
+    return normalizedSourceQualitySettings(config?.signal_source_quality);
+  } catch {
+    return DEFAULT_SIGNAL_SOURCE_QUALITY;
+  }
+}
+
+function sourceWeight(entry: ContextEntry, settings: SignalSourceQualitySettings = DEFAULT_SIGNAL_SOURCE_QUALITY): number {
   const evidence = evidenceItems(entry)[0] ?? {};
   const type = sourceIdentityType(evidence.source_type ?? entry.source ?? '');
-  if (['email', 'crm', 'warehouse'].includes(type)) return 1.0;
-  if (['support', 'product_usage', 'slack', 'mcp', 'add_context', 'manual', 'raw_context', 'raw_context_event'].includes(type)) return 0.9;
-  if (['research', 'external_research'].includes(type)) return 0.75;
-  return 0.85;
+  if (['email', 'crm', 'warehouse'].includes(type)) return settings.high;
+  if (['support', 'product_usage', 'slack', 'mcp', 'add_context', 'manual', 'raw_context', 'raw_context_event'].includes(type)) return settings.medium;
+  if (['research', 'external_research'].includes(type)) return settings.lower;
+  return settings.fallback;
 }
 
 function sourceTrustLabel(weight: number): string {
@@ -296,8 +324,8 @@ async function verifySignalRelation(
   }
 }
 
-function confidenceComponents(entries: ContextEntry[], independentSources: number, conflictCount: number) {
-  const weights = entries.map(sourceWeight);
+function confidenceComponents(entries: ContextEntry[], independentSources: number, conflictCount: number, sourceQualitySettings: SignalSourceQualitySettings = DEFAULT_SIGNAL_SOURCE_QUALITY) {
+  const weights = entries.map(entry => sourceWeight(entry, sourceQualitySettings));
   const weighted = entries.map((entry, index) => (entry.confidence ?? 0.5) * weights[index]);
   const base = weighted.length > 0 ? Math.max(...weighted) : 0;
   const strongestSourceWeight = weights.length > 0 ? Math.max(...weights) : 0;
@@ -316,11 +344,12 @@ function confidenceComponents(entries: ContextEntry[], independentSources: numbe
     source_boost: sourceBoost,
     conflict_penalty: conflictPenalty,
     duplicate_source_count: Math.max(0, entries.length - independentSources),
+    source_quality_settings: sourceQualitySettings,
   };
 }
 
-function aggregateConfidence(entries: ContextEntry[], independentSources: number, conflictCount: number): number {
-  return confidenceComponents(entries, independentSources, conflictCount).score;
+function aggregateConfidence(entries: ContextEntry[], independentSources: number, conflictCount: number, sourceQualitySettings?: SignalSourceQualitySettings): number {
+  return confidenceComponents(entries, independentSources, conflictCount, sourceQualitySettings).score;
 }
 
 async function resolveCustomerScope(
@@ -386,7 +415,8 @@ async function recomputeGroup(
   const independentSources = new Set(sourceKeys).size;
   const duplicateSourceCount = Math.max(0, supporting.length - independentSources);
   const evidenceCount = supporting.reduce((sum, entry) => sum + evidenceItems(entry).length, 0);
-  const confidence = aggregateConfidence(supporting, independentSources, conflictCount);
+  const sourceQualitySettings = await loadSignalSourceQualitySettings(db, tenantId);
+  const confidence = aggregateConfidence(supporting, independentSources, conflictCount, sourceQualitySettings);
   const readinessBlockers = supporting.flatMap(entry => {
     const data = entry.structured_data ?? {};
     return Array.isArray(data.readiness_blockers) ? data.readiness_blockers.map(String) : [];
@@ -423,7 +453,7 @@ async function recomputeGroup(
     convergenceBlocked: Boolean(convergence.should_block),
     readinessBlocked: readinessBlockers.length > 0,
   });
-  const components = confidenceComponents(supporting, independentSources, conflictCount);
+  const components = confidenceComponents(supporting, independentSources, conflictCount, sourceQualitySettings);
   const promotionBlockers = [
     ...(conflictCount > 0 ? ['Conflicting evidence needs review.'] : []),
     ...(Boolean(convergence.should_block) ? ['Similar or conflicting Memory already exists.'] : []),

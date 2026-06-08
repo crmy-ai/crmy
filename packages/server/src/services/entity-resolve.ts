@@ -207,9 +207,10 @@ async function resolveContacts(
               c.account_id, a.name AS account_name, a.domain AS account_domain, c.aliases
        FROM contacts c
        LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
-       WHERE c.tenant_id = $1
-         AND c.merged_into IS NULL
-         AND LOWER(c.email) = LOWER($2)
+	       WHERE c.tenant_id = $1
+	         AND c.merged_into IS NULL
+	         AND c.archived_at IS NULL
+	         AND LOWER(c.email) = LOWER($2)
        LIMIT $3`,
       [tenantId, emailVal, limit],
     );
@@ -230,9 +231,10 @@ async function resolveContacts(
               c.account_id, a.name AS account_name, a.domain AS account_domain, c.aliases
        FROM contacts c
        LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
-       WHERE c.tenant_id = $1
-         AND c.merged_into IS NULL
-         AND LOWER(c.first_name) = LOWER($2)
+	       WHERE c.tenant_id = $1
+	         AND c.merged_into IS NULL
+	         AND c.archived_at IS NULL
+	         AND LOWER(c.first_name) = LOWER($2)
          AND ($3 = '' OR LOWER(c.last_name) = LOWER($3))
          ${hint.sql}
        LIMIT $4`,
@@ -254,9 +256,10 @@ async function resolveContacts(
               c.account_id, a.name AS account_name, a.domain AS account_domain, c.aliases
        FROM contacts c
        LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
-       WHERE c.tenant_id = $1
-         AND c.merged_into IS NULL
-         AND EXISTS (SELECT 1 FROM unnest(c.aliases) _a WHERE LOWER(_a) = $2)
+	       WHERE c.tenant_id = $1
+	         AND c.merged_into IS NULL
+	         AND c.archived_at IS NULL
+	         AND EXISTS (SELECT 1 FROM unnest(c.aliases) _a WHERE LOWER(_a) = $2)
          ${hint.sql}
        LIMIT $3`,
       [tenantId, qLower, limit, ...hint.params],
@@ -277,9 +280,10 @@ async function resolveContacts(
               c.account_id, a.name AS account_name, a.domain AS account_domain, c.aliases
        FROM contacts c
        LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
-       WHERE c.tenant_id = $1
-         AND c.merged_into IS NULL
-         AND (c.first_name ILIKE $2 OR c.last_name ILIKE $2 OR c.email ILIKE $2
+	       WHERE c.tenant_id = $1
+	         AND c.merged_into IS NULL
+	         AND c.archived_at IS NULL
+	         AND (c.first_name ILIKE $2 OR c.last_name ILIKE $2 OR c.email ILIKE $2
               OR c.company_name ILIKE $2
               OR a.name ILIKE $2
               OR EXISTS (SELECT 1 FROM unnest(c.aliases) _a WHERE _a ILIKE $2))
@@ -309,9 +313,10 @@ async function resolveContacts(
                 similarity(c.first_name || ' ' || c.last_name, $2) AS sml
          FROM contacts c
          LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
-         WHERE c.tenant_id = $1
-           AND c.merged_into IS NULL
-           AND similarity(c.first_name || ' ' || c.last_name, $2) > 0.2
+	         WHERE c.tenant_id = $1
+	           AND c.merged_into IS NULL
+	           AND c.archived_at IS NULL
+	           AND similarity(c.first_name || ' ' || c.last_name, $2) > 0.2
            ${hint.sql}
          ORDER BY sml DESC
          LIMIT $3`,
@@ -370,9 +375,10 @@ async function resolveAccounts(
   if (domainQuery) {
     const r = await db.query<{ id: UUID; name: string; domain?: string; aliases: string[] }>(
       `SELECT id, name, domain, aliases FROM accounts
-       WHERE tenant_id = $1
-         AND merged_into IS NULL
-         AND LOWER(domain) = LOWER($2)
+	       WHERE tenant_id = $1
+	         AND merged_into IS NULL
+	         AND archived_at IS NULL
+	         AND LOWER(domain) = LOWER($2)
        LIMIT $3`,
       [tenantId, domainQuery, limit],
     );
@@ -394,9 +400,10 @@ async function resolveAccounts(
   {
     const r = await db.query<{ id: UUID; name: string; domain?: string; aliases: string[] }>(
       `SELECT id, name, domain, aliases FROM accounts
-       WHERE tenant_id = $1 AND LOWER(name) = $2
-         AND merged_into IS NULL
-       LIMIT $3`,
+	       WHERE tenant_id = $1 AND LOWER(name) = $2
+	         AND merged_into IS NULL
+	         AND archived_at IS NULL
+	       LIMIT $3`,
       [tenantId, qLower, limit],
     );
     for (const row of r.rows) {
@@ -419,9 +426,10 @@ async function resolveAccounts(
   {
     const r = await db.query<{ id: UUID; name: string; domain?: string; aliases: string[] }>(
       `SELECT id, name, domain, aliases FROM accounts
-       WHERE tenant_id = $1
-         AND merged_into IS NULL
-         AND EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE LOWER(_a) = $2)
+	       WHERE tenant_id = $1
+	         AND merged_into IS NULL
+	         AND archived_at IS NULL
+	         AND EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE LOWER(_a) = $2)
        LIMIT $3`,
       [tenantId, qLower, limit],
     );
@@ -445,9 +453,10 @@ async function resolveAccounts(
   if (candidates.size < limit) {
     const r = await db.query<{ id: UUID; name: string; domain?: string; aliases: string[] }>(
       `SELECT id, name, domain, aliases FROM accounts
-       WHERE tenant_id = $1
-         AND merged_into IS NULL
-         AND (name ILIKE $2 OR domain ILIKE $2
+	       WHERE tenant_id = $1
+	         AND merged_into IS NULL
+	         AND archived_at IS NULL
+	         AND (name ILIKE $2 OR domain ILIKE $2
               OR EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE _a ILIKE $2))
        LIMIT $3`,
       [tenantId, pattern, limit],
@@ -479,9 +488,10 @@ async function resolveAccounts(
       }>(
         `SELECT id, name, domain, aliases, similarity(name, $2) AS sml
          FROM accounts
-         WHERE tenant_id = $1
-           AND merged_into IS NULL
-           AND similarity(name, $2) > 0.2
+	         WHERE tenant_id = $1
+	           AND merged_into IS NULL
+	           AND archived_at IS NULL
+	           AND similarity(name, $2) > 0.2
          ORDER BY sml DESC
          LIMIT $3`,
         [tenantId, q, limit],
@@ -544,15 +554,15 @@ async function filterCandidatesByOwners(
   const accountIds = candidates.filter(c => c.entity_type === 'account').map(c => c.id);
   const visible = new Set<string>();
   if (contactIds.length > 0) {
-    const rows = await db.query(
-      `SELECT id FROM contacts WHERE tenant_id = $1 AND id = ANY($2::uuid[]) AND owner_id = ANY($3::uuid[])`,
+	    const rows = await db.query(
+	      `SELECT id FROM contacts WHERE tenant_id = $1 AND id = ANY($2::uuid[]) AND owner_id = ANY($3::uuid[]) AND archived_at IS NULL`,
       [tenantId, contactIds, ownerIds],
     );
     for (const row of rows.rows) visible.add(row.id);
   }
   if (accountIds.length > 0) {
-    const rows = await db.query(
-      `SELECT id FROM accounts WHERE tenant_id = $1 AND id = ANY($2::uuid[]) AND owner_id = ANY($3::uuid[])`,
+	    const rows = await db.query(
+	      `SELECT id FROM accounts WHERE tenant_id = $1 AND id = ANY($2::uuid[]) AND owner_id = ANY($3::uuid[]) AND archived_at IS NULL`,
       [tenantId, accountIds, ownerIds],
     );
     for (const row of rows.rows) visible.add(row.id);

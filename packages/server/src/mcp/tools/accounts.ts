@@ -17,6 +17,7 @@ import { withTransaction } from '../../db/transaction.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
 import { assertOwnedObjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
+import { verifiedActionContextMetadataForReceipt } from '../../services/action-context.js';
 
 function runAccountOperation<T>(
   db: DbPool,
@@ -188,6 +189,7 @@ export function accountTools(db: DbPool): ToolDef[] {
           expectedVersion: input.expected_version,
         });
         if (!account) throw notFound('Account', input.id);
+        const actionContextMetadata = await verifiedActionContextMetadataForReceipt(db, actor, 'account', input.id, input.action_context);
 
         const event_id = await emitEvent(db, {
           tenantId: actor.tenant_id,
@@ -198,6 +200,7 @@ export function accountTools(db: DbPool): ToolDef[] {
           objectId: account.id,
           beforeData: before,
           afterData: account,
+          metadata: actionContextMetadata ? { action_context: actionContextMetadata } : undefined,
         });
         indexDocument(db, 'account', account as unknown as Record<string, unknown>)
           .catch((err: unknown) => console.warn(`[search] account index ${account.id}: ${(err as Error).message}`));

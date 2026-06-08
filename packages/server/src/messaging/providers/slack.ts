@@ -3,6 +3,9 @@
 
 import type { ChannelProvider, ChannelProviderMessage, ChannelProviderSendResult } from '../provider.js';
 
+const SLACK_SEND_TIMEOUT_MS = Number(process.env.SLACK_SEND_TIMEOUT_MS ?? 10_000);
+const REDACTED_RESPONSE_BODY = '[redacted: provider response body omitted]';
+
 export const slackProvider: ChannelProvider = {
   type: 'slack',
 
@@ -26,18 +29,18 @@ export const slackProvider: ChannelProvider = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(SLACK_SEND_TIMEOUT_MS),
       });
-
-      const body = await res.text();
+      await res.body?.cancel().catch(() => undefined);
 
       if (res.ok) {
-        return { success: true, response_status: res.status, response_body: body };
+        return { success: true, response_status: res.status, response_body: REDACTED_RESPONSE_BODY };
       }
       return {
         success: false,
         response_status: res.status,
-        response_body: body,
-        error: `Slack returned ${res.status}: ${body}`,
+        response_body: REDACTED_RESPONSE_BODY,
+        error: `Slack returned HTTP ${res.status}`,
       };
     } catch (err) {
       return {

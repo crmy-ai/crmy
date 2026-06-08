@@ -14,11 +14,22 @@ interface SetupInfo {
 }
 
 async function authRequest<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method: body ? 'POST' : 'GET',
-    headers: { 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 30_000);
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') throw new Error('Setup request timed out. Check server health and try again.');
+    throw err;
+  } finally {
+    window.clearTimeout(timeout);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || 'Setup link failed');
   return data as T;
@@ -41,8 +52,8 @@ export function SetupPage() {
   }, [token]);
 
   const submit = async () => {
-    if (password.length < 8) {
-      toast({ title: 'Password too short', description: 'Use at least 8 characters.', variant: 'destructive' });
+    if (password.length < 12) {
+      toast({ title: 'Password too short', description: 'Use at least 12 characters.', variant: 'destructive' });
       return;
     }
     if (password !== confirmPassword) {
@@ -97,7 +108,7 @@ export function SetupPage() {
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Password</label>
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className={inputCls} placeholder="Min. 8 characters" />
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} className={inputCls} placeholder="Min. 12 characters" />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Confirm Password</label>

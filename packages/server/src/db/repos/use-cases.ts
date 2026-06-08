@@ -58,7 +58,7 @@ export async function createUseCase(
 
 export async function getUseCase(db: DbPool, tenantId: UUID, id: UUID): Promise<UseCase | null> {
   const result = await db.query(
-    'SELECT * FROM use_cases WHERE id = $1 AND tenant_id = $2',
+    'SELECT * FROM use_cases WHERE id = $1 AND tenant_id = $2 AND archived_at IS NULL',
     [id, tenantId],
   );
   return (result.rows[0] as UseCase) ?? null;
@@ -104,7 +104,7 @@ export async function updateUseCase(
   }
 
   const result = await db.query(
-    `UPDATE use_cases SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2${versionClause} RETURNING *`,
+    `UPDATE use_cases SET ${sets.join(', ')} WHERE tenant_id = $1 AND id = $2 AND archived_at IS NULL${versionClause} RETURNING *`,
     params,
   );
   if (result.rows.length === 0 && options.expectedVersion !== undefined) {
@@ -126,7 +126,11 @@ export async function deleteUseCase(
     params.push(options.expectedVersion);
   }
   const result = await db.query(
-    `DELETE FROM use_cases WHERE id = $1 AND tenant_id = $2${versionClause}`,
+    `UPDATE use_cases
+        SET archived_at = COALESCE(archived_at, now()),
+            updated_at = now(),
+            row_version = row_version + 1
+      WHERE id = $1 AND tenant_id = $2 AND archived_at IS NULL${versionClause}`,
     params,
   );
   if ((result.rowCount ?? 0) === 0 && options.expectedVersion !== undefined) {
@@ -150,7 +154,7 @@ export async function searchUseCases(
     cursor?: string;
   },
 ): Promise<PaginatedResponse<UseCase>> {
-  const conditions: string[] = ['u.tenant_id = $1'];
+  const conditions: string[] = ['u.tenant_id = $1', 'u.archived_at IS NULL'];
   const params: unknown[] = [tenantId];
   let idx = 2;
 
@@ -304,7 +308,7 @@ export async function getUseCaseSummary(
   tenantId: UUID,
   filters: { account_id?: UUID; group_by: string },
 ): Promise<{ group: string; count: number; total_arr: number }[]> {
-  const conditions = ['tenant_id = $1'];
+  const conditions = ['tenant_id = $1', 'archived_at IS NULL'];
   const params: unknown[] = [tenantId];
   let idx = 2;
 
@@ -335,8 +339,8 @@ export async function getAccountUseCases(
   tenantId: UUID,
   accountId: UUID,
 ): Promise<UseCase[]> {
-  const result = await db.query(
-    'SELECT * FROM use_cases WHERE account_id = $1 AND tenant_id = $2 ORDER BY created_at DESC',
+	  const result = await db.query(
+	    'SELECT * FROM use_cases WHERE account_id = $1 AND tenant_id = $2 AND archived_at IS NULL ORDER BY created_at DESC',
     [accountId, tenantId],
   );
   return result.rows as UseCase[];

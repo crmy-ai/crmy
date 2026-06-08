@@ -337,8 +337,10 @@ async function saveWorkspaceAgentConfig(
   tenantId: string,
   setup: AgentSetupConfig,
   jwtSecret: string,
+  encryptionKey: string,
 ): Promise<void> {
   process.env.JWT_SECRET = jwtSecret;
+  process.env.CRMY_ENCRYPTION_KEY = encryptionKey;
   const { encryptAgentSecret } = await import('@crmy/server');
   const apiKeyEnc = setup.apiKey ? encryptAgentSecret(setup.apiKey) : null;
   await db.query(
@@ -368,10 +370,15 @@ async function saveWorkspaceAgentConfig(
 
 export function initCommand(): Command {
   return new Command('init')
-    .description('Set up CRMy: database, migrations, owner account, API key, Workspace Agent model, and sample data')
+    .description('Set up CRMy: database, migrations, owner account, API key, Workspace Agent model, and demo data')
     .option('-y, --yes', 'Use defaults non-interactively (requires CRMY_ADMIN_EMAIL + CRMY_ADMIN_PASSWORD; DATABASE_URL optional)')
-    .action(async (opts) => {
+    .option('--demo', 'Seed the rich demo proof state for a fast first run')
+    .option('--no-demo', 'Skip demo data seeding')
+    .action(async (opts, command: Command) => {
       const yesMode = !!opts.yes;
+      const demoOptionSource = command.getOptionValueSource('demo');
+      const demoMode = opts.demo === true;
+      const skipDemo = opts.demo === false && demoOptionSource === 'cli';
       const { default: inquirer } = await import('inquirer');
 
       // ── Header ─────────────────────────────────────────────────────────────
@@ -413,7 +420,7 @@ export function initCommand(): Command {
 
       let databaseUrl: string;
 
-      if (yesMode) {
+      if (yesMode || process.env.DATABASE_URL) {
         databaseUrl = process.env.DATABASE_URL ?? 'postgresql://localhost:5432/crmy';
         console.log(`  Using database URL: ${databaseUrl}\n`);
       } else {
@@ -497,7 +504,7 @@ export function initCommand(): Command {
       }
 
       // ── Optional: pgvector semantic search ──────────────────────────────────
-      if (process.env.ENABLE_PGVECTOR !== 'true' && !yesMode && isInteractive) {
+      if (process.env.ENABLE_PGVECTOR !== 'true' && !yesMode && !demoMode && isInteractive) {
         console.log('');
         const { enablePgvector } = await inquirer.prompt([
           {
@@ -522,7 +529,7 @@ export function initCommand(): Command {
             console.log(
               `\n  \x1b[33m⚠\x1b[0m  ${(err as Error).message}` +
               '\n  This is non-fatal — CRMy works without semantic search.' +
-              '\n  You can enable it later by setting ENABLE_PGVECTOR=true and running: crmy migrate\n',
+              '\n  You can enable it later by setting ENABLE_PGVECTOR=true and running: crmy migrate run\n',
             );
           }
         }
@@ -633,6 +640,7 @@ export function initCommand(): Command {
 
       let rawKey = '';
       let jwtSecret = '';
+      let encryptionKey = '';
 
       try {
         // scrypt — same params as auth/routes.ts so passwords are portable
@@ -688,14 +696,16 @@ export function initCommand(): Command {
 
         spinner.succeed('Admin account created');
 
-        // Generate JWT secret + write config
+        // Generate JWT + stored-secret encryption keys, then write config.
         jwtSecret = crypto.randomBytes(32).toString('hex');
+        encryptionKey = crypto.randomBytes(32).toString('hex');
         const crmmyConfig = {
           serverUrl: 'http://localhost:3000',
           apiKey: rawKey,
           tenantId: 'default',
           database: { url: databaseUrl },
           jwtSecret,
+          encryptionKey,
           hitl: {
             requireApproval: ['bulk_update', 'bulk_delete', 'send_email'],
             autoApproveSeconds: 0,
@@ -725,10 +735,10 @@ export function initCommand(): Command {
 
       let configuredAgent: AgentSetupConfig | null = null;
       try {
-        configuredAgent = await chooseAgentSetup(inquirer, yesMode, isInteractive);
+        configuredAgent = await chooseAgentSetup(inquirer, yesMode || demoMode, isInteractive);
         if (configuredAgent) {
           spinner = createSpinner(`Saving ${getProvider(configuredAgent.provider).label} model settings…`);
-          await saveWorkspaceAgentConfig(db, tenantId, configuredAgent, jwtSecret);
+          await saveWorkspaceAgentConfig(db, tenantId, configuredAgent, jwtSecret, encryptionKey);
           spinner.succeed(
             `Workspace Agent configured  \x1b[2m(${getProvider(configuredAgent.provider).label} · ${configuredAgent.model})\x1b[0m`,
           );
@@ -744,8 +754,8 @@ export function initCommand(): Command {
       // ── Demo data prompt ──────────────────────────────────────────────────────
       console.log('\n  ── Step 5 of 5: Demo Data ──────────────────────────\n');
 
-      let seedDemo = yesMode; // --yes mode auto-seeds demo data
-      if (!yesMode && isInteractive) {
+      let seedDemo = demoMode || (yesMode && !skipDemo); // --yes remains backward-compatible.
+      if (!demoMode && !skipDemo && !yesMode && isInteractive) {
         const { loadDemo } = await inquirer.prompt([
           {
             type: 'confirm',
@@ -765,12 +775,14 @@ export function initCommand(): Command {
           const status = await seedSampleData(db, tenantId);
           const counts = status.counts;
           spinner.succeed(
-            `Demo data seeded  \x1b[2m(${counts.accounts} accounts, ${counts.contacts} contacts, ${counts.opportunities} opportunities, ${counts.raw_context_sources} Raw Context sources)\x1b[0m`,
+            `Demo data seeded  \x1b[2m(${counts.accounts} accounts, ${counts.contacts} contacts, ${counts.opportunities} opportunities, ${counts.raw_context_sources} Raw Context sources, ${counts.memory} Memory, ${counts.signals} Signals, ${counts.signal_groups} Signal groups)\x1b[0m`,
           );
         } catch {
           spinner.fail('Demo data seeding failed');
           console.log('  \x1b[33m⚠\x1b[0m  You can run it later with: crmy seed-demo\n');
         }
+      } else {
+        console.log('  Demo data skipped. Run `crmy seed-demo` later to load the proof state.\n');
       }
 
       await closePool();
@@ -782,6 +794,7 @@ export function initCommand(): Command {
       console.log('  └───────────────────────────────────────────────────┘\n');
       console.log(`  Admin account:  ${email.trim()}`);
       console.log(`  API key:        ${keyPreview}  \x1b[2m(full key in .crmy.json)\x1b[0m`);
+      console.log('  Secret storage: dedicated encryption key generated and saved');
       if (configuredAgent) {
         console.log(`  Agent model:    ${getProvider(configuredAgent.provider).label} · ${configuredAgent.model}`);
       }
@@ -792,6 +805,7 @@ export function initCommand(): Command {
       if (seedDemo) {
         console.log('    Try the demo data:');
         console.log('    \x1b[1mnpx -y @crmy/cli briefing "account:Northstar Labs"\x1b[0m');
+        console.log('    \x1b[1mnpx -y @crmy/cli context signal-groups\x1b[0m');
         console.log('    \x1b[1mnpx -y @crmy/cli context lineage --subject "account:Northstar Labs"\x1b[0m');
         console.log('    \x1b[1mnpx -y @crmy/cli hitl list\x1b[0m\n');
         console.log('    Sample logins:');

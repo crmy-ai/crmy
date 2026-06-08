@@ -69,8 +69,8 @@ async function ensureNoAccountDuplicate(db: DbPool, tenantId: UUID, name: string
     const existingByDomain = await accountRepo.getAccountByDomain(db, tenantId, domain);
     if (existingByDomain) throw validationError(`Account already exists for domain ${domain}: ${existingByDomain.name}`);
   }
-  const existingByName = await db.query(
-    `SELECT id, name FROM accounts WHERE tenant_id = $1 AND lower(name) = lower($2) AND merged_into IS NULL LIMIT 1`,
+	  const existingByName = await db.query(
+	    `SELECT id, name FROM accounts WHERE tenant_id = $1 AND lower(name) = lower($2) AND merged_into IS NULL AND archived_at IS NULL LIMIT 1`,
     [tenantId, name],
   );
   if (existingByName.rows[0]) throw validationError(`Account already exists: ${existingByName.rows[0].name}`);
@@ -85,11 +85,12 @@ async function ensureNoContactDuplicate(db: DbPool, tenantId: UUID, name: string
   const existingByName = await db.query(
     `SELECT id, first_name, last_name
      FROM contacts
-     WHERE tenant_id = $1
-       AND lower(first_name) = lower($2)
-       AND lower(last_name) = lower($3)
-       AND merged_into IS NULL
-     LIMIT 1`,
+	     WHERE tenant_id = $1
+	       AND lower(first_name) = lower($2)
+	       AND lower(last_name) = lower($3)
+	       AND merged_into IS NULL
+	       AND archived_at IS NULL
+	     LIMIT 1`,
     [tenantId, first_name, last_name],
   );
   if (existingByName.rows[0]) throw validationError(`Contact already exists: ${name}`);

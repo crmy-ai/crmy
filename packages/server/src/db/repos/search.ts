@@ -34,6 +34,13 @@ export async function crmSearch(
        FROM search_index
        WHERE tenant_id = $1
          AND search_vector @@ plainto_tsquery('english', $2)
+         AND (
+           (entity_type = 'contact' AND EXISTS (SELECT 1 FROM contacts c WHERE c.tenant_id = $1 AND c.id = entity_id AND c.merged_into IS NULL AND c.archived_at IS NULL))
+        OR (entity_type = 'account' AND EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = $1 AND a.id = entity_id AND a.merged_into IS NULL AND a.archived_at IS NULL))
+        OR (entity_type = 'opportunity' AND EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = $1 AND o.id = entity_id AND o.archived_at IS NULL))
+        OR (entity_type = 'use_case' AND EXISTS (SELECT 1 FROM use_cases u WHERE u.tenant_id = $1 AND u.id = entity_id AND u.archived_at IS NULL))
+        OR entity_type NOT IN ('contact', 'account', 'opportunity', 'use_case')
+         )
        ORDER BY rank DESC
        LIMIT $3`,
       [tenantId, query, limit * 6],  // fetch up to 6× limit so each bucket can fill
@@ -61,15 +68,14 @@ export async function crmSearch(
         }
       }
 
-      const fallback = await fallbackCrmSearch(db, tenantId, query, limit, ownerIds);
       return {
-        contacts:      mergeById(contacts, fallback.contacts, limit),
-        accounts:      mergeById(accounts, fallback.accounts, limit),
-        opportunities: mergeById(opportunities, fallback.opportunities, limit),
-        activities:    mergeById(activities, fallback.activities, limit),
-        useCases:      mergeById(useCases, fallback.useCases, limit),
-        assignments:   mergeById(assignments, fallback.assignments, limit),
-        contextEntries: mergeById(contextEntries, fallback.contextEntries, limit),
+        contacts:      contacts.slice(0, limit),
+        accounts:      accounts.slice(0, limit),
+        opportunities: opportunities.slice(0, limit),
+        activities:    activities.slice(0, limit),
+        useCases:      useCases.slice(0, limit),
+        assignments:   assignments.slice(0, limit),
+        contextEntries: contextEntries.slice(0, limit),
       };
     }
   } catch {
@@ -77,19 +83,6 @@ export async function crmSearch(
   }
 
   return fallbackCrmSearch(db, tenantId, query, limit, ownerIds);
-}
-
-function mergeById<T extends { id?: unknown }>(primary: T[], fallback: T[], limit: number): T[] {
-  const seen = new Set<string>();
-  const merged: T[] = [];
-  for (const item of [...primary, ...fallback]) {
-    const id = item.id == null ? JSON.stringify(item) : String(item.id);
-    if (seen.has(id)) continue;
-    seen.add(id);
-    merged.push(item);
-    if (merged.length >= limit) break;
-  }
-  return merged;
 }
 
 async function fallbackCrmSearch(
@@ -120,10 +113,10 @@ async function fallbackCrmSearch(
     ? ownerIds.length === 0
       ? ' AND FALSE'
       : ` AND (
-          (subject_type = 'contact' AND EXISTS (SELECT 1 FROM contacts c WHERE c.tenant_id = $1 AND c.id = subject_id AND c.owner_id = ANY($4::uuid[])))
-       OR (subject_type = 'account' AND EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = $1 AND a.id = subject_id AND a.owner_id = ANY($4::uuid[])))
-       OR (subject_type = 'opportunity' AND EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = $1 AND o.id = subject_id AND o.owner_id = ANY($4::uuid[])))
-       OR (subject_type = 'use_case' AND EXISTS (SELECT 1 FROM use_cases u WHERE u.tenant_id = $1 AND u.id = subject_id AND u.owner_id = ANY($4::uuid[])))
+          (subject_type = 'contact' AND EXISTS (SELECT 1 FROM contacts c WHERE c.tenant_id = $1 AND c.id = subject_id AND c.owner_id = ANY($4::uuid[]) AND c.archived_at IS NULL))
+       OR (subject_type = 'account' AND EXISTS (SELECT 1 FROM accounts a WHERE a.tenant_id = $1 AND a.id = subject_id AND a.owner_id = ANY($4::uuid[]) AND a.archived_at IS NULL))
+       OR (subject_type = 'opportunity' AND EXISTS (SELECT 1 FROM opportunities o WHERE o.tenant_id = $1 AND o.id = subject_id AND o.owner_id = ANY($4::uuid[]) AND o.archived_at IS NULL))
+       OR (subject_type = 'use_case' AND EXISTS (SELECT 1 FROM use_cases u WHERE u.tenant_id = $1 AND u.id = subject_id AND u.owner_id = ANY($4::uuid[]) AND u.archived_at IS NULL))
       )`
     : '';
   const ownerParams = ownerIds ? [tenantId, pattern, limit, ownerIds] : [tenantId, pattern, limit];
@@ -132,6 +125,8 @@ async function fallbackCrmSearch(
     db.query(
       `SELECT * FROM contacts
        WHERE tenant_id = $1
+         AND merged_into IS NULL
+         AND archived_at IS NULL
          AND (first_name ILIKE $2 OR last_name ILIKE $2 OR email ILIKE $2 OR company_name ILIKE $2
               OR EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE _a ILIKE $2))
          ${ownerClause}
@@ -141,6 +136,8 @@ async function fallbackCrmSearch(
     db.query(
       `SELECT * FROM accounts
        WHERE tenant_id = $1
+         AND merged_into IS NULL
+         AND archived_at IS NULL
          AND (name ILIKE $2 OR domain ILIKE $2
               OR EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE _a ILIKE $2))
          ${ownerClause}
@@ -150,6 +147,7 @@ async function fallbackCrmSearch(
     db.query(
       `SELECT * FROM opportunities
        WHERE tenant_id = $1
+         AND archived_at IS NULL
          AND name ILIKE $2
          ${ownerClause}
        ORDER BY updated_at DESC LIMIT $3`,
@@ -166,6 +164,7 @@ async function fallbackCrmSearch(
     db.query(
       `SELECT * FROM use_cases
        WHERE tenant_id = $1
+         AND archived_at IS NULL
          AND (name ILIKE $2 OR description ILIKE $2)
          ${ownerClause}
        ORDER BY updated_at DESC LIMIT $3`,
@@ -215,11 +214,11 @@ export async function getAccountHealthReport(
   activity_count_30d: number;
 }> {
   const [account, opps, lastActivity, contactCount, activityCount] = await Promise.all([
-    db.query('SELECT health_score FROM accounts WHERE id = $1 AND tenant_id = $2', [accountId, tenantId]),
+    db.query('SELECT health_score FROM accounts WHERE id = $1 AND tenant_id = $2 AND archived_at IS NULL', [accountId, tenantId]),
     db.query(
       `SELECT count(*)::int as count, COALESCE(SUM(amount), 0)::bigint as value
        FROM opportunities
-       WHERE account_id = $1 AND tenant_id = $2 AND stage NOT IN ('closed_won', 'closed_lost')`,
+       WHERE account_id = $1 AND tenant_id = $2 AND archived_at IS NULL AND stage NOT IN ('closed_won', 'closed_lost')`,
       [accountId, tenantId],
     ),
     db.query(
@@ -229,7 +228,7 @@ export async function getAccountHealthReport(
       [accountId, tenantId],
     ),
     db.query(
-      'SELECT count(*)::int as count FROM contacts WHERE account_id = $1 AND tenant_id = $2',
+      'SELECT count(*)::int as count FROM contacts WHERE account_id = $1 AND tenant_id = $2 AND archived_at IS NULL',
       [accountId, tenantId],
     ),
     db.query(
@@ -258,6 +257,7 @@ export async function getAccountHealthReport(
 export async function getTenantStats(
   db: DbPool,
   tenantId: UUID,
+  ownerIds?: UUID[],
 ): Promise<{
   contacts: number;
   accounts: number;
@@ -265,15 +265,21 @@ export async function getTenantStats(
   activities: number;
   open_pipeline_value: number;
 }> {
+  const ownerClause = ownerIds
+    ? ownerIds.length === 0
+      ? ' AND FALSE'
+      : ' AND owner_id = ANY($2::uuid[])'
+    : '';
+  const params = ownerIds ? [tenantId, ownerIds] : [tenantId];
   const [contacts, accounts, opps, activities, pipeline] = await Promise.all([
-    db.query('SELECT count(*)::int as c FROM contacts WHERE tenant_id = $1', [tenantId]),
-    db.query('SELECT count(*)::int as c FROM accounts WHERE tenant_id = $1', [tenantId]),
-    db.query('SELECT count(*)::int as c FROM opportunities WHERE tenant_id = $1', [tenantId]),
-    db.query('SELECT count(*)::int as c FROM activities WHERE tenant_id = $1', [tenantId]),
+    db.query(`SELECT count(*)::int as c FROM contacts WHERE tenant_id = $1 AND archived_at IS NULL${ownerClause}`, params),
+    db.query(`SELECT count(*)::int as c FROM accounts WHERE tenant_id = $1 AND archived_at IS NULL${ownerClause}`, params),
+    db.query(`SELECT count(*)::int as c FROM opportunities WHERE tenant_id = $1 AND archived_at IS NULL${ownerClause}`, params),
+    db.query(`SELECT count(*)::int as c FROM activities WHERE tenant_id = $1${ownerClause}`, params),
     db.query(
       `SELECT COALESCE(SUM(amount), 0)::bigint as value FROM opportunities
-       WHERE tenant_id = $1 AND stage NOT IN ('closed_won', 'closed_lost')`,
-      [tenantId],
+       WHERE tenant_id = $1 AND archived_at IS NULL AND stage NOT IN ('closed_won', 'closed_lost')${ownerClause}`,
+      params,
     ),
   ]);
 

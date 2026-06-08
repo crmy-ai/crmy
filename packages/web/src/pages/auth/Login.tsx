@@ -23,7 +23,7 @@ const DEMO_ACCOUNTS = [
 ] as const;
 
 const PASSWORD_RULES = [
-  { label: 'At least 8 characters', test: (p: string) => p.length >= 8 },
+  { label: 'At least 12 characters', test: (p: string) => p.length >= 12 },
   { label: 'One uppercase letter', test: (p: string) => /[A-Z]/.test(p) },
   { label: 'One number', test: (p: string) => /\d/.test(p) },
   { label: 'One special character', test: (p: string) => /[^A-Za-z0-9]/.test(p) },
@@ -84,7 +84,9 @@ export function LoginPage() {
   }>({ status: 'loading' });
 
   useEffect(() => {
-    fetch('/health')
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5_000);
+    fetch('/health', { signal: controller.signal })
       .then(async (r) => {
         const d = await r.json().catch(() => null);
         if (!d) {
@@ -99,7 +101,12 @@ export function LoginPage() {
           version: d.version,
         });
       })
-      .catch(() => setDbStatus({ status: 'api_error' }));
+      .catch(() => setDbStatus({ status: 'api_error' }))
+      .finally(() => window.clearTimeout(timeout));
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, []);
 
   useEffect(() => {

@@ -546,6 +546,40 @@ function SnapshotChip({
   );
 }
 
+function ProofPathStep({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  href,
+  color,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: string | number;
+  detail: string;
+  href: string;
+  color: string;
+}) {
+  return (
+    <Link
+      to={href}
+      className="group rounded-xl border border-border bg-background/70 p-3 transition-colors hover:border-primary/30 hover:bg-muted/30"
+    >
+      <div className="flex items-start gap-3">
+        <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${color}`}>
+          <Icon className="h-4 w-4" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
+          <span className="mt-0.5 block font-display text-lg font-bold leading-6 text-foreground">{value}</span>
+        </span>
+      </div>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">{detail}</p>
+    </Link>
+  );
+}
+
 function FocusQueueRow({
   icon: Icon,
   title,
@@ -1339,6 +1373,40 @@ function AdminDashboard() {
       tone: 'action' as const,
     }] : []),
   ];
+  const proofPathSteps = [
+    {
+      icon: FileText,
+      label: 'Raw Context',
+      value: observationsTotal.toLocaleString(),
+      detail: 'Notes, transcripts, emails, research, or agent input enter as source material.',
+      href: '/context?tab=observations&add=context',
+      color: 'bg-[#0ea5e9]/15 text-[#0ea5e9]',
+    },
+    {
+      icon: Sparkles,
+      label: 'Signals',
+      value: signalGroupTotal.toLocaleString(),
+      detail: 'CRMy separates useful claims from noise and marks what needs evidence or approval.',
+      href: '/context?tab=signals',
+      color: 'bg-violet-500/15 text-violet-500',
+    },
+    {
+      icon: Library,
+      label: 'Memory',
+      value: memoryTotal.toLocaleString(),
+      detail: 'Confirmed, evidenced customer facts become trusted Memory agents can rely on.',
+      href: '/context?tab=browser',
+      color: 'bg-emerald-500/15 text-emerald-500',
+    },
+    {
+      icon: Bot,
+      label: 'Action Context',
+      value: pendingHITL.length > 0 ? `${pendingHITL.length} gated` : 'Ready',
+      detail: 'One retrieval call returns Memory, Signals, stale warnings, evidence, and action boundaries.',
+      href: '/agent',
+      color: 'bg-[#6366f1]/15 text-[#6366f1]',
+    },
+  ];
 
   return (
     <div className="flex flex-col h-full">
@@ -1394,6 +1462,37 @@ function AdminDashboard() {
         <ContextGovernance />
       ) : (
       <div className="flex-1 overflow-y-auto p-4 pb-24 md:p-6 md:pb-6">
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.01 }}>
+          <div className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-sm md:mb-6 md:p-5">
+            <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-3xl">
+                <p className="text-xs font-semibold uppercase tracking-wide text-primary">30 second proof</p>
+                <h2 className="mt-1 font-display text-lg font-bold text-foreground">
+                  Messy customer context becomes action context agents can use.
+                </h2>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  Throw raw source material at CRMy, then inspect how it turns into reviewable Signals, confirmed Memory, and governed action context before a customer-facing agent acts.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Link to="/context?tab=observations&add=context" className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-[#0ea5e9] px-3 text-sm font-semibold text-white transition-colors hover:bg-[#0284c7]">
+                  <PlusCircle className="h-4 w-4" />
+                  Add Context
+                </Link>
+                <Link to="/context?tab=signals" className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+                  <GitCompareArrows className="h-4 w-4" />
+                  Review Signals
+                </Link>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
+              {proofPathSteps.map(step => (
+                <ProofPathStep key={step.label} {...step} />
+              ))}
+            </div>
+          </div>
+        </motion.div>
+
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 }}>
           <div className="mb-4 rounded-2xl border border-border bg-surface p-4 shadow-sm md:mb-6 md:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">

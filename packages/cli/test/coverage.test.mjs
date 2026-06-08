@@ -61,9 +61,10 @@ test('CLI HTTP mode falls back to actor-scoped generic MCP tool bridge', async (
 test('friendly CLI commands stay mapped to efficient HTTP routes', async () => {
   const clientSource = await read('packages/cli/src/client.ts');
   const mappedTools = new Set([...clientSource.matchAll(/^\s+([a-z0-9_]+):\s*\{/gm)].map(match => match[1]));
-  const expected = [
-    'customer_record_resolve',
-    'email_draft_preview',
+	  const expected = [
+	    'customer_record_resolve',
+	    'action_context_get',
+	    'email_draft_preview',
     'email_draft_save',
     'record_draft_preview',
     'calendar_connection_list',
@@ -89,7 +90,22 @@ test('friendly CLI commands stay mapped to efficient HTTP routes', async () => {
     'sequence_analytics',
   ];
   const missing = expected.filter(tool => !mappedTools.has(tool));
-  assert.deepEqual(missing, []);
+	  assert.deepEqual(missing, []);
+	});
+
+test('Action Context has a friendly CLI command and efficient REST mapping', async () => {
+  const indexSource = await read('packages/cli/src/index.ts');
+  const helpSource = await read('packages/cli/src/commands/help.ts');
+  const commandSource = await read('packages/cli/src/commands/action-context.ts');
+  const clientSource = await read('packages/cli/src/client.ts');
+  const routerSource = await read('packages/server/src/rest/router.ts');
+
+  assert.match(indexSource, /actionContextCommand/);
+  assert.match(helpSource, /action-context/);
+  assert.match(commandSource, /client\.call\('action_context_get'/);
+  assert.match(commandSource, /resolveSubjectRef/);
+  assert.match(clientSource, /action_context_get:\s*\{ method: 'POST', path: \(\) => '\/api\/v1\/action-context' \}/);
+  assert.match(routerSource, /router\.post\('\/action-context'/);
 });
 
 test('new MCP agent workflow tools have scope entries', async () => {
@@ -105,6 +121,64 @@ test('direct DB CLI uses actor-scoped MCP tool filtering', async () => {
   assert.doesNotMatch(clientSource, /const tools = getAllTools\(db\)/);
   assert.match(clientSource, /actorScopes \? keyScopes\.filter/);
   assert.match(clientSource, /Invalid CRMY_API_KEY/);
+});
+
+test('production setup and health hardening stay gated', async () => {
+  const indexSource = await read('packages/server/src/index.ts');
+  const routerSource = await read('packages/server/src/rest/router.ts');
+  const settingsSource = await read('packages/web/src/pages/Settings.tsx');
+  const guide = await read('docs/guide.md');
+
+  assert.match(indexSource, /process\.env\.NODE_ENV === 'production'/);
+  assert.match(indexSource, /status: 'ok',\s*db: 'ok',\s*version: SERVER_VERSION/s);
+  assert.match(routerSource, /function isLocalDbConfigEnabled/);
+  assert.match(routerSource, /CRMY_LOCAL_SETUP_MODE/);
+  assert.match(routerSource, /CRMY_ALLOW_DB_CONFIG_WRITE/);
+  assert.match(routerSource, /rejectLocalDbConfigDisabled/);
+  assert.match(routerSource, /local_setup_enabled: isLocalDbConfigEnabled\(\)/);
+  assert.match(settingsSource, /Managed by server environment/);
+  assert.match(guide, /hosted\/production deployments show the current connection/);
+});
+
+test('customer record deletes archive instead of removing trust anchors', async () => {
+  const migration = await read('packages/server/migrations/074_revenue_record_archives.sql');
+  const docs = await read('docs/mcp-tools.md');
+  for (const table of ['accounts', 'contacts', 'opportunities', 'use_cases']) {
+    assert.match(migration, new RegExp(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS archived_at`));
+  }
+  for (const repo of ['accounts', 'contacts', 'opportunities', 'use-cases']) {
+    const source = await read(`packages/server/src/db/repos/${repo}.ts`);
+    assert.match(source, /archived_at = COALESCE\(archived_at, now\(\)\)/);
+    assert.doesNotMatch(source, new RegExp(`DELETE FROM ${repo === 'use-cases' ? 'use_cases' : repo}\\b`));
+  }
+  assert.match(docs, /Archive a contact/);
+  assert.match(docs, /Archive an account/);
+  assert.match(docs, /Archive an opportunity/);
+  assert.match(docs, /Archive a use case/);
+});
+
+test('CLI and web request paths have bounded waits', async () => {
+  const cliClient = await read('packages/cli/src/client.ts');
+  const webClient = await read('packages/web/src/api/client.ts');
+  const agentStream = await read('packages/web/src/lib/agentStream.ts');
+  const login = await read('packages/web/src/pages/auth/Login.tsx');
+  const setup = await read('packages/web/src/pages/auth/Setup.tsx');
+
+  assert.match(cliClient, /function fetchWithTimeout/);
+  assert.match(cliClient, /CRMY_CLI_HTTP_TIMEOUT_MS/);
+  assert.match(webClient, /DEFAULT_REQUEST_TIMEOUT_MS/);
+  assert.match(webClient, /controller\.abort\(\)/);
+  assert.match(agentStream, /function fetchAgentJson/);
+  assert.match(login, /fetch\('\/health', \{ signal: controller\.signal \}\)/);
+  assert.match(setup, /Setup request timed out/);
+});
+
+test('external writeback approval request creation is transactional', async () => {
+  const service = await read('packages/server/src/services/systems-of-record/index.ts');
+  assert.match(service, /return await withTransaction\(db, async tx =>/);
+  assert.match(service, /sorRepo\.createWriteback\(tx/);
+  assert.match(service, /hitlRepo\.createHITLRequest\(tx/);
+  assert.match(service, /sorRepo\.updateWriteback\(tx/);
 });
 
 test('agent harness setup avoids npx prompts and includes systems scopes', async () => {
@@ -178,7 +252,235 @@ test('agent smoke command exercises the one-minute MCP tool path', async () => {
   }
   assert.match(smokeSource, /context_ingest_auto/);
   assert.match(smokeSource, /withModel/);
+  assert.match(smokeSource, /Running model-backed Raw Context extraction/);
   assert.match(mcpSource, /command\('doctor'\)/);
   assert.match(mcpSource, /with-model/);
   assert.match(smokeSource, /Northstar Labs/);
+});
+
+test('first-run proof path uses rich seeded sample data and signal groups', async () => {
+  const readme = await read('README.md');
+  const guide = await read('docs/guide.md');
+  const serverSource = await read('packages/server/src/index.ts');
+  const webHtml = await read('packages/web/index.html');
+  const initSource = await read('packages/cli/src/commands/init.ts');
+  const mcpSource = await read('packages/cli/src/commands/mcp.ts');
+  const seedDemoSource = await read('packages/cli/src/commands/seed-demo.ts');
+  const contextSource = await read('packages/cli/src/commands/context.ts');
+  const sampleSource = await read('packages/server/src/services/sample-data.ts');
+  const uiSmokeSource = await read('scripts/ui-smoke.mjs');
+
+  assert.match(readme, /npx -y @crmy\/cli init --demo/);
+  assert.match(readme, /init --yes --no-demo/);
+  assert.match(guide, /npx -y @crmy\/cli init --demo/);
+  assert.match(mcpSource, /crmy init --demo/);
+  assert.match(initSource, /\.option\('--demo'/);
+  assert.match(initSource, /\.option\('--no-demo'/);
+  assert.match(initSource, /let seedDemo = demoMode \|\| \(yesMode && !skipDemo\)/);
+  assert.match(initSource, /process\.env\.ENABLE_PGVECTOR !== 'true' && !yesMode && !demoMode && isInteractive/);
+  assert.match(readme, /context signal-groups/);
+  assert.doesNotMatch(readme, /context signals --subject "account:Northstar Labs"\n> npx -y @crmy\/cli context lineage/);
+  assert.match(initSource, /counts\.signal_groups/);
+  assert.match(initSource, /crmy\/cli context signal-groups/);
+  assert.match(seedDemoSource, /counts\.signal_groups/);
+  assert.match(seedDemoSource, /crmy context signal-groups/);
+  assert.match(contextSource, /Resolving subjects and extracting Raw Context/);
+  assert.match(contextSource, /Raw Context extraction complete/);
+  assert.match(sampleSource, /ACTIVITY_INGESTED_NOTE/);
+  assert.match(sampleSource, /RAW_MODEL_NOTE/);
+  assert.match(sampleSource, /SIGNAL_GROUP_TRUST_PACKET/);
+  assert.match(sampleSource, /Schedule technical validation next Friday/);
+  assert.match(sampleSource, /Security review is the blocker for the pilot/);
+  assert.match(uiSmokeSource, /childElementCount > 0/);
+  assert.match(uiSmokeSource, /CRMy UI root is blank/);
+  assert.match(serverSource, /isSameRequestOrigin/);
+  assert.match(serverSource, /callback\(null, \{/);
+  assert.match(serverSource, /isSameRequestOrigin\(req, origin\)/);
+  assert.doesNotMatch(webHtml, /fonts\.googleapis\.com/);
+  assert.doesNotMatch(webHtml, /<script>\s*\(function/);
+});
+
+test('migration guidance points at executable subcommands', async () => {
+  const initSource = await read('packages/cli/src/commands/init.ts');
+  const doctorSource = await read('packages/cli/src/commands/doctor.ts');
+  assert.match(initSource, /crmy migrate run/);
+  assert.match(doctorSource, /crmy migrate run/);
+  assert.doesNotMatch(initSource, /running: crmy migrate\\n/);
+  assert.doesNotMatch(doctorSource, /Run: crmy migrate['"`]/);
+});
+
+test('first-run setup persists a dedicated stored-secret encryption key', async () => {
+  const configSource = await read('packages/cli/src/config.ts');
+  const configCommandSource = await read('packages/cli/src/commands/config.ts');
+  const initSource = await read('packages/cli/src/commands/init.ts');
+  const serverCommandSource = await read('packages/cli/src/commands/server.ts');
+  const doctorSource = await read('packages/cli/src/commands/doctor.ts');
+  const mcpSource = await read('packages/cli/src/commands/mcp.ts');
+  const migrateSource = await read('packages/cli/src/commands/migrate.ts');
+  const seedDemoSource = await read('packages/cli/src/commands/seed-demo.ts');
+  const loadEnvSource = await read('packages/server/scripts/load-env.cjs');
+  const readme = await read('README.md');
+  const guide = await read('docs/guide.md');
+
+  assert.match(configSource, /encryptionKey\?: string/);
+  assert.match(configCommandSource, /encryptionKey: config\.encryptionKey \? '\*\*\*' : undefined/);
+  assert.match(initSource, /encryptionKey = crypto\.randomBytes\(32\)\.toString\('hex'\)/);
+  assert.match(initSource, /process\.env\.CRMY_ENCRYPTION_KEY = encryptionKey/);
+  assert.match(initSource, /Secret storage: dedicated encryption key generated and saved/);
+  assert.match(serverCommandSource, /Generated a dedicated stored-secret encryption key and saved it to \.crmy\.json/);
+  assert.match(serverCommandSource, /saveConfigFile\(config\)/);
+  assert.match(doctorSource, /Stored-secret encryption key is configured/);
+  assert.match(doctorSource, /Run: crmy init, or run crmy server once to generate and save a local key/);
+  for (const source of [mcpSource, migrateSource, seedDemoSource]) {
+    assert.match(source, /process\.env\.CRMY_ENCRYPTION_KEY = config\.encryptionKey|process\.env\.CRMY_ENCRYPTION_KEY = encryptionKey/);
+  }
+  assert.match(loadEnvSource, /process\.env\.NODE_ENV !== 'production'/);
+  assert.match(loadEnvSource, /Generated CRMY_ENCRYPTION_KEY and saved it to/);
+  assert.match(readme, /local source dev server generate this automatically/);
+  assert.match(guide, /local source dev server also generates and appends one to `\.env`/);
+  assert.match(guide, /"encryptionKey": "\.\.\."/);
+});
+
+test('README and guide stay aligned with canonical sequence and REST surfaces', async () => {
+  const guide = await read('docs/guide.md');
+  const routerSource = await read('packages/server/src/rest/router.ts');
+  const clientSource = await read('packages/cli/src/client.ts');
+  const sequencesCommandSource = await read('packages/cli/src/commands/sequences.ts');
+  const sequenceTools = await read('packages/server/src/mcp/tools/email-sequences.ts');
+  const mcpHelpSource = await read('packages/cli/src/commands/mcp.ts');
+
+  assert.match(guide, /use `sequence_enroll` to start a contact on the sequence/);
+  assert.match(guide, /\| `sequence_create` \| Create a multi-channel sequence/);
+  assert.match(guide, /GET    \/api\/v1\/sequences/);
+  assert.match(guide, /POST   \/api\/v1\/sequences\/enrollments\/:id\/pause/);
+  assert.match(guide, /POST \| `\/sequences\/enrollments\/:id\/unenroll`/);
+  assert.match(guide, /Legacy `\/api\/v1\/email-sequences\/\*` routes remain available/);
+  assert.match(guide, /\| Email Sequences \| `sequence_create`/);
+  assert.match(guide, /`sequence_enrollment_context`/);
+  assert.match(guide, /GET \| `\/messaging-channels`/);
+  assert.match(guide, /there are not dedicated REST routes for those operations yet/);
+  assert.match(guide, /later GET, POST, and DELETE requests can reuse that session/);
+  assert.match(guide, /Base URL for REST resources: `\/api\/v1`\. Auth endpoints are mounted separately at `\/auth`\./);
+  assert.doesNotMatch(guide, /email_sequence_/);
+  assert.doesNotMatch(guide, /\/messaging\/channels/);
+  assert.doesNotMatch(guide, /\/messaging\/send/);
+  assert.doesNotMatch(guide, /Each request creates a new session/);
+  assert.match(mcpHelpSource, /crmy init --demo/);
+
+  assert.match(routerSource, /router\.get\('\/messaging-channels'/);
+  assert.doesNotMatch(routerSource, /router\.get\('\/messaging\/channels'/);
+  assert.match(routerSource, /router\.post\('\/sequences\/enrollments\/:id\/pause'/);
+  assert.match(routerSource, /router\.post\('\/sequences\/enrollments\/:id\/resume'/);
+  assert.match(routerSource, /router\.post\('\/sequences\/enrollments\/:id\/unenroll'/);
+  assert.match(clientSource, /sequence_pause:\s*\{ method: 'POST', path: \(i\) => `\/api\/v1\/sequences\/enrollments\/\$\{i\.id\}\/pause`/);
+  assert.match(clientSource, /sequence_resume:\s*\{ method: 'POST', path: \(i\) => `\/api\/v1\/sequences\/enrollments\/\$\{i\.id\}\/resume`/);
+  assert.match(sequencesCommandSource, /command\('unenroll <enrollment_id>'\)/);
+  assert.doesNotMatch(sequencesCommandSource, /command\('unenroll <sequence_id>'\)/);
+  assert.match(sequencesCommandSource, /client\.call\('sequence_unenroll', \{\s*id: enrollmentId,/);
+  for (const tool of ['sequence_create', 'sequence_enrollment_context', 'sequence_clone']) {
+    assert.match(sequenceTools, new RegExp(`name: '${tool}'`));
+    assert.match(guide, new RegExp(`\\\`${tool}\\\``));
+  }
+});
+
+test('OpenAPI artifact advertises the canonical public REST surface', async () => {
+  const openapi = JSON.parse(await read('docs/openapi.json'));
+  const paths = openapi.paths ?? {};
+  const routerSource = await read('packages/server/src/rest/router.ts');
+
+  for (const route of [
+    '/ops/status',
+    '/ops/data-quality',
+    '/ops/data-quality/{check_name}/repair',
+    '/auth/setup/{token}',
+    '/auth/profile',
+    '/context/raw-sources/{id}/reprocess',
+    '/context/semantic-search',
+    '/context/contradictions',
+    '/subjects/resolve',
+    '/context/detect-subjects',
+    '/context/ingest-file',
+    '/context/review-batch',
+    '/context/mark-stale',
+    '/context/consolidate',
+    '/context/contradictions/assign',
+    '/context/contradictions/resolve',
+    '/email-messages/{id}',
+    '/email-messages/{id}/classification',
+    '/email-messages/{id}/ignore',
+    '/source-filters',
+    '/calendar/connections',
+    '/calendar-events',
+    '/calendar-events/{id}/artifacts',
+    '/messaging-channels',
+    '/messaging-channels/{id}',
+    '/sequences',
+    '/sequences/{id}',
+    '/sequences/{id}/enroll',
+    '/sequences/{id}/analytics',
+    '/sequences/enrollments',
+    '/sequences/enrollments/{id}/unenroll',
+    '/sequences/enrollments/{id}/pause',
+    '/sequences/enrollments/{id}/resume',
+    '/sequences/draft-preview',
+    '/sequences/enrollments/{enrollmentId}/activities',
+    '/sequences/enrollments/{enrollmentId}/context',
+    '/workflows/{id}/test',
+    '/workflows/{id}/clone',
+    '/workflows/{id}/trigger',
+    '/admin/sample-data',
+    '/admin/actors',
+    '/admin/actors/{id}/approve',
+    '/admin/actors/{id}/reject',
+    '/admin/users',
+    '/admin/users/{id}/invite',
+    '/admin/users/{id}/password-reset',
+    '/resolve',
+  ]) {
+    assert.ok(paths[route], `missing OpenAPI route ${route}`);
+  }
+
+  assert.ok(paths['/messaging-channels'].get);
+  assert.ok(paths['/messaging-channels'].post);
+  assert.ok(paths['/sequences'].get);
+  assert.ok(paths['/sequences'].post);
+  assert.ok(paths['/sequences/enrollments/{id}/pause'].post);
+  assert.ok(paths['/sequences/enrollments/{id}/resume'].post);
+  assert.ok(paths['/sequences/enrollments/{id}/unenroll'].post);
+  assert.equal(paths['/auth/login'].post.servers?.[0]?.url, '/');
+  assert.equal(paths['/auth/profile'].patch.servers?.[0]?.url, '/');
+
+  assert.equal(paths['/email-sequences'], undefined);
+  assert.equal(paths['/messaging/channels'], undefined);
+  assert.equal(paths['/messaging/send'], undefined);
+
+  const intentionallyUndocumented = new Set([
+    'GET /openapi.json',
+    'GET /calendar/oauth/{provider}/callback',
+    'GET /mailbox/oauth/{provider}/callback',
+    'POST /email/inbound',
+    'GET /email-sequences',
+    'POST /email-sequences',
+    'GET /email-sequences/{id}',
+    'PATCH /email-sequences/{id}',
+    'DELETE /email-sequences/{id}',
+    'POST /email-sequences/enroll',
+    'POST /email-sequences/unenroll',
+    'GET /email-sequences/enrollments',
+    'POST /sequences/{id}/unenroll',
+    'POST /sequences/enroll',
+  ]);
+  const routeMatches = [...routerSource.matchAll(/router\.(get|post|patch|delete|put)\('([^']+)'/g)];
+  for (const match of routeMatches) {
+    const method = match[1].toUpperCase();
+    const normalizedPath = match[2]
+      .replace(/:([A-Za-z_][A-Za-z0-9_]*)(\([^)]*\))?/g, '{$1}')
+      .replace(/\/+/g, '/');
+    const key = `${method} ${normalizedPath}`;
+    if (intentionallyUndocumented.has(key)) continue;
+    assert.ok(
+      paths[normalizedPath]?.[method.toLowerCase()],
+      `missing OpenAPI route ${key}`,
+    );
+  }
 });

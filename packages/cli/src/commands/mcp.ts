@@ -22,7 +22,7 @@ export function mcpCommand(): Command {
     .addHelpText('after', `
 
 Examples:
-  $ crmy init --yes
+  $ crmy init --demo
   $ crmy doctor
   $ claude mcp add crmy -- npx -y @crmy/cli mcp
 
@@ -64,6 +64,10 @@ Agent guidance:
 
       const databaseUrl = process.env.DATABASE_URL ?? config.database?.url;
       const apiKey      = process.env.CRMY_API_KEY  ?? config.apiKey;
+      if (config.jwtSecret && !process.env.JWT_SECRET) process.env.JWT_SECRET = config.jwtSecret;
+      if (config.encryptionKey && !process.env.CRMY_ENCRYPTION_KEY && !process.env.AGENT_ENCRYPTION_KEY) {
+        process.env.CRMY_ENCRYPTION_KEY = config.encryptionKey;
+      }
 
       if (!databaseUrl) {
         process.stderr.write(
