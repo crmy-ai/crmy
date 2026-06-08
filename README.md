@@ -9,14 +9,14 @@
 </p>
 
 <p align="center">
-  CRMy turns transcripts, emails, notes, CRM changes, and other raw GTM context into the briefing a customer-facing agent needs before it acts.
+  CRMy turns transcripts, emails, notes, CRM changes, and other messy GTM context into the briefing a customer-facing agent needs before it acts.
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/@crmy/cli"><img alt="npm" src="https://img.shields.io/npm/v/@crmy/cli?label=npm&color=2563eb"></a>
   <a href="https://github.com/crmy-ai/crmy/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-0f172a"></a>
   <a href="https://discord.gg/2HvmudDwE"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white"></a>
-  <a href="https://github.com/crmy-ai/crmy/releases"><img alt="Release" src="https://img.shields.io/badge/release-v0.8.7-16a34a"></a>
+  <a href="https://github.com/crmy-ai/crmy/releases"><img alt="Release" src="https://img.shields.io/badge/release-v0.8.8-16a34a"></a>
   <a href="https://github.com/crmy-ai/crmy/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/crmy-ai/crmy?style=social"></a>
 </p>
 
@@ -36,7 +36,7 @@
 
 ---
 
-GTM agents do not usually fail because they cannot write an email or call an API.
+GTM agents do not fail because they don't have context, memory, or the right tools.
 
 They fail because the context around the customer is messy:
 
@@ -49,7 +49,7 @@ They fail because the context around the customer is messy:
 
 CRMy is the context engine for that gap.
 
-It accepts Raw Context, resolves the customer, extracts evidence-backed Signals, keeps inferred Signals separate until evidence, readiness, and policy gates allow them to become typed Memory, and retrieves the right briefing and Action Context before an agent drafts, decides, requests approval, or writes back.
+It accepts **Raw Context**, resolves the customer, extracts evidence-backed **Signals**, keeps inferred Signals separate until evidence, readiness, and policy gates allow them to become typed **Memory**, and retrieves the right briefing and **Action Context** before an agent drafts, decides, requests approval, or writes back.
 
 ```text
 Raw Context -> Signals -> Memory -> Briefing + Action Context -> Handoff / Writeback -> Proof
@@ -70,7 +70,7 @@ CRMy gives that answer through MCP, CLI, REST, and UI surfaces on top of Postgre
 > npx -y @crmy/cli context lineage --subject "account:Northstar Labs"
 > ```
 
-Star CRMy if you’re building GTM agents that need operational memory, scoped tools, and governed action.
+Star CRMy if you’re building GTM agents that need operational memory, scoped tools, and governed action. If you expect them to *reliably* interact with customers, they do. 
 
 ---
 
@@ -90,7 +90,7 @@ flowchart LR
   raw --> signals --> memory --> retrieve --> action --> proof
 ```
 
-Before an agent acts on a customer, CRMy can tell it what is known, what is stale, what is inferred, what is approved, what action is allowed, what system owns the record, and what proof or audit trail will exist afterward.
+TL;DR: Before an agent acts on a customer, CRMy can tell it what is known, what is stale, what is inferred, what is approved, what action is allowed, what system owns the record, and what proof or audit trail will exist afterward.
 
 ## Why CRMy?
 
@@ -734,7 +734,7 @@ npm run test:ui-smoke   # with CRMy running on http://localhost:3000
 
 ## Release
 
-Current version: `0.8.7`
+Current version: `0.8.8`
 
 v0.8.x focuses on making CRMy a usable, scoped GTM agent workspace:
 

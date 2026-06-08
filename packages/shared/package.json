@@ -1,6 +1,6 @@
 {
   "name": "@crmy/shared",
-  "version": "0.8.7",
+  "version": "0.8.8",
   "description": "Shared types, Zod schemas, and validation for CRMy",
   "type": "module",
   "files": [
