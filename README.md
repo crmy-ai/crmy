@@ -34,9 +34,7 @@
 
 ---
 
-GTM agents do not fail because they don't have context, memory, or the right tools.
-
-They fail because the context around the customer is messy:
+GTM agents do not fail because they don't have context, memory, or the right tools. They fail because the context around the customer is messy:
 
 - the CRM is stale or incomplete;
 - the call transcript has the real blocker but no durable structure;
