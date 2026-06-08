@@ -736,17 +736,6 @@ npm run test:ui-smoke   # with CRMy running on http://localhost:3000
 
 Current version: `0.8.8`
 
-v0.8.x focuses on making CRMy a usable, scoped GTM agent workspace:
-
-- Raw Context ingestion with evidence-backed Signals
-- Signal consolidation and typed Memory readiness
-- scoped member, manager, and admin workspaces
-- Workspace Agent with record scope, durable turns, attachments, and tool logs
-- Handoffs as the approval and review boundary
-- Customer Email and Customer Activity as first-class context sources
-- Systems of Record setup, mapping, sync, conflict handling, and governed writeback
-- MCP and CLI coverage for source-to-action workflows
-
 Older release notes live in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
