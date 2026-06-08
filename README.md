@@ -1,13 +1,13 @@
-<p align="center">
-  <img src="https://crmy.ai/crmy-logo.png" alt="CRMy" width="120" />
-</p>
+
+<img src="https://crmy.ai/crmy-logo.png" alt="CRMy" width="120" style="display: block; margin-left: auto; margin-right: auto;"/>
+
 
 <h1 align="center">CRMy</h1>
 
 <h3 align="center">Before an agent acts on a customer, it needs trusted context.</h3>
 
 <p align="center">
-  CRMy turns transcripts, emails, notes, CRM changes, and other raw GTM context into the trusted briefing a customer-facing agent needs before it acts. 
+  CRMy turns transcripts, emails, notes, CRM changes, and other raw customer context into the trusted briefing a customer-facing agent needs before it acts.
 </p>
 <p align="center">
   <strong>Messy customer context in. Agent-ready Signals, Memory, and action guidance out.</strong>
@@ -24,7 +24,7 @@
 <p align="center">
   <a href="#quickstart">Quickstart</a>
   ·
-  <a href="#prove-the-loop">Demo path</a>
+  <a href="#demo-workflow">Demo workflow</a>
   ·
   <a href="#why-crmy">Why CRMy?</a>
   ·
@@ -37,7 +37,7 @@
 
 ---
 
-GTM agents do not need another place to store context. They need to know what is true, current, evidenced, approved, and safe to act on.
+Sales, CS, support, and RevOps agents do not need another place to store context. They need to know what is true, current, evidenced, approved, and safe to act on.
 
 That breaks down when customer context is messy:
 
@@ -46,7 +46,7 @@ That breaks down when customer context is messy:
 - renewal risk is implied across emails, meetings, and notes;
 - the agent cannot tell evidence from inference;
 - the next action needs approval before it touches a customer or system of record;
-- nobody can prove afterward why the agent acted.
+- nobody can explain afterward why the agent acted.
 
 CRMy is the context engine for that gap.
 
@@ -58,7 +58,7 @@ Raw Context -> Signals -> Memory -> Briefing + Action Guidance -> Handoff / Writ
 
 A customer-facing agent should be able to ask one high-level question before work:
 
-> What do I need to know about this customer, what is uncertain or stale, what am I allowed to do, and what proof backs it?
+> What do I need to know about this customer, what is uncertain or stale, what am I allowed to do, and what evidence backs it?
 
 CRMy gives that answer through agent tools, CLI, REST, and UI surfaces on top of PostgreSQL.
 
@@ -71,7 +71,7 @@ CRMy gives that answer through agent tools, CLI, REST, and UI surfaces on top of
 > npx -y @crmy/cli context lineage --subject "account:Northstar Labs"
 > ```
 
-Star CRMy if you’re building GTM agents that need operational memory, scoped tools, and governed action. If you expect them to *reliably* interact with customers, they do. 
+Star CRMy if you’re building customer-facing agents that need operational memory, scoped tools, and governed action. If you expect them to *reliably* interact with customers, they do.
 
 ---
 
@@ -86,16 +86,16 @@ flowchart LR
   memory["Memory\nconfirmed customer truth"]
   retrieve["One retrieval path\nbriefing_get / action_context_get"]
   action["Agent action\nwith warnings + policy"]
-  proof["Handoff / Writeback / Audit Trail"]
+  audit_trail["Handoff / Writeback / Audit Trail"]
 
-  raw --> signals --> memory --> retrieve --> action --> proof
+  raw --> signals --> memory --> retrieve --> action --> audit_trail
 ```
 
-TL;DR: Before an agent acts on a customer, CRMy can tell it what is known, what is stale, what is inferred, what is approved, what action is allowed, what system owns the record, and what proof or audit trail will exist afterward.
+TL;DR: Before an agent acts on a customer, CRMy can tell it what is known, what is stale, what is inferred, what is approved, what action is allowed, what system owns the record, and what evidence or audit trail will exist afterward.
 
 ## Why CRMy?
 
-Most GTM agents can draft, summarize, and call APIs. They still struggle with the operational questions that matter before action:
+Most sales, CS, support, and RevOps agents can draft, summarize, and call APIs. They still struggle with the operational questions that matter before action:
 
 - What do we actually know about this account or deal?
 - Which claims came from evidence, and which are only inferred?
@@ -103,13 +103,13 @@ Most GTM agents can draft, summarize, and call APIs. They still struggle with th
 - Which Memory is stale, contradicted, or missing support?
 - Is this actor/agent allowed to see or change this record?
 - Does this action need approval before it touches our system of record?
-- What receipt proves what happened afterward?
+- What receipt shows what happened afterward?
 
 CRMy gives agents that operating layer.
 
 ## Who This Is For
 
-CRMy is for builders creating sales, CS, RevOps, support, or GTM (AI) agents that need to work with humans and revenue systems safely.
+CRMy is for builders creating sales, CS, RevOps, support, or other customer-facing agents that need to work with humans and revenue systems safely.
 
 Use it when your agent needs to know account state, inspect evidence, remember durable customer context, respect user scope, act with the right warnings, request approval when risk requires it, or prepare governed CRM/writeback actions.
 
@@ -127,7 +127,7 @@ The same account-first resolver powers Raw Context, customer email, calendar/act
 
 ### 2. Remember Operationally
 
-Store typed GTM Memory for accounts, contacts, opportunities, use cases, stakeholders, risks, objections, commitments, next steps, buying process, success criteria, and forecast signals.
+Store typed customer Memory for accounts, contacts, opportunities, use cases, stakeholders, risks, objections, commitments, next steps, buying process, success criteria, and forecast signals.
 
 Memory is persistent, scoped, searchable, versioned, auditable, and designed for agent action. Signals remain separate until evidence, source quality, typed detail, policy, and readiness allow them to become confirmed Memory.
 
@@ -145,7 +145,7 @@ Agents can prepare work freely. CRMy decides what can proceed, what needs a warn
 | **Signals** | Inferred claims with evidence, confidence, source lineage, and readiness. Signals can be confirmed, dismissed, or sent to review. |
 | **Memory** | Confirmed operational customer context agents can rely on across sessions and workflows. Memory carries freshness and decay signals, so CRMy does not treat customer truth as permanent. |
 | **Active Context** | The temporary working set an agent can see right now: prompt, conversation, bound record, retrieved briefing, tool results, and loaded files. |
-| **Action Context** | The action-aware packet that adds readiness, policy, source authority, warnings, review requirements, and proof before an agent prepares customer-facing or record-changing work. |
+| **Action Context** | The action-aware packet that adds readiness, policy, source authority, warnings, review requirements, and audit metadata before an agent prepares customer-facing or record-changing work. |
 | **Handoffs** | Human review for approvals, escalations, uncertain Signals, and governed decisions. |
 | **Writeback** | Policy-checked updates to systems of record through preview, approval, idempotency, audit, and execution receipts. |
 
@@ -154,9 +154,9 @@ Briefings answer “what should the agent know?” Action Context answers “is 
 ## What CRMy Is Not
 
 - Not a CRM replacement. Salesforce, HubSpot, warehouses, and support desks stay the systems of record.
-- Not generic chatbot memory. CRMy stores typed, evidence-backed GTM Memory with lifecycle, ownership, freshness, and audit.
+- Not generic chatbot memory. CRMy stores typed, evidence-backed customer Memory with lifecycle, ownership, freshness, and audit.
 - Not a workflow toy. Agents can prepare action, but CRMy keeps policy, Handoffs, writeback receipts, and human review in the path when risk requires it.
-- Not a sales methodology lock-in. Registries and Memory types are extensible, so teams can model their own GTM language.
+- Not a sales methodology lock-in. Registries and Memory types are extensible, so teams can model their own customer operating language.
 
 ## Architecture
 
@@ -167,7 +167,7 @@ flowchart LR
   signals["Signals\ninferred + evidence-backed"]
   memory["Memory\nconfirmed + typed"]
   active["Active Context\nbriefing_get + search"]
-  action_context["Action Context\nreadiness + policy + proof"]
+  action_context["Action Context\nreadiness + policy + audit"]
   agent["Agent action"]
   handoff["Handoffs\napproval + review"]
   writeback["System-of-record writeback"]
@@ -201,20 +201,20 @@ Use CRMy when you want agents that can:
 
 ## How The Engine Works
 
-CRMy's main value is the engine underneath the app. Each step preserves enough structure and proof for the next step to be safe:
+CRMy's main value is the engine underneath the app. Each step preserves enough structure, evidence, and audit metadata for the next step to be safe:
 
 ```text
-Raw Context -> Subject Graph -> Signals -> Memory -> Briefing / Action Context -> Handoff / Writeback -> Proof
+Raw Context -> Subject Graph -> Signals -> Memory -> Briefing / Action Guidance -> Handoff / Writeback -> Audit Trail
 ```
 
 1. **Raw Context** enters from transcripts, emails, notes, meetings, CRM/warehouse sync, REST, CLI, MCP, or the UI.
 2. **Subject Graph** resolves which account, contact, opportunity, or use case the source material belongs to.
 3. **Signals** capture inferred customer claims with evidence, source provenance, confidence, and readiness.
 4. **Memory** stores confirmed operational context agents can rely on across sessions.
-5. **Briefing / Action Context** retrieves the right Memory, Signals, stale warnings, policy, source authority, review requirements, and proof before work.
+5. **Briefing / Action Guidance** retrieves the right Memory, Signals, stale warnings, policy, source authority, review requirements, and evidence before work.
 6. **Handoff / Writeback** routes uncertain or sensitive work through human review, idempotency, audit, and execution receipts.
 
-That engine keeps customer context useful without pretending messy source material is instantly true. Handoffs, writeback policy, receipts, audit, and Lineage carry proof through execution.
+That engine keeps customer context useful without pretending messy source material is instantly true. Handoffs, writeback policy, receipts, audit, and Lineage carry evidence through execution.
 
 The most important community contributions are real-world tests of this loop: messy transcripts, customer emails, calendar meetings, CRM/warehouse sync, custom systems of record, writeback previews, approval flows, and agent harnesses. See [Context Engine](docs/context-engine.md) and [Contributing](CONTRIBUTING.md) for where testing helps most.
 
@@ -300,9 +300,9 @@ crmy doctor
 crmy server
 ```
 
-## Prove The Loop
+## Demo Workflow
 
-After quickstart, the seeded demo proves CRMy is doing more than serving CRM records. It shows customer context becoming agent-usable customer memory.
+After quickstart, the seeded demo shows CRMy doing more than serving CRM records. It shows customer context becoming agent-usable Memory.
 
 ```bash
 npx -y @crmy/cli agent-smoke
@@ -327,7 +327,7 @@ You should see:
 4. **Memory**: confirmed context is available to briefings and search across sessions.
 5. **Lineage**: source material can be traced into Signals, Memory, related records, and later review/writeback/audit receipts when those actions happen.
 
-With a Workspace Agent model configured, check live Raw Context extraction:
+With a Workspace Agent model configured, you can also check live Raw Context extraction:
 
 ```bash
 cat > /tmp/northstar-note.txt <<'EOF'
@@ -363,9 +363,9 @@ use_case:Production Rollout
 
 IDs are still used for system artifacts such as Handoffs, raw-source receipts, sync runs, and writeback requests.
 
-## 30-Second Proof
+## Try A Customer Briefing
 
-The fastest way to see the memory layer in action is to ask CRMy what an agent should know before touching a customer:
+The fastest way to see CRMy work is to ask what an agent should know before touching a customer:
 
 ```bash
 npx -y @crmy/cli briefing "account:Northstar Labs"
@@ -388,19 +388,20 @@ Equivalent MCP tool call:
 
 The briefing returns customer state, Current Memory, unconfirmed Signals, recent activity, open Handoffs, stale warnings, and the context an agent should use before acting.
 
-That is the core CRMy contract: a customer-facing agent does not have to scrape five tools, guess what is true, or rely on stale CRM fields. It asks CRMy for the customer briefing, then uses Action Context when it needs to prepare work that may touch a customer or system of record.
+That is the core CRMy contract: a customer-facing agent does not have to scrape five tools, guess what is true, or rely on stale CRM fields. It asks CRMy for the customer briefing, then checks action readiness when work may touch a customer or system of record.
 
 ## Connect Agents Through MCP
 
 CRMy is MCP-native. Add it to an agent harness and give the agent scoped tools for briefings, Raw Context ingestion, Signals, Memory, Handoffs, email drafting, record drafting, workflows, and systems-of-record writeback.
 
-Claude Code:
+Local agent clients can usually start CRMy over stdio:
 
 ```bash
 claude mcp add crmy -- npx -y @crmy/cli mcp
+codex mcp add crmy -- npx -y @crmy/cli mcp
 ```
 
-Claude Desktop, Cursor, Windsurf, or any MCP client:
+Claude Desktop, Cursor, Windsurf, and other MCP clients can use the same command:
 
 ```json
 {
@@ -413,50 +414,14 @@ Claude Desktop, Cursor, Windsurf, or any MCP client:
 }
 ```
 
-Codex:
+Remote clients, including ChatGPT Developer Mode, need a reachable CRMy server and the HTTP MCP endpoint:
 
-```bash
-codex mcp add crmy -- npx -y @crmy/cli mcp
+```text
+https://<your-crmy-host>/mcp
+Authorization: Bearer <CRMy API key>
 ```
 
-Or add CRMy to `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.crmy]
-command = "npx"
-args = ["-y", "@crmy/cli", "mcp"]
-```
-
-ChatGPT Developer Mode:
-
-Use CRMy's remote MCP endpoint (`https://<your-crmy-host>/mcp`) as a Developer Mode app. ChatGPT Developer Mode uses remote MCP over SSE or streaming HTTP, so use a reachable HTTPS CRMy server or a secure development tunnel rather than local stdio.
-
-Hermes Agent:
-
-Add CRMy to `~/.hermes/config.yaml` under `mcp_servers`. Hermes prefixes CRMy tools as `mcp_crmy_<tool>`, so `briefing_get` appears as `mcp_crmy_briefing_get`.
-
-```yaml
-mcp_servers:
-  crmy:
-    command: "npx"
-    args: ["-y", "@crmy/cli", "mcp"]
-    timeout: 120
-    connect_timeout: 60
-    tools:
-      include:
-        - customer_record_resolve
-        - briefing_get
-        - context_ingest_auto
-        - context_signal_group_list
-        - context_signal_group_get
-        - context_signal_group_promote
-        - context_signal_handoff
-        - email_draft_preview
-        - email_draft_save
-        - record_draft_preview
-```
-
-If Hermes runs outside the shell where `crmy init` wrote config, add `DATABASE_URL` and `CRMY_API_KEY` under `env:` or connect to CRMy over HTTP with `url: "http://localhost:3000/mcp"` and an `Authorization` header. Restart Hermes or run `/reload-mcp` after editing the config.
+For harness-specific setup, see the examples for [Claude Code](examples/claude-code-account-briefing/README.md), [Claude Desktop](examples/claude-desktop-account-briefing/README.md), [Codex](examples/codex-account-briefing/README.md), [ChatGPT Developer Mode](examples/chatgpt-developer-mode-account-briefing/README.md), [Hermes Agent](examples/hermes-agent-account-briefing/README.md), and [OpenClaw](examples/openclaw-plugin-account-briefing/README.md).
 
 Demo Prompt - Ask your agent to run this with CRMy MCP tools:
 
@@ -502,7 +467,7 @@ See [MCP tools](docs/mcp-tools.md) for the full tool catalog and scoped-access m
 | Surface | What it is for |
 |---|---|
 | **Overview** | Daily operating view: what is set up, what context is flowing, and what needs action. |
-| **Workspace Agent** | Scoped GTM workbench for briefings, tool use, drafting, record work, and customer reasoning. |
+| **Workspace Agent** | Scoped customer workbench for briefings, tool use, drafting, record work, and customer reasoning. |
 | **Context** | Raw Context, Signals, Memory, Lineage, and Context Sources. Graph remains available as a supporting record explorer. |
 | **Handoffs** | Decision queue for approvals, escalations, delegated work, and governed action review. |
 | **Customer Email** | Supporting Context Source for mailboxes, customer-message review, and governed follow-up drafts. |
@@ -647,7 +612,7 @@ Design choices:
 
 - **MCP-first**: agents use tools, not brittle app-specific glue.
 - **PostgreSQL-backed**: durable state, migrations, audit, and optional pgvector retrieval.
-- **Typed Memory**: GTM-specific context instead of generic chatbot memory.
+- **Typed Memory**: customer-facing operational context instead of generic chatbot memory.
 - **Scoped actors**: members, managers, admins, owners, and agents see only what they are allowed to see.
 - **Evidence and lineage**: important claims point back to source material.
 - **Governed writes**: mutating actions use idempotency, policy, approvals, and audit receipts.
