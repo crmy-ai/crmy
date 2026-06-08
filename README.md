@@ -1,6 +1,6 @@
-
-<img src="https://crmy.ai/crmy-logo.png" alt="CRMy" width="120" style="display: block; margin-left: auto; margin-right: auto;"/>
-
+<p align="center">
+  <img src="https://crmy.ai/crmy-logo.png" alt="CRMy" width="120" />
+</p>
 
 <h1 align="center">CRMy</h1>
 
