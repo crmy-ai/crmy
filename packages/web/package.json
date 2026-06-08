@@ -1,6 +1,6 @@
 {
   "name": "@crmy/web",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "private": false,
   "type": "module",
   "files": [
