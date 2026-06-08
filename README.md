@@ -37,11 +37,13 @@
 
 ---
 
-GTM agents do not fail because they don't have context, memory, or the right tools. They fail because the context around the customer is messy:
+GTM agents do not need another place to store context. They need to know what is true, current, evidenced, approved, and safe to act on.
+
+That breaks down when customer context is messy:
 
 - the CRM is stale or incomplete;
 - the call transcript has the real blocker but no durable structure;
-- the renewal risk is implied across emails, meetings, and notes;
+- renewal risk is implied across emails, meetings, and notes;
 - the agent cannot tell evidence from inference;
 - the next action needs approval before it touches a customer or system of record;
 - nobody can prove afterward why the agent acted.
