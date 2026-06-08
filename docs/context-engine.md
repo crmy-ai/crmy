@@ -94,7 +94,7 @@ The current 0.8.x engine includes:
 - proposed-record Handoffs when context implies a new contact, account, opportunity, or use case;
 - typed Memory retrieval through `briefing_get`;
 - Action Context retrieval through `action_context_get`;
-- Action Context receipts on email drafts, record create/edit previews, assignments, workflow-triggered actions, sequence email sends, and systems-of-record writeback requests;
+- Action Context receipts on email drafts, record create/edit previews, assignments, workflow-triggered actions, sequence email and non-email actions, durable agent turns, and systems-of-record writeback requests;
 - Context Lineage from source to Signal, Memory, Active Context retrieval, Handoff, writeback, and audit;
 - optional pgvector-backed candidate retrieval when embeddings are configured;
 - scoped REST, MCP, CLI, and Workspace Agent tool access.

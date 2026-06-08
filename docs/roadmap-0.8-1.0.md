@@ -29,11 +29,11 @@ Related 1.0 runtime plan:
 
 ## What Prevents CRMy From Being The Default Today
 
-### 1. System-of-record connectivity is not first-class yet
+### 1. System-of-record connectivity still needs live certification
 
-Status: **In progress.** HubSpot, Salesforce, Databricks, and Snowflake connector paths now exist with mappings, source authority, sync, conflicts, and governed writeback. Remaining 0.9 work is live-environment certification, adapter maturity, and broader workflow adoption.
+Status: **In progress.** HubSpot, Salesforce, Databricks, and Snowflake connector paths now exist with mappings, source authority, sync, conflicts, governed writeback, Action Context receipts, and operations visibility. Remaining 0.9 work is live-environment certification, adapter maturity, provider-specific runbooks, and broader workflow adoption.
 
-CRMy has plugins, webhooks, REST, MCP, imports, and a strong internal event model, but it does not yet have native connectors with:
+CRMy has plugins, webhooks, REST, MCP, imports, and a strong internal event model. The native connector foundation now includes:
 
 - external system registration
 - external record references
@@ -44,7 +44,7 @@ CRMy has plugins, webhooks, REST, MCP, imports, and a strong internal event mode
 - governed writeback requests
 - connector health and replay
 
-Without this layer, CRMy risks becoming another operational store instead of the governed bridge between agents and enterprise systems.
+Without live certification and clear provider runbooks, CRMy could still feel like an internal overlay instead of the governed bridge between agents and enterprise systems.
 
 ### 2. Warehouses are not modeled as operational sources
 
@@ -64,13 +64,13 @@ Without this, CRMy would create a parallel sync automation system that users hav
 
 ### 4. Sequences need external-event awareness
 
-Status: **Planned.** Sequences exist, but deeper external-event awareness and source-driven enrollment/branching remain roadmap work.
+Status: **In progress.** Sequences exist, email sends and non-email sequence actions can carry Action Context proof, and sequence execution has durable/idempotency coverage. Deeper source-driven enrollment, branching, and live external-event certification remain roadmap work.
 
 Sequences already handle enrollment, AI-generated steps, branch/wait logic, HITL gates, reply detection, and goal events. External system updates should be able to enroll contacts, complete goals, branch journeys, or pause for review without bypassing the sequence engine.
 
 ### 5. External writes require stronger governance
 
-Status: **In progress.** Governed writeback preview/request/review/execute paths exist, and first-class customer outreach/writeback paths now carry Action Context receipts. Remaining work is provider certification, live-environment proof polish, and adoption inside remaining long-running or non-email action flows.
+Status: **In progress.** Governed writeback preview/request/review/execute paths exist, first-class customer outreach/writeback paths carry Action Context receipts, and external side-effect paths have receipt-first/idempotency hardening. Remaining work is provider certification, live-environment proof polish, and broader workflow adoption.
 
 CRMy already has scopes, HITL, idempotency, optimistic concurrency, and audit. External writes need the same safety plus:
 
@@ -284,9 +284,9 @@ CRMy already has the right spine:
 
 The 0.9 work is to make that spine dependable enough for real users and external agents.
 
-### 0.8.5 Release Checkpoint
+### Current 0.8.x Hardening Checkpoint
 
-0.8.5 is the first major hardening checkpoint on the way to 0.9. It does not complete the whole 0.9 roadmap, but it closes the riskiest early gaps in Raw Context reliability, customer-record resolution, surface cleanup, and agent/MCP setup.
+The 0.8.x hardening line closes the riskiest early gaps on the way to 0.9: Raw Context reliability, customer-record resolution, Action Context, surface cleanup, durable agent work, MCP/CLI setup, and scoped safety. The current codebase is close to a 0.9-ready self-hosted/local release; the remaining work is mostly launch proof, live-provider certification, and hosted-production hardening.
 
 Completed in the 0.8.x hardening line:
 
@@ -300,19 +300,19 @@ Completed in the 0.8.x hardening line:
 - **Scoped safety checks:** hardening tests cover Raw Context no-subject receipt visibility, MCP resource subject access, explicit tool scope mappings, and Workspace Agent write-object policy defaults.
 - **Source and navigation cleanup:** primary navigation is focused on the core loop; Customer Email and Customer Activity are framed as Context Sources; Automations/Sequences are moved into admin settings surfaces while compatible routes remain available.
 - **Docs alignment:** README, guide, MCP tool reference, examples, recipes, Raw Context reliability plan, record-resolution plan, and contributor “what belongs where” guidance now describe the same Observe -> Signals -> Memory -> Briefing/Active Context -> Handoff/Writeback -> Proof model.
-- **Action Context v1:** `POST /api/v1/action-context` and MCP `action_context_get` assemble action-aware context, readiness, policy/source-authority checks, and compact retrieval proof without mutating CRM records or executing writebacks. Email drafts, record create/edit previews, record updates, assignment creation, workflow-triggered email/writeback actions, sequence email sends, and systems-of-record writeback previews/requests now carry verified Action Context receipts.
+- **Action Context v1:** `POST /api/v1/action-context` and MCP `action_context_get` assemble action-aware context, readiness, policy/source-authority checks, and compact retrieval proof without mutating CRM records or executing writebacks. Email drafts, record create/edit previews, record updates, assignment creation, workflow-triggered email/writeback actions, sequence email and non-email actions, durable agent turns, and systems-of-record writeback previews/requests now carry verified Action Context receipts where they can affect customer work.
 - **Signal Readiness v1:** Signal group responses include deterministic readiness and resolution metadata. The web workflow can repair missing typed Signal details inline through `context_signal_group_complete_details`.
 - **Actor-scoped aggregate safety:** search and stats surfaces now respect member/manager/admin visibility so external agents cannot use aggregate tools as a tenant-wide data leak.
-- **Durable Workspace Agent turns:** agent turns are persisted with ordered events, worker leases, heartbeats, expired-lease recovery, active-turn blocking, automatic operation keys for idempotent tools, persisted successful-tool-result replay, side-effecting tool coverage tests, and final action summaries so users can navigate away and workers can recover long-running turns without starting duplicate session work or duplicating supported writes.
+- **Durable Workspace Agent turns:** agent turns are persisted with ordered events, worker leases, heartbeats, expired-lease recovery, active-turn blocking, automatic operation keys for idempotent tools, receipt-first external side-effect attempts, persisted successful-tool-result replay, side-effecting tool coverage tests, and final changed-record/action summaries so users can navigate away and workers can recover long-running turns without starting duplicate session work or duplicating supported writes.
 
-Still planned for 0.9:
+Remaining before calling 0.9 launch-ready:
 
-- Broader Action Context adoption inside remaining long-running agent task flows and non-email sequence actions.
-- More calibrated readiness/source-quality scoring beyond the current conservative defaults and tests.
-- Tenant-visible source quality settings with conservative defaults.
-- Richer durable agent task orchestration: keep broadening idempotency coverage as new side-effecting tools are added, add receipt-first recovery for the small crash window before a tool result is persisted, and make final changed-record summaries richer for multi-step tasks.
-- Live-environment certification for first-party SOR connectors and provider-specific mailbox/calendar OAuth behavior.
-- Broader synthetic large-tenant scale testing; the current 0.8.5 gate verifies correctness and drift, not 1.0-scale latency budgets.
+- Run a clean first-run proof from an empty database: `init -> seed demo -> agent-smoke -> briefing/action-context proof -> lineage`.
+- Certify first-party SOR connectors and provider-specific mailbox/calendar OAuth behavior against live or sandbox HubSpot, Salesforce, Google, Microsoft, Databricks, and Snowflake environments.
+- Update release/runbook docs with the supported 0.9 deployment envelope: local and single-instance self-hosted are acceptable; hosted beta requires sticky MCP routing and one worker leader; multi-instance hosted production remains a 1.0 target.
+- Keep expanding real-world extraction/resolution fixtures as users contribute messy transcripts, customer emails, calendar artifacts, and source-system edge cases.
+- Run broader synthetic large-tenant soak tests. Current gates verify correctness, drift, security boundaries, and durability; 1.0 still owns high-volume latency budgets on serverless Postgres.
+- Harden browser session handling before hosted enterprise GA. The current bearer-token flow is fine for local/self-hosted 0.9, but hosted browser sessions should move toward short-lived/session-managed auth with revocation and CSRF-safe mutation behavior.
 
 ### 0.8.6 Release Checkpoint
 
@@ -341,7 +341,7 @@ Completed in this checkpoint:
 
 ### 1. Extraction Reliability And Typed Memory Readiness
 
-Status: **In progress.** Raw Context receipts, golden fixtures, typed readiness, and conservative auto-promotion checks are landed; broader source coverage and calibration continue.
+Status: **Landed for v0.9 self-hosted readiness; expanding through live corpus.** Raw Context receipts, durable replay, golden fixtures, custom registry fixtures, event-time-aware duplicate protection, typed readiness, permission-safe retry, and conservative auto-promotion checks are landed. Broader live-source corpus coverage and calibration continue as real users contribute messy inputs.
 
 Raw Context ingestion is the heart of CRMy. In 0.9 it should be treated like critical infrastructure.
 
@@ -355,7 +355,7 @@ Key changes:
 - High-recall Signal creation, but conservative Memory promotion when evidence, typed detail, confidence, source quality, or policy is insufficient.
 - Richer receipts that explain matched account scope, examined child records, created Signals, proposed records, skipped internal/spam sources, review needs, and write failures.
 
-Acceptance target: messy customer inputs should usually produce useful Signals or an actionable reason why they did not.
+Acceptance target: messy customer inputs should usually produce useful Signals or an actionable reason why they did not. This target is met in the durability suite; the next step is live-provider and real-world corpus certification.
 
 ### 2. Source Coverage Maturity
 
@@ -391,7 +391,7 @@ Key changes:
 
 ### 3. Unified Agent Action Context Packet
 
-Status: **Landed for v1, expanding.** `POST /api/v1/action-context` and MCP `action_context_get` exist. Email drafts, record create/edit previews, assignments, workflow-triggered outreach/writeback, sequence email sends, and systems-of-record writeback requests carry Action Context receipts. Remaining work is live proof polish and adoption inside long-running agent tasks and non-email sequence actions.
+Status: **Landed for v1; expanding through live proof.** `POST /api/v1/action-context` and MCP `action_context_get` exist. Email drafts, record create/edit previews, assignments, durable agent turns, workflow-triggered outreach/writeback, sequence email and non-email actions, and systems-of-record writeback requests carry Action Context receipts. Remaining work is live proof polish, UX consistency, and continued adoption as new side-effecting workflows are added.
 
 Agents need one packet that helps them act intelligently on customer work. This is not meant to gate every step. It should make low-risk work faster by giving the agent the right Memory, Signals, source ownership, policy, and proof context up front, while reserving review for actions that can affect customers, records, systems of record, or trust boundaries.
 
@@ -426,7 +426,7 @@ This should not replace `briefing_get`. Use `briefing_get` for customer understa
 
 ### 4. Signal Readiness Calibration And Grouping Proof
 
-Status: **Landed for v1, expanding.** Signal groups expose readiness and resolution metadata, with inline missing-detail repair in the web workflow. Remaining work is deeper calibration, tenant-visible source quality settings, and corpus coverage.
+Status: **Landed for v1; expanding through calibration.** Signal groups expose readiness and resolution metadata, inline missing-detail repair, source-quality handling, and duplicate-event protections. Remaining work is deeper calibration against larger real-world corpora and continued tuning of tenant-visible source-quality defaults.
 
 Signals should be understandable and reliable enough for users to confirm, route to review, or ignore.
 
@@ -444,7 +444,7 @@ Acceptance target: a user can see why a Signal is not Memory yet and what action
 
 ### 5. Proof-Grade Lineage And Audit
 
-Status: **In progress.** Lineage includes Raw Context, Signals, Memory, Active Context retrievals, Handoffs, writebacks, and audit events. Remaining work is scale, retention, export, and precomputed edge performance.
+Status: **Landed for first-class workflows; 1.0 owns scale polish.** Lineage includes Raw Context, Signals, Memory, Active Context retrievals, Handoffs, writebacks, workflow/sequence actions, and audit events. Remaining work is scale, retention, export, and precomputed edge performance.
 
 Lineage should become the proof trail for the source-to-action lifecycle.
 
@@ -460,7 +460,7 @@ Acceptance target: admins and builders can answer what happened, why it happened
 
 ### 6. Durable Agent Work And Human Collaboration
 
-Status: **In progress.** Workspace Agent, Handoffs, assignments, HITL, and tool transparency exist. Durable turn continuity now has a database-backed foundation with persisted events, worker leases, heartbeats, expired-lease recovery, active-turn blocking, stable operation keys for tools that expose `idempotency_key`, replay of already-persisted successful tool results, coverage tests for side-effecting MCP tools, and final action-summary hints. Remaining work is richer task orchestration and receipt-first recovery for the narrow crash window before a tool result event is persisted.
+Status: **Landed for v0.9 single-instance/self-hosted readiness; 1.0 owns hosted multi-instance orchestration.** Workspace Agent, Handoffs, assignments, HITL, and tool transparency exist. Durable turn continuity now has persisted events, worker leases, heartbeats, expired-lease recovery, active-turn blocking, stable operation keys for tools that expose `idempotency_key`, receipt-first external side-effect attempts, replay of already-persisted successful tool results, coverage tests for side-effecting MCP tools, and final changed-record/action summaries. Remaining work is richer multi-step task orchestration and the hosted multi-instance runtime described in the 1.0 plan.
 
 The Workspace Agent should be a durable workbench, not just a chat surface.
 
@@ -477,7 +477,7 @@ Acceptance target: a user can delegate work, leave, return, inspect what happene
 
 ### 7. Scoped Access Parity Across Every Surface
 
-Status: **In progress.** Core REST/MCP/worker parity tests exist; continue adding coverage as new tools and UI flows land.
+Status: **Landed for core 0.9 surfaces; continuously expanding.** Core REST/MCP/worker parity tests exist across Raw Context, MCP resources, action tools, aggregate safety, workers, and agent paths. Continue adding coverage as new tools and UI flows land.
 
 Scoped actors are a product differentiator and a security boundary.
 
@@ -510,7 +510,7 @@ Acceptance target: users know whether the Workspace Agent is ready, what is degr
 
 ### 9. Demo And Developer Experience
 
-Status: **In progress.** Demo data, examples, MCP setup, recipes, and smoke paths exist. Remaining work is keeping demos aligned with the current Action Context and Signal Readiness model.
+Status: **Landed for v0.9 demo proof; keep aligned.** Demo data, examples, MCP setup, recipes, and smoke paths exist. Remaining work is manually verifying the clean first-run loop before each release and keeping demos aligned with the current Action Context and Signal Readiness model.
 
 The demo should prove the product in minutes.
 
