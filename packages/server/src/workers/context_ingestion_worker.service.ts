@@ -32,7 +32,7 @@ export async function processNextBatch(db: DbPool): Promise<void> {
 
   for (const job of jobs) {
     try {
-      await processJob(db, job.entity_type, job.entity_id, job.payload);
+      await processJob(db, job.tenant_id, job.entity_type, job.entity_id, job.payload);
       await outboxRepo.markComplete(db, job.id);
       succeeded++;
     } catch (err) {
@@ -52,16 +52,55 @@ export async function processNextBatch(db: DbPool): Promise<void> {
  */
 async function processJob(
   db: DbPool,
+  tenantId: string,
   entityType: string,
-  _entityId: string,
+  entityId: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
   // Only entity types the indexer understands are forwarded.
   // Others (e.g. future entity types) are silently acknowledged.
   const known = new Set<string>([
-    'contact', 'account', 'opportunity', 'use_case', 'activity', 'context_entry',
+    'contact', 'account', 'opportunity', 'use_case', 'activity', 'context_entry', 'assignment',
   ]);
   if (known.has(entityType)) {
-    await indexDocument(db, entityType as IndexableEntityType, payload);
+    const entity = await hydrateEntityPayload(db, entityType as IndexableEntityType, tenantId, entityId, payload);
+    await indexDocument(db, entityType as IndexableEntityType, entity);
+  }
+}
+
+async function hydrateEntityPayload(
+  db: DbPool,
+  entityType: IndexableEntityType,
+  tenantId: string,
+  entityId: string,
+  payload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (payload.tenant_id && payload.id) return payload;
+
+  const table = tableForEntityType(entityType);
+  const result = await db.query(
+    `SELECT *
+     FROM ${table}
+     WHERE tenant_id = $1
+       AND id = $2
+     LIMIT 1`,
+    [tenantId, entityId],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new Error(`Cannot index ${entityType}:${entityId}: source record not found`);
+  }
+  return row as Record<string, unknown>;
+}
+
+function tableForEntityType(entityType: IndexableEntityType): string {
+  switch (entityType) {
+    case 'contact': return 'contacts';
+    case 'account': return 'accounts';
+    case 'opportunity': return 'opportunities';
+    case 'use_case': return 'use_cases';
+    case 'activity': return 'activities';
+    case 'context_entry': return 'context_entries';
+    case 'assignment': return 'assignments';
   }
 }

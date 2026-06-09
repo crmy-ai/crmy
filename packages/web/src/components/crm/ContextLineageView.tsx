@@ -7,6 +7,7 @@ import {
   Activity,
   AlertCircle,
   ArrowRight,
+  ChevronDown,
   CheckCircle2,
   ClipboardList,
   Database,
@@ -29,14 +30,15 @@ import { useSlashSearchFocus } from '@/hooks/useSlashSearchFocus';
 
 type SubjectType = 'contact' | 'account' | 'opportunity' | 'use_case';
 type LineagePhase = 'sources' | 'signals' | 'memory' | 'active_context' | 'actions' | 'audit';
+type PhaseGroup = 'lifecycle' | 'usage';
 
-const PHASES: Array<{ key: LineagePhase; label: string }> = [
-  { key: 'sources', label: 'Sources' },
-  { key: 'signals', label: 'Signals' },
-  { key: 'memory', label: 'Memory' },
-  { key: 'active_context', label: 'Active Context' },
-  { key: 'actions', label: 'Handoffs & Actions' },
-  { key: 'audit', label: 'Audit' },
+const PHASES: Array<{ key: LineagePhase; label: string; group: PhaseGroup }> = [
+  { key: 'sources', label: 'Sources', group: 'lifecycle' },
+  { key: 'signals', label: 'Signals', group: 'lifecycle' },
+  { key: 'memory', label: 'Memory', group: 'lifecycle' },
+  { key: 'active_context', label: 'Active Context', group: 'usage' },
+  { key: 'actions', label: 'Handoffs & Actions', group: 'usage' },
+  { key: 'audit', label: 'Audit', group: 'usage' },
 ];
 
 const NODE_CONFIG: Record<ContextLineageNode['type'], { label: string; icon: typeof FileText; className: string; dotClassName: string }> = {
@@ -119,24 +121,39 @@ function isVisibleNode(node: ContextLineageNode, phases: Set<LineagePhase>) {
   return phase === 'record' || phases.has(phase);
 }
 
+function isUsageNode(node: ContextLineageNode) {
+  const phase = phaseFor(node);
+  return phase === 'active_context' || phase === 'actions' || phase === 'audit';
+}
+
+function isLifecycleNode(node: ContextLineageNode) {
+  return !isUsageNode(node);
+}
+
 function journeySummary(summary: Record<string, number>) {
   const sources = (summary.raw_context ?? 0) + (summary.activity ?? 0);
   const signals = (summary.signals ?? 0) + (summary.signal_groups ?? 0);
   const memory = summary.memory ?? 0;
-  const retrievals = summary.retrievals ?? 0;
-  const handoffs = summary.handoffs ?? 0;
-  const writebacks = summary.writebacks ?? 0;
-  const actionReceipts = summary.action_receipts ?? 0;
   const parts = [
     `${sources} source${sources === 1 ? '' : 's'}`,
     `${signals} Signal${signals === 1 ? '' : 's'}`,
     `${memory} Memory ${memory === 1 ? 'entry' : 'entries'}`,
+  ];
+  return `${parts[0]} produced ${parts.slice(1).join(' and ')}.`;
+}
+
+function usageSummary(summary: Record<string, number>) {
+  const retrievals = summary.retrievals ?? 0;
+  const handoffs = summary.handoffs ?? 0;
+  const writebacks = summary.writebacks ?? 0;
+  const auditEvents = summary.audit_events ?? 0;
+  const parts = [
     `${retrievals} Active Context retrieval${retrievals === 1 ? '' : 's'}`,
     `${handoffs} Handoff${handoffs === 1 ? '' : 's'}`,
     `${writebacks} writeback${writebacks === 1 ? '' : 's'}`,
-    `${actionReceipts} action receipt${actionReceipts === 1 ? '' : 's'}`,
+    `${auditEvents} audit receipt${auditEvents === 1 ? '' : 's'}`,
   ];
-  return `${parts[0]} produced ${parts.slice(1).join(', ')}.`;
+  return parts.join(', ');
 }
 
 function shortValue(value: unknown) {
@@ -352,6 +369,7 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
   const [subject, setSubject] = useState<{ type: SubjectType; id: string; name: string } | null>(null);
   const [phases, setPhases] = useState<Set<LineagePhase>>(() => new Set(PHASES.map(phase => phase.key)));
   const [viewMode, setViewMode] = useState<'path' | 'events'>('path');
+  const [showUsageReceipts, setShowUsageReceipts] = useState(false);
   const [selectedNode, setSelectedNode] = useState<ContextLineageNode | null>(null);
   const { data: contacts } = useContacts({ q: query || undefined, limit: 4 }) as any;
   const { data: accounts } = useAccounts({ q: query || undefined, limit: 4 }) as any;
@@ -405,6 +423,14 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
     () => (visibleData?.edges ?? []).filter(edge => visibleIds.has(edge.source) && visibleIds.has(edge.target)),
     [visibleData?.edges, visibleIds],
   );
+  const lifecycleNodes = useMemo(() => visibleNodes.filter(isLifecycleNode), [visibleNodes]);
+  const usageNodes = useMemo(() => visibleNodes.filter(isUsageNode), [visibleNodes]);
+  const eventNodes = showUsageReceipts ? visibleNodes : lifecycleNodes;
+  const eventIds = useMemo(() => new Set(eventNodes.map(node => node.id)), [eventNodes]);
+  const eventEdges = useMemo(
+    () => visibleEdges.filter(edge => eventIds.has(edge.source) && eventIds.has(edge.target)),
+    [eventIds, visibleEdges],
+  );
 
   const activePhaseCount = phases.size;
   const selectedRecordLabel = subject?.name
@@ -422,6 +448,8 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
   };
   const lifecycleEdges = visibleEdges.filter(edge => edge.relation !== 'about_record');
   const hasGaps = visibleData && nonRecordNodes.length > 1 && lifecycleEdges.length === 0;
+  const hiddenUsageCount = showUsageReceipts ? 0 : usageNodes.length;
+  const hasUsageReceipts = usageNodes.length > 0;
   useSlashSearchFocus(searchRef);
 
   function togglePhase(phase: LineagePhase) {
@@ -529,12 +557,19 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
                 )}
               </div>
               <div className="max-h-80 space-y-0.5 overflow-y-auto p-2">
-                {PHASES.map(phase => (
-                  <label key={phase.key} className="flex min-h-[40px] cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-foreground hover:bg-muted/50">
-                    <Checkbox checked={phases.has(phase.key)} onCheckedChange={() => togglePhase(phase.key)} className="h-4 w-4" />
-                    <span className="flex-1">{phase.label}</span>
-                    <span className="text-xs text-muted-foreground">{visibleData ? phaseSummary(visibleData.summary, phase.key) : 0}</span>
-                  </label>
+                {(['lifecycle', 'usage'] as const).map(group => (
+                  <div key={group} className="space-y-0.5">
+                    <p className="px-2 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {group === 'lifecycle' ? 'Lifecycle' : 'Usage & audit'}
+                    </p>
+                    {PHASES.filter(phase => phase.group === group).map(phase => (
+                      <label key={phase.key} className="flex min-h-[40px] cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-sm text-foreground hover:bg-muted/50">
+                        <Checkbox checked={phases.has(phase.key)} onCheckedChange={() => togglePhase(phase.key)} className="h-4 w-4" />
+                        <span className="flex-1">{phase.label}</span>
+                        <span className="text-xs text-muted-foreground">{visibleData ? phaseSummary(visibleData.summary, phase.key) : 0}</span>
+                      </label>
+                    ))}
+                  </div>
                 ))}
               </div>
             </PopoverContent>
@@ -568,7 +603,7 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
         {headerContent}
         <div className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            Trace how source material becomes Signals, confirmed Memory, Active Context, handoffs, writebacks, and audit history.
+            Trace how source material became Signals and Memory. Usage and audit receipts are available when you need proof of downstream action.
           </p>
 
           {visibleData && nonRecordNodes.length > 0 && (
@@ -592,7 +627,7 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
               <FileText className="mx-auto h-8 w-8 text-muted-foreground/50" />
               <p className="mt-3 font-semibold text-foreground">Search for a record to view lineage</p>
               <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-                Search for a customer record to trace how context became Memory and action.
+                Search for a customer record to trace how context became Signals and Memory.
               </p>
             </div>
           ) : lineage.isLoading ? (
@@ -616,8 +651,8 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
               </p>
               <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
                 {hasLineageTarget
-                  ? 'This record does not have linked Raw Context, Signals, Memory, handoffs, or writebacks yet.'
-                  : 'Search for a customer record to trace how context became Memory and action.'}
+                  ? 'This record does not have linked Raw Context, Signals, or Memory yet.'
+                  : 'Search for a customer record to trace how context became Signals and Memory.'}
               </p>
               {hasLineageTarget && (
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
@@ -629,8 +664,22 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
             </div>
           ) : viewMode === 'events' ? (
             <div className="space-y-3">
-              {visibleNodes.map(node => (
-                <TimelineItem key={node.id} node={node} edges={visibleEdges} nodesById={nodesById} onSelect={setSelectedNode} />
+              {hiddenUsageCount > 0 && (
+                <div className="flex flex-col gap-2 rounded-2xl border border-border bg-card p-4 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+                  <span>
+                    {hiddenUsageCount} usage and audit event{hiddenUsageCount === 1 ? '' : 's'} hidden. These receipts are available when you need downstream proof.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowUsageReceipts(true)}
+                    className="inline-flex h-8 items-center justify-center rounded-lg border border-border px-3 text-xs font-semibold text-foreground hover:bg-muted"
+                  >
+                    Show usage and receipts
+                  </button>
+                </div>
+              )}
+              {eventNodes.map(node => (
+                <TimelineItem key={node.id} node={node} edges={eventEdges} nodesById={nodesById} onSelect={setSelectedNode} />
               ))}
             </div>
           ) : (
@@ -669,30 +718,54 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
                 nodesById={nodesById}
                 onSelect={setSelectedNode}
               />
-              <PhaseSection
-                title="Active Context"
-                description="Briefing, policy, source authority, and readiness checks retrieved before action."
-                nodes={nodesByPhase.active_context}
-                edges={visibleEdges}
-                nodesById={nodesById}
-                onSelect={setSelectedNode}
-              />
-              <PhaseSection
-                title="Handoffs & Actions"
-                description="Human reviews, governed writebacks, and action receipts connected to this context."
-                nodes={nodesByPhase.actions}
-                edges={visibleEdges}
-                nodesById={nodesById}
-                onSelect={setSelectedNode}
-              />
-              <PhaseSection
-                title="Audit Receipts"
-                description="Immutable events preserved for traceability."
-                nodes={nodesByPhase.audit}
-                edges={visibleEdges}
-                nodesById={nodesById}
-                onSelect={setSelectedNode}
-              />
+              {hasUsageReceipts && visibleData && (
+                <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Usage & receipts</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {usageSummary(visibleData.summary)} connected to this lineage.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowUsageReceipts(prev => !prev)}
+                      className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-border px-3 text-xs font-semibold text-foreground hover:bg-muted"
+                    >
+                      {showUsageReceipts ? 'Hide usage and receipts' : 'View usage and receipts'}
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showUsageReceipts ? 'rotate-180' : ''}`} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {showUsageReceipts && (
+                <div className="space-y-5">
+                  <PhaseSection
+                    title="Active Context"
+                    description="Briefing, policy, source authority, and readiness checks retrieved before action."
+                    nodes={nodesByPhase.active_context}
+                    edges={visibleEdges}
+                    nodesById={nodesById}
+                    onSelect={setSelectedNode}
+                  />
+                  <PhaseSection
+                    title="Handoffs & Actions"
+                    description="Human reviews, governed writebacks, and action receipts connected to this context."
+                    nodes={nodesByPhase.actions}
+                    edges={visibleEdges}
+                    nodesById={nodesById}
+                    onSelect={setSelectedNode}
+                  />
+                  <PhaseSection
+                    title="Audit Receipts"
+                    description="Immutable events preserved for traceability."
+                    nodes={nodesByPhase.audit}
+                    edges={visibleEdges}
+                    nodesById={nodesById}
+                    onSelect={setSelectedNode}
+                  />
+                </div>
+              )}
               {hasGaps && (
                 <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-300">
                   Some actions do not have linked source evidence yet. They are still shown here so operators can inspect the available path.

@@ -9,7 +9,7 @@ import { useSearch } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { ENTITY_COLORS } from '@/lib/entityColors';
 import { headerDescription } from '@/lib/headerCopy';
-import { cn } from '@/lib/utils';
+import { cn, formatCompactCurrency } from '@/lib/utils';
 
 type Bucket = {
   key: string;
@@ -62,7 +62,7 @@ export function SearchResultsPage() {
       items: data?.opportunities ?? [],
       open: item => { navigate('/opportunities'); openDrawer('opportunity', item.id); },
       title: item => item.name ?? 'Unnamed opportunity',
-      detail: item => [item.stage, item.amount ? `$${(Number(item.amount) / 1000).toFixed(0)}K` : null].filter(Boolean).join(' · '),
+      detail: item => [item.stage, item.amount ? formatCompactCurrency(Number(item.amount)) : null].filter(Boolean).join(' · '),
     },
     {
       key: 'useCases',

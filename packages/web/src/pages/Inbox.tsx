@@ -8,6 +8,16 @@ import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { headerDescription } from '@/lib/headerCopy';
+import { cn } from '@/lib/utils';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import {
   useHITLRequests,
   useResolveHITL,
@@ -52,6 +62,8 @@ import {
   X,
   Eye,
   UserCheck,
+  Check,
+  ChevronsUpDown,
 } from 'lucide-react';
 import { formatDistanceToNow, isPast, parseISO } from 'date-fns';
 
@@ -644,6 +656,88 @@ function slaMinutesFromForm(presetValue: string, customValue: string): number | 
   return Number.isFinite(preset) && preset > 0 ? preset : null;
 }
 
+function actorLabel(actor: any): string {
+  return actor?.display_name ?? actor?.name ?? actor?.email ?? actor?.agent_identifier ?? actor?.id ?? 'Reviewer';
+}
+
+function ReviewerCombobox({
+  value,
+  onChange,
+  fallbackActors,
+  actorMap,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  fallbackActors: any[];
+  actorMap: Map<string, string>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const actorsQ = useActors({ q: query || undefined, is_active: true, limit: 25 }) as any;
+  const remoteActors = ((actorsQ.data?.actors ?? actorsQ.data?.data ?? []) as any[]).filter(actor => actor.is_active !== false);
+  const actors = remoteActors.length > 0 || query ? remoteActors : fallbackActors.slice(0, 25);
+  const selectedLabel = value ? actorMap.get(value) ?? actorLabel(actors.find(actor => actor.id === value)) : 'Unassigned';
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setQuery('');
+  };
+
+  return (
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="mt-1 flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none transition-colors hover:border-ring focus:ring-2 focus:ring-primary/30"
+        >
+          <span className={cn('truncate text-left', !value && 'text-muted-foreground')}>{selectedLabel}</span>
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-70" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] min-w-[240px] p-0" align="start" sideOffset={4}>
+        <Command shouldFilter={false}>
+          <CommandInput placeholder="Search reviewers..." value={query} onValueChange={setQuery} />
+          <CommandList>
+            <CommandEmpty className="py-4 text-center text-sm text-muted-foreground">
+              {actorsQ.isLoading ? 'Searching reviewers...' : 'No reviewers found.'}
+            </CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                value="unassigned"
+                onSelect={() => {
+                  onChange('');
+                  setOpen(false);
+                  setQuery('');
+                }}
+                className="flex items-center gap-2"
+              >
+                <Check className={cn('h-3.5 w-3.5 shrink-0', !value ? 'opacity-100' : 'opacity-0')} />
+                <span>Unassigned</span>
+              </CommandItem>
+              {actors.map(actor => (
+                <CommandItem
+                  key={actor.id}
+                  value={actor.id}
+                  onSelect={() => {
+                    onChange(actor.id);
+                    setOpen(false);
+                    setQuery('');
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <Check className={cn('h-3.5 w-3.5 shrink-0', value === actor.id ? 'opacity-100' : 'opacity-0')} />
+                  <span className="min-w-0 flex-1 truncate">{actorLabel(actor)}</span>
+                  {actor.actor_type && <span className="shrink-0 text-xs capitalize text-muted-foreground">{actor.actor_type}</span>}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function HITLDetailDrawer({
   req,
   actors,
@@ -744,12 +838,12 @@ function HITLDetailDrawer({
               </label>
               <label className="block text-xs font-medium text-muted-foreground">
                 Reassign reviewer
-                <select value={reviewerId} onChange={event => setReviewerId(event.target.value)} className="mt-1 h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30">
-                  <option value="">Unassigned</option>
-                  {actors.map(actor => (
-                    <option key={actor.id} value={actor.id}>{actor.display_name ?? actor.name ?? actor.email ?? actor.id}</option>
-                  ))}
-                </select>
+                <ReviewerCombobox
+                  value={reviewerId}
+                  onChange={setReviewerId}
+                  fallbackActors={actors}
+                  actorMap={actorMap}
+                />
               </label>
               <label className="block text-xs font-medium text-muted-foreground">
                 Due / SLA

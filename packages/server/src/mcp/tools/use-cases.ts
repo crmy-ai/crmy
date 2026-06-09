@@ -19,6 +19,7 @@ import { validateCustomFields } from '../../db/repos/custom-fields-validate.js';
 import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+import { writeToolUx } from '../tool-ux.js';
 import { assertOwnedObjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
 import { verifiedActionContextMetadataForReceipt } from '../../services/action-context.js';
 
@@ -46,6 +47,11 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       tier: 'extended',
       description: 'Create a new use case for an account to track a consumption-based workload or deployment. Use cases complement opportunities by tracking ongoing product usage after a deal closes. Set product_line, target consumption metrics, and stage (discovery, poc, production, scaling, sunset).',
       inputSchema: useCaseCreate,
+      ux: writeToolUx({
+        displayName: 'Create use case',
+        actionPhrase: 'create the use case',
+        objectLabel: 'use case',
+      }),
       handler: async (input: z.infer<typeof useCaseCreate>, actor: ActorContext) => {
         return runUseCaseOperation(db, actor, 'use_case_create', input, async () => {
         if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
@@ -115,6 +121,11 @@ export function useCaseTools(db: DbPool): ToolDef[] {
       tier: 'extended',
       description: 'Update a use case by passing its id and a patch object with fields to change. Supports all use case fields including product_line, consumption metrics, tags, and custom_fields.',
       inputSchema: useCaseUpdate,
+      ux: writeToolUx({
+        displayName: 'Update use case',
+        actionPhrase: 'update the use case',
+        objectLabel: 'use case',
+      }),
       handler: async (input: z.infer<typeof useCaseUpdate>, actor: ActorContext) => {
         return runUseCaseOperation(db, actor, 'use_case_update', input, async () => {
         const before = await ucRepo.getUseCase(db, actor.tenant_id, input.id);

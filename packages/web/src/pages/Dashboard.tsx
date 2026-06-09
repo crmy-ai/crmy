@@ -1384,12 +1384,10 @@ function AdminDashboard() {
   return (
     <div className="flex flex-col h-full">
       <TopBar
-        title={activeTab === 'health' ? 'Memory Health' : 'Overview'}
-        icon={activeTab === 'health' ? ShieldCheck : Brain}
+        title="Overview"
+        icon={Brain}
         iconClassName="text-primary"
-        description={activeTab === 'health'
-          ? 'Review Memory that needs attention before agents rely on it.'
-          : 'Watch Raw Context become confirmed Memory that agents retrieve into Active Context.'}
+        description="Watch Raw Context become confirmed Memory that agents retrieve into Active Context."
       />
 
       <div className="flex items-center justify-between gap-3 overflow-x-auto border-b border-border px-4 pt-4 md:px-6">
@@ -1439,9 +1437,9 @@ function AdminDashboard() {
           <div className="mb-4 rounded-2xl border border-border bg-surface p-4 shadow-sm md:mb-6 md:p-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="max-w-2xl">
-                <h2 className="font-display text-lg font-bold text-foreground">Workspace Status</h2>
+                <h2 className="font-display font-bold text-foreground">Workspace Status</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  CRMy setup, context flow, and action readiness in one view.
+                  Setup, context activity, and pending review status.
                 </p>
               </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:min-w-[36rem]">
@@ -1532,11 +1530,11 @@ function AdminDashboard() {
           <div className="mb-4 rounded-2xl border border-border bg-card p-4 shadow-sm md:mb-6 md:p-5">
             <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div className="max-w-3xl">
-                <h2 className="mt-1 font-display text-lg font-bold text-foreground">
+                <h2 className="font-display font-bold text-foreground">
                   Context Flow
                 </h2>
-                <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                  This panel shows recent source material, reviewable Signals, confirmed Memory, and the action context agents use before customer-facing work.
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Recent source material, reviewable Signals, confirmed Memory, and action context before customer-facing work.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -1551,10 +1549,6 @@ function AdminDashboard() {
                 <Link to="/automations" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                   <Zap className="h-3.5 w-3.5" />
                   Automations
-                </Link>
-                <Link to="/settings/systems" className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                  <Server className="h-3.5 w-3.5" />
-                  Systems of Record
                 </Link>
               </div>
             </div>
@@ -1603,7 +1597,7 @@ function AdminDashboard() {
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <h2 className="font-display font-bold text-foreground">System Snapshot</h2>
-                <p className="mt-1 text-sm text-muted-foreground">The essentials behind safe agent operation.</p>
+                <p className="mt-1 text-sm text-muted-foreground">Memory coverage, pending writebacks, agent status, and retrieval readiness.</p>
               </div>
               <button
                 type="button"

@@ -16,6 +16,7 @@ import { extractContextFromActivity, triggerExtraction } from '../../agent/extra
 import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+import { writeToolUx } from '../tool-ux.js';
 import { runToolOperation } from '../tool-operation.js';
 import { assertActivityAccess, assertSubjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
 import { verifiedActionContextMetadataForReceipt } from '../../services/action-context.js';
@@ -27,6 +28,11 @@ export function activityTools(db: DbPool): ToolDef[] {
       tier: 'core',
       description: 'Log a meaningful observation: outreach sent, call made, meeting held, stage changed, proposal drafted, research completed. Set occurred_at to when the event actually happened, not when you are logging it — this is critical for accurate timelines when logging retroactively. The detail field is a free JSONB payload for type-specific data: for outreach_email include {to, subject, channel}, for meeting_held include {duration_minutes, attendees}, for stage_change include {from_stage, to_stage}. If an LLM backend is configured, CRMy auto-extracts reviewable Signals from the activity description. Prefer setting subject_type and subject_id. If you pass contact_id, account_id, opportunity_id, or use_case_id without subject_type/subject_id, CRMy derives the canonical subject automatically.',
       inputSchema: activityCreate,
+      ux: writeToolUx({
+        displayName: 'Log activity',
+        actionPhrase: 'log the activity',
+        objectLabel: 'activity',
+      }),
       handler: async (input: z.infer<typeof activityCreate>, actor: ActorContext) => {
         return runIdempotent(db, {
           tenantId: actor.tenant_id,
@@ -174,6 +180,11 @@ export function activityTools(db: DbPool): ToolDef[] {
       tier: 'extended',
       description: 'Update an existing activity record. Pass the id and a patch object with fields to change (body, subject, outcome, detail, occurred_at, custom_fields, etc.). If extractable content changes, context extraction automatically re-runs to capture any new information.',
       inputSchema: activityUpdate,
+      ux: writeToolUx({
+        displayName: 'Update activity',
+        actionPhrase: 'update the activity',
+        objectLabel: 'activity',
+      }),
       handler: async (input: z.infer<typeof activityUpdate>, actor: ActorContext) => {
         return runIdempotent(db, {
           tenantId: actor.tenant_id,

@@ -10,11 +10,13 @@ import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
 import { ObjectActionBar } from './ObjectActionBar';
 import { DrawerSection } from './DrawerSection';
+import { DrawerTabBar, type DrawerView } from './DrawerTabBar';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EntityCombobox } from '@/components/ui/entity-combobox';
 import { assertReferenceExists } from '@/lib/referenceValidation';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
+import { formatCompactCurrency } from '@/lib/utils';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -253,10 +255,11 @@ function OpportunityEditForm({
 }
 
 export function OpportunityDrawer() {
-  const { drawerEntityId, closeDrawer, openDrawer, drawerEditing, setDrawerEditing, openQuickAdd } = useAppStore();
+  const { drawerEntityId, closeDrawer, openDrawer, drawerBriefing, drawerEditing, setDrawerEditing, openQuickAdd } = useAppStore();
   const editing = drawerEditing;
   const setEditing = setDrawerEditing;
-  const [briefing, setBriefing] = useState(false);
+  const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
+  const graphHref = drawerEntityId ? `/opportunities/${drawerEntityId}/graph` : undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: oppData, isLoading } = useOpportunity(drawerEntityId ?? '') as any;
   const updateOpportunity = useUpdateOpportunity(drawerEntityId ?? '');
@@ -310,8 +313,13 @@ export function OpportunityDrawer() {
     setEditing(true);
   };
 
-  if (briefing) {
-    return <BriefingPanel subjectType="opportunity" subjectId={drawerEntityId!} onClose={() => setBriefing(false)} />;
+  if (view === 'brief') {
+    return (
+      <>
+        <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} />
+        <BriefingPanel subjectType="opportunity" subjectId={drawerEntityId!} subjectName={name} onClose={() => setView('detail')} />
+      </>
+    );
   }
 
   if (editing) {
@@ -358,7 +366,7 @@ export function OpportunityDrawer() {
           </button>
         </div>
         <p className="text-3xl font-display font-extrabold text-foreground mt-2">
-          ${amount >= 1000 ? `${(amount / 1000).toFixed(0)}K` : amount}
+          {formatCompactCurrency(amount)}
         </p>
         <div className="flex items-center gap-2 mt-3 flex-wrap">
           {stage && <StageBadge stage={stage} />}
@@ -385,9 +393,10 @@ export function OpportunityDrawer() {
         </div>
       </div>
 
+      <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} showBriefTab={false} />
       <ObjectActionBar
-        context={{ type: 'opportunity', id: opportunity.id, name, detail: `$${(amount / 1000).toFixed(0)}K` }}
-        onBrief={() => setBriefing(true)}
+        context={{ type: 'opportunity', id: opportunity.id, name, detail: formatCompactCurrency(amount) }}
+        onBrief={() => setView('brief')}
       />
 
       {/* Stats */}

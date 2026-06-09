@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ListOrdered, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw, Zap } from 'lucide-react';
@@ -2586,6 +2587,13 @@ function SystemsOfRecordSettings() {
       throw new Error(`${label} must be valid JSON.`);
     }
   };
+  const tryParseJson = (label: string, value: string): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } => {
+    try {
+      return { ok: true, value: parseJson(label, value) };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : `${label} must be valid JSON.` };
+    }
+  };
   const parseCsvList = (value: string) =>
     value.split(',').map(item => item.trim()).filter(Boolean);
   const csvList = (value?: string[]) => (value ?? []).join(', ');
@@ -2804,8 +2812,102 @@ function SystemsOfRecordSettings() {
     throw new Error(`${systemLabel(systemType)} credentials must be entered as JSON so CRMy has the host/account, auth token, and required connection metadata.`);
   };
 
+  const requiredCredentialIssue = () => {
+    if (!systemType) return 'Choose the system of record you want to connect.';
+    if (!name.trim()) return 'Name this connection so admins can recognize it later.';
+    if (!authType) return `Choose how CRMy should connect to ${systemLabel(systemType)}.`;
+
+    const config = tryParseJson('Config', configInput);
+    if (!config.ok) return config.error;
+    const sync = tryParseJson('Sync settings', syncInput);
+    if (!sync.ok) return sync.error;
+
+    if (systemType === 'hubspot' && authType === 'oauth_app') {
+      if (!hubSpotAppId.trim()) return 'Enter the HubSpot App ID.';
+      if (!hubSpotClientId.trim()) return 'Enter the HubSpot OAuth Client ID.';
+      if (!hubSpotClientSecret.trim()) return 'Enter the HubSpot OAuth Client Secret.';
+      return '';
+    }
+
+    if (systemType === 'hubspot' && authType === 'private_app_token') {
+      return credentialInput.trim() ? '' : 'Paste a HubSpot private app access token, or switch to OAuth app setup.';
+    }
+
+    if (!credentialInput.trim()) return `Enter ${systemLabel(systemType)} credentials JSON before continuing.`;
+
+    const credentials = tryParseJson('Credentials', credentialInput);
+    if (!credentials.ok) return credentials.error;
+    const value = credentials.value;
+    const has = (key: string) => typeof value[key] === 'string' && String(value[key]).trim().length > 0;
+
+    if (systemType === 'salesforce') {
+      const hasAccessToken = has('access_token');
+      const hasRefreshFlow = has('refresh_token') && has('client_id') && has('client_secret');
+      if (!has('instance_url')) return 'Salesforce credentials need instance_url.';
+      if (!hasAccessToken && !hasRefreshFlow) return 'Salesforce credentials need access_token, or refresh_token with client_id and client_secret.';
+    }
+    if (systemType === 'databricks') {
+      if (!has('host')) return 'Databricks credentials need host.';
+      if (!has('token')) return 'Databricks credentials need token.';
+      if (!has('warehouse_id')) return 'Databricks credentials need warehouse_id.';
+    }
+    if (systemType === 'snowflake') {
+      if (!has('account_url')) return 'Snowflake credentials need account_url.';
+      if (!has('token')) return 'Snowflake credentials need token.';
+    }
+
+    return '';
+  };
+
+  const addWizardStepIssue = (step = addWizardStep) => {
+    if (step === 0) return systemType ? '' : 'Choose a system before continuing.';
+    if (step === 1) return requiredCredentialIssue();
+    if (step === 2) return setupReadObjects.length > 0 ? '' : 'Choose at least one customer record type for CRMy to read.';
+    if (step === 3) return selectedReadOptions.length > 0 ? '' : 'Choose at least one record type before reviewing mappings.';
+    if (step === 5) {
+      return requiredCredentialIssue()
+        || (setupReadObjects.length > 0 ? '' : 'Choose at least one customer record type for CRMy to read.');
+    }
+    return '';
+  };
+
+  const canMoveToAddWizardStep = (targetStep: number) => {
+    if (targetStep <= addWizardStep) return true;
+    for (let step = 0; step < targetStep; step += 1) {
+      const issue = addWizardStepIssue(step);
+      if (issue) return false;
+    }
+    return true;
+  };
+
+  const moveToAddWizardStep = (targetStep: number) => {
+    if (targetStep <= addWizardStep) {
+      setAddWizardStep(targetStep);
+      return;
+    }
+    for (let step = 0; step < targetStep; step += 1) {
+      const issue = addWizardStepIssue(step);
+      if (issue) {
+        toast({ title: issue, variant: 'destructive' });
+        return;
+      }
+    }
+    setAddWizardStep(targetStep);
+  };
+
+  const continueAddWizard = () => {
+    const issue = addWizardStepIssue(addWizardStep);
+    if (issue) {
+      toast({ title: issue, variant: 'destructive' });
+      return;
+    }
+    setAddWizardStep(step => Math.min(5, step + 1));
+  };
+
   const handleCreateSystem = async () => {
     try {
+      const setupIssue = addWizardStepIssue(5);
+      if (setupIssue) throw new Error(setupIssue);
       if (!systemType) {
         throw new Error('Choose the system of record you want to connect.');
       }
@@ -3473,7 +3575,7 @@ function SystemsOfRecordSettings() {
       setMappingSystemId(system.id);
       toast({
         title: 'Add a mapping before syncing',
-        description: 'Mappings tell CRMy which external records become typed revenue objects.',
+        description: 'Mappings tell CRMy which external records become customer records.',
         variant: 'destructive',
       });
       return;
@@ -3926,9 +4028,9 @@ function SystemsOfRecordSettings() {
         </button>
       </div>
 
-      {showCreate && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-background/70 backdrop-blur-sm">
-          <div className="h-full w-full max-w-3xl border-l border-border bg-card shadow-2xl flex flex-col">
+      {showCreate && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[70] flex justify-end bg-background/70 backdrop-blur-sm">
+          <div className="h-dvh min-h-dvh w-full max-w-3xl border-l border-border bg-card shadow-2xl flex flex-col">
             <div className="border-b border-border px-5 py-4 flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold text-primary uppercase tracking-wider">Guided setup</p>
@@ -3944,8 +4046,9 @@ function SystemsOfRecordSettings() {
                 {['Choose', 'Connect', 'Read', 'Map', 'Write', 'Activate'].map((label, index) => (
                   <button
                     key={label}
-                    onClick={() => setAddWizardStep(index)}
-                    className={`rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${addWizardStep === index ? 'border-primary bg-primary/10 text-primary' : index < addWizardStep ? 'border-success/30 bg-success/10 text-success' : 'border-border bg-background text-muted-foreground hover:text-foreground'}`}
+                    onClick={() => moveToAddWizardStep(index)}
+                    disabled={!canMoveToAddWizardStep(index)}
+                    className={`rounded-lg border px-2 py-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${addWizardStep === index ? 'border-primary bg-primary/10 text-primary' : index < addWizardStep ? 'border-success/30 bg-success/10 text-success' : 'border-border bg-background text-muted-foreground hover:text-foreground'}`}
                   >
                     <span className="block text-[10px] opacity-70">Step {index + 1}</span>
                     {label}
@@ -4192,24 +4295,30 @@ function SystemsOfRecordSettings() {
               >
                 {addWizardStep === 0 ? 'Cancel' : 'Back'}
               </button>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col items-end gap-2">
+                {addWizardStepIssue() && (
+                  <p className="max-w-md text-right text-xs font-medium text-destructive">
+                    {addWizardStepIssue()}
+                  </p>
+                )}
                 {addWizardStep < 5 ? (
                   <button
-                    onClick={() => setAddWizardStep(step => Math.min(5, step + 1))}
-                    disabled={addWizardStep === 0 && !systemType}
+                    onClick={continueAddWizard}
+                    disabled={Boolean(addWizardStepIssue())}
                     className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40"
                   >
                     Continue
                   </button>
                 ) : (
-                  <button onClick={handleCreateSystem} disabled={!name.trim() || !systemType || createSystem.isPending || upsertMapping.isPending} className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                  <button onClick={handleCreateSystem} disabled={Boolean(addWizardStepIssue(5)) || createSystem.isPending || upsertMapping.isPending} className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
                     {createSystem.isPending || upsertMapping.isPending ? 'Saving...' : 'Save System'}
                   </button>
                 )}
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       <div className="flex flex-wrap gap-1 border-b border-border">
@@ -5393,7 +5502,7 @@ function DatabaseSettings() {
 	            Managed by server environment
 	          </span>
 	        )}
-        <span className={`h-9 inline-flex items-center px-3 rounded-xl border text-sm font-medium ${semanticReady ? 'border-success/30 bg-success/5 text-success' : 'border-amber-500/30 bg-amber-500/10 text-amber-700'}`}>
+        <span className={`h-9 inline-flex items-center px-3 rounded-xl border text-sm font-medium ${semanticReady ? 'border-success/30 bg-success/5 text-success' : 'border-warning/30 bg-warning/10 text-warning'}`}>
           Semantic retrieval {semanticReady ? 'ready' : 'needs setup'}
         </span>
       </div>
@@ -5438,9 +5547,19 @@ function DatabaseSettings() {
                 Enable this when you want natural-language search and stronger related-context matching.
               </p>
             </div>
-            <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${semanticReady ? 'border-success/30 bg-success/5 text-success' : 'border-warning/30 bg-warning/10 text-warning'}`}>
-              {semanticReady ? <CheckCircle2 className="h-3.5 w-3.5" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-              {semanticReady ? 'Ready' : 'Setup needed'}
+            <span
+              className={`inline-flex items-center justify-center rounded-full border text-xs font-semibold ${semanticReady ? 'gap-1.5 px-2.5 py-1 border-success/30 bg-success/5 text-success' : 'h-8 w-8 border-warning/30 bg-warning/10 text-warning'}`}
+              title={semanticReady ? 'Semantic retrieval ready' : 'Semantic retrieval needs setup'}
+              aria-label={semanticReady ? 'Semantic retrieval ready' : 'Semantic retrieval needs setup'}
+            >
+              {semanticReady ? (
+                <>
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Ready
+                </>
+              ) : (
+                <AlertTriangle className="h-3.5 w-3.5" />
+              )}
             </span>
           </div>
 
@@ -5972,13 +6091,6 @@ function AutomationsSettings() {
       href: '/automations?tab=sequences',
       cta: 'Open sequences',
     },
-    {
-      title: 'Webhooks',
-      description: 'Advanced event delivery for operators and developers integrating CRMy with external systems.',
-      Icon: Link2,
-      href: '/settings/webhooks',
-      cta: 'Open webhooks',
-    },
   ];
 
   return (
@@ -5986,7 +6098,7 @@ function AutomationsSettings() {
       <div className="mb-6">
         <h2 className="font-display text-lg font-bold text-foreground">Automations</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Admin-only automation tools for routing events, governing outbound orchestration, and delivering webhooks.
+          Admin-only automation tools for routing events and governing outbound orchestration.
         </p>
       </div>
       <div className="grid gap-4 md:grid-cols-2">

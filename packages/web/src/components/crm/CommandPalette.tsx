@@ -13,8 +13,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
 import { getUser } from '@/api/client';
-import { cn } from '@/lib/utils';
-import { ContactAvatar } from './ContactAvatar';
+import { cn, formatCompactCurrency } from '@/lib/utils';
 import { useSearch, useWorkflows, useSequences } from '@/api/hooks';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { ENTITY_COLORS } from '@/lib/entityColors';
@@ -276,7 +275,7 @@ export function CommandPalette() {
                 onSelect={() => runAction(() => { navigate('/contacts'); openDrawer('contact', c.id as string); })}
                 className={itemClass}
               >
-                <ContactAvatar name={contactName(c)} className="w-5 h-5 rounded-full text-[8px]" />
+                <Users className={cn('h-4 w-4 flex-shrink-0', ENTITY_COLORS.contacts.text)} />
                 <span>{contactName(c)}</span>
                 {contactCompany(c) && <span className="text-muted-foreground text-xs">— {contactCompany(c)}</span>}
                 {c.lifecycle_stage && <span className="ml-auto text-xs text-muted-foreground">{c.lifecycle_stage as string}</span>}
@@ -317,7 +316,7 @@ export function CommandPalette() {
                 {d.stage && <span className="text-muted-foreground text-xs">— {d.stage as string}</span>}
                 {d.amount && (
                   <span className="text-muted-foreground text-xs ml-auto">
-                    ${((d.amount as number) / 1000).toFixed(0)}K
+                    {formatCompactCurrency(Number(d.amount))}
                   </span>
                 )}
               </Command.Item>

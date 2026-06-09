@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '@/hooks/use-toast';
 import {
@@ -17,7 +17,7 @@ import {
 interface RuleCondition {
   field: string;
   op: '<' | '>' | '=' | '!=' | 'contains' | 'not_contains';
-  value: string;
+  value: unknown;
 }
 
 interface ApprovalRule {
@@ -38,6 +38,32 @@ const OPS = [
   { value: '>',            label: 'greater than' },
   { value: 'contains',     label: 'contains' },
   { value: 'not_contains', label: 'not contains' },
+] as const;
+
+const ACTION_TYPE_OPTIONS = [
+  { value: 'record_update', label: 'Record update' },
+  { value: 'customer_outreach', label: 'Customer outreach' },
+  { value: 'email.send', label: 'Email send' },
+  { value: 'sequence.step.send', label: 'Sequence email send' },
+  { value: 'context.signal_promote', label: 'Confirm Signal as Memory' },
+  { value: 'context.signal_review', label: 'Signal review' },
+  { value: 'external.writeback', label: 'System-of-record writeback' },
+] as const;
+
+const CONDITION_FIELD_OPTIONS = [
+  { value: 'object_type', label: 'Customer record type' },
+  { value: 'object_id', label: 'Customer record ID' },
+  { value: 'field', label: 'Field being changed' },
+  { value: 'field_name', label: 'Field name' },
+  { value: 'risk_level', label: 'Risk level' },
+  { value: 'recipient', label: 'Recipient' },
+  { value: 'channel', label: 'Channel' },
+  { value: 'system_type', label: 'System type' },
+  { value: 'system_id', label: 'System ID' },
+  { value: 'external_object', label: 'External object' },
+  { value: 'mapping_id', label: 'Mapping ID' },
+  { value: 'action_context.readiness.risk_level', label: 'Action Context risk' },
+  { value: 'action_context.operating_mode', label: 'Action Context mode' },
 ] as const;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -83,6 +109,43 @@ function emptyCondition(): RuleCondition {
   return { field: '', op: '=', value: '' };
 }
 
+function conditionValueForInput(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  return String(value);
+}
+
+function parseConditionValue(raw: string, op: RuleCondition['op']): unknown {
+  const trimmed = raw.trim();
+  if (op === '<' || op === '>') {
+    const numberValue = Number(trimmed);
+    return Number.isFinite(numberValue) ? numberValue : trimmed;
+  }
+  if (/^(true|false)$/i.test(trimmed)) return trimmed.toLowerCase() === 'true';
+  if (/^null$/i.test(trimmed)) return null;
+  return trimmed;
+}
+
+function normalizeConditionsForSave(conditions: RuleCondition[]): { conditions: RuleCondition[]; error?: string } {
+  const normalized: RuleCondition[] = [];
+  for (const condition of conditions) {
+    const field = condition.field.trim();
+    const value = conditionValueForInput(condition.value).trim();
+    const hasAny = Boolean(field || value);
+    if (!hasAny) continue;
+    if (!field) return { conditions: [], error: 'Choose the field each condition should check.' };
+    if (!value) return { conditions: [], error: `Add a value for ${field}.` };
+    if ((condition.op === '<' || condition.op === '>') && !Number.isFinite(Number(value))) {
+      return { conditions: [], error: 'Less than / greater than conditions need a numeric value.' };
+    }
+    normalized.push({
+      field,
+      op: condition.op,
+      value: parseConditionValue(value, condition.op),
+    });
+  }
+  return { conditions: normalized };
+}
+
 // ─── Condition Builder ────────────────────────────────────────────────────────
 
 function ConditionBuilder({
@@ -92,6 +155,7 @@ function ConditionBuilder({
   conditions: RuleCondition[];
   onChange: (conditions: RuleCondition[]) => void;
 }) {
+  const conditionFieldListId = `hitl-condition-fields-${useId().replace(/:/g, '')}`;
   const update = (i: number, patch: Partial<RuleCondition>) => {
     const next = conditions.map((c, idx) => idx === i ? { ...c, ...patch } : c);
     onChange(next);
@@ -99,48 +163,78 @@ function ConditionBuilder({
   const remove = (i: number) => onChange(conditions.filter((_, idx) => idx !== i));
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
+      <div className="rounded-lg border border-border bg-background/70 px-3 py-2">
+        <p className="text-xs text-muted-foreground">
+          Conditions inspect the approval request payload. Add one or more checks when a policy should only apply to specific fields, risk levels, systems, or customer actions.
+          All conditions must be true.
+        </p>
+      </div>
+      <datalist id={conditionFieldListId}>
+        {CONDITION_FIELD_OPTIONS.map(option => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
+      </datalist>
       {conditions.map((c, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <div className="text-muted-foreground shrink-0">
-            <GripVertical className="w-4 h-4" />
+        <div key={i} className="rounded-lg border border-border bg-card p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+              <GripVertical className="w-3.5 h-3.5" />
+              Condition {i + 1}
+            </div>
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-destructive"
+            >
+              <X className="w-3.5 h-3.5" />
+              Remove
+            </button>
           </div>
-          <input
-            type="text"
-            value={c.field}
-            onChange={(e) => update(i, { field: e.target.value })}
-            placeholder="field.path"
-            className={`${inputCls} flex-1`}
-          />
-          <select
-            value={c.op}
-            onChange={(e) => update(i, { op: e.target.value as RuleCondition['op'] })}
-            className={`${inputCls} w-40 shrink-0`}
-          >
-            {OPS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          <input
-            type="text"
-            value={c.value}
-            onChange={(e) => update(i, { value: e.target.value })}
-            placeholder="value"
-            className={`${inputCls} flex-1`}
-          />
-          <button
-            type="button"
-            onClick={() => remove(i)}
-            className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-destructive shrink-0"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+          <div className="grid grid-cols-1 md:grid-cols-[1.2fr_0.8fr_1fr] gap-2">
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Field to check</label>
+              <input
+                type="text"
+                list={conditionFieldListId}
+                value={c.field}
+                onChange={(e) => update(i, { field: e.target.value })}
+                placeholder="e.g. risk_level"
+                className={inputCls}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Operator</label>
+              <select
+                value={c.op}
+                onChange={(e) => update(i, { op: e.target.value as RuleCondition['op'] })}
+                className={inputCls}
+              >
+                {OPS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">Value</label>
+              <input
+                type="text"
+                value={conditionValueForInput(c.value)}
+                onChange={(e) => update(i, { value: e.target.value })}
+                placeholder="e.g. high"
+                className={inputCls}
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Example: <span className="font-mono">risk_level equals high</span> or <span className="font-mono">field equals forecast_cat</span>.
+          </p>
         </div>
       ))}
       <button
         type="button"
         onClick={() => onChange([...conditions, emptyCondition()])}
-        className="flex items-center gap-1.5 text-xs text-primary hover:underline"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted"
       >
         <Plus className="w-3.5 h-3.5" />
         Add condition
@@ -174,11 +268,16 @@ function RuleRow({ rule }: { rule: ApprovalRule }) {
   };
 
   const handleSave = async () => {
+    const normalized = normalizeConditionsForSave(conditions);
+    if (normalized.error) {
+      toast({ title: normalized.error, variant: 'destructive' });
+      return;
+    }
     try {
       await update.mutateAsync({
         name,
         action_type: actionType.trim() || null,
-        condition: conditions.length > 0 ? conditions : {},
+        condition: normalized.conditions.length > 0 ? normalized.conditions : {},
         decision,
         priority: parseInt(priority) || 0,
       });
@@ -299,14 +398,21 @@ function RuleRow({ rule }: { rule: ApprovalRule }) {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Action Type</label>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Request Type</label>
+                  <datalist id={`hitl-action-types-${rule.id}`}>
+                    {ACTION_TYPE_OPTIONS.map(option => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </datalist>
                   <input
                     type="text"
+                    list={`hitl-action-types-${rule.id}`}
                     value={actionType}
                     onChange={(e) => setActionType(e.target.value)}
                     placeholder="Any (leave blank to match all)"
                     className={inputCls}
                   />
+                  <p className="text-xs text-muted-foreground">Choose a request type such as <span className="font-mono">record_update</span>, or leave blank for any approval request.</p>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Decision</label>
@@ -318,7 +424,7 @@ function RuleRow({ rule }: { rule: ApprovalRule }) {
               </div>
 
               <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Conditions (AND logic)</label>
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">What must be true</label>
                 <ConditionBuilder conditions={conditions} onChange={setConditions} />
               </div>
 
@@ -351,11 +457,16 @@ function CreateRuleForm({ onClose }: { onClose: () => void }) {
       toast({ title: 'Policy name is required', variant: 'destructive' });
       return;
     }
+    const normalized = normalizeConditionsForSave(conditions);
+    if (normalized.error) {
+      toast({ title: normalized.error, variant: 'destructive' });
+      return;
+    }
     try {
       await create.mutateAsync({
         name: name.trim(),
         action_type: actionType.trim() || null,
-        condition: conditions.length > 0 ? conditions : {},
+        condition: normalized.conditions.length > 0 ? normalized.conditions : {},
         decision,
         priority: parseInt(priority) || 0,
       });
@@ -381,15 +492,21 @@ function CreateRuleForm({ onClose }: { onClose: () => void }) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Action Type</label>
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Request Type</label>
+          <datalist id="hitl-action-types-create">
+            {ACTION_TYPE_OPTIONS.map(option => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </datalist>
           <input
             type="text"
+            list="hitl-action-types-create"
             value={actionType}
             onChange={(e) => setActionType(e.target.value)}
             placeholder="Any (leave blank to match all)"
             className={inputCls}
           />
-          <p className="text-xs text-muted-foreground">e.g. send_email, create_contact</p>
+          <p className="text-xs text-muted-foreground">Choose a request type such as <span className="font-mono">record_update</span>, or leave blank for any approval request.</p>
         </div>
         <div className="space-y-1">
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Decision</label>
@@ -401,7 +518,7 @@ function CreateRuleForm({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="space-y-2">
-        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Conditions (AND logic)</label>
+        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">What must be true</label>
         <ConditionBuilder conditions={conditions} onChange={setConditions} />
       </div>
 

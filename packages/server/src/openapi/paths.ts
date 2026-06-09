@@ -2504,7 +2504,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'get', path: '/search',
   tags: ['Search'],
-  summary: 'Cross-entity full-text search across revenue objects, context, and handoffs',
+  summary: 'Cross-entity full-text search across customer records, context, and handoffs',
   security: bearer,
   request: { query: z.object({ q: z.string().min(1), limit: z.number().int().optional() }) },
   responses: { 200: ok(GenericList), 400: err400 },

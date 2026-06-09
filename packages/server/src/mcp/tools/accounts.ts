@@ -16,6 +16,7 @@ import { runIdempotent } from '../../db/repos/idempotency.js';
 import { withTransaction } from '../../db/transaction.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+import { writeToolUx } from '../tool-ux.js';
 import { assertOwnedObjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
 import { verifiedActionContextMetadataForReceipt } from '../../services/action-context.js';
 
@@ -52,6 +53,11 @@ export function accountTools(db: DbPool): ToolDef[] {
       tier: 'extended',
       description: 'Create a new account record. Before calling this, use customer_record_resolve to check if the customer already exists; use entity_resolve only as a compatibility fallback for simple account/contact lookup. If a potential duplicate is detected (same domain or same name), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record. Pass allow_duplicates: true to skip the check after confirming with the user.',
       inputSchema: accountCreate,
+      ux: writeToolUx({
+        displayName: 'Create account',
+        actionPhrase: 'create the account',
+        objectLabel: 'account',
+      }),
       handler: async (input: z.infer<typeof accountCreate>, actor: ActorContext) => {
         return runAccountOperation(db, actor, 'account_create', input, async () => {
         // ── Duplicate check ──
@@ -176,6 +182,11 @@ export function accountTools(db: DbPool): ToolDef[] {
       tier: 'extended',
       description: 'Update an account record by passing its id and a patch object with the fields to change. Supports all account fields including name, industry, domain, annual_revenue, tags, and custom_fields.',
       inputSchema: accountUpdate,
+      ux: writeToolUx({
+        displayName: 'Update account',
+        actionPhrase: 'update the account',
+        objectLabel: 'account',
+      }),
       handler: async (input: z.infer<typeof accountUpdate>, actor: ActorContext) => {
         return runAccountOperation(db, actor, 'account_update', input, async () => {
         const before = await accountRepo.getAccount(db, actor.tenant_id, input.id);

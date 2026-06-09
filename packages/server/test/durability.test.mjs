@@ -40,6 +40,7 @@ import { buildAgentScopes, runAgentTurn, __testAgentEngine } from '../dist/agent
 import { resolveLlmTimeoutMs } from '../dist/agent/provider-utils.js';
 import { callLLM } from '../dist/agent/providers/llm.js';
 import { previewRecordDraft } from '../dist/services/record-drafts.js';
+import { processNextBatch as processContextOutboxBatch } from '../dist/workers/context_ingestion_worker.service.js';
 
 const baseInput = {
   tenantId: '11111111-1111-4111-8111-111111111111',
@@ -2399,6 +2400,84 @@ class FakeRecoveryDb {
   }
 }
 
+class FakeSearchOutboxDb {
+  tenantId = baseInput.tenantId;
+  entryId = '33333333-3333-4333-8333-333333333333';
+  job = {
+    id: '44444444-4444-4444-8444-444444444444',
+    tenant_id: this.tenantId,
+    entity_type: 'context_entry',
+    entity_id: this.entryId,
+    payload: {
+      subject_type: 'account',
+      subject_id: '22222222-2222-4222-8222-222222222222',
+      context_type: 'key_fact',
+      repair_reason: 'current_context_missing_search_index',
+    },
+    status: 'pending',
+    attempt_count: 0,
+    last_error: null,
+  };
+  completed = false;
+  indexed = [];
+
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+
+    if (text.startsWith('WITH to_claim AS')) {
+      this.job = { ...this.job, status: 'processing', attempt_count: this.job.attempt_count + 1 };
+      return { rows: [this.job], rowCount: 1 };
+    }
+
+    if (text.startsWith('SELECT * FROM context_entries')) {
+      assert.equal(params[0], this.tenantId);
+      assert.equal(params[1], this.entryId);
+      return {
+        rows: [{
+          id: this.entryId,
+          tenant_id: this.tenantId,
+          title: 'Renewal blocker',
+          body: 'Procurement is waiting on security review.',
+          context_type: 'deal_risk',
+          subject_type: 'account',
+          subject_id: '22222222-2222-4222-8222-222222222222',
+          confidence: 0.72,
+          is_current: true,
+          authored_by: 'actor-1',
+        }],
+        rowCount: 1,
+      };
+    }
+
+    if (text.startsWith('INSERT INTO search_index')) {
+      this.indexed.push(params);
+      return { rows: [], rowCount: 1 };
+    }
+
+    if (text.startsWith('UPDATE context_outbox') && text.includes("status = 'complete'")) {
+      this.completed = true;
+      return { rows: [], rowCount: 1 };
+    }
+
+    throw new Error(`Unexpected query: ${text}`);
+  }
+}
+
+test('context outbox backfill hydrates minimal repair payloads before indexing', async () => {
+  const db = new FakeSearchOutboxDb();
+
+  await processContextOutboxBatch(db);
+
+  assert.equal(db.completed, true);
+  assert.equal(db.indexed.length, 1);
+  const [tenantId, entityType, entityId, primaryName, secondaryText] = db.indexed[0];
+  assert.equal(tenantId, db.tenantId);
+  assert.equal(entityType, 'context_entry');
+  assert.equal(entityId, db.entryId);
+  assert.equal(primaryName, 'Renewal blocker');
+  assert.equal(secondaryText, 'Procurement is waiting on security review.');
+});
+
 const recoveryActor = {
   tenant_id: baseInput.tenantId,
   actor_id: 'recovery-actor',
@@ -2685,6 +2764,157 @@ test('GTM tool-choice evals route first calls to the right MCP front door', asyn
     for (const forbidden of item.forbidden_tools) {
       assert.equal(toolCalls.includes(forbidden), false, `${item.name} should not call ${forbidden}`);
     }
+  }
+});
+
+test('Workspace Agent exposes contact creation and does not frame it as unavailable when writes are enabled', async () => {
+  let inspected = false;
+
+  const history = await runAgentTurn(
+    [{ role: 'user', content: 'Lets create a new contact John Doe' }],
+    toolChoiceAgentConfig,
+    memberActor,
+    {},
+    () => {},
+    {
+      modelCaller: async ({ history, toolDefs }) => {
+        inspected = true;
+        const toolNames = new Set(toolDefs.map(tool => tool.name));
+        assert.equal(toolNames.has('customer_record_resolve'), true);
+        assert.equal(toolNames.has('account_create'), true);
+        assert.equal(toolNames.has('account_update'), true);
+        assert.equal(toolNames.has('contact_create'), true);
+        assert.equal(toolNames.has('contact_update'), true);
+        assert.equal(toolNames.has('opportunity_create'), true);
+        assert.equal(toolNames.has('opportunity_update'), true);
+        assert.equal(toolNames.has('use_case_create'), true);
+        assert.equal(toolNames.has('use_case_update'), true);
+        const systemPrompt = history.find(message => message.role === 'system')?.content ?? '';
+        assert.match(systemPrompt, /Record creation requests/);
+        assert.match(systemPrompt, /do not say you lack a create\/update tool/i);
+        assert.match(systemPrompt, /contact_create/);
+        assert.match(systemPrompt, /Use Cases:/);
+        assert.match(systemPrompt, /first_name: "John", last_name: "Doe"/);
+        return {
+          content: 'I can create that contact after checking for existing matches.',
+          tool_calls: [],
+        };
+      },
+    },
+  );
+
+  assert.equal(inspected, true);
+  assert.equal(history.at(-1)?.content, 'I can create that contact after checking for existing matches.');
+});
+
+test('Workspace Agent reports missing required tool details as a friendly blocker', async () => {
+  const events = [];
+  let round = 0;
+
+  const history = await runAgentTurn(
+    [{ role: 'user', content: 'Create a new contact.' }],
+    toolChoiceAgentConfig,
+    memberActor,
+    {},
+    event => events.push(event),
+    {
+      modelCaller: async ({ history }) => {
+        round += 1;
+        if (round === 1) {
+          return {
+            content: 'I will create the contact.',
+            tool_calls: [{
+              id: 'missing-contact-fields',
+              name: 'contact_create',
+              arguments: JSON.stringify({ last_name: 'Doe' }),
+            }],
+          };
+        }
+
+        const toolMessage = history.find(message => message.role === 'tool' && message.tool_name === 'contact_create');
+        assert.ok(toolMessage);
+        assert.match(toolMessage.content, /I can create the contact, but I need First name first/);
+        assert.doesNotMatch(toolMessage.content, /Unknown tool|don't have|do not have a direct/i);
+        return {
+          content: 'I can create the contact, but I need the first name first.',
+          tool_calls: [],
+        };
+      },
+    },
+  );
+
+  const resultEvent = events.find(event => event.type === 'tool_result' && event.name === 'contact_create');
+  assert.equal(resultEvent?.is_error, true);
+  assert.match(resultEvent?.result?.error ?? '', /I can create the contact, but I need First name first/);
+  assert.equal(history.at(-1)?.content, 'I can create the contact, but I need the first name first.');
+});
+
+test('Workspace Agent frames unavailable write tools as settings or permission blockers', async () => {
+  let sawCorrectivePrompt = false;
+  let round = 0;
+
+  const history = await runAgentTurn(
+    [{ role: 'user', content: 'Create a new contact John Doe.' }],
+    { ...toolChoiceAgentConfig, can_write_objects: false },
+    memberActor,
+    {},
+    () => {},
+    {
+      modelCaller: async ({ history, toolDefs }) => {
+        round += 1;
+        if (round === 1) {
+          assert.equal(toolDefs.some(tool => tool.name === 'contact_create'), false);
+          return {
+            content: 'I will create the contact.',
+            tool_calls: [{
+              id: 'disabled-write',
+              name: 'contact_create',
+              arguments: JSON.stringify({ first_name: 'John', last_name: 'Doe' }),
+            }],
+          };
+        }
+
+        const correctivePrompt = history.at(-1)?.content ?? '';
+        assert.match(correctivePrompt, /permissions, disabled settings, missing required details, ambiguity, or approval policy/i);
+        assert.match(correctivePrompt, /Do not describe this as a missing CRMy capability/i);
+        assert.doesNotMatch(correctivePrompt, /Invalid tool call name/i);
+        sawCorrectivePrompt = true;
+        return {
+          content: 'Workspace Agent record writes are disabled in Model Settings, so I can draft the contact details but cannot save the record from here.',
+          tool_calls: [],
+        };
+      },
+    },
+  );
+
+  assert.equal(sawCorrectivePrompt, true);
+  assert.match(history.at(-1)?.content ?? '', /record writes are disabled/i);
+  assert.doesNotMatch(history.at(-1)?.content ?? '', /do not have a direct|don't have.*tool/i);
+});
+
+test('agent-facing record action tools carry UX metadata for friendly blockers', () => {
+  const tools = new Map(getAllTools({}).map(tool => [tool.name, tool]));
+  const expected = [
+    'account_create',
+    'account_update',
+    'contact_create',
+    'contact_update',
+    'opportunity_create',
+    'opportunity_update',
+    'use_case_create',
+    'use_case_update',
+    'activity_create',
+    'activity_update',
+    'record_draft_preview',
+  ];
+
+  for (const name of expected) {
+    const tool = tools.get(name);
+    assert.ok(tool, `${name} should exist`);
+    assert.ok(tool.ux?.displayName, `${name} should define ux.displayName`);
+    assert.ok(tool.ux?.actionPhrase, `${name} should define ux.actionPhrase`);
+    assert.ok(tool.ux?.unavailableMessage, `${name} should define ux.unavailableMessage`);
+    assert.ok(tool.ux?.fieldLabels?.name, `${name} should inherit common field labels`);
   }
 });
 
@@ -3234,6 +3464,32 @@ test('Workspace Agent summarizes successful changed records for final answers', 
   );
 });
 
+test('Workspace Agent final answers translate internal identifiers into product language', () => {
+  const content = [
+    'High-priority HITL request pending for a',
+    '```',
+    'context.signal_promote',
+    '```',
+    'action.',
+    '',
+    'There are index gaps for',
+    '```',
+    'deal_risk',
+    '```',
+    'Signals.',
+    'Use `context_signal_group_promote` after review.',
+  ].join('\n');
+
+  const sanitized = __testAgentEngine.sanitizeAgentAnswer(content);
+
+  assert.doesNotMatch(sanitized, /context\.signal_promote/);
+  assert.doesNotMatch(sanitized, /deal_risk/);
+  assert.doesNotMatch(sanitized, /context_signal_group_promote/);
+  assert.match(sanitized, /Signal confirmation approval/);
+  assert.match(sanitized, /Deal risk/);
+  assert.match(sanitized, /Confirm Signal/);
+});
+
 test('sensitive tool scopes enforce read/write and object-level boundaries', () => {
   const adminReadOnly = { ...recoveryActor, scopes: ['read'] };
   const adminWriteOnly = { ...recoveryActor, scopes: ['write'] };
@@ -3355,9 +3611,11 @@ test('Workspace Agent write scopes follow can_write_objects', () => {
   assert.equal(readOnlyScopes.includes('contacts:write'), false);
   assert.equal(readOnlyScopes.includes('accounts:write'), false);
   assert.equal(readOnlyScopes.includes('opportunities:write'), false);
+  assert.equal(readOnlyScopes.includes('use_cases:write'), false);
   assert.equal(readOnlyScopes.includes('write'), false);
   assert.equal(readOnlyScopes.includes('activities:write'), true);
   assert.equal(readOnlyScopes.includes('context:write'), true);
+  assert.equal(readOnlyScopes.includes('use_cases:read'), true);
 
   const writeScopes = buildAgentScopes({
     can_write_objects: true,
@@ -3367,7 +3625,43 @@ test('Workspace Agent write scopes follow can_write_objects', () => {
   assert.equal(writeScopes.includes('contacts:write'), true);
   assert.equal(writeScopes.includes('accounts:write'), true);
   assert.equal(writeScopes.includes('opportunities:write'), true);
+  assert.equal(writeScopes.includes('use_cases:write'), true);
   assert.equal(writeScopes.includes('write'), true);
+});
+
+test('Workspace Agent tool manifest keeps customer record writes visible', () => {
+  const scopes = buildAgentScopes({
+    can_write_objects: true,
+    can_log_activities: true,
+    can_create_assignments: true,
+  });
+  const toolNames = __testAgentEngine.workspaceAgentToolNamesForScopes({}, scopes);
+
+  for (const expected of [
+    'customer_record_resolve',
+    'record_draft_preview',
+    'contact_create',
+    'contact_update',
+    'account_create',
+    'account_update',
+    'opportunity_create',
+    'opportunity_update',
+    'use_case_create',
+    'use_case_update',
+  ]) {
+    assert.equal(toolNames.includes(expected), true, `${expected} should be visible to the Workspace Agent`);
+  }
+
+  for (const unexpected of [
+    'workflow_create',
+    'workflow_list',
+    'custom_field_create',
+    'message_send',
+    'ops_status_get',
+    'schema_get',
+  ]) {
+    assert.equal(toolNames.includes(unexpected), false, `${unexpected} should not crowd the default Workspace Agent manifest`);
+  }
 });
 
 test('lite record draft preview respects can_write_objects', async () => {

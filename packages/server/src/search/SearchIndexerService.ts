@@ -54,6 +54,7 @@ export async function indexDocument(
   entity: Record<string, unknown>,
 ): Promise<void> {
   const doc = normalize(entityType, entity);
+  validateIndexDoc(entityType, doc);
 
   await db.query(
     `INSERT INTO search_index
@@ -103,6 +104,15 @@ function normalize(entityType: IndexableEntityType, e: Record<string, unknown>):
     case 'activity':      return normalizeActivity(e);
     case 'context_entry': return normalizeContextEntry(e);
     case 'assignment':    return normalizeAssignment(e);
+  }
+}
+
+function validateIndexDoc(entityType: IndexableEntityType, doc: IndexDoc): void {
+  const missing: string[] = [];
+  if (!doc.tenant_id) missing.push('tenant_id');
+  if (!doc.entity_id) missing.push('entity_id');
+  if (missing.length > 0) {
+    throw new Error(`Cannot index ${entityType}: missing ${missing.join(', ')}`);
   }
 }
 

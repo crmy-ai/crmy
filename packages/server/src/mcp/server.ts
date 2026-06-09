@@ -50,6 +50,7 @@ import { compoundTools } from './tools/compound.js';
 import { agentHandoffTools } from './tools/agent-handoff.js';
 import { systemsOfRecordTools } from './tools/systems-of-record.js';
 import { recordDraftTools } from './tools/record-drafts.js';
+import type { ToolUxMetadata } from './tool-ux.js';
 
 export interface ToolDef {
   name: string;
@@ -62,6 +63,7 @@ export interface ToolDef {
   tier: 'core' | 'extended' | 'analytics' | 'admin';
   description: string;
   inputSchema: ZodObject<ZodRawShape>;
+  ux?: ToolUxMetadata;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handler: (input: any, actor: ActorContext) => Promise<unknown>;
 }

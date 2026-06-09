@@ -48,6 +48,211 @@ const READ_ONLY_ACTION_NAME_EXCEPTIONS = new Set([
   'entity_resolve',
 ]);
 
+const WORKSPACE_AGENT_TOOL_ALLOWLIST = new Set([
+  // Routing and identity
+  'tool_guide',
+  'guide_search',
+  'actor_whoami',
+
+  // Customer record resolution and proof context
+  'customer_record_resolve',
+  'entity_resolve',
+  'action_context_get',
+  'briefing_get',
+  'record_draft_preview',
+
+  // Contacts
+  'contact_search',
+  'contact_get',
+  'contact_get_timeline',
+  'contact_create',
+  'contact_update',
+  'contact_set_lifecycle',
+  'contact_outreach',
+
+  // Accounts
+  'account_search',
+  'account_get',
+  'account_get_hierarchy',
+  'account_health_report',
+  'account_create',
+  'account_update',
+  'account_set_health_score',
+
+  // Opportunities
+  'opportunity_search',
+  'opportunity_get',
+  'opportunity_create',
+  'opportunity_update',
+  'opportunity_advance_stage',
+  'deal_advance',
+  'pipeline_summary',
+  'pipeline_forecast',
+
+  // Use cases
+  'use_case_search',
+  'use_case_get',
+  'use_case_get_timeline',
+  'use_case_summary',
+  'use_case_create',
+  'use_case_update',
+  'use_case_advance_stage',
+  'use_case_update_consumption',
+  'use_case_set_health',
+  'use_case_list_contacts',
+  'use_case_link_contact',
+  'use_case_unlink_contact',
+
+  // Activities
+  'activity_search',
+  'activity_get',
+  'activity_get_timeline',
+  'activity_create',
+  'activity_update',
+  'activity_complete',
+  'activity_add_context',
+
+  // Context engine
+  'context_find',
+  'context_get',
+  'context_list',
+  'context_search',
+  'context_semantic_search',
+  'context_ingest_auto',
+  'context_ingest',
+  'context_add',
+  'context_raw_source_list',
+  'context_raw_source_get',
+  'context_raw_source_reprocess',
+  'context_signal_group_list',
+  'context_signal_group_get',
+  'context_signal_group_promote',
+  'context_signal_group_complete_details',
+  'context_signal_handoff',
+  'context_signal_group_reject',
+  'context_signal_promote',
+  'context_signal_reject',
+  'context_supersede',
+  'context_review_batch',
+  'context_bulk_mark_stale',
+  'context_stale',
+  'context_lineage_get',
+  'context_detect_contradictions',
+  'context_contradiction_assign',
+  'context_resolve_contradiction',
+  'context_consolidate',
+
+  // Handoffs and approvals
+  'assignment_create',
+  'assignment_list',
+  'assignment_get',
+  'assignment_update',
+  'assignment_accept',
+  'assignment_start',
+  'assignment_complete',
+  'assignment_block',
+  'assignment_decline',
+  'assignment_cancel',
+  'hitl_submit_request',
+  'hitl_check_status',
+  'hitl_list_pending',
+  'agent_capture_handoff',
+  'agent_resume_handoff',
+
+  // Email/activity sources and drafting
+  'email_draft_preview',
+  'email_draft_save',
+  'email_message_search',
+  'email_message_get',
+  'email_message_process',
+  'email_message_ignore',
+  'email_message_link',
+  'calendar_event_search',
+  'calendar_event_get',
+  'calendar_event_process',
+  'calendar_event_add_context',
+
+  // Sequences are customer work, but workflow/admin configuration is not part
+  // of the in-app Workspace Agent's default manifest.
+  'sequence_get',
+  'sequence_list',
+  'sequence_enrollment_get',
+  'sequence_enrollment_context',
+  'sequence_enrollment_list',
+  'sequence_enroll',
+  'sequence_unenroll',
+  'sequence_pause',
+  'sequence_resume',
+  'sequence_advance',
+  'sequence_draft_step',
+  'sequence_analytics',
+]);
+
+const INTERNAL_LABELS: Record<string, string> = {
+  account_create: 'Create account',
+  account_update: 'Update account',
+  contact_create: 'Create contact',
+  contact_update: 'Update contact',
+  opportunity_create: 'Create opportunity',
+  opportunity_update: 'Update opportunity',
+  use_case_create: 'Create use case',
+  use_case_update: 'Update use case',
+  activity_create: 'Log activity',
+  activity_update: 'Update activity',
+  record_draft_preview: 'Draft record fields',
+  'context.signal_promote': 'Signal confirmation approval',
+  'context.signal_review': 'Signal review',
+  'external.writeback': 'System-of-record writeback',
+  context_signal_group_promote: 'Confirm Signal',
+  context_signal_promote: 'Confirm Signal',
+  context_signal_group_get: 'Review Signal details',
+  context_signal_group_list: 'Review Signals',
+  context_signal_handoff: 'Send Signal for review',
+  context_signal_group_reject: 'Dismiss Signal',
+  context_signal_group_complete_details: 'Add Signal details',
+  context_ingest_auto: 'Add Context',
+  action_context_get: 'Action Context',
+  briefing_get: 'Briefing',
+  hitl_submit_request: 'Request approval',
+  hitl_check_status: 'Check approval status',
+  hitl_list_pending: 'Pending approvals',
+  deal_risk: 'Deal risk',
+  stakeholder: 'Stakeholder',
+  stakeholder_role: 'Stakeholder role',
+  key_fact: 'Key fact',
+  commitment: 'Commitment',
+  next_step: 'Next step',
+  objection: 'Objection',
+  competitive_intel: 'Competitive intel',
+  methodology_gap: 'Methodology gap',
+  success_criteria: 'Success criteria',
+  buying_process: 'Buying process',
+  forecast_signal: 'Forecast signal',
+  ready_to_confirm: 'Ready for Memory',
+};
+
+const INTERNAL_IDENTIFIER_PREFIXES = [
+  'account_',
+  'action_',
+  'activity_',
+  'assignment_',
+  'briefing_',
+  'calendar_',
+  'contact_',
+  'context_',
+  'customer_record_',
+  'email_',
+  'entity_',
+  'hitl_',
+  'opportunity_',
+  'pipeline_',
+  'record_draft_',
+  'sequence_',
+  'sor_',
+  'use_case_',
+  'workflow_',
+];
+
 // ── XML escaping ─────────────────────────────────────────────────────────────
 
 /**
@@ -91,9 +296,210 @@ function normalizeToolErrorMessage(err: unknown): string {
   if (code === 'PERMISSION_DENIED' || status === 403 || /do not have access|outside.+book of business/i.test(rawMessage)) {
     return 'I cannot access that record because it is outside your visible book of business.';
   }
+  if (/required|missing|invalid|required field|validation/i.test(rawMessage)) {
+    return rawMessage;
+  }
   if (/did not respond within/i.test(rawMessage)) return rawMessage;
   if (/not configured|unavailable|requires pgvector|provider/i.test(rawMessage)) return rawMessage;
   return rawMessage || 'Tool execution failed';
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function internalLabelPattern(): string {
+  return Object.keys(INTERNAL_LABELS)
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join('|');
+}
+
+function humanizeInternalIdentifier(value: string): string | null {
+  return INTERNAL_LABELS[value] ?? null;
+}
+
+function isLikelyInternalIdentifier(value: string): boolean {
+  if (INTERNAL_LABELS[value]) return true;
+  if (!/^[a-z][a-z0-9]*(?:[_.][a-z0-9]+){1,}$/.test(value)) return false;
+  return INTERNAL_IDENTIFIER_PREFIXES.some(prefix => value.startsWith(prefix))
+    || (value.includes('.') && /^(context|external|action)\./.test(value));
+}
+
+function humanizeIdentifier(value: string): string {
+  return INTERNAL_LABELS[value]
+    ?? value
+      .replace(/[_.]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function friendlyToolLabel(toolName: string, tool?: ToolDef): string {
+  return tool?.ux?.displayName
+    ?? humanizeInternalIdentifier(toolName)
+    ?? toolName
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function friendlyToolActionPhrase(toolName: string, tool?: ToolDef): string {
+  if (tool?.ux?.actionPhrase) return tool.ux.actionPhrase;
+  const phrases: Record<string, string> = {
+    account_create: 'create the account',
+    contact_create: 'create the contact',
+    opportunity_create: 'create the opportunity',
+    use_case_create: 'create the use case',
+    activity_create: 'log the activity',
+    account_update: 'update the account',
+    contact_update: 'update the contact',
+    opportunity_update: 'update the opportunity',
+    use_case_update: 'update the use case',
+    activity_update: 'update the activity',
+    record_draft_preview: 'draft the record fields',
+  };
+  return phrases[toolName] ?? `use ${friendlyToolLabel(toolName, tool)}`;
+}
+
+const FIELD_LABELS: Record<string, string> = {
+  account_id: 'Account',
+  contact_id: 'Contact',
+  opportunity_id: 'Opportunity',
+  use_case_id: 'Use case',
+  subject_id: 'Record',
+  subject_type: 'Record type',
+  first_name: 'First name',
+  last_name: 'Last name',
+  full_name: 'Name',
+  email: 'Email',
+  phone: 'Phone',
+  name: 'Name',
+  title: 'Title',
+  text: 'Context',
+  body: 'Body',
+  body_text: 'Body',
+  source_type: 'Source type',
+  content_type: 'Content type',
+  idempotency_key: 'Idempotency key',
+};
+
+function titleCaseField(value: string): string {
+  return value
+    .replace(/[_-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function friendlyFieldLabel(path: Array<string | number>, tool?: ToolDef): string | null {
+  const field = [...path].reverse().find(part => typeof part === 'string');
+  if (!field || field === 'idempotency_key') return null;
+  return tool?.ux?.fieldLabels?.[field] ?? FIELD_LABELS[field] ?? titleCaseField(field);
+}
+
+function formatFriendlyList(values: string[]): string {
+  const unique = Array.from(new Set(values.filter(Boolean)));
+  if (unique.length === 0) return '';
+  if (unique.length === 1) return unique[0];
+  if (unique.length === 2) return `${unique[0]} and ${unique[1]}`;
+  return `${unique.slice(0, -1).join(', ')}, and ${unique[unique.length - 1]}`;
+}
+
+function toolUnavailableMessage(toolName: string, tool?: ToolDef): string {
+  if (tool?.ux?.unavailableMessage) {
+    return `${tool.ux.unavailableMessage} Do not describe this as a missing CRMy capability.`;
+  }
+  const label = friendlyToolLabel(toolName, tool);
+  if (/(create|update|delete|send|writeback|enroll|trigger|execute)/i.test(toolName)) {
+    return `${label} is not available in this session because Workspace Agent record writes, permissions, or provider configuration do not allow it. Explain the specific limit if it is known, and offer to draft the proposed fields or route the action for review. Do not describe this as a missing CRMy capability.`;
+  }
+  return `${label} is not available in this session. Explain the permission or configuration limit if it is known, and offer the closest available CRMy workflow. Do not describe this as a missing CRMy capability unless the workflow is truly unsupported.`;
+}
+
+function friendlyToolValidationError(toolName: string, issues: Array<{ path: Array<string | number>; message?: string; code?: string; received?: unknown }>, tool?: ToolDef): string {
+  const fields = issues
+    .map(issue => friendlyFieldLabel(issue.path, tool))
+    .filter((field): field is string => Boolean(field));
+  const missingFields = issues
+    .filter(issue => issue.code === 'invalid_type' && (issue.received === 'undefined' || /required/i.test(issue.message ?? '')))
+    .map(issue => friendlyFieldLabel(issue.path, tool))
+    .filter((field): field is string => Boolean(field));
+
+  const action = friendlyToolActionPhrase(toolName, tool);
+  const missing = formatFriendlyList(missingFields);
+  if (missing) {
+    return `I can ${action}, but I need ${missing} first. Ask the user for the missing detail or use an allowed default before trying again.`;
+  }
+
+  const affected = formatFriendlyList(fields);
+  const firstMessage = issues.find(issue => issue.message)?.message;
+  if (affected) {
+    return `I can ${action}, but ${affected} ${fields.length === 1 ? 'needs' : 'need'} a valid value${firstMessage ? ` (${firstMessage})` : ''}. Ask the user for the correction before trying again.`;
+  }
+
+  return `I can ${action}, but the request is missing required details or includes invalid values. Ask the user for the missing detail before trying again.`;
+}
+
+function validateAgentToolArguments(input: {
+  handler?: ToolDef;
+  toolName: string;
+  args: Record<string, unknown>;
+}): { ok: true; args: Record<string, unknown> } | { ok: false; error: string } {
+  if (!input.handler) return { ok: false, error: toolUnavailableMessage(input.toolName) };
+  const parsed = input.handler.inputSchema.safeParse(input.args);
+  if (parsed.success) return { ok: true, args: parsed.data as Record<string, unknown> };
+  return {
+    ok: false,
+    error: friendlyToolValidationError(input.toolName, parsed.error.issues, input.handler),
+  };
+}
+
+function invalidToolCallFeedback(tc: ToolCallRecord, handlers: Map<string, ToolDef>, catalog: Map<string, ToolDef>): string {
+  const name = tc.name?.trim();
+  if (!name) {
+    return 'The model attempted an unnamed action. Retry with one available CRMy tool and valid arguments, or answer directly if no tool is needed.';
+  }
+  if (splitKnownToolNames(name, handlers).length > 1) {
+    return 'The model combined multiple actions into one malformed tool call. Retry with exactly one available tool at a time and include the required arguments.';
+  }
+  return toolUnavailableMessage(name, catalog.get(name));
+}
+
+function sanitizeAgentAnswer(content: string): string {
+  if (!content) return content;
+  const pattern = internalLabelPattern();
+
+  const internalIdPattern = String.raw`(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{6,}\.{3,}[0-9a-f]{2,})`;
+  let sanitized = content;
+
+  // Hide internal record IDs when the model leaks them as parenthetical references or standalone code.
+  sanitized = sanitized.replace(new RegExp(String.raw`\s*\(\s*` + internalIdPattern + String.raw`\s*\)`, 'gi'), '');
+  sanitized = sanitized.replace(new RegExp(String.raw`\s*\(\s*` + '`' + internalIdPattern + '`' + String.raw`\s*\)`, 'gi'), '');
+  sanitized = sanitized.replace(new RegExp('\\s*\\(\\s*```\\s*' + internalIdPattern + '\\s*```\\s*\\)', 'gi'), '');
+  sanitized = sanitized.replace(new RegExp('```\\s*' + internalIdPattern + '\\s*```', 'gi'), '');
+  sanitized = sanitized.replace(new RegExp('`(' + internalIdPattern + ')`', 'gi'), 'record reference');
+
+  if (!pattern) return sanitized;
+
+  sanitized = sanitized.replace(
+    new RegExp('```\\s*(' + pattern + ')\\s*```', 'g'),
+    (_match, identifier: string) => humanizeIdentifier(identifier),
+  );
+  sanitized = sanitized.replace(/```\s*([a-z][a-z0-9]*(?:[_.][a-z0-9]+){1,})\s*```/g, (match, identifier: string) =>
+    isLikelyInternalIdentifier(identifier) ? humanizeIdentifier(identifier) : match,
+  );
+  sanitized = sanitized.replace(
+    new RegExp('`(' + pattern + ')`', 'g'),
+    (_match, identifier: string) => humanizeIdentifier(identifier),
+  );
+  sanitized = sanitized.replace(/`([a-z][a-z0-9]*(?:[_.][a-z0-9]+){1,})`/g, (match, identifier: string) =>
+    isLikelyInternalIdentifier(identifier) ? humanizeIdentifier(identifier) : match,
+  );
+  sanitized = sanitized.replace(
+    new RegExp('(^|[^A-Za-z0-9_.-])(' + pattern + ')(?=$|[^A-Za-z0-9_.-])', 'g'),
+    (_match, prefix: string, identifier: string) => `${prefix}${humanizeIdentifier(identifier)}`,
+  );
+  return sanitized;
 }
 
 // ── Tool status messages ──────────────────────────────────────────────────────
@@ -286,10 +692,10 @@ function toolStatusText(name: string): string {
  * Read scopes are always granted. Write scopes depend on config toggles.
  */
 export function buildAgentScopes(config: AgentConfig): string[] {
-  const scopes = ['read', 'contacts:read', 'accounts:read', 'opportunities:read', 'activities:read', 'context:read'];
+  const scopes = ['read', 'contacts:read', 'accounts:read', 'opportunities:read', 'use_cases:read', 'activities:read', 'context:read'];
 
   if (config.can_write_objects) {
-    scopes.push('contacts:write', 'accounts:write', 'opportunities:write', 'write');
+    scopes.push('contacts:write', 'accounts:write', 'opportunities:write', 'use_cases:write', 'write');
   }
   if (config.can_log_activities) {
     scopes.push('activities:write');
@@ -310,8 +716,9 @@ export function buildAgentScopes(config: AgentConfig): string[] {
  * Convert CRM MCP tools into the provider-agnostic AgentToolDef format,
  * filtering to only tools the agent is allowed to call.
  */
-function getAvailableTools(db: DbPool, scopes: string[]): { defs: AgentToolDef[]; handlers: Map<string, ToolDef> } {
+function getAvailableTools(db: DbPool, scopes: string[]): { defs: AgentToolDef[]; handlers: Map<string, ToolDef>; catalog: Map<string, ToolDef> } {
   const allTools = getAllTools(db);
+  const catalog = new Map(allTools.map(tool => [tool.name, tool]));
   const defs: AgentToolDef[] = [];
   const handlers = new Map<string, ToolDef>();
 
@@ -325,6 +732,7 @@ function getAvailableTools(db: DbPool, scopes: string[]): { defs: AgentToolDef[]
   };
 
   for (const tool of allTools) {
+    if (!WORKSPACE_AGENT_TOOL_ALLOWLIST.has(tool.name)) continue;
     try {
       enforceToolScopes(tool.name, testActor);
     } catch {
@@ -339,7 +747,11 @@ function getAvailableTools(db: DbPool, scopes: string[]): { defs: AgentToolDef[]
     handlers.set(tool.name, tool);
   }
 
-  return { defs, handlers };
+  return { defs, handlers, catalog };
+}
+
+function workspaceAgentToolNamesForScopes(db: DbPool, scopes: string[]): string[] {
+  return getAvailableTools(db, scopes).defs.map(tool => tool.name);
 }
 
 function normalizeToolCallName(name: string, handlers: Map<string, ToolDef>): string {
@@ -694,16 +1106,16 @@ function buildSystemPrompt(
 
   const capLines = ['# Capabilities'];
   capLines.push('**You CAN:**');
-  capLines.push('- Search, read, and summarise typed revenue records');
+  capLines.push('- Search, read, and summarise customer records');
   capLines.push('- Search confirmed workspace Memory and review unconfirmed Signals');
   capLines.push('- Add and update context Memory entries');
-  if (canWrite)      capLines.push('- Create, update, and delete contacts, accounts, and opportunities');
+  if (canWrite)      capLines.push('- Create, update, and delete contacts, accounts, opportunities, and use cases');
   if (canActivities) capLines.push('- Log and complete activities');
   if (canAssignments) capLines.push('- Create and manage assignments');
   if (canWrite)      capLines.push('- Configure email delivery and send emails');
   capLines.push('');
   capLines.push('**You CANNOT:**');
-  if (!canWrite)      capLines.push('- Create, update, or delete CRM records (write access not enabled)');
+  if (!canWrite)      capLines.push('- Create, update, or delete customer records (write access not enabled)');
   if (!canActivities) capLines.push('- Log activities (not enabled)');
   if (!canAssignments) capLines.push('- Create assignments (not enabled)');
   capLines.push('- Access data outside this workspace or tenant');
@@ -714,10 +1126,10 @@ function buildSystemPrompt(
   parts.push(capLines.join('\n'));
 
   // ── 3b. Workflow pattern ──────────────────────────────────────────────────
-  parts.push([
+  const workflowLines = [
     '# Workflow',
     '**Simple lookups**: call the relevant tool → answer directly.',
-    '**Revenue tasks**: briefly state the goal, subject record, evidence you will use, and any action risk before tool-heavy work.',
+    '**Customer-record tasks**: briefly state the goal, subject record, evidence you will use, and any action risk before tool-heavy work.',
     '**Write operations / complex tasks**:',
     '  1. Gather — call `action_context_get`, `briefing_get`, and/or `context_find` to understand the current state',
     '  2. Plan — in one sentence, tell the user what you are about to do',
@@ -731,7 +1143,25 @@ function buildSystemPrompt(
     'When you learn useful customer context in conversation, propose it for review before treating it as saved memory unless you explicitly call a context write tool.',
     'For risky work, prefer HITL approval tools and clearly explain what is waiting on a human decision.',
     "If a tool denies access, do not try to work around it. Explain that the record is outside the user's visible book of business or current permissions.",
-  ].join('\n'));
+    "If a tool reports missing required details, invalid values, permissions, approval requirements, or disabled settings, explain that blocker plainly. Do not describe those cases as missing CRMy capabilities or missing tools.",
+  ];
+  if (canWrite) {
+    workflowLines.push(
+      '',
+      '**Record creation requests**:',
+      '- If the user asks to create or update a contact, account, opportunity, or use case, do not say you lack a create/update tool when the matching tool is available.',
+      '- For "create a new contact John Doe", resolve possible duplicates first with `customer_record_resolve`, then call `contact_create` with first_name: "John", last_name: "Doe" unless the resolver finds an existing record or the user provided more fields.',
+      '- For lightweight natural-language creation with several fields, use `record_draft_preview` when available to preview fields, then call the relevant create tool after the required fields are clear.',
+      '- Ask a clarifying question only when a required field is missing or the resolver returns ambiguous candidates that the user must choose between.',
+    );
+  } else {
+    workflowLines.push(
+      '',
+      '**Record creation requests**:',
+      '- If the user asks to create or update a customer record, explain that Workspace Agent customer-record writes are disabled in Model Settings. You may still draft the proposed fields or help the user add Raw Context.',
+    );
+  }
+  parts.push(workflowLines.join('\n'));
 
   // ── 4. Tool guide (grouped by entity) ────────────────────────────────────
   const toolNames = new Set(toolDefs.map(t => t.name));
@@ -747,11 +1177,14 @@ function buildSystemPrompt(
   const contacts = pick('contact_search', 'contact_get', 'contact_get_timeline', 'contact_create', 'contact_update', 'contact_set_lifecycle', 'contact_outreach');
   if (contacts) toolLines.push(`**Contacts:** ${contacts}`);
 
-  const accounts = pick('account_search', 'account_get', 'account_get_hierarchy', 'account_health_report', 'account_update', 'account_set_health_score');
+  const accounts = pick('account_search', 'account_get', 'account_get_hierarchy', 'account_health_report', 'account_create', 'account_update', 'account_set_health_score');
   if (accounts) toolLines.push(`**Accounts:** ${accounts}`);
 
   const opps = pick('opportunity_search', 'opportunity_get', 'opportunity_create', 'opportunity_update', 'opportunity_advance_stage', 'deal_advance');
   if (opps) toolLines.push(`**Opportunities:** ${opps}`);
+
+  const useCases = pick('use_case_search', 'use_case_get', 'use_case_create', 'use_case_update', 'use_case_advance_stage', 'use_case_get_timeline', 'use_case_summary');
+  if (useCases) toolLines.push(`**Use Cases:** ${useCases}`);
 
   const activities = pick('activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete');
   if (activities) toolLines.push(`**Activities:** ${activities}`);
@@ -772,8 +1205,9 @@ function buildSystemPrompt(
   const grouped = new Set([
     'tool_guide', 'customer_record_resolve', 'action_context_get', 'briefing_get', 'context_find', 'context_search', 'context_semantic_search', 'guide_search',
     'contact_search', 'contact_get', 'contact_get_timeline', 'contact_create', 'contact_update', 'contact_set_lifecycle', 'contact_outreach',
-    'account_search', 'account_get', 'account_get_hierarchy', 'account_health_report', 'account_update', 'account_set_health_score',
+    'account_search', 'account_get', 'account_get_hierarchy', 'account_health_report', 'account_create', 'account_update', 'account_set_health_score',
     'opportunity_search', 'opportunity_get', 'opportunity_create', 'opportunity_update', 'opportunity_advance_stage', 'deal_advance',
+    'use_case_search', 'use_case_get', 'use_case_create', 'use_case_update', 'use_case_advance_stage', 'use_case_get_timeline', 'use_case_summary',
     'activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete',
     'context_add', 'context_get', 'context_find', 'context_list', 'context_raw_source_list', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_group_list', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale',
     'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status', 'hitl_list_pending',
@@ -801,8 +1235,11 @@ function buildSystemPrompt(
     '- When a request is ambiguous or could reasonably be interpreted multiple ways, ask ONE focused clarifying question before acting. Never ask more than one question at a time. Example: "Did you mean update the lifecycle stage, or log this as a completed activity?" — then wait for the answer.',
     '- For any destructive or bulk action, state exactly what you are about to do and how many records are affected, then do it immediately. Do not ask for confirmation — just be transparent.',
     '- Be concise. After completing a task, confirm what changed and show the key new values.',
-    '- If a tool call fails, explain the error in plain language and suggest a correction.',
+    '- If a tool call fails, explain the blocker in plain language and suggest a correction. Distinguish missing required information, ambiguous records, permission limits, disabled settings, approval requirements, and true unsupported capabilities.',
     '- Format lists and structured data as markdown tables when it aids readability.',
+    '- User-facing answers must use CRMy product language, not raw API/tool identifiers. Say "Confirm Signal", "Deal risk", "Signal review", or "System-of-record writeback" instead of `context_signal_group_promote`, `deal_risk`, `context.signal_review`, or `external.writeback`.',
+    '- Do not include internal record IDs in user-facing answers. Refer to customer records, Signals, Memory, handoffs, and actions by name, type, status, or next step. Include IDs only when the user explicitly asks for developer/debug details.',
+    '- Do not render internal tool names, action types, context types, enum values, JSON keys, or record IDs as code blocks unless the user explicitly asks for developer/debug details.',
     '- Do not use excessive disclaimers or refusals for normal CRM operations.',
     '',
     '# Duplicate Prevention',
@@ -867,7 +1304,7 @@ export async function runAgentTurn(
 ): Promise<ConversationMessage[]> {
   const apiKey = config.api_key_enc ? decrypt(config.api_key_enc).trim() : '';
   const agentScopes = buildAgentScopes(config);
-  const { defs: toolDefs, handlers } = getAvailableTools(db, agentScopes);
+  const { defs: toolDefs, handlers, catalog } = getAvailableTools(db, agentScopes);
 
   // Build the agent actor context (used when executing tools)
   const agentActor: ActorContext = {
@@ -1061,7 +1498,7 @@ export async function runAgentTurn(
 
     // No tool calls — we're done
     if (!result.tool_calls.length) {
-      history.push({ role: 'assistant', content: result.content });
+      history.push({ role: 'assistant', content: sanitizeAgentAnswer(result.content) });
       return history;
     }
 
@@ -1075,7 +1512,9 @@ export async function runAgentTurn(
     if (!toolCalls.length) {
       if (invalidToolCalls.length > 0 && !malformedToolRetryUsed) {
         malformedToolRetryUsed = true;
-        const invalidNames = invalidToolCalls.map(tc => tc.name || '(unnamed tool)').join(', ');
+        const feedback = invalidToolCalls
+          .map(tc => `- ${invalidToolCallFeedback(tc, handlers, catalog)}`)
+          .join('\n');
         history.push({
           role: 'assistant',
           content: result.content || '',
@@ -1083,9 +1522,11 @@ export async function runAgentTurn(
         history.push({
           role: 'user',
           content: [
-            'Your previous tool call was malformed and was not executed.',
-            `Invalid tool call name(s): ${invalidNames}.`,
+            'Your previous CRMy action was not executed.',
+            'Why it was blocked:',
+            feedback,
             'Retry by calling exactly one available tool at a time, using that tool name exactly and valid JSON arguments that satisfy the tool schema.',
+            'If the requested action is blocked by permissions, disabled settings, missing required details, ambiguity, or approval policy, explain that blocker plainly instead of saying CRMy lacks the capability.',
             'If no tool is needed, answer directly without tool calls.',
           ].join('\n'),
         });
@@ -1093,9 +1534,9 @@ export async function runAgentTurn(
       }
       const content = [
         result.content,
-        'I could not continue because the model produced an invalid tool call. Please try the request again or choose a more specific action.',
+        'I could not continue because the model produced an unavailable or malformed action request. If this is a write action, check Workspace Agent permissions/settings; otherwise try a more specific request.',
       ].filter(Boolean).join('\n\n');
-      history.push({ role: 'assistant', content });
+      history.push({ role: 'assistant', content: sanitizeAgentAnswer(content) });
       return history;
     }
 
@@ -1124,17 +1565,23 @@ export async function runAgentTurn(
         callIndex,
         toolName: tc.name,
       });
+      const validation = validateAgentToolArguments({
+        handler,
+        toolName: tc.name,
+        args,
+      });
+      const executableArgs = validation.ok ? validation.args : args;
 
       // Emit human-readable status BEFORE the tool_call event so the UI can
       // show progress immediately (mirrors the Windsurf toolSummary pattern).
       // turn_id groups all calls in this round so the UI collapses them.
       onEvent({ type: 'tool_status', id: tc.id, name: tc.name, status: toolStatusText(tc.name), turn_id: turnId });
-      onEvent({ type: 'tool_call', id: tc.id, name: tc.name, arguments: args, turn_id: turnId });
+      onEvent({ type: 'tool_call', id: tc.id, name: tc.name, arguments: executableArgs, turn_id: turnId });
 
       let toolResult: unknown;
       let isError = false;
       const callStart = Date.now();
-      const replayKey = toolReplayKey(tc.name, args);
+      const replayKey = toolReplayKey(tc.name, executableArgs);
       const hasReplay = toolReplayCache.has(replayKey);
 
       if (hasReplay) {
@@ -1146,13 +1593,13 @@ export async function runAgentTurn(
           status: `Reused previous ${tc.name.replace(/_/g, ' ')} result`,
           turn_id: turnId,
         });
-      } else if (!handler) {
-        toolResult = { error: `Unknown tool: ${tc.name}` };
+      } else if (!validation.ok) {
+        toolResult = { error: validation.error };
         isError = true;
       } else {
         try {
           if (opts?.abortSignal?.aborted) throw new Error('Agent turn was cancelled');
-          toolResult = await withTimeout(handler.handler(args, agentActor), TOOL_TIMEOUT_MS, tc.name);
+          toolResult = await withTimeout(handler!.handler(executableArgs, agentActor), TOOL_TIMEOUT_MS, tc.name);
         } catch (err) {
           toolResult = { error: normalizeToolErrorMessage(err) };
           isError = true;
@@ -1169,7 +1616,7 @@ export async function runAgentTurn(
           userId: actor.actor_id,
           turnIndex: turnIndex++,
           toolName: tc.name,
-          toolArgs: args,
+          toolArgs: executableArgs,
           toolResult,
           isError,
           durationMs,
@@ -1200,7 +1647,7 @@ export async function runAgentTurn(
   // If we exhausted MAX_TOOL_ROUNDS, add an error
   history.push({
     role: 'assistant',
-    content: 'I reached the maximum number of tool calls for this turn. Please try a more specific request.',
+    content: sanitizeAgentAnswer('I reached the maximum number of tool calls for this turn. Please try a more specific request.'),
   });
 
   return history;
@@ -1208,5 +1655,9 @@ export async function runAgentTurn(
 
 export const __testAgentEngine = {
   buildAgentToolIdempotencyKey,
+  friendlyToolValidationError,
+  sanitizeAgentAnswer,
   summarizeActionResult,
+  toolUnavailableMessage,
+  workspaceAgentToolNamesForScopes,
 };

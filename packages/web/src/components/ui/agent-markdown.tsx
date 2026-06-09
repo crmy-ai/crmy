@@ -21,6 +21,60 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
 
+const INTERNAL_LABELS: Record<string, string> = {
+  'context.signal_promote': 'Signal confirmation approval',
+  'context.signal_review': 'Signal review',
+  'external.writeback': 'System-of-record writeback',
+  context_signal_group_promote: 'Confirm Signal',
+  context_signal_promote: 'Confirm Signal',
+  context_signal_group_get: 'Review Signal details',
+  context_signal_group_list: 'Review Signals',
+  context_signal_handoff: 'Send Signal for review',
+  context_signal_group_reject: 'Dismiss Signal',
+  context_signal_group_complete_details: 'Add Signal details',
+  context_ingest_auto: 'Add Context',
+  action_context_get: 'Action Context',
+  briefing_get: 'Briefing',
+  hitl_submit_request: 'Request approval',
+  hitl_check_status: 'Check approval status',
+  hitl_list_pending: 'Pending approvals',
+  deal_risk: 'Deal risk',
+  stakeholder: 'Stakeholder',
+  stakeholder_role: 'Stakeholder role',
+  key_fact: 'Key fact',
+  commitment: 'Commitment',
+  next_step: 'Next step',
+  objection: 'Objection',
+  competitive_intel: 'Competitive intel',
+  methodology_gap: 'Methodology gap',
+  success_criteria: 'Success criteria',
+  buying_process: 'Buying process',
+  forecast_signal: 'Forecast signal',
+  ready_to_confirm: 'Ready for Memory',
+};
+
+const INTERNAL_IDENTIFIER_PREFIXES = [
+  'account_',
+  'action_',
+  'activity_',
+  'assignment_',
+  'briefing_',
+  'calendar_',
+  'contact_',
+  'context_',
+  'customer_record_',
+  'email_',
+  'entity_',
+  'hitl_',
+  'opportunity_',
+  'pipeline_',
+  'record_draft_',
+  'sequence_',
+  'sor_',
+  'use_case_',
+  'workflow_',
+];
+
 function safeHref(href?: string): string | undefined {
   if (!href) return undefined;
   if (href.startsWith('/') || href.startsWith('#')) return href;
@@ -30,6 +84,67 @@ function safeHref(href?: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function internalLabelPattern(): string {
+  return Object.keys(INTERNAL_LABELS)
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp)
+    .join('|');
+}
+
+function isLikelyInternalIdentifier(value: string): boolean {
+  if (INTERNAL_LABELS[value]) return true;
+  if (!/^[a-z][a-z0-9]*(?:[_.][a-z0-9]+){1,}$/.test(value)) return false;
+  return INTERNAL_IDENTIFIER_PREFIXES.some(prefix => value.startsWith(prefix))
+    || value.includes('.') && /^(context|external|action)\./.test(value);
+}
+
+function humanizeIdentifier(value: string): string {
+  return INTERNAL_LABELS[value]
+    ?? value
+      .replace(/[_.]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function sanitizeAgentDisplay(content: string): string {
+  const pattern = internalLabelPattern();
+  let sanitized = content;
+  const internalIdPattern = String.raw`(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{6,}\.{3,}[0-9a-f]{2,})`;
+
+  // Keep leaked internal record IDs from becoming visually heavy code blocks in agent prose.
+  sanitized = sanitized.replace(new RegExp(String.raw`\s*\(\s*` + internalIdPattern + String.raw`\s*\)`, 'gi'), '');
+  sanitized = sanitized.replace(new RegExp(String.raw`\s*\(\s*` + '`' + internalIdPattern + '`' + String.raw`\s*\)`, 'gi'), '');
+  sanitized = sanitized.replace(new RegExp('\\s*\\(\\s*```\\s*' + internalIdPattern + '\\s*```\\s*\\)', 'gi'), '');
+  sanitized = sanitized.replace(new RegExp('```\\s*' + internalIdPattern + '\\s*```', 'gi'), '');
+  sanitized = sanitized.replace(new RegExp('`(' + internalIdPattern + ')`', 'gi'), 'record reference');
+
+  if (!pattern) return sanitized;
+  sanitized = sanitized.replace(
+    new RegExp('```\\s*(' + pattern + ')\\s*```', 'g'),
+    (_match, identifier: string) => humanizeIdentifier(identifier),
+  );
+  sanitized = sanitized.replace(/```\s*([a-z][a-z0-9]*(?:[_.][a-z0-9]+){1,})\s*```/g, (match, identifier: string) =>
+    isLikelyInternalIdentifier(identifier) ? humanizeIdentifier(identifier) : match,
+  );
+  sanitized = sanitized.replace(
+    new RegExp('`(' + pattern + ')`', 'g'),
+    (_match, identifier: string) => humanizeIdentifier(identifier),
+  );
+  sanitized = sanitized.replace(/`([a-z][a-z0-9]*(?:[_.][a-z0-9]+){1,})`/g, (match, identifier: string) =>
+    isLikelyInternalIdentifier(identifier) ? humanizeIdentifier(identifier) : match,
+  );
+  sanitized = sanitized.replace(
+    new RegExp('(^|[^A-Za-z0-9_.-])(' + pattern + ')(?=$|[^A-Za-z0-9_.-])', 'g'),
+    (_match, prefix: string, identifier: string) => `${prefix}${humanizeIdentifier(identifier)}`,
+  );
+  return sanitized;
 }
 
 // Prose component map — each key maps to a styled wrapper for that HTML element.
@@ -178,7 +293,7 @@ interface AgentMarkdownProps {
 export function AgentMarkdown({ content }: AgentMarkdownProps) {
   return (
     <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-      {content}
+      {sanitizeAgentDisplay(content)}
     </ReactMarkdown>
   );
 }

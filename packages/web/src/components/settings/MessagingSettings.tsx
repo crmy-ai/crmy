@@ -873,27 +873,67 @@ function InboundEmailSection() {
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
+type MessagingTab = 'email-provider' | 'source-filters' | 'inbound-email' | 'notifications';
+
 export default function MessagingSettings() {
+  const [activeTab, setActiveTab] = useState<MessagingTab>('email-provider');
+  const tabs: { key: MessagingTab; label: string; description: string; Icon: React.ElementType }[] = [
+    {
+      key: 'email-provider',
+      label: 'Email Provider',
+      description: 'Send approved drafts and sequence emails.',
+      Icon: Mail,
+    },
+    {
+      key: 'source-filters',
+      label: 'Source Filters',
+      description: 'Control what email and activity data CRMy can read.',
+      Icon: SlidersHorizontal,
+    },
+    {
+      key: 'inbound-email',
+      label: 'Inbound Webhook',
+      description: 'Receive customer replies from inbound parse providers.',
+      Icon: Download,
+    },
+    {
+      key: 'notifications',
+      label: 'Notifications',
+      description: 'Route workflow and alert messages to channels like Slack.',
+      Icon: MessageSquare,
+    },
+  ];
+
   return (
-    <div className="space-y-8">
+    <div className="w-full space-y-5">
       <div>
         <h2 className="font-display font-bold text-lg text-foreground mb-1">Messaging</h2>
-        <p className="text-sm text-muted-foreground">Configure email delivery and notification channels for your customer context workspace.</p>
+        <p className="text-sm text-muted-foreground">Configure how CRMy sends approved customer messages, receives customer replies, and routes operational notifications.</p>
       </div>
 
-      <EmailProviderSection />
+      <div className="flex flex-wrap gap-1 border-b border-border">
+        {tabs.map(({ key, label, Icon }) => (
+          <button
+            key={key}
+            onClick={() => setActiveTab(key)}
+            className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
+              activeTab === key
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <Icon className="h-4 w-4" />
+            {label}
+          </button>
+        ))}
+      </div>
 
-      <div className="border-t border-border" />
-
-      <SourceFiltersSection />
-
-      <div className="border-t border-border" />
-
-      <InboundEmailSection />
-
-      <div className="border-t border-border" />
-
-      <MessagingChannelsSection />
+      <section className="space-y-4">
+        {activeTab === 'email-provider' && <EmailProviderSection />}
+        {activeTab === 'source-filters' && <SourceFiltersSection />}
+        {activeTab === 'inbound-email' && <InboundEmailSection />}
+        {activeTab === 'notifications' && <MessagingChannelsSection />}
+      </section>
     </div>
   );
 }

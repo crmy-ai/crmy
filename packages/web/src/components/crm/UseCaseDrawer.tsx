@@ -12,6 +12,7 @@ import { ObjectActionBar } from './ObjectActionBar';
 import { CustomFieldsSection } from './CrmWidgets';
 import { ActivityTimeline } from './ActivityTimeline';
 import { DrawerSection } from './DrawerSection';
+import { DrawerTabBar, type DrawerView } from './DrawerTabBar';
 import { useCaseStageConfig } from '@/lib/stageConfig';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
@@ -307,10 +308,11 @@ function UseCaseEditForm({
 }
 
 export function UseCaseDrawer() {
-  const { drawerEntityId, closeDrawer, drawerEditing, setDrawerEditing, openQuickAdd } = useAppStore();
+  const { drawerEntityId, closeDrawer, drawerBriefing, drawerEditing, setDrawerEditing, openQuickAdd } = useAppStore();
   const editing = drawerEditing;
   const setEditing = setDrawerEditing;
-  const [briefing, setBriefing] = useState(false);
+  const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
+  const graphHref = drawerEntityId ? `/use-cases/${drawerEntityId}/graph` : undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: useCaseData, isLoading } = useUseCase(drawerEntityId ?? '') as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -356,8 +358,13 @@ export function UseCaseDrawer() {
     setEditing(true);
   };
 
-  if (briefing) {
-    return <BriefingPanel subjectType="use_case" subjectId={drawerEntityId!} subjectName={name} onClose={() => setBriefing(false)} />;
+  if (view === 'brief') {
+    return (
+      <>
+        <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} />
+        <BriefingPanel subjectType="use_case" subjectId={drawerEntityId!} subjectName={name} onClose={() => setView('detail')} />
+      </>
+    );
   }
 
   if (editing) {
@@ -408,9 +415,10 @@ export function UseCaseDrawer() {
         </div>
       </div>
 
+      <DrawerTabBar view={view} onChange={setView} graphHref={graphHref} showBriefTab={false} />
       <ObjectActionBar
         context={{ type: 'use-case', id: useCase.id, name, detail: stage }}
-        onBrief={() => setBriefing(true)}
+        onBrief={() => setView('brief')}
       />
 
       {/* Stats */}

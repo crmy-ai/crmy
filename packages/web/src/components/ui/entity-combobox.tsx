@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { Check, ChevronsUpDown, X } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, formatCompactCurrency } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Command,
@@ -47,7 +47,7 @@ function getLabel(entityType: EntityType, item: any): string {
   }
   if (entityType === 'account') return item.name ?? item.id;
   if (entityType === 'opportunity') {
-    const amt = item.amount ? ` · $${Number(item.amount) >= 1000 ? `${(Number(item.amount) / 1000).toFixed(0)}K` : item.amount}` : '';
+    const amt = item.amount ? ` · ${formatCompactCurrency(Number(item.amount))}` : '';
     return (item.name ?? item.id) + amt;
   }
   if (entityType === 'use_case') return item.name ?? item.id;

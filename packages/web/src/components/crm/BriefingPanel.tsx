@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { useActionContext, useBriefingSummary } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import { FileText, ChevronDown, ChevronUp, AlertTriangle, ClipboardList, Brain, X, Phone, Mail, Calendar, Monitor, CheckSquare, Activity, Swords, Sparkles, Loader2, Network, Gauge, EyeOff, Bot, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, FileText, ChevronDown, ChevronUp, AlertTriangle, ClipboardList, Brain, Phone, Mail, Calendar, Monitor, CheckSquare, Activity, Swords, Sparkles, Loader2, Network, Gauge, EyeOff, Bot, CheckCircle2 } from 'lucide-react';
 import { ACTIVITY_COLORS } from './GraphSidebar';
 import { TYPE_COLORS } from './ContextPanel';
 import { toast } from '@/components/ui/use-toast';
@@ -570,8 +570,13 @@ function BriefingHeader({ onClose }: { onClose: () => void }) {
     <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
       <FileText className="w-4 h-4 text-primary" />
       <h2 className="font-display font-bold text-foreground flex-1">Briefing</h2>
-      <button onClick={onClose} className="p-1 rounded-lg hover:bg-muted transition-colors">
-        <X className="w-4 h-4 text-muted-foreground" />
+      <button
+        onClick={onClose}
+        className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        title="Back to record details"
+      >
+        <ArrowLeft className="w-4 h-4" />
+        Back
       </button>
     </div>
   );

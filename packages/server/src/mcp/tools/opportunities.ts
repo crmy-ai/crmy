@@ -18,6 +18,7 @@ import { checkOpportunityDuplicate } from '../../services/deduplication.js';
 import { runIdempotent } from '../../db/repos/idempotency.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+import { writeToolUx } from '../tool-ux.js';
 import { assertOwnedObjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
 import { verifiedActionContextMetadataForReceipt } from '../../services/action-context.js';
 
@@ -54,6 +55,11 @@ export function opportunityTools(db: DbPool): ToolDef[] {
       tier: 'extended',
       description: 'Create a new sales opportunity linked to an account. Set stage, amount (in cents), close_date, probability, and forecast_cat to build the pipeline record. The amount field represents ARR in cents (e.g. 180000 for $1,800). If a duplicate opportunity is detected (same name on the same account), a 409 is returned with candidates. Pass allow_duplicates: true to create anyway.',
       inputSchema: opportunityCreate,
+      ux: writeToolUx({
+        displayName: 'Create opportunity',
+        actionPhrase: 'create the opportunity',
+        objectLabel: 'opportunity',
+      }),
       handler: async (input: z.infer<typeof opportunityCreate>, actor: ActorContext) => {
         return runOpportunityOperation(db, actor, 'opportunity_create', input, async () => {
         // ── Duplicate check ──
@@ -242,6 +248,11 @@ export function opportunityTools(db: DbPool): ToolDef[] {
       tier: 'extended',
       description: 'Update an opportunity by passing its id and a patch object with fields to change. Supports amount, close_date, probability, forecast_cat, description, and custom_fields. For stage changes, prefer opportunity_advance_stage which auto-logs the transition.',
       inputSchema: opportunityUpdate,
+      ux: writeToolUx({
+        displayName: 'Update opportunity',
+        actionPhrase: 'update the opportunity',
+        objectLabel: 'opportunity',
+      }),
       handler: async (input: z.infer<typeof opportunityUpdate>, actor: ActorContext) => {
         return runOpportunityOperation(db, actor, 'opportunity_update', input, async () => {
         const before = await oppRepo.getOpportunity(db, actor.tenant_id, input.id);

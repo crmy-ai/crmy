@@ -19,6 +19,7 @@ import { ContactAvatar } from '@/components/crm/ContactAvatar';
 import { useRecordMemoryCounts } from '@/hooks/useRecordMemoryCounts';
 import { stageConfig } from '@/lib/stageConfig';
 import { headerDescription } from '@/lib/headerCopy';
+import { formatCompactCurrency } from '@/lib/utils';
 
 type ViewMode = 'kanban' | 'table' | 'forecast';
 const kanbanStages = ['prospecting', 'qualification', 'proposal', 'negotiation', 'closed_won', 'closed_lost'];
@@ -77,6 +78,25 @@ const sortOptions: SortOption[] = [
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Opportunity = any;
+
+function opportunityAmount(opportunity: Opportunity): number {
+  const amount = Number(opportunity.amount ?? 0);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function opportunityProbability(opportunity: Opportunity): number {
+  const probability = Number(opportunity.probability ?? 0);
+  if (!Number.isFinite(probability)) return 0;
+  return Math.min(100, Math.max(0, probability));
+}
+
+function isOpenOpportunity(opportunity: Opportunity): boolean {
+  return opportunity.stage !== 'closed_won' && opportunity.stage !== 'closed_lost';
+}
+
+function isBestCaseOpportunity(opportunity: Opportunity): boolean {
+  return isOpenOpportunity(opportunity) && ['best_case', 'commit'].includes(String(opportunity.forecast_cat ?? 'pipeline'));
+}
 
 export default function Opportunities() {
   const navigate = useNavigate();
@@ -139,6 +159,14 @@ export default function Opportunities() {
 
   useEffect(() => { setPage(1); }, [search, activeFilters, sort, closeDate, customFrom, customTo]);
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const forecastMetrics = useMemo(() => {
+    const open = filtered.filter(isOpenOpportunity);
+    return {
+      weightedPipeline: open.reduce((sum, opportunity) => sum + opportunityAmount(opportunity) * opportunityProbability(opportunity) / 100, 0),
+      bestCase: filtered.filter(isBestCaseOpportunity).reduce((sum, opportunity) => sum + opportunityAmount(opportunity), 0),
+      closedWon: filtered.filter(opportunity => opportunity.stage === 'closed_won').reduce((sum, opportunity) => sum + opportunityAmount(opportunity), 0),
+    };
+  }, [filtered]);
 
   const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
     <th onClick={() => handleSortChange(sortKey)} className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground cursor-pointer hover:text-foreground transition-colors select-none">
@@ -223,7 +251,7 @@ export default function Opportunities() {
             {kanbanStages.map((stage) => {
               const config = stageConfig[stage] ?? { label: stage, color: '#94a3b8' };
               const stageOpps = filtered.filter((d) => d.stage === stage);
-              const total = stageOpps.reduce((sum, d) => sum + ((d.amount as number) || 0), 0);
+              const total = stageOpps.reduce((sum, d) => sum + opportunityAmount(d), 0);
               return (
                 <div key={stage} className="flex-shrink-0 w-[280px] md:w-72 flex flex-col snap-center">
                   <div className="flex items-center justify-between mb-3 px-1">
@@ -233,12 +261,12 @@ export default function Opportunities() {
                       </span>
                       <span className="text-xs text-muted-foreground font-mono">{stageOpps.length}</span>
                     </div>
-                    <span className="text-xs text-muted-foreground font-mono">${(total / 1000).toFixed(0)}K</span>
+                    <span className="text-xs text-muted-foreground font-mono">{formatCompactCurrency(total)}</span>
                   </div>
                   <div className="flex-1 space-y-2">
                     {stageOpps.map((opp, i) => {
                       const contactName = (opp.contact_name ?? opp.contactName ?? '') as string;
-                      const amount = (opp.amount as number) ?? 0;
+                      const amount = opportunityAmount(opp);
                       const daysInStage = (opp.days_in_stage ?? opp.daysInStage ?? 0) as number;
                       return (
                         <motion.div key={opp.id as string} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
@@ -255,7 +283,7 @@ export default function Opportunities() {
                                 <FileText className="w-3.5 h-3.5 text-primary" />
                               </button>
                               {agentEnabled && (
-                                <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: opp.id as string, name: opp.name as string, detail: `$${(amount / 1000).toFixed(0)}K` }); navigate('/agent'); }}
+                                <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: opp.id as string, name: opp.name as string, detail: formatCompactCurrency(amount) }); navigate('/agent'); }}
                                   className="p-0.5 rounded-lg hover:bg-violet-500/10 transition-all" title="Open with agent">
                                   <Bot className="w-3.5 h-3.5 text-violet-500" />
                                 </button>
@@ -270,7 +298,7 @@ export default function Opportunities() {
                           )}
                           <div className="flex items-center justify-between mt-2.5">
                             <span className="text-sm font-display font-extrabold text-foreground">
-                              ${amount >= 1000 ? `${(amount / 1000).toFixed(0)}K` : amount}
+                              {formatCompactCurrency(amount)}
                             </span>
                             <div className="flex items-center gap-1.5">
                               {opp.deal_health_score != null && (
@@ -335,15 +363,14 @@ export default function Opportunities() {
                         <SortHeader label="Probability" sortKey="probability" />
                         <SortHeader label="Health" sortKey="deal_health_score" />
                         <SortHeader label="Close Date" sortKey="close_date" />
-                        <th className="px-4 py-3 text-left text-xs font-display font-semibold text-muted-foreground">Briefing</th>
-                        {agentEnabled && <th className="px-2 py-3 w-8"></th>}
+                        <th className="px-2 py-3 w-16"></th>
                       </tr>
                     </thead>
                     <tbody>
                       {paginated.map((d, i) => {
                         const contactName = (d.contact_name ?? d.contactName ?? '') as string;
                         const accountName = (d.account_name ?? d.accountName ?? '') as string;
-                        const amount = (d.amount as number) ?? 0;
+                        const amount = opportunityAmount(d);
                         return (
                           <tr key={d.id as string} onClick={() => openDrawer('opportunity', d.id as string)}
                             className={`border-b border-border last:border-0 hover:bg-primary/5 cursor-pointer transition-colors group ${i % 2 === 1 ? 'bg-surface-sunken/30' : ''}`}>
@@ -356,16 +383,13 @@ export default function Opportunities() {
                             <td className="px-4 py-3 text-muted-foreground">{accountName || '—'}</td>
                             <td className="px-4 py-3">
                               {contactName ? (
-                                <div className="flex items-center gap-2">
-                                  <ContactAvatar name={contactName} className="w-5 h-5 rounded-full text-[8px]" />
-                                  <span className="text-muted-foreground">{contactName}</span>
-                                </div>
+                                <span className="text-muted-foreground">{contactName}</span>
                               ) : (
                                 <span className="text-muted-foreground">—</span>
                               )}
                             </td>
                             <td className="px-4 py-3 font-display font-bold text-foreground">
-                              ${amount >= 1000 ? `${(amount / 1000).toFixed(0)}K` : amount}
+                              {formatCompactCurrency(amount)}
                             </td>
                             <td className="px-4 py-3">{d.stage && <StageBadge stage={d.stage as string} />}</td>
                             <td className="px-4 py-3 text-muted-foreground">{d.probability ? `${d.probability}%` : '—'}</td>
@@ -377,25 +401,24 @@ export default function Opportunities() {
                             <td className="px-4 py-3 text-muted-foreground text-xs">
                               {d.close_date ? new Date(d.close_date as string).toLocaleDateString() : '—'}
                             </td>
-                            <td className="px-4 py-3">
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); openDrawerBriefing('opportunity', d.id as string); }}
-                                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-primary/20 bg-primary/10 px-2.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/15"
-                                title="View briefing"
-                              >
-                                <FileText className="h-3.5 w-3.5" />
-                                Brief
-                              </button>
-                            </td>
-                            {agentEnabled && (
-                              <td className="px-2 py-3">
-                                <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: d.id as string, name: d.name as string, detail: `$${(amount / 1000).toFixed(0)}K` }); navigate('/agent'); }}
+                            <td className="px-2 py-3">
+                              <div className="flex items-center gap-0.5 opacity-0 transition-all group-hover:opacity-100">
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); openDrawerBriefing('opportunity', d.id as string); }}
+                                  className="p-1.5 rounded-lg hover:bg-primary/10 transition-colors"
+                                  title="View briefing"
+                                >
+                                  <FileText className="h-3.5 w-3.5 text-primary" />
+                                </button>
+                                {agentEnabled && (
+                                <button onClick={(e) => { e.stopPropagation(); openAIWithContext({ type: 'opportunity', id: d.id as string, name: d.name as string, detail: formatCompactCurrency(amount) }); navigate('/agent'); }}
                                   className="p-1.5 rounded-lg hover:bg-violet-500/10 transition-all" title="Open with agent">
                                   <Bot className="w-3.5 h-3.5 text-violet-500" />
                                 </button>
-                              </td>
-                            )}
+                                )}
+                              </div>
+                            </td>
                           </tr>
                         );
                       })}
@@ -412,14 +435,14 @@ export default function Opportunities() {
           <div className="px-4 md:px-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
               {[
-                { label: 'Weighted Pipeline', value: filtered.filter(d => d.stage !== 'closed_won' && d.stage !== 'closed_lost').reduce((s, d) => s + ((d.amount as number) || 0) * ((d.probability as number) || 0) / 100, 0) },
-                { label: 'Best Case', value: filtered.filter(d => d.stage !== 'closed_lost').reduce((s, d) => s + ((d.amount as number) || 0), 0) },
-                { label: 'Closed Won', value: filtered.filter(d => d.stage === 'closed_won').reduce((s, d) => s + ((d.amount as number) || 0), 0) },
+                { label: 'Weighted Pipeline', value: forecastMetrics.weightedPipeline },
+                { label: 'Best Case', value: forecastMetrics.bestCase },
+                { label: 'Closed Won', value: forecastMetrics.closedWon },
               ].map((card) => (
                 <div key={card.label} className="bg-card border border-border rounded-2xl p-5 shadow-sm">
                   <p className="text-xs text-muted-foreground font-display font-semibold">{card.label}</p>
                   <p className="text-2xl font-display font-extrabold text-foreground mt-1">
-                    ${card.value >= 1_000_000 ? `${(card.value / 1_000_000).toFixed(2)}M` : `${(card.value / 1000).toFixed(0)}K`}
+                    {formatCompactCurrency(card.value)}
                   </p>
                 </div>
               ))}
@@ -429,8 +452,8 @@ export default function Opportunities() {
               <div className="space-y-4">
                 {kanbanStages.filter(s => s !== 'closed_lost').map((stage) => {
                   const config = stageConfig[stage] ?? { label: stage, color: '#94a3b8' };
-                  const total = filtered.filter(d => d.stage === stage).reduce((s, d) => s + ((d.amount as number) || 0), 0);
-                  const max = Math.max(...kanbanStages.map(s => filtered.filter(d => d.stage === s).reduce((sum, d) => sum + ((d.amount as number) || 0), 0)), 1);
+                  const total = filtered.filter(d => d.stage === stage).reduce((sum, d) => sum + opportunityAmount(d), 0);
+                  const max = Math.max(...kanbanStages.map(s => filtered.filter(d => d.stage === s).reduce((sum, d) => sum + opportunityAmount(d), 0)), 1);
                   return (
                     <div key={stage} className="flex items-center gap-3">
                       <span className="text-xs w-28 truncate font-semibold" style={{ color: config.color }}>{config.label}</span>
@@ -440,7 +463,7 @@ export default function Opportunities() {
                           className="h-full rounded-xl flex items-center px-3"
                           style={{ backgroundColor: config.color + '30' }}>
                           <span className="text-xs font-display font-bold" style={{ color: config.color }}>
-                            ${(total / 1000).toFixed(0)}K
+                            {formatCompactCurrency(total)}
                           </span>
                         </motion.div>
                       </div>

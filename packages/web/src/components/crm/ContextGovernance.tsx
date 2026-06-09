@@ -212,8 +212,8 @@ export function ContextGovernance() {
         <section className="rounded-xl border border-border bg-card p-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-semibold text-foreground">Memory Health Overview</p>
-              <p className="mt-1 text-xs text-muted-foreground">How much confirmed Memory is current enough for agents to rely on.</p>
+              <p className="font-display font-bold text-foreground">Memory Health Overview</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">Review Memory that needs attention before agents rely on it.</p>
             </div>
             <div className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-semibold ${
               stats.total > 0
@@ -236,7 +236,7 @@ export function ContextGovernance() {
         </section>
 
         <section className="rounded-xl border border-border bg-card p-4">
-          <p className="text-sm font-semibold text-foreground">What to do next</p>
+          <p className="font-display font-bold text-foreground">What to do next</p>
           <div className="mt-3 space-y-2 text-sm">
             {stats.total > 0 ? (
               <ActionHint icon={<AlertTriangle className="h-4 w-4" />} title="Review stale Memory" detail="Select visible rows below, then extend or retire context after verification." />
@@ -251,8 +251,8 @@ export function ContextGovernance() {
       <section className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-foreground">Memory Review Queue</p>
-            <p className="text-xs text-muted-foreground">Reconfirm or supersede expired Memory before agents rely on it.</p>
+            <p className="font-display font-bold text-foreground">Memory Review Queue</p>
+            <p className="mt-0.5 text-sm text-muted-foreground">Reconfirm or supersede expired Memory before agents rely on it.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={selectAll} disabled={staleEntries.length === 0} className="h-8 px-3 rounded-lg border border-border text-xs font-semibold text-muted-foreground hover:bg-muted/50 disabled:opacity-40">Select all</button>
@@ -302,8 +302,8 @@ export function ContextGovernance() {
 
       <section className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="px-4 py-3 border-b border-border">
-          <p className="text-sm font-semibold text-foreground">Contradiction Scanner</p>
-          <p className="text-xs text-muted-foreground">Find conflicting Current Memory and resolve it before agents act.</p>
+          <p className="font-display font-bold text-foreground">Contradiction Scanner</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">Find conflicting Current Memory and resolve it before agents act.</p>
         </div>
         <div className="p-4 grid grid-cols-1 lg:grid-cols-[160px_1fr_220px_auto] gap-3 items-end">
           <label className="space-y-1.5">

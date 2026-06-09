@@ -19,6 +19,7 @@ import { runIdempotent } from '../../db/repos/idempotency.js';
 import { withTransaction } from '../../db/transaction.js';
 import { mutationReceipt } from '../mutation-receipt.js';
 import type { ToolDef } from '../server.js';
+import { writeToolUx } from '../tool-ux.js';
 import { assertOwnedObjectAccess, defaultOwnerForCreate, resolveOwnerFilter } from '../../services/access-control.js';
 import { verifiedActionContextMetadataForReceipt } from '../../services/action-context.js';
 
@@ -55,6 +56,11 @@ export function contactTools(db: DbPool): ToolDef[] {
       tier: 'core',
       description: 'Create a new contact record. Contact names are stored as first_name (required) and last_name (optional) separately. Before calling this tool, use customer_record_resolve with the contact name, email, and account context to check if the contact already exists; use entity_resolve only as a compatibility fallback for simple account/contact lookup. If a potential duplicate is detected (same email, or same name + account), a 409 is returned with ranked candidate records. Pass if_exists: "return_existing" to silently receive the best-matching existing record instead of erroring. Pass allow_duplicates: true to skip the check entirely after confirming with the user.',
       inputSchema: contactCreate,
+      ux: writeToolUx({
+        displayName: 'Create contact',
+        actionPhrase: 'create the contact',
+        objectLabel: 'contact',
+      }),
       handler: async (input: z.infer<typeof contactCreate>, actor: ActorContext) => {
         return runContactOperation(db, actor, 'contact_create', input, async () => {
         // ── Duplicate check ──
@@ -197,6 +203,11 @@ export function contactTools(db: DbPool): ToolDef[] {
       tier: 'extended',
       description: 'Update a contact record. Pass the contact ID and a patch object containing only the fields to change. Contact names are stored as first_name and last_name separately — to rename a contact pass { first_name: "Thomas" } or { last_name: "Rivera" } or both. Other patchable fields: email, phone, title, company_name, account_id, lifecycle_stage, tags, custom_fields. Example: { id: "<contact-id>", patch: { first_name: "Thomas", last_name: "Rivera" } }',
       inputSchema: contactUpdate,
+      ux: writeToolUx({
+        displayName: 'Update contact',
+        actionPhrase: 'update the contact',
+        objectLabel: 'contact',
+      }),
       handler: async (input: z.infer<typeof contactUpdate>, actor: ActorContext) => {
         return runContactOperation(db, actor, 'contact_update', input, async () => {
         const before = await contactRepo.getContact(db, actor.tenant_id, input.id);

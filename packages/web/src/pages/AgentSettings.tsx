@@ -69,7 +69,7 @@ function normalizeSourceQualitySettings(value?: Record<string, number> | null) {
   };
 }
 
-const defaultSystemPrompt = `You are a CRMy workspace assistant with direct API access to typed revenue objects, customer context, and scoped operational tools.
+const defaultSystemPrompt = `You are a CRMy workspace assistant with direct API access to customer records, customer context, and scoped operational tools.
 
 CORE RULES:
 1. Use your tools to complete every task directly — never tell the user to use the UI instead.
@@ -547,7 +547,7 @@ export default function AgentSettings() {
         </div>
 
         <div className="px-5 py-4 text-sm text-muted-foreground leading-relaxed">
-          The Workspace Agent gives the web app a model-backed operator that can read typed revenue objects, assemble persistent customer context, log activities, draft handoffs, and update state through the same scoped tools your external agents use. Use a local or self-hosted model when customer context cannot leave your environment, when you want offline/dev parity, or when you need predictable cost and data residency. Provider-hosted models are also supported; either way, access stays tenant-scoped and follows the permissions below.
+          The Workspace Agent gives the web app a model-backed operator that can read customer records, assemble persistent customer context, log activities, draft handoffs, and update state through the same scoped tools your external agents use. Use a local or self-hosted model when customer context cannot leave your environment, when you want offline/dev parity, or when you need predictable cost and data residency. Provider-hosted models are also supported; either way, access stays tenant-scoped and follows the permissions below.
         </div>
       </div>
 
@@ -1227,12 +1227,12 @@ export default function AgentSettings() {
             )}
           </div>
 
-          {/* Can write objects */}
+          {/* Can write customer records */}
           <div className="py-3 space-y-2">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-foreground">Allow agent to write revenue objects</p>
-                <p className="text-xs text-muted-foreground">Lets the Workspace Agent and lightweight record agent create or update revenue records after scope checks and confirmation.</p>
+                <p className="text-sm font-medium text-foreground">Allow agent to write customer records</p>
+                <p className="text-xs text-muted-foreground">Lets the Workspace Agent and lightweight record agent create or update Accounts, Contacts, Opportunities, and Use Cases after scope checks and confirmation.</p>
               </div>
               <Switch
                 checked={canWriteObjects}
@@ -1245,7 +1245,7 @@ export default function AgentSettings() {
                     toast({ title: 'Failed to save', variant: 'destructive' });
                   }
                 }}
-                aria-label="Allow agent to write revenue objects"
+                aria-label="Allow agent to write customer records"
               />
             </div>
             {canWriteObjects && (

@@ -11,6 +11,7 @@ import { trimForPersistence, estimateHistoryChars } from './compaction.js';
 import type { AgentEvent, AgentSessionAttachment, ConversationMessage } from './types.js';
 import { getActionContext } from '../services/action-context.js';
 import { emitEvent } from '../events/emitter.js';
+import { effectiveJwtScopes } from '../auth/scopes.js';
 
 const ATTACHED_CONTEXT_PREFIX = '[ATTACHED_CONTEXT]';
 const activeTurnControllers = new Map<string, AbortController>();
@@ -75,17 +76,26 @@ async function getAgentTaskActionContext(
 
 async function actorForUser(db: DbPool, tenantId: string, userId: string): Promise<ActorContext | null> {
   const { rows } = await db.query(
-    'SELECT id, role FROM users WHERE tenant_id = $1 AND id = $2 LIMIT 1',
+    `SELECT u.id, u.role, a.scopes AS actor_scopes
+     FROM users u
+     LEFT JOIN actors a
+       ON a.tenant_id = u.tenant_id
+      AND a.user_id = u.id
+      AND a.actor_type = 'human'
+      AND a.is_active = true
+     WHERE u.tenant_id = $1 AND u.id = $2
+     LIMIT 1`,
     [tenantId, userId],
   );
   const row = rows[0];
   if (!row) return null;
+  const actorScopes = Array.isArray(row.actor_scopes) ? row.actor_scopes : undefined;
   return {
     tenant_id: tenantId,
     actor_id: row.id,
     actor_type: 'user',
     role: row.role,
-    scopes: ['read'],
+    scopes: effectiveJwtScopes(row.role, actorScopes),
   };
 }
 

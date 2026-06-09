@@ -1074,7 +1074,7 @@ export default function Agent() {
           ? `Load confirmed Memory, open Signals, stale warnings, and next action for ${target}.`
           : 'Find the highest-priority customer work and retrieve the context behind it.',
         prompt: entityContext
-          ? `Get a briefing for ${entityContext.name}. Separate confirmed Memory from Signals, call out stale or risky context, cite evidence, and recommend the safest next action.`
+          ? `Get a briefing for ${entityContext.name}. Separate confirmed Memory from Signals, call out stale or risky context, cite evidence, and recommend the next best action.`
           : 'Show my highest-priority accounts, opportunities, Signals, and handoffs. Retrieve the relevant context and recommend what to do first.',
         Icon: Search,
       },
@@ -1087,11 +1087,11 @@ export default function Agent() {
         Icon: ShieldCheck,
       },
       {
-        label: 'Prepare a safe action',
-        description: 'Draft or recommend the next move while keeping writebacks review-gated.',
+        label: 'Next best action',
+        description: 'Recommend the strongest next move with evidence, context, and any review needs.',
         prompt: entityContext
-          ? `Recommend the safest customer-facing action for ${entityContext.name}. Ground it in evidence, flag assumptions, and say whether any writeback or handoff needs approval.`
-          : 'Prepare the safest next action for the top customer issue. Ground it in evidence and say whether a writeback, assignment, or handoff needs approval.',
+          ? `Recommend the next best customer-facing action for ${entityContext.name}. Ground it in confirmed Memory and relevant Signals, flag assumptions, and call out any writeback, assignment, or handoff review needed before execution.`
+          : 'Recommend the next best action for the top customer issue. Ground it in confirmed Memory and relevant Signals, flag assumptions, and call out any writeback, assignment, or handoff review needed before execution.',
         Icon: FileCheck2,
       },
     ];
@@ -1426,8 +1426,8 @@ export default function Agent() {
                 ) : (
                   <div className="mb-4 text-center text-muted-foreground">
                     <Bot className="w-10 h-10 mx-auto mb-3 opacity-40" />
-                    <p className="text-sm font-medium text-foreground">Start with customer context, not a blank chat.</p>
-                    <p className="text-sm mt-1">Pick a workflow that retrieves CRMy Memory and review boundaries before the agent answers.</p>
+                    <p className="text-sm font-medium text-foreground">Choose what you want the agent to do first.</p>
+                    <p className="text-sm mt-1">CRMy will retrieve the relevant Memory, Signals, evidence, and review needs behind the work.</p>
                   </div>
                 )}
                 <div className="mx-auto grid max-w-3xl gap-2 md:grid-cols-3">
