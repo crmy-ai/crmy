@@ -1,84 +1,80 @@
-# CRMy v0.8.7
+# CRMy v0.9.0
 
-CRMy v0.8.7 is a same-day launch-hardening patch for v0.8.6, not the 0.9 release.
+CRMy v0.9.0 is the agent reliability and polish release — the hardening line that brings durable workspace agent execution, richer email and inbox surfaces, and a tighter admin and object UX into a coherent whole.
 
-This release keeps the v0.8.6 MCP/API/CLI and recipe improvements, then adds a major security and reliability hardening pass for auth, API keys, HITL policy routes, inbound email webhooks, migrations, and governed writeback execution.
-
-Before any agent acts on a customer, CRMy can tell it what is true, what is stale, what is inferred, what is approved, what system owns the record, what action is allowed, and what proof or audit trail will exist afterward.
+Before any agent acts on a customer record, CRMy can tell it what is true, what is stale, what is inferred, what is approved, what system owns the record, what action is allowed, and what proof or audit trail will exist afterward. v0.9.0 makes that guarantee hold under real agent workloads.
 
 ## Release Focus
 
-v0.8.7 focuses on launch readiness:
+v0.9.0 focuses on agent execution durability and surface polish:
 
-- strengthen auth and scope enforcement before broader traffic;
-- lock down API key management and scope grants;
-- require explicit tenant identity and HMAC signatures for inbound email ingestion;
-- prevent pending writebacks from executing before approval;
-- make HITL/writeback review state changes transactional;
-- keep MCP, REST, CLI, recipes, and examples aligned for external agent harnesses.
+- harden workspace agent tool execution, side-effect handling, and record-write permissions;
+- add durable replay-oriented safeguards and test coverage around agent turns and side-effecting tools;
+- deepen email and inbox surfaces with draft previews, message linking, and improved provider support;
+- polish admin UX for Action Policy conditions, Messaging, Systems of Record, and Context Lineage;
+- clean up object list and drawer UX across Accounts, Contacts, Opportunities, and Use Cases;
+- extend the CLI with friendly error surfaces and improved server startup feedback.
 
 ## Highlights
 
-### Auth and scope hardening
+### Durable Workspace Agent Execution
 
-- JWT users now resolve against current database user and actor state.
-- Deactivated users and actors are rejected instead of remaining usable through stale tokens.
-- Missing scopes no longer imply broad/full access.
-- Admin-only scopes now cover API keys, HITL policies, inbound email config, and systems administration.
-- API key management is restricted to owner/admin actors with `api_keys:admin`.
-- Requested API key scopes must be known and cannot exceed the grantor's own authority.
+- Agent engine hardened against partial tool execution, replay-unsafe side effects, and stale turn state.
+- Record-write tool exposure now requires explicit write permission scopes — agents cannot write records they are not authorized to modify.
+- Turn runner adds guard rails around side-effecting tool calls to prevent double-execution on retry.
+- New `test/durability.test.mjs` suite with 294+ lines of durability and replay coverage.
+- `tool-ux.ts` added to centralize response formatting and error surface for MCP tool calls.
 
-### HITL, inbound email, and writeback safety
+### Email and Inbox Surfaces
 
-- `/hitl/rules` now routes before `/hitl/:id`, avoiding accidental route capture.
-- HITL approval rules require owner/admin access plus `hitl:admin`.
-- Inbound webhook secret configuration requires owner/admin access plus `email_provider:admin`.
-- Inbound email ingestion now requires explicit tenant identity plus a valid HMAC signature.
-- Pending writebacks can no longer execute before approval.
-- HITL/writeback review state updates are now transactional.
+- Email drawer rebuilt with full message thread view, context add, and draft editing.
+- Draft preview and save endpoints added to REST router; `email_draft_preview` and `email_draft_save` now exposed in MCP.
+- Inbox adds message linking and ignore flows; message processing improved for inbound provider events.
+- `email-messages` repo extended with richer query, link, and ignore primitives.
+- Provider-level email and mailbox connection list endpoints added to REST API.
 
-### Migration reliability
+### Action Policy and HITL UX
 
-- Migrations now use a connection-scoped PostgreSQL advisory lock.
-- This reduces the risk of concurrent migration runners stepping on each other in local, CI, or deploy environments.
+- Action Policy condition editing redesigned with clearer write-permission language and structured condition builder.
+- HITL rules settings expanded with guided setup, required field validation, and full-height layout.
+- Pending writeback rules now surface inline in the HITL rules view.
 
-### MCP/API/CLI parity
+### Context Lineage and Governance
 
-- Added actor-scoped REST endpoints to list, describe, and call MCP tools.
-- Added `crmy tools list`, `crmy tools describe <tool_name>`, and `crmy tools call <tool_name>`.
-- Kept friendly CLI commands for common workflows while making the full visible MCP tool surface reachable from the CLI.
-- Added coverage so CLI HTTP mode continues to map direct tool calls and falls back to the generic actor-scoped tool bridge safely.
+- Context Lineage default view simplified to source → Signal → Memory; usage and audit details available on demand.
+- Context Governance view updated for cleaner contradiction and staleness flows.
+- Agent Markdown renderer extended with richer structured-output support for lineage and briefing responses.
 
-### Recipes and examples
+### Object List and Drawer Polish
 
-- Added a recipes index explaining recipes vs deterministic examples.
-- Clarified seeded demo records around Northstar Labs.
-- Updated runnable recipe CLI commands to use friendly record references instead of requiring UUIDs.
-- Added `agent-smoke` and `tools describe` checks to Claude Code, Claude Desktop, Codex, ChatGPT Developer Mode, Hermes, and OpenClaw examples.
-- Reworked the renewal-risk recipe to use Raw Context ingestion, Signal review, promotion, or Handoff instead of direct model-derived Memory writes.
+- Accounts, Contacts, Opportunities, and Use Cases all receive consistent hover-only briefing/agent action bars.
+- Opportunity and Use Case drawers improved with field editing, lifecycle controls, and briefing navigation.
+- Account and Contact drawers add inline activity and timeline access.
+- Briefing panel navigation between related records improved.
 
-### OpenClaw support
+### Settings and Systems of Record
 
-- Added `context.ingest_auto` to the OpenClaw plugin action surface.
-- Updated the OpenClaw skill to use accounts terminology and Raw Context ingestion for messy notes, transcripts, emails, and research.
-- Reframed `context.add` as an advanced direct write path for already-reviewed Memory or evidence-backed Signals.
+- Messaging settings redesigned with tab layout, full-height guided setup, and subtler semantic retrieval status.
+- Systems of Record settings cleaned up; connection state and sync status now surface in the tab header.
+- Agent settings page updated for model and provider configuration clarity.
 
-### Docs and generated API reference
+### CLI and Server Startup
 
-- Updated README, guide, generated OpenAPI, MCP docs, roadmap, examples, and release notes to describe the current auth, webhook, tool, and Action Context model.
-- Clarified Action Context as a context-and-policy packet that informs, warns, or requires review based on risk rather than adding red tape to every action.
-- Updated self-registration guidance so local setup and auth docs match the current actor/API-key model.
+- Server startup now distinguishes "migrations skipped" from "migrations run" in progress output.
+- CLI client adds friendly error surfaces for common failure modes via `friendlyErrors.ts`.
+- `agent-smoke` command registered and fully functional for quick end-to-end validation.
+- Search indexer tenant handling fixed to prevent cross-tenant index bleed.
 
 ## Published Packages
 
 Published to npm:
 
-- `@crmy/core@0.8.7`
-- `@crmy/shared@0.8.7`
-- `@crmy/server@0.8.7`
-- `@crmy/web@0.8.7`
-- `@crmy/cli@0.8.7`
-- `@crmy/openclaw-plugin@0.8.7`
+- `@crmy/core@0.9.0`
+- `@crmy/shared@0.9.0`
+- `@crmy/server@0.9.0`
+- `@crmy/web@0.9.0`
+- `@crmy/cli@0.9.0`
+- `@crmy/openclaw-plugin@0.9.0`
 
 ## Quick Validation
 
@@ -102,35 +98,34 @@ Expected path:
 1. CRMy resolves the account.
 2. `briefing_get` returns Memory, activity, and grouped Signals.
 3. Signal review items are visible.
-4. The agent can explain the safest next action using evidence.
+4. The agent explains the safest next action using evidence from lineage.
 
 ## Validation Run
 
-Before publish, the hardening gate passed:
+Before publish:
 
 - `npm run build`
 - `npm run lint`
-- `npm test` - 109 passing
-- `npm run test:cli-coverage` - 8 passing
+- `npm test` — durability suite passing
+- `npm run test:cli-coverage`
 - `npm --workspace @crmy/server run generate:openapi`
 
-## Notes And Caveats
+## Notes and Caveats
 
 - pgvector remains optional. Semantic search improves retrieval when configured, but lexical and deterministic paths continue to work without it.
-- Live connector certification remains environment-dependent. HubSpot is the primary certified path today; Salesforce, Databricks, Snowflake, mailbox/calendar OAuth, and custom provider flows should be smoke-tested against real tenant credentials before production claims.
-- v0.8.7 improves tool-surface confidence, documentation alignment, and launch security posture. Full high-volume/serverless Postgres scale certification remains planned for the 1.0 resilience-at-scale line.
+- Live connector certification remains environment-dependent. HubSpot is the primary certified path; Salesforce, Databricks, Snowflake, mailbox/calendar OAuth, and custom provider flows should be smoke-tested against real tenant credentials before production claims.
+- v0.9.0 improves agent execution durability and surface consistency. Full high-volume/serverless Postgres scale certification remains planned for the 1.0 resilience-at-scale line.
 
 ## Community Testing Wanted
 
-The biggest thing CRMy needs from the community is real-world testing of the engine:
+The biggest thing CRMy needs from the community is real-world testing under agent workloads:
 
-- messy customer transcripts and emails;
-- account and opportunity ambiguity;
-- Systems of Record sync and writeback;
-- custom API/MCP integrations;
-- Handoff approval and rejection flows;
-- agent harness behavior outside the web UI;
-- auth, API key, webhook, and scoped-access behavior under real deployments;
+- agent turns that involve multiple side-effecting tool calls;
+- email and inbox flows with real provider data;
+- Action Policy condition editing under varied rule shapes;
+- Systems of Record sync and writeback under concurrent writes;
+- Handoff approval and rejection flows from external agent harnesses;
+- auth, API key, and scoped-access behavior under real deployments;
 - recovery from provider failures, stale jobs, and partial writes.
 
-If you are testing CRMy against real GTM systems, please share sanitized fixtures, expected matches, missed Signals, false positives, writeback receipts, auth/scope surprises, and recovery behavior. That feedback directly shapes the v0.9 hardening line.
+If you are testing CRMy against real GTM systems, please share sanitized fixtures, expected matches, missed Signals, false positives, writeback receipts, and recovery behavior. That feedback directly shapes the v1.0 resilience line.
