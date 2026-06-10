@@ -313,6 +313,8 @@ crmy server
 
 ## Demo: Raw Context To Agent Briefing
 
+![CRMy MCP Demo](examples/CRMy%20MCP%20Demo.gif)
+
 After quickstart, the seeded demo shows CRMy doing more than serving CRM records. It shows customer context becoming agent-usable Memory.
 
 The seeded proof path does not require an LLM provider. Live extraction from your own notes requires a configured Workspace Agent model.
