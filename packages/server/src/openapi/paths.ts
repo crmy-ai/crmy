@@ -1588,12 +1588,30 @@ registry.registerPath({
       direction: z.enum(['inbound', 'outbound']).optional(),
       classification: z.string().optional(),
       processing_status: z.string().optional(),
+      contact_id: z.string().optional(),
+      account_id: z.string().optional(),
+      opportunity_id: z.string().optional(),
+      use_case_id: z.string().optional(),
       include_internal: z.boolean().optional(),
       limit: z.number().optional(),
       cursor: z.string().optional(),
     }),
   },
   responses: { 200: ok(GenericList), 401: err401 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/email-messages/subject-summary',
+  tags: ['Emails'],
+  summary: 'Summarize linked customer email activity for contact or account records',
+  security: bearer,
+  request: {
+    query: z.object({
+      subject_type: z.enum(['contact', 'account']),
+      ids: z.string(),
+    }),
+  },
+  responses: { 200: ok(GenericList), 400: err400, 401: err401 },
 });
 
 registry.registerPath({

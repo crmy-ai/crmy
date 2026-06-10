@@ -6,6 +6,8 @@
  * Extracted here so they can be reused across components without circular deps.
  */
 
+import { friendlyErrorMessage } from './friendlyErrors';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 /** turn_id groups all tool calls from the same agent loop round */
@@ -135,7 +137,7 @@ export async function streamChat(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+    throw new Error(friendlyErrorMessage(body, `HTTP ${res.status}`));
   }
 
   const reader = res.body!.getReader();
@@ -179,7 +181,7 @@ export async function createAgentTurn(
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+    throw new Error(friendlyErrorMessage(body, `HTTP ${res.status}`));
   }
   const json = await res.json();
   return json.data as AgentTurnSummary;
@@ -192,7 +194,7 @@ export async function getAgentSession(sessionId: string): Promise<AgentSessionDe
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+    throw new Error(friendlyErrorMessage(body, `HTTP ${res.status}`));
   }
   const json = await res.json();
   return json.data as AgentSessionDetail;
@@ -213,7 +215,7 @@ export async function streamAgentTurn(
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+    throw new Error(friendlyErrorMessage(body, `HTTP ${res.status}`));
   }
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
@@ -242,7 +244,7 @@ export async function cancelAgentTurn(sessionId: string, turnId: string): Promis
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+    throw new Error(friendlyErrorMessage(body, `HTTP ${res.status}`));
   }
 }
 
@@ -261,7 +263,7 @@ export async function uploadAgentAttachment(
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+    throw new Error(friendlyErrorMessage(body, `HTTP ${res.status}`));
   }
   return body;
 }
@@ -274,7 +276,7 @@ export async function deleteAgentAttachment(sessionId: string, attachmentId: str
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error || body.detail || `HTTP ${res.status}`);
+    throw new Error(friendlyErrorMessage(body, `HTTP ${res.status}`));
   }
 }
 

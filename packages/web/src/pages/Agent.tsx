@@ -38,6 +38,7 @@ import {
 } from '@/lib/agentStream';
 import { AgentMarkdown } from '@/components/ui/agent-markdown';
 import { ENTITY_COLORS } from '@/lib/entityColors';
+import { friendlyErrorMessage } from '@/lib/friendlyErrors';
 
 const agentDescription = 'Ask questions, prep follow-ups, add context, and safely act on your book of business.';
 const agentIconClassName = ENTITY_COLORS.agents.text;
@@ -670,7 +671,7 @@ export default function Agent() {
       await loadSession(session.data, ctx);
       refetchSessions();
     } catch (err) {
-      setMessages([{ kind: 'error', message: (err as Error).message }]);
+      setMessages([{ kind: 'error', message: friendlyErrorMessage(err, 'Could not load this agent session.') }]);
     } finally {
       launchContextRef.current = null;
     }
@@ -769,7 +770,7 @@ export default function Agent() {
         break;
       case 'error':
         setTask(prev => prev ? { ...prev, status: 'failed', nextAction: 'Retry the request or inspect the failed tool output.' } : prev);
-        setMessages(prev => [...prev, { kind: 'error', message: event.message }]);
+        setMessages(prev => [...prev, { kind: 'error', message: friendlyErrorMessage(event.message, 'The agent turn failed. Try again.') }]);
         break;
       case 'done':
         setIsSessionPending(false);
@@ -862,7 +863,7 @@ export default function Agent() {
         // Network / server error. Keep isSessionPending=true so polling can
         // recover if the server finishes the turn after disconnect.
         setTask(prev => prev ? { ...prev, status: 'failed', nextAction: 'Retry after the connection recovers.' } : prev);
-        setMessages(prev => [...prev, { kind: 'error', message: (err as Error).message }]);
+        setMessages(prev => [...prev, { kind: 'error', message: friendlyErrorMessage(err, 'The agent turn failed. Try again.') }]);
       }
     } finally {
       setStreaming(false);
@@ -909,7 +910,7 @@ export default function Agent() {
         setCurrentTurnId(null);
         setActiveTurnMeta(null);
       } catch (err) {
-        toast({ title: 'Could not stop agent turn', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+        toast({ title: 'Could not stop agent turn', description: friendlyErrorMessage(err, 'Please try again.'), variant: 'destructive' });
       }
     } else {
       setIsSessionPending(false);
@@ -955,7 +956,7 @@ export default function Agent() {
         toast({ title: 'Attachment added', description: 'It will be used as temporary Active Context on the next turn.' });
       }
     } catch (err) {
-      toast({ title: 'Attachment failed', description: err instanceof Error ? err.message : 'Please try another file.', variant: 'destructive' });
+      toast({ title: 'Attachment failed', description: friendlyErrorMessage(err, 'Please try another file.'), variant: 'destructive' });
     } finally {
       setUploadingAttachment(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -968,7 +969,7 @@ export default function Agent() {
       await deleteAgentAttachment(activeSessionId, attachmentId);
       setAttachments(prev => prev.filter(item => item.id !== attachmentId));
     } catch (err) {
-      toast({ title: 'Could not remove attachment', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+      toast({ title: 'Could not remove attachment', description: friendlyErrorMessage(err, 'Please try again.'), variant: 'destructive' });
     }
   }, [activeSessionId]);
 

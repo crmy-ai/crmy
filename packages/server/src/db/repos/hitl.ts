@@ -224,6 +224,22 @@ export async function updatePendingHITLRequest(
   return (result.rows[0] as HITLRequest | undefined) ?? null;
 }
 
+export async function mergeHITLActionPayload(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  payload: Record<string, unknown>,
+): Promise<HITLRequest | null> {
+  const result = await db.query(
+    `UPDATE hitl_requests
+     SET action_payload = COALESCE(action_payload, '{}'::jsonb) || $3::jsonb
+     WHERE id = $1 AND tenant_id = $2
+     RETURNING *`,
+    [id, tenantId, JSON.stringify(payload)],
+  );
+  return (result.rows[0] as HITLRequest | undefined) ?? null;
+}
+
 export async function resolveHITLRequest(
   db: DbPool,
   tenantId: UUID,

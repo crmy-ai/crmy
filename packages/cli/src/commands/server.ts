@@ -119,7 +119,7 @@ export function serverCommand(): Command {
       const stepLabels: Record<string, string> = {
         db_connect:    'Connecting to database',
         migrations:    'Running database migrations',
-        seed_defaults: 'Seeding defaults',
+        seed_defaults: 'Checking built-in registries',
       };
 
       serverConfig.onProgress = (step, status, detail) => {
@@ -128,7 +128,9 @@ export function serverCommand(): Command {
         if (status === 'start') {
           spinner = createSpinner(stepLabels[step] ?? step);
         } else if (status === 'done') {
-          const label = stepLabels[step] ?? step;
+          const label = step === 'migrations' && detail === 'up to date'
+            ? 'Database migrations skipped'
+            : stepLabels[step] ?? step;
           const suffix = detail ? `  \x1b[2m(${detail})\x1b[0m` : '';
           spinner.succeed(`${label}${suffix}`);
         } else if (status === 'error') {

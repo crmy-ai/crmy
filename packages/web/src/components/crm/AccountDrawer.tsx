@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from 'react';
-import { useAccount, useUpdateAccount, useDeleteAccount, useUsers, useCustomFields } from '@/api/hooks';
+import { useNavigate } from 'react-router-dom';
+import { useAccount, useUpdateAccount, useDeleteAccount, useUsers, useCustomFields, useEmailSubjectSummary } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
-import { Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2 } from 'lucide-react';
+import { Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2, Mail } from 'lucide-react';
 import { DrawerTabBar, type DrawerView } from './DrawerTabBar';
 import { ContextPanel } from './ContextPanel';
 import { BriefingPanel } from './BriefingPanel';
@@ -209,12 +210,22 @@ function AccountEditForm({
 
 export function AccountDrawer() {
   const { drawerEntityId, closeDrawer, drawerBriefing, drawerEditing, setDrawerEditing, openQuickAdd, recordFieldProvenance } = useAppStore();
+  const navigate = useNavigate();
   const editing = drawerEditing;
   const setEditing = setDrawerEditing;
   const [view, setView] = useState<DrawerView>(drawerBriefing ? 'brief' : 'detail');
   const graphHref = drawerEntityId ? `/accounts/${drawerEntityId}/graph` : undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: accountData, isLoading } = useAccount(drawerEntityId ?? '') as any;
+  const emailSummaryQ = useEmailSubjectSummary('account', drawerEntityId ? [drawerEntityId] : []);
+  const emailSummary = ((emailSummaryQ.data as any)?.data ?? [])[0] as { total?: number; inbound?: number; outbound?: number; drafts?: number; pending_approvals?: number } | undefined;
+  const emailStats = {
+    total: emailSummary?.total ?? 0,
+    inbound: emailSummary?.inbound ?? 0,
+    outbound: emailSummary?.outbound ?? 0,
+    drafts: emailSummary?.drafts ?? 0,
+    pendingApprovals: emailSummary?.pending_approvals ?? 0,
+  };
   const updateAccount = useUpdateAccount(drawerEntityId ?? '');
   const deleteAccount = useDeleteAccount(drawerEntityId ?? '');
   const { enabled: agentEnabled, config: agentConfig, connectivity } = useAgentSettings();
@@ -340,6 +351,37 @@ export function AccountDrawer() {
         context={{ type: 'account', id: account.id, name, detail: industry }}
         onBrief={() => setView('brief')}
       />
+
+      {emailStats.total > 0 && (
+        <div className="mx-4 mt-4 rounded-xl border border-border bg-card/70 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10">
+                <Mail className="h-4 w-4 text-blue-400" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Email context</p>
+                <p className="text-xs text-muted-foreground">
+                  {emailStats.total} linked · {emailStats.inbound} in · {emailStats.outbound} out
+                  {emailStats.drafts > 0 ? ` · ${emailStats.drafts} draft${emailStats.drafts === 1 ? '' : 's'}` : ''}
+                  {emailStats.pendingApprovals > 0 ? ` · ${emailStats.pendingApprovals} approval${emailStats.pendingApprovals === 1 ? '' : 's'}` : ''}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const params = new URLSearchParams({ account_id: account.id, scope_label: name });
+                closeDrawer();
+                navigate(`/emails?${params.toString()}`);
+              }}
+              className="rounded-lg border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted/80"
+            >
+              View email context
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-3 p-4 mx-4 mt-4">

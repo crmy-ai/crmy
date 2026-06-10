@@ -432,6 +432,23 @@ export async function saveEmailDraft(db: DbPool, actor: ActorContext, input: Ema
     },
   });
 
+  if (hitlRequestId) {
+    await hitlRepo.mergeHITLActionPayload(db, actor.tenant_id, hitlRequestId as UUID, {
+      email_id: email.id,
+      body_text: input.body_text,
+      draft: {
+        id: email.id,
+        subject: input.subject,
+        body_text: input.body_text,
+        to_email: ctx.to_address,
+        to_name: ctx.to_name,
+        status: email.status,
+        draft_origin: input.draft_origin,
+        draft_target: input.draft_target,
+      },
+    });
+  }
+
   const providerConfig = await emailRepo.getProvider(db, actor.tenant_id);
   await emailMessageRepo.upsertEmailMessage(db, actor.tenant_id, {
     direction: 'outbound',

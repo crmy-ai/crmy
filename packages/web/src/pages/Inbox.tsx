@@ -484,8 +484,49 @@ function DecisionPacket({ req, compact = false }: { req: HITLRequest; compact?: 
         </div>
       )}
 
+      {!compact && <EmailDraftApprovalPreview payload={payload} />}
       {!compact && subject.subjectType && subject.subjectId && <BriefingContextPreview subject={subject} />}
       {!compact && snapshotId && <HandoffSnapshotPreview snapshotId={snapshotId} />}
+    </div>
+  );
+}
+
+function EmailDraftApprovalPreview({ payload }: { payload: Record<string, unknown> }) {
+  const { openDrawer } = useAppStore();
+  const draft = isRecord(payload.draft) ? payload.draft : {};
+  const emailId = firstString(payload, ['email_id', 'draft_email_id']) ?? firstString(draft, ['id']);
+  const subject = firstString(draft, ['subject']) ?? firstString(payload, ['subject', 'email_subject']);
+  const to = firstString(draft, ['to_email']) ?? firstString(payload, ['to_address', 'to_email', 'recipient_email', 'email']);
+  const body = firstString(draft, ['body_text', 'body']) ?? firstString(payload, ['body_text', 'body']);
+
+  if (!body && !subject && !to) return null;
+
+  return (
+    <div className="rounded-lg border border-blue-500/20 bg-blue-500/8 p-3 text-xs">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-semibold text-foreground">Email draft for review</p>
+          {(to || subject) && (
+            <p className="mt-0.5 truncate text-muted-foreground">
+              {to ? `To ${to}` : 'Recipient not set'}{subject ? ` · ${subject}` : ''}
+            </p>
+          )}
+        </div>
+        {emailId && (
+          <button
+            type="button"
+            onClick={() => openDrawer('email', emailId)}
+            className="shrink-0 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+          >
+            Open draft
+          </button>
+        )}
+      </div>
+      {body && (
+        <div className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg bg-card/70 p-3 leading-relaxed text-foreground">
+          {body}
+        </div>
+      )}
     </div>
   );
 }

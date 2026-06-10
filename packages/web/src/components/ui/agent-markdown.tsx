@@ -51,6 +51,20 @@ const INTERNAL_LABELS: Record<string, string> = {
   buying_process: 'Buying process',
   forecast_signal: 'Forecast signal',
   ready_to_confirm: 'Ready for Memory',
+  subject_type: 'Record type',
+  subject_id: 'Record',
+  context_entries: 'Memory entries',
+  evaluation_criteria: 'Evaluation criteria',
+  readiness_status: 'Readiness',
+  readiness_score: 'Readiness score',
+  missing_details: 'Missing details',
+  readiness_blockers: 'Readiness blockers',
+  unmapped_details: 'Unmapped details',
+  extraction_completeness: 'Extraction completeness',
+  confidence: 'Confidence',
+  owner: 'Owner',
+  summary: 'Summary',
+  evidence: 'Evidence',
 };
 
 const INTERNAL_IDENTIFIER_PREFIXES = [
@@ -113,6 +127,44 @@ function humanizeIdentifier(value: string): string {
       .replace(/\b\w/g, letter => letter.toUpperCase());
 }
 
+function isLikelyInternalSchemaFragment(value: string): boolean {
+  const normalized = value.trim().replace(/^`+|`+$/g, '').trim();
+  if (!normalized || normalized.length > 160) return false;
+  const lines = normalized.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (lines.length > 3) return false;
+  return lines.every(line => {
+    if (INTERNAL_LABELS[line]) return true;
+    const keyValue = line.match(/^([a-z][a-z0-9_]*(?:[_.][a-z0-9]+)*):\s*([A-Za-z0-9 _.-]+)$/);
+    if (keyValue) return Boolean(INTERNAL_LABELS[keyValue[1]]) || isLikelyInternalIdentifier(keyValue[1]);
+    return isLikelyInternalIdentifier(line);
+  });
+}
+
+function humanizeSchemaFragment(value: string): string {
+  const normalized = value.trim().replace(/^`+|`+$/g, '').trim();
+  const keyValue = normalized.match(/^([a-z][a-z0-9_]*(?:[_.][a-z0-9]+)*):\s*([A-Za-z0-9 _.-]+)$/);
+  if (keyValue) {
+    const [, key, rawValue] = keyValue;
+    const label = humanizeIdentifier(key);
+    const displayValue = rawValue.replace(/_/g, ' ').trim();
+    if (key === 'subject_type') return `${displayValue.replace(/\b\w/g, char => char.toUpperCase())} record`;
+    return `${label}: ${displayValue}`;
+  }
+  return humanizeIdentifier(normalized);
+}
+
+function normalizeSanitizedPunctuation(value: string): string {
+  return value
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\(\s*\n+\s*\)/g, '')
+    .replace(/\s+([,.;:])/g, '$1')
+    .replace(/([(\[])\s+/g, '$1')
+    .replace(/\s+([)\]])/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function sanitizeAgentDisplay(content: string): string {
   const pattern = internalLabelPattern();
   let sanitized = content;
@@ -125,7 +177,20 @@ function sanitizeAgentDisplay(content: string): string {
   sanitized = sanitized.replace(new RegExp('```\\s*' + internalIdPattern + '\\s*```', 'gi'), '');
   sanitized = sanitized.replace(new RegExp('`(' + internalIdPattern + ')`', 'gi'), 'record reference');
 
-  if (!pattern) return sanitized;
+  sanitized = sanitized.replace(/\s*\(\s*```\s*([\s\S]{1,220}?)\s*```\s*\)/g, (match, fragment: string) =>
+    isLikelyInternalSchemaFragment(fragment) ? '' : match,
+  );
+  sanitized = sanitized.replace(/```\s*([\s\S]{1,220}?)\s*```/g, (match, fragment: string) =>
+    isLikelyInternalSchemaFragment(fragment) ? humanizeSchemaFragment(fragment) : match,
+  );
+  sanitized = sanitized.replace(/\s*\(\s*`([^`\n]{1,160})`\s*\)/g, (match, fragment: string) =>
+    isLikelyInternalSchemaFragment(fragment) ? '' : match,
+  );
+  sanitized = sanitized.replace(/`([^`\n]{1,160})`/g, (match, fragment: string) =>
+    isLikelyInternalSchemaFragment(fragment) ? humanizeSchemaFragment(fragment) : match,
+  );
+
+  if (!pattern) return normalizeSanitizedPunctuation(sanitized);
   sanitized = sanitized.replace(
     new RegExp('```\\s*(' + pattern + ')\\s*```', 'g'),
     (_match, identifier: string) => humanizeIdentifier(identifier),
@@ -144,7 +209,7 @@ function sanitizeAgentDisplay(content: string): string {
     new RegExp('(^|[^A-Za-z0-9_.-])(' + pattern + ')(?=$|[^A-Za-z0-9_.-])', 'g'),
     (_match, prefix: string, identifier: string) => `${prefix}${humanizeIdentifier(identifier)}`,
   );
-  return sanitized;
+  return normalizeSanitizedPunctuation(sanitized);
 }
 
 // Prose component map — each key maps to a styled wrapper for that HTML element.

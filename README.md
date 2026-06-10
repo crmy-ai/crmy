@@ -4,10 +4,10 @@
 
 <h1 align="center">CRMy</h1>
 
-<h2 align="center">Customer memory for AI sales agents.</h2>
+<h2 align="center">Operational customer context for AI agents.</h2>
 
 <p align="center">
-  Before an agent acts on a customer, it needs trusted context. CRMy turns transcripts, emails, notes, CRM changes, and other raw customer context into the trusted briefing any customer-facing agent needs before it acts.
+  Before a customer-facing agent acts, it needs trusted context. CRMy turns meeting transcripts, emails, notes, CRM changes, and other raw customer context into the trusted briefing any AI agent needs before it acts.
 </p>
 <p align="center">
   <strong>Messy customer context in. Agent-ready Signals, Memory, and action guidance out.</strong> 

@@ -5,14 +5,14 @@ import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { OnboardingEmptyState } from '@/components/crm/OnboardingEmptyState';
-import { useContacts } from '@/api/hooks';
+import { useContacts, useEmailSubjectSummary } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { StageBadge, LeadScoreBadge } from '@/components/crm/CrmWidgets';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { RecordMemoryIndicator } from '@/components/crm/RecordMemoryIndicator';
 import { motion } from 'framer-motion';
-import { LayoutGrid, List, Bot, ChevronUp, ChevronDown, Users, FileText } from 'lucide-react';
+import { LayoutGrid, List, Bot, ChevronUp, ChevronDown, Users, FileText, Mail } from 'lucide-react';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useRecordMemoryCounts } from '@/hooks/useRecordMemoryCounts';
@@ -87,6 +87,19 @@ export default function Contacts() {
 
   useEffect(() => { setPage(1); }, [search, activeFilters, sort]);
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const emailSummaryQ = useEmailSubjectSummary('contact', paginated.map(c => c.id as string));
+  const emailSummaryByContact = useMemo(() => {
+    const rows: Array<{ subject_id: string; total: number }> = (emailSummaryQ.data as any)?.data ?? [];
+    return new Map(rows.map(row => [row.subject_id, row]));
+  }, [emailSummaryQ.data]);
+
+  const openEmailContext = (contact: Contact) => {
+    const params = new URLSearchParams({
+      contact_id: contact.id as string,
+      scope_label: displayName(contact),
+    });
+    navigate(`/emails?${params.toString()}`);
+  };
 
   const SortHeader = ({ label, sortKey }: { label: string; sortKey: string }) => (
     <th onClick={() => handleSortChange(sortKey)}
@@ -162,7 +175,7 @@ export default function Contacts() {
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Phone</th>
                     <SortHeader label="Stage" sortKey="lifecycle_stage" />
                     <SortHeader label="Score" sortKey="lead_score" />
-                    <th className="px-2 py-3 w-16"></th>
+                    <th className="px-2 py-3 w-24"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -187,6 +200,12 @@ export default function Contacts() {
                       </td>
                       <td className="px-2 py-3">
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                          {(emailSummaryByContact.get(c.id as string)?.total ?? 0) > 0 && (
+                            <button onClick={(e) => { e.stopPropagation(); openEmailContext(c); }}
+                              className="p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors" title="View email context">
+                              <Mail className="w-3.5 h-3.5 text-blue-400" />
+                            </button>
+                          )}
                           <button onClick={(e) => { e.stopPropagation(); openDrawerBriefing('contact', c.id as string); }}
                             className="p-1.5 rounded-lg hover:bg-primary/10 transition-colors" title="View briefing">
                             <FileText className="w-3.5 h-3.5 text-primary" />
@@ -216,6 +235,12 @@ export default function Contacts() {
                 onClick={() => openDrawer('contact', c.id as string)}
                 className="bg-card border border-border rounded-2xl p-4 cursor-pointer hover:shadow-lg hover:border-primary/20 transition-all press-scale group relative">
                 <div className="absolute top-3 right-3 flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-all">
+                  {(emailSummaryByContact.get(c.id as string)?.total ?? 0) > 0 && (
+                    <button onClick={(e) => { e.stopPropagation(); openEmailContext(c); }}
+                      className="p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors" title="View email context">
+                      <Mail className="w-3.5 h-3.5 text-blue-400" />
+                    </button>
+                  )}
                   <button onClick={(e) => { e.stopPropagation(); openDrawerBriefing('contact', c.id as string); }}
                     className="p-1.5 rounded-lg hover:bg-primary/10 transition-colors" title="View briefing">
                     <FileText className="w-3.5 h-3.5 text-primary" />

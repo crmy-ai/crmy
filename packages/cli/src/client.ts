@@ -36,6 +36,17 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}): Promise<Re
   }
 }
 
+function queryPath(path: string, input: Record<string, unknown>, keys: string[]): string {
+  const query = new URLSearchParams();
+  for (const key of keys) {
+    const value = input[key];
+    if (value === undefined || value === null || value === '') continue;
+    query.set(key, String(value));
+  }
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
+}
+
 // Map MCP tool names to REST method + path
 const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<string, unknown>) => string; bodyTransform?: (input: Record<string, unknown>) => Record<string, unknown> }> = {
   // Contacts
@@ -108,7 +119,23 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   email_draft_preview: { method: 'POST', path: () => '/api/v1/emails/draft-preview' },
   email_draft_save: { method: 'POST', path: () => '/api/v1/emails/drafts' },
   mailbox_connection_list: { method: 'GET', path: () => '/api/v1/mailbox/connections' },
-  email_message_search: { method: 'GET', path: (i) => `/api/v1/email-messages?view=${i.view ?? 'customer'}&limit=${i.limit ?? 20}${i.q ? `&q=${encodeURIComponent(i.q as string)}` : ''}${i.include_internal ? '&include_internal=true' : ''}` },
+  email_message_search: {
+    method: 'GET',
+    path: (i) => queryPath('/api/v1/email-messages', { ...i, view: i.view ?? 'customer', limit: i.limit ?? 20 }, [
+      'view',
+      'limit',
+      'q',
+      'direction',
+      'classification',
+      'processing_status',
+      'contact_id',
+      'account_id',
+      'opportunity_id',
+      'use_case_id',
+      'include_internal',
+      'cursor',
+    ]),
+  },
   email_message_get: { method: 'GET', path: (i) => `/api/v1/email-messages/${i.id}` },
   email_message_process: { method: 'POST', path: (i) => `/api/v1/email-messages/${i.id}/process` },
   email_message_ignore: { method: 'POST', path: (i) => `/api/v1/email-messages/${i.id}/ignore` },

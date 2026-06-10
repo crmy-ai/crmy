@@ -140,6 +140,57 @@ export async function updateEmailStatus(
   return (result.rows[0] as EmailRow) ?? null;
 }
 
+export async function updateEmailDraft(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  data: { to_email?: string; to_name?: string | null; subject?: string; body_text?: string; body_html?: string | null },
+): Promise<EmailRow | null> {
+  const result = await db.query(
+    `UPDATE emails
+     SET to_email = COALESCE($3, to_email),
+         to_name = COALESCE($4, to_name),
+         subject = COALESCE($5, subject),
+         body_text = COALESCE($6, body_text),
+         body_html = COALESCE($7, body_html),
+         updated_at = now()
+     WHERE id = $1
+       AND tenant_id = $2
+       AND status IN ('draft', 'failed', 'rejected')
+     RETURNING *`,
+    [
+      id,
+      tenantId,
+      data.to_email ?? null,
+      data.to_name ?? null,
+      data.subject ?? null,
+      data.body_text ?? null,
+      data.body_html ?? null,
+    ],
+  );
+  return (result.rows[0] as EmailRow) ?? null;
+}
+
+export async function setEmailApprovalRequest(
+  db: DbPool,
+  tenantId: UUID,
+  id: UUID,
+  hitlRequestId: UUID,
+): Promise<EmailRow | null> {
+  const result = await db.query(
+    `UPDATE emails
+     SET status = 'pending_approval',
+         hitl_request_id = $3,
+         updated_at = now()
+     WHERE id = $1
+       AND tenant_id = $2
+       AND status IN ('draft', 'failed', 'rejected')
+     RETURNING *`,
+    [id, tenantId, hitlRequestId],
+  );
+  return (result.rows[0] as EmailRow) ?? null;
+}
+
 export async function claimEmailForDelivery(
   db: DbPool,
   tenantId: UUID,

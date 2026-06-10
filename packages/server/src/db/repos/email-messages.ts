@@ -72,6 +72,21 @@ export interface EmailMessage {
   account_name?: string | null;
   opportunity_name?: string | null;
   use_case_name?: string | null;
+  email_status?: string | null;
+  draft_origin?: string | null;
+  hitl_request_id?: UUID | null;
+  provider_draft_status?: string | null;
+}
+
+export interface EmailSubjectSummary {
+  subject_id: UUID;
+  total: number;
+  inbound: number;
+  outbound: number;
+  drafts: number;
+  pending_approvals: number;
+  needs_review: number;
+  latest_at?: string | null;
 }
 
 export interface EmailMessageInput {
@@ -410,12 +425,17 @@ export async function getEmailMessage(db: DbPool, tenantId: UUID, id: UUID): Pro
        NULLIF(trim(concat_ws(' ', c.first_name, c.last_name)), '') AS contact_name,
        a.name AS account_name,
        o.name AS opportunity_name,
-       u.name AS use_case_name
+       u.name AS use_case_name,
+       e.status AS email_status,
+       e.draft_origin,
+       e.hitl_request_id,
+       e.provider_draft_status
      FROM email_messages em
      LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
      LEFT JOIN accounts a ON a.id = em.account_id AND a.tenant_id = em.tenant_id
      LEFT JOIN opportunities o ON o.id = em.opportunity_id AND o.tenant_id = em.tenant_id
      LEFT JOIN use_cases u ON u.id = em.use_case_id AND u.tenant_id = em.tenant_id
+     LEFT JOIN emails e ON e.id = em.email_id AND e.tenant_id = em.tenant_id
      WHERE em.tenant_id = $1 AND em.id = $2`,
     [tenantId, id],
   );
@@ -456,8 +476,9 @@ export async function listEmailMessages(
     params.push(filters.contact_id);
   }
   if (filters.account_id) {
-    conditions.push(`em.account_id = $${idx++}`);
+    conditions.push(`(em.account_id = $${idx} OR c.account_id = $${idx})`);
     params.push(filters.account_id);
+    idx++;
   }
   if (filters.opportunity_id) {
     conditions.push(`em.opportunity_id = $${idx++}`);
@@ -505,7 +526,8 @@ export async function listEmailMessages(
     LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
     LEFT JOIN accounts a ON a.id = em.account_id AND a.tenant_id = em.tenant_id
     LEFT JOIN opportunities o ON o.id = em.opportunity_id AND o.tenant_id = em.tenant_id
-    LEFT JOIN use_cases u ON u.id = em.use_case_id AND u.tenant_id = em.tenant_id`;
+    LEFT JOIN use_cases u ON u.id = em.use_case_id AND u.tenant_id = em.tenant_id
+    LEFT JOIN emails e ON e.id = em.email_id AND e.tenant_id = em.tenant_id`;
   const where = conditions.join(' AND ');
   const countResult = await db.query(`SELECT count(*)::int AS total ${from} WHERE ${where}`, params);
 
@@ -515,7 +537,11 @@ export async function listEmailMessages(
        NULLIF(trim(concat_ws(' ', c.first_name, c.last_name)), '') AS contact_name,
        a.name AS account_name,
        o.name AS opportunity_name,
-       u.name AS use_case_name
+       u.name AS use_case_name,
+       e.status AS email_status,
+       e.draft_origin,
+       e.hitl_request_id,
+       e.provider_draft_status
      ${from}
      WHERE ${where}
      ORDER BY COALESCE(em.received_at, em.sent_at, em.created_at) DESC
@@ -530,6 +556,77 @@ export async function listEmailMessages(
     total: Number(countResult.rows[0]?.total ?? 0),
     next_cursor: hasMore ? (data[data.length - 1].received_at ?? data[data.length - 1].sent_at ?? data[data.length - 1].created_at) : undefined,
   };
+}
+
+export async function summarizeEmailMessagesBySubject(
+  db: DbPool,
+  tenantId: UUID,
+  subjectType: 'contact' | 'account',
+  subjectIds: UUID[],
+  ownerIds?: UUID[],
+): Promise<EmailSubjectSummary[]> {
+  const uniqueIds = Array.from(new Set(subjectIds.filter(Boolean)));
+  if (uniqueIds.length === 0) return [];
+
+  const params: unknown[] = [tenantId, uniqueIds];
+  let ownerClause = '';
+  if (ownerIds) {
+    if (ownerIds.length === 0) {
+      ownerClause = ' AND FALSE';
+    } else {
+      params.push(ownerIds);
+      ownerClause = ` AND (
+        c.owner_id = ANY($${params.length}::uuid[])
+        OR a.owner_id = ANY($${params.length}::uuid[])
+        OR ca.owner_id = ANY($${params.length}::uuid[])
+        OR o.owner_id = ANY($${params.length}::uuid[])
+        OR u.owner_id = ANY($${params.length}::uuid[])
+        OR em.user_id = ANY($${params.length}::uuid[])
+      )`;
+    }
+  }
+
+  const subjectExpr = subjectType === 'contact' ? 'em.contact_id' : 'COALESCE(em.account_id, c.account_id)';
+  const result = await db.query(
+    `SELECT
+       ${subjectExpr} AS subject_id,
+       count(*)::int AS total,
+       count(*) FILTER (WHERE em.direction = 'inbound')::int AS inbound,
+       count(*) FILTER (WHERE em.direction = 'outbound')::int AS outbound,
+       count(*) FILTER (WHERE e.status = 'draft')::int AS drafts,
+       count(*) FILTER (WHERE e.status = 'pending_approval')::int AS pending_approvals,
+       count(*) FILTER (
+         WHERE em.processing_status IN ('needs_review','failed','unprocessed')
+            OR em.classification = 'unknown'
+            OR e.status IN ('pending_approval','failed','rejected')
+       )::int AS needs_review,
+       max(COALESCE(em.received_at, em.sent_at, em.created_at)) AS latest_at
+     FROM email_messages em
+     LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
+     LEFT JOIN accounts a ON a.id = em.account_id AND a.tenant_id = em.tenant_id
+     LEFT JOIN accounts ca ON ca.id = c.account_id AND ca.tenant_id = em.tenant_id
+     LEFT JOIN opportunities o ON o.id = em.opportunity_id AND o.tenant_id = em.tenant_id
+     LEFT JOIN use_cases u ON u.id = em.use_case_id AND u.tenant_id = em.tenant_id
+     LEFT JOIN emails e ON e.id = em.email_id AND e.tenant_id = em.tenant_id
+     WHERE em.tenant_id = $1
+       AND ${subjectExpr} = ANY($2::uuid[])
+       AND em.classification NOT IN ('internal','automated')
+       AND em.ignored_at IS NULL
+       ${ownerClause}
+     GROUP BY ${subjectExpr}`,
+    params,
+  );
+
+  return result.rows.map(row => ({
+    subject_id: row.subject_id as UUID,
+    total: Number(row.total ?? 0),
+    inbound: Number(row.inbound ?? 0),
+    outbound: Number(row.outbound ?? 0),
+    drafts: Number(row.drafts ?? 0),
+    pending_approvals: Number(row.pending_approvals ?? 0),
+    needs_review: Number(row.needs_review ?? 0),
+    latest_at: (row.latest_at as string | null | undefined) ?? null,
+  }));
 }
 
 export async function updateEmailMessage(

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentConfig, ConversationMessage, AgentToolDef, ToolCallRecord } from '../types.js';
-import { buildOpenAICompatibleHeaders, chatCompletionsUrl, DEFAULT_LLM_TIMEOUT_MS, resolveLlmTimeoutMs } from '../provider-utils.js';
+import { buildOpenAICompatibleHeaders, chatCompletionsUrl, DEFAULT_LLM_TIMEOUT_MS, formatProviderHttpError, resolveLlmTimeoutMs } from '../provider-utils.js';
 
 const AGENT_STREAM_TIMEOUT_MS = Number(process.env.AGENT_STREAM_TIMEOUT_MS ?? DEFAULT_LLM_TIMEOUT_MS);
 
@@ -65,13 +65,22 @@ export async function callOpenAICompat(
 
     if (!res.ok) {
       const errBody = await res.text();
-      throw new Error(`LLM API error ${res.status}: ${errBody}`);
+      throw new Error(formatProviderHttpError(providerLabel(config.provider), res.status, errBody));
     }
 
     return await parseOpenAIStream(res, onDelta, new Set(tools.map(tool => tool.name)));
   } finally {
     timeout.done();
   }
+}
+
+function providerLabel(provider: string | null | undefined): string {
+  if (!provider) return 'Model provider';
+  if (provider === 'openrouter') return 'OpenRouter';
+  if (provider === 'ollama') return 'Ollama';
+  if (provider === 'databricks') return 'Databricks AI Gateway';
+  if (provider === 'nvidia') return 'NVIDIA';
+  return 'Model provider';
 }
 
 /** Convert generic messages to OpenAI chat format. */

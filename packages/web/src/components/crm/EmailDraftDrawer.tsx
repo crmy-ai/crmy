@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { EntityCombobox, type EntityType } from '@/components/ui/entity-combobox';
 import { toast } from '@/hooks/use-toast';
+import { friendlyErrorMessage } from '@/lib/friendlyErrors';
 
 type DraftIntent = 'reply' | 'follow_up' | 'recap_next_steps' | 'nudge_stalled_deal' | 'custom';
 
@@ -41,7 +42,7 @@ function subjectEntityType(subjectType?: string): EntityType {
 export function EmailDraftDrawer() {
   const { emailDraftOpen, emailDraftContext, closeEmailDraft } = useAppStore();
   const context = useMemo(() => normalizeContext(emailDraftContext), [emailDraftContext]);
-  const { enabled: agentEnabled, connectivity } = useAgentSettings();
+  const { enabled: agentEnabled, connectivity, loading: agentSettingsLoading } = useAgentSettings();
   const previewDraft = usePreviewEmailDraft();
   const saveDraft = useSaveEmailDraft();
 
@@ -64,7 +65,7 @@ export function EmailDraftDrawer() {
 
   const { data: contactData } = useContact(contactId) as any;
   const contact = contactData?.contact ?? contactData;
-  const agentReady = agentEnabled && connectivity !== 'offline';
+  const agentConfigured = agentEnabled || agentSettingsLoading;
   const actionContext = contextUsed?.action_context as { review_required?: boolean; readiness_status?: string; risk_level?: string; guidance_summary?: string } | undefined;
   const directSendBlocked = Boolean(actionContext?.review_required);
 
@@ -131,7 +132,7 @@ export function EmailDraftDrawer() {
     } catch (err) {
       toast({
         title: 'Could not generate draft',
-        description: err instanceof Error ? err.message : 'Check Workspace Agent settings and try again.',
+        description: friendlyErrorMessage(err, 'Check Workspace Agent settings and try again.'),
         variant: 'destructive',
       });
     }
@@ -269,18 +270,24 @@ export function EmailDraftDrawer() {
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Bot className="h-3.5 w-3.5 text-purple-300" />
-                {agentReady ? 'Workspace Agent ready' : agentEnabled ? 'Workspace Agent unreachable' : 'Workspace Agent not enabled'}
+                {agentEnabled
+                  ? connectivity === 'offline'
+                    ? 'Workspace Agent enabled; provider status is being checked'
+                    : 'Workspace Agent ready'
+                  : agentSettingsLoading
+                    ? 'Checking Workspace Agent'
+                    : 'Workspace Agent not enabled'}
               </div>
               <Button
                 onClick={generate}
-                disabled={!agentReady || previewDraft.isPending}
+                disabled={!agentConfigured || previewDraft.isPending}
                 className="gap-1.5 bg-purple-600 text-white hover:bg-purple-500"
               >
                 {previewDraft.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
                 Generate draft
               </Button>
             </div>
-            {!agentReady && (
+            {!agentConfigured && (
               <p className="mt-2 text-xs text-muted-foreground">
                 Manual drafting is still available. Ask an admin to enable Workspace Agent for generated first drafts.
               </p>

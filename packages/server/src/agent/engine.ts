@@ -229,6 +229,20 @@ const INTERNAL_LABELS: Record<string, string> = {
   buying_process: 'Buying process',
   forecast_signal: 'Forecast signal',
   ready_to_confirm: 'Ready for Memory',
+  subject_type: 'Record type',
+  subject_id: 'Record',
+  context_entries: 'Memory entries',
+  evaluation_criteria: 'Evaluation criteria',
+  readiness_status: 'Readiness',
+  readiness_score: 'Readiness score',
+  missing_details: 'Missing details',
+  readiness_blockers: 'Readiness blockers',
+  unmapped_details: 'Unmapped details',
+  extraction_completeness: 'Extraction completeness',
+  confidence: 'Confidence',
+  owner: 'Owner',
+  summary: 'Summary',
+  evidence: 'Evidence',
 };
 
 const INTERNAL_IDENTIFIER_PREFIXES = [
@@ -333,6 +347,44 @@ function humanizeIdentifier(value: string): string {
       .replace(/\s+/g, ' ')
       .trim()
       .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function isLikelyInternalSchemaFragment(value: string): boolean {
+  const normalized = value.trim().replace(/^`+|`+$/g, '').trim();
+  if (!normalized || normalized.length > 160) return false;
+  const lines = normalized.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (lines.length > 3) return false;
+  return lines.every(line => {
+    if (INTERNAL_LABELS[line]) return true;
+    const keyValue = line.match(/^([a-z][a-z0-9_]*(?:[_.][a-z0-9]+)*):\s*([A-Za-z0-9 _.-]+)$/);
+    if (keyValue) return Boolean(INTERNAL_LABELS[keyValue[1]]) || isLikelyInternalIdentifier(keyValue[1]);
+    return isLikelyInternalIdentifier(line);
+  });
+}
+
+function humanizeSchemaFragment(value: string): string {
+  const normalized = value.trim().replace(/^`+|`+$/g, '').trim();
+  const keyValue = normalized.match(/^([a-z][a-z0-9_]*(?:[_.][a-z0-9]+)*):\s*([A-Za-z0-9 _.-]+)$/);
+  if (keyValue) {
+    const [, key, rawValue] = keyValue;
+    const label = humanizeIdentifier(key);
+    const displayValue = rawValue.replace(/_/g, ' ').trim();
+    if (key === 'subject_type') return `${displayValue.replace(/\b\w/g, char => char.toUpperCase())} record`;
+    return `${label}: ${displayValue}`;
+  }
+  return humanizeIdentifier(normalized);
+}
+
+function normalizeSanitizedPunctuation(value: string): string {
+  return value
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\(\s*\n+\s*\)/g, '')
+    .replace(/\s+([,.;:])/g, '$1')
+    .replace(/([(\[])\s+/g, '$1')
+    .replace(/\s+([)\]])/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function friendlyToolLabel(toolName: string, tool?: ToolDef): string {
@@ -479,7 +531,20 @@ function sanitizeAgentAnswer(content: string): string {
   sanitized = sanitized.replace(new RegExp('```\\s*' + internalIdPattern + '\\s*```', 'gi'), '');
   sanitized = sanitized.replace(new RegExp('`(' + internalIdPattern + ')`', 'gi'), 'record reference');
 
-  if (!pattern) return sanitized;
+  sanitized = sanitized.replace(/\s*\(\s*```\s*([\s\S]{1,220}?)\s*```\s*\)/g, (match, fragment: string) =>
+    isLikelyInternalSchemaFragment(fragment) ? '' : match,
+  );
+  sanitized = sanitized.replace(/```\s*([\s\S]{1,220}?)\s*```/g, (match, fragment: string) =>
+    isLikelyInternalSchemaFragment(fragment) ? humanizeSchemaFragment(fragment) : match,
+  );
+  sanitized = sanitized.replace(/\s*\(\s*`([^`\n]{1,160})`\s*\)/g, (match, fragment: string) =>
+    isLikelyInternalSchemaFragment(fragment) ? '' : match,
+  );
+  sanitized = sanitized.replace(/`([^`\n]{1,160})`/g, (match, fragment: string) =>
+    isLikelyInternalSchemaFragment(fragment) ? humanizeSchemaFragment(fragment) : match,
+  );
+
+  if (!pattern) return normalizeSanitizedPunctuation(sanitized);
 
   sanitized = sanitized.replace(
     new RegExp('```\\s*(' + pattern + ')\\s*```', 'g'),
@@ -499,7 +564,7 @@ function sanitizeAgentAnswer(content: string): string {
     new RegExp('(^|[^A-Za-z0-9_.-])(' + pattern + ')(?=$|[^A-Za-z0-9_.-])', 'g'),
     (_match, prefix: string, identifier: string) => `${prefix}${humanizeIdentifier(identifier)}`,
   );
-  return sanitized;
+  return normalizeSanitizedPunctuation(sanitized);
 }
 
 // ── Tool status messages ──────────────────────────────────────────────────────
@@ -1240,6 +1305,9 @@ function buildSystemPrompt(
     '- User-facing answers must use CRMy product language, not raw API/tool identifiers. Say "Confirm Signal", "Deal risk", "Signal review", or "System-of-record writeback" instead of `context_signal_group_promote`, `deal_risk`, `context.signal_review`, or `external.writeback`.',
     '- Do not include internal record IDs in user-facing answers. Refer to customer records, Signals, Memory, handoffs, and actions by name, type, status, or next step. Include IDs only when the user explicitly asks for developer/debug details.',
     '- Do not render internal tool names, action types, context types, enum values, JSON keys, or record IDs as code blocks unless the user explicitly asks for developer/debug details.',
+    '- Do not explain CRMy to end users as a "schema". Use "Memory types", "customer context", "Signals", "evidence", and "action readiness" instead.',
+    '- Never show raw field keys such as `subject_type`, `context_entries`, `evaluation_criteria`, `readiness_status`, `summary`, or `evidence` in normal user-facing answers. Write natural labels like "Account context", "Memory entries", "Evaluation criteria", "Readiness", "Summary", and "Evidence".',
+    '- If a tool result contains JSON keys, IDs, enum values, or registry identifiers, translate them into plain English before answering.',
     '- Do not use excessive disclaimers or refusals for normal CRM operations.',
     '',
     '# Duplicate Prevention',

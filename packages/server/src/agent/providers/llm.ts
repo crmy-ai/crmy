@@ -27,6 +27,7 @@ import {
   buildOpenAICompatibleHeaders,
   chatCompletionsUrl,
   DEFAULT_LLM_TIMEOUT_MS,
+  formatProviderHttpError,
   isTransientModelError,
   providerUsesAnthropicFormat,
   resolveLlmTimeoutMs,
@@ -201,7 +202,7 @@ async function callAnthropicSync(
   }, timeoutMs);
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Anthropic API error ${res.status}: ${err.slice(0, 300)}`);
+    throw new Error(formatProviderHttpError('Anthropic', res.status, err));
   }
   const data = await res.json() as { content: { type: string; text: string }[] };
   return data.content?.find(c => c.type === 'text')?.text ?? '';
@@ -253,9 +254,9 @@ async function callOpenAICompatSync(
         return extractOpenAICompatText(data);
       }
       const fallbackErr = await res.text();
-      throw new Error(`LLM API error ${res.status}: ${fallbackErr.slice(0, 300)}`);
+      throw new Error(formatProviderHttpError('Model provider', res.status, fallbackErr));
     }
-    throw new Error(`LLM API error ${res.status}: ${err.slice(0, 300)}`);
+    throw new Error(formatProviderHttpError('Model provider', res.status, err));
   }
   const data = await res.json();
   return extractOpenAICompatText(data);

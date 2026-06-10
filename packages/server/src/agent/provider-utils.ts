@@ -22,12 +22,113 @@ export function resolveLlmTimeoutMs(
 }
 
 export function modelErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err ?? 'Model call failed');
+  const message = err instanceof Error ? err.message : String(err ?? 'Model call failed');
+  return friendlyModelProviderError(message);
 }
 
 export function isTransientModelError(err: unknown): boolean {
   const message = modelErrorMessage(err);
   return /timed out|timeout|abort|aborted|ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket|network|fetch failed|429|rate limit|temporarily|503|502|504|500/i.test(message);
+}
+
+export function formatProviderHttpError(providerLabel: string, status: number, rawBody: string): string {
+  const providerMessage = extractProviderMessage(rawBody);
+  const label = providerLabel || 'Model provider';
+  if (status === 429) {
+    return `${label} is rate limited right now. Try again in a moment, or switch to a backup model provider in Workspace Agent settings.`;
+  }
+  if (status === 401 || status === 403) {
+    return `${label} rejected the configured API key or permissions. Check Workspace Agent model settings.`;
+  }
+  if (status === 404) {
+    return `${label} could not find the selected model or endpoint. Check the provider, base URL, and model name.`;
+  }
+  if (status === 400) {
+    if (/invalid tool call arguments/i.test(providerMessage)) {
+      return `${label} returned an invalid tool request. CRMy will retry when possible; otherwise try the request again.`;
+    }
+    return providerMessage
+      ? `${label} rejected the model request. ${providerMessage}`
+      : `${label} rejected the model request. Check the selected model and provider settings.`;
+  }
+  if (status >= 500) {
+    return `${label} is temporarily unavailable. Try again, or use a backup model provider if one is configured.`;
+  }
+  return providerMessage
+    ? `${label} returned an error (${status}). ${providerMessage}`
+    : `${label} returned an error (${status}). Check provider settings and try again.`;
+}
+
+export function friendlyModelProviderError(message: string): string {
+  const raw = String(message ?? '').trim();
+  if (!raw) return 'The model call failed. Check Workspace Agent model settings and try again.';
+
+  const match = raw.match(/\b(?:LLM|Anthropic|Embedding)\s+API error\s+(\d{3}):\s*([\s\S]*)$/i);
+  if (match) {
+    const [, status, body] = match;
+    return formatProviderHttpError(match[0].startsWith('Anthropic') ? 'Anthropic' : 'Model provider', Number(status), body);
+  }
+
+  if (/\b429\b|rate[-\s]?limit|too many requests/i.test(raw)) {
+    return 'The model provider is rate limited right now. Try again in a moment, or switch to a backup model provider in Workspace Agent settings.';
+  }
+  if (/invalid tool call arguments/i.test(raw)) {
+    return 'The model returned an invalid tool request. CRMy will retry when possible; otherwise try the request again.';
+  }
+  if (/api key|unauthorized|forbidden|permission/i.test(raw) && /model|provider|llm|anthropic|openai|openrouter/i.test(raw)) {
+    return 'The model provider rejected the configured API key or permissions. Check Workspace Agent model settings.';
+  }
+
+  return stripRawJsonTail(raw);
+}
+
+function extractProviderMessage(rawBody: string): string {
+  const raw = String(rawBody ?? '').trim();
+  if (!raw) return '';
+  const parsed = parseMaybeJson(raw);
+  if (parsed && typeof parsed === 'object') {
+    const record = parsed as Record<string, unknown>;
+    const error = record.error;
+    if (error && typeof error === 'object') {
+      const errorRecord = error as Record<string, unknown>;
+      return cleanProviderDetail(String(errorRecord.message ?? errorRecord.detail ?? errorRecord.code ?? ''));
+    }
+    return cleanProviderDetail(String(record.message ?? record.detail ?? record.error ?? ''));
+  }
+  return cleanProviderDetail(stripRawJsonTail(raw));
+}
+
+function parseMaybeJson(raw: string): unknown | null {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(raw.slice(start, end + 1));
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+function cleanProviderDetail(value: string): string {
+  const cleaned = stripRawJsonTail(value)
+    .replace(/\s+/g, ' ')
+    .replace(/^error[:\s-]+/i, '')
+    .trim();
+  if (!cleaned || /^[{}\[\]",:\s\d._-]+$/.test(cleaned)) return '';
+  return cleaned.length > 180 ? `${cleaned.slice(0, 177)}...` : cleaned;
+}
+
+function stripRawJsonTail(raw: string): string {
+  return raw
+    .replace(/\s*\{[\s\S]*\}\s*$/g, '')
+    .replace(/\s*\[[\s\S]*\]\s*$/g, '')
+    .trim();
 }
 
 export function wait(ms: number): Promise<void> {

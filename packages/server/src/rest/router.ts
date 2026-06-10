@@ -8,13 +8,14 @@ import * as path from 'node:path';
 import crypto from 'node:crypto';
 import type { DbPool } from '../db/pool.js';
 import type { ActorContext, UUID } from '@crmy/shared';
-import { CrmyError, actionContextGet, workflowAction } from '@crmy/shared';
+import { CrmyError, actionContextGet, notFound, validationError, workflowAction } from '@crmy/shared';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as accountRepo from '../db/repos/accounts.js';
 import * as oppRepo from '../db/repos/opportunities.js';
 import * as activityRepo from '../db/repos/activities.js';
 import * as rawContextRepo from '../db/repos/raw-context-sources.js';
 import * as emailMessageRepo from '../db/repos/email-messages.js';
+import * as emailRepo from '../db/repos/emails.js';
 import * as calendarRepo from '../db/repos/calendar.js';
 import * as hitlRepo from '../db/repos/hitl.js';
 import * as eventRepo from '../db/repos/events.js';
@@ -31,6 +32,7 @@ import * as governorLimits from '../db/repos/governor-limits.js';
 import { getSpec } from '../openapi/spec.js';
 import { extractTextFromBuffer } from '../lib/file-extract.js';
 import { resumeEnrollmentAfterHITL } from '../services/sequence-executor.js';
+import { deliverEmail } from '../email/delivery.js';
 import { getSampleDataStatus, seedSampleData } from '../services/sample-data.js';
 import { hashPassword } from '../auth/password.js';
 import { buildSetupUrl, createUserAuthToken, sendAuthLifecycleEmail } from '../services/auth-lifecycle.js';
@@ -348,7 +350,7 @@ export function apiRouter(db: DbPool): Router {
         lifecycle_stage: qs(req.query.stage),
         account_id: qs(req.query.account_id),
         ...ownerFilter,
-        limit: Math.min(qn(req.query.limit, 20), 100),
+        limit: Math.min(qn(req.query.limit, 20), 500),
         cursor: qs(req.query.cursor),
       });
       res.json(result);
@@ -1095,6 +1097,141 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  async function assertOutboundEmailAccess(actor: ActorContext, email: emailRepo.EmailRow): Promise<void> {
+    if (isGlobalActor(actor) || actor.role === 'owner' || actor.role === 'admin') return;
+    const actorUserId = await getActorUserId(db, actor);
+    if (actorUserId && email.created_by === actorUserId) return;
+    const linked = [
+      ['opportunity', email.opportunity_id],
+      ['use_case', email.use_case_id],
+      ['contact', email.contact_id],
+      ['account', email.account_id],
+    ] as const;
+    for (const [type, id] of linked) {
+      if (!id) continue;
+      try {
+        await assertSubjectAccess(db, actor, type, id);
+        return;
+      } catch {
+        // Continue checking other linked records before returning a safe 404.
+      }
+    }
+    throw notFound('Email', email.id);
+  }
+
+  router.patch('/emails/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id') as UUID;
+      const current = await emailRepo.getEmail(db, actor.tenant_id, id);
+      if (!current) throw notFound('Email', id);
+      await assertOutboundEmailAccess(actor, current);
+      if (!['draft', 'failed', 'rejected'].includes(current.status)) {
+        throw validationError('Only drafts, failed emails, or rejected drafts can be edited.');
+      }
+      const parsed = z.object({
+        to_email: z.string().email().optional(),
+        to_name: z.string().optional().nullable(),
+        subject: z.string().min(1).optional(),
+        body_text: z.string().min(1).optional(),
+        body_html: z.string().optional().nullable(),
+      }).safeParse(req.body ?? {});
+      if (!parsed.success) throw parsed.error;
+      const email = await emailRepo.updateEmailDraft(db, actor.tenant_id, id, parsed.data);
+      if (!email) throw validationError('This draft can no longer be edited.');
+      const event_id = await emitEvent(db, {
+        tenantId: actor.tenant_id,
+        eventType: 'email.draft_updated',
+        actorId: actor.actor_id,
+        actorType: actor.actor_type,
+        objectType: 'email',
+        objectId: email.id,
+        beforeData: { subject: current.subject, to_email: current.to_email, status: current.status },
+        afterData: { subject: email.subject, to_email: email.to_email, status: email.status },
+      });
+      res.json({ email, event_id });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/emails/:id/request-approval', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id') as UUID;
+      const current = await emailRepo.getEmail(db, actor.tenant_id, id);
+      if (!current) throw notFound('Email', id);
+      await assertOutboundEmailAccess(actor, current);
+      if (current.status === 'pending_approval') {
+        res.json({ email: current, hitl_request_id: current.hitl_request_id });
+        return;
+      }
+      if (!['draft', 'failed', 'rejected'].includes(current.status)) {
+        throw validationError('Only draft or failed emails can be sent for approval.');
+      }
+      const hitl = await hitlRepo.createHITLRequest(db, actor.tenant_id, {
+        agent_id: actor.actor_id,
+        action_type: 'email.send',
+        action_summary: `Send email to ${current.to_email}: "${current.subject}"`,
+        action_payload: {
+          email_id: current.id,
+          to_address: current.to_email,
+          to_name: current.to_name,
+          subject: current.subject,
+          body_preview: current.body_text.slice(0, 240),
+          body_text: current.body_text,
+          contact_id: current.contact_id,
+          account_id: current.account_id,
+          opportunity_id: current.opportunity_id,
+          use_case_id: current.use_case_id,
+          draft: {
+            id: current.id,
+            subject: current.subject,
+            body_text: current.body_text,
+            to_email: current.to_email,
+            to_name: current.to_name,
+            status: 'pending_approval',
+            draft_origin: current.draft_origin,
+            draft_target: current.draft_target,
+          },
+        },
+        priority: 'normal',
+        sla_minutes: 1440,
+      });
+      const email = await emailRepo.setEmailApprovalRequest(db, actor.tenant_id, id, hitl.id);
+      if (!email) throw validationError('This draft can no longer be sent for approval.');
+      const event_id = await emitEvent(db, {
+        tenantId: actor.tenant_id,
+        eventType: 'email.approval_requested',
+        actorId: actor.actor_id,
+        actorType: actor.actor_type,
+        objectType: 'email',
+        objectId: email.id,
+        afterData: { id: email.id, status: email.status, hitl_request_id: hitl.id },
+      });
+      res.json({ email, hitl_request_id: hitl.id, event_id });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/emails/:id/send', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id') as UUID;
+      const current = await emailRepo.getEmail(db, actor.tenant_id, id);
+      if (!current) throw notFound('Email', id);
+      await assertOutboundEmailAccess(actor, current);
+      if (!['draft', 'approved'].includes(current.status)) {
+        throw validationError('Only draft or approved emails can be sent directly.');
+      }
+      const storedActionContext = current.generation_metadata?.action_context as Record<string, unknown> | undefined;
+      const storedGuidance = storedActionContext?.guidance as Record<string, unknown> | undefined;
+      if (storedActionContext?.review_required === true || storedGuidance?.can_execute === false) {
+        throw validationError('Action Context requires review before this email can be sent. Send it for approval instead.');
+      }
+      await deliverEmail(db, actor.tenant_id, id);
+      const email = await emailRepo.getEmail(db, actor.tenant_id, id);
+      res.json({ email: email ?? current });
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Email & Activity Source Filters ---
   router.get('/source-filters', async (req: Request, res: Response) => {
     try {
@@ -1587,6 +1724,31 @@ export function apiRouter(db: DbPool): Router {
       });
       const summary = await emailMessageRepo.summarizeEmailMessages(db, actor.tenant_id, ownerFilter.owner_ids);
       res.json({ ...result, summary });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/email-messages/subject-summary', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const subjectType = qs(req.query.subject_type);
+      if (subjectType !== 'contact' && subjectType !== 'account') {
+        res.status(400).json({ error: 'subject_type must be contact or account' });
+        return;
+      }
+      const ids = qcsv(req.query.ids);
+      if (!ids?.length) {
+        res.json({ data: [], total: 0 });
+        return;
+      }
+      const ownerFilter = await resolveOwnerFilter(db, actor);
+      const data = await emailMessageRepo.summarizeEmailMessagesBySubject(
+        db,
+        actor.tenant_id,
+        subjectType,
+        ids,
+        ownerFilter.owner_ids,
+      );
+      res.json({ data, total: data.length });
     } catch (err) { handleError(res, err); }
   });
 

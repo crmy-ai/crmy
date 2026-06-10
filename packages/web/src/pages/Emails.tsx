@@ -1,8 +1,8 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { CompactList } from '@/components/crm/CompactList';
@@ -11,6 +11,7 @@ import {
   useEmails,
   useEmailMessage,
   useEmailMessages,
+  useEmailSubjectSummary,
   useIgnoreEmailMessage,
   useMailboxConnections,
   useProcessEmailMessage,
@@ -73,6 +74,11 @@ type EmailMessage = {
   classification: 'customer' | 'mixed' | 'internal' | 'automated' | 'unknown';
   processing_status: 'unprocessed' | 'processing' | 'processed' | 'needs_review' | 'skipped' | 'failed' | 'ignored';
   processing_reason?: string | null;
+  email_id?: string | null;
+  email_status?: string | null;
+  draft_origin?: string | null;
+  hitl_request_id?: string | null;
+  provider_draft_status?: string | null;
   contact_id?: string | null;
   contact_name?: string | null;
   account_id?: string | null;
@@ -200,9 +206,11 @@ function RecordChip({
   );
 }
 
-function MessageRow({ message, onOpen }: { message: EmailMessage; onOpen: (id: string) => void }) {
+function MessageRow({ message, onOpen }: { message: EmailMessage; onOpen: (message: EmailMessage) => void }) {
   const processing = PROCESSING[message.processing_status] ?? PROCESSING.unprocessed;
   const ProcessingIcon = processing.icon;
+  const outboundStatus = message.email_status ? OUTBOUND_STATUS[message.email_status] : null;
+  const OutboundIcon = outboundStatus?.icon;
   const from = message.from_name ? `${message.from_name} <${message.from_email}>` : message.from_email;
   const memory = countFromReceipt(message.extraction_receipt, 'memory_created');
   const signals = countFromReceipt(message.extraction_receipt, 'signals_created');
@@ -212,7 +220,7 @@ function MessageRow({ message, onOpen }: { message: EmailMessage; onOpen: (id: s
       type="button"
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
-      onClick={() => onOpen(message.id)}
+      onClick={() => onOpen(message)}
       className="w-full rounded-xl border border-border/70 bg-card/60 px-3 py-3 text-left transition-colors hover:bg-muted/35"
     >
       <div className="flex items-start gap-3">
@@ -231,6 +239,15 @@ function MessageRow({ message, onOpen }: { message: EmailMessage; onOpen: (id: s
               <ProcessingIcon className={`mr-1 h-3 w-3 ${message.processing_status === 'processing' ? 'animate-spin' : ''}`} />
               {processing.label}
             </Badge>
+            {outboundStatus && OutboundIcon && (
+              <Badge variant="outline" className={outboundStatus.className}>
+                <OutboundIcon className="mr-1 h-3 w-3" />
+                {outboundStatus.label}
+              </Badge>
+            )}
+            {message.draft_origin === 'agent_generated' && (
+              <Badge variant="outline" className="border-purple-500/25 bg-purple-500/10 text-purple-200">Agent generated</Badge>
+            )}
           </div>
           <p className="mt-1 truncate text-xs text-muted-foreground">{from}</p>
           <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{message.snippet || message.body_text || 'No preview available.'}</p>
@@ -549,6 +566,7 @@ function MessageDetail({
 export default function EmailsPage() {
   const { openDrawer, openEmailDraft } = useAppStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const [tab, setTab] = useState<CustomerEmailTab>('customer');
   const [q, setQ] = useState('');
   const [classification, setClassification] = useState('');
@@ -561,19 +579,39 @@ export default function EmailsPage() {
   const [setupEmail, setSetupEmail] = useState('');
   const [setupDisplayName, setSetupDisplayName] = useState('');
 
-  const messageView = tab === 'review' ? 'review' : tab === 'customer' ? 'customer' : 'all';
+  const scopedParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const tabParam = scopedParams.get('tab') as CustomerEmailTab | null;
+  const scopedContactId = scopedParams.get('contact_id') || undefined;
+  const scopedAccountId = scopedParams.get('account_id') || undefined;
+  const scopedLabel = scopedParams.get('scope_label') || undefined;
+  const scopedSubjectType: 'contact' | 'account' = scopedAccountId ? 'account' : 'contact';
+  const scopedSubjectId = scopedAccountId ?? scopedContactId;
+  const scoped = Boolean(scopedSubjectId);
+
+  useEffect(() => {
+    if (scoped) return;
+    if (tabParam && TABS.some(item => item.key === tabParam)) {
+      setTab(tabParam);
+    }
+  }, [scoped, tabParam]);
+  const scopedSummaryQ = useEmailSubjectSummary(scopedSubjectType, scopedSubjectId ? [scopedSubjectId] : []);
+  const scopedSummary = ((scopedSummaryQ.data as any)?.data ?? [])[0] as { total?: number; inbound?: number; outbound?: number; drafts?: number; pending_approvals?: number; needs_review?: number } | undefined;
+
+  const messageView = scoped ? 'all' : tab === 'review' ? 'review' : tab === 'customer' ? 'customer' : 'all';
   const messagesQ = useEmailMessages({
     view: messageView,
     q,
     classification: classification || undefined,
-    direction: tab === 'outbound' ? 'outbound' : tab === 'customer' || tab === 'review' ? 'inbound' : undefined,
-    include_internal: tab === 'review' || classification === 'internal' || classification === 'automated',
+    direction: scoped ? undefined : tab === 'outbound' ? 'outbound' : tab === 'customer' || tab === 'review' ? 'inbound' : undefined,
+    contact_id: scopedContactId,
+    account_id: scopedAccountId,
+    include_internal: !scoped && (tab === 'review' || classification === 'internal' || classification === 'automated'),
     limit: 100,
   }) as any;
   const messages: EmailMessage[] = messagesQ.data?.data ?? [];
   const summary = messagesQ.data?.summary ?? {};
 
-  const outboundQ = useEmails({ limit: 100 }) as any;
+  const outboundQ = useEmails({ limit: 500 }) as any;
   const outboundEmails: any[] = outboundQ.data?.data ?? [];
   const connectionsQ = useMailboxConnections() as any;
   const connections: Connection[] = connectionsQ.data?.data ?? [];
@@ -583,7 +621,7 @@ export default function EmailsPage() {
   const syncConnection = useSyncMailboxConnection();
   const setupCopy = setupProvider ? MAILBOX_PROVIDER_COPY[setupProvider] : null;
   const setupSaving = startGoogle.isPending || startMicrosoft.isPending;
-  const emailFilterConfigs: FilterConfig[] = tab === 'outbound' || tab === 'connections' ? [] : [
+  const emailFilterConfigs: FilterConfig[] = !scoped && (tab === 'outbound' || tab === 'connections') ? [] : [
     {
       key: 'classification',
       label: 'Type',
@@ -616,11 +654,19 @@ export default function EmailsPage() {
   const outboundAttentionCount = outboundEmails.filter(email => ['draft', 'pending_approval', 'failed', 'rejected'].includes(email.status)).length;
 
   const visibleMessages = useMemo(() => {
-    const list = tab === 'outbound'
+    const list = !scoped && tab === 'outbound'
       ? messages.filter(message => message.direction === 'outbound')
       : messages;
     return list.slice((page - 1) * pageSize, page * pageSize);
-  }, [messages, page, pageSize, tab]);
+  }, [messages, page, pageSize, scoped, tab]);
+
+  const openMessage = (message: EmailMessage) => {
+    if (message.direction === 'outbound' && message.email_id) {
+      openDrawer('email', message.email_id);
+      return;
+    }
+    setSelectedMessageId(message.id);
+  };
 
   const openSetup = (provider: MailboxProvider, connection?: Connection) => {
     setSetupProvider(provider);
@@ -690,6 +736,37 @@ export default function EmailsPage() {
       />
 
       <div className="border-b border-border px-4 pt-4 md:px-6">
+        {scoped ? (
+          <div className="mb-4 rounded-xl border border-blue-500/20 bg-blue-500/8 p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Mail className="h-4 w-4 text-blue-300" />
+                  <p className="text-sm font-semibold text-foreground">
+                    Email context{scopedLabel ? ` for ${scopedLabel}` : ''}
+                  </p>
+                </div>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Linked inbound, outbound, draft, and approval-gated email for this {scopedSubjectType}.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                  <span>{scopedSummary?.total ?? messages.length} linked</span>
+                  <span>·</span>
+                  <span>{scopedSummary?.inbound ?? messages.filter(message => message.direction === 'inbound').length} in</span>
+                  <span>·</span>
+                  <span>{scopedSummary?.outbound ?? messages.filter(message => message.direction === 'outbound').length} out</span>
+                  {(scopedSummary?.drafts ?? 0) > 0 && <span>· {scopedSummary?.drafts} drafts</span>}
+                  {(scopedSummary?.pending_approvals ?? 0) > 0 && <span>· {scopedSummary?.pending_approvals} approvals</span>}
+                  {(scopedSummary?.needs_review ?? 0) > 0 && <span>· {scopedSummary?.needs_review} need review</span>}
+                </div>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Button variant="outline" onClick={() => navigate('/emails?tab=outbound')}>View all drafts</Button>
+                <Button variant="outline" onClick={() => navigate('/emails')}>Clear scope</Button>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className="mb-4 rounded-xl border border-blue-500/20 bg-blue-500/8 p-4">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
@@ -720,7 +797,9 @@ export default function EmailsPage() {
             )}
           </div>
         </div>
+        )}
 
+        {!scoped && (
         <div className="flex flex-wrap items-center gap-1">
           {TABS.map(item => {
             const Icon = item.icon;
@@ -750,13 +829,14 @@ export default function EmailsPage() {
             );
           })}
         </div>
+        )}
       </div>
 
-      {tab !== 'connections' && (
+      {scoped || tab !== 'connections' ? (
         <ListToolbar
           searchValue={q}
           onSearchChange={setQ}
-          searchPlaceholder="Search customer emails..."
+          searchPlaceholder={scoped ? 'Search email context...' : 'Search customer emails...'}
           filters={emailFilterConfigs}
           activeFilters={emailActiveFilters}
           onFilterChange={handleEmailFilterChange}
@@ -767,18 +847,18 @@ export default function EmailsPage() {
           entityType="emails"
           searchSuffix={(
             <div className="hidden items-center gap-2 text-xs text-muted-foreground lg:flex">
-              <span>{summary.customer ?? 0} customer</span>
+              <span>{scoped ? (scopedSummary?.total ?? messages.length) : (summary.customer ?? 0)} customer</span>
               <span>·</span>
-              <span>{summary.needs_review ?? 0} need review</span>
+              <span>{scoped ? (scopedSummary?.needs_review ?? 0) : (summary.needs_review ?? 0)} need review</span>
               <span>·</span>
-              <span>{summary.processed ?? 0} processed</span>
+              <span>{scoped ? messages.filter(message => message.processing_status === 'processed').length : (summary.processed ?? 0)} processed</span>
             </div>
           )}
         />
-      )}
+      ) : null}
 
       <div className="flex-1 overflow-y-auto px-4 py-4 md:px-6">
-        {tab === 'connections' ? (
+        {!scoped && tab === 'connections' ? (
           <div className="space-y-4">
             <div className="grid gap-3 md:grid-cols-3">
               <button
@@ -833,7 +913,7 @@ export default function EmailsPage() {
               ))}
             </div>
           </div>
-        ) : tab === 'outbound' ? (
+        ) : !scoped && tab === 'outbound' ? (
           <div className="space-y-3">
             <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3 md:flex-row md:items-center md:justify-between">
               <div className="flex flex-wrap items-center gap-2">
@@ -907,17 +987,19 @@ export default function EmailsPage() {
           <div className="rounded-xl border border-dashed border-border p-10 text-center">
             <Mail className="mx-auto h-10 w-10 text-muted-foreground/40" />
             <p className="mt-3 text-sm font-semibold text-foreground">
-              {tab === 'review' ? 'No emails need review' : 'No customer emails yet'}
+              {scoped ? 'No email context linked yet' : tab === 'review' ? 'No emails need review' : 'No customer emails yet'}
             </p>
             <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-              {tab === 'review'
+              {scoped
+                ? 'Inbound, outbound, draft, and approval-gated email linked to this record will appear here.'
+                : tab === 'review'
                 ? 'Ambiguous, unmatched, or failed customer emails will appear here.'
                 : 'Connect a mailbox or inbound webhook so customer conversations can become Raw Context, Signals, and Memory.'}
             </p>
           </div>
         ) : (
           <CompactList className="space-y-2">
-            {visibleMessages.map(message => <MessageRow key={message.id} message={message} onOpen={setSelectedMessageId} />)}
+            {visibleMessages.map(message => <MessageRow key={message.id} message={message} onOpen={openMessage} />)}
             <PaginationBar page={page} pageSize={pageSize} total={messages.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
           </CompactList>
         )}

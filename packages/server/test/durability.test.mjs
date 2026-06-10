@@ -3490,6 +3490,46 @@ test('Workspace Agent final answers translate internal identifiers into product 
   assert.match(sanitized, /Confirm Signal/);
 });
 
+test('Workspace Agent final answers remove internal schema fragments from prose', () => {
+  const content = [
+    '## Key Components of the Schema',
+    '',
+    '1. Account-Level Context (',
+    '```',
+    'subject_type: account',
+    '```',
+    ')',
+    'This section stores customer context.',
+    '',
+    '- Context Entries: A collection of categorized memory slots.',
+    '  -',
+    '```',
+    'evaluation_criteria',
+    '```',
+    ': Stores what the customer cares about.',
+    '  -',
+    '```',
+    'summary',
+    '```',
+    ': A high-level synthesis.',
+    '  -',
+    '```',
+    'evidence',
+    '```',
+    ': Links memory back to source interactions.',
+  ].join('\n');
+
+  const sanitized = __testAgentEngine.sanitizeAgentAnswer(content);
+
+  assert.doesNotMatch(sanitized, /```/);
+  assert.doesNotMatch(sanitized, /subject_type/);
+  assert.doesNotMatch(sanitized, /evaluation_criteria/);
+  assert.doesNotMatch(sanitized, /\(\s*\)/);
+  assert.match(sanitized, /Evaluation criteria: Stores what the customer cares about/);
+  assert.match(sanitized, /Summary: A high-level synthesis/);
+  assert.match(sanitized, /Evidence: Links memory back to source interactions/);
+});
+
 test('sensitive tool scopes enforce read/write and object-level boundaries', () => {
   const adminReadOnly = { ...recoveryActor, scopes: ['read'] };
   const adminWriteOnly = { ...recoveryActor, scopes: ['write'] };

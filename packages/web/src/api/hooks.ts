@@ -715,6 +715,43 @@ export function useSaveEmailDraft() {
   });
 }
 
+export function useUpdateEmailDraft() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & Record<string, unknown>) => api.patch(`emails/${id}`, data),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['emails'] });
+      qc.invalidateQueries({ queryKey: ['email', variables.id] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+    },
+  });
+}
+
+export function useRequestEmailApproval() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`emails/${id}/request-approval`, {}),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['emails'] });
+      qc.invalidateQueries({ queryKey: ['email', id] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+      qc.invalidateQueries({ queryKey: ['hitl'] });
+    },
+  });
+}
+
+export function useSendEmailNow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`emails/${id}/send`, {}),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['emails'] });
+      qc.invalidateQueries({ queryKey: ['email', id] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+    },
+  });
+}
+
 export function useSourceFilters() {
   return useQuery({
     queryKey: ['source-filters'],
@@ -767,11 +804,27 @@ export function useEmailMessages(params?: {
   direction?: 'inbound' | 'outbound';
   classification?: string;
   processing_status?: string;
+  contact_id?: string;
+  account_id?: string;
+  opportunity_id?: string;
+  use_case_id?: string;
   include_internal?: boolean;
   limit?: number;
   cursor?: string;
 }) {
   return useList('email-messages', 'email-messages', params as Record<string, string | number | boolean | undefined>);
+}
+
+export function useEmailSubjectSummary(subjectType: 'contact' | 'account', ids: string[]) {
+  const uniqueIds = Array.from(new Set(ids.filter(Boolean)));
+  const query = new URLSearchParams();
+  query.set('subject_type', subjectType);
+  query.set('ids', uniqueIds.join(','));
+  return useQuery({
+    queryKey: ['email-subject-summary', subjectType, uniqueIds],
+    queryFn: () => api.get(`email-messages/subject-summary?${query}`),
+    enabled: uniqueIds.length > 0,
+  });
 }
 
 export function useEmailMessage(id: string | null) {

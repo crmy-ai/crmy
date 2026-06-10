@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { EntityCombobox } from '@/components/ui/entity-combobox';
 import { useQueryClient } from '@tanstack/react-query';
-import { useContact, useActivities, useUpdateContact, useDeleteContact, useUsers, useCustomFields, useContextEntries, useCreateContextEntry, useRescoreContact } from '@/api/hooks';
+import { useContact, useActivities, useUpdateContact, useDeleteContact, useUsers, useCustomFields, useContextEntries, useCreateContextEntry, useRescoreContact, useEmailSubjectSummary } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { StageBadge, LeadScoreBadge, CustomFieldsSection } from './CrmWidgets';
 import { ActivityTimeline } from './ActivityTimeline';
@@ -234,6 +235,7 @@ function ContactEditForm({
 
 export function ContactDrawer() {
   const { drawerEntityId, closeDrawer, drawerBriefing, drawerEditing, setDrawerEditing, openQuickAdd } = useAppStore();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const editing = drawerEditing;
   const setEditing = setDrawerEditing;
@@ -249,6 +251,15 @@ export function ContactDrawer() {
   const activities: any[] = activitiesData?.data ?? [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: notesData } = useContextEntries({ subject_type: 'contact', subject_id: drawerEntityId ?? '', context_type: 'note', limit: 20 }) as any;
+  const emailSummaryQ = useEmailSubjectSummary('contact', drawerEntityId ? [drawerEntityId] : []);
+  const emailSummary = ((emailSummaryQ.data as any)?.data ?? [])[0] as { total?: number; inbound?: number; outbound?: number; drafts?: number; pending_approvals?: number; latest_at?: string | null } | undefined;
+  const emailStats = {
+    total: emailSummary?.total ?? 0,
+    inbound: emailSummary?.inbound ?? 0,
+    outbound: emailSummary?.outbound ?? 0,
+    drafts: emailSummary?.drafts ?? 0,
+    pendingApprovals: emailSummary?.pending_approvals ?? 0,
+  };
   const notes: any[] = notesData?.data ?? [];
   const createNote = useCreateContextEntry();
   const updateContact = useUpdateContact(drawerEntityId ?? '');
@@ -416,6 +427,37 @@ export function ContactDrawer() {
         context={{ type: 'contact', id: contact.id, name, detail: company }}
         onBrief={() => setView('brief')}
       />
+
+      {emailStats.total > 0 && (
+        <div className="mx-4 mt-4 rounded-xl border border-border bg-card/70 p-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-500/10">
+                <Mail className="h-4 w-4 text-blue-400" />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-foreground">Email context</p>
+                <p className="text-xs text-muted-foreground">
+                  {emailStats.total} linked · {emailStats.inbound} in · {emailStats.outbound} out
+                  {emailStats.drafts > 0 ? ` · ${emailStats.drafts} draft${emailStats.drafts === 1 ? '' : 's'}` : ''}
+                  {emailStats.pendingApprovals > 0 ? ` · ${emailStats.pendingApprovals} approval${emailStats.pendingApprovals === 1 ? '' : 's'}` : ''}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const params = new URLSearchParams({ contact_id: contact.id, scope_label: name });
+                closeDrawer();
+                navigate(`/emails?${params.toString()}`);
+              }}
+              className="rounded-lg border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted/80"
+            >
+              View email context
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Note compose panel */}
       {noting && (

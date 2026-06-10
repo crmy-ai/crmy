@@ -1,6 +1,8 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
+import { friendlyErrorMessage } from '../lib/friendlyErrors';
+
 const BASE = '/api/v1';
 const DEFAULT_REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_CRMY_API_TIMEOUT_MS ?? 30_000);
 
@@ -10,7 +12,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_CRMY_API_TIMEOUT_
  */
 export class ApiError extends Error {
   constructor(public readonly body: Record<string, unknown>) {
-    super((body.detail as string) || `HTTP ${body.status ?? 'error'}`);
+    super(friendlyErrorMessage(body, `HTTP ${body.status ?? 'error'}`));
     this.name = 'ApiError';
   }
   get status(): number { return (this.body.status as number) ?? 0; }

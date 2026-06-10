@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { AgentConfig, ConversationMessage, AgentToolDef, ToolCallRecord } from '../types.js';
-import { DEFAULT_LLM_TIMEOUT_MS, resolveLlmTimeoutMs } from '../provider-utils.js';
+import { DEFAULT_LLM_TIMEOUT_MS, formatProviderHttpError, resolveLlmTimeoutMs } from '../provider-utils.js';
 
 const AGENT_STREAM_TIMEOUT_MS = Number(process.env.AGENT_STREAM_TIMEOUT_MS ?? DEFAULT_LLM_TIMEOUT_MS);
 
@@ -106,7 +106,7 @@ export async function callAnthropic(
 
     if (!res.ok) {
       const errBody = await res.text();
-      throw new Error(`Anthropic API error ${res.status}: ${errBody}`);
+      throw new Error(formatProviderHttpError('Anthropic', res.status, errBody));
     }
 
     return await parseAnthropicStream(res, onDelta, onThinking);
