@@ -641,6 +641,7 @@ export function initCommand(): Command {
       let rawKey = '';
       let jwtSecret = '';
       let encryptionKey = '';
+      let userId = '';
 
       try {
         // scrypt — same params as auth/routes.ts so passwords are portable
@@ -654,7 +655,7 @@ export function initCommand(): Command {
            RETURNING id`,
           [tenantId, email.trim(), name, passwordHash],
         );
-        const userId = userResult.rows[0].id;
+        userId = userResult.rows[0].id as string;
         const bootstrapAdminScopes = [
           'read',
           'write',
@@ -767,19 +768,24 @@ export function initCommand(): Command {
         seedDemo = loadDemo;
       }
 
+      let showcaseContactId = '';
       if (seedDemo) {
         console.log('');
         spinner = createSpinner('Seeding demo data…');
         try {
           const { seedSampleData } = await import('@crmy/server');
+          const { seedDemoData } = await import('../demo/seed.js');
           const status = await seedSampleData(db, tenantId);
           const counts = status.counts;
+          const demoResult = await seedDemoData(db, tenantId, userId);
+          showcaseContactId = demoResult.showcaseContactId;
           spinner.succeed(
-            `Demo data seeded  \x1b[2m(${counts.accounts} accounts, ${counts.contacts} contacts, ${counts.opportunities} opportunities, ${counts.raw_context_sources} Raw Context sources, ${counts.memory} Memory, ${counts.signals} Signals, ${counts.signal_groups} reviewable Signal sets)\x1b[0m`,
+            `Demo data seeded  \x1b[2m(${counts.accounts + demoResult.accounts} accounts, ${counts.contacts + demoResult.contacts} contacts, ${counts.opportunities + demoResult.opportunities} opportunities, ${demoResult.contextEntries} context entries)\x1b[0m`,
           );
-        } catch {
+        } catch (err) {
           spinner.fail('Demo data seeding failed');
-          console.log('  \x1b[33m⚠\x1b[0m  You can run it later with: crmy seed-demo\n');
+          console.log(`  \x1b[33m⚠\x1b[0m  ${(err as Error).message}`);
+          console.log('  You can run it later with: crmy seed-demo\n');
         }
       } else {
         console.log('  Demo data skipped. Run `crmy seed-demo` later to load demo customer data and context.\n');
@@ -804,9 +810,12 @@ export function initCommand(): Command {
       console.log('    \x1b[1mnpx -y @crmy/cli server\x1b[0m\n');
       if (seedDemo) {
         console.log('    Try the demo data:');
-        console.log('    \x1b[1mnpx -y @crmy/cli briefing "account:Northstar Labs"\x1b[0m');
+        console.log('    \x1b[1mnpx -y @crmy/cli briefing "contact:James Wilson"\x1b[0m');
+        if (showcaseContactId) {
+          console.log(`    \x1b[2m(contact id: ${showcaseContactId})\x1b[0m`);
+        }
+        console.log('    \x1b[1mnpx -y @crmy/cli briefing "account:FinanceFirst"\x1b[0m');
         console.log('    \x1b[1mnpx -y @crmy/cli context signal-groups\x1b[0m');
-        console.log('    \x1b[1mnpx -y @crmy/cli context lineage --subject "account:Northstar Labs"\x1b[0m');
         console.log('    \x1b[1mnpx -y @crmy/cli hitl list\x1b[0m\n');
         console.log('    Sample logins:');
         console.log('    \x1b[1msample.admin@crmy.local\x1b[0m / crmy-demo-123  \x1b[2m(admin view)\x1b[0m');
@@ -822,7 +831,7 @@ export function initCommand(): Command {
           console.log('    \x1b[1mnpx -y @crmy/cli agent-smoke --with-model\x1b[0m\n');
         }
         console.log('    Demo Prompt - Ask your agent to run this with CRMy MCP tools:');
-        console.log('    \x1b[1mUse the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.\x1b[0m\n');
+        console.log('    \x1b[1mUse the CRMy MCP tools to get a briefing for contact "James Wilson" at FinanceFirst, list any context entries with staleness warnings, and tell me the single most urgent next action with the evidence you used.\x1b[0m\n');
       }
     });
 }
