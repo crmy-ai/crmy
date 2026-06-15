@@ -33,12 +33,16 @@ export interface WebhookDeliveryRow {
   created_at: string;
 }
 
+export function generateWebhookSecret(): string {
+  return `whsec_${crypto.randomBytes(24).toString('hex')}`;
+}
+
 export async function createWebhook(
   db: DbPool,
   tenantId: UUID,
   data: { url: string; events: string[]; description?: string; created_by?: UUID },
 ): Promise<WebhookEndpointRow> {
-  const secret = `whsec_${crypto.randomBytes(24).toString('hex')}`;
+  const secret = generateWebhookSecret();
   const result = await db.query(
     `INSERT INTO webhook_endpoints (tenant_id, url, secret, event_types, description, created_by)
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
@@ -51,6 +55,18 @@ export async function getWebhook(db: DbPool, tenantId: UUID, id: UUID): Promise<
   const result = await db.query(
     'SELECT * FROM webhook_endpoints WHERE id = $1 AND tenant_id = $2',
     [id, tenantId],
+  );
+  return (result.rows[0] as WebhookEndpointRow) ?? null;
+}
+
+export async function rotateWebhookSecret(db: DbPool, tenantId: UUID, id: UUID): Promise<WebhookEndpointRow | null> {
+  const secret = generateWebhookSecret();
+  const result = await db.query(
+    `UPDATE webhook_endpoints
+     SET secret = $3, updated_at = now()
+     WHERE tenant_id = $1 AND id = $2
+     RETURNING *`,
+    [tenantId, id, secret],
   );
   return (result.rows[0] as WebhookEndpointRow) ?? null;
 }

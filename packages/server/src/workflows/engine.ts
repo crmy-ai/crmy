@@ -889,8 +889,8 @@ async function executeAction(
       });
 
       if (!effectiveRequireApproval) {
-        const { deliverEmail } = await import('../email/delivery.js');
-        await deliverEmail(db, tenantId, email.id);
+        const emailRepo = await import('../db/repos/emails.js');
+        await emailRepo.enqueueEmailDeliveryJob(db, tenantId, email.id, { reason: 'workflow_send_email' });
       }
       break;
     }

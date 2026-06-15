@@ -4,11 +4,17 @@
 import type {
   ActionContext,
   ActionContextAllowedAction,
+  ActionContextActionPacket,
   ActionContextCheckStatus,
   ActionContextGetInput,
+  ActionContextPacketEvidence,
+  ActionContextPacketItem,
   ActionContextOperatingMode,
   ActionContextPolicySummary,
   ActionContextProposedAction,
+  ActionContextRecommendedAction,
+  ActionContextSourcePosture,
+  ContextEvidence,
   ActionContextReadinessStatus,
   ActionContextRiskLevel,
   ActionContextSourceAuthoritySummary,
@@ -358,6 +364,494 @@ function proposedActionLabel(action?: ActionContextProposedAction): string {
   }
 }
 
+function compactText(value: string | undefined | null, max = 240): string {
+  const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
+}
+
+function entryTitle(entry: ContextEntry): string {
+  return entry.title || entry.context_type.replace(/_/g, ' ');
+}
+
+function evidenceRefs(entry: ContextEntry, limit = 2): ActionContextPacketEvidence[] {
+  return (entry.evidence ?? []).slice(0, limit).map(evidence => ({
+    source_type: typeof evidence.source_type === 'string' ? evidence.source_type : undefined,
+    source_id: typeof evidence.source_id === 'string' ? evidence.source_id : undefined,
+    source_ref: typeof evidence.source_ref === 'string' ? evidence.source_ref : undefined,
+    source_label: typeof evidence.source_label === 'string' ? evidence.source_label : undefined,
+    observed_at: typeof evidence.observed_at === 'string' ? evidence.observed_at : undefined,
+    snippet: compactText(typeof evidence.snippet === 'string' ? evidence.snippet : undefined, 180) || undefined,
+    confidence: typeof evidence.confidence === 'number' ? evidence.confidence : undefined,
+  }));
+}
+
+type SourcePostureKind = keyof ActionContextSourcePosture['counts'];
+
+function evidenceString(evidence: ContextEvidence, key: string): string {
+  const value = evidence[key];
+  return typeof value === 'string' ? value.toLowerCase() : '';
+}
+
+function classifyEvidencePosture(evidence: ContextEvidence): SourcePostureKind {
+  const sourceType = String(evidence.source_type ?? '').toLowerCase();
+  const authorship = evidenceString(evidence, 'source_authorship');
+  const origin = evidenceString(evidence, 'context_origin');
+  const role = evidenceString(evidence, 'evidence_role');
+  const weight = evidenceString(evidence, 'evidence_weight');
+  const customerAuthored = evidence.customer_authored;
+
+  if (customerAuthored === false || authorship === 'crmy' || origin.includes('crmy_outbound') || weight.includes('self_authored')) {
+    return 'seller_authored';
+  }
+  if (
+    customerAuthored === true
+    || authorship.includes('customer')
+    || role === 'customer_source'
+    || sourceType.includes('inbound_email')
+    || sourceType.includes('customer_email')
+  ) {
+    return 'customer_authored';
+  }
+  if (
+    sourceType.includes('crm')
+    || sourceType.includes('warehouse')
+    || sourceType.includes('hubspot')
+    || sourceType.includes('salesforce')
+    || sourceType.includes('system')
+  ) {
+    return 'system_of_record';
+  }
+  if (
+    sourceType.includes('activity')
+    || sourceType.includes('meeting')
+    || sourceType.includes('calendar')
+    || sourceType.includes('note')
+    || sourceType.includes('mcp')
+    || sourceType.includes('api')
+    || sourceType.includes('add_context')
+    || sourceType.includes('workflow')
+    || sourceType.includes('sequence')
+  ) {
+    return 'internal';
+  }
+  return 'unknown';
+}
+
+function sourcePostureSummary(dominant: ActionContextSourcePosture['dominant_source'], counts: ActionContextSourcePosture['counts']): string {
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  if (total === 0) return 'No cited source evidence is attached to this packet.';
+  if (dominant === 'mixed') return 'This packet uses a mixed source posture; distinguish customer evidence, internal context, and CRMy-authored actions before acting.';
+  switch (dominant) {
+    case 'customer_authored':
+      return 'Customer-authored evidence is the strongest source posture in this packet.';
+    case 'seller_authored':
+      return 'CRMy/seller-authored context is prominent; use it for our actions and commitments, not as customer-authored truth.';
+    case 'system_of_record':
+      return 'System-of-record data is the strongest source posture in this packet; respect source authority and writeback policy.';
+    case 'internal':
+      return 'Internal activity or note context is the strongest source posture in this packet; caveat customer claims unless backed by customer evidence.';
+    default:
+      return 'Some source evidence is weak or unknown; caveat claims before acting.';
+  }
+}
+
+function buildSourcePosture(entries: ContextEntry[], groups: SignalGroup[]): ActionContextSourcePosture {
+  const counts: ActionContextSourcePosture['counts'] = {
+    customer_authored: 0,
+    seller_authored: 0,
+    system_of_record: 0,
+    internal: 0,
+    unknown: 0,
+  };
+  for (const evidence of [
+    ...entries.flatMap(entry => entry.evidence ?? []),
+    ...groups.flatMap(group => (group.members ?? []).flatMap(member => member.context_entry?.evidence ?? [])),
+  ]) {
+    counts[classifyEvidencePosture(evidence)]++;
+  }
+
+  const nonZero = Object.entries(counts).filter(([, count]) => count > 0) as Array<[SourcePostureKind, number]>;
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  const dominant = nonZero.length === 0
+    ? 'unknown'
+    : nonZero.length > 1
+      ? 'mixed'
+      : nonZero[0][0];
+  const instructions = [
+    counts.customer_authored > 0
+      ? 'Customer-authored evidence can support customer claims when current, specific, and non-conflicting.'
+      : undefined,
+    counts.seller_authored > 0
+      ? 'Treat CRMy/seller-authored context as our words, asks, actions, or commitments; do not convert it into customer intent or agreement.'
+      : undefined,
+    counts.system_of_record > 0
+      ? 'Respect system-of-record source authority, writable-field policy, and writeback approval rules before changing external systems.'
+      : undefined,
+    counts.internal > 0
+      ? 'Use internal notes, meetings, and agent-added context as operational context; cite uncertainty when they are not direct customer evidence.'
+      : undefined,
+    counts.unknown > 0
+      ? 'Caveat weak or unknown sources and gather stronger evidence before high-impact customer or record actions.'
+      : undefined,
+  ].filter((item): item is string => Boolean(item));
+
+  return {
+    summary: sourcePostureSummary(dominant, counts),
+    dominant_source: dominant,
+    counts,
+    customer_authored_claims_present: counts.customer_authored > 0,
+    seller_authored_context_present: counts.seller_authored > 0,
+    weak_or_unknown_sources_present: total === 0 || counts.unknown > 0,
+    instructions,
+  };
+}
+
+function entryPacketItem(kind: ActionContextPacketItem['kind'], entry: ContextEntry, status?: string): ActionContextPacketItem {
+  return {
+    kind,
+    id: entry.id,
+    context_type: entry.context_type,
+    title: entryTitle(entry),
+    summary: compactText(entry.body),
+    status: status ?? entry.memory_status,
+    confidence: entry.confidence,
+    evidence_refs: evidenceRefs(entry),
+  };
+}
+
+function signalGroupPacketItem(group: SignalGroup): ActionContextPacketItem {
+  return {
+    kind: 'signal_group',
+    id: group.id,
+    context_type: group.context_type,
+    title: group.title ?? group.normalized_claim,
+    summary: group.normalized_claim,
+    status: group.readiness?.status ?? group.status,
+    confidence: group.aggregate_confidence,
+    evidence_refs: (group.members ?? [])
+      .flatMap(member => member.context_entry ? evidenceRefs(member.context_entry, 1) : [])
+      .slice(0, 3),
+  };
+}
+
+function actionSpecificInstruction(action?: ActionContextProposedAction): string {
+  switch (action?.action_type) {
+    case 'customer_outreach':
+      return 'Draft or recommend customer outreach only from confirmed Memory; cite uncertain Signals as caveats and do not imply review-required claims are settled.';
+    case 'external_writeback':
+      return 'Do not execute writeback unless source authority, writable fields, policy, and approval checks are clear.';
+    case 'record_update':
+      return 'Preview record changes first and include Action Context proof with the write.';
+    case 'memory_promote':
+      return 'Confirm only Signals that have sufficient evidence, complete typed details, and no unresolved conflict.';
+    case 'assignment_create':
+      return 'Create a focused assignment with the smallest human decision needed to unblock progress.';
+    case 'sequence_step':
+      return 'Keep automated sequence execution inside sender, approval, and customer-context boundaries.';
+    case 'workflow_action':
+      return 'Run workflow actions only when the resolved customer record, policy, and source-authority checks match the trigger payload.';
+    case 'agent_task':
+      return 'Use this packet as the task boundary and ask for review before changing customer-facing or system-of-record state.';
+    default:
+      return 'Use this packet to decide whether to proceed, warn, or ask a human before acting.';
+  }
+}
+
+function nextToolsForAction(action?: ActionContextProposedAction, mode?: ActionContextOperatingMode): string[] {
+  const reviewTools = mode === 'require_review' ? ['action_context_request_human_unblock', 'hitl_submit_request', 'assignment_create'] : [];
+  switch (action?.action_type) {
+    case 'customer_outreach':
+      return unique(['briefing_get', 'email_draft_preview', 'email_draft_save', ...reviewTools]);
+    case 'external_writeback':
+      return unique(['sor_writeback_preview', 'sor_writeback_request', ...reviewTools]);
+    case 'record_update':
+      return unique(['record_draft_preview', ...reviewTools]);
+    case 'memory_promote':
+      return unique(['context_signal_group_get', 'context_signal_group_complete_details', 'context_signal_group_promote', ...reviewTools]);
+    case 'assignment_create':
+      return unique(['assignment_create', 'briefing_get']);
+    case 'sequence_step':
+      return unique(['sequence_draft_step', 'email_draft_preview', ...reviewTools]);
+    case 'workflow_action':
+      return unique(['workflow_test', 'workflow_trigger', ...reviewTools]);
+    case 'agent_task':
+      return unique(['briefing_get', 'context_find', ...reviewTools]);
+    default:
+      return unique(['briefing_get', 'context_find', ...reviewTools]);
+  }
+}
+
+function primaryToolForAction(action?: ActionContextProposedAction): string | undefined {
+  switch (action?.action_type) {
+    case 'customer_outreach':
+      return 'email_draft_preview';
+    case 'external_writeback':
+      return 'sor_writeback_preview';
+    case 'record_update':
+      return 'record_draft_preview';
+    case 'memory_promote':
+      return 'context_signal_group_get';
+    case 'assignment_create':
+      return 'assignment_create';
+    case 'sequence_step':
+      return 'email_draft_preview';
+    case 'workflow_action':
+      return 'workflow_test';
+    case 'agent_task':
+      return 'briefing_get';
+    default:
+      return undefined;
+  }
+}
+
+function actionLabelForPlan(action?: ActionContextProposedAction): string {
+  switch (action?.action_type) {
+    case 'customer_outreach':
+      return 'Prepare customer outreach';
+    case 'external_writeback':
+      return 'Preview system-of-record writeback';
+    case 'record_update':
+      return 'Preview record update';
+    case 'memory_promote':
+      return 'Review Signal for Memory';
+    case 'assignment_create':
+      return 'Create focused assignment';
+    case 'sequence_step':
+      return 'Prepare sequence step';
+    case 'workflow_action':
+      return 'Test workflow action';
+    case 'agent_task':
+      return 'Continue agent task';
+    default:
+      return 'Continue with customer context';
+  }
+}
+
+function buildRecommendedActions(
+  context: Pick<ActionContext, 'operating_mode' | 'guidance' | 'readiness' | 'required_handoffs'>,
+  proposedAction?: ActionContextProposedAction,
+): ActionContextRecommendedAction[] {
+  const reasons = unique([
+    ...context.readiness.blockers,
+    ...context.guidance.review_reasons,
+    ...context.guidance.warning_reasons,
+  ]).slice(0, 6);
+  const proposedActionType = proposedAction?.action_type;
+
+  if (context.operating_mode === 'require_review') {
+    return [
+      {
+        id: 'request_human_unblock',
+        label: 'Request human unblock',
+        description: context.required_handoffs[0]?.title
+          ? `Create a tracked review for "${context.required_handoffs[0].title}" before execution.`
+          : `Create a tracked approval or assignment before executing ${proposedActionLabel(proposedAction)}.`,
+        priority: 'primary',
+        can_execute_now: true,
+        customer_or_system_effect: false,
+        requires_human_review: false,
+        next_tool: 'action_context_request_human_unblock',
+        reason_refs: reasons,
+        proposed_action_type: proposedActionType,
+      },
+      {
+        id: 'prepare_draft_only',
+        label: 'Prepare draft only',
+        description: 'Draft or preview the work using confirmed Memory, but do not send, write back, or update records until review clears.',
+        priority: 'secondary',
+        can_execute_now: true,
+        customer_or_system_effect: false,
+        requires_human_review: false,
+        next_tool: primaryToolForAction(proposedAction) ?? 'briefing_get',
+        reason_refs: context.guidance.review_reasons.slice(0, 4),
+        proposed_action_type: proposedActionType,
+      },
+    ];
+  }
+
+  if (context.operating_mode === 'warn') {
+    return [
+      {
+        id: 'proceed_with_caveats',
+        label: actionLabelForPlan(proposedAction),
+        description: 'Proceed if appropriate, making stale, inferred, conflicting, or low-confidence context visible in the work.',
+        priority: 'primary',
+        can_execute_now: true,
+        customer_or_system_effect: Boolean(proposedAction),
+        requires_human_review: false,
+        next_tool: primaryToolForAction(proposedAction) ?? 'briefing_get',
+        reason_refs: context.guidance.warning_reasons.slice(0, 6),
+        proposed_action_type: proposedActionType,
+      },
+      {
+        id: 'gather_more_evidence',
+        label: 'Gather more evidence',
+        description: 'Use search or briefing tools to strengthen uncertain context before committing to a customer-facing or system-changing action.',
+        priority: 'secondary',
+        can_execute_now: true,
+        customer_or_system_effect: false,
+        requires_human_review: false,
+        next_tool: 'context_find',
+        reason_refs: context.guidance.warning_reasons.slice(0, 4),
+        proposed_action_type: proposedActionType,
+      },
+    ];
+  }
+
+  return [
+    {
+      id: 'proceed',
+      label: actionLabelForPlan(proposedAction),
+      description: proposedAction
+        ? `Proceed with ${proposedActionLabel(proposedAction)} using confirmed Memory and cited evidence.`
+        : 'Use the briefing and Action Context packet to continue the customer workflow.',
+      priority: 'primary',
+      can_execute_now: true,
+      customer_or_system_effect: Boolean(proposedAction),
+      requires_human_review: false,
+      next_tool: primaryToolForAction(proposedAction) ?? 'briefing_get',
+      reason_refs: context.guidance.recommended_next_steps.slice(0, 4),
+      proposed_action_type: proposedActionType,
+    },
+  ];
+}
+
+function buildHumanUnblock(
+  context: Pick<ActionContext, 'readiness' | 'required_handoffs' | 'guidance'>,
+  action?: ActionContextProposedAction,
+): ActionContextActionPacket['human_unblock'] {
+  if (!context.readiness.review_required && context.required_handoffs.length === 0) return undefined;
+  const first = context.required_handoffs[0];
+  const reasons = unique([...context.readiness.blockers, ...context.guidance.review_reasons]).slice(0, 6);
+  const actionLabel = proposedActionLabel(action);
+  const question = first
+    ? `Can we resolve "${first.title}" so the agent can continue with ${actionLabel}?`
+    : `Can a human approve or correct the blocking context so the agent can continue with ${actionLabel}?`;
+  return {
+    required: true,
+    question,
+    reasons,
+    handoff_type: first?.type,
+  };
+}
+
+function buildActionPacket(
+  context: Pick<ActionContext, 'operating_mode' | 'guidance' | 'briefing' | 'readiness' | 'checks' | 'required_handoffs' | 'allowed_actions' | 'proof'>,
+  proposedAction?: ActionContextProposedAction,
+): ActionContextActionPacket {
+  const memory = briefingMemoryEntries(context.briefing)
+    .filter(entry => (entry.memory_status ?? 'active') === 'active' && entry.is_current !== false);
+  const staleIds = new Set(context.briefing.staleness_warnings.map(entry => entry.id));
+  const staleMemory = context.briefing.staleness_warnings;
+  const signalEntries = briefingSignalEntries(context.briefing);
+  const unresolvedGroups = (context.briefing.signal_groups ?? []).filter(group =>
+    group.readiness
+      ? !['ready_to_confirm', 'confirmed'].includes(group.readiness.status)
+      : ['blocked', 'conflicting', 'gathering'].includes(group.status),
+  );
+  const readySignalGroups = (context.briefing.signal_groups ?? []).filter(group =>
+    group.readiness?.status === 'ready_to_confirm' || group.status === 'ready',
+  );
+  const contradictionItems: ActionContextPacketItem[] = (context.briefing.contradiction_warnings ?? []).slice(0, 5).map((warning, index) => ({
+    kind: 'contradiction' as const,
+    id: `contradiction:${index}`,
+    title: 'Contradictory customer context',
+    summary: compactText(JSON.stringify(warning), 260),
+    status: 'needs_review',
+  }));
+  const assignmentItems: ActionContextPacketItem[] = context.briefing.open_assignments.slice(0, 5).map(assignment => ({
+    kind: 'assignment' as const,
+    id: assignment.id,
+    title: assignment.title,
+    summary: compactText(assignment.description ?? assignment.context ?? 'Open assignment attached to this record.'),
+    status: assignment.status,
+  }));
+  const sourceAuthorityItems: ActionContextPacketItem[] = context.checks.systems_of_record.mappings.slice(0, 5).map(mapping => ({
+    kind: 'source_authority' as const,
+    id: mapping.mapping_id,
+    title: `${mapping.object_type} -> ${mapping.external_object}`,
+    summary: `Authority: ${mapping.source_authority}; writable fields: ${mapping.writable_fields.length > 0 ? mapping.writable_fields.join(', ') : 'none'}.`,
+    status: mapping.is_active ? 'active' : 'inactive',
+  }));
+  const policyItem: ActionContextPacketItem[] = context.checks.policy ? [{
+    kind: 'policy' as const,
+    title: `Policy: ${context.checks.policy.policy}`,
+    summary: context.checks.policy.reasons.join(' ') || `Decision: ${context.checks.policy.decision}.`,
+    status: context.checks.policy.decision,
+  }] : [];
+  const permissionItems: ActionContextPacketItem[] = context.checks.permissions.status === 'blocked' ? [{
+    kind: 'permission' as const,
+    title: 'Permission boundary',
+    summary: context.checks.permissions.reasons.join(' '),
+    status: 'blocked',
+  }] : [];
+
+  const useAsTruth = memory
+    .filter(entry => !staleIds.has(entry.id))
+    .slice(0, 8)
+    .map(entry => entryPacketItem('memory', entry, 'confirmed'));
+  const cautionItems = [
+    ...signalEntries.slice(0, 5).map(entry => entryPacketItem('signal', entry, 'unconfirmed')),
+    ...readySignalGroups.slice(0, 5).map(signalGroupPacketItem),
+    ...sourceAuthorityItems,
+  ].slice(0, 12);
+  const doNotUseAsTruth = [
+    ...staleMemory.slice(0, 5).map(entry => entryPacketItem('stale_memory', entry, 'stale')),
+    ...unresolvedGroups.slice(0, 5).map(signalGroupPacketItem),
+    ...contradictionItems,
+    ...assignmentItems,
+    ...policyItem,
+    ...permissionItems,
+  ].slice(0, 14);
+  const evidenceToCite = [
+    ...useAsTruth.filter(item => (item.evidence_refs?.length ?? 0) > 0),
+    ...cautionItems.filter(item => (item.evidence_refs?.length ?? 0) > 0),
+  ].slice(0, 8);
+  const sourcePosture = buildSourcePosture(
+    [...memory, ...signalEntries, ...staleMemory],
+    context.briefing.signal_groups ?? [],
+  );
+  const allowed = context.allowed_actions
+    .filter(action => action.status === 'allowed')
+    .map(action => `${action.action_type}: ${action.reasons.join(' ')}`);
+  const approvalRequired = context.allowed_actions
+    .filter(action => action.status === 'approval_required')
+    .map(action => `${action.action_type}: ${action.reasons.join(' ')}`);
+  const blocked = unique([
+    ...context.readiness.blockers,
+    ...context.allowed_actions.filter(action => action.status === 'blocked').map(action => `${action.action_type}: ${action.reasons.join(' ')}`),
+  ]);
+
+  return {
+    action_type: proposedAction?.action_type,
+    objective: proposedActionLabel(proposedAction),
+    status: context.readiness.status,
+    risk_level: context.readiness.risk_level,
+    operating_mode: context.operating_mode,
+    can_execute: context.guidance.can_execute,
+    agent_instructions: unique([
+      actionSpecificInstruction(proposedAction),
+      context.guidance.summary,
+      ...context.guidance.recommended_next_steps,
+    ]),
+    use_as_truth: useAsTruth,
+    use_with_caution: cautionItems,
+    do_not_use_as_truth: doNotUseAsTruth,
+    evidence_to_cite: evidenceToCite,
+    source_posture: sourcePosture,
+    recommended_actions: buildRecommendedActions(context, proposedAction),
+    action_boundaries: {
+      allowed: allowed.slice(0, 8),
+      warnings: context.guidance.warning_reasons,
+      blocked,
+      required_review: unique([...context.guidance.review_reasons, ...approvalRequired]).slice(0, 10),
+    },
+    human_unblock: buildHumanUnblock(context, proposedAction),
+    next_tools: nextToolsForAction(proposedAction, context.operating_mode),
+  };
+}
+
 function buildActionGuidance(input: ActionContextGuidanceInput): ActionContext['guidance'] {
   const actionLabel = proposedActionLabel(input.proposed_action);
   if (input.operating_mode === 'require_review') {
@@ -582,6 +1076,9 @@ export async function getActionContext(
     include_stale: input.include_stale,
     context_radius: input.context_radius,
     token_budget: input.token_budget,
+    token_budget_profile: input.token_budget_profile,
+    evidence_mode: input.evidence_mode,
+    proposed_action_type: input.proposed_action?.action_type,
   });
 
   const systems = await loadSourceAuthority(db, actor.tenant_id, input.subject_type, input.subject_id, input.proposed_action);
@@ -647,6 +1144,20 @@ export async function getActionContext(
     generated_at: new Date().toISOString(),
     operating_mode: derived.operating_mode,
     guidance: derived.guidance,
+    action_packet: buildActionPacket({
+      operating_mode: derived.operating_mode,
+      guidance: derived.guidance,
+      briefing,
+      readiness: derived.readiness,
+      checks: derived.checks,
+      allowed_actions: allowedActions,
+      required_handoffs: derived.required_handoffs,
+      proof: {
+        used_context_entry_ids: usedContextEntryIds,
+        used_signal_group_ids: usedSignalGroupIds,
+        expected_receipts: unique(expectedReceipts),
+      },
+    }, input.proposed_action),
     briefing,
     readiness: derived.readiness,
     checks: derived.checks,

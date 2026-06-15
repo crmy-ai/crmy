@@ -23,6 +23,18 @@ interface AgentSmokeResult {
     assignment_count: number;
     signal_group_count: number;
   };
+  action_context: {
+    operating_mode?: string;
+    readiness_status?: string;
+    recommended_action_count: number;
+    review_required: boolean;
+  };
+  lineage: {
+    node_count: number;
+    edge_count: number;
+    pending_outcomes: number;
+    failed_outcomes: number;
+  };
   signals: {
     count: number;
     examples: Array<{
@@ -79,6 +91,11 @@ function countGroupedEntries(grouped: unknown): number {
   return Object.values(asRecord(grouped)).reduce<number>((sum, entries) => sum + asArray(entries).length, 0);
 }
 
+function unwrapActionContext(value: Record<string, unknown>): Record<string, unknown> {
+  const wrapped = asRecord(value.action_context);
+  return Object.keys(wrapped).length ? wrapped : value;
+}
+
 function parseToolResult(raw: string): Record<string, unknown> {
   const parsed = JSON.parse(raw) as Record<string, unknown>;
   if (parsed.error) {
@@ -97,17 +114,25 @@ export async function runAgentSmoke(options: {
   withModel?: boolean;
   json?: boolean;
   config?: string;
-} = {}): Promise<AgentSmokeResult> {
+  } = {}): Promise<AgentSmokeResult> {
   const accountName = options.account?.trim() || 'Northstar Labs';
   const signalLimit = options.signalLimit ?? 5;
   const checks: SmokeCheck[] = [];
-  const prompt = `Use the CRMy MCP tools to resolve the customer record "${accountName}", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.`;
+  const prompt = `Use the CRMy MCP tools to resolve the customer record "${accountName}", get a briefing, get Action Context for customer outreach, inspect Signals that need attention, and check lineage outcomes before recommending the safest next action with evidence.`;
   let client: CliClient | undefined;
   let accountId: string | undefined;
   let memoryCount = 0;
   let activityCount = 0;
   let assignmentCount = 0;
   let briefingSignalGroupCount = 0;
+  let actionContextOperatingMode: string | undefined;
+  let actionContextReadinessStatus: string | undefined;
+  let actionContextRecommendedActionCount = 0;
+  let actionContextReviewRequired = false;
+  let lineageNodeCount = 0;
+  let lineageEdgeCount = 0;
+  let lineagePendingOutcomeCount = 0;
+  let lineageFailedOutcomeCount = 0;
   let signals: AgentSmokeResult['signals']['examples'] = [];
   let modelExtraction: AgentSmokeResult['model_extraction'] | undefined;
 
@@ -160,6 +185,51 @@ export async function runAgentSmoke(options: {
           ? `Briefing returned ${memoryCount} Memory item(s), ${activityCount} activity item(s), ${assignmentCount} open assignment(s), and ${briefingSignalGroupCount} reviewable Signal set(s).`
           : `Briefing resolved but contains no demo context for "${accountName}".`,
         fix: hasBriefingContent ? undefined : 'Run `crmy seed-demo` to load the Northstar Labs source-to-action demo.',
+      });
+
+      const actionContextResult = unwrapActionContext(await runTool(client, 'action_context_get', {
+        subject_type: 'account',
+        subject_id: accountId,
+        context_radius: 'account_wide',
+        token_budget: 4000,
+        proposed_action: {
+          action_type: 'customer_outreach',
+          object_type: 'account',
+        },
+      }));
+      const actionPacket = asRecord(actionContextResult.action_packet);
+      const readiness = asRecord(actionContextResult.readiness);
+      actionContextOperatingMode = typeof actionContextResult.operating_mode === 'string' ? actionContextResult.operating_mode : undefined;
+      actionContextReadinessStatus = typeof readiness.status === 'string' ? readiness.status : undefined;
+      actionContextReviewRequired = Boolean(readiness.review_required);
+      actionContextRecommendedActionCount = asArray(actionPacket.recommended_actions).length;
+      const hasActionPacket = Boolean(actionPacket.objective) || actionContextRecommendedActionCount > 0;
+      checks.push({
+        name: 'action_context_get',
+        ok: hasActionPacket,
+        detail: hasActionPacket
+          ? `Action Context returned ${actionContextOperatingMode ?? 'unknown'} mode, ${actionContextReadinessStatus ?? 'unknown'} readiness, and ${actionContextRecommendedActionCount} recommended action(s).`
+          : 'Action Context did not return an agent-ready action packet.',
+        fix: hasActionPacket ? undefined : 'Run `crmy seed-demo` and verify the server has the current migrations.',
+      });
+
+      const lineageResult = await runTool(client, 'context_lineage_get', {
+        subject_type: 'account',
+        subject_id: accountId,
+      });
+      const lineage = asRecord(lineageResult.lineage ?? lineageResult);
+      lineageNodeCount = asArray(lineage.nodes).length;
+      lineageEdgeCount = asArray(lineage.edges).length;
+      const outcomes = asRecord(lineage.outcomes);
+      lineagePendingOutcomeCount = Number(outcomes.pending_count ?? 0);
+      lineageFailedOutcomeCount = Number(outcomes.failed_count ?? 0);
+      checks.push({
+        name: 'context_lineage_get',
+        ok: lineageNodeCount > 0,
+        detail: lineageNodeCount > 0
+          ? `Lineage returned ${lineageNodeCount} node(s), ${lineageEdgeCount} edge(s), ${lineagePendingOutcomeCount} pending outcome(s), and ${lineageFailedOutcomeCount} failed outcome(s).`
+          : 'Lineage returned no source-to-context proof nodes.',
+        fix: lineageNodeCount > 0 ? undefined : 'Run `crmy seed-demo` or process Raw Context before checking lineage.',
       });
 
       if (options.withModel) {
@@ -242,6 +312,18 @@ export async function runAgentSmoke(options: {
       assignment_count: assignmentCount,
       signal_group_count: briefingSignalGroupCount,
     },
+    action_context: {
+      operating_mode: actionContextOperatingMode,
+      readiness_status: actionContextReadinessStatus,
+      recommended_action_count: actionContextRecommendedActionCount,
+      review_required: actionContextReviewRequired,
+    },
+    lineage: {
+      node_count: lineageNodeCount,
+      edge_count: lineageEdgeCount,
+      pending_outcomes: lineagePendingOutcomeCount,
+      failed_outcomes: lineageFailedOutcomeCount,
+    },
     signals: {
       count: signals.length,
       examples: signals,
@@ -277,6 +359,15 @@ export async function runAgentSmoke(options: {
     console.log(`\n  Model-backed extraction: ${modelExtraction.extracted_count} item(s)${duplicate}`);
   }
 
+  if (actionContextOperatingMode) {
+    const review = actionContextReviewRequired ? ' · review required' : '';
+    console.log(`\n  Action Context: ${actionContextOperatingMode} · ${actionContextReadinessStatus ?? 'unknown'}${review}`);
+  }
+
+  if (lineageNodeCount > 0) {
+    console.log(`  Lineage proof: ${lineageNodeCount} node(s), ${lineageEdgeCount} edge(s), ${lineagePendingOutcomeCount} pending outcome(s)`);
+  }
+
   console.log('\n  Demo Prompt - Ask your agent to run this with CRMy MCP tools enabled:');
   console.log(`  \x1b[1m${prompt}\x1b[0m\n`);
 
@@ -292,7 +383,7 @@ export async function runAgentSmoke(options: {
 
 export function agentSmokeCommand(): Command {
   return new Command('agent-smoke')
-    .description('Check the seeded demo agent workflow: resolve an account, get a briefing, and list Signals')
+    .description('Check the seeded demo agent workflow: resolve an account, get a briefing, check Action Context, Signals, and lineage')
     .option('--account <name>', 'Demo account name to resolve', 'Northstar Labs')
     .option('--signal-limit <n>', 'Signals to request from context_signal_group_list', '5')
     .option('--with-model', 'Also ingest a small Raw Context source through the configured Workspace Agent model')

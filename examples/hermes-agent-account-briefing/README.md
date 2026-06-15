@@ -64,7 +64,7 @@ Then restart Hermes or run:
 Paste this into Hermes Agent:
 
 ```text
-Use mcp_crmy_customer_record_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, then call mcp_crmy_context_signal_group_list for Signals needing attention. Tell me the safest next action with the evidence you used.
+Use mcp_crmy_customer_record_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, call mcp_crmy_action_context_get for customer outreach, call mcp_crmy_context_signal_group_list for Signals needing attention, then call mcp_crmy_context_lineage_get to check outcomes. Tell me the safest next action with the evidence you used.
 ```
 
 ## Expected Path
@@ -73,9 +73,11 @@ Hermes should call:
 
 1. `mcp_crmy_customer_record_resolve` for `Northstar Labs`.
 2. `mcp_crmy_briefing_get` for the resolved account.
-3. `mcp_crmy_context_signal_group_list` with `attention_only: true`.
+3. `mcp_crmy_action_context_get` with `proposed_action.action_type: "customer_outreach"`.
+4. `mcp_crmy_context_signal_group_list` with `attention_only: true`.
+5. `mcp_crmy_context_lineage_get` for the resolved account.
 
-The answer should mention confirmed Memory separately from unconfirmed Signals, explain which Signal needs review, and recommend a safe next action such as reviewing or routing the sensitive Signal to a Handoff.
+The answer should mention confirmed Memory separately from unconfirmed Signals, explain which Signal needs review, respect Action Context boundaries, and recommend a safe next action such as reviewing or routing the sensitive Signal to a Handoff.
 
 ## Troubleshooting
 

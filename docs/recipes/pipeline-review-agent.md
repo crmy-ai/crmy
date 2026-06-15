@@ -384,7 +384,7 @@ crmy briefing "opportunity:Vertex Logistics Expansion" --format json
         "confidence": 0.9
       }
     ],
-    "stale_warnings": [
+    "staleness_warnings": [
       {
         "id": "d0000000-0000-4000-f000-000000000004",
         "context_type": "competitive_intel",
@@ -494,7 +494,7 @@ crmy briefing "opportunity:Brightside Health Platform Deal" --format json
         "confidence": 0.85
       }
     ],
-    "stale_warnings": [
+    "staleness_warnings": [
       {
         "id": "d0000000-0000-4000-f000-000000000009",
         "context_type": "research",

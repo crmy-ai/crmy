@@ -89,6 +89,41 @@ export function useDeleteAccount(id: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['accounts'] }),
   });
 }
+export function useMergeAccount(primaryId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { secondary_id: string; idempotency_key?: string }) => api.post(`accounts/${primaryId}/merge`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['account', primaryId] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['contacts'] });
+      qc.invalidateQueries({ queryKey: ['opportunities'] });
+      qc.invalidateQueries({ queryKey: ['emails'] });
+      qc.invalidateQueries({ queryKey: ['context'] });
+    },
+  });
+}
+export function useSplitAccountDomains(sourceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: {
+      target_account_id: string;
+      domains: string[];
+      move_matching_records?: boolean;
+      idempotency_key?: string;
+    }) => api.post(`accounts/${sourceId}/split-domains`, data),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['account', sourceId] });
+      qc.invalidateQueries({ queryKey: ['account', variables.target_account_id] });
+      qc.invalidateQueries({ queryKey: ['accounts'] });
+      qc.invalidateQueries({ queryKey: ['contacts'] });
+      qc.invalidateQueries({ queryKey: ['opportunities'] });
+      qc.invalidateQueries({ queryKey: ['emails'] });
+      qc.invalidateQueries({ queryKey: ['activities'] });
+      qc.invalidateQueries({ queryKey: ['context'] });
+    },
+  });
+}
 
 // Opportunities
 export function useOpportunities(params?: {
@@ -320,11 +355,28 @@ export function useSyncCalendarConnection() {
   });
 }
 
+export function useUpdateCalendarConnectionStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, active, meeting_ingest_scope }: { id: string; active: boolean; meeting_ingest_scope?: string }) =>
+      api.patch(`calendar/connections/${id}/status`, { active, meeting_ingest_scope }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calendar-connections'] });
+      qc.invalidateQueries({ queryKey: ['calendar-events'] });
+      qc.invalidateQueries({ queryKey: ['admin-actor-connections'] });
+    },
+  });
+}
+
 export function useDeleteCalendarConnection() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`calendar/connections/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['calendar-connections'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calendar-connections'] });
+      qc.invalidateQueries({ queryKey: ['calendar-events'] });
+      qc.invalidateQueries({ queryKey: ['admin-actor-connections'] });
+    },
   });
 }
 
@@ -626,6 +678,18 @@ export function useUpdateWebhook() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['webhooks'] }),
   });
 }
+export function useRevealWebhookSecret() {
+  return useMutation({
+    mutationFn: (id: string) => api.post(`webhooks/${id}/secret/reveal`, {}),
+  });
+}
+export function useRotateWebhookSecret() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`webhooks/${id}/secret/rotate`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['webhooks'] }),
+  });
+}
 export function useDeleteWebhook() {
   const qc = useQueryClient();
   return useMutation({
@@ -675,11 +739,26 @@ export function useSearch(q: string) {
 }
 
 // Emails
-export function useEmails(params?: { contact_id?: string; status?: string; limit?: number }) {
+export function useEmails(params?: {
+  contact_id?: string;
+  account_id?: string;
+  opportunity_id?: string;
+  use_case_id?: string;
+  q?: string;
+  status?: string;
+  limit?: number;
+}) {
   return useList('emails', 'emails', params);
 }
 export function useEmail(id: string) {
   return useQuery({ queryKey: ['email', id], queryFn: () => api.get(`emails/${id}`), enabled: !!id });
+}
+export function useHITLRequest(id?: string | null) {
+  return useQuery({
+    queryKey: ['hitl-request', id],
+    queryFn: () => api.get(`hitl/${id}`),
+    enabled: !!id,
+  });
 }
 export function useCreateEmail() {
   const qc = useQueryClient();
@@ -696,11 +775,19 @@ export function usePreviewEmailDraft() {
   return useMutation<{
     subject: string;
     body_text: string;
+    sender?: Record<string, unknown>;
     context_used?: Record<string, unknown>;
     warnings?: string[];
     model_metadata?: Record<string, unknown>;
   }, Error, Record<string, unknown>>({
     mutationFn: (data) => api.post('emails/draft-preview', data),
+  });
+}
+
+export function useEmailSender() {
+  return useQuery({
+    queryKey: ['email-sender'],
+    queryFn: () => api.get('emails/sender'),
   });
 }
 
@@ -723,6 +810,7 @@ export function useUpdateEmailDraft() {
       qc.invalidateQueries({ queryKey: ['emails'] });
       qc.invalidateQueries({ queryKey: ['email', variables.id] });
       qc.invalidateQueries({ queryKey: ['email-messages'] });
+      qc.invalidateQueries({ queryKey: ['email-subject-summary'] });
     },
   });
 }
@@ -735,7 +823,9 @@ export function useRequestEmailApproval() {
       qc.invalidateQueries({ queryKey: ['emails'] });
       qc.invalidateQueries({ queryKey: ['email', id] });
       qc.invalidateQueries({ queryKey: ['email-messages'] });
+      qc.invalidateQueries({ queryKey: ['email-subject-summary'] });
       qc.invalidateQueries({ queryKey: ['hitl'] });
+      qc.invalidateQueries({ queryKey: ['hitl-request'] });
     },
   });
 }
@@ -748,6 +838,33 @@ export function useSendEmailNow() {
       qc.invalidateQueries({ queryKey: ['emails'] });
       qc.invalidateQueries({ queryKey: ['email', id] });
       qc.invalidateQueries({ queryKey: ['email-messages'] });
+      qc.invalidateQueries({ queryKey: ['email-subject-summary'] });
+    },
+  });
+}
+
+export function useRetryProviderDraft() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`emails/${id}/provider-draft/retry`, {}),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['emails'] });
+      qc.invalidateQueries({ queryKey: ['email', id] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+    },
+  });
+}
+
+export function useResolveEmailDelivery() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string; action: 'retry' | 'mark_sent' | 'mark_failed'; note?: string }) =>
+      api.post(`emails/${id}/delivery-resolution`, data),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['emails'] });
+      qc.invalidateQueries({ queryKey: ['email', variables.id] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+      qc.invalidateQueries({ queryKey: ['ops-status'] });
     },
   });
 }
@@ -786,7 +903,70 @@ export function useSyncMailboxConnection() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.post(`mailbox/connections/${id}/sync`, {}),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mailbox-connections'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mailbox-connections'] });
+      qc.invalidateQueries({ queryKey: ['admin-actor-connections'] });
+    },
+  });
+}
+
+export function useRefreshMailboxAliases() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`mailbox/connections/${id}/aliases/refresh`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mailbox-connections'] });
+      qc.invalidateQueries({ queryKey: ['email-sender'] });
+    },
+  });
+}
+
+export function useUpdateMailboxSender() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, selected_send_as_email }: { id: string; selected_send_as_email: string }) =>
+      api.patch(`mailbox/connections/${id}/sender`, { selected_send_as_email }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mailbox-connections'] });
+      qc.invalidateQueries({ queryKey: ['email-sender'] });
+    },
+  });
+}
+
+export function useUpdateMailboxConnectionStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      active,
+      context_sync_enabled,
+      send_enabled,
+      provider_draft_enabled,
+      is_default_sender,
+      account_ingest_scope,
+    }: {
+      id: string;
+      active: boolean;
+      context_sync_enabled?: boolean;
+      send_enabled?: boolean;
+      provider_draft_enabled?: boolean;
+      is_default_sender?: boolean;
+      account_ingest_scope?: string;
+    }) => api.patch(`mailbox/connections/${id}/status`, {
+      active,
+      context_sync_enabled,
+      send_enabled,
+      provider_draft_enabled,
+      is_default_sender,
+      account_ingest_scope,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mailbox-connections'] });
+      qc.invalidateQueries({ queryKey: ['email-sender'] });
+      qc.invalidateQueries({ queryKey: ['admin-actor-connections'] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+      qc.invalidateQueries({ queryKey: ['emails'] });
+    },
   });
 }
 
@@ -794,7 +974,13 @@ export function useDeleteMailboxConnection() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`mailbox/connections/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mailbox-connections'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mailbox-connections'] });
+      qc.invalidateQueries({ queryKey: ['email-sender'] });
+      qc.invalidateQueries({ queryKey: ['admin-actor-connections'] });
+      qc.invalidateQueries({ queryKey: ['email-messages'] });
+      qc.invalidateQueries({ queryKey: ['emails'] });
+    },
   });
 }
 
@@ -1035,6 +1221,118 @@ export function useAdminActors() {
   return useQuery({
     queryKey: ['admin-actors'],
     queryFn: () => api.get<{ data: AdminActorRow[] }>('admin/actors'),
+  });
+}
+
+export interface OAuthReadinessItem {
+  kind: 'mailbox' | 'calendar';
+  provider: 'google' | 'microsoft';
+  label: string;
+  configured: boolean;
+  ready: boolean;
+  can_start_oauth: boolean;
+  setup_status: 'ready' | 'tenant_app_incomplete' | 'managed_app_unavailable' | 'self_hosted_env_missing';
+  setup_blockers: string[];
+  admin_action: string;
+  user_action: string;
+  redirect_uri: string;
+  callback_path: string;
+  accepted_env_vars: {
+    client_id: string[];
+    client_secret: string[];
+    redirect_uri: string[];
+  };
+  configured_env_vars: string[];
+  missing_env_vars: string[];
+  scopes: {
+    context: string[];
+    send?: string[];
+    drafts?: string[];
+  };
+  app_source: 'tenant_owned' | 'crmy_managed' | 'self_hosted_env' | 'missing';
+  tenant_owned_configured: boolean;
+  crmy_managed_available: boolean;
+  self_hosted_env_configured: boolean;
+  hosted_managed_enabled: boolean;
+}
+
+export interface TenantOAuthApp {
+  provider: 'google' | 'microsoft';
+  enabled: boolean;
+  client_id?: string;
+  has_client_secret: boolean;
+  microsoft_tenant_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ActorConnectionSummary {
+  actor_id: string;
+  actor_name: string;
+  actor_type: 'human' | 'agent';
+  is_active: boolean;
+  user_id?: string | null;
+  user_email?: string | null;
+  user_name?: string | null;
+  mailbox_connections: Array<Record<string, unknown>>;
+  calendar_connections: Array<Record<string, unknown>>;
+  mailbox_count: number;
+  calendar_count: number;
+  sender_count: number;
+  ready_sender_count: number;
+  connected_mailbox_count: number;
+  connected_calendar_count: number;
+  email_processed_count?: number;
+  calendar_processed_count?: number;
+  raw_context_source_count?: number;
+  signal_count?: number;
+  memory_count?: number;
+}
+
+export function useOAuthReadiness(enabled = true) {
+  return useQuery({
+    queryKey: ['admin-oauth-readiness'],
+    queryFn: () => api.get<{ data: OAuthReadinessItem[]; summary: Record<string, number> }>('admin/oauth-readiness'),
+    enabled,
+  });
+}
+
+export function useTenantOAuthApps(enabled = true) {
+  return useQuery({
+    queryKey: ['admin-oauth-apps'],
+    queryFn: () => api.get<{ data: TenantOAuthApp[]; total: number }>('admin/oauth-apps'),
+    enabled,
+  });
+}
+
+export function useUpsertTenantOAuthApp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ provider, data }: { provider: 'google' | 'microsoft'; data: Record<string, unknown> }) =>
+      api.put(`admin/oauth-apps/${provider}`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-oauth-apps'] });
+      qc.invalidateQueries({ queryKey: ['admin-oauth-readiness'] });
+    },
+  });
+}
+
+export function useDeleteTenantOAuthApp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (provider: 'google' | 'microsoft') => api.delete(`admin/oauth-apps/${provider}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin-oauth-apps'] });
+      qc.invalidateQueries({ queryKey: ['admin-oauth-readiness'] });
+    },
+  });
+}
+
+export function useAdminActorConnections(enabled = true) {
+  return useQuery({
+    queryKey: ['admin-actor-connections'],
+    queryFn: () => api.get<{ data: ActorConnectionSummary[]; total: number }>('admin/actor-connections'),
+    enabled,
   });
 }
 

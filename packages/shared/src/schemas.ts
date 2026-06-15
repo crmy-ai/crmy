@@ -26,6 +26,8 @@ export const writebackMode = z.enum(['append_event', 'mapped_upsert', 'stored_pr
 export const sourceAuthority = z.enum(['crmy', 'external', 'bidirectional', 'read_only', 'approval_required']);
 export const externalObjectType = z.enum(['contact', 'account', 'opportunity', 'activity', 'use_case', 'context_entry']);
 export const memoryStatus = z.enum(['signal', 'active', 'rejected', 'superseded']);
+export const tokenBudgetProfile = z.enum(['tiny', 'standard', 'deep', 'evidence_heavy']);
+export const evidenceMode = z.enum(['summary', 'full', 'none']);
 export const signalReadinessStatus = z.enum([
   'ready_to_confirm',
   'needs_more_evidence',
@@ -187,6 +189,7 @@ export const accountCreate = z.object({
   parent_id: uuid.optional(),
   owner_id: uuid.optional(),
   aliases: z.array(z.string()).default([]),
+  additional_domains: z.array(z.string()).default([]),
   tags,
   custom_fields: customFields,
   idempotency_key: idempotencyKey,
@@ -209,6 +212,7 @@ export const accountUpdate = z.object({
     parent_id: uuid.nullable().optional(),
     owner_id: uuid.nullable().optional(),
     aliases: z.array(z.string()).optional(),
+    additional_domains: z.array(z.string()).optional(),
     tags: z.array(z.string()).optional(),
     custom_fields: z.record(z.unknown()).optional(),
   }),
@@ -502,7 +506,7 @@ export const sorDiscover = z.object({
 export const sorMappingUpsert = z.object({
   id: uuid.optional(),
   system_id: uuid.describe('System connection that owns this mapping.'),
-  object_type: externalObjectType.describe('CRMy typed object that external records sync into. In 0.8, contact/account/opportunity/activity sync directly; use_case and context_entry mappings create reviewable conflicts until their typed adapters are available.'),
+  object_type: externalObjectType.describe('CRMy typed object that external records sync into. contact/account/opportunity/activity sync directly; use_case and context_entry mappings create reviewable conflicts until their typed adapters are available.'),
   external_object: z.string().min(1)
     .describe('External CRM object, warehouse table, view, or approved stored procedure target.'),
   external_id_field: z.string().min(1).default('id')
@@ -586,7 +590,7 @@ export const sorWritebackPreview = z.object({
 
 export const sorWritebackRequest = sorWritebackPreview.extend({
   require_approval: z.boolean().default(true),
-  idempotency_key: idempotencyKey,
+  idempotency_key: z.string().trim().min(1).max(128).describe('Required stable operation key. Reuse the same key when retrying the same external writeback request.'),
 });
 
 export const sorWritebackExecute = z.object({
@@ -620,6 +624,7 @@ export const authRegister = z.object({
 export const authLogin = z.object({
   email: z.string().trim().email(),
   password: z.string(),
+  tenant_slug: z.string().trim().min(1).max(80).optional(),
 });
 
 export const apiKeyCreate = z.object({
@@ -771,6 +776,8 @@ export const webhookUpdate = z.object({
 
 export const webhookDelete = z.object({ id: uuid, idempotency_key: idempotencyKey });
 export const webhookGet = z.object({ id: uuid });
+export const webhookRevealSecret = z.object({ id: uuid });
+export const webhookRotateSecret = z.object({ id: uuid, idempotency_key: idempotencyKey });
 
 export const webhookList = z.object({
   active: z.boolean().optional(),
@@ -804,7 +811,11 @@ export const emailGet = z.object({ id: uuid });
 
 export const emailSearch = z.object({
   contact_id: uuid.optional(),
-  status: z.enum(['draft', 'pending_approval', 'approved', 'sending', 'sent', 'failed', 'rejected']).optional(),
+  account_id: uuid.optional(),
+  opportunity_id: uuid.optional(),
+  use_case_id: uuid.optional(),
+  q: z.string().optional(),
+  status: z.enum(['draft', 'pending_approval', 'approved', 'queued_for_delivery', 'sending', 'sent', 'failed', 'rejected', 'delivery_uncertain']).optional(),
   limit,
   cursor,
 });
@@ -1406,6 +1417,10 @@ export const briefingGet = z.object({
    * Estimated at ~4 chars/token (body + title + overhead per entry).
    */
   token_budget: z.number().int().min(100).optional(),
+  token_budget_profile: tokenBudgetProfile.optional()
+    .describe('Named token budget preset. Explicit token_budget wins when both are supplied.'),
+  evidence_mode: evidenceMode.default('summary')
+    .describe('summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries.'),
 });
 
 export const actionContextProposedAction = z.object({
@@ -1438,8 +1453,39 @@ export const actionContextGet = z.object({
   include_stale: z.boolean().default(false),
   context_radius: z.enum(['direct', 'adjacent', 'account_wide']).default('direct'),
   token_budget: z.number().int().min(100).optional(),
+  token_budget_profile: tokenBudgetProfile.optional()
+    .describe('Named token budget preset. If omitted, CRMy infers one from proposed_action when useful. Explicit token_budget wins.'),
+  evidence_mode: evidenceMode.default('summary')
+    .describe('summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries.'),
   emit_retrieval_event: z.boolean().default(true),
   proposed_action: actionContextProposedAction.optional(),
+});
+
+export const actionContextHumanUnblock = z.object({
+  subject_type: subjectType,
+  subject_id: uuid,
+  proposed_action: actionContextProposedAction.optional(),
+  request_type: z.enum(['auto', 'approval', 'assignment']).default('auto')
+    .describe('auto chooses approval for policy/signal review and assignment when an assignee is provided.'),
+  title: z.string().min(1).max(240).optional()
+    .describe('Human-facing title. Defaults to the Action Context unblock question.'),
+  question: z.string().min(1).max(1000).optional()
+    .describe('The smallest decision or correction needed from the human.'),
+  assignee_id: uuid.optional()
+    .describe('Human or agent actor to assign when request_type is assignment.'),
+  reviewer_id: uuid.optional()
+    .describe('Human actor to notify/escalate when request_type is approval.'),
+  priority: assignmentPriority.default('normal'),
+  due_at: z.string().optional(),
+  sla_minutes: z.number().int().min(1).optional(),
+  reasoning: z.string().min(1).max(4000).optional()
+    .describe('Agent summary of what it found and why it stopped. Defaults to Action Context guidance.'),
+  tools_called: z.array(z.object({
+    tool_name: z.string().min(1),
+    args_summary: z.string().optional(),
+    result_summary: z.string().optional(),
+  })).default([]),
+  idempotency_key: idempotencyKey,
 });
 
 // -- Context search (full-text) schema --
@@ -1767,6 +1813,8 @@ export const contextDiff = z.object({
   subject_id: uuid,
   /** Relative ("7d", "24h", "30m") or ISO timestamp */
   since: z.string(),
+  limit: z.number().int().min(1).max(100).default(50)
+    .describe('Maximum entries to return per diff bucket. If more changes exist, the response marks that bucket as truncated.'),
 });
 
 /**

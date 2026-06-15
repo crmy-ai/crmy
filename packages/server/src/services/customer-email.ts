@@ -76,10 +76,6 @@ function localPart(email: string): string {
   return email.split('@')[0]?.trim().toLowerCase() ?? '';
 }
 
-function truthyString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
 async function internalDomains(db: DbPool, tenantId: UUID): Promise<Set<string>> {
   const result = await db.query(
     `SELECT lower(split_part(email, '@', 2)) AS domain
@@ -135,20 +131,52 @@ async function findAccountByDomain(
   if (ownerIds) {
     if (ownerIds.length === 0) return null;
     params.push(ownerIds);
-    ownerClause = ` AND owner_id = ANY($${params.length}::uuid[])`;
+    ownerClause = ` AND a.owner_id = ANY($${params.length}::uuid[])`;
   }
   const result = await db.query(
-    `SELECT id, name, owner_id
-	     FROM accounts
-	     WHERE tenant_id = $1
-	       AND merged_into IS NULL
-	       AND archived_at IS NULL
-	       AND lower(domain) = $2
+    `SELECT a.id, a.name, a.owner_id
+	     FROM accounts a
+       LEFT JOIN account_domains ad ON ad.tenant_id = a.tenant_id AND ad.account_id = a.id
+	     WHERE a.tenant_id = $1
+	       AND a.merged_into IS NULL
+	       AND a.archived_at IS NULL
+	       AND (lower(a.domain) = $2 OR lower(ad.domain) = $2)
        ${ownerClause}
      LIMIT 1`,
     params,
   );
   return result.rows[0] ?? null;
+}
+
+async function linkedSubjectInOwnerScope(
+  db: DbPool,
+  tenantId: UUID,
+  linked: {
+    contact_id?: string | null;
+    account_id?: string | null;
+    opportunity_id?: string | null;
+    use_case_id?: string | null;
+  },
+  ownerIds?: UUID[] | null,
+): Promise<boolean> {
+  if (ownerIds === undefined || ownerIds === null) return true;
+  if (ownerIds.length === 0) return false;
+  const checks: Array<[string, string | null | undefined]> = [
+    ['accounts', linked.account_id],
+    ['contacts', linked.contact_id],
+    ['opportunities', linked.opportunity_id],
+    ['use_cases', linked.use_case_id],
+  ];
+  for (const [table, id] of checks) {
+    if (!id) continue;
+    const result = await db.query(
+      `SELECT owner_id FROM ${table} WHERE tenant_id = $1 AND id = $2 LIMIT 1`,
+      [tenantId, id],
+    );
+    const ownerId = result.rows[0]?.owner_id as string | null | undefined;
+    if (ownerId && ownerIds.includes(ownerId)) return true;
+  }
+  return false;
 }
 
 async function findContactByEmail(
@@ -181,15 +209,18 @@ async function associateEmail(
   tenantId: UUID,
   input: NormalizedEmailInput,
   ownerIds?: UUID[] | null,
-): Promise<{
-  contact_id?: string | null;
-  account_id?: string | null;
-  opportunity_id?: string | null;
-  use_case_id?: string | null;
-  reason: string;
-  resolution_summary?: string;
-  ambiguity_count?: number;
-}> {
+	): Promise<{
+	  contact_id?: string | null;
+	  account_id?: string | null;
+	  opportunity_id?: string | null;
+	  use_case_id?: string | null;
+	  email_id?: string | null;
+	  reply_to_email_message_id?: string | null;
+	  conversation_root_email_message_id?: string | null;
+	  reason: string;
+	  resolution_summary?: string;
+	  ambiguity_count?: number;
+	}> {
   if (input.contact_id || input.account_id || input.opportunity_id || input.use_case_id) {
     return {
       contact_id: input.contact_id ?? null,
@@ -200,12 +231,32 @@ async function associateEmail(
     };
   }
 
-  const externalEmails = [input.from_email, ...input.to_emails, ...(input.cc_emails ?? [])]
-    .map(email => email.trim().toLowerCase())
-    .filter(Boolean);
-  const sourceText = emailAssociationText(input, externalEmails);
+	  const externalEmails = [input.from_email, ...input.to_emails, ...(input.cc_emails ?? [])]
+	    .map(email => email.trim().toLowerCase())
+	    .filter(Boolean);
+	  const sourceText = emailAssociationText(input, externalEmails);
+	  const replyLink = await emailMessageRepo.findReplyLink(db, tenantId, {
+	    mailbox_connection_id: input.mailbox_connection_id as UUID | null | undefined,
+	    thread_id: input.thread_id,
+	    in_reply_to: input.in_reply_to,
+	    references_header: input.references_header,
+	  });
+	  if (replyLink) {
+	    return {
+	      contact_id: replyLink.contact_id ?? null,
+	      account_id: replyLink.account_id ?? null,
+	      opportunity_id: replyLink.opportunity_id ?? null,
+	      use_case_id: replyLink.use_case_id ?? null,
+	      email_id: replyLink.email_id ?? null,
+	      reply_to_email_message_id: replyLink.id,
+	      conversation_root_email_message_id: replyLink.conversation_root_email_message_id ?? replyLink.id,
+	      reason: input.thread_id
+	        ? 'Matched by mailbox thread/conversation to an outbound email.'
+	        : 'Matched by message headers to an outbound email.',
+	    };
+	  }
 
-  for (const email of externalEmails) {
+	  for (const email of externalEmails) {
     const contact = await findContactByEmail(db, tenantId, email, ownerIds);
     if (contact) {
       const base = {
@@ -220,22 +271,7 @@ async function associateEmail(
     }
   }
 
-  const replyTarget = truthyString(input.in_reply_to) ?? input.references_header?.find(Boolean);
-  if (replyTarget) {
-    const reply = await db.query(
-      `SELECT contact_id, account_id, opportunity_id, use_case_id
-       FROM emails
-       WHERE tenant_id = $1 AND provider_msg_id = $2
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [tenantId, replyTarget],
-    );
-    if (reply.rows[0]) {
-      return { ...reply.rows[0], reason: 'Matched by reply chain to an outbound email.' };
-    }
-  }
-
-  for (const email of externalEmails) {
+	  for (const email of externalEmails) {
     const account = await findAccountByDomain(db, tenantId, domainFromEmail(email), ownerIds);
     if (account) {
       const base = {
@@ -255,6 +291,29 @@ async function associateEmail(
   return graphLinked.contact_id || graphLinked.account_id || graphLinked.opportunity_id || graphLinked.use_case_id
     ? graphLinked
     : { reason: graphLinked.reason, resolution_summary: graphLinked.resolution_summary, ambiguity_count: graphLinked.ambiguity_count };
+}
+
+export async function previewEmailAssociation(
+  db: DbPool,
+  tenantId: UUID,
+  input: NormalizedEmailInput,
+  ownerIds?: UUID[] | null,
+): Promise<{
+  has_linked_subject: boolean;
+  in_owner_scope: boolean;
+  reason: string;
+  contact_id?: string | null;
+  account_id?: string | null;
+  opportunity_id?: string | null;
+  use_case_id?: string | null;
+}> {
+  const linked = await associateEmail(db, tenantId, input, ownerIds);
+  const hasLinkedSubject = Boolean(linked.contact_id || linked.account_id || linked.opportunity_id || linked.use_case_id);
+  return {
+    ...linked,
+    has_linked_subject: hasLinkedSubject,
+    in_owner_scope: hasLinkedSubject ? await linkedSubjectInOwnerScope(db, tenantId, linked, ownerIds) : false,
+  };
 }
 
 function emailAssociationText(input: NormalizedEmailInput, externalEmails: string[]): string {
@@ -371,6 +430,36 @@ function primarySubject(linked: {
   return {};
 }
 
+function emailContextProvenance(message: emailMessageRepo.EmailMessage): Record<string, unknown> {
+  const outbound = message.direction === 'outbound';
+  const sender = message.metadata && typeof message.metadata.sender === 'object' && message.metadata.sender !== null
+    ? message.metadata.sender as Record<string, unknown>
+    : undefined;
+  return outbound
+    ? {
+        context_origin: 'crmy_outbound_email',
+        source_authorship: 'crmy',
+        source_perspective: 'our_words',
+        customer_authored: false,
+        customer_statement: false,
+        evidence_weight: 'self_authored_action_context',
+        evidence_role: 'seller_action_or_commitment',
+        extraction_guidance: 'Treat this as CRMy-authored outbound context. Extract our commitments, asks, and follow-up actions; do not treat it as a customer-authored claim.',
+        sender_type: sender?.sender_type ?? message.metadata?.sender_type ?? null,
+        sender_identity: sender?.from_email ?? message.from_email,
+        reply_processing_path: message.metadata?.reply_handling ?? 'Customer replies become customer-authored context when they sync back through a connected mailbox or inbound webhook.',
+      }
+    : {
+        context_origin: 'customer_email',
+        source_authorship: 'customer_or_external',
+        source_perspective: 'customer_or_external_words',
+        customer_authored: true,
+        customer_statement: true,
+        evidence_weight: 'customer_authored_context',
+        evidence_role: 'customer_source',
+      };
+}
+
 async function processingOwnerIds(db: DbPool, actor?: ActorContext): Promise<UUID[] | null | undefined> {
   if (!actor) return undefined;
   return getVisibleOwnerIds(db, actor);
@@ -403,8 +492,11 @@ export async function ingestEmailMessage(
     contact_id: linked.contact_id ?? null,
     account_id: linked.account_id ?? null,
     opportunity_id: linked.opportunity_id ?? null,
-    use_case_id: linked.use_case_id ?? null,
-    metadata: {
+	    use_case_id: linked.use_case_id ?? null,
+	    email_id: input.email_id ?? linked.email_id ?? null,
+	    reply_to_email_message_id: linked.reply_to_email_message_id ?? null,
+	    conversation_root_email_message_id: linked.conversation_root_email_message_id ?? null,
+	    metadata: {
       ...(input.metadata ?? {}),
       classification_reason: classification.reason,
       association_reason: linked.reason,
@@ -472,19 +564,23 @@ export async function processEmailMessage(
 
   await emailMessageRepo.updateEmailMessage(db, tenantId, message.id, {
     processing_status: 'processing',
-    processing_reason: 'Processing email as Raw Context.',
+    processing_reason: message.direction === 'outbound'
+      ? 'Processing delivered outbound email as account activity and CRMy-authored context.'
+      : 'Processing email as Raw Context.',
   });
 
   try {
-    const actorUserId = actor ? await getActorUserId(db, actor) : null;
+    const actorUserId = actor ? await getActorUserId(db, actor) : (message.user_id ?? null);
+    const outbound = message.direction === 'outbound';
+    const provenance = emailContextProvenance(message);
     let activity = message.activity_id
       ? await activityRepo.getActivity(db, tenantId, message.activity_id)
       : null;
     if (!activity) {
       activity = await activityRepo.createActivity(db, tenantId, {
-        type: 'email',
+        type: outbound ? 'outreach_email' : 'email',
         direction: message.direction,
-        subject: message.subject,
+        subject: outbound ? `Sent email: ${message.subject}` : message.subject,
         body: message.body_text ?? '',
         contact_id: message.contact_id ?? undefined,
         account_id: message.account_id ?? undefined,
@@ -492,9 +588,13 @@ export async function processEmailMessage(
         subject_type: subject.subject_type,
         subject_id: subject.subject_id,
         owner_id: actorUserId ?? undefined,
-        source_agent: message.source === 'webhook' ? 'inbound_webhook' : `email:${message.source}`,
+        performed_by: actorUserId ?? undefined,
+        source_agent: outbound ? 'email:outbound_send' : message.source === 'webhook' ? 'inbound_webhook' : `email:${message.source}`,
         occurred_at: message.received_at ?? message.sent_at ?? message.created_at,
+        outcome: outbound ? 'sent' : undefined,
+        custom_fields: provenance,
         detail: {
+          ...provenance,
           from_email: message.from_email,
           from_name: message.from_name,
           to_emails: message.to_emails,
@@ -524,12 +624,19 @@ export async function processEmailMessage(
       activity_id: activity.id,
       raw_context_source_id: rawSource?.id ?? null,
       processing_status: status,
-      processing_reason: rawSource?.failure_reason ?? (status === 'processed' ? 'Email processed into customer context.' : 'No extractable customer context was found.'),
+      processing_reason: rawSource?.failure_reason ?? (status === 'processed'
+        ? outbound
+          ? 'Outbound email recorded as account activity and CRMy-authored context.'
+          : 'Email processed into customer context.'
+        : 'No extractable customer context was found.'),
       extraction_receipt: {
         memory_created: extraction.memory_created,
         signals_created: extraction.signals_created,
         skipped: extraction.skipped,
         raw_context_source_id: rawSource?.id ?? null,
+        context_origin: provenance.context_origin,
+        source_authorship: provenance.source_authorship,
+        customer_authored: provenance.customer_authored,
       },
     });
 
@@ -574,6 +681,21 @@ export async function processEmailMessage(
       processing_reason: messageText,
     };
   }
+}
+
+export async function processDeliveredOutboundEmailContextJobs(db: DbPool, limit = 5): Promise<{ processed: number; failed: number }> {
+  const messages = await emailMessageRepo.claimDeliveredOutboundEmailMessagesForProcessing(db, Math.max(1, Math.min(limit, 25)));
+  let processed = 0;
+  let failed = 0;
+  for (const message of messages) {
+    const result = await processEmailMessage(db, message.tenant_id, message.id);
+    if (result.processing_status === 'processed' || result.processing_status === 'skipped' || result.processing_status === 'needs_review') {
+      processed++;
+    } else {
+      failed++;
+    }
+  }
+  return { processed, failed };
 }
 
 export async function processMailboxSyncJobs(db: DbPool): Promise<{ processed: number; failed: number }> {

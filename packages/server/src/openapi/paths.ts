@@ -22,6 +22,16 @@ import {
   GenericList,
   GenericObject,
   SuccessResult,
+  OAuthReadinessResponse,
+  OAuthConnectionStartResponse,
+  TenantOAuthAppRecord,
+  ActorConnectionSummary,
+  MailboxConnectionListResponse,
+  CalendarConnectionListResponse,
+  ActionContextResponse,
+  ActionContextHumanUnblockResponse,
+  ContextLineageResponse,
+  BriefingResponse,
 } from './registry.js';
 
 const idParam = z.object({ id: S.uuid.openapi({ description: 'Record UUID' }) });
@@ -29,6 +39,13 @@ const enrollmentIdParam = z.object({ enrollmentId: S.uuid.openapi({ description:
 const setupTokenParam = z.object({ token: z.string().min(1).openapi({ description: 'One-time invite or password-reset token' }) });
 const toolNameParam = z.object({ tool_name: z.string().regex(/^[a-z0-9_]+$/).openapi({ description: 'MCP tool name' }) });
 const checkNameParam = z.object({ check_name: z.string().min(1).openapi({ description: 'Data-quality check name' }) });
+const oauthProviderParam = z.object({ provider: z.enum(['google', 'microsoft']) });
+const tenantOAuthAppUpsert = z.object({
+  client_id: z.string().min(1),
+  client_secret: z.string().min(1).optional(),
+  microsoft_tenant_id: z.string().optional(),
+  enabled: z.boolean().optional(),
+});
 const providerParam = z.object({ provider: z.enum(['google', 'microsoft']) });
 const bearer = [{ BearerAuth: [] }];
 const rootServer = [{ url: '/', description: 'Server root; auth endpoints are not mounted under /api/v1' }];
@@ -355,7 +372,7 @@ registry.registerPath({
   summary: 'Create an account',
   security: bearer,
   request: { body: jsonBody(Req.AccountCreate) },
-  responses: { 201: created(AccountRecord), 400: err400 },
+  responses: { 201: created(AccountRecord), 400: err400, 409: err409 },
 });
 
 registry.registerPath({
@@ -373,7 +390,7 @@ registry.registerPath({
   summary: 'Update an account',
   security: bearer,
   request: { params: idParam, body: jsonBody(Req.AccountUpdate) },
-  responses: { 200: ok(AccountRecord), 400: err400, 404: err404 },
+  responses: { 200: ok(AccountRecord), 400: err400, 404: err404, 409: err409 },
 });
 
 registry.registerPath({
@@ -383,6 +400,38 @@ registry.registerPath({
   security: bearer,
   request: { params: idParam },
   responses: { 200: ok(SuccessResult), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/accounts/{id}/merge',
+  tags: ['Accounts'],
+  summary: 'Merge a duplicate account into this account (admin/owner only)',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      secondary_id: S.uuid.openapi({ description: 'Duplicate account UUID to merge into the path account' }),
+      idempotency_key: z.string().optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404, 409: err409 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/accounts/{id}/split-domains',
+  tags: ['Accounts'],
+  summary: 'Move one or more domains from this account to another account (admin/owner only)',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      target_account_id: S.uuid.openapi({ description: 'Account UUID that should own the moved domains' }),
+      domains: z.array(z.string().min(1)).min(1),
+      move_matching_records: z.boolean().optional(),
+      idempotency_key: z.string().optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404, 409: err409 },
 });
 
 // -- Opportunities --
@@ -1045,7 +1094,7 @@ registry.registerPath({
       raw_context_source_id: S.uuid.optional(),
     }),
   },
-  responses: { 200: ok(GenericObject), 401: err401 },
+  responses: { 200: ok(ContextLineageResponse), 401: err401 },
 });
 
 registry.registerPath({
@@ -1213,7 +1262,16 @@ registry.registerPath({
   summary: 'Assemble action-aware customer context, warnings, policy checks, and review requirements',
   security: bearer,
   request: { body: jsonBody(Req.ActionContextGet) },
-  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+  responses: { 200: ok(ActionContextResponse), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/action-context/human-unblock',
+  tags: ['Briefing'],
+  summary: 'Create a human approval or assignment from Action Context unblock guidance',
+  security: bearer,
+  request: { body: jsonBody(Req.ActionContextHumanUnblock) },
+  responses: { 201: created(ActionContextHumanUnblockResponse), 400: err400, 401: err401, 403: err403 },
 });
 
 registry.registerPath({
@@ -1225,19 +1283,7 @@ registry.registerPath({
     params: z.object({ subject_type: S.subjectType, subject_id: S.uuid }),
     query: Req.BriefingGet,
   },
-  responses: {
-    200: ok(z.object({
-      record: z.record(z.unknown()),
-      related: z.record(z.unknown()),
-      activities: z.array(z.record(z.unknown())),
-      open_assignments: z.array(z.record(z.unknown())),
-      context: z.record(z.array(ContextEntryRecord)),
-      stale_warnings: z.array(z.object({
-        id: S.uuid, context_type: z.string(), valid_until: z.string(), body: z.string(),
-      })),
-    })),
-    404: err404,
-  },
+  responses: { 200: ok(BriefingResponse), 404: err404 },
 });
 
 registry.registerPath({
@@ -1278,10 +1324,28 @@ registry.registerPath({
 registry.registerPath({
   method: 'get', path: '/webhooks/{id}',
   tags: ['Webhooks'],
-  summary: 'Get a webhook endpoint (includes signing secret)',
+  summary: 'Get a webhook endpoint with masked signing-secret state',
   security: bearer,
   request: { params: idParam },
   responses: { 200: ok(GenericObject), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/webhooks/{id}/secret/reveal',
+  tags: ['Webhooks'],
+  summary: 'Reveal the full signing secret for a webhook endpoint',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/webhooks/{id}/secret/rotate',
+  tags: ['Webhooks'],
+  summary: 'Rotate the signing secret for a webhook endpoint',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(Req.WebhookRotateSecret) },
+  responses: { 200: ok(GenericObject), 400: err400, 404: err404 },
 });
 
 registry.registerPath({
@@ -1325,10 +1389,30 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/emails',
   tags: ['Emails'],
-  summary: 'Create/draft an email — auto-submits HITL request when require_approval is true',
+  summary: 'Create/draft an email; delivered sends become CRMy-authored account activity and context',
   security: bearer,
   request: { body: jsonBody(Req.EmailCreate) },
   responses: { 201: created(GenericObject), 400: err400 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/emails/sender',
+  tags: ['Emails'],
+  summary: 'Resolve the current actor sender identity for outbound email drafts and sends',
+  security: bearer,
+  responses: { 200: ok(z.object({
+    sender: z.object({
+      sender_type: z.enum(['actor_mailbox', 'tenant_provider', 'unknown']),
+      from_email: z.string().email().nullable().optional(),
+      from_name: z.string().nullable().optional(),
+      mailbox_connection_id: z.string().uuid().nullable().optional(),
+      provider: z.string().nullable().optional(),
+      can_send: z.boolean(),
+      can_provider_draft: z.boolean(),
+      reason: z.string(),
+      reply_handling: z.string(),
+    }),
+  })), 401: err401 },
 });
 
 registry.registerPath({
@@ -1357,7 +1441,7 @@ registry.registerPath({
 registry.registerPath({
   method: 'post', path: '/emails/drafts',
   tags: ['Emails'],
-  summary: 'Persist a manual or agent-generated customer email draft, request approval, or explicitly send now',
+  summary: 'Persist, approve, provider-draft, or send customer email with CRMy-authored context after delivery',
   security: bearer,
   request: { body: jsonBody(z.object({
     source_email_message_id: z.string().uuid().optional(),
@@ -1418,7 +1502,7 @@ registry.registerPath({
   tags: ['Calendar'],
   summary: 'List calendar connections and customer-meeting processing summary',
   security: bearer,
-  responses: { 200: ok(GenericList), 401: err401 },
+  responses: { 200: ok(CalendarConnectionListResponse), 401: err401 },
 });
 
 registry.registerPath({
@@ -1431,9 +1515,10 @@ registry.registerPath({
     body: jsonBody(z.object({
       email_address: z.string().email().optional(),
       display_name: z.string().optional(),
+      meeting_ingest_scope: z.enum(['owned_accounts', 'accessible_accounts', 'all_meetings']).optional(),
     }), false),
   },
-  responses: { 202: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+  responses: { 202: ok(OAuthConnectionStartResponse), 400: err400, 401: err401, 403: err403 },
 });
 
 registry.registerPath({
@@ -1443,6 +1528,22 @@ registry.registerPath({
   security: bearer,
   request: { params: idParam },
   responses: { 204: { description: 'Deleted' }, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/calendar/connections/{id}/status',
+  tags: ['Calendar'],
+  summary: 'Activate or deactivate a calendar connection',
+  description: 'Deactivation pauses CRMy calendar use while preserving OAuth credentials. Disconnecting is handled by DELETE and removes the connection.',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      active: z.boolean(),
+      meeting_ingest_scope: z.enum(['owned_accounts', 'accessible_accounts', 'all_meetings']).optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
 });
 
 registry.registerPath({
@@ -1533,6 +1634,34 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'post', path: '/availability/suggest-times',
+  tags: ['Calendar'],
+  summary: 'Suggest meeting times from connected internal calendar free/busy and customer timing preferences',
+  security: bearer,
+  request: {
+    body: jsonBody(z.object({
+      subject_type: z.enum(['account', 'contact', 'opportunity', 'use_case']).optional(),
+      subject_id: S.uuid.optional(),
+      account_id: S.uuid.optional(),
+      contact_id: S.uuid.optional(),
+      opportunity_id: S.uuid.optional(),
+      use_case_id: S.uuid.optional(),
+      actor_ids: z.array(S.uuid).max(10).optional(),
+      duration_minutes: z.number().int().min(15).max(480).optional(),
+      date_start: z.string().datetime().optional(),
+      date_end: z.string().datetime().optional(),
+      timezone: z.string().optional(),
+      business_hours_start: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/).optional(),
+      business_hours_end: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/).optional(),
+      business_days_only: z.boolean().optional(),
+      increment_minutes: z.number().int().min(5).max(120).optional(),
+      limit: z.number().int().min(1).max(10).optional(),
+    }), false),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 422: err400 },
+});
+
+registry.registerPath({
   method: 'get', path: '/emails/{id}',
   tags: ['Emails'],
   summary: 'Get an email by ID',
@@ -1542,11 +1671,71 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'patch', path: '/emails/{id}',
+  tags: ['Emails'],
+  summary: 'Edit a draft, failed, or rejected outbound email',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      to_email: z.string().email().optional(),
+      to_name: z.string().nullable().optional(),
+      subject: z.string().min(1).optional(),
+      body_text: z.string().min(1).optional(),
+      body_html: z.string().nullable().optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/emails/{id}/request-approval',
+  tags: ['Emails'],
+  summary: 'Request approval for a governed outbound email draft',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(z.object({ reason: z.string().optional(), idempotency_key: z.string().optional() }), false) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/emails/{id}/send',
+  tags: ['Emails'],
+  summary: 'Send an approved or explicitly allowed outbound email draft',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(z.object({ idempotency_key: z.string().optional() }), false) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/emails/{id}/provider-draft/retry',
+  tags: ['Emails'],
+  summary: 'Retry provider draft creation for an editable outbound email',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/emails/{id}/delivery-resolution',
+  tags: ['Emails'],
+  summary: 'Retry or manually reconcile failed or delivery-uncertain outbound email',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      action: z.enum(['retry', 'mark_sent', 'mark_failed']),
+      note: z.string().max(1000).optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
   method: 'get', path: '/mailbox/connections',
   tags: ['Emails'],
   summary: 'List mailbox connections and customer-email processing summary',
   security: bearer,
-  responses: { 200: ok(GenericList), 401: err401 },
+  responses: { 200: ok(MailboxConnectionListResponse), 401: err401 },
 });
 
 registry.registerPath({
@@ -1554,8 +1743,19 @@ registry.registerPath({
   tags: ['Emails'],
   summary: 'Start a Gmail or Outlook mailbox connection',
   security: bearer,
-  request: { params: z.object({ provider: z.enum(['google', 'microsoft']) }) },
-  responses: { 202: ok(GenericObject), 400: err400 },
+  request: {
+    params: z.object({ provider: z.enum(['google', 'microsoft']) }),
+    body: jsonBody(z.object({
+      email_address: z.string().email().optional(),
+      display_name: z.string().optional(),
+      context_sync_enabled: z.boolean().optional(),
+      send_enabled: z.boolean().optional(),
+      provider_draft_enabled: z.boolean().optional(),
+      is_default_sender: z.boolean().optional(),
+      account_ingest_scope: z.enum(['owned_accounts', 'accessible_accounts']).optional(),
+    }), false),
+  },
+  responses: { 202: ok(OAuthConnectionStartResponse), 400: err400 },
 });
 
 registry.registerPath({
@@ -1574,6 +1774,49 @@ registry.registerPath({
   security: bearer,
   request: { params: idParam },
   responses: { 204: { description: 'Deleted' }, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/mailbox/connections/{id}/status',
+  tags: ['Emails'],
+  summary: 'Activate or deactivate a mailbox connection',
+  description: 'Deactivation pauses mailbox context sync and sender use while preserving OAuth credentials. Disconnecting is handled by DELETE and removes the connection.',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      active: z.boolean(),
+      context_sync_enabled: z.boolean().optional(),
+      send_enabled: z.boolean().optional(),
+      provider_draft_enabled: z.boolean().optional(),
+      is_default_sender: z.boolean().optional(),
+      account_ingest_scope: z.enum(['owned_accounts', 'accessible_accounts']).optional(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/mailbox/connections/{id}/aliases/refresh',
+  tags: ['Emails'],
+  summary: 'Refresh verified send-as aliases for a Gmail or Outlook mailbox connection',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/mailbox/connections/{id}/sender',
+  tags: ['Emails'],
+  summary: 'Choose the verified send-as identity used for outbound drafts from this mailbox',
+  security: bearer,
+  request: {
+    params: idParam,
+    body: jsonBody(z.object({
+      selected_send_as_email: z.string().email(),
+    })),
+  },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
 });
 
 registry.registerPath({
@@ -2390,12 +2633,65 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'get', path: '/admin/oauth-readiness',
+  tags: ['Admin'],
+  summary: 'Inspect Google and Microsoft mailbox/calendar OAuth readiness without exposing secrets',
+  security: bearer,
+  responses: { 200: ok(OAuthReadinessResponse), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/admin/oauth-apps',
+  tags: ['Admin'],
+  summary: 'List tenant-owned Google and Microsoft OAuth app overrides without secret values',
+  security: bearer,
+  responses: {
+    200: ok(z.object({ data: z.array(TenantOAuthAppRecord), total: z.number().int() })),
+    401: err401,
+    403: err403,
+  },
+});
+
+registry.registerPath({
+  method: 'put', path: '/admin/oauth-apps/{provider}',
+  tags: ['Admin'],
+  summary: 'Create or update a tenant-owned OAuth app override for Google or Microsoft',
+  security: bearer,
+  request: {
+    params: oauthProviderParam,
+    body: jsonBody(tenantOAuthAppUpsert.extend({
+      client_secret: z.string().min(1).optional().openapi({
+        description: 'Write-only. Omit on update to preserve the existing encrypted secret.',
+      }),
+    })),
+  },
+  responses: { 200: ok(z.object({ oauth_app: TenantOAuthAppRecord })), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'delete', path: '/admin/oauth-apps/{provider}',
+  tags: ['Admin'],
+  summary: 'Remove a tenant-owned OAuth app override so the tenant uses CRMy-managed or self-hosted defaults',
+  security: bearer,
+  request: { params: oauthProviderParam },
+  responses: { 200: ok(z.object({ deleted: z.boolean() })), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
   method: 'get', path: '/admin/actors',
   tags: ['Admin'],
   summary: 'List actors with user, API key, registration, and activity metadata',
   security: bearer,
   request: { query: z.object({ limit: z.coerce.number().int().min(1).max(500).optional(), cursor: z.string().optional() }) },
   responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/admin/actor-connections',
+  tags: ['Admin'],
+  summary: 'List human actor mailbox sender and calendar connection coverage',
+  security: bearer,
+  responses: { 200: ok(ActorConnectionSummary), 401: err401, 403: err403 },
 });
 
 registry.registerPath({

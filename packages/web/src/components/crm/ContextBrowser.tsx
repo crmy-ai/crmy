@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type ReactNode, useState, useMemo, useCallback, useRef, useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import {
   useContextEntriesInfinite,
@@ -22,6 +22,7 @@ import {
   useOpportunities,
   useUseCases,
 } from '@/api/hooks';
+import { getUser } from '@/api/client';
 import { motion } from 'framer-motion';
 import { formatDistanceToNow, isPast } from 'date-fns';
 import {
@@ -570,6 +571,7 @@ export function ContextBrowser({
   viewMode?: 'cards' | 'table';
   headerContent?: ReactNode;
 }) {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const isSignalMode = memoryStatus === 'signal';
 
@@ -912,22 +914,12 @@ export function ContextBrowser({
   } = useSemanticSearch(searchMode === 'semantic' ? q : '', semanticParams);
   const semanticEntries: any[] = (semanticData as any)?.entries ?? (semanticData as any)?.data ?? [];
   const semanticUnavailable = searchMode === 'semantic' && (semanticError || Boolean((semanticData as any)?.error));
+  const showSemanticFallbackNote = semanticUnavailable && q.trim().length >= 2;
   const semanticUnavailableMessage = (semanticData as any)?.error
     ? String((semanticData as any).error)
     : 'Semantic retrieval is not ready on this workspace.';
-
-  // Toast once when semantic search fails so users notice even if they scrolled past the inline banner
-  const semanticErrorToastedRef = useRef(false);
-  useEffect(() => {
-    if (semanticUnavailable && !semanticErrorToastedRef.current) {
-      semanticErrorToastedRef.current = true;
-      toast({
-        title: 'Semantic search unavailable',
-        description: 'Showing keyword results instead. Ask an admin to finish semantic retrieval setup in Database Settings.',
-      });
-    }
-    if (!semanticUnavailable) semanticErrorToastedRef.current = false;
-  }, [semanticUnavailable]);
+  const currentUser = getUser();
+  const canOpenDatabaseSettings = currentUser?.role === 'admin' || currentUser?.role === 'owner';
 
   // When semantic search errors, fall back to keyword results
   const effectiveMode = searchMode === 'semantic' && semanticUnavailable ? 'keyword' : searchMode;
@@ -1234,20 +1226,31 @@ export function ContextBrowser({
           </div>
         )}
 
-        {/* Semantic unavailable banner */}
-        {semanticUnavailable && (
+        {/* Semantic search setup note */}
+        {showSemanticFallbackNote && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="mb-4 px-3 py-2 bg-warning/10 border border-warning/30 rounded-lg text-xs text-warning flex items-center gap-2"
+            role={canOpenDatabaseSettings ? 'link' : 'status'}
+            tabIndex={canOpenDatabaseSettings ? 0 : undefined}
+            onClick={canOpenDatabaseSettings ? () => navigate('/settings/database') : undefined}
+            onKeyDown={canOpenDatabaseSettings ? event => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                navigate('/settings/database');
+              }
+            } : undefined}
+            className={`mb-4 flex items-start gap-2 rounded-lg border border-violet-500/20 bg-violet-500/5 px-3 py-2 text-xs text-muted-foreground ${
+              canOpenDatabaseSettings ? 'cursor-pointer transition-colors hover:border-violet-500/35 hover:bg-violet-500/10 focus:outline-none focus:ring-2 focus:ring-violet-500/30' : ''
+            }`}
+            title={canOpenDatabaseSettings ? 'Open Database Settings' : undefined}
           >
-            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            <Search className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-500" />
             <span>
-              Semantic search is using keyword fallback. Admins can enable semantic retrieval in{' '}
-              <Link to="/settings/database" className="font-semibold underline underline-offset-2">
-                Database Settings
-              </Link>{' '}
-              by turning on pgvector and adding an embedding provider to the server environment.
+              Showing keyword matches for this search because semantic retrieval is not ready.{' '}
+              {canOpenDatabaseSettings
+                ? 'Open Database Settings to enable pgvector and an embedding provider.'
+                : 'Ask an admin to enable semantic retrieval in Database Settings.'}
               <span className="sr-only"> {semanticUnavailableMessage}</span>
             </span>
           </motion.div>

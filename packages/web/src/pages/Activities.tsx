@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Activity as ActivityIcon,
   AlertCircle,
@@ -32,6 +32,7 @@ import {
   useAddActivityContext,
   useAddMeetingArtifact,
   useCalendarConnections,
+  useDeleteCalendarConnection,
   useCalendarEvent,
   useCalendarEvents,
   useIgnoreCalendarEvent,
@@ -39,6 +40,7 @@ import {
   useProcessCalendarEvent,
   useStartCalendarConnection,
   useSyncCalendarConnection,
+  useUpdateCalendarConnectionStatus,
 } from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { headerDescription } from '@/lib/headerCopy';
@@ -47,6 +49,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { getUser } from '@/api/client';
 import {
   Dialog,
   DialogContent,
@@ -58,6 +61,7 @@ import { toast } from '@/hooks/use-toast';
 
 type CustomerActivityTab = 'meetings' | 'needs_context' | 'calls_notes' | 'all' | 'connections';
 type CalendarProvider = 'google' | 'microsoft';
+type MeetingIngestScope = 'owned_accounts' | 'accessible_accounts' | 'all_meetings';
 
 type CalendarEvent = {
   id: string;
@@ -108,14 +112,14 @@ const CALENDAR_PROVIDER_COPY: Record<CalendarProvider, {
 }> = {
   google: {
     label: 'Google Calendar',
-    title: 'Set up Google Calendar',
+    title: 'Connect Google Calendar',
     description: 'Capture customer meetings from Google Workspace calendars and turn notes or transcripts into Signals and Memory.',
     credentialLabel: 'Google Cloud OAuth app',
     callbackPath: '/api/v1/calendar/oauth/google/callback',
   },
   microsoft: {
     label: 'Outlook Calendar',
-    title: 'Set up Outlook Calendar',
+    title: 'Connect Outlook Calendar',
     description: 'Sync customer meetings from Microsoft 365 calendars and keep missing meeting context visible.',
     credentialLabel: 'Microsoft Entra OAuth app',
     callbackPath: '/api/v1/calendar/oauth/microsoft/callback',
@@ -395,16 +399,32 @@ function CalendarConnectionCard({
   connection,
   onSync,
   onSetup,
+  onToggleActive,
+  onDisconnect,
   syncing,
+  connectionActionPending,
 }: {
   connection: Record<string, any>;
   onSync: (id: string) => void;
   onSetup: (provider: CalendarProvider, connection?: Record<string, any>) => void;
+  onToggleActive: (connection: Record<string, any>, active: boolean) => void;
+  onDisconnect: (connection: Record<string, any>) => void;
   syncing: boolean;
+  connectionActionPending?: boolean;
 }) {
   const connected = connection.status === 'connected';
+  const paused = connection.status === 'disconnected';
+  const canToggle = connected || paused;
   const provider = CALENDAR_PROVIDER_COPY[connection.provider as CalendarProvider] ?? CALENDAR_PROVIDER_COPY.google;
   const status = connectionCopy[connection.status] ?? connectionCopy.configuration_required;
+  const statusLabel = connected ? `Connected as ${connection.email_address}` : paused ? 'Paused' : status.label === 'Setup needed' ? 'Waiting for admin OAuth setup' : status.label;
+  const statusClassName = paused ? STATUS_TONES.muted : status.className;
+  const scope = connection.settings?.meeting_ingest_scope as MeetingIngestScope | undefined;
+  const scopeLabel = scope === 'all_meetings'
+    ? 'All external meetings'
+    : scope === 'accessible_accounts'
+      ? 'Accounts I can access'
+      : 'My accounts';
   return (
     <div className="rounded-xl border border-border bg-card/70 p-4">
       <div className="flex items-start justify-between gap-3">
@@ -412,19 +432,40 @@ function CalendarConnectionCard({
           <div className="flex items-center gap-2">
             <CalendarClock className={`h-4 w-4 ${connected ? 'text-emerald-400' : 'text-blue-300'}`} />
             <h3 className="text-sm font-semibold text-foreground">{provider.label}</h3>
-            <Badge variant="outline" className={status.className}>{status.label}</Badge>
+            <Badge variant="outline" className={statusClassName}>{statusLabel}</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">{connection.email_address}</p>
         </div>
-        {connected ? (
-          <Button variant="outline" size="sm" onClick={() => onSync(connection.id)} disabled={syncing} className="gap-1.5">
-            <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} /> Sync
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          {connected ? (
+            <Button variant="outline" size="sm" onClick={() => onSync(connection.id)} disabled={syncing} className="gap-1.5">
+              <RefreshCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} /> Sync
+            </Button>
+          ) : !paused ? (
+            <Button variant="outline" size="sm" onClick={() => onSetup(connection.provider as CalendarProvider, connection)} className="gap-1.5">
+              <SlidersHorizontal className="h-3.5 w-3.5" /> Setup guide
+            </Button>
+          ) : null}
+          {canToggle && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={connectionActionPending}
+              onClick={() => onToggleActive(connection, !connected)}
+            >
+              {connected ? 'Deactivate' : 'Activate'}
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={connectionActionPending}
+            onClick={() => onDisconnect(connection)}
+            className="border-destructive/30 text-destructive hover:bg-destructive/10"
+          >
+            Disconnect calendar
           </Button>
-        ) : (
-          <Button variant="outline" size="sm" onClick={() => onSetup(connection.provider as CalendarProvider, connection)} className="gap-1.5">
-            <SlidersHorizontal className="h-3.5 w-3.5" /> Setup guide
-          </Button>
-        )}
+        </div>
       </div>
       <div className="mt-3 space-y-1 text-xs text-muted-foreground">
         {connection.sync_stats && Object.keys(connection.sync_stats).length > 0 && (
@@ -438,9 +479,19 @@ function CalendarConnectionCard({
             <span className="rounded-md border border-border bg-muted/20 px-2 py-0.5">
               {connection.sync_stats.filtered_unknown ?? 0} unmatched skipped
             </span>
+            <span className="rounded-md border border-border bg-muted/20 px-2 py-0.5">
+              {connection.sync_stats.out_of_scope_skipped ?? 0} outside scope
+            </span>
           </div>
         )}
-        {!connected && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          <span className="rounded-md border border-blue-500/20 bg-blue-500/8 px-2 py-0.5 text-blue-200">
+            Ingest: {scopeLabel}
+          </span>
+        </div>
+        {paused ? (
+          <p>Paused. CRMy is not reading this calendar for customer meeting context or availability.</p>
+        ) : !connected && (
           <p>
             Live sync is waiting for provider setup. The guide shows calendar scope, customer meeting filtering, and OAuth steps.
           </p>
@@ -458,17 +509,27 @@ function CalendarConnectionsPanel({
   summary,
   onSetup,
   onSync,
+  onToggleActive,
+  onDisconnect,
   syncingId,
+  connectionActionPending,
+  oauthReady,
+  isAdmin,
 }: {
   connections: Array<Record<string, any>>;
   summary?: Record<string, number>;
   onSetup: (provider: CalendarProvider, connection?: Record<string, any>) => void;
   onSync: (id: string) => void;
+  onToggleActive: (connection: Record<string, any>, active: boolean) => void;
+  onDisconnect: (connection: Record<string, any>) => void;
   syncingId?: string | null;
+  connectionActionPending?: boolean;
+  oauthReady?: Record<'google' | 'microsoft', boolean>;
+  isAdmin?: boolean;
 }) {
   const providers = [
-    { provider: 'google' as const, title: 'Set up Google Calendar', description: 'Guided setup for customer meeting capture from Google Workspace calendars.' },
-    { provider: 'microsoft' as const, title: 'Set up Outlook Calendar', description: 'Guided setup for customer meeting capture from Microsoft 365 calendars.' },
+    { provider: 'google' as const, title: oauthReady?.google === false ? 'Request Google Calendar setup' : 'Connect Google Calendar', description: 'Connect Google Workspace meeting context for customer activity capture.' },
+    { provider: 'microsoft' as const, title: oauthReady?.microsoft === false ? 'Request Outlook Calendar setup' : 'Connect Outlook Calendar', description: 'Connect Microsoft 365 meeting context for customer activity capture.' },
   ];
 
   return (
@@ -501,7 +562,7 @@ function CalendarConnectionsPanel({
               <h3 className="mt-3 text-sm font-semibold text-foreground">{provider.title}</h3>
               <p className="mt-1 text-sm text-muted-foreground">{provider.description}</p>
               <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-blue-300">
-                Open setup guide <ArrowRight className="h-3 w-3" />
+                {oauthReady?.[provider.provider] === true ? 'Connect calendar' : oauthReady?.[provider.provider] === false ? (isAdmin ? 'Open setup guide' : 'Request admin setup') : 'Open setup guide'} <ArrowRight className="h-3 w-3" />
               </span>
             </button>
           );
@@ -519,7 +580,10 @@ function CalendarConnectionsPanel({
             connection={connection}
             onSync={onSync}
             onSetup={onSetup}
+            onToggleActive={onToggleActive}
+            onDisconnect={onDisconnect}
             syncing={syncingId === connection.id}
+            connectionActionPending={connectionActionPending}
           />
         ))}
       </div>
@@ -711,6 +775,7 @@ function MeetingDetailDrawer({
 
 export default function Activities() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { openQuickAdd, openDrawer } = useAppStore();
   const [tab, setTab] = useState<CustomerActivityTab>('meetings');
   const [search, setSearch] = useState('');
@@ -720,6 +785,7 @@ export default function Activities() {
   const [setupStep, setSetupStep] = useState(0);
   const [setupEmail, setSetupEmail] = useState('');
   const [setupDisplayName, setSetupDisplayName] = useState('');
+  const [setupMeetingScope, setSetupMeetingScope] = useState<MeetingIngestScope>('owned_accounts');
   const [debriefActivity, setDebriefActivity] = useState<Record<string, any> | null>(null);
   const [debriefText, setDebriefText] = useState('');
   const [page, setPage] = useState(1);
@@ -730,9 +796,12 @@ export default function Activities() {
       return false;
     }
   });
+  const queryParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const startGoogle = useStartCalendarConnection('google');
   const startMicrosoft = useStartCalendarConnection('microsoft');
   const syncConnection = useSyncCalendarConnection();
+  const updateCalendarStatus = useUpdateCalendarConnectionStatus();
+  const deleteCalendarConnection = useDeleteCalendarConnection();
   const processEvent = useProcessCalendarEvent();
   const addActivityContext = useAddActivityContext();
   const classificationsQ = useMeetingClassifications() as any;
@@ -768,6 +837,20 @@ export default function Activities() {
     },
   ];
   const currentFilterConfigs = tab === 'meetings' || tab === 'needs_context' ? meetingFilterConfigs : tab === 'connections' ? [] : activityFilterConfigs;
+  useEffect(() => {
+    const message = queryParams.get('calendar_error');
+    if (!message) return;
+    toast({
+      title: 'Calendar connection needs attention',
+      description: message,
+      variant: 'destructive',
+    });
+    const next = new URLSearchParams(queryParams);
+    next.delete('calendar_error');
+    const search = next.toString();
+    navigate(search ? `${location.pathname}?${search}` : location.pathname, { replace: true });
+  }, [location.pathname, navigate, queryParams]);
+
   const handleFilterChange = (key: string, values: string[]) => {
     setActiveFilters(prev => {
       const next = { ...prev };
@@ -790,6 +873,10 @@ export default function Activities() {
   const meetings: CalendarEvent[] = calendarQ.data?.data ?? [];
   const summary = calendarQ.data?.summary ?? connectionsQ.data?.summary;
   const connections = connectionsQ.data?.data ?? [];
+  const oauthReady = connectionsQ.data?.oauth_ready as Record<'google' | 'microsoft', boolean> | undefined;
+  const currentUser = getUser();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'owner';
+  const selectedProviderReady = setupProvider ? oauthReady?.[setupProvider] === true : false;
   const calendarConnected = connections.some((connection: any) => connection.status === 'connected');
   const allActivities = activitiesQ.data?.data ?? [];
   const activityRows = useMemo(() => {
@@ -821,6 +908,7 @@ export default function Activities() {
     setSetupStep(0);
     setSetupEmail(String(connection?.email_address ?? ''));
     setSetupDisplayName(String(connection?.display_name ?? ''));
+    setSetupMeetingScope(connection?.settings?.meeting_ingest_scope ?? 'owned_accounts');
   };
 
   const closeSetup = () => {
@@ -828,6 +916,32 @@ export default function Activities() {
     setSetupStep(0);
     setSetupEmail('');
     setSetupDisplayName('');
+    setSetupMeetingScope('owned_accounts');
+  };
+
+  const toggleCalendarActive = (connection: Record<string, any>, active: boolean) => {
+    updateCalendarStatus.mutate({ id: String(connection.id), active }, {
+      onSuccess: () => toast({ title: active ? 'Calendar activated' : 'Calendar paused' }),
+      onError: (err) => toast({
+        title: active ? 'Could not activate calendar' : 'Could not pause calendar',
+        description: err instanceof Error ? err.message : 'Try again or reconnect the calendar.',
+        variant: 'destructive',
+      }),
+    });
+  };
+
+  const disconnectCalendar = (connection: Record<string, any>) => {
+    const email = String(connection.email_address ?? 'this calendar');
+    const ok = window.confirm(`Disconnect ${email}? This removes the calendar connection and OAuth tokens. Reconnecting requires provider consent again.`);
+    if (!ok) return;
+    deleteCalendarConnection.mutate(String(connection.id), {
+      onSuccess: () => toast({ title: 'Calendar disconnected' }),
+      onError: (err) => toast({
+        title: 'Could not disconnect calendar',
+        description: err instanceof Error ? err.message : 'Try again from Customer Activity connections.',
+        variant: 'destructive',
+      }),
+    });
   };
 
   const nextSetupStep = () => {
@@ -847,6 +961,7 @@ export default function Activities() {
     const payload = {
       email_address: setupEmail.trim().toLowerCase(),
       display_name: setupDisplayName.trim(),
+      meeting_ingest_scope: setupMeetingScope,
     };
     try {
       const result = await (setupProvider === 'google' ? startGoogle : startMicrosoft).mutateAsync(payload) as any;
@@ -855,11 +970,12 @@ export default function Activities() {
         return;
       }
       toast({
-        title: `${CALENDAR_PROVIDER_COPY[setupProvider].label} setup saved`,
-        description: 'CRMy saved the calendar and setup steps. Complete OAuth credentials before live sync runs.',
+        title: 'Admin setup requested',
+        description: `${CALENDAR_PROVIDER_COPY[setupProvider].label} is waiting for an admin to finish OAuth setup before live sync can run.`,
       });
       setTab('connections');
       closeSetup();
+      if (isAdmin) navigate('/settings/connections');
     } catch (err) {
       toast({ title: 'Calendar setup failed', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' });
     }
@@ -988,7 +1104,12 @@ export default function Activities() {
             summary={connectionsQ.data?.summary}
             onSetup={openSetup}
             onSync={(id) => syncConnection.mutate(id, { onSuccess: () => toast({ title: 'Calendar sync queued' }) })}
+            onToggleActive={toggleCalendarActive}
+            onDisconnect={disconnectCalendar}
             syncingId={syncConnection.variables ?? null}
+            connectionActionPending={updateCalendarStatus.isPending || deleteCalendarConnection.isPending}
+            oauthReady={oauthReady}
+            isAdmin={isAdmin}
           />
         ) : tab === 'calls_notes' || tab === 'all' ? (
           activitiesQ.isLoading ? (
@@ -1080,7 +1201,7 @@ export default function Activities() {
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">{setupCopy.description}</p>
               <div className="grid gap-2 md:grid-cols-4">
-                {['Calendar', 'Customer meetings', 'Provider setup', 'Review'].map((label, index) => (
+                {['Choose calendar', 'What CRMy uses', 'Connect', 'Review'].map((label, index) => (
                   <CalendarSetupStep key={label} active={setupStep === index} index={index} label={label} />
                 ))}
               </div>
@@ -1114,22 +1235,47 @@ export default function Activities() {
 
               {setupStep === 1 && (
                 <section className="rounded-xl border border-border bg-card/70 p-4">
-                  <h3 className="text-sm font-semibold text-foreground">Keep Activities focused on customer meetings</h3>
+                  <h3 className="text-sm font-semibold text-foreground">CRMy looks for customer meetings</h3>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    CRMy classifies meetings before processing so internal calendar noise does not become Raw Context by accident.
+                    CRMy reads meeting metadata so customer meetings can be matched to accounts and contacts.
                   </p>
                   <div className="mt-4 grid gap-2 md:grid-cols-3">
                     <div className="rounded-lg border border-blue-500/20 bg-blue-500/8 p-3">
-                      <p className="text-sm font-semibold text-blue-200">Shown by default</p>
+                      <p className="text-sm font-semibold text-blue-200">Meeting context</p>
                       <p className="mt-1 text-xs text-muted-foreground">Customer-facing meetings and mixed meetings with external attendees.</p>
                     </div>
                     <div className="rounded-lg border border-border bg-background/40 p-3">
-                      <p className="text-sm font-semibold text-foreground">Skipped by default</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Internal-only meetings unless a user explicitly adds context.</p>
+                      <p className="text-sm font-semibold text-foreground">Signals and Memory</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Notes and transcripts can become Signals and Memory.</p>
                     </div>
                     <div className="rounded-lg border border-purple-500/20 bg-purple-500/8 p-3">
-                      <p className="text-sm font-semibold text-purple-200">Needs Context</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Meetings missing notes, transcripts, or record links are queued for review.</p>
+                      <p className="text-sm font-semibold text-purple-200">Read-only calendar</p>
+                      <p className="mt-1 text-xs text-muted-foreground">CRMy does not create invites from this setup.</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 rounded-lg border border-border bg-background/40 p-3">
+                    <p className="text-sm font-semibold text-foreground">Which meetings should CRMy ingest?</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      CRMy matches attendees to accounts by contact email and account domains, including additional domains.
+                    </p>
+                    <div className="mt-3 grid gap-2 md:grid-cols-3">
+                      {([
+                        ['owned_accounts', 'Meetings with my accounts', 'Best for a focused personal book.'],
+                        ['accessible_accounts', 'Accounts I can access', 'Best for managers and shared customer coverage.'],
+                        ['all_meetings', 'All external meetings', 'Capture external meetings even before CRMy can match a record.'],
+                      ] as Array<[MeetingIngestScope, string, string]>).map(([value, label, description]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => setSetupMeetingScope(value)}
+                          className={`rounded-lg border p-3 text-left transition-colors ${
+                            setupMeetingScope === value ? 'border-blue-500/45 bg-blue-500/12' : 'border-border bg-card/40 hover:bg-muted/35'
+                          }`}
+                        >
+                          <span className="block text-sm font-semibold text-foreground">{label}</span>
+                          <span className="mt-1 block text-xs text-muted-foreground">{description}</span>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 </section>
@@ -1137,23 +1283,40 @@ export default function Activities() {
 
               {setupStep === 2 && (
                 <section className="rounded-xl border border-border bg-card/70 p-4">
-                  <h3 className="text-sm font-semibold text-foreground">Prepare {setupCopy.credentialLabel}</h3>
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {selectedProviderReady
+                      ? `Connect ${setupCopy.label}`
+                      : isAdmin
+                        ? 'OAuth setup required'
+                        : `Ask an admin to enable ${setupCopy.label} connections`}
+                  </h3>
                   <div className="mt-3 space-y-3 text-sm text-muted-foreground">
                     <p>
-                      Live calendar sync requires OAuth credentials configured by an admin. Until then, CRMy saves this as a setup request and shows exactly what remains.
+                      {selectedProviderReady
+                        ? 'Continue to provider consent to connect this calendar. You will choose the Google or Microsoft account CRMy can use.'
+                        : isAdmin
+                          ? 'Prepare System Connections -> OAuth, then users can connect their own calendar here.'
+                          : 'Your workspace admin needs to enable this provider before you can connect your calendar.'}
                     </p>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      <div className="rounded-lg border border-border bg-background/40 p-3">
-                        <p className="font-medium text-foreground">Redirect path</p>
-                        <code className="mt-1 block break-all rounded bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
-                          {setupCopy.callbackPath}
-                        </code>
+                    {selectedProviderReady ? (
+                      <div className="rounded-lg border border-blue-500/20 bg-blue-500/8 p-3">
+                        <p className="font-medium text-foreground">What happens next</p>
+                        <p className="mt-1 text-xs">CRMy sends you to {setupCopy.label} to grant read-only calendar access. When you return, customer meetings can be matched and queued for notes or transcripts.</p>
                       </div>
+                    ) : isAdmin ? (
                       <div className="rounded-lg border border-border bg-background/40 p-3">
-                        <p className="font-medium text-foreground">Access model</p>
-                        <p className="mt-1 text-xs">Read meetings, classify customer-facing events, and process notes or transcripts as Raw Context. Calendar writeback is not enabled.</p>
+                        <p className="font-medium text-foreground">Admin setup</p>
+                        <p className="mt-1 text-xs">Redirect URIs, OAuth app source, tenant-owned credentials, and provider scopes live in System Connections.</p>
+                        <Button variant="outline" size="sm" onClick={() => navigate('/settings/connections')} className="mt-3">
+                          Open System Connections
+                        </Button>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/8 p-3">
+                        <p className="font-medium text-foreground">Admin setup needed</p>
+                        <p className="mt-1 text-xs">Request setup now. CRMy will record that you need calendar access so an admin can finish provider configuration.</p>
+                      </div>
+                    )}
                   </div>
                 </section>
               )}
@@ -1172,7 +1335,13 @@ export default function Activities() {
                     </div>
                     <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
                       <span className="text-muted-foreground">Default processing</span>
-                      <span className="font-medium text-foreground">Customer meetings and mixed meetings</span>
+                      <span className="font-medium text-foreground">
+                        {setupMeetingScope === 'all_meetings'
+                          ? 'All external meetings'
+                          : setupMeetingScope === 'accessible_accounts'
+                            ? 'Meetings with accessible accounts'
+                            : 'Meetings with my accounts'}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
                       <span className="text-muted-foreground">Missing context</span>
@@ -1197,7 +1366,7 @@ export default function Activities() {
               ) : (
                 <Button onClick={saveCalendarSetup} disabled={setupSaving} className="gap-1.5 bg-blue-600 text-white hover:bg-blue-500">
                   {setupSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  Save setup request
+                  {selectedProviderReady ? `Connect ${setupCopy.label}` : isAdmin ? 'Save and open OAuth setup' : 'Request admin setup'}
                 </Button>
               )}
             </DialogFooter>

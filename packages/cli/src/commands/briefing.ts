@@ -12,6 +12,9 @@ export function briefingCommand(): Command {
     .option('--since <duration>', 'Filter activities by duration (e.g. 7d, 24h)')
     .option('--context-types <types>', 'Comma-separated context types to include')
     .option('--include-stale', 'Include superseded context entries')
+    .option('--token-budget <tokens>', 'Approximate context token budget')
+    .option('--token-profile <profile>', 'Token budget profile: tiny, standard, deep, or evidence_heavy')
+    .option('--evidence-mode <mode>', 'Evidence detail: summary, full, or none', 'summary')
     .action(async (subject, opts) => {
       const client = await getClient();
       const resolved = await resolveSubjectRef(client, subject);
@@ -26,6 +29,9 @@ export function briefingCommand(): Command {
         since: opts.since,
         context_types: opts.contextTypes ? opts.contextTypes.split(',') : undefined,
         include_stale: opts.includeStale ?? false,
+        token_budget: opts.tokenBudget ? Number(opts.tokenBudget) : undefined,
+        token_budget_profile: opts.tokenProfile,
+        evidence_mode: opts.evidenceMode,
       });
 
       const data = JSON.parse(result);

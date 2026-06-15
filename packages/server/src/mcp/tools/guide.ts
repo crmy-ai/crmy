@@ -101,6 +101,7 @@ const workflowGuideInput = z.object({
     'customer_outreach',
     'record_update',
     'systems_writeback',
+    'post_action_follow_up',
     'ops_recovery',
   ]).default('first_steps').describe('The customer workflow you are trying to perform. Use first_steps when unsure.'),
 });
@@ -125,9 +126,9 @@ const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
   },
   brief_before_action: {
     summary: 'Load current Memory, Signals, stale warnings, source authority, policy checks, and retrieval proof before acting.',
-    recommended_tools: ['action_context_get', 'briefing_get', 'context_find', 'context_get'],
+    recommended_tools: ['action_context_get', 'action_context_request_human_unblock', 'briefing_get', 'context_find', 'context_get'],
     avoid_tools: ['customer-facing actions that ignore Action Context warnings', 'record_update/writeback tools without policy/source checks'],
-    next_step: 'Call action_context_get with proposed_action when you need the operating mode: inform, warn, or require_review.',
+    next_step: 'Call action_context_get with proposed_action when you need the operating mode: inform, warn, or require_review. If it returns human_unblock.required, call action_context_request_human_unblock to create the approval or assignment.',
   },
   ingest_raw_context: {
     summary: 'Send transcripts, emails, meeting notes, research, and other messy source text through Raw Context ingestion.',
@@ -149,9 +150,9 @@ const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
   },
   customer_outreach: {
     summary: 'Prepare customer communication from confirmed context, visible warnings, and policy checks.',
-    recommended_tools: ['action_context_get', 'briefing_get', 'email_draft_preview', 'activity_create', 'contact_outreach'],
+    recommended_tools: ['action_context_get', 'action_context_request_human_unblock', 'briefing_get', 'email_draft_preview', 'activity_create', 'contact_outreach'],
     avoid_tools: ['message_send or email_draft_save before user approval unless your policy explicitly allows it'],
-    next_step: 'Call action_context_get with proposed_action="customer_outreach"; draft freely when mode is inform/warn, and route execution to review when mode is require_review.',
+    next_step: 'Call action_context_get with proposed_action="customer_outreach"; draft freely when mode is inform/warn, and call action_context_request_human_unblock before execution when mode is require_review.',
   },
   record_update: {
     summary: 'Preview governed record changes before mutating CRM objects.',
@@ -164,6 +165,12 @@ const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
     recommended_tools: ['sor_mapping_list', 'sor_writeback_preview', 'sor_writeback_request', 'sor_writeback_review', 'sor_writeback_execute'],
     avoid_tools: ['sor_writeback_execute without approved request/review', 'systems tools in ordinary customer-reasoning agents'],
     next_step: 'Start with sor_mapping_list and sor_writeback_preview; request/review/execute only when authorized.',
+  },
+  post_action_follow_up: {
+    summary: 'Check durable outcomes before dependent follow-up after sends, approvals, writebacks, assignments, workflows, or sequence steps.',
+    recommended_tools: ['context_lineage_get', 'action_context_get', 'briefing_get', 'hitl_check_status', 'email_search'],
+    avoid_tools: ['assuming a send, approval, writeback, or assignment completed without checking lineage outcomes', 'customer follow-up based only on an optimistic tool response'],
+    next_step: 'Call context_lineage_get for the customer subject and inspect lineage.outcomes.pending, failed, completed, and recommended_follow_up before taking the next customer-facing or system-changing action.',
   },
   ops_recovery: {
     summary: 'Operator-only durability and data-quality workflows for stuck jobs, Raw Context retries, audit, privacy, and retention.',
@@ -179,7 +186,7 @@ export function guideTools(): ToolDef[] {
       name: 'tool_guide',
       tier: 'core',
       description:
-        'Start here when you are unsure which CRMy MCP tool to use. Returns the recommended tools, tools to avoid, and next step for common workflows such as record lookup, briefing, Raw Context ingestion, Signal review, Memory promotion, customer outreach, record updates, systems writeback, and ops recovery. This tool does not mutate data.',
+        'Start here when you are unsure which CRMy MCP tool to use. Returns the recommended tools, tools to avoid, and next step for common workflows such as record lookup, briefing, Raw Context ingestion, Signal review, Memory promotion, customer outreach, record updates, systems writeback, post-action follow-up, and ops recovery. This tool does not mutate data.',
       inputSchema: workflowGuideInput,
       handler: async (input: z.infer<typeof workflowGuideInput>, _actor: ActorContext) => {
         const workflow = input.workflow ?? 'first_steps';

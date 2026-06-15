@@ -36,8 +36,16 @@ export async function emitEvent(db: DbPool, opts: EmitEventOpts): Promise<number
     ],
   );
   const event_id: number = result.rows[0].id;
+  db.query(
+    `SELECT pg_notify('crmy_mcp_resource_events', $1)`,
+    [JSON.stringify({
+      eventId: event_id,
+      tenantId: opts.tenantId,
+      objectType: opts.objectType,
+      objectId: opts.objectId,
+    })],
+  ).catch(() => {});
   // Broadcast to in-process subscribers (e.g. MCP session registry)
   eventBus.emit('crmy:event', { ...opts, event_id });
   return event_id;
 }
-

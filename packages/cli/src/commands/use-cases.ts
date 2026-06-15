@@ -83,7 +83,7 @@ export function useCasesCommand(): Command {
     });
 
   cmd.command('delete <use_case>')
-    .description('Delete a use case (admin/owner only)')
+    .description('Archive a use case while preserving evidence and lineage anchors (admin/owner only)')
     .action(async (useCase) => {
       const { default: inquirer } = await import('inquirer');
       const client = await getClient();

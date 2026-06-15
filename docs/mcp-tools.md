@@ -6,7 +6,7 @@ CRMy exposes many tools, but agents should usually connect with scoped credentia
 
 ### tool_guide
 Read-only router for common MCP workflows. Use this when the agent is unsure which CRMy tool path to take.
-- **Input**: `workflow` (`first_steps`, `record_lookup`, `brief_before_action`, `ingest_raw_context`, `review_signals`, `promote_memory`, `customer_outreach`, `record_update`, `systems_writeback`, `ops_recovery`)
+- **Input**: `workflow` (`first_steps`, `record_lookup`, `brief_before_action`, `ingest_raw_context`, `review_signals`, `promote_memory`, `customer_outreach`, `record_update`, `systems_writeback`, `post_action_follow_up`, `ops_recovery`)
 - **Output**: `{ workflow, summary, recommended_tools, avoid_tools, next_step, reminder }`
 
 ### guide_search
@@ -19,6 +19,8 @@ Common safe paths:
 - **Find Memory, Signals, stale context, or search results**: `context_find`
 - **Raw notes/transcripts/email/research**: `context_ingest_auto` when IDs are unknown, `context_ingest` when subject IDs are known
 - **Before customer-facing action**: `action_context_get` with `proposed_action`
+- **When Action Context requires review**: `action_context_request_human_unblock`
+- **After sends, approvals, writebacks, assignments, workflows, or sequences**: `context_lineage_get` and inspect `outcomes` before dependent follow-up
 - **Signal review**: `context_find` with `mode="signals"` → `context_signal_group_get` → complete details, handoff, reject, or promote
 - **Operator recovery**: `ops_status_get` or `ops_data_quality_get` first; keep repair tools at `dry_run=true` until confirmed
 
@@ -427,12 +429,22 @@ Apply tenant retention cleanup to supported operational tables. Defaults to dry 
 ### webhook_create
 Register an HTTP endpoint to receive event notifications.
 - **Input**: `url` (required), `events` (required array of event types), `description`
-- **Output**: `{ webhook }` — includes `signing_secret`
+- **Output**: `{ webhook }` — includes the generated signing secret once for setup
 
 ### webhook_get
 Get endpoint details.
 - **Input**: `id` (required)
-- **Output**: `{ webhook }` — includes `signing_secret`
+- **Output**: `{ webhook }` — includes masked signing-secret state, not the full secret
+
+### webhook_reveal_secret
+Reveal the full signing secret for receiver setup or repair.
+- **Input**: `id` (required)
+- **Output**: `{ id, secret, secret_masked }`
+
+### webhook_rotate_secret
+Regenerate the signing secret. The previous secret stops verifying new deliveries immediately.
+- **Input**: `id` (required)
+- **Output**: `{ webhook, secret, secret_masked }`
 
 ### webhook_list
 List registered endpoints.
@@ -479,9 +491,9 @@ Remove a custom field definition.
 ## Email Tools
 
 ### email_create
-Draft an outbound email. When `require_approval` is true (default), automatically submits a HITL approval request.
+Draft an outbound email. CRMy resolves sender identity from the actor mailbox first, then tenant fallback provider. When `require_approval` is true (default), automatically submits a HITL approval request. Delivered sends are recorded as account activity and CRMy-authored context, not customer-authored evidence.
 - **Input**: `to_address` (required), `subject` (required), `body_html`, `body_text`, `contact_id`, `account_id`, `opportunity_id`, `use_case_id`, `require_approval`
-- **Output**: `{ email, hitl_request_id? }`
+- **Output**: `{ email, sender, hitl_request_id? }`
 
 ### email_get
 Get an email by ID.
@@ -490,8 +502,36 @@ Get an email by ID.
 
 ### email_search
 Search emails.
-- **Input**: `contact_id`, `status`, `limit`, `cursor`
+- **Input**: `contact_id`, `account_id`, `opportunity_id`, `use_case_id`, `q`, `status`, `limit`, `cursor`
 - **Output**: `{ emails, next_cursor, total }`
+
+### mailbox_connection_list
+List mailbox connections visible to the current actor, including context sync and sender capabilities.
+- **Input**: none
+- **Output**: `{ mailbox_connections, total, summary }`
+
+### mailbox_connection_start
+Start Gmail or Outlook OAuth for the current human-linked actor without opening the CRMy web UI. The tool returns `auth_url`; the user opens that URL in a browser to complete provider consent, then returns to MCP/CLI and checks `mailbox_connection_list`. Pure agent actors without a linked human user cannot connect a mailbox.
+- **Input**: `provider` (`google` or `microsoft`), `email_address`, `display_name`, `context_sync_enabled`, `send_enabled`, `provider_draft_enabled`, `is_default_sender`, `account_ingest_scope`
+- **Output**: `{ connection, auth_url, oauth_ready, setup_check, status, message }`
+
+### calendar_connection_start
+Start Google or Microsoft calendar OAuth for the current human-linked actor without opening the CRMy web UI. The tool returns `auth_url`; the user opens that URL in a browser to complete provider consent, then returns to MCP/CLI and checks `calendar_connection_list`. Pure agent actors without a linked human user cannot connect a calendar.
+- **Input**: `provider` (`google` or `microsoft`), `email_address`, `display_name`, `meeting_ingest_scope`
+- **Output**: `{ connection, auth_url, oauth_ready, setup_check, status, message }`
+
+### email_draft_preview
+Generate a customer email draft preview from Memory, Signals, source email, linked records, and selected sender identity.
+- **Input**: `source_email_message_id`, `subject_type`, `subject_id`, `contact_id`, `account_id`, `opportunity_id`, `use_case_id`, `to_address`, `to_name`, `intent`, `instruction`, `tone`, `target`
+- **Output**: `{ subject, body_text, sender, context_used, warnings, model_metadata }`
+
+### email_draft_save
+Save, request approval, push a provider draft when supported, or send a governed customer email draft. Sends use the actor mailbox when send-enabled, otherwise tenant fallback provider; no sender allows save-draft only. After provider delivery, CRMy records the sent email as account activity and CRMy-authored context so later agents can see what your team promised or asked without treating it as the customer's words.
+- **Input**: draft preview fields plus `subject`, `body_text`, `body_html`, `draft_origin`, `draft_target`, `delivery_action`, `generation_metadata`
+- **Output**: `{ email, sender, hitl_request_id?, event_id, status }`
+
+### email_provider_set / email_provider_get
+Configure or inspect the tenant fallback/shared email provider. Customer drafts prefer the actor mailbox when one is send-enabled; this provider is used when no actor mailbox sender is available and for sequence or system-generated email. Secrets are redacted in reads.
 
 ## Customer Record Resolution
 
@@ -642,8 +682,9 @@ Add missing typed Signal detail and recompute readiness before confirmation.
 ### context_lineage_get
 Trace Raw Context through Signals, Memory, Active Context retrievals, Handoffs, governed writebacks, and audit events.
 - **Input**: one of `subject_type` + `subject_id`, `context_entry_id`, `signal_group_id`, or `raw_context_source_id`
-- **Output**: `{ lineage: { nodes, edges, summary } }`
+- **Output**: `{ lineage: { nodes, edges, outcomes, summary } }`
 - **Use when**: an agent needs to explain why a Memory exists, what evidence supports it, whether Action Context was assembled before action, whether a human reviewed it, or whether it produced a system-of-record writeback.
+- **Outcomes**: summarizes recent downstream action results, pending human/writeback work, failed side effects, completed counts, and recommended follow-up so agents can continue safely after an action.
 
 ### context_signal_group_promote
 Promote a confirmed corroborated Signal into Current Memory.
@@ -698,8 +739,9 @@ Specific Memory Health listing tool for Current Memory where `valid_until` has p
 
 ### context_diff
 Catch-up diff for a customer record — shows what changed since a given timestamp. Ideal for daily agent check-ins.
-- **Input**: `subject_type` (required), `subject_id` (required), `since` (required — ISO timestamp or relative: `"7d"`, `"24h"`, `"30m"`)
-- **Output**: `{ subject_type, subject_id, since, new_entries, superseded_entries, newly_stale, resolved_entries, summary: { new, superseded, newly_stale, resolved } }`
+- **Input**: `subject_type` (required), `subject_id` (required), `since` (required — ISO timestamp or relative: `"7d"`, `"24h"`, `"30m"`), `limit` (default 50, max 100 per bucket)
+- **Output**: `{ subject_type, subject_id, since, limit, new_entries, superseded_entries, newly_stale, resolved_entries, truncated, summary: { new, superseded, newly_stale, resolved, truncated } }`
+- **Note**: CRMy caps each bucket independently. If `summary.truncated` marks a bucket true, narrow `since` or fetch specific entries before relying on the diff as complete.
 
 ### context_ingest
 Ingest Raw Context (transcript, email, meeting notes, etc.) and auto-extract structured Signals. Creates an activity as provenance and runs the full extraction pipeline.
@@ -723,24 +765,33 @@ Trigger the Memory Health review loop for the current tenant on-demand. Normally
 
 ### briefing_get
 Get a unified briefing for any customer record — assembles the record, related objects, activity timeline, open assignments, Current Memory, separate unconfirmed Signals, and Memory Health warnings in one call.
-- **Input**: `subject_type` (required), `subject_id` (required), `since`, `context_types`, `include_stale`, `format` (`"json"` | `"text"`), `context_radius` (`"direct"` | `"adjacent"` | `"account_wide"`, default `"direct"`), `token_budget`
-- **Output (json)**: `{ briefing: { record, related, activities, open_assignments, context, stale_warnings, adjacent_context?, token_estimate, truncated?, dropped_entries? } }`
+- **Input**: `subject_type` (required), `subject_id` (required), `since`, `context_types`, `include_stale`, `format` (`"json"` | `"text"`), `context_radius` (`"direct"` | `"adjacent"` | `"account_wide"`, default `"direct"`), `token_budget`, `token_budget_profile` (`tiny`, `standard`, `deep`, `evidence_heavy`), `evidence_mode` (`summary`, `full`, `none`)
+- **Output (json)**: `{ briefing: { subject, subject_type, related_objects, activities, open_assignments, context_entries, signals?, signal_groups?, staleness_warnings, active_sequences?, contradiction_warnings?, adjacent_context?, token_estimate?, truncated?, dropped_entries? } }`
 - **Output (text)**: `{ briefing_text }` — a formatted string ready for prompt injection
 - **Active Context**: this is the main retrieval tool for moving persistent Memory and relevant Signals into the model's current working set before action.
-- **Note**: `token_budget` enables priority-ranked, budget-constrained packing. Entries are scored by `effective_confidence × priority_weight` (with per-type half-life decay) and greedily packed. Pass `context_radius: "adjacent"` or `"account_wide"` to pull in context from related entities. When entries are dropped due to budget exhaustion, `dropped_entries` summarizes what was cut (context_type, title, confidence) so agents can request specific entries via `context_get`.
+- **Note**: `token_budget` enables priority-ranked, budget-constrained packing across direct and adjacent/account-wide Memory entries. `token_budget_profile` gives named presets: `tiny` for routing/classification, `standard` for ordinary action prep, `deep` for account/deal review, and `evidence_heavy` for writeback or Memory promotion. Explicit `token_budget` wins over a profile. Entries are scored by `effective_confidence × priority_weight` with freshness decay, evidence boost, and action-aware ranking when called through Action Context. `evidence_mode: "summary"` returns compact evidence references by default; use `"full"` only when the agent needs deeper proof, or `"none"` for cheapest context scanning. `context_packing` reports the effective profile, budget, evidence mode, and ranking strategy.
 
 ### action_context_get
 Assemble action-aware customer context before an agent prepares work. This is an intelligence packet first: it helps the agent understand Memory, Signals, stale context, policy, source ownership, warnings, proof, and whether review is needed for the proposed action.
-- **Input**: `subject_type` (required), `subject_id` (required), `since`, `context_types`, `include_stale`, `context_radius`, `token_budget`, `emit_retrieval_event` (default `true`), and optional `proposed_action`
+- **Input**: `subject_type` (required), `subject_id` (required), `since`, `context_types`, `include_stale`, `context_radius`, `token_budget`, `token_budget_profile`, `evidence_mode`, `emit_retrieval_event` (default `true`), and optional `proposed_action`
 - **Proposed action types**: `customer_outreach`, `assignment_create`, `memory_promote`, `record_update`, `external_writeback`
-- **Output**: `{ action_context: { operating_mode, guidance, briefing, readiness, checks, allowed_actions, required_handoffs, proof } }`
+- **Output**: `{ action_context: { operating_mode, guidance, action_packet, briefing, readiness, checks, allowed_actions, required_handoffs, proof } }`
+- **Action packet**: `action_packet` is the agent-ready decision packet. It separates `use_as_truth`, `use_with_caution`, `do_not_use_as_truth`, `evidence_to_cite`, `source_posture`, `recommended_actions`, `action_boundaries`, `human_unblock`, and `next_tools` so an agent can act, caveat, or ask for review without re-interpreting the full briefing.
 - **Readiness states**: `ready`, `review_needed`, or `blocked`
 - **Operating modes**: use the readiness and checks as `inform` for low-risk work, `warn` when stale/inferred/conflicting context should be visible but not blocking, and `require_review` when execution needs human approval.
 - **Handoffs**: `required_handoffs` contains execution-blocking review work. Non-blocking stale Memory, unconfirmed Signals, and open-work warnings remain in `guidance.warning_reasons` and `checks`.
 - **Low-friction examples**: briefing, search, summarization, internal notes, draft preparation, Raw Context ingest, and reviewable Signal creation should generally remain fast.
 - **Review examples**: automatic customer email send, sequence send, workflow-triggered outreach, forecast/stage/amount/owner changes, external writeback, external commitments, out-of-scope records, or using unconfirmed Signals as fact should require review when policy or risk says so.
 - **Proof**: when `emit_retrieval_event` is true, CRMy records an `action_context.retrieved` event with compact metadata: context IDs, Signal group IDs, stale count, contradiction count, readiness status, risk level, and proposed action type.
-- **Boundary**: this tool does not create activities, promote Memory, update records, create handoffs, or execute writebacks. It only assesses readiness and records retrieval proof.
+- **Boundary**: this tool does not create activities, promote Memory, update records, create handoffs, or execute writebacks. It only assesses readiness and records retrieval proof. When it returns `human_unblock.required`, call `action_context_request_human_unblock` to create the tracked human decision.
+- **Token control**: if no explicit profile or budget is supplied, CRMy infers a budget profile from `proposed_action` for common workflows. For example, customer outreach uses `standard`, assignment/agent tasks use `tiny`, and external writeback or Memory promotion uses `evidence_heavy`.
+
+### action_context_request_human_unblock
+Create a durable human approval or assignment from Action Context review guidance. This composes `action_context_get`, a handoff snapshot, and either HITL or Assignment creation so the reviewer gets the packet, proof, and agent reasoning.
+- **Input**: `subject_type` (required), `subject_id` (required), optional `proposed_action`, `request_type` (`"auto"` | `"approval"` | `"assignment"`), `title`, `question`, `assignee_id`, `reviewer_id`, `priority`, `due_at`, `sla_minutes`, `reasoning`, `tools_called`, `idempotency_key`
+- **Output**: approval path returns `{ created_type: "approval", request_id, status, snapshot_id, event_id, action_packet, mutation }`; assignment path returns `{ created_type: "assignment", assignment_id, assignment, snapshot_id, event_id, action_packet, mutation }`
+- **Use when**: `action_context_get` returns `operating_mode: "require_review"` or `action_packet.human_unblock.required: true`, and the agent needs a concrete human decision before acting.
+- **Notes**: `request_type: "auto"` creates approval by default, or assignment when Action Context recommends assignment/source-conflict review and an `assignee_id` is provided. Use explicit `request_type: "assignment"` when a specific owner should take over.
 
 ## Actor Tools
 
@@ -781,7 +832,7 @@ Query actor Memory contributions. Two modes:
 
 These tools are intentionally operator-facing. They are visible in an MCP session only when the actor has explicit systems scopes. Generic `read` and `write` shortcuts do not grant systems-of-record access. Governed external writeback tools also require the relevant object write scope, such as `contacts:write` or `opportunities:write`, before CRMy will preview, review, or execute a write.
 
-HubSpot is the first certified 0.8 connector path. Salesforce, Databricks, and Snowflake use the same governed interfaces, but should be live-tested in the target environment before production rollout. `context_entry` mappings are reserved for the connector-author workflow and currently produce reviewable sync conflicts instead of silently creating memory.
+HubSpot is the first certified connector path. Salesforce, Databricks, and Snowflake use the same governed interfaces, but should be live-tested in the target environment before production rollout. `context_entry` mappings are reserved for the connector-author workflow and currently produce reviewable sync conflicts instead of silently creating memory.
 
 ### sor_system_create
 Create a governed external system connection for HubSpot, Salesforce, Databricks, or Snowflake. Credentials are encrypted and redacted.

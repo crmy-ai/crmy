@@ -838,6 +838,7 @@ const FIELD_CONFIGS: Record<string, FieldConfig[]> = {
     { key: 'industry', label: 'Industry', placeholder: 'e.g. Real Estate, Technology' },
     { key: 'website', label: 'Website', placeholder: 'https://acme.com', inputType: 'url' },
     { key: 'domain', label: 'Domain', placeholder: 'acme.com' },
+    { key: 'additional_domains', label: 'Additional Domains', placeholder: 'Comma-separated domains used for matching email and meetings' },
     { key: 'aliases', label: 'Aliases', placeholder: 'Comma-separated alternate names' },
     { key: 'tags', label: 'Tags', placeholder: 'Comma-separated tags' },
   ],
@@ -955,6 +956,9 @@ function ManualForm({
       }
       if (typeof payload.aliases === 'string') {
         payload.aliases = payload.aliases.split(',').map(item => item.trim()).filter(Boolean);
+      }
+      if (typeof payload.additional_domains === 'string') {
+        payload.additional_domains = payload.additional_domains.split(',').map(item => item.trim()).filter(Boolean);
       }
       if (typeof payload.tags === 'string') {
         payload.tags = payload.tags.split(',').map(item => item.trim()).filter(Boolean);

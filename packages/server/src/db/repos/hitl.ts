@@ -191,6 +191,140 @@ export async function listHITLRequests(
   return result.rows as HITLRequest[];
 }
 
+const HITL_PAYLOAD_TYPE_SQL = `COALESCE(
+  h.action_payload->>'subject_type',
+  h.action_payload->>'_subject_type',
+  h.action_payload->>'object_type',
+  h.action_payload->>'target_object_type'
+)`;
+
+const HITL_PAYLOAD_ID_SQL = `COALESCE(
+  h.action_payload->>'subject_id',
+  h.action_payload->>'_subject_id',
+  h.action_payload->>'object_id',
+  h.action_payload->>'target_object_id'
+)`;
+
+const UUID_REGEX = '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$';
+
+function safeUuidCast(sql: string): string {
+  return `CASE WHEN ${sql} ~* '${UUID_REGEX}' THEN (${sql})::uuid ELSE NULL END`;
+}
+
+function ownedSubjectExists(table: string, type: string, ownerParam: number): string {
+  return `EXISTS (
+    SELECT 1 FROM ${table} o
+    WHERE o.tenant_id = h.tenant_id
+      AND o.owner_id = ANY($${ownerParam}::uuid[])
+      AND ${HITL_PAYLOAD_TYPE_SQL} = '${type}'
+      AND o.id = ${safeUuidCast(HITL_PAYLOAD_ID_SQL)}
+  )`;
+}
+
+function ownedSessionSubjectExists(table: string, type: string, ownerParam: number): string {
+  return `EXISTS (
+    SELECT 1
+    FROM agent_sessions s
+    JOIN ${table} o
+      ON o.tenant_id = s.tenant_id
+     AND o.id = s.context_id
+     AND o.owner_id = ANY($${ownerParam}::uuid[])
+    WHERE s.tenant_id = h.tenant_id
+      AND s.id::text = h.session_id
+      AND s.context_type = '${type}'
+  )`;
+}
+
+function ownedLinkedArtifactExists(table: string, payloadKey: string, ownerParam: number): string {
+  return `EXISTS (
+    SELECT 1
+    FROM ${table} linked
+    LEFT JOIN accounts a
+      ON a.tenant_id = linked.tenant_id
+     AND linked.subject_type = 'account'
+     AND a.id = linked.subject_id
+    LEFT JOIN contacts c
+      ON c.tenant_id = linked.tenant_id
+     AND linked.subject_type = 'contact'
+     AND c.id = linked.subject_id
+    LEFT JOIN opportunities o
+      ON o.tenant_id = linked.tenant_id
+     AND linked.subject_type = 'opportunity'
+     AND o.id = linked.subject_id
+    LEFT JOIN use_cases u
+      ON u.tenant_id = linked.tenant_id
+     AND linked.subject_type = 'use_case'
+     AND u.id = linked.subject_id
+    WHERE linked.tenant_id = h.tenant_id
+      AND linked.id = ${safeUuidCast(`h.action_payload->>'${payloadKey}'`)}
+      AND COALESCE(a.owner_id, c.owner_id, o.owner_id, u.owner_id) = ANY($${ownerParam}::uuid[])
+  )`;
+}
+
+export async function listVisibleHITLRequests(
+  db: DbPool,
+  tenantId: UUID,
+  options: {
+    status?: 'pending' | 'approved' | 'rejected' | 'expired' | 'auto_approved' | 'all';
+    limit: number;
+    actorId: string;
+    visibleOwnerIds: UUID[];
+  },
+): Promise<HITLRequest[]> {
+  const params: unknown[] = [tenantId];
+  const conditions = ['h.tenant_id = $1'];
+  if (options.status && options.status !== 'all') {
+    params.push(options.status);
+    conditions.push(`h.status = $${params.length}`);
+  }
+  params.push(options.actorId);
+  const actorParam = params.length;
+  params.push(options.visibleOwnerIds);
+  const ownerParam = params.length;
+  params.push(options.limit);
+  const limitParam = params.length;
+
+  const ownerPredicates = options.visibleOwnerIds.length > 0
+    ? [
+        ownedSubjectExists('accounts', 'account', ownerParam),
+        ownedSubjectExists('contacts', 'contact', ownerParam),
+        ownedSubjectExists('opportunities', 'opportunity', ownerParam),
+        ownedSubjectExists('use_cases', 'use_case', ownerParam),
+        ownedSessionSubjectExists('accounts', 'account', ownerParam),
+        ownedSessionSubjectExists('contacts', 'contact', ownerParam),
+        ownedSessionSubjectExists('opportunities', 'opportunity', ownerParam),
+        ownedSessionSubjectExists('use_cases', 'use_case', ownerParam),
+        ownedLinkedArtifactExists('signal_groups', 'signal_group_id', ownerParam),
+        ownedLinkedArtifactExists('context_entries', 'context_entry_id', ownerParam),
+        ownedLinkedArtifactExists('raw_context_sources', 'raw_context_source_id', ownerParam),
+      ]
+    : [];
+
+  const visibility = [
+    `h.agent_id = $${actorParam}`,
+    `h.reviewer_id::text = $${actorParam}`,
+    `h.escalate_to_id::text = $${actorParam}`,
+    `EXISTS (
+      SELECT 1 FROM agent_sessions s
+      WHERE s.tenant_id = h.tenant_id
+        AND s.id::text = h.session_id
+        AND s.user_id::text = $${actorParam}
+    )`,
+    ...ownerPredicates,
+  ].join('\n      OR ');
+
+  const result = await db.query(
+    `SELECT h.*
+     FROM hitl_requests h
+     WHERE ${conditions.join(' AND ')}
+       AND (${visibility})
+     ORDER BY h.created_at DESC
+     LIMIT $${limitParam}`,
+    params,
+  );
+  return result.rows as HITLRequest[];
+}
+
 export async function updatePendingHITLRequest(
   db: DbPool,
   tenantId: UUID,

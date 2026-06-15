@@ -3,6 +3,7 @@
 
 import type { DbPool } from '../pool.js';
 import { validationError, type Activity, type UUID, type PaginatedResponse } from '@crmy/shared';
+import { addStableDescCursorCondition, encodeStableCursor } from './pagination.js';
 
 type ActivityCreateData = Partial<Activity> & { created_by?: UUID };
 
@@ -216,11 +217,7 @@ export async function searchActivities(
     params.push(filters.direction);
     idx++;
   }
-  if (filters.cursor) {
-    conditions.push(`a.created_at < $${idx}`);
-    params.push(filters.cursor);
-    idx++;
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'a.created_at', 'a.id');
 
   const where = conditions.join(' AND ');
 
@@ -231,7 +228,7 @@ export async function searchActivities(
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
-    `SELECT a.* FROM activities a WHERE ${where} ORDER BY a.created_at DESC LIMIT $${idx}`,
+    `SELECT a.* FROM activities a WHERE ${where} ORDER BY a.created_at DESC, a.id DESC LIMIT $${idx}`,
     params,
   );
 
@@ -242,7 +239,9 @@ export async function searchActivities(
   return {
     data,
     total: countResult.rows[0].total,
-    next_cursor: hasMore ? data[data.length - 1].created_at : undefined,
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({ sort_value: data[data.length - 1].created_at, id: data[data.length - 1].id })
+      : undefined,
   };
 }
 

@@ -86,20 +86,52 @@ async function findAccountByDomain(
   if (ownerIds) {
     if (ownerIds.length === 0) return null;
     params.push(ownerIds);
-    ownerClause = ` AND owner_id = ANY($${params.length}::uuid[])`;
+    ownerClause = ` AND a.owner_id = ANY($${params.length}::uuid[])`;
   }
   const result = await db.query(
-    `SELECT id, name, owner_id
-	     FROM accounts
-	     WHERE tenant_id = $1
-	       AND merged_into IS NULL
-	       AND archived_at IS NULL
-	       AND lower(domain) = $2
+    `SELECT a.id, a.name, a.owner_id
+	     FROM accounts a
+       LEFT JOIN account_domains ad ON ad.tenant_id = a.tenant_id AND ad.account_id = a.id
+	     WHERE a.tenant_id = $1
+	       AND a.merged_into IS NULL
+	       AND a.archived_at IS NULL
+	       AND (lower(a.domain) = $2 OR lower(ad.domain) = $2)
        ${ownerClause}
      LIMIT 1`,
     params,
   );
   return result.rows[0] ?? null;
+}
+
+async function linkedSubjectInOwnerScope(
+  db: DbPool,
+  tenantId: UUID,
+  linked: {
+    contact_id?: string | null;
+    account_id?: string | null;
+    opportunity_id?: string | null;
+    use_case_id?: string | null;
+  },
+  ownerIds?: UUID[] | null,
+): Promise<boolean> {
+  if (ownerIds === undefined || ownerIds === null) return true;
+  if (ownerIds.length === 0) return false;
+  const checks: Array<[string, string | null | undefined]> = [
+    ['accounts', linked.account_id],
+    ['contacts', linked.contact_id],
+    ['opportunities', linked.opportunity_id],
+    ['use_cases', linked.use_case_id],
+  ];
+  for (const [table, id] of checks) {
+    if (!id) continue;
+    const result = await db.query(
+      `SELECT owner_id FROM ${table} WHERE tenant_id = $1 AND id = $2 LIMIT 1`,
+      [tenantId, id],
+    );
+    const ownerId = result.rows[0]?.owner_id as UUID | null | undefined;
+    if (ownerId && ownerIds.includes(ownerId)) return true;
+  }
+  return false;
 }
 
 async function associateMeeting(
@@ -355,9 +387,14 @@ export async function upsertCalendarEventWithIntelligence(
   tenantId: UUID,
   input: Partial<calendarRepo.CalendarEvent> & { title: string; starts_at: string },
   actor?: ActorContext,
-): Promise<calendarRepo.CalendarEvent> {
-  const ownerIds = actor ? await getVisibleOwnerIds(db, actor) : undefined;
+  options: { ownerIds?: UUID[] | null; requireLinkedCustomer?: boolean } = {},
+): Promise<calendarRepo.CalendarEvent | null> {
+  const ownerIds = options.ownerIds !== undefined ? options.ownerIds : actor ? await getVisibleOwnerIds(db, actor) : undefined;
   const linked = await associateMeeting(db, tenantId, input, ownerIds);
+  const hasLinkedSubject = Boolean(linked.contact_id || linked.account_id || linked.opportunity_id || linked.use_case_id);
+  if (options.requireLinkedCustomer && (!hasLinkedSubject || !await linkedSubjectInOwnerScope(db, tenantId, linked, ownerIds))) {
+    return null;
+  }
   const classified = await classifyMeeting(db, tenantId, input);
   const userId = input.user_id ?? (actor ? await getActorUserId(db, actor) : null);
   let event = await calendarRepo.upsertCalendarEvent(db, tenantId, {

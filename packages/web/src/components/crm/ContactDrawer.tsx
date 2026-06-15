@@ -252,13 +252,24 @@ export function ContactDrawer() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: notesData } = useContextEntries({ subject_type: 'contact', subject_id: drawerEntityId ?? '', context_type: 'note', limit: 20 }) as any;
   const emailSummaryQ = useEmailSubjectSummary('contact', drawerEntityId ? [drawerEntityId] : []);
-  const emailSummary = ((emailSummaryQ.data as any)?.data ?? [])[0] as { total?: number; inbound?: number; outbound?: number; drafts?: number; pending_approvals?: number; latest_at?: string | null } | undefined;
+  const emailSummary = ((emailSummaryQ.data as any)?.data ?? [])[0] as {
+    total?: number;
+    inbound?: number;
+    outbound?: number;
+    outbound_drafts?: number;
+    outbound_pending_approvals?: number;
+    outbound_failed?: number;
+    outbound_rejected?: number;
+    latest_at?: string | null;
+  } | undefined;
   const emailStats = {
     total: emailSummary?.total ?? 0,
     inbound: emailSummary?.inbound ?? 0,
     outbound: emailSummary?.outbound ?? 0,
-    drafts: emailSummary?.drafts ?? 0,
-    pendingApprovals: emailSummary?.pending_approvals ?? 0,
+    drafts: emailSummary?.outbound_drafts ?? 0,
+    pendingApprovals: emailSummary?.outbound_pending_approvals ?? 0,
+    failed: emailSummary?.outbound_failed ?? 0,
+    rejected: emailSummary?.outbound_rejected ?? 0,
   };
   const notes: any[] = notesData?.data ?? [];
   const createNote = useCreateContextEntry();
@@ -436,11 +447,13 @@ export function ContactDrawer() {
                 <Mail className="h-4 w-4 text-blue-400" />
               </span>
               <div>
-                <p className="text-sm font-semibold text-foreground">Email context</p>
+                <p className="text-sm font-semibold text-foreground">Email context and actions</p>
                 <p className="text-xs text-muted-foreground">
                   {emailStats.total} linked · {emailStats.inbound} in · {emailStats.outbound} out
                   {emailStats.drafts > 0 ? ` · ${emailStats.drafts} draft${emailStats.drafts === 1 ? '' : 's'}` : ''}
-                  {emailStats.pendingApprovals > 0 ? ` · ${emailStats.pendingApprovals} approval${emailStats.pendingApprovals === 1 ? '' : 's'}` : ''}
+                  {emailStats.pendingApprovals > 0 ? ` · ${emailStats.pendingApprovals} approval${emailStats.pendingApprovals === 1 ? '' : 's'} waiting` : ''}
+                  {emailStats.rejected > 0 ? ` · ${emailStats.rejected} rejected action${emailStats.rejected === 1 ? '' : 's'}` : ''}
+                  {emailStats.failed > 0 ? ` · ${emailStats.failed} failed send${emailStats.failed === 1 ? '' : 's'}` : ''}
                 </p>
               </div>
             </div>
@@ -453,7 +466,7 @@ export function ContactDrawer() {
               }}
               className="rounded-lg border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted/80"
             >
-              View email context
+              View email
             </button>
           </div>
         </div>

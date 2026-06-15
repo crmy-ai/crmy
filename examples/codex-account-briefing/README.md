@@ -64,7 +64,7 @@ bearer_token_env_var = "CRMY_API_KEY"
 Paste this into Codex:
 
 ```text
-Use the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.
+Use the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, get Action Context for customer outreach, list Signals that need attention, check lineage outcomes, and tell me the safest next action with the evidence you used.
 ```
 
 ## Expected Path
@@ -73,9 +73,11 @@ Codex should call:
 
 1. `customer_record_resolve` for `Northstar Labs`.
 2. `briefing_get` for the resolved account.
-3. `context_signal_group_list` with `attention_only: true`.
+3. `action_context_get` with `proposed_action.action_type: "customer_outreach"`.
+4. `context_signal_group_list` with `attention_only: true`.
+5. `context_lineage_get` for the resolved account.
 
-The answer should mention confirmed Memory separately from unconfirmed Signals, explain which Signal needs review, and recommend a safe next action such as reviewing or routing the sensitive Signal to a Handoff.
+The answer should mention confirmed Memory separately from unconfirmed Signals, explain which Signal needs review, respect Action Context boundaries, and recommend a safe next action such as reviewing or routing the sensitive Signal to a Handoff.
 
 ## Troubleshooting
 

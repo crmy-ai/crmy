@@ -248,7 +248,7 @@ export default function Accounts() {
                         <div className="flex items-center gap-0.5 opacity-0 transition-all group-hover:opacity-100">
                           {(emailSummaryByAccount.get(a.id as string)?.total ?? 0) > 0 && (
                             <button onClick={(e) => { e.stopPropagation(); openEmailContext(a); }}
-                              className="p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors" title="View email context">
+                              className="p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors" title="View linked email">
                               <Mail className="w-3.5 h-3.5 text-blue-400" />
                             </button>
                           )}
@@ -283,7 +283,7 @@ export default function Accounts() {
                 <div className="absolute top-3 right-3 flex items-center gap-0.5 transition-all md:opacity-0 md:group-hover:opacity-100">
                   {(emailSummaryByAccount.get(a.id as string)?.total ?? 0) > 0 && (
                     <button onClick={(e) => { e.stopPropagation(); openEmailContext(a); }}
-                      className="p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors" title="View email context">
+                      className="p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors" title="View linked email">
                       <Mail className="w-3.5 h-3.5 text-blue-400" />
                     </button>
                   )}

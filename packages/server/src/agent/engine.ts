@@ -58,6 +58,7 @@ const WORKSPACE_AGENT_TOOL_ALLOWLIST = new Set([
   'customer_record_resolve',
   'entity_resolve',
   'action_context_get',
+  'action_context_request_human_unblock',
   'briefing_get',
   'record_draft_preview',
 
@@ -167,6 +168,7 @@ const WORKSPACE_AGENT_TOOL_ALLOWLIST = new Set([
   'email_message_process',
   'email_message_ignore',
   'email_message_link',
+  'availability_suggest_times',
   'calendar_event_search',
   'calendar_event_get',
   'calendar_event_process',
@@ -212,6 +214,7 @@ const INTERNAL_LABELS: Record<string, string> = {
   context_signal_group_complete_details: 'Add Signal details',
   context_ingest_auto: 'Add Context',
   action_context_get: 'Action Context',
+  action_context_request_human_unblock: 'Request human unblock',
   briefing_get: 'Briefing',
   hitl_submit_request: 'Request approval',
   hitl_check_status: 'Check approval status',
@@ -670,6 +673,7 @@ const TOOL_STATUS_MAP: Record<string, string> = {
   context_signal_handoff:     'Sending Signal for review…',
   context_signal_group_reject: 'Dismissing Signal…',
   context_lineage_get:        'Loading context lineage…',
+  action_context_request_human_unblock: 'Creating human unblock request…',
   context_type_list:           'Loading context types…',
   context_type_add:            'Adding context type…',
   context_type_remove:         'Removing context type…',
@@ -718,6 +722,8 @@ const TOOL_STATUS_MAP: Record<string, string> = {
   webhook_list:         'Loading webhooks…',
   webhook_get:          'Looking up webhook…',
   webhook_update:       'Updating webhook…',
+  webhook_reveal_secret:'Revealing webhook secret…',
+  webhook_rotate_secret:'Rotating webhook secret…',
   webhook_delete:       'Deleting webhook…',
   workflow_create:      'Creating workflow…',
   workflow_list:        'Loading workflows…',
@@ -1202,7 +1208,8 @@ function buildSystemPrompt(
     '  4. Confirm — show what changed with the key new values, audit trail, and suggested next action',
     'When `action_context_get` returns `operating_mode: "inform"`, proceed normally and use the briefing/proof context.',
     'When it returns `operating_mode: "warn"`, proceed only while making stale, inferred, conflicting, or low-confidence context explicit. Do not turn warnings into approval work unless the action will affect customers, records, systems of record, or commitments.',
-    'When it returns `operating_mode: "require_review"`, stop before execution and route the action to Handoff/policy review, or explain what must be resolved first.',
+    'When it returns `operating_mode: "require_review"`, stop before execution and call `action_context_request_human_unblock` when you need a concrete human approval or assignment, or explain what must be resolved first.',
+    'After sends, approvals, writebacks, assignments, workflow runs, or sequence steps, call `context_lineage_get` before dependent follow-up when the next step depends on whether the action completed, is still pending, or failed. Use lineage outcomes as the source of truth for "what happened next".',
     'Never call a write tool on a record you have not fetched in this session via `action_context_get`, `briefing_get`, or the relevant object read tool.',
     'Treat Signals as unconfirmed: cite them with uncertainty, but promote them or request approval before using them to update records, forecast, assign work, or guide customer-facing action.',
     'When you learn useful customer context in conversation, propose it for review before treating it as saved memory unless you explicitly call a context write tool.',
@@ -1251,13 +1258,13 @@ function buildSystemPrompt(
   const useCases = pick('use_case_search', 'use_case_get', 'use_case_create', 'use_case_update', 'use_case_advance_stage', 'use_case_get_timeline', 'use_case_summary');
   if (useCases) toolLines.push(`**Use Cases:** ${useCases}`);
 
-  const activities = pick('activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete');
+  const activities = pick('activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete', 'availability_suggest_times');
   if (activities) toolLines.push(`**Activities:** ${activities}`);
 
-  const ctx = pick('context_find', 'context_ingest_auto', 'context_ingest', 'context_get', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject', 'context_add', 'context_list', 'context_search', 'context_stale', 'context_raw_source_list', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_review_batch', 'context_bulk_mark_stale');
+  const ctx = pick('context_find', 'context_ingest_auto', 'context_ingest', 'context_get', 'context_lineage_get', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject', 'context_add', 'context_list', 'context_search', 'context_stale', 'context_raw_source_list', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_review_batch', 'context_bulk_mark_stale');
   if (ctx) toolLines.push(`**Context memory:** ${ctx}`);
 
-  const hitl = pick('assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status', 'hitl_list_pending');
+  const hitl = pick('action_context_request_human_unblock', 'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status', 'hitl_list_pending');
   if (hitl) toolLines.push(`**Assignments & HITL:** ${hitl}`);
 
   const seqWf = pick('email_sequence_list', 'email_sequence_get', 'email_sequence_enroll', 'email_sequence_unenroll', 'email_sequence_enrollment_list', 'workflow_template_list');
@@ -1268,14 +1275,14 @@ function buildSystemPrompt(
 
   // Catch-all: any tools not in the groups above
   const grouped = new Set([
-    'tool_guide', 'customer_record_resolve', 'action_context_get', 'briefing_get', 'context_find', 'context_search', 'context_semantic_search', 'guide_search',
+    'tool_guide', 'customer_record_resolve', 'action_context_get', 'action_context_request_human_unblock', 'briefing_get', 'context_find', 'context_search', 'context_semantic_search', 'guide_search',
     'contact_search', 'contact_get', 'contact_get_timeline', 'contact_create', 'contact_update', 'contact_set_lifecycle', 'contact_outreach',
     'account_search', 'account_get', 'account_get_hierarchy', 'account_health_report', 'account_create', 'account_update', 'account_set_health_score',
     'opportunity_search', 'opportunity_get', 'opportunity_create', 'opportunity_update', 'opportunity_advance_stage', 'deal_advance',
     'use_case_search', 'use_case_get', 'use_case_create', 'use_case_update', 'use_case_advance_stage', 'use_case_get_timeline', 'use_case_summary',
-    'activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete',
-    'context_add', 'context_get', 'context_find', 'context_list', 'context_raw_source_list', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_group_list', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale',
-    'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status', 'hitl_list_pending',
+    'activity_search', 'activity_get_timeline', 'activity_create', 'activity_update', 'activity_complete', 'availability_suggest_times',
+    'context_add', 'context_get', 'context_find', 'context_lineage_get', 'context_list', 'context_raw_source_list', 'context_raw_source_get', 'context_raw_source_reprocess', 'context_signal_group_list', 'context_signal_group_get', 'context_signal_group_promote', 'context_signal_group_complete_details', 'context_signal_handoff', 'context_signal_group_reject', 'context_signal_promote', 'context_signal_reject', 'context_supersede', 'context_stale', 'context_ingest', 'context_ingest_auto', 'context_review_batch', 'context_bulk_mark_stale',
+    'action_context_request_human_unblock', 'assignment_create', 'assignment_list', 'assignment_get', 'assignment_complete', 'assignment_accept', 'assignment_start', 'hitl_submit_request', 'hitl_check_status', 'hitl_list_pending',
     'email_sequence_list', 'email_sequence_get', 'email_sequence_enroll', 'email_sequence_unenroll', 'email_sequence_enrollment_list', 'workflow_template_list',
     'pipeline_summary', 'pipeline_forecast', 'tenant_get_stats', 'crm_search',
   ]);

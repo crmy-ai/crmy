@@ -22,7 +22,6 @@ import * as emailRepo from '../db/repos/emails.js';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as assignmentRepo from '../db/repos/assignments.js';
 import * as activityRepo from '../db/repos/activities.js';
-import { deliverEmail } from '../email/delivery.js';
 import { interpolate, buildVariableContext } from '../workflows/variables.js';
 import { callLLM, requireTenantLLMConfig } from '../agent/providers/llm.js';
 import { triggerExtraction } from '../agent/extraction.js';
@@ -97,6 +96,19 @@ interface AiActionStep {
 }
 
 type SequenceStep = EmailStep | NotificationStep | TaskStep | WebhookStep | WaitStep | BranchStep | AiActionStep;
+
+function outboundEmailContextProvenance(): Record<string, unknown> {
+  return {
+    context_origin: 'crmy_outbound_email',
+    source_authorship: 'crmy',
+    source_perspective: 'our_words',
+    customer_authored: false,
+    customer_statement: false,
+    evidence_weight: 'self_authored_action_context',
+    evidence_role: 'seller_action_or_commitment',
+    extraction_guidance: 'Treat this as CRMy-authored outbound context. Extract our commitments, asks, and follow-up actions; do not treat it as a customer-authored claim.',
+  };
+}
 
 function sequenceActionActor(tenantId: UUID): ActorContext {
   return {
@@ -518,7 +530,7 @@ async function executeEmailStep(
     },
   } as any);
 
-  await deliverEmail(db, enrollment.tenant_id, email.id);
+  await emailRepo.enqueueEmailDeliveryJob(db, enrollment.tenant_id, email.id, { reason: 'sequence_due_step' });
 
   // Back-link email → enrollment for analytics + reply threading
   await db.query(
@@ -527,9 +539,10 @@ async function executeEmailStep(
   );
 
   // Create Activity so this email appears in the contact timeline and feeds context extraction
+  const outboundProvenance = outboundEmailContextProvenance();
   const activity = await activityRepo.createActivity(db, enrollment.tenant_id, {
     type: 'outreach_email',
-    subject,
+    subject: `Sent email: ${subject}`,
     body: bodyText?.slice(0, 500),
     direction: 'outbound',
     status: 'completed',
@@ -539,7 +552,10 @@ async function executeEmailStep(
     performed_by: (enrollment as any).enrolled_by_actor_id ?? undefined,
     source_agent: `sequence:${sequence.id}`,
     occurred_at: new Date().toISOString(),
+    outcome: 'sent',
+    custom_fields: outboundProvenance,
     detail: {
+      ...outboundProvenance,
       sequence_id: sequence.id,
       sequence_name: sequence.name,
       enrollment_id: enrollment.id,
@@ -1296,16 +1312,17 @@ export async function resumeEnrollmentAfterHITL(
         },
       } as any);
 
-      await deliverEmail(db, hitlRequest.tenant_id as UUID, email.id);
+      await emailRepo.enqueueEmailDeliveryJob(db, hitlRequest.tenant_id as UUID, email.id, { reason: 'sequence_hitl_approved' });
 
       await db.query(
         `UPDATE emails SET enrollment_id = $1, sequence_id = $2 WHERE id = $3`,
         [enrollmentId, enrollment.sequence_id, email.id],
       );
 
+      const outboundProvenance = outboundEmailContextProvenance();
       const activity = await activityRepo.createActivity(db, hitlRequest.tenant_id as UUID, {
         type: 'outreach_email',
-        subject,
+        subject: `Sent email: ${subject}`,
         body: (bodyText ?? '').slice(0, 500),
         direction: 'outbound',
         status: 'completed',
@@ -1315,7 +1332,10 @@ export async function resumeEnrollmentAfterHITL(
         performed_by: enrollment.enrolled_by_actor_id ?? undefined,
         source_agent: `sequence:${sequence.id}`,
         occurred_at: new Date().toISOString(),
+        outcome: 'sent',
+        custom_fields: outboundProvenance,
         detail: {
+          ...outboundProvenance,
           sequence_id: sequence.id,
           sequence_name: sequence.name,
           enrollment_id: enrollmentId,

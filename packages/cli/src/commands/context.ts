@@ -409,6 +409,24 @@ export function contextCommand(): Command {
       const data = JSON.parse(result);
       const lineage = data.lineage ?? data;
       console.log(lineage.summary ?? {});
+      if (lineage.outcomes) {
+        console.log('Outcomes:', {
+          completed: lineage.outcomes.completed_count ?? 0,
+          pending: lineage.outcomes.pending_count ?? 0,
+          failed: lineage.outcomes.failed_count ?? 0,
+        });
+        for (const item of (lineage.outcomes.recommended_follow_up ?? []).slice(0, 3)) {
+          console.log(`- ${item}`);
+        }
+        if ((lineage.outcomes.recent ?? []).length) {
+          console.table((lineage.outcomes.recent ?? []).slice(0, 8).map((outcome: Record<string, unknown>) => ({
+            kind: outcome.kind,
+            status: outcome.status,
+            impact: outcome.impact,
+            title: String(outcome.label ?? '').slice(0, 48),
+          })));
+        }
+      }
       console.table((lineage.nodes ?? []).map((node: Record<string, unknown>) => ({
         id: String(node.id ?? '').slice(0, 8),
         type: node.type,

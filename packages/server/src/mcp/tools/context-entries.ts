@@ -59,6 +59,22 @@ function normalizeOptionalTimestamp(value?: string): string | null {
   return parsed.toISOString();
 }
 
+function normalizeSinceTimestamp(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) throw validationError('since must be an ISO timestamp or a relative duration like "7d", "24h", or "30m".');
+  const match = trimmed.match(/^(\d+)([dhm])$/);
+  if (match) {
+    const [, num, unit] = match;
+    const ms = parseInt(num, 10) * (unit === 'd' ? 86400000 : unit === 'h' ? 3600000 : 60000);
+    return new Date(Date.now() - ms).toISOString();
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    throw validationError('since must be an ISO timestamp or a relative duration like "7d", "24h", or "30m".');
+  }
+  return parsed.toISOString();
+}
+
 function metadataString(source: rawContextRepo.RawContextSource, key: string): string | null {
   const value = source.metadata?.[key];
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -1169,7 +1185,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     {
       name: 'briefing_get',
       tier: 'core',
-      description: 'Get a unified briefing for any customer record — the single most important tool in CRMy. Call this before every agent action that needs current state. It assembles the full record, related entities, recent activity timeline, open assignments, Current Memory, Signals, Memory that needs review, and contradiction warnings in one response. Set context_radius to "direct" for single-contact outreach, "adjacent" to include related accounts and opportunities, or "account_wide" for deal reviews that need the full picture. Set token_budget (integer, token count) to tell CRMy how much space you have — it packs the highest-priority context to fit. Check stale_warnings before acting; they identify Memory past its valid_until date that should be reverified. Works on contacts, accounts, opportunities, and use_cases.',
+      description: 'Get a unified briefing for any customer record — the single most important tool in CRMy. Call this before every agent action that needs current state. It assembles the full record, related entities, recent activity timeline, open assignments, Current Memory, Signals, Memory that needs review, and contradiction warnings in one response. Set context_radius to "direct" for single-contact outreach, "adjacent" to include related accounts and opportunities, or "account_wide" for deal reviews that need the full picture. Set token_budget or token_budget_profile to tell CRMy how much space you have; it ranks by confidence, freshness, evidence, and type priority, then packs the highest-value context first. Use evidence_mode="summary" by default, "none" for cheap scanning, and "full" only when the agent needs proof inline. Check staleness_warnings before acting; they identify Memory past its valid_until date that should be reverified. Works on contacts, accounts, opportunities, and use_cases.',
       inputSchema: briefingGet,
       handler: async (input: z.infer<typeof briefingGet>, actor: ActorContext) => {
         await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
@@ -1184,6 +1200,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             include_stale: input.include_stale,
             context_radius: input.context_radius,
             token_budget: input.token_budget,
+            token_budget_profile: input.token_budget_profile,
+            evidence_mode: input.evidence_mode,
           },
         );
 
@@ -1195,26 +1213,18 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
     },
     {
       name: 'context_diff',
-      tier: 'admin',
-      description: 'Get a catch-up diff for a CRM subject showing everything that changed since a given timestamp. Returns four lists: new context entries added, entries that were superseded, entries that became stale, and entries that were recently reviewed. Ideal for daily agent check-ins or resuming work after a gap — call this instead of a full briefing when you already have baseline context and just need the delta.',
+      tier: 'core',
+      description: 'Get a bounded catch-up diff for a CRM subject showing what changed since a given timestamp. Returns capped lists for new context entries, superseded entries, newly stale entries, and recently reviewed entries, plus truncation flags. Ideal for daily agent check-ins or resuming work after a gap — call this instead of a full briefing when you already have baseline context and just need the delta.',
       inputSchema: contextDiff,
       handler: async (input: z.infer<typeof contextDiff>, actor: ActorContext) => {
         await assertSubjectAccess(db, actor, input.subject_type as SubjectType, input.subject_id);
-        // Parse relative durations ("7d", "24h", "30m") into ISO timestamps
-        let since = input.since;
-        if (!since.includes('T') && !since.includes('-')) {
-          const match = since.match(/^(\d+)([dhm])$/);
-          if (match) {
-            const [, num, unit] = match;
-            const ms = parseInt(num, 10) * (unit === 'd' ? 86400000 : unit === 'h' ? 3600000 : 60000);
-            since = new Date(Date.now() - ms).toISOString();
-          }
-        }
+        const since = normalizeSinceTimestamp(input.since);
         const diff = await contextRepo.diffContextEntries(
           db, actor.tenant_id,
           input.subject_type as SubjectType,
           input.subject_id,
           since,
+          input.limit,
         );
         return {
           subject_type: input.subject_type,
@@ -1226,6 +1236,7 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             superseded: diff.superseded_entries.length,
             newly_stale: diff.newly_stale.length,
             resolved: diff.resolved_entries.length,
+            truncated: diff.truncated,
           },
         };
       },

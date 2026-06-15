@@ -1,6 +1,7 @@
 # CRMy 1.0 Multi-Instance Runtime Plan
 
-Status: **planned for 1.0 hosted production**.
+Status: **durable MCP session catalog landed; remaining worker split and optional
+internal MCP forwarding are 1.0 hosted-production work**.
 
 This plan covers the gap behind the release-review finding: MCP sessions and
 background workers are still partly process-local architecture concerns. The
@@ -31,14 +32,26 @@ Does not block:
 
 ## Current Code Signals
 
-Current implementation details that make this a 1.0 concern:
+Implemented MCP hardening:
 
-- `packages/server/src/mcp/session-registry.ts` stores MCP sessions in an
-  in-memory `Map<string, McpSession>`.
-- `packages/server/src/mcp/session-registry.ts` sends MCP resource change
-  notifications through the in-process event bus.
-- `packages/server/src/index.ts` reuses MCP sessions only when the request lands
-  on the process that owns the `StreamableHTTPServerTransport`.
+- `packages/server/migrations/079_mcp_session_catalog.sql` creates durable MCP
+  session, subscription, and instance-heartbeat tables.
+- `packages/server/src/db/repos/mcp-sessions.ts` records session ownership,
+  actor/scope fingerprints, TTL, close/expire reasons, and stale instance
+  recovery.
+- `packages/server/src/index.ts` validates every `mcp-session-id` against the
+  durable catalog before using a local transport, rejects actor/scope mismatch,
+  rejects wrong-instance routing with a clear sticky-routing error, and returns
+  a reinitialize response when the local transport is gone.
+- `packages/server/src/mcp/session-registry.ts` still stores live transports in
+  an in-memory `Map<string, McpSession>`, by design, but durable validity and
+  recovery decisions are shared through PostgreSQL.
+- `packages/server/src/events/emitter.ts` publishes best-effort PostgreSQL
+  resource notifications so live MCP sessions on another app instance can emit
+  `resources/listChanged`.
+
+Remaining 1.0 runtime concerns:
+
 - `packages/server/src/index.ts` starts the background worker loop inside the app
   process.
 - `packages/server/src/index.ts` serializes many unrelated background tasks
@@ -58,8 +71,8 @@ Current implementation details that make this a 1.0 concern:
 | --- | --- | --- |
 | Local dev / demo | Yes | Current in-process sessions and workers are acceptable. |
 | Single-instance self-hosted | Yes, if disclosed | One app process may run the worker loop; MCP sessions are process-local. |
-| Hosted beta | Yes, with constraints | Require sticky MCP routing and a single worker leader or explicitly separated worker process. |
-| Hosted multi-instance production | No | Requires the 1.0 architecture in this document. |
+| Hosted beta | Yes, with constraints | Require `CRMY_INSTANCE_ID`, `CRMY_MCP_SESSION_MODE=sticky`, sticky routing by `mcp-session-id`, and a single worker leader or explicitly separated worker process. |
+| Hosted multi-instance production | Conditionally | MCP sessions now have durable ownership/expiry and cross-instance resource notifications. Remaining 1.0 requirements are split worker deployment, processor observability, two-instance release tests, and a decision on optional internal MCP forwarding. |
 
 ## Design Principles
 
@@ -112,23 +125,23 @@ lands on instance B, instance B does not have the session. Deploys, instance
 restarts, serverless freezes, or load-balancer changes can drop resource
 subscriptions and produce confusing session failures.
 
-### 1.0 Target
+### Implemented Runtime Baseline
 
 Create a durable MCP session catalog. Live transports remain process-local, but
 session validity and recovery decisions become shared.
 
-Recommended table shape:
+Implemented table shape:
 
 ```sql
 CREATE TABLE mcp_sessions (
-  id UUID PRIMARY KEY,
+  id TEXT PRIMARY KEY,
   tenant_id UUID NOT NULL,
-  actor_id UUID NOT NULL,
+  actor_id TEXT NOT NULL,
   actor_type TEXT NOT NULL,
   actor_role TEXT NOT NULL,
   scope_hash TEXT NOT NULL,
-  auth_subject_hash TEXT NOT NULL,
-  owning_instance_id TEXT,
+  actor_identity_hash TEXT NOT NULL,
+  owning_instance_id TEXT NOT NULL,
   transport_state TEXT NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -147,10 +160,10 @@ Optional subscription/event cursor table:
 
 ```sql
 CREATE TABLE mcp_session_subscriptions (
-  session_id UUID NOT NULL REFERENCES mcp_sessions(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL REFERENCES mcp_sessions(id) ON DELETE CASCADE,
   tenant_id UUID NOT NULL,
   resource_uri TEXT NOT NULL,
-  last_event_id UUID,
+  last_event_id BIGINT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (session_id, resource_uri)
 );
@@ -171,16 +184,13 @@ CREATE TABLE mcp_session_subscriptions (
    - Load the session row.
    - Reject if expired, closed, wrong tenant, wrong actor, or wrong scope hash.
    - If the request lands on the owning instance, use the live transport.
-   - If the request lands on another instance, one of these must be true:
-     - load balancer routes by `mcp-session-id` to the owning instance;
-     - the app forwards the request through an internal instance RPC;
-     - the session is marked expired and the client receives a clear
-       reinitialize response.
+   - If the request lands on another instance, the current runtime returns a
+     clear conflict telling the client/operator to use sticky routing or
+     reinitialize. Internal instance forwarding remains future work.
 
 3. **Resource notifications**
    - Persist CRMy domain events as the source of truth.
-   - Publish best-effort cross-instance notification messages by tenant and
-     resource type.
+   - Publish best-effort PostgreSQL notifications by tenant and resource type.
    - The owning instance pushes `resources/listChanged` to live sessions.
    - Clients must be able to recover by listing resources again after reconnect.
 
@@ -340,14 +350,14 @@ RETURNING q.*;
 | Local dev | 1 | 0 or in-app | In memory | In app |
 | Single-instance self-hosted | 1 | 0 or 1 | In memory, documented | In app or worker |
 | Hosted beta | 2+ | 1+ | Sticky by `mcp-session-id` | Dedicated worker preferred |
-| 1.0 hosted production | 2+ | 2+ | Durable catalog + sticky/forward/expire behavior | Dedicated named processors |
+| 1.0 hosted production | 2+ | 2+ | Durable catalog + sticky/expire behavior; optional internal forwarding later | Dedicated named processors |
 
 Production configuration should include:
 
 - `CRMY_RUN_WORKERS=false` for web/API processes.
 - `CRMY_WORKER_QUEUES=agent_turns,raw_context,...` for worker processes.
 - `CRMY_INSTANCE_ID` for app and worker identity.
-- `CRMY_MCP_SESSION_MODE=sticky` or `durable`.
+- `CRMY_MCP_SESSION_MODE=sticky`.
 - `CRMY_MCP_SESSION_TTL_SECONDS`.
 - Queue-specific batch, timeout, and concurrency settings.
 
@@ -409,10 +419,10 @@ Add release-gate tests for:
 3. Standardize queue columns and stale recovery for context outbox and remaining
    durable queues.
 4. Add per-processor metrics and operator recovery views/tools.
-5. Add `mcp_sessions` durable catalog, actor/scope validation, TTL, and explicit
-   stale-session errors.
-6. Add sticky routing guidance and tests for hosted beta.
-7. Add cross-instance resource notification delivery or recovery behavior.
+5. Add sticky routing guidance and release tests for hosted beta.
+6. Extract app/worker deployment docs into an operator runbook.
+7. Decide whether hosted 1.0 needs internal MCP request forwarding, or whether
+   sticky/expire/reinitialize remains the supported contract.
 8. Add multi-instance release tests with two app instances and two worker
    instances.
 

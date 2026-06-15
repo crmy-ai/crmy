@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useMemo, useState } from 'react';
-import { Bot, CheckCircle2, Loader2, Send, Sparkles, X } from 'lucide-react';
-import { useContact, usePreviewEmailDraft, useSaveEmailDraft } from '@/api/hooks';
+import { AlertTriangle, Bot, CheckCircle2, Loader2, Mail, Send, Sparkles, X } from 'lucide-react';
+import { useContact, useEmailSender, usePreviewEmailDraft, useSaveEmailDraft } from '@/api/hooks';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import { useAppStore, type EmailDraftContext } from '@/store/appStore';
 import { Button } from '@/components/ui/button';
@@ -43,8 +43,9 @@ export function EmailDraftDrawer() {
   const { emailDraftOpen, emailDraftContext, closeEmailDraft } = useAppStore();
   const context = useMemo(() => normalizeContext(emailDraftContext), [emailDraftContext]);
   const { enabled: agentEnabled, connectivity, loading: agentSettingsLoading } = useAgentSettings();
-  const previewDraft = usePreviewEmailDraft();
-  const saveDraft = useSaveEmailDraft();
+	  const previewDraft = usePreviewEmailDraft();
+	  const saveDraft = useSaveEmailDraft();
+	  const senderQ = useEmailSender() as any;
 
   const [toAddress, setToAddress] = useState('');
   const [toName, setToName] = useState('');
@@ -67,7 +68,20 @@ export function EmailDraftDrawer() {
   const contact = contactData?.contact ?? contactData;
   const agentConfigured = agentEnabled || agentSettingsLoading;
   const actionContext = contextUsed?.action_context as { review_required?: boolean; readiness_status?: string; risk_level?: string; guidance_summary?: string } | undefined;
-  const directSendBlocked = Boolean(actionContext?.review_required);
+	  const directSendBlocked = Boolean(actionContext?.review_required);
+	  const sender = (senderQ.data?.sender ?? {}) as {
+	    sender_type?: 'actor_mailbox' | 'tenant_provider' | 'unknown';
+	    from_email?: string | null;
+	    from_name?: string | null;
+	    can_send?: boolean;
+	    can_provider_draft?: boolean;
+	    reason?: string;
+	    reply_handling?: string;
+	  };
+	  const senderReady = sender.can_send !== false && sender.sender_type !== 'unknown';
+	  const senderLabel = sender.from_email
+	    ? `${sender.from_name ? `${sender.from_name} ` : ''}<${sender.from_email}>`
+	    : 'No sender configured';
 
   useEffect(() => {
     if (!emailDraftOpen) return;
@@ -125,9 +139,9 @@ export function EmailDraftDrawer() {
       setSubject(result.subject);
       setBody(result.body_text);
       setGenerated(true);
-      setGenerationMetadata(result.model_metadata ?? {});
-      setContextUsed(result.context_used ?? null);
-      setWarnings(result.warnings ?? []);
+	      setGenerationMetadata(result.model_metadata ?? {});
+	      setContextUsed(result.context_used ?? null);
+	      setWarnings(result.warnings ?? []);
       toast({ title: 'Draft generated', description: 'Review and edit before saving or sending.' });
     } catch (err) {
       toast({
@@ -138,12 +152,16 @@ export function EmailDraftDrawer() {
     }
   };
 
-  const save = async (deliveryAction: 'save_draft' | 'request_approval' | 'send_now') => {
-    if (!toAddress.trim() || !subject.trim() || !body.trim()) {
-      toast({ title: 'Missing details', description: 'Recipient, subject, and body are required.', variant: 'destructive' });
-      return;
-    }
-    try {
+	  const save = async (deliveryAction: 'save_draft' | 'request_approval' | 'send_now', draftTarget: 'crmy' | 'provider_draft' = 'crmy') => {
+	    if (!toAddress.trim() || !subject.trim() || !body.trim()) {
+	      toast({ title: 'Missing details', description: 'Recipient, subject, and body are required.', variant: 'destructive' });
+	      return;
+	    }
+	    if (deliveryAction !== 'save_draft' && !senderReady) {
+	      toast({ title: 'Sender required', description: 'Save as a CRMy draft, or connect a mailbox sender / fallback provider before sending.', variant: 'destructive' });
+	      return;
+	    }
+	    try {
       await saveDraft.mutateAsync({
         ...linkedPayload,
         to_address: toAddress.trim(),
@@ -151,7 +169,7 @@ export function EmailDraftDrawer() {
         subject: subject.trim(),
         body_text: body.trim(),
         draft_origin: generated ? 'agent_generated' : 'manual',
-        draft_target: 'crmy',
+	        draft_target: draftTarget,
         delivery_action: deliveryAction,
         generation_metadata: {
           ...generationMetadata,
@@ -163,7 +181,7 @@ export function EmailDraftDrawer() {
       });
       toast({
         title: deliveryAction === 'request_approval' ? 'Sent for approval' : deliveryAction === 'send_now' ? 'Sending email' : 'Draft saved',
-        description: deliveryAction === 'save_draft' ? 'Find it in Drafts & Approvals.' : undefined,
+	        description: deliveryAction === 'save_draft' ? 'Find it in Outbound Actions.' : undefined,
       });
       closeEmailDraft();
     } catch (err) {
@@ -175,9 +193,7 @@ export function EmailDraftDrawer() {
     }
   };
 
-  const providerDraftReason = 'Provider draft folders need Gmail/Outlook draft-write support. Save a CRMy draft or send for approval for now.';
-
-  return (
+	  return (
     <div className="fixed inset-y-0 right-0 z-[70] w-full max-w-2xl border-l border-border bg-background shadow-2xl">
       <div className="flex h-full flex-col">
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
@@ -192,8 +208,24 @@ export function EmailDraftDrawer() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
-          <section className="rounded-xl border border-border bg-card/70 p-4">
-            <div className="grid gap-3 md:grid-cols-2">
+	          <section className="rounded-xl border border-border bg-card/70 p-4">
+	            <div className="mb-4 rounded-lg border border-border bg-background/40 p-3">
+	              <div className="flex items-start gap-3">
+	                {senderReady ? <Mail className="mt-0.5 h-4 w-4 text-emerald-300" /> : <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-300" />}
+	                <div className="min-w-0 flex-1">
+	                  <div className="flex flex-wrap items-center gap-2">
+	                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">From</p>
+	                    <Badge variant="outline" className={sender.sender_type === 'actor_mailbox' ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200' : sender.sender_type === 'tenant_provider' ? 'border-blue-500/25 bg-blue-500/10 text-blue-200' : 'border-amber-500/25 bg-amber-500/10 text-amber-200'}>
+	                      {sender.sender_type === 'actor_mailbox' ? 'Actor mailbox' : sender.sender_type === 'tenant_provider' ? 'Fallback provider' : 'Draft only'}
+	                    </Badge>
+	                  </div>
+	                  <p className="mt-1 truncate text-sm font-semibold text-foreground">{senderQ.isLoading ? 'Resolving sender...' : senderLabel}</p>
+	                  <p className="mt-1 text-xs text-muted-foreground">{sender.reason ?? 'CRMy resolves the sender before approval or send.'}</p>
+	                  <p className="mt-1 text-xs text-muted-foreground">{sender.reply_handling ?? 'Replies are processed when they arrive through a connected mailbox or inbound webhook.'}</p>
+	                </div>
+	              </div>
+	            </div>
+	            <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Contact</label>
                 <EntityCombobox
@@ -342,20 +374,22 @@ export function EmailDraftDrawer() {
         <div className="border-t border-border px-5 py-4">
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button variant="outline" onClick={closeEmailDraft}>Cancel</Button>
-            <Button variant="outline" disabled title={providerDraftReason}>
-              Push to provider draft
-            </Button>
-            <Button variant="outline" onClick={() => save('save_draft')} disabled={saveDraft.isPending}>
+	            {sender.can_provider_draft && (
+	              <Button variant="outline" onClick={() => save('save_draft', 'provider_draft')} disabled={saveDraft.isPending}>
+	                Push to provider draft
+	              </Button>
+	            )}
+	            <Button variant="outline" onClick={() => save('save_draft')} disabled={saveDraft.isPending}>
               Save draft
             </Button>
-            <Button onClick={() => save('request_approval')} disabled={saveDraft.isPending} className="gap-1.5 bg-blue-600 text-white hover:bg-blue-500">
+	            <Button onClick={() => save('request_approval')} disabled={saveDraft.isPending || !senderReady} className="gap-1.5 bg-blue-600 text-white hover:bg-blue-500">
               {saveDraft.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Send for approval
             </Button>
             <Button
-              variant="outline"
-              onClick={() => save('send_now')}
-              disabled={saveDraft.isPending || directSendBlocked}
+	              variant="outline"
+	              onClick={() => save('send_now')}
+	              disabled={saveDraft.isPending || directSendBlocked || !senderReady}
               className="gap-1.5"
               title={directSendBlocked ? 'This email needs review before it can be sent.' : undefined}
             >

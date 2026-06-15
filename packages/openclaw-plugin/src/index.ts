@@ -141,6 +141,19 @@ const ROUTES: Record<string, RouteHandler> = {
       token_budget: num(p.token_budget),
       format: str(p.format) ?? 'json',
     }),
+  'action_context.get': async (c, p) =>
+    c.post('/action-context', {
+      subject_type: req(p.subject_type, 'subject_type'),
+      subject_id: req(p.subject_id, 'subject_id'),
+      since: str(p.since),
+      context_types: Array.isArray(p.context_types) ? p.context_types : undefined,
+      include_stale: bool(p.include_stale),
+      context_radius: str(p.context_radius),
+      token_budget: num(p.token_budget),
+      proposed_action: p.proposed_action,
+    }),
+  'action_context.unblock': async (c, p) =>
+    c.post('/action-context/human-unblock', p),
   'context.list': async (c, p) =>
     c.get('/context', {
       subject_type: str(p.subject_type),
@@ -164,6 +177,14 @@ const ROUTES: Record<string, RouteHandler> = {
     }),
   'context.signal_group.get': async (c, p) =>
     c.get(`/context/signal-groups/${req(p.id, 'id')}`),
+  'context.lineage': async (c, p) =>
+    c.get('/context/lineage', {
+      subject_type: str(p.subject_type),
+      subject_id: str(p.subject_id),
+      context_entry_id: str(p.context_entry_id),
+      signal_group_id: str(p.signal_group_id),
+      raw_context_source_id: str(p.raw_context_source_id),
+    }),
   'context.get': async (c, p) =>
     c.get(`/context/${req(p.id, 'id')}`),
   'context.ingest_auto': async (c, p) =>

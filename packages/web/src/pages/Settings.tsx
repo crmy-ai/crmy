@@ -5,7 +5,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ListOrdered, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, MessageSquare, ShieldCheck, Sparkles, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw, Zap } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ListOrdered, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, ShieldCheck, Sparkles, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw, Zap } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -13,7 +13,7 @@ import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
-import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useMeetingClassifications, useCreateMeetingClassification, useUpdateMeetingClassification, useDeleteMeetingClassification, useSystemsOfRecord, useCreateSystemOfRecord, useUpdateSystemOfRecord, useDeleteSystemOfRecord, useTestSystemOfRecord, useRunSystemSync, useDiscoverSystemOfRecord, useSystemMappings, useUpsertSystemMapping, useDeleteSystemMapping, useSystemSyncRuns, useSystemConflicts, useResolveSystemConflict, useSystemWritebacks, usePreviewSystemWriteback, useRequestSystemWriteback, useExecuteSystemWriteback, useReviewSystemWriteback } from '@/api/hooks';
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useRevealWebhookSecret, useRotateWebhookSecret, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useMeetingClassifications, useCreateMeetingClassification, useUpdateMeetingClassification, useDeleteMeetingClassification, useSystemsOfRecord, useCreateSystemOfRecord, useUpdateSystemOfRecord, useDeleteSystemOfRecord, useTestSystemOfRecord, useRunSystemSync, useDiscoverSystemOfRecord, useSystemMappings, useUpsertSystemMapping, useDeleteSystemMapping, useSystemSyncRuns, useSystemConflicts, useResolveSystemConflict, useSystemWritebacks, usePreviewSystemWriteback, useRequestSystemWriteback, useExecuteSystemWriteback, useReviewSystemWriteback } from '@/api/hooks';
 import type { SystemMapping, SystemOfRecord } from '@/api/hooks';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 import AgentSettings from '@/pages/AgentSettings';
@@ -29,7 +29,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'], group: 'Setup' },
   { icon: Sparkles,   label: 'Workspace Agent', path: '/settings/model',      roles: ['admin', 'owner'], group: 'Setup' },
   { icon: Server,     label: 'Systems of Record', path: '/settings/systems', roles: ['admin', 'owner'], group: 'Sources' },
-  { icon: MessageSquare, label: 'Messaging', path: '/settings/messaging',     roles: ['admin', 'owner'], group: 'Sources' },
+  { icon: Server,     label: 'System Connections', path: '/settings/connections', roles: ['admin', 'owner'], group: 'Sources' },
   { icon: ShieldCheck, label: 'Action Policies', path: '/settings/hitl-rules', roles: ['admin', 'owner'], group: 'Safety' },
   { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'], group: 'Safety' },
   { icon: Tags,       label: 'Memory Types',  path: '/settings/registries',   roles: ['admin', 'owner'], group: 'Advanced' },
@@ -55,6 +55,11 @@ function RequireRole({ roles, children }: { roles: NavRole[]; children: React.Re
   const user = getUser();
   if (!user || !roles.includes(user.role as NavRole)) return <AccessDenied />;
   return <>{children}</>;
+}
+
+function RedirectSettingsMessaging() {
+  const location = useLocation();
+  return <Navigate to={`/settings/connections${location.search}`} replace />;
 }
 
 function SettingsHealthDot({ tone, className = '' }: { tone: 'ok' | 'warn' | 'error' | 'muted'; className?: string }) {
@@ -334,7 +339,7 @@ const API_KEY_SCOPE_GROUPS = [
   ]},
   { label: 'Admin Setup', scopes: [
     { value: 'api_keys:admin', label: 'API keys' },
-    { value: 'email_provider:admin', label: 'Inbound email' },
+    { value: 'email_provider:admin', label: 'Shared email provider' },
   ]},
   { label: 'Agent', scopes: [
     { value: 'agent:read', label: 'Read' },
@@ -1189,6 +1194,8 @@ function WebhooksSettings() {
   const { data, isLoading } = useWebhooks();
   const createWebhook = useCreateWebhook();
   const updateWebhook = useUpdateWebhook();
+  const revealWebhookSecret = useRevealWebhookSecret();
+  const rotateWebhookSecret = useRotateWebhookSecret();
   const deleteWebhook = useDeleteWebhook();
 
   const [showCreate, setShowCreate] = useState(false);
@@ -1203,12 +1210,15 @@ function WebhooksSettings() {
   const [newEvents, setNewEvents] = useState<string[]>(['contact.created', 'opportunity.updated']);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [rotateSecretId, setRotateSecretId] = useState<string | null>(null);
   const [editingEventsId, setEditingEventsId] = useState<string | null>(null);
   const [editEvents, setEditEvents] = useState<string[]>([]);
+  const [visibleSecrets, setVisibleSecrets] = useState<Record<string, string>>({});
 
   const PAGE_SIZE = 10;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const webhooks: any[] = (data as any)?.data ?? [];
+  const webhookEvents = (wh: any): string[] => wh.events ?? wh.event_types ?? [];
 
   const filtered = useMemo(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1223,7 +1233,7 @@ function WebhooksSettings() {
       const group = WEBHOOK_EVENT_GROUPS.find(g => g.label === categoryFilter);
       if (group) {
         const vals = group.events.map(e => e.value);
-        result = result.filter(wh => (wh.events ?? []).some((ev: string) => vals.includes(ev)));
+        result = result.filter(wh => webhookEvents(wh).some((ev: string) => vals.includes(ev)));
       }
     }
     result.sort((a, b) => {
@@ -1246,9 +1256,13 @@ function WebhooksSettings() {
   const handleCreate = async () => {
     if (!newUrl.trim() || newEvents.length === 0) return;
     try {
-      await createWebhook.mutateAsync({ url: newUrl.trim(), events: newEvents });
+      const result = await createWebhook.mutateAsync({ url: newUrl.trim(), events: newEvents }) as { webhook?: { id?: string; secret?: string } };
+      if (result.webhook?.id && result.webhook?.secret) {
+        setVisibleSecrets(prev => ({ ...prev, [result.webhook!.id!]: result.webhook!.secret! }));
+        setExpandedId(result.webhook.id);
+      }
       resetCreate();
-      toast({ title: 'Webhook created' });
+      toast({ title: 'Webhook created', description: result.webhook?.secret ? 'Copy the signing secret now, or reveal it again later.' : undefined });
     } catch (err) {
       toast({
         title: 'Could not create webhook',
@@ -1258,10 +1272,50 @@ function WebhooksSettings() {
     }
   };
 
+  const copySecret = async (secret: string) => {
+    try {
+      await navigator.clipboard.writeText(secret);
+      toast({ title: 'Secret copied' });
+    } catch {
+      toast({ title: 'Could not copy secret', description: 'Select the secret and copy it manually.', variant: 'destructive' });
+    }
+  };
+
+  const handleRevealSecret = async (id: string) => {
+    try {
+      const result = await revealWebhookSecret.mutateAsync(id) as { secret?: string };
+      if (!result.secret) throw new Error('No secret returned');
+      setVisibleSecrets(prev => ({ ...prev, [id]: result.secret! }));
+      toast({ title: 'Secret revealed', description: 'Copy it only into the receiving service.' });
+    } catch (err) {
+      toast({
+        title: 'Could not reveal secret',
+        description: err instanceof Error ? err.message : 'Check your webhook permissions and try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleRotateSecret = async (id: string) => {
+    try {
+      const result = await rotateWebhookSecret.mutateAsync(id) as { secret?: string };
+      if (!result.secret) throw new Error('No secret returned');
+      setVisibleSecrets(prev => ({ ...prev, [id]: result.secret! }));
+      setRotateSecretId(null);
+      toast({ title: 'Secret regenerated', description: 'Update the receiving service now; the old secret no longer works.' });
+    } catch (err) {
+      toast({
+        title: 'Could not regenerate secret',
+        description: err instanceof Error ? err.message : 'Check your webhook permissions and try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const startEditEvents = (wh: any) => {
     setEditingEventsId(wh.id);
-    setEditEvents(wh.events ?? []);
+    setEditEvents(webhookEvents(wh));
     setExpandedId(wh.id);
   };
 
@@ -1283,7 +1337,13 @@ function WebhooksSettings() {
     try {
       await deleteWebhook.mutateAsync(id);
       setDeleteId(null);
+      setRotateSecretId(prev => prev === id ? null : prev);
       if (expandedId === id) setExpandedId(null);
+      setVisibleSecrets(prev => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       toast({ title: 'Webhook deleted' });
     } catch (err) {
       toast({
@@ -1292,6 +1352,80 @@ function WebhooksSettings() {
         variant: 'destructive',
       });
     }
+  };
+
+  const renderSecretPanel = (wh: any) => {
+    const visibleSecret = visibleSecrets[wh.id];
+    const maskedSecret = wh.secret_masked ?? 'whsec_••••••••';
+    const isRevealing = revealWebhookSecret.isPending;
+    const isRotating = rotateWebhookSecret.isPending && rotateSecretId === wh.id;
+    return (
+      <div className="border-b border-border px-4 py-3">
+        <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <Key className="h-4 w-4 text-muted-foreground" />
+              <p className="text-xs font-display font-semibold uppercase tracking-wider text-muted-foreground">Signing secret</p>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              CRMy signs outbound webhook deliveries with <code className="rounded bg-muted px-1 py-0.5 font-mono">X-CRMy-Signature</code>. Keep this secret in the receiving service only.
+            </p>
+            <div className="mt-2 flex min-w-0 items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-2">
+              <code className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{visibleSecret ?? maskedSecret}</code>
+              {visibleSecret && (
+                <button
+                  onClick={() => copySecret(visibleSecret)}
+                  className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground"
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
+                </button>
+              )}
+            </div>
+            {visibleSecret && (
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">Copy this now if you just generated it. Avoid sharing it in tickets, chats, or logs.</p>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2 sm:justify-end">
+            <button
+              onClick={() => handleRevealSecret(wh.id)}
+              disabled={isRevealing || isRotating}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              {isRevealing ? 'Revealing…' : 'Reveal'}
+            </button>
+            {rotateSecretId === wh.id ? (
+              <div className="inline-flex items-center gap-1.5 rounded-lg border border-destructive/30 bg-destructive/10 px-2 py-1">
+                <span className="text-xs font-semibold text-destructive">Invalidate old secret?</span>
+                <button
+                  onClick={() => handleRotateSecret(wh.id)}
+                  disabled={isRotating}
+                  className="rounded-md bg-destructive px-2 py-1 text-xs font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50"
+                >
+                  {isRotating ? 'Regenerating…' : 'Yes'}
+                </button>
+                <button
+                  onClick={() => setRotateSecretId(null)}
+                  disabled={isRotating}
+                  className="rounded-md px-2 py-1 text-xs font-semibold text-muted-foreground hover:bg-muted"
+                >
+                  No
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setRotateSecretId(wh.id)}
+                disabled={isRevealing || isRotating}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 px-3 py-1.5 text-xs font-semibold text-amber-600 hover:bg-amber-500/10 dark:text-amber-400 disabled:opacity-50"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                Regenerate
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -1457,7 +1591,7 @@ function WebhooksSettings() {
                             className="flex items-center gap-1.5 hover:text-foreground transition-colors"
                           >
                             <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border font-mono">
-                              {(wh.events ?? []).length} event{(wh.events ?? []).length !== 1 ? 's' : ''}
+                              {webhookEvents(wh).length} event{webhookEvents(wh).length !== 1 ? 's' : ''}
                             </span>
                             <ChevronRight className={`w-3 h-3 text-muted-foreground transition-transform ${expandedId === wh.id ? 'rotate-90' : ''}`} />
                           </button>
@@ -1524,6 +1658,7 @@ function WebhooksSettings() {
                                 </div>
                               ) : (
                                 <div>
+                                  {renderSecretPanel(wh)}
                                   <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider px-4 pt-3 pb-1">Recent deliveries</p>
                                   <WebhookDeliveryLog webhookId={wh.id} />
                                 </div>
@@ -4607,7 +4742,7 @@ function SystemsOfRecordSettings() {
               </div>
               {mappingObjectType === 'use_case' && (
                 <div className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
-                  Use Case mappings are visible for review and conflict tracking in 0.8. Direct sync into Use Cases needs a follow-up typed-object adapter.
+                  Use Case mappings are visible for review and conflict tracking. Direct sync into Use Cases needs a follow-up typed-object adapter.
                 </div>
               )}
               <div className="rounded-xl border border-border bg-muted/20 p-3 space-y-3">
@@ -6290,7 +6425,8 @@ export default function Settings() {
             <Route path="custom-fields" element={<RequireRole roles={['admin', 'owner']}><CustomFieldsSettings /></RequireRole>} />
             <Route path="registries" element={<RequireRole roles={['admin', 'owner']}><RegistriesSettings /></RequireRole>} />
             <Route path="actors" element={<RequireRole roles={['admin', 'owner']}><ActorsSettings /></RequireRole>} />
-            <Route path="messaging" element={<RequireRole roles={['admin', 'owner']}><MessagingSettings /></RequireRole>} />
+            <Route path="connections" element={<RequireRole roles={['admin', 'owner']}><MessagingSettings /></RequireRole>} />
+            <Route path="messaging" element={<RedirectSettingsMessaging />} />
             <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
             <Route path="model" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
             <Route path="automations" element={<Navigate to="/settings/advanced" replace />} />

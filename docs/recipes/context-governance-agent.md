@@ -261,7 +261,7 @@ briefing_get {
 
 Check:
 
-- `stale_warnings` dropped or were assigned for review
+- `staleness_warnings` dropped or were assigned for review
 - Contradiction warnings are gone or have assignments
 - Consolidated entries are concise and current
 - Open assignments explain what remains unresolved

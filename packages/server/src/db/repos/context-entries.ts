@@ -6,6 +6,7 @@ import type { ContextEntry, UUID, PaginatedResponse } from '@crmy/shared';
 import type { EmbeddingConfig } from '../../agent/providers/embeddings.js';
 import { embedText } from '../../agent/providers/embeddings.js';
 import { withTransaction } from '../transaction.js';
+import { addStableDescCursorCondition, encodeStableCursor } from './pagination.js';
 
 export async function createContextEntry(
   db: DbPool,
@@ -150,13 +151,23 @@ export async function diffContextEntries(
   subjectType: string,
   subjectId: UUID,
   since: string,
+  limit = 50,
 ): Promise<{
   new_entries: ContextEntry[];
   superseded_entries: ContextEntry[];
   newly_stale: ContextEntry[];
   resolved_entries: ContextEntry[];
+  limit: number;
+  truncated: {
+    new_entries: boolean;
+    superseded_entries: boolean;
+    newly_stale: boolean;
+    resolved_entries: boolean;
+  };
 }> {
-  const base = [tenantId, subjectType, subjectId, since];
+  const boundedLimit = Math.min(Math.max(Math.floor(Number(limit) || 50), 1), 100);
+  const queryLimit = boundedLimit + 1;
+  const base = [tenantId, subjectType, subjectId, since, queryLimit];
 
   // New entries: created in the window and currently active
   const newResult = await db.query(
@@ -165,7 +176,8 @@ export async function diffContextEntries(
        AND created_at >= $4 AND is_current = true
        AND memory_status = 'active'
        AND supersedes_id IS NULL
-     ORDER BY created_at DESC`,
+     ORDER BY created_at DESC
+     LIMIT $5`,
     base,
   );
 
@@ -175,7 +187,8 @@ export async function diffContextEntries(
      JOIN context_entries replacement ON old.id = replacement.supersedes_id
      WHERE old.tenant_id = $1 AND old.subject_type = $2 AND old.subject_id = $3
        AND replacement.created_at >= $4
-     ORDER BY replacement.created_at DESC`,
+     ORDER BY replacement.created_at DESC
+     LIMIT $5`,
     base,
   );
 
@@ -186,7 +199,8 @@ export async function diffContextEntries(
        AND valid_until >= $4 AND valid_until < now()
        AND is_current = true
        AND memory_status = 'active'
-     ORDER BY valid_until ASC`,
+     ORDER BY valid_until ASC
+     LIMIT $5`,
     base,
   );
 
@@ -195,15 +209,25 @@ export async function diffContextEntries(
     `SELECT * FROM context_entries
      WHERE tenant_id = $1 AND subject_type = $2 AND subject_id = $3
        AND reviewed_at >= $4
-     ORDER BY reviewed_at DESC`,
+     ORDER BY reviewed_at DESC
+     LIMIT $5`,
     base,
   );
 
+  const page = (rows: unknown[]) => rows.slice(0, boundedLimit) as ContextEntry[];
+
   return {
-    new_entries: newResult.rows as ContextEntry[],
-    superseded_entries: supersededResult.rows as ContextEntry[],
-    newly_stale: staleResult.rows as ContextEntry[],
-    resolved_entries: resolvedResult.rows as ContextEntry[],
+    new_entries: page(newResult.rows),
+    superseded_entries: page(supersededResult.rows),
+    newly_stale: page(staleResult.rows),
+    resolved_entries: page(resolvedResult.rows),
+    limit: boundedLimit,
+    truncated: {
+      new_entries: newResult.rows.length > boundedLimit,
+      superseded_entries: supersededResult.rows.length > boundedLimit,
+      newly_stale: staleResult.rows.length > boundedLimit,
+      resolved_entries: resolvedResult.rows.length > boundedLimit,
+    },
   };
 }
 
@@ -313,13 +337,19 @@ export async function getContextForSubjectList(
 ): Promise<ContextEntry[]> {
   if (subjects.length === 0) return [];
 
+  const subjectTypes = subjects.map(s => s.subject_type);
   const subjectIds = subjects.map(s => s.subject_id);
   const conditions: string[] = [
     'tenant_id = $1',
-    `subject_id = ANY($2::uuid[])`,
+    `EXISTS (
+       SELECT 1
+       FROM unnest($2::text[], $3::uuid[]) AS scoped(subject_type, subject_id)
+       WHERE scoped.subject_type = context_entries.subject_type
+         AND scoped.subject_id = context_entries.subject_id
+     )`,
   ];
-  const params: unknown[] = [tenantId, subjectIds];
-  let idx = 3;
+  const params: unknown[] = [tenantId, subjectTypes, subjectIds];
+  let idx = 4;
 
   if (filters?.current_only !== false) {
     conditions.push('is_current = true');
@@ -696,11 +726,7 @@ export async function searchContextEntries(
       idx++;
     }
   }
-  if (filters.cursor) {
-    conditions.push(`c.created_at < $${idx}`);
-    params.push(filters.cursor);
-    idx++;
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'c.created_at', 'c.id');
 
   const where = conditions.join(' AND ');
 
@@ -720,7 +746,7 @@ export async function searchContextEntries(
        END AS subject_name,
        (SELECT display_name FROM actors WHERE id = c.authored_by) AS authored_by_name,
        (SELECT actor_type   FROM actors WHERE id = c.authored_by) AS authored_by_type
-     FROM context_entries c WHERE ${where} ORDER BY c.created_at DESC LIMIT $${idx}`,
+     FROM context_entries c WHERE ${where} ORDER BY c.created_at DESC, c.id DESC LIMIT $${idx}`,
     params,
   );
 
@@ -731,7 +757,9 @@ export async function searchContextEntries(
   return {
     data,
     total: countResult.rows[0].total,
-    next_cursor: hasMore ? data[data.length - 1].created_at : undefined,
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({ sort_value: data[data.length - 1].created_at, id: data[data.length - 1].id })
+      : undefined,
   };
 }
 

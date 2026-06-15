@@ -54,11 +54,18 @@ export async function initPool(databaseUrl: string, maxConnections = 10): Promis
     password = undefined;
   }
 
+  const connectionTimeoutMillis = Number(process.env.DB_CONNECTION_TIMEOUT_MS ?? 10_000);
+  const queryTimeoutMillis = Number(process.env.DB_QUERY_TIMEOUT_MS ?? 30_000);
+  const statementTimeoutMillis = Number(process.env.DB_STATEMENT_TIMEOUT_MS ?? queryTimeoutMillis);
+
   pool = new Pool({
     connectionString: cleanUrl,
     ...(password !== undefined && { password }),
     ...(ssl !== undefined && { ssl }),
     max: maxConnections,
+    connectionTimeoutMillis,
+    query_timeout: queryTimeoutMillis,
+    statement_timeout: statementTimeoutMillis,
   });
 
   // Test the connection with retries

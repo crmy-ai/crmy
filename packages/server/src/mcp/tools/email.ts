@@ -7,11 +7,9 @@ import type { DbPool } from '../../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import * as emailRepo from '../../db/repos/emails.js';
 import * as emailMessageRepo from '../../db/repos/email-messages.js';
-import * as hitlRepo from '../../db/repos/hitl.js';
 import * as activityRepo from '../../db/repos/activities.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound } from '@crmy/shared';
-import { deliverEmail } from '../../email/delivery.js';
 import { getEmailProvider, listEmailProviderTypes } from '../../email/providers/index.js';
 import { parseInboundEmail } from '../../email/inbound-parser.js';
 import { extractContextFromActivity } from '../../agent/extraction.js';
@@ -19,6 +17,7 @@ import { entityResolve } from '../../services/entity-resolve.js';
 import { getActorUserId, isGlobalActor, resolveOwnerFilter, assertSubjectAccess } from '../../services/access-control.js';
 import { ingestEmailMessage, processEmailMessage } from '../../services/customer-email.js';
 import { emailDraftPreviewSchema, emailDraftSaveSchema, previewEmailDraft, saveEmailDraft, type EmailDraftPreviewInput, type EmailDraftSaveInput } from '../../services/email-drafts.js';
+import { buildOAuthUrl, oauthReadiness } from '../../services/source-sync.js';
 import type { ToolDef } from '../server.js';
 import { runToolOperation } from '../tool-operation.js';
 import { mutationReceipt } from '../mutation-receipt.js';
@@ -97,110 +96,51 @@ async function assertEmailMessageAccess(db: DbPool, actor: ActorContext, message
   throw notFound('EmailMessage', message.id);
 }
 
+async function assertOutboundEmailAccess(db: DbPool, actor: ActorContext, email: emailRepo.EmailRow): Promise<void> {
+  if (isGlobalActor(actor)) return;
+  const actorUserId = await getActorUserId(db, actor);
+  if ((actorUserId && email.created_by === actorUserId) || email.created_by === actor.actor_id) return;
+  const linked = [
+    ['opportunity', email.opportunity_id],
+    ['use_case', email.use_case_id],
+    ['contact', email.contact_id],
+    ['account', email.account_id],
+  ] as const;
+  for (const [type, id] of linked) {
+    if (!id) continue;
+    if (await canAccessSubjectLink(db, actor, type, id)) return;
+  }
+  throw notFound('Email', email.id);
+}
+
 export function emailTools(db: DbPool): ToolDef[] {
   return [
     {
       name: 'email_create',
       tier: 'extended',
-      description: 'Draft an outbound email linked to a contact. By default require_approval is true, which creates a HITL request for human review before sending — this is the recommended approach for high-stakes communications. Set require_approval to false only for routine, low-risk sends. The email is stored as a draft until approved.',
+      description: 'Draft an outbound email linked to a customer record. CRMy resolves the sender from the actor’s send-enabled mailbox first, then the tenant fallback provider. By default require_approval is true, which creates a HITL request for human review before sending. Delivered sends are recorded as account activity and CRMy-authored context, not customer-authored evidence.',
       inputSchema: emailCreate,
       handler: async (input: z.infer<typeof emailCreate>, actor: ActorContext) => {
         return runToolOperation(db, actor, 'email_create', input, async () => {
-        const bodyText = input.body_text ?? input.body_html?.replace(/<[^>]+>/g, '') ?? '';
-
-        let hitlRequestId: string | undefined;
-        let status = 'draft';
-
-        if (input.require_approval !== false) {
-          // Create HITL request for approval
-          const hitl = await hitlRepo.createHITLRequest(db, actor.tenant_id, {
-            agent_id: actor.actor_id,
-            action_type: 'email.send',
-            action_summary: `Send email to ${input.to_address}: "${input.subject}"`,
-            action_payload: {
-              to_address: input.to_address,
-              subject: input.subject,
-              body_preview: bodyText.slice(0, 200),
-            },
+          const bodyText = input.body_text ?? input.body_html?.replace(/<[^>]+>/g, '') ?? '';
+          return saveEmailDraft(db, actor, {
+            contact_id: input.contact_id,
+            account_id: input.account_id,
+            opportunity_id: input.opportunity_id,
+            use_case_id: input.use_case_id,
+            to_address: input.to_address,
+            subject: input.subject,
+            body_html: input.body_html,
+            body_text: bodyText,
+            intent: 'follow_up',
+            tone: 'concise, helpful, and specific',
+            target: 'crmy',
+            draft_origin: 'manual',
+            draft_target: 'crmy',
+            delivery_action: input.require_approval === false ? 'send_now' : 'request_approval',
+            generation_metadata: { legacy_tool: 'email_create' },
+            idempotency_key: input.idempotency_key,
           });
-          hitlRequestId = hitl.id;
-          status = 'pending_approval';
-        }
-
-        const email = await emailRepo.createEmail(db, actor.tenant_id, {
-          contact_id: input.contact_id,
-          account_id: input.account_id,
-          opportunity_id: input.opportunity_id,
-          use_case_id: input.use_case_id,
-          to_email: input.to_address,
-          subject: input.subject,
-          body_html: input.body_html,
-          body_text: bodyText,
-          status,
-          hitl_request_id: hitlRequestId,
-          created_by: actor.actor_id,
-        });
-
-        const providerConfig = await emailRepo.getProvider(db, actor.tenant_id);
-        const actorUser = await db.query('SELECT email, name FROM users WHERE tenant_id = $1 AND id = $2 LIMIT 1', [actor.tenant_id, actor.actor_id]);
-        await emailMessageRepo.upsertEmailMessage(db, actor.tenant_id, {
-          direction: 'outbound',
-          source: 'outbound',
-          from_email: providerConfig?.from_email ?? actorUser.rows[0]?.email ?? 'unknown@local',
-          from_name: providerConfig?.from_name ?? actorUser.rows[0]?.name ?? undefined,
-          to_emails: [input.to_address],
-          subject: input.subject,
-          body_html: input.body_html,
-          body_text: bodyText,
-          classification: 'customer',
-          processing_status: status === 'sent' ? 'processed' : 'unprocessed',
-          processing_reason: status === 'pending_approval' ? 'Waiting for governed send approval.' : 'Outbound draft recorded.',
-          contact_id: input.contact_id,
-          account_id: input.account_id,
-          opportunity_id: input.opportunity_id,
-          use_case_id: input.use_case_id,
-          email_id: email.id,
-          user_id: actorUser.rows[0]?.email ? actor.actor_id : undefined,
-          metadata: { governed_email_status: status },
-        });
-
-        const event_id = await emitEvent(db, {
-          tenantId: actor.tenant_id,
-          eventType: 'email.created',
-          actorId: actor.actor_id,
-          actorType: actor.actor_type,
-          objectType: 'email',
-          objectId: email.id,
-          afterData: { id: email.id, to: email.to_email, subject: email.subject, status: email.status },
-        });
-
-        // When no approval required, send immediately
-        if (input.require_approval === false) {
-          await deliverEmail(db, actor.tenant_id, email.id);
-          const sent = await emailRepo.getEmail(db, actor.tenant_id, email.id);
-          return {
-            email: sent ?? email,
-            event_id,
-            mutation: mutationReceipt(actor, {
-              objectType: 'email',
-              objectId: email.id,
-              eventId: event_id,
-              sideEffects: ['email_delivery:attempted'],
-            }),
-          };
-        }
-
-        return {
-          email,
-          hitl_request_id: hitlRequestId,
-          event_id,
-          mutation: mutationReceipt(actor, {
-            objectType: 'email',
-            objectId: email.id,
-            eventId: event_id,
-            sideEffects: hitlRequestId ? ['hitl_request:created'] : [],
-          }),
-        };
         });
       },
     },
@@ -212,18 +152,25 @@ export function emailTools(db: DbPool): ToolDef[] {
       handler: async (input: z.infer<typeof emailGet>, actor: ActorContext) => {
         const email = await emailRepo.getEmail(db, actor.tenant_id, input.id);
         if (!email) throw notFound('Email', input.id);
+        await assertOutboundEmailAccess(db, actor, email);
         return { email };
       },
     },
     {
       name: 'email_search',
       tier: 'extended',
-      description: 'Search emails with optional filters for contact_id and status. Use this to find all emails sent to a specific contact or to list all drafts pending approval. Returns emails sorted by creation time.',
+      description: 'Search outbound email actions with optional filters for contact_id, account_id, opportunity_id, use_case_id, q, and status. Use this to find linked drafts, rejected drafts, pending approvals, sent emails, or failed sends. Returns emails sorted by creation time.',
       inputSchema: emailSearch,
       handler: async (input: z.infer<typeof emailSearch>, actor: ActorContext) => {
+        const ownerFilter = await resolveOwnerFilter(db, actor);
         const result = await emailRepo.searchEmails(db, actor.tenant_id, {
           contact_id: input.contact_id,
+          account_id: input.account_id,
+          opportunity_id: input.opportunity_id,
+          use_case_id: input.use_case_id,
+          q: input.q,
           status: input.status,
+          owner_ids: ownerFilter.owner_ids,
           limit: input.limit ?? 20,
           cursor: input.cursor,
         });
@@ -233,7 +180,7 @@ export function emailTools(db: DbPool): ToolDef[] {
     {
       name: 'mailbox_connection_list',
       tier: 'extended',
-      description: 'List mailbox connections and customer-email processing summary visible to the current user. Use this to check whether Customer Email is connected and healthy.',
+	      description: 'List mailbox connections and customer-email processing summary visible to the current user. Mailbox connections are both customer context sources and optional actor sender identities when send permissions are enabled.',
       inputSchema: z.object({}),
       handler: async (_input: {}, actor: ActorContext) => {
         const userId = isGlobalActor(actor) ? undefined : await getActorUserId(db, actor);
@@ -241,6 +188,99 @@ export function emailTools(db: DbPool): ToolDef[] {
         const data = await emailMessageRepo.listMailboxConnections(db, actor.tenant_id, userId);
         const summary = await emailMessageRepo.summarizeEmailMessages(db, actor.tenant_id, ownerFilter.owner_ids);
         return { mailbox_connections: data, total: data.length, summary };
+      },
+    },
+    {
+      name: 'mailbox_connection_start',
+      tier: 'extended',
+      description: 'Start Gmail or Outlook mailbox OAuth for the current human-linked actor and return the browser auth_url to finish provider consent. Use this from MCP/CLI when the user does not want to open the CRMy web UI. Pure agent actors without a linked human user cannot connect a mailbox.',
+      inputSchema: z.object({
+        provider: z.enum(['google', 'microsoft']).describe('Mailbox provider to connect. google = Gmail/Google Workspace, microsoft = Outlook/Microsoft 365.'),
+        email_address: z.string().email().optional().describe('Mailbox address. Defaults to the current user email when omitted.'),
+        display_name: z.string().optional(),
+        context_sync_enabled: z.boolean().optional().default(true),
+        send_enabled: z.boolean().optional().default(true),
+        provider_draft_enabled: z.boolean().optional().default(true),
+        is_default_sender: z.boolean().optional().default(true),
+        account_ingest_scope: z.enum(['owned_accounts', 'accessible_accounts']).optional().default('owned_accounts'),
+        idempotency_key: z.string().max(128).optional(),
+      }),
+      handler: async (input, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'mailbox_connection_start', input, async () => {
+          const userId = await getActorUserId(db, actor);
+          if (!userId) {
+            throw new Error('A human-linked user is required to connect a mailbox. Use a user API key/session, or ask the human mailbox owner to connect it.');
+          }
+          const user = await db.query('SELECT email, name FROM users WHERE tenant_id = $1 AND id = $2 LIMIT 1', [actor.tenant_id, userId]);
+          const email = String(input.email_address ?? user.rows[0]?.email ?? '').trim().toLowerCase();
+          if (!email || !email.includes('@')) throw new Error('A valid mailbox email address is required.');
+          const contextSyncEnabled = input.context_sync_enabled !== false;
+          const sendEnabled = input.send_enabled !== false;
+          const providerDraftEnabled = input.provider_draft_enabled !== false;
+          const isDefaultSender = input.is_default_sender !== false && sendEnabled;
+          const accountIngestScope = input.account_ingest_scope === 'accessible_accounts' ? 'accessible_accounts' : 'owned_accounts';
+          const setupCheck = await oauthReadiness(db, actor.tenant_id, 'mailbox', input.provider);
+          let connection = await emailMessageRepo.createPlaceholderConnection(db, actor.tenant_id, {
+            user_id: userId,
+            provider: input.provider,
+            email_address: email,
+            display_name: String(input.display_name ?? user.rows[0]?.name ?? ''),
+            status: 'configuration_required',
+            last_error: null,
+            context_sync_enabled: contextSyncEnabled,
+            send_enabled: sendEnabled,
+            provider_draft_enabled: providerDraftEnabled,
+            send_status: sendEnabled ? 'not_authorized' : 'disabled',
+            is_default_sender: isDefaultSender,
+            settings: {
+              setup_required: true,
+              account_ingest_scope: accountIngestScope,
+              setup_started_from: 'mcp',
+              next_step: 'Open the returned auth_url in a browser to finish mailbox OAuth.',
+            },
+          });
+          const authUrl = setupCheck.can_start_oauth
+            ? await buildOAuthUrl(db, 'mailbox', input.provider, {
+                kind: 'mailbox',
+                provider: input.provider,
+                tenant_id: actor.tenant_id,
+                user_id: userId,
+                email_address: email,
+                display_name: String(input.display_name ?? user.rows[0]?.name ?? ''),
+                context_sync_enabled: contextSyncEnabled,
+                account_ingest_scope: accountIngestScope,
+                send_enabled: sendEnabled,
+                provider_draft_enabled: providerDraftEnabled,
+                is_default_sender: isDefaultSender,
+              })
+            : null;
+          if (!authUrl) {
+            connection = await emailMessageRepo.updateMailboxConnection(db, actor.tenant_id, connection.id, {
+              last_error: setupCheck.setup_blockers[0] ?? 'Mailbox OAuth setup is not ready yet.',
+              settings: {
+                setup_required: true,
+                oauth_configured: false,
+                oauth_ready: false,
+                oauth_setup_status: setupCheck.setup_status,
+                oauth_setup_blockers: setupCheck.setup_blockers,
+                oauth_app_source: setupCheck.app_source,
+                oauth_redirect_uri: setupCheck.redirect_uri,
+                account_ingest_scope: accountIngestScope,
+              },
+            }) ?? connection;
+          }
+          return {
+            connection,
+            auth_url: authUrl,
+            oauth_ready: Boolean(authUrl),
+            setup_check: setupCheck,
+            status: authUrl ? 'oauth_required' : 'configuration_required',
+            message: authUrl
+              ? 'Open auth_url in a browser, finish provider consent, then return here and list mailbox connections to confirm status=connected.'
+              : setupCheck.user_action,
+            mutation: mutationReceipt(actor, { objectType: 'mailbox_connection', objectId: connection.id }),
+          };
+        });
       },
     },
     {
@@ -391,7 +431,7 @@ export function emailTools(db: DbPool): ToolDef[] {
     {
       name: 'email_draft_preview',
       tier: 'extended',
-      description: 'Generate a customer email draft preview from CRMy Memory, relevant Signals, source email context, and linked revenue records. This does not save or send email; use email_draft_save after review.',
+      description: 'Generate a customer email draft preview from CRMy Memory, relevant Signals, source email context, linked revenue records, and the selected sender identity. This does not save or send email; use email_draft_save after review.',
       inputSchema: emailDraftPreviewSchema,
       handler: async (input: EmailDraftPreviewInput, actor: ActorContext) => {
         return runToolOperation(db, actor, 'email_draft_preview', input, async () => (
@@ -402,7 +442,7 @@ export function emailTools(db: DbPool): ToolDef[] {
     {
       name: 'email_draft_save',
       tier: 'extended',
-      description: 'Save a reviewed customer email draft, request approval, or explicitly send now through CRMy governed email flow. Agent-generated drafts should normally be saved or sent for approval first.',
+      description: 'Save a reviewed customer email draft, request approval, create a provider draft, or explicitly send now through CRMy governed email flow. Sends use the actor mailbox when send-enabled, otherwise the tenant fallback provider; no sender means save-draft only. After provider delivery, CRMy records the sent email as account activity and CRMy-authored context.',
       inputSchema: emailDraftSaveSchema,
       handler: async (input: EmailDraftSaveInput, actor: ActorContext) => {
         return runToolOperation(db, actor, 'email_draft_save', input, async () => (
@@ -417,7 +457,7 @@ export function emailTools(db: DbPool): ToolDef[] {
       name: 'email_provider_set',
       tier: 'extended',
       description:
-        'Configure the tenant\'s email provider for outbound email delivery. ' +
+        'Configure the tenant fallback/shared provider for outbound email delivery when an actor mailbox sender is unavailable, and for sequence or system-generated emails. ' +
         'Required: provider type, config object, from_name, from_email. ' +
         'SMTP config requires: host, port, auth.user, auth.pass (optional: secure). ' +
         'Resend config requires: api_key. ' +
@@ -561,7 +601,7 @@ export function emailTools(db: DbPool): ToolDef[] {
       name: 'email_provider_get',
       tier: 'extended',
       description:
-        'Get the current email provider configuration for this tenant. ' +
+	        'Get the tenant fallback/shared sending provider configuration. ' +
         'Returns provider type, from_name, from_email, and config. ' +
         'Returns { configured: false } if no provider is set up.',
       inputSchema: emailProviderGet,

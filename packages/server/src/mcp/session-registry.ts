@@ -2,17 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * In-memory MCP session registry.
+ * MCP session registry.
  *
- * Maintains live McpServer+transport pairs keyed by MCP session ID so that
- * subsequent HTTP requests from the same client reuse the same session and
- * so that the server can push resource-updated notifications.
+ * Maintains live McpServer+transport pairs keyed by MCP session ID for the
+ * current process. The durable mcp_sessions catalog records ownership,
+ * identity, expiry, and recovery state across processes; live transports and
+ * sockets intentionally remain process-local.
  */
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { ActorContext } from '@crmy/shared';
+import type { DbPool } from '../db/pool.js';
 import { eventBus } from '../events/bus.js';
+import { expireMcpSessionRecord } from '../db/repos/mcp-sessions.js';
 
 // Subset of object types that map 1-1 to MCP resource URIs
 const RESOURCE_OBJECT_TYPES = new Set(['contact', 'account', 'opportunity', 'use_case', 'context_entry']);
@@ -65,11 +68,14 @@ export function touchMcpSession(sessionId: string): void {
 }
 
 /** Remove sessions that have been idle longer than SESSION_TTL_MS. */
-export function evictStaleMcpSessions(): void {
+export async function evictStaleMcpSessions(db?: DbPool): Promise<void> {
   const cutoff = Date.now() - SESSION_TTL_MS;
   for (const [sid, session] of mcpSessions) {
     if (session.lastUsedAt < cutoff) {
       mcpSessions.delete(sid);
+      if (db) {
+        await expireMcpSessionRecord(db, sid, 'idle_timeout').catch(() => {});
+      }
       // Best-effort close; ignore errors if already closed
       session.transport.close?.().catch(() => {});
     }
@@ -96,6 +102,42 @@ function notifyResourceUpdated(tenantId: string, objectType: string, objectId?: 
       }
     }
   }
+}
+
+export async function startMcpResourceNotificationListener(db: DbPool): Promise<() => Promise<void>> {
+  const client = await db.connect();
+  let stopped = false;
+  const onNotification = (message: { channel: string; payload?: string }) => {
+    if (stopped || message.channel !== 'crmy_mcp_resource_events' || !message.payload) return;
+    try {
+      const payload = JSON.parse(message.payload) as {
+        tenantId?: string;
+        objectType?: string;
+        objectId?: string;
+      };
+      if (payload.tenantId && payload.objectType) {
+        notifyResourceUpdated(payload.tenantId, payload.objectType, payload.objectId);
+      }
+    } catch {
+      // Ignore malformed cross-instance notifications. The events table remains
+      // the durable source of truth and clients can recover by refetching.
+    }
+  };
+  const onError = (err: Error) => {
+    if (!stopped) console.warn('[mcp] resource notification listener error:', err.message);
+  };
+
+  client.on('notification', onNotification);
+  client.on('error', onError);
+  await client.query('LISTEN crmy_mcp_resource_events');
+
+  return async () => {
+    stopped = true;
+    client.off('notification', onNotification);
+    client.off('error', onError);
+    await client.query('UNLISTEN crmy_mcp_resource_events').catch(() => {});
+    client.release();
+  };
 }
 
 // Subscribe to the in-process event bus once on module load

@@ -44,6 +44,11 @@ export async function getActorUserId(db: DbPool, actor: ActorContext): Promise<U
   return (linked.rows[0]?.user_id as UUID | undefined) ?? null;
 }
 
+export async function getDirectOwnerIds(db: DbPool, actor: ActorContext): Promise<UUID[]> {
+  const userId = await getActorUserId(db, actor);
+  return userId ? [userId] : [];
+}
+
 export async function getVisibleOwnerIds(db: DbPool, actor: ActorContext): Promise<UUID[] | null> {
   if (isGlobalActor(actor)) return null;
 

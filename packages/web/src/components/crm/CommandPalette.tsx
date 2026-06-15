@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users, Briefcase, LayoutDashboard, FolderKanban, Activity, Settings, Search,
   Building2, ClipboardList, Zap, ListOrdered, Plus, Database, Bot, Mail,
-  ScrollText, ShieldCheck, Network, KeyRound, Tags, MessageSquare, Palette,
+  ScrollText, ShieldCheck, Network, KeyRound, Tags, Palette,
   Webhook, Sparkles, Loader2, FileText, Server, type LucideIcon,
 } from 'lucide-react';
 import { useAppStore } from '@/store/appStore';
@@ -73,7 +73,7 @@ const DESTINATIONS: DestinationCommand[] = [
   { label: 'Webhooks',        icon: Webhook,         path: '/settings/webhooks',        color: null, keywords: 'webhooks integrations outbound events advanced', roles: ['admin', 'owner'] },
   { label: 'Custom Fields',   icon: Tags,            path: '/settings/custom-fields',   color: null, keywords: 'custom fields record fields schema typed memory fields', roles: ['admin', 'owner'] },
   { label: 'Registries',      icon: Tags,            path: '/settings/registries',      color: null, keywords: 'registries activity types context types taxonomy', roles: ['admin', 'owner'] },
-  { label: 'Messaging',       icon: MessageSquare,   path: '/settings/messaging',       color: null, keywords: 'messaging email provider smtp resend sendgrid', roles: ['admin', 'owner'] },
+  { label: 'System Connections', icon: Server,        path: '/settings/connections',     color: null, keywords: 'system connections messaging email provider smtp resend sendgrid oauth calendar mailbox', roles: ['admin', 'owner'] },
   { label: 'Action Policies', icon: ShieldCheck,     path: '/settings/hitl-rules',      color: ENTITY_COLORS.assignments, keywords: 'hitl rules approval handoff policy action policies', roles: ['admin', 'owner'] },
 ];
 

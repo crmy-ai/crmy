@@ -90,6 +90,7 @@ interface DirectoryContact {
   company_name?: string | null;
   account_id?: string | null;
   account_domain?: string | null;
+  account_domains?: string[];
   aliases?: string[];
   account_aliases?: string[];
 }
@@ -98,6 +99,7 @@ interface DirectoryAccount {
   id: string;
   name: string;
   domain?: string | null;
+  additional_domains?: string[];
   industry?: string | null;
   aliases?: string[];
 }
@@ -217,7 +219,7 @@ async function loadSubjectResolutionDirectory(
 ): Promise<SubjectResolutionDirectory> {
   const perType = Math.min(Math.max(limit, 25), 120);
   const contactOwnerFilter = ownerIds ? 'AND c.owner_id = ANY($3::uuid[])' : '';
-  const accountOwnerFilter = ownerIds ? 'AND owner_id = ANY($3::uuid[])' : '';
+  const accountOwnerFilter = ownerIds ? 'AND a.owner_id = ANY($3::uuid[])' : '';
   const opportunityOwnerFilter = ownerIds ? 'AND o.owner_id = ANY($3::uuid[])' : '';
   const useCaseOwnerFilter = ownerIds ? 'AND uc.owner_id = ANY($3::uuid[])' : '';
   const params = ownerIds ? [tenantId, perType, ownerIds] : [tenantId, perType];
@@ -225,7 +227,13 @@ async function loadSubjectResolutionDirectory(
     db.query(
       `SELECT c.id, c.first_name || ' ' || c.last_name AS name, c.first_name, c.last_name,
               c.email, c.title, COALESCE(a.name, c.company_name) AS company_name,
-              c.account_id, a.domain AS account_domain, c.aliases, a.aliases AS account_aliases
+              c.account_id, a.domain AS account_domain,
+              COALESCE((
+                SELECT array_agg(ad.domain ORDER BY ad.domain)
+                FROM account_domains ad
+                WHERE ad.tenant_id = a.tenant_id AND ad.account_id = a.id AND ad.is_primary = FALSE
+              ), '{}') AS account_domains,
+              c.aliases, a.aliases AS account_aliases
        FROM contacts c
        LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
 	       WHERE c.tenant_id = $1
@@ -237,11 +245,16 @@ async function loadSubjectResolutionDirectory(
       params,
     ),
     db.query(
-      `SELECT id, name, domain, industry, aliases
-       FROM accounts
-	       WHERE tenant_id = $1
-	         AND merged_into IS NULL
-	         AND archived_at IS NULL
+      `SELECT a.id, a.name, a.domain, a.industry, a.aliases,
+              COALESCE((
+                SELECT array_agg(ad.domain ORDER BY ad.domain)
+                FROM account_domains ad
+                WHERE ad.tenant_id = a.tenant_id AND ad.account_id = a.id AND ad.is_primary = FALSE
+              ), '{}') AS additional_domains
+       FROM accounts a
+	       WHERE a.tenant_id = $1
+	         AND a.merged_into IS NULL
+	         AND a.archived_at IS NULL
 	         ${accountOwnerFilter}
        ORDER BY updated_at DESC
       LIMIT $2`,
@@ -286,6 +299,7 @@ async function loadSubjectResolutionDirectory(
       company_name: row.company_name,
       account_id: row.account_id,
       account_domain: row.account_domain,
+      account_domains: row.account_domains ?? [],
       aliases: row.aliases ?? [],
       account_aliases: row.account_aliases ?? [],
     })),
@@ -293,6 +307,7 @@ async function loadSubjectResolutionDirectory(
       id: row.id,
       name: row.name,
       domain: row.domain,
+      additional_domains: row.additional_domains ?? [],
       industry: row.industry,
       aliases: row.aliases ?? [],
     })),
@@ -446,7 +461,7 @@ function deterministicSubjectMatches(
   };
 
   for (const account of directory.accounts) {
-    const variants = matchVariants(account.name, account.domain, ...(account.aliases ?? []));
+    const variants = matchVariants(account.name, account.domain, ...(account.additional_domains ?? []), ...(account.aliases ?? []));
     if (variants.some(variant => containsPhrase(normalizedText, variant))) {
       candidates.add(account.name);
       mentionedAccountIds.add(account.id);
@@ -476,7 +491,7 @@ function deterministicSubjectMatches(
     const firstName = normalizeForMatch(contact.first_name ?? contact.name.split(/\s+/)[0] ?? '');
     const email = normalizeForMatch(contact.email ?? '');
     const aliasMatch = (contact.aliases ?? []).some(alias => containsPhrase(normalizedText, normalizeForMatch(alias)));
-    const companyVariants = matchVariants(contact.company_name, contact.account_domain, ...(contact.account_aliases ?? []));
+    const companyVariants = matchVariants(contact.company_name, contact.account_domain, ...(contact.account_domains ?? []), ...(contact.account_aliases ?? []));
     const fullNameMatch = containsPhrase(normalizedText, fullName) || aliasMatch;
     const emailMatch = email.includes('@') && normalizedText.includes(email);
     const fullMatch = fullNameMatch || emailMatch;
@@ -879,7 +894,7 @@ function findScopedAccount(
   const candidateVariants = matchVariants(accountName);
   const fromCandidate = accountName
     ? directory.accounts.find(account =>
-      matchVariants(account.name, account.domain, ...(account.aliases ?? [])).some(variant => candidateVariants.includes(variant)))
+      matchVariants(account.name, account.domain, ...(account.additional_domains ?? []), ...(account.aliases ?? [])).some(variant => candidateVariants.includes(variant)))
     : undefined;
   if (fromCandidate) return fromCandidate;
   if (accountSubjects.length === 1) {

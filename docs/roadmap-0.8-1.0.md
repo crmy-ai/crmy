@@ -309,10 +309,11 @@ Remaining before calling 0.9 launch-ready:
 
 - Run a clean first-run proof from an empty database: `init -> seed demo -> agent-smoke -> briefing/action-context proof -> lineage`.
 - Certify first-party SOR connectors and provider-specific mailbox/calendar OAuth behavior against live or sandbox HubSpot, Salesforce, Google, Microsoft, Databricks, and Snowflake environments.
-- Update release/runbook docs with the supported 0.9 deployment envelope: local and single-instance self-hosted are acceptable; hosted beta requires sticky MCP routing and one worker leader; multi-instance hosted production remains a 1.0 target.
+- Update release/runbook docs with the supported hosted envelope: local and single-instance self-hosted remain simple; hosted/multi-instance app tiers require stable `CRMY_INSTANCE_ID`, `CRMY_MCP_SESSION_MODE=sticky`, and routing by `mcp-session-id`; the remaining 1.0 work is the split worker runbook and optional internal MCP forwarding decision.
 - Keep expanding real-world extraction/resolution fixtures as users contribute messy transcripts, customer emails, calendar artifacts, and source-system edge cases.
 - Run broader synthetic large-tenant soak tests. Current gates verify correctness, drift, security boundaries, and durability; 1.0 still owns high-volume latency budgets on serverless Postgres.
 - Harden browser session handling before hosted enterprise GA. The current bearer-token flow is fine for local/self-hosted 0.9, but hosted browser sessions should move toward short-lived/session-managed auth with revocation and CSRF-safe mutation behavior.
+- Certify the hosted SaaS OAuth model for System Connections against production Google/Microsoft app registrations. The application now supports CRMy-managed Google/Microsoft OAuth apps by default, tenant-owned OAuth app overrides for enterprise tenants, and environment-managed credentials for local/self-hosted installs; 1.0 still needs live-provider verification, consent-screen review, and hosted operational runbooks.
 
 ### 0.8.6 Release Checkpoint
 
@@ -684,7 +685,7 @@ Assumed production shape:
 - **Search becomes uneven.** Global search, Context Browser, Signals, Memory, Graph, and Lineage need consistent server-side filtering, stable cursors, and search indexes instead of loading recent records and filtering locally.
 - **Raw Context processing becomes request-bound.** LLM extraction, JSON repair, subject resolution, and signal grouping must survive timeouts, cold starts, provider failures, and retries without duplicate Signals or stuck sources.
 - **Source sync becomes too chunky.** Mailbox, calendar, CRM, and warehouse sync need page-level checkpoints and backoff. A provider page failure should not replay or lose an entire sync run.
-- **Agent and MCP sessions become fragile.** In-memory session registries and long SSE streams do not survive multi-instance routing, serverless freezes, or deploys without durable session identity, explicit routing/expiry behavior, and resumable persisted events.
+- **Agent and MCP sessions become fragile without the hosted runtime envelope.** Live MCP transports and long SSE streams are still process-local. The durable MCP session catalog now records identity, scope, ownership, TTL, and expiry, but hosted deployments still need sticky routing, clear reinitialization behavior, and resumable persisted events around those live transports.
 - **Lineage and audit become heavy.** Source-to-action proof trails and audit logs grow quickly and need indexed edges, retention/export, and precomputed summaries.
 - **Scoped access checks get expensive.** Visibility filters that rely on per-row joins or `EXISTS` checks will degrade unless ownership/scope metadata is materialized on high-volume context tables.
 
@@ -695,7 +696,7 @@ Current code signals behind these findings:
 - `packages/server/src/db/repos/context-outbox.ts` should gain the same stale-lock and retry scheduling guarantees as newer durable queues.
 - `packages/server/src/db/repos/search.ts` and high-volume list repos should converge on indexed, scoped, server-side search rather than broad unions or client-filtered recent batches.
 - `packages/server/src/services/customer-email.ts` and `packages/server/src/services/customer-activity.ts` need page-level sync checkpoints and pre-storage filtering before large mailbox/calendar deployments.
-- The MCP session registry in `packages/server/src/mcp/session-registry.ts` is in-memory today; production multi-instance deployments need the durable catalog, sticky/forward/expire behavior, and recovery gates described in the [Multi-Instance Runtime Plan](multi-instance-runtime-plan.md).
+- `packages/server/src/mcp/session-registry.ts` keeps live MCP transports in memory by design, while `packages/server/migrations/079_mcp_session_catalog.sql` and `packages/server/src/db/repos/mcp-sessions.ts` provide durable ownership, scope validation, TTL, and stale-instance expiry. Production hosted deployments still need the sticky-routing runbook, split worker deployment, and release gates described in the [Multi-Instance Runtime Plan](multi-instance-runtime-plan.md).
 
 ### 1. Serverless Postgres Runtime
 
@@ -801,7 +802,7 @@ Key changes:
 - Keep durable agent turns as the source of truth for messages, events, tool calls, reasoning summaries, changed-record summaries, and final outputs. **Landed foundation:** persisted turn rows, ordered events, worker leases, heartbeats, expired-lease recovery, active-turn blocking, stable operation keys for idempotency-aware tools, replay of prior successful tool results, and final action-summary hints.
 - Add polling fallback for every streamed turn so clients can recover when SSE is interrupted. **Landed foundation:** the app can reload session state and active-turn metadata while streamed events remain persisted.
 - Move MCP session identity, actor/scope validation, ownership, TTL, and expiry out of process memory. Live SDK transports may remain process-local, but hosted production must use durable session catalog state plus sticky routing, internal forwarding, or explicit session-expired/reinitialize behavior.
-- Deliver MCP resource notifications across instances through a shared notification path, or make notification loss explicitly recoverable by durable resource reads and clear reconnect behavior.
+- Keep MCP resource notifications recoverable across instances. **Landed foundation:** CRMy domain events now publish best-effort PostgreSQL notifications for live MCP sessions; clients still need durable resource reads and clear reconnect behavior as the correctness fallback.
 - Add persisted tool-call idempotency keys for write tools so retries cannot duplicate creates, updates, sends, handoffs, or writebacks. **Landed foundation:** Workspace Agent injects deterministic keys for tools whose schemas expose `idempotency_key`, and tests now fail when side-effecting MCP tool names omit idempotency support without an explicit read-only exception.
 - Budget every tool call: default limits, explicit filters, timeouts, and clear “too broad” responses.
 - Add MCP doctor and agent smoke tests that prove `customer_record_resolve -> briefing_get -> signal list -> handoff/action` against demo data in under one minute.
@@ -899,6 +900,7 @@ Acceptance target: 1.0 ships with measurable scale budgets, release gates, and r
 - Hosted multi-instance deployments satisfy the [Multi-Instance Runtime Plan](multi-instance-runtime-plan.md): separate app/worker/migration roles, durable queue leases, durable MCP session catalog, explicit session routing or expiry behavior, and cross-instance recovery tests.
 - Lineage, audit, retrieval, and writeback proof trails remain queryable through indexed edges, retention/export, and precomputed summaries.
 - CRMy can be deployed self-hosted by an enterprise team, connected to CRM and warehouse systems, governed by scoped actors/policies, and used by agents for read/write revenue workflows with audit-safe execution.
+- Hosted System Connections default to CRMy-managed Google/Microsoft OAuth apps so ordinary SaaS tenants can connect mailbox and calendar without deployment-level secrets; enterprise tenants can bring tenant-owned OAuth apps when they need custom consent, security review, publisher identity, or domain app restrictions.
 - Hosted browser deployments use session storage patterns appropriate for production SaaS, not long-lived bearer tokens in `localStorage`, while local/dev/self-hosted setup remains fast and understandable.
 - Developers can build against stable SDKs and MCP tools without reverse-engineering app behavior.
 - Admins can prove what happened, why it happened, who approved it, which systems changed, and what context the agent used.

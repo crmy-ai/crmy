@@ -67,6 +67,7 @@ CRMy gives that answer through agent tools, CLI, REST, and UI surfaces on top of
 > ```bash
 > npx -y @crmy/cli agent-smoke
 > npx -y @crmy/cli briefing "account:Northstar Labs"
+> npx -y @crmy/cli action-context "account:Northstar Labs" --action customer_outreach
 > npx -y @crmy/cli context signal-groups
 > npx -y @crmy/cli context lineage --subject "account:Northstar Labs"
 > ```
@@ -151,7 +152,7 @@ Agents can prepare work freely. CRMy decides what can proceed, what needs a warn
 | **Handoffs** | Human review for approvals, escalations, uncertain Signals, and governed decisions. |
 | **Writeback** | Policy-checked updates to systems of record through preview, approval, idempotency, audit, and execution receipts. |
 
-Briefings answer “what should the agent know?” Action Context answers “is this action ready, allowed, risky, stale, or review-required?”
+Briefings answer “what should the agent know?” Action Context answers “is this action ready, allowed, risky, stale, or review-required?” When review is required, the human-unblock tool turns that packet into a tracked approval or assignment with proof attached.
 
 ## What CRMy Is Not
 
@@ -219,6 +220,20 @@ Raw Context -> Subject Graph -> Signals -> Memory -> Briefing / Action Context -
 That engine keeps customer context useful without pretending messy source material is instantly true. Handoffs, writeback policy, receipts, audit, and Lineage carry evidence through execution.
 
 The most important community contributions are real-world tests of this loop: messy transcripts, customer emails, calendar meetings, CRM/warehouse sync, custom systems of record, writeback previews, approval flows, and agent harnesses. See [Context Engine](docs/context-engine.md) and [Contributing](CONTRIBUTING.md) for where testing helps most.
+
+## How CRMy Reduces Token Use
+
+CRMy is designed to keep agents from paying to reread the whole customer universe. It turns noisy source material into compact, typed, evidence-backed context, then retrieves the smallest useful packet for the action at hand.
+
+- **Compress raw context into Signals and Memory.** Agents do not need every transcript, thread, note, or sync payload in the prompt. CRMy extracts reviewable Signals and confirmed Memory with source receipts.
+- **Separate truth from inference.** Confirmed Memory, unresolved Signals, stale warnings, and risky claims are returned separately, so agents do not spend tokens re-interpreting trust state.
+- **Retrieve by action, not by database dump.** `briefing_get` and `action_context_get` support `context_radius`, explicit `token_budget`, and budget profiles (`tiny`, `standard`, `deep`, `evidence_heavy`), so callers can request direct, adjacent, or account-wide context sized to the job.
+- **Pack high-value context first.** Token-budgeted briefings rank Memory by confidence, freshness decay, evidence support, context-type priority, and proposed action relevance, then report `truncated` and `dropped_entries` when lower-priority context is omitted.
+- **Use evidence on demand.** Normal packets use `evidence_mode: "summary"` with evidence IDs and short snippets. Agents can switch to `none` for cheap scanning, `full` for proof-heavy work, or fetch Lineage, Raw Context, and individual Memory only when the action requires deeper proof.
+- **Ask what changed.** `context_diff` returns a bounded catch-up view since the last call, email, sync, or agent run, which is cheaper than rebuilding a full briefing every turn.
+- **Keep proof out of the hot path until needed.** Lineage and Raw Context receipts stay available for audit and explanation without being stuffed into every prompt.
+
+The goal is not “more context in the model.” The goal is the smallest sufficient, trustworthy customer context packet for the next action, with clear omissions and a path to fetch more.
 
 ## API, MCP, And CLI Parity
 
@@ -322,6 +337,7 @@ The seeded proof path does not require an LLM provider. Live extraction from you
 ```bash
 npx -y @crmy/cli agent-smoke
 npx -y @crmy/cli briefing "account:Northstar Labs"
+npx -y @crmy/cli action-context "account:Northstar Labs" --action customer_outreach
 npx -y @crmy/cli context signal-groups
 npx -y @crmy/cli context lineage --subject "account:Northstar Labs"
 ```
@@ -331,16 +347,19 @@ Representative demo check output:
 ```text
 Resolved account "Northstar Labs"
 Briefing returned Memory, activity, open assignments, and related Signals
+Action Context returned action guidance and recommended next steps
 Found Signals needing attention
+Lineage returned source-to-context proof
 ```
 
 You should see:
 
 1. **Resolution**: the demo check resolves `Northstar Labs` through the same account-first resolver agents use for ambiguous customer references.
 2. **Briefing**: the briefing tool returns Current Memory, recent activity, open assignments, stale warnings, and reviewable Signals in one agent-ready payload.
-3. **Signals**: `context signal-groups` shows inferred claims that need attention across the customer graph; direct `context signals --subject ...` is narrower and only lists raw Signal entries attached to that exact record.
-4. **Memory**: confirmed context is available to briefings and search across sessions.
-5. **Lineage**: source material can be traced into Signals, Memory, related records, and later review/writeback/audit receipts when those actions happen.
+3. **Action Context**: the action-readiness call separates what is true, stale, inferred, risky, review-required, and safe to use before outreach.
+4. **Signals**: `context signal-groups` shows inferred claims that need attention across the customer graph; direct `context signals --subject ...` is narrower and only lists raw Signal entries attached to that exact record.
+5. **Memory**: confirmed context is available to briefings and search across sessions.
+6. **Lineage**: source material can be traced into Signals, Memory, related records, and later review/writeback/audit receipts when those actions happen.
 
 With a Workspace Agent model configured, you can also check live Raw Context extraction:
 
@@ -460,6 +479,8 @@ https://<your-crmy-host>/mcp
 Authorization: Bearer <CRMy API key>
 ```
 
+For hosted multi-instance deployments, configure sticky routing by the `mcp-session-id` header. CRMy records MCP session ownership durably and returns clear reinitialize/sticky-routing errors if a stateful session reaches the wrong instance.
+
 For harness-specific setup, see the examples for [Claude Code](examples/claude-code-account-briefing/README.md), [Claude Desktop](examples/claude-desktop-account-briefing/README.md), [Codex](examples/codex-account-briefing/README.md), [ChatGPT Developer Mode](examples/chatgpt-developer-mode-account-briefing/README.md), [Hermes Agent](examples/hermes-agent-account-briefing/README.md), and [OpenClaw](examples/openclaw-plugin-account-briefing/README.md).
 
 Demo Prompt - Ask your agent to run this with CRMy MCP tools:
@@ -471,13 +492,13 @@ npx -y @crmy/cli agent-smoke
 Or ask the connected agent:
 
 ```text
-Use the CRMy MCP tools to resolve the customer record "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.
+Use the CRMy MCP tools to resolve the customer record "Northstar Labs", get a briefing, get Action Context for customer outreach, list Signals that need attention, check lineage outcomes, and tell me the safest next action with the evidence you used.
 ```
 
 For Hermes Agent, ask for the prefixed tools:
 
 ```text
-Use mcp_crmy_customer_record_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, then call mcp_crmy_context_signal_group_list for Signals needing attention. Tell me the safest next action with the evidence you used.
+Use mcp_crmy_customer_record_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, call mcp_crmy_action_context_get for customer outreach, call mcp_crmy_context_signal_group_list for Signals needing attention, then call mcp_crmy_context_lineage_get to check outcomes. Tell me the safest next action with the evidence you used.
 ```
 
 Common first tools:
@@ -488,6 +509,7 @@ Common first tools:
 | Resolve customer records | `customer_record_resolve` |
 | Brief an agent before analysis | `briefing_get` |
 | Check whether action is ready | `action_context_get` |
+| Create the needed human unblock | `action_context_request_human_unblock` |
 | Find Memory, Signals, stale context, or search results | `context_find` |
 | Ingest messy customer context | `context_ingest_auto` |
 | Review evidence-backed Signals | `context_signal_group_list` |
@@ -509,10 +531,12 @@ See [MCP tools](docs/mcp-tools.md) for the full tool catalog and scoped-access m
 | **Workspace Agent** | Scoped customer workbench for briefings, tool use, drafting, record work, and customer reasoning. |
 | **Context** | Raw Context, Signals, Memory, Lineage, and Context Sources. Graph remains available as a supporting record explorer. |
 | **Handoffs** | Decision queue for approvals, escalations, delegated work, and governed action review. |
-| **Customer Email** | Supporting Context Source for mailboxes, customer-message review, and governed follow-up drafts. |
-| **Customer Activity** | Supporting Context Source for meetings, calls, notes, transcripts, and calendar context. |
+| **Customer Email** | Mailbox Context for customer-message memory, plus Outbound Actions for governed drafts/sends with visible sender identity. Sent email becomes account context as CRMy-authored activity, not customer-authored truth. |
+| **Customer Activity** | Supporting Context Source for meetings, calls, notes, transcripts, calendar context, and free/busy-backed meeting time suggestions. |
 | **Systems of Record** | Admin setup for CRMs and warehouses, field mappings, sync, conflicts, and governed writeback. |
 | **Settings → Automations** | Admin/advanced event rules and sequences that request governed action instead of bypassing policy. |
+
+Admins verify one primary Gmail/Outlook provider in **Settings -> System Connections -> OAuth** and wait for the first-connection preflight to show ready, then track which actors have mailbox, sender, and calendar coverage from **Settings -> Actors**. Hosted tenants use CRMy-managed OAuth apps by default, enterprise tenants can bring tenant-owned OAuth apps, and self-hosted installs can use environment-managed OAuth credentials. Users connect their own mailbox from **Customer Email -> Mailboxes & Senders** and their calendar from **Customer Activity -> Connections**, choosing whether CRMy ingests only their owned accounts or all accounts they can access; calendar users can also capture all external meetings. Account primary and additional domains drive mailbox/calendar matching. The shared sender remains a fallback/system provider, not the user's personal mailbox.
 
 ## Source Support Levels
 
@@ -594,8 +618,8 @@ crmy seed-demo --reset            # reset and seed demo data
 crmy briefing "account:Northstar Labs"
 crmy context signals
 crmy context signal-groups
+crmy action-context "account:Northstar Labs" --action customer_outreach
 crmy context lineage --subject "account:Northstar Labs"
-crmy action-context "account:Northstar Labs"
 crmy activities meetings
 crmy emails messages
 crmy hitl list
@@ -667,6 +691,7 @@ Design choices:
 | `CRMY_ADMIN_EMAIL` | Optional | Auto-create the first owner account. |
 | `CRMY_ADMIN_PASSWORD` | Optional | Password for the first owner account. |
 | `CRMY_CORS_ORIGINS` | Optional | Comma-separated browser origins allowed to call the API cross-origin. |
+| `CRMY_PUBLIC_URL` | Hosted/proxied OAuth | Public base URL CRMy should use when generating Gmail/Outlook mailbox and calendar OAuth redirect URIs. Recommended when CRMy sits behind a tunnel, reverse proxy, or hosted domain. |
 | `CRMY_TRUST_PROXY` | Optional | Set to `1` when CRMy runs behind one trusted reverse proxy. |
 | `CRMY_SEED_DEMO` | Optional | Seed demo data on startup when set to `true`. |
 | `ENABLE_PGVECTOR` | Optional | Enable pgvector migrations and semantic retrieval support. |
@@ -675,7 +700,26 @@ Design choices:
 | `LLM_TIMEOUT_MS` | Optional | General Workspace Agent and background LLM timeout. Default: `60000`. |
 | `AGENT_STREAM_TIMEOUT_MS` | Optional | Streaming Workspace Agent provider timeout. Default: `60000`. |
 | `CONTEXT_EXTRACTION_LLM_TIMEOUT_MS` | Optional | Raw Context extraction timeout. Default: `90000`. |
+| `DB_CONNECTION_TIMEOUT_MS` | Optional | PostgreSQL connection timeout. Default: `10000`. |
+| `DB_QUERY_TIMEOUT_MS` | Optional | PostgreSQL client query timeout. Default: `30000`. |
+| `DB_STATEMENT_TIMEOUT_MS` | Optional | PostgreSQL server statement timeout. Default follows `DB_QUERY_TIMEOUT_MS`. |
+| `CRMY_ACTOR_RATE_LIMIT_MAX` | Optional | Shared authenticated REST/MCP requests per actor per window. Default: `600`. |
+| `CRMY_ACTOR_RATE_LIMIT_WINDOW_MS` | Optional | Shared authenticated REST/MCP rate-limit window. Default: `60000`. |
+| `CRMY_DEPLOYMENT_MODE` | Optional | `single_instance` for local/self-hosted, `multi_instance` for hosted deployments with sticky MCP routing. |
+| `CRMY_INSTANCE_ID` | Multi-instance | Stable unique app instance id required when `CRMY_DEPLOYMENT_MODE=multi_instance`. |
+| `CRMY_MCP_SESSION_MODE` | Multi-instance | Must be `sticky` for multi-instance MCP; route by `mcp-session-id`. |
+| `CRMY_MCP_SESSION_TTL_SECONDS` | Optional | Durable MCP session TTL. Default: `1800`. |
+| `CRMY_MCP_STALE_INSTANCE_SECONDS` | Optional | Expire sessions owned by instances without heartbeats after this window. Default: `120`. |
+| `CRMY_BROWSER_COOKIE_AUTH` | Optional | Server-side hosted browser auth mode. When `true`, login/register also set an HttpOnly `crmy_session` cookie. |
+| `VITE_CRMY_BROWSER_COOKIE_AUTH` | Optional | Web build flag for hosted browser auth. When `true`, the UI uses same-origin cookies instead of localStorage bearer tokens. |
 | `SOURCE_SYNC_FETCH_TIMEOUT_MS` | Optional | Mailbox/calendar provider HTTP timeout. Default: `30000`. |
+| `CRMY_MANAGED_OAUTH_APPS_ENABLED` | Hosted SaaS | Enables CRMy-managed Google/Microsoft OAuth apps as the default System Connections app source. |
+| `CRMY_MANAGED_GOOGLE_CLIENT_ID` / `CRMY_MANAGED_GOOGLE_CLIENT_SECRET` | Hosted SaaS | CRMy-managed Google OAuth app used for hosted mailbox and calendar consent when no tenant-owned override exists. |
+| `CRMY_MANAGED_MICROSOFT_CLIENT_ID` / `CRMY_MANAGED_MICROSOFT_CLIENT_SECRET` | Hosted SaaS | CRMy-managed Microsoft OAuth app used for hosted mailbox and calendar consent when no tenant-owned override exists. |
+| `GOOGLE_MAIL_CLIENT_ID` / `GOOGLE_MAIL_CLIENT_SECRET` | Self-hosted mailbox OAuth | Google Workspace OAuth app credentials for Gmail Mailbox Context and sender identity. |
+| `MICROSOFT_MAIL_CLIENT_ID` / `MICROSOFT_MAIL_CLIENT_SECRET` | Self-hosted mailbox OAuth | Microsoft Entra OAuth app credentials for Outlook Mailbox Context and sender identity. |
+| `GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET` | Self-hosted calendar OAuth | Google OAuth app credentials for Customer Activity calendar context. |
+| `MICROSOFT_CALENDAR_CLIENT_ID` / `MICROSOFT_CALENDAR_CLIENT_SECRET` | Self-hosted calendar OAuth | Microsoft Entra OAuth app credentials for Customer Activity calendar context. |
 | `CONNECTOR_FETCH_TIMEOUT_MS` | Optional | Systems-of-record connector HTTP timeout. Default: `30000`. |
 | `SLACK_SEND_TIMEOUT_MS` | Optional | Slack webhook delivery timeout. Default: `10000`. |
 
@@ -688,7 +732,7 @@ See [`.env.example`](.env.example) for the full reference.
 ## Develop From Source
 
 ```bash
-git clone https://github.com/codycharris/crmy.git
+git clone https://github.com/crmy-ai/crmy.git
 cd crmy
 npm install
 npm run build

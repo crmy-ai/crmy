@@ -82,7 +82,7 @@ Handoffs, writeback previews, policy checks, idempotency, execution receipts, au
 
 ## Current capabilities
 
-The current 0.8.x engine includes:
+The current engine includes:
 
 - durable Raw Context processing receipts;
 - replayable raw-source payload storage;

@@ -44,6 +44,9 @@ function loginErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 422) return 'Enter a valid email address.';
     if (err.status === 429) return 'Too many login attempts. Please wait a bit and try again.';
+    if (err.status === 409 && err.body.type === 'https://crmy.ai/errors/workspace_required') {
+      return 'This email belongs to more than one workspace. Enter the workspace slug and try again.';
+    }
     return (err.body.detail as string | undefined) ?? 'Authentication failed. Please try again.';
   }
   return err instanceof Error ? err.message : 'Authentication failed. Please try again.';
@@ -59,6 +62,7 @@ export function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [tenantSlug, setTenantSlug] = useState('');
   const [name, setName] = useState('');
   const [tenantName, setTenantName] = useState('');
   const [error, setError] = useState('');
@@ -158,7 +162,7 @@ export function LoginPage() {
     try {
       const result =
         mode === 'login'
-          ? await auth.login(normalizedEmail, password)
+          ? await auth.login(normalizedEmail, password, tenantSlug)
           : await auth.register({ email: normalizedEmail, password, name: name.trim(), tenant_name: tenantName.trim() });
       setToken(result.token);
       setUser(result.user);
@@ -213,6 +217,11 @@ export function LoginPage() {
         : 'Sign-in only'
     : 'Unavailable';
   const showPasswordHelp = mode === 'login' && Boolean(error) && !registrationOpen;
+  const showWorkspaceField = mode === 'login' && (
+    tenantSlug.trim().length > 0 ||
+    error.includes('more than one workspace') ||
+    dbStatus.setup?.public_registration_enabled === true
+  );
   const showDemoAccounts = mode === 'login' && dbStatus.status === 'ok' && dbStatus.setup?.demo_accounts_available === true;
   const workspaceName = dbStatus.tenant?.name?.trim() || 'CRMy Workspace';
   const displayVersion = APP_VERSION !== 'unknown' ? APP_VERSION : dbStatus.version;
@@ -350,6 +359,21 @@ export function LoginPage() {
                 </ul>
               )}
             </div>
+            {showWorkspaceField && (
+              <div>
+                <label className="sr-only">Workspace slug</label>
+                <Input
+                  value={tenantSlug}
+                  onChange={(e) => setTenantSlug(e.target.value)}
+                  onBlur={() => setTenantSlug((value) => value.trim())}
+                  autoComplete="organization"
+                  placeholder="Workspace slug"
+                />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Only needed when the same email belongs to more than one workspace.
+                </p>
+              </div>
+            )}
             {error && (
               <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 <p>{error}</p>

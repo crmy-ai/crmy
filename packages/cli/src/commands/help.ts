@@ -57,6 +57,7 @@ const HELP_TEXT = `
 	    $ crmy agent-smoke              Check the seeded demo agent workflow
 	    $ crmy briefing "contact:Maya Patel"  Get customer context before action
 	    $ crmy action-context "account:Northstar Labs" --action customer_outreach
+	    $ crmy action-context unblock "account:Northstar Labs" --action customer_outreach --type approval
 	    $ crmy context ingest -f call.txt --auto
     $ crmy contacts list            List all contacts
     $ crmy mcp                      Start stdio MCP for local agents
@@ -64,7 +65,9 @@ const HELP_TEXT = `
   Friendly commands cover common workflows. For full tool parity, use
   crmy tools list, crmy tools describe <tool_name>, and crmy tools call
   <tool_name> with JSON input.
-  OAuth connection wizards and provider setup remain UI-first admin flows.
+  Work-app OAuth can start from CLI/MCP. Use crmy emails connect <provider>
+  or crmy activities connect-calendar <provider>, then open the returned
+  provider consent URL in a browser.
 
   Run crmy <command> --help for detailed usage of any command.
 `;

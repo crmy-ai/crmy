@@ -313,7 +313,7 @@ export function contactTools(db: DbPool): ToolDef[] {
     {
       name: 'contact_delete',
       tier: 'admin',
-      description: 'Permanently delete a contact and all associated data. This is a destructive action that requires admin or owner role. Consider archiving or reassigning activities before deletion.',
+      description: 'Archive a contact while preserving evidence, lineage, Handoffs, and writeback anchors. This hides the contact from active workflows and requires admin or owner role.',
       inputSchema: z.object({
         id: z.string().uuid(),
         idempotency_key: z.string().max(128).optional(),

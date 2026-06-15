@@ -49,6 +49,31 @@ export function webhooksCommand(): Command {
       await client.close();
     });
 
+  cmd.command('secret <id>')
+    .description('Reveal the signing secret for a webhook endpoint')
+    .action(async (id) => {
+      const client = await getClient();
+      const webhookId = await resolveWebhookId(client, id);
+      const result = await client.call('webhook_reveal_secret', { id: webhookId });
+      const data = JSON.parse(result);
+      console.log(`\n  Webhook: ${data.id}\n`);
+      console.log(`  Secret: ${data.secret}\n`);
+      await client.close();
+    });
+
+  cmd.command('rotate-secret <id>')
+    .description('Rotate the signing secret for a webhook endpoint')
+    .action(async (id) => {
+      const client = await getClient();
+      const webhookId = await resolveWebhookId(client, id);
+      const result = await client.call('webhook_rotate_secret', { id: webhookId });
+      const data = JSON.parse(result);
+      console.log(`\n  Rotated webhook secret: ${data.webhook?.id ?? webhookId}\n`);
+      console.log('  Update the receiving service now; the old secret no longer verifies new deliveries.\n');
+      console.log(`  Secret: ${data.secret}\n`);
+      await client.close();
+    });
+
   cmd.command('create')
     .action(async () => {
       const { default: inquirer } = await import('inquirer');

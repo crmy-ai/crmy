@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ContextLineage, ContextLineageEdge, ContextLineageNode, UUID } from '@crmy/shared';
+import type { ContextLineage, ContextLineageEdge, ContextLineageNode, ContextLineageOutcome, UUID } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
 
 export interface ContextLineageQuery {
@@ -196,6 +196,86 @@ function actionReceiptTargetIds(event: Record<string, unknown>): string[] {
   if (uuidLike(afterActivityId)) ids.add(`activity:${afterActivityId}`);
 
   return [...ids];
+}
+
+function lowerStatus(value: unknown): string {
+  return String(value ?? '').toLowerCase();
+}
+
+function outcomeImpact(node: ContextLineageNode): ContextLineageOutcome['impact'] {
+  const status = lowerStatus(node.status);
+  if (['failed', 'rejected', 'cancelled', 'expired', 'delivery_uncertain'].includes(status)) return 'failed';
+  if (['pending', 'approval_required', 'approved', 'executing', 'sending', 'queued_for_delivery'].includes(status)) return 'pending';
+  if (['completed', 'sent', 'auto_approved', 'processed', 'resolved', 'success'].includes(status)) return 'completed';
+  if (node.type === 'activity' && node.stage === 'action') return 'completed';
+  if (node.type === 'audit' && node.stage === 'action') return 'completed';
+  return 'informational';
+}
+
+function outcomeKind(node: ContextLineageNode): ContextLineageOutcome['kind'] | null {
+  if (node.type === 'handoff') return 'handoff';
+  if (node.type === 'writeback') return 'writeback';
+  if (node.type === 'activity' && node.stage === 'action') return 'activity';
+  if (node.type === 'audit' && node.stage === 'action') return 'action_receipt';
+  if (node.type === 'audit') return 'audit';
+  return null;
+}
+
+function outcomeFollowUp(node: ContextLineageNode, impact: ContextLineageOutcome['impact']): string | undefined {
+  if (impact === 'pending') {
+    if (node.type === 'handoff') return 'A human decision is still needed before the related action should proceed.';
+    if (node.type === 'writeback') return 'Check approval/execution status before assuming the external system changed.';
+    return 'Check the action status before continuing dependent work.';
+  }
+  if (impact === 'failed') {
+    if (node.type === 'writeback') return 'Inspect the writeback error and retry only after the connector or payload issue is resolved.';
+    if (node.type === 'handoff') return 'Review the rejection or expiry note before revising the action.';
+    return 'Inspect the audit receipt and recover or retry from the Reliability surface if appropriate.';
+  }
+  if (impact === 'completed') {
+    if (node.type === 'writeback') return 'Refresh the customer briefing or external sync before acting on the changed system-of-record state.';
+    if (node.type === 'activity') return 'Use the resulting activity/context as CRMy-authored outcome evidence, not as a new customer statement.';
+  }
+  return undefined;
+}
+
+function buildLineageOutcomes(nodes: ContextLineageNode[]): NonNullable<ContextLineage['outcomes']> {
+  const outcomes = nodes
+    .map((node): ContextLineageOutcome | null => {
+      const kind = outcomeKind(node);
+      if (!kind) return null;
+      const impact = outcomeImpact(node);
+      return {
+        kind,
+        label: node.label,
+        status: String(node.status ?? impact),
+        occurred_at: node.timestamp ?? undefined,
+        object_id: typeof node.object_id === 'string' ? node.object_id : undefined,
+        node_id: node.id,
+        impact,
+        follow_up: outcomeFollowUp(node, impact),
+      };
+    })
+    .filter((item): item is ContextLineageOutcome => Boolean(item))
+    .sort((a, b) => String(b.occurred_at ?? '').localeCompare(String(a.occurred_at ?? '')));
+  const pending = outcomes.filter(outcome => outcome.impact === 'pending');
+  const failed = outcomes.filter(outcome => outcome.impact === 'failed');
+  const completed = outcomes.filter(outcome => outcome.impact === 'completed');
+  const recommended = [
+    pending.length > 0 ? 'Resolve pending Handoffs, approvals, or queued writes before assuming the action is complete.' : undefined,
+    failed.length > 0 ? 'Review failed outcomes in Handoffs, Systems of Record, Email, or Reliability before retrying dependent work.' : undefined,
+    completed.length > 0 ? 'Refresh briefing or Action Context after completed outcomes so the next agent works from updated state.' : undefined,
+    outcomes.length === 0 ? 'No downstream action outcomes were found for this lineage query yet.' : undefined,
+  ].filter((item): item is string => Boolean(item));
+  return {
+    recent: outcomes.slice(0, 12),
+    pending: pending.slice(0, 12),
+    failed: failed.slice(0, 12),
+    completed_count: completed.length,
+    pending_count: pending.length,
+    failed_count: failed.length,
+    recommended_follow_up: recommended,
+  };
 }
 
 export async function getContextLineage(
@@ -933,9 +1013,11 @@ export async function getContextLineage(
   }
 
   const nodeList = [...nodes.values()];
+  const outcomes = buildLineageOutcomes(nodeList);
   return {
     nodes: nodeList,
     edges: [...edges.values()].filter(edge => nodes.has(edge.source) && nodes.has(edge.target)),
+    outcomes,
     summary: {
       records: nodeList.filter(node => node.type === 'record').length,
       raw_context: nodeList.filter(node => node.type === 'raw_context').length,

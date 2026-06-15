@@ -8,7 +8,7 @@ import * as path from 'node:path';
 import crypto from 'node:crypto';
 import type { DbPool } from '../db/pool.js';
 import type { ActorContext, UUID } from '@crmy/shared';
-import { CrmyError, actionContextGet, notFound, validationError, workflowAction } from '@crmy/shared';
+import { CrmyError, actionContextGet, actionContextHumanUnblock, notFound, validationError, workflowAction } from '@crmy/shared';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as accountRepo from '../db/repos/accounts.js';
 import * as oppRepo from '../db/repos/opportunities.js';
@@ -32,7 +32,6 @@ import * as governorLimits from '../db/repos/governor-limits.js';
 import { getSpec } from '../openapi/spec.js';
 import { extractTextFromBuffer } from '../lib/file-extract.js';
 import { resumeEnrollmentAfterHITL } from '../services/sequence-executor.js';
-import { deliverEmail } from '../email/delivery.js';
 import { getSampleDataStatus, seedSampleData } from '../services/sample-data.js';
 import { hashPassword } from '../auth/password.js';
 import { buildSetupUrl, createUserAuthToken, sendAuthLifecycleEmail } from '../services/auth-lifecycle.js';
@@ -43,8 +42,8 @@ import {
   assertHITLAccess,
   assertHITLPayloadAccess,
   assertSubjectAccess,
-  filterVisibleHITLRequests,
   getActorUserId,
+  getVisibleOwnerIds,
   isGlobalActor,
   resolveOwnerFilter,
 } from '../services/access-control.js';
@@ -58,6 +57,12 @@ import {
   buildOAuthUrl,
   completeCalendarOAuth,
   completeMailboxOAuth,
+  deleteTenantOAuthApp,
+  listTenantOAuthApps,
+  oauthCallbackErrorMessage,
+  oauthReadiness,
+  refreshMailboxSendAsAliases,
+  upsertTenantOAuthApp,
 } from '../services/source-sync.js';
 import {
   getSourceFilterSettings,
@@ -234,6 +239,7 @@ function adminToolHandler(db: DbPool, toolName: string) {
         403,
       );
     }
+    enforceToolScopes(toolName, actor);
     return tool.handler(normalizeToolInput(input), actor);
   };
 }
@@ -469,6 +475,30 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.post('/accounts/:id/merge', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = adminToolHandler(db, 'account_merge');
+      const result = await handler({
+        ...req.body,
+        primary_id: p(req, 'id'),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/accounts/:id/split-domains', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = adminToolHandler(db, 'account_split_domains');
+      const result = await handler({
+        ...req.body,
+        source_account_id: p(req, 'id'),
+      }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   // --- Opportunities ---
   router.get('/opportunities', async (req: Request, res: Response) => {
     try {
@@ -696,11 +726,15 @@ export function apiRouter(db: DbPool): Router {
       const status = ['pending', 'approved', 'rejected', 'expired', 'auto_approved', 'all'].includes(statusParam ?? '')
         ? statusParam as 'pending' | 'approved' | 'rejected' | 'expired' | 'auto_approved' | 'all'
         : 'pending';
-      const candidates = await hitlRepo.listHITLRequests(db, actor.tenant_id, {
-        status,
-        limit: Math.min(500, Math.max(limit * 10, limit)),
-      });
-      const requests = await filterVisibleHITLRequests(db, actor, candidates, limit);
+      const boundedLimit = Math.min(Math.max(limit, 1), 100);
+      const requests = isGlobalActor(actor)
+        ? await hitlRepo.listHITLRequests(db, actor.tenant_id, { status, limit: boundedLimit })
+        : await hitlRepo.listVisibleHITLRequests(db, actor.tenant_id, {
+            status,
+            limit: boundedLimit,
+            actorId: actor.actor_id,
+            visibleOwnerIds: await getVisibleOwnerIds(db, actor) ?? [],
+          });
       res.json({ data: requests });
     } catch (err) { handleError(res, err); }
   });
@@ -1008,6 +1042,24 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.post('/webhooks/:id/secret/reveal', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'webhook_reveal_secret');
+      const result = await handler({ id: p(req, 'id') }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/webhooks/:id/secret/rotate', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'webhook_rotate_secret');
+      const result = await handler({ id: p(req, 'id'), idempotency_key: req.body?.idempotency_key }, actor);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   router.patch('/webhooks/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
@@ -1047,6 +1099,10 @@ export function apiRouter(db: DbPool): Router {
       const handler = toolHandler(db, 'email_search');
       const result = await handler({
         contact_id: qs(req.query.contact_id),
+        account_id: qs(req.query.account_id),
+        opportunity_id: qs(req.query.opportunity_id),
+        use_case_id: qs(req.query.use_case_id),
+        q: qs(req.query.q),
         status: qs(req.query.status),
         limit: Math.min(qn(req.query.limit, 20), 100),
         cursor: qs(req.query.cursor),
@@ -1061,6 +1117,14 @@ export function apiRouter(db: DbPool): Router {
       const handler = toolHandler(db, 'email_create');
       const result = await handler(req.body, actor);
       res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/emails/sender', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const { resolveEmailSender, publicSender } = await import('../email/sender-identity.js');
+      res.json({ sender: publicSender(await resolveEmailSender(db, actor)) });
     } catch (err) { handleError(res, err); }
   });
 
@@ -1097,7 +1161,7 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
-  async function assertOutboundEmailAccess(actor: ActorContext, email: emailRepo.EmailRow): Promise<void> {
+	  async function assertOutboundEmailAccess(actor: ActorContext, email: emailRepo.EmailRow): Promise<void> {
     if (isGlobalActor(actor) || actor.role === 'owner' || actor.role === 'admin') return;
     const actorUserId = await getActorUserId(db, actor);
     if (actorUserId && email.created_by === actorUserId) return;
@@ -1116,8 +1180,25 @@ export function apiRouter(db: DbPool): Router {
         // Continue checking other linked records before returning a safe 404.
       }
     }
-    throw notFound('Email', email.id);
-  }
+	    throw notFound('Email', email.id);
+	  }
+
+	  async function assertEmailHasSender(email: emailRepo.EmailRow): Promise<void> {
+	    if (email.sender_type === 'actor_mailbox') {
+	      if (!email.mailbox_connection_id || !email.from_email) throw validationError('This draft does not have a valid mailbox sender. Save a new draft after connecting a mailbox sender.');
+	      const mailbox = await emailMessageRepo.getMailboxConnection(db, email.tenant_id, email.mailbox_connection_id);
+	      if (!mailbox || !mailbox.send_enabled || mailbox.send_status !== 'ready') {
+	        throw validationError('The mailbox sender for this draft is not ready. Reauthorize the mailbox with send permissions or save a new draft.');
+	      }
+	      return;
+	    }
+	    if (email.sender_type === 'tenant_provider') {
+	      const provider = await emailRepo.getProvider(db, email.tenant_id);
+	      if (!provider) throw validationError('No fallback sending provider is configured. Save this as a draft until a sender is available.');
+	      return;
+	    }
+	    throw validationError('No sender is configured for this draft. Save this as a CRMy draft until a mailbox sender or fallback provider is configured.');
+	  }
 
   router.patch('/emails/:id', async (req: Request, res: Response) => {
     try {
@@ -1164,9 +1245,10 @@ export function apiRouter(db: DbPool): Router {
         res.json({ email: current, hitl_request_id: current.hitl_request_id });
         return;
       }
-      if (!['draft', 'failed', 'rejected'].includes(current.status)) {
-        throw validationError('Only draft or failed emails can be sent for approval.');
-      }
+	      if (!['draft', 'failed', 'rejected'].includes(current.status)) {
+	        throw validationError('Only draft, failed, or rejected emails can be sent for approval.');
+	      }
+	      await assertEmailHasSender(current);
       const hitl = await hitlRepo.createHITLRequest(db, actor.tenant_id, {
         agent_id: actor.actor_id,
         action_type: 'email.send',
@@ -1218,17 +1300,92 @@ export function apiRouter(db: DbPool): Router {
       const current = await emailRepo.getEmail(db, actor.tenant_id, id);
       if (!current) throw notFound('Email', id);
       await assertOutboundEmailAccess(actor, current);
-      if (!['draft', 'approved'].includes(current.status)) {
-        throw validationError('Only draft or approved emails can be sent directly.');
-      }
+	      if (!['draft', 'approved'].includes(current.status)) {
+	        throw validationError('Only draft or approved emails can be sent directly.');
+	      }
+	      await assertEmailHasSender(current);
       const storedActionContext = current.generation_metadata?.action_context as Record<string, unknown> | undefined;
       const storedGuidance = storedActionContext?.guidance as Record<string, unknown> | undefined;
       if (storedActionContext?.review_required === true || storedGuidance?.can_execute === false) {
         throw validationError('Action Context requires review before this email can be sent. Send it for approval instead.');
       }
-      await deliverEmail(db, actor.tenant_id, id);
+      await emailRepo.enqueueEmailDeliveryJob(db, actor.tenant_id, id, { reason: 'rest_send' });
       const email = await emailRepo.getEmail(db, actor.tenant_id, id);
-      res.json({ email: email ?? current });
+      res.json({ email: email ?? current, delivery_status: 'queued' });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/emails/:id/provider-draft/retry', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id') as UUID;
+      const current = await emailRepo.getEmail(db, actor.tenant_id, id);
+      if (!current) throw notFound('Email', id);
+      await assertOutboundEmailAccess(actor, current);
+      if (!['draft', 'failed', 'rejected'].includes(current.status)) {
+        throw validationError('Provider drafts can only be retried for editable drafts.');
+      }
+      const { createProviderDraft } = await import('../email/provider-drafts.js');
+      const providerDraft = await createProviderDraft(db, actor.tenant_id, {
+        email_id: current.id,
+        to_email: current.to_email,
+        subject: current.subject,
+        body_text: current.body_text,
+      });
+      const email = await emailRepo.updateProviderDraftStatus(db, actor.tenant_id, current.id, {
+        provider_draft_status: providerDraft.status === 'created' ? 'created' : 'unsupported',
+        provider_draft_id: providerDraft.provider_draft_id,
+        metadata: { provider_draft_retry: { ...providerDraft, retried_at: new Date().toISOString(), actor_id: actor.actor_id } },
+      });
+      res.json({ email: email ?? current, provider_draft: providerDraft });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/emails/:id/delivery-resolution', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id') as UUID;
+      const current = await emailRepo.getEmail(db, actor.tenant_id, id);
+      if (!current) throw notFound('Email', id);
+      await assertOutboundEmailAccess(actor, current);
+      const parsed = z.object({
+        action: z.enum(['retry', 'mark_sent', 'mark_failed']),
+        note: z.string().max(1000).optional(),
+      }).safeParse(req.body ?? {});
+      if (!parsed.success) throw parsed.error;
+      if (!['delivery_uncertain', 'failed'].includes(current.status)) {
+        throw validationError('Only failed or delivery-uncertain emails can be repaired from this action.');
+      }
+      let email: emailRepo.EmailRow | null = current;
+      if (parsed.data.action === 'retry') {
+        await emailRepo.enqueueEmailDeliveryJob(db, actor.tenant_id, current.id, { reason: 'operator_retry' });
+        email = await emailRepo.getEmail(db, actor.tenant_id, current.id);
+      } else if (parsed.data.action === 'mark_sent') {
+        email = await emailRepo.updateEmailStatus(db, actor.tenant_id, current.id, 'sent', {
+          delivery_resolution: {
+            action: 'mark_sent',
+            note: parsed.data.note ?? null,
+            actor_id: actor.actor_id,
+            resolved_at: new Date().toISOString(),
+          },
+        });
+        await emailMessageRepo.markOutboundEmailMessageDelivered(db, actor.tenant_id, current.id, {
+          metadata: {
+            delivery_status: 'operator_marked_sent',
+            resolution_note: parsed.data.note ?? null,
+          },
+        });
+      } else {
+        email = await emailRepo.updateEmailStatus(db, actor.tenant_id, current.id, 'failed', {
+          delivery_resolution: {
+            action: 'mark_failed',
+            note: parsed.data.note ?? null,
+            actor_id: actor.actor_id,
+            resolved_at: new Date().toISOString(),
+          },
+        });
+      }
+      res.json({ email: email ?? current, delivery_resolution: parsed.data.action });
     } catch (err) { handleError(res, err); }
   });
 
@@ -1296,6 +1453,18 @@ export function apiRouter(db: DbPool): Router {
     throw new CrmyError('NOT_FOUND', 'Calendar event not found', 404);
   }
 
+  async function assertCalendarConnectionAccess(actor: ActorContext, id: string): Promise<calendarRepo.CalendarConnection> {
+    const connection = await calendarRepo.getCalendarConnection(db, actor.tenant_id, id);
+    if (!connection) throw new CrmyError('NOT_FOUND', 'Calendar connection not found', 404);
+    if (!isGlobalActor(actor)) {
+      const userId = await getActorUserId(db, actor);
+      if (!userId || connection.user_id !== userId) {
+        throw new CrmyError('NOT_FOUND', 'Calendar connection not found', 404);
+      }
+    }
+    return connection;
+  }
+
   router.get('/calendar/connections', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
@@ -1303,7 +1472,16 @@ export function apiRouter(db: DbPool): Router {
       const data = await calendarRepo.listCalendarConnections(db, actor.tenant_id, userId);
       const ownerFilter = await resolveOwnerFilter(db, actor);
       const summary = await calendarRepo.summarizeCalendarEvents(db, actor.tenant_id, ownerFilter.owner_ids);
-      res.json({ data, total: data.length, summary });
+      const origin = requestOrigin(req);
+      res.json({
+        data,
+        total: data.length,
+        summary,
+        oauth_ready: {
+          google: (await oauthReadiness(db, actor.tenant_id, 'calendar', 'google', origin)).ready,
+          microsoft: (await oauthReadiness(db, actor.tenant_id, 'calendar', 'microsoft', origin)).ready,
+        },
+      });
     } catch (err) { handleError(res, err); }
   });
 
@@ -1326,7 +1504,12 @@ export function apiRouter(db: DbPool): Router {
         res.status(400).json({ error: 'A valid calendar email address is required' });
         return;
       }
-      const connection = await calendarRepo.createPlaceholderCalendarConnection(db, actor.tenant_id, {
+      const meetingIngestScope = req.body?.meeting_ingest_scope === 'accessible_accounts' || req.body?.meeting_ingest_scope === 'all_meetings'
+        ? req.body.meeting_ingest_scope
+        : 'owned_accounts';
+      const origin = requestOrigin(req);
+      const setupCheck = await oauthReadiness(db, actor.tenant_id, 'calendar', provider as 'google' | 'microsoft', origin);
+      let connection = await calendarRepo.createPlaceholderCalendarConnection(db, actor.tenant_id, {
         user_id: userId,
         provider: provider as calendarRepo.CalendarProvider,
         email_address: email,
@@ -1335,30 +1518,45 @@ export function apiRouter(db: DbPool): Router {
         last_error: null,
         settings: {
           setup_required: true,
+          meeting_ingest_scope: meetingIngestScope,
           next_step: 'Complete OAuth to enable customer meeting capture.',
         },
       });
-      const authUrl = buildOAuthUrl('calendar', provider as 'google' | 'microsoft', {
-        kind: 'calendar',
-        provider: provider as 'google' | 'microsoft',
-        tenant_id: actor.tenant_id,
-        user_id: userId,
-        email_address: email,
-        display_name: String(req.body?.display_name ?? user.rows[0]?.name ?? ''),
-      }, requestOrigin(req));
+      const authUrl = setupCheck.can_start_oauth
+        ? await buildOAuthUrl(db, 'calendar', provider as 'google' | 'microsoft', {
+            kind: 'calendar',
+            provider: provider as 'google' | 'microsoft',
+            tenant_id: actor.tenant_id,
+            user_id: userId,
+            email_address: email,
+            display_name: String(req.body?.display_name ?? user.rows[0]?.name ?? ''),
+            meeting_ingest_scope: meetingIngestScope,
+          }, origin)
+        : null;
       if (!authUrl) {
-        await calendarRepo.updateCalendarConnection(db, actor.tenant_id, connection.id, {
-          last_error: `${provider === 'google' ? 'Google Calendar' : 'Microsoft 365 Calendar'} OAuth app credentials are not configured yet.`,
-          settings: { setup_required: true, oauth_configured: false },
-        });
+        connection = await calendarRepo.updateCalendarConnection(db, actor.tenant_id, connection.id, {
+          last_error: setupCheck.setup_blockers[0] ?? `${provider === 'google' ? 'Google Calendar' : 'Microsoft 365 Calendar'} OAuth setup is not ready yet.`,
+          settings: {
+            setup_required: true,
+            oauth_configured: false,
+            oauth_ready: false,
+            oauth_setup_status: setupCheck.setup_status,
+            oauth_setup_blockers: setupCheck.setup_blockers,
+            oauth_app_source: setupCheck.app_source,
+            oauth_redirect_uri: setupCheck.redirect_uri,
+            meeting_ingest_scope: meetingIngestScope,
+          },
+        }) ?? connection;
       }
       res.status(202).json({
         connection,
         auth_url: authUrl,
+        oauth_ready: Boolean(authUrl),
+        setup_check: setupCheck,
         status: authUrl ? 'oauth_required' : 'configuration_required',
         message: authUrl
-          ? 'Calendar connection saved. Continue to OAuth to enable live customer meeting sync.'
-          : 'Calendar connection saved as pending. Configure OAuth credentials to enable live sync.',
+          ? 'Continue to OAuth to connect this calendar for customer meeting context.'
+          : setupCheck.user_action || 'Admin OAuth setup required. This calendar setup request is recorded so an admin can finish provider configuration.',
       });
     } catch (err) { handleError(res, err); }
   });
@@ -1378,24 +1576,69 @@ export function apiRouter(db: DbPool): Router {
       }
       await completeCalendarOAuth(db, provider as 'google' | 'microsoft', code, state, requestOrigin(req));
       res.redirect('/app/activities?tab=connections&connected=calendar');
-    } catch (err) { handleError(res, err); }
+    } catch (err) {
+      const callbackProvider = p(req, 'provider') === 'microsoft' ? 'microsoft' : 'google';
+      const message = oauthCallbackErrorMessage(err, callbackProvider, 'calendar');
+      res.redirect(`/app/activities?tab=connections&calendar_error=${encodeURIComponent(message)}`);
+    }
   });
 
   router.delete('/calendar/connections/:id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
       const id = p(req, 'id');
-      if (!isGlobalActor(actor)) {
-        const userId = await getActorUserId(db, actor);
-        const check = await db.query(
-          'SELECT id FROM calendar_connections WHERE tenant_id = $1 AND id = $2 AND user_id = $3',
-          [actor.tenant_id, id, userId],
-        );
-        if (check.rowCount === 0) throw new CrmyError('NOT_FOUND', 'Calendar connection not found', 404);
-      }
+      await assertCalendarConnectionAccess(actor, id);
       const deleted = await calendarRepo.deleteCalendarConnection(db, actor.tenant_id, id);
       if (!deleted) throw new CrmyError('NOT_FOUND', 'Calendar connection not found', 404);
       res.status(204).end();
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/calendar/connections/:id/status', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id');
+      const parsed = z.object({
+        active: z.boolean(),
+        meeting_ingest_scope: z.enum(['owned_accounts', 'accessible_accounts', 'all_meetings']).optional(),
+      }).safeParse(req.body ?? {});
+      if (!parsed.success) throw parsed.error;
+      const connection = await assertCalendarConnectionAccess(actor, id);
+      if (!parsed.data.active) {
+        const updated = await calendarRepo.updateCalendarConnection(db, actor.tenant_id, id, {
+          status: 'disconnected',
+          last_error: null,
+          settings: {
+            previous_capabilities: {
+              status: connection.status,
+              meeting_ingest_scope: connection.settings?.meeting_ingest_scope ?? 'owned_accounts',
+            },
+            deactivated_at: new Date().toISOString(),
+            deactivated_by: actor.actor_id,
+          },
+        });
+        res.json({
+          connection: updated ?? connection,
+          message: 'Calendar paused. CRMy will not read this calendar until it is activated again.',
+        });
+        return;
+      }
+      if (!connection.access_token_enc && !connection.refresh_token_enc) {
+        throw validationError('Reconnect this calendar with OAuth before activating it.');
+      }
+      const updated = await calendarRepo.updateCalendarConnection(db, actor.tenant_id, id, {
+        status: 'connected',
+        last_error: null,
+        settings: {
+          meeting_ingest_scope: parsed.data.meeting_ingest_scope ?? connection.settings?.meeting_ingest_scope ?? 'owned_accounts',
+          activated_at: new Date().toISOString(),
+          activated_by: actor.actor_id,
+        },
+      });
+      res.json({
+        connection: updated ?? connection,
+        message: 'Calendar activated. CRMy can use it for customer meeting context again.',
+      });
     } catch (err) { handleError(res, err); }
   });
 
@@ -1403,19 +1646,20 @@ export function apiRouter(db: DbPool): Router {
     try {
       const actor = getActor(req);
       const id = p(req, 'id');
-      if (!isGlobalActor(actor)) {
-        const userId = await getActorUserId(db, actor);
-        const check = await db.query(
-          'SELECT id FROM calendar_connections WHERE tenant_id = $1 AND id = $2 AND user_id = $3',
-          [actor.tenant_id, id, userId],
-        );
-        if (check.rowCount === 0) throw new CrmyError('NOT_FOUND', 'Calendar connection not found', 404);
-      }
+      await assertCalendarConnectionAccess(actor, id);
       const job = await calendarRepo.enqueueCalendarSyncJob(db, actor.tenant_id, id, { requested_by: actor.actor_id });
       res.status(202).json({
         job,
         message: 'Calendar sync queued. Live sync requires configured Google Calendar or Microsoft 365 OAuth credentials.',
       });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/availability/suggest-times', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'availability_suggest_times');
+      res.json(await handler(req.body ?? {}, actor));
     } catch (err) { handleError(res, err); }
   });
 
@@ -1585,7 +1829,16 @@ export function apiRouter(db: DbPool): Router {
       const data = await emailMessageRepo.listMailboxConnections(db, actor.tenant_id, userId);
       const ownerFilter = await resolveOwnerFilter(db, actor);
       const summary = await emailMessageRepo.summarizeEmailMessages(db, actor.tenant_id, ownerFilter.owner_ids);
-      res.json({ data, total: data.length, summary });
+      const origin = requestOrigin(req);
+      res.json({
+        data,
+        total: data.length,
+        summary,
+        oauth_ready: {
+          google: (await oauthReadiness(db, actor.tenant_id, 'mailbox', 'google', origin)).ready,
+          microsoft: (await oauthReadiness(db, actor.tenant_id, 'mailbox', 'microsoft', origin)).ready,
+        },
+      });
     } catch (err) { handleError(res, err); }
   });
 
@@ -1604,43 +1857,74 @@ export function apiRouter(db: DbPool): Router {
       }
       const user = await db.query('SELECT email, name FROM users WHERE tenant_id = $1 AND id = $2 LIMIT 1', [actor.tenant_id, userId]);
       const email = String(req.body?.email_address ?? user.rows[0]?.email ?? '').trim().toLowerCase();
-      if (!email || !email.includes('@')) {
-        res.status(400).json({ error: 'A valid mailbox email address is required' });
-        return;
-      }
-      const connection = await emailMessageRepo.createPlaceholderConnection(db, actor.tenant_id, {
-        user_id: userId,
-        provider: provider as emailMessageRepo.MailboxProvider,
-        email_address: email,
-        display_name: String(req.body?.display_name ?? user.rows[0]?.name ?? ''),
-        status: 'configuration_required',
-        last_error: null,
-        settings: {
-          setup_required: true,
-          next_step: 'Complete OAuth to enable customer email capture.',
-        },
-      });
-      const authUrl = buildOAuthUrl('mailbox', provider as 'google' | 'microsoft', {
-        kind: 'mailbox',
-        provider: provider as 'google' | 'microsoft',
-        tenant_id: actor.tenant_id,
-        user_id: userId,
-        email_address: email,
-        display_name: String(req.body?.display_name ?? user.rows[0]?.name ?? ''),
-      }, requestOrigin(req));
+	      if (!email || !email.includes('@')) {
+	        res.status(400).json({ error: 'A valid mailbox email address is required' });
+	        return;
+	      }
+	      const contextSyncEnabled = req.body?.context_sync_enabled !== false;
+	      const sendEnabled = req.body?.send_enabled !== false;
+	      const providerDraftEnabled = req.body?.provider_draft_enabled !== false;
+	      const isDefaultSender = req.body?.is_default_sender !== false && sendEnabled;
+        const accountIngestScope = req.body?.account_ingest_scope === 'accessible_accounts' ? 'accessible_accounts' : 'owned_accounts';
+        const origin = requestOrigin(req);
+        const setupCheck = await oauthReadiness(db, actor.tenant_id, 'mailbox', provider as 'google' | 'microsoft', origin);
+	      let connection = await emailMessageRepo.createPlaceholderConnection(db, actor.tenant_id, {
+	        user_id: userId,
+	        provider: provider as emailMessageRepo.MailboxProvider,
+	        email_address: email,
+	        display_name: String(req.body?.display_name ?? user.rows[0]?.name ?? ''),
+	        status: 'configuration_required',
+	        last_error: null,
+	        context_sync_enabled: contextSyncEnabled,
+	        send_enabled: sendEnabled,
+	        provider_draft_enabled: providerDraftEnabled,
+	        send_status: sendEnabled ? 'not_authorized' : 'disabled',
+	        is_default_sender: isDefaultSender,
+	        settings: {
+	          setup_required: true,
+            account_ingest_scope: accountIngestScope,
+	          next_step: 'Complete OAuth to enable mailbox context and selected sender permissions.',
+	        },
+	      });
+      const authUrl = setupCheck.can_start_oauth
+        ? await buildOAuthUrl(db, 'mailbox', provider as 'google' | 'microsoft', {
+            kind: 'mailbox',
+            provider: provider as 'google' | 'microsoft',
+            tenant_id: actor.tenant_id,
+	        user_id: userId,
+	        email_address: email,
+	        display_name: String(req.body?.display_name ?? user.rows[0]?.name ?? ''),
+	        context_sync_enabled: contextSyncEnabled,
+          account_ingest_scope: accountIngestScope,
+	        send_enabled: sendEnabled,
+	        provider_draft_enabled: providerDraftEnabled,
+	        is_default_sender: isDefaultSender,
+          }, origin)
+        : null;
       if (!authUrl) {
-        await emailMessageRepo.updateMailboxConnection(db, actor.tenant_id, connection.id, {
-          last_error: `${provider === 'google' ? 'Google Workspace' : 'Microsoft 365'} OAuth app credentials are not configured yet.`,
-          settings: { setup_required: true, oauth_configured: false },
-        });
+        connection = await emailMessageRepo.updateMailboxConnection(db, actor.tenant_id, connection.id, {
+          last_error: setupCheck.setup_blockers[0] ?? `${provider === 'google' ? 'Google Workspace' : 'Microsoft 365'} OAuth setup is not ready yet.`,
+          settings: {
+            setup_required: true,
+            oauth_configured: false,
+            oauth_ready: false,
+            oauth_setup_status: setupCheck.setup_status,
+            oauth_setup_blockers: setupCheck.setup_blockers,
+            oauth_app_source: setupCheck.app_source,
+            oauth_redirect_uri: setupCheck.redirect_uri,
+            account_ingest_scope: accountIngestScope,
+          },
+        }) ?? connection;
       }
       res.status(202).json({
         connection,
         auth_url: authUrl,
+        oauth_ready: Boolean(authUrl),
+        setup_check: setupCheck,
         status: authUrl ? 'oauth_required' : 'configuration_required',
         message: authUrl
-          ? 'Mailbox connection saved. Continue to OAuth to enable live customer email sync.'
-          : 'Mailbox connection saved as pending. Configure OAuth credentials to enable live sync.',
+	          ? 'Continue to OAuth to connect this mailbox for selected context and sender permissions.'
+	          : setupCheck.user_action || 'Admin OAuth setup required. This mailbox setup request is recorded so an admin can finish provider configuration.',
       });
     } catch (err) { handleError(res, err); }
   });
@@ -1660,7 +1944,11 @@ export function apiRouter(db: DbPool): Router {
       }
       await completeMailboxOAuth(db, provider as 'google' | 'microsoft', code, state, requestOrigin(req));
       res.redirect('/app/emails?tab=connections&connected=mailbox');
-    } catch (err) { handleError(res, err); }
+    } catch (err) {
+      const callbackProvider = p(req, 'provider') === 'microsoft' ? 'microsoft' : 'google';
+      const message = oauthCallbackErrorMessage(err, callbackProvider, 'mailbox');
+      res.redirect(`/app/emails?tab=connections&mailbox_error=${encodeURIComponent(message)}`);
+    }
   });
 
   router.delete('/mailbox/connections/:id', async (req: Request, res: Response) => {
@@ -1681,18 +1969,185 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  async function assertMailboxConnectionAccess(actor: ActorContext, id: string): Promise<emailMessageRepo.MailboxConnection> {
+    const connection = await emailMessageRepo.getMailboxConnection(db, actor.tenant_id, id);
+    if (!connection) throw new CrmyError('NOT_FOUND', 'Mailbox connection not found', 404);
+    if (!isGlobalActor(actor)) {
+      const userId = await getActorUserId(db, actor);
+      if (!userId || connection.user_id !== userId) {
+        throw new CrmyError('NOT_FOUND', 'Mailbox connection not found', 404);
+      }
+    }
+    return connection;
+  }
+
+  function mailboxHasScope(connection: emailMessageRepo.MailboxConnection, scopes: string[]): boolean {
+    const granted = new Set((connection.scopes ?? []).map(scope => String(scope).toLowerCase()));
+    return scopes.some(scope => granted.has(scope.toLowerCase()));
+  }
+
+  function mailboxHasSendScope(connection: emailMessageRepo.MailboxConnection): boolean {
+    return mailboxHasScope(connection, [
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://mail.google.com/',
+      'mail.send',
+    ]);
+  }
+
+  function mailboxHasDraftScope(connection: emailMessageRepo.MailboxConnection): boolean {
+    return mailboxHasScope(connection, [
+      'https://www.googleapis.com/auth/gmail.compose',
+      'https://mail.google.com/',
+      'mail.readwrite',
+    ]);
+  }
+
+  function previousConnectionCapabilities(connection: emailMessageRepo.MailboxConnection): Record<string, unknown> {
+    const previous = connection.settings?.previous_capabilities;
+    return previous && typeof previous === 'object' && !Array.isArray(previous)
+      ? previous as Record<string, unknown>
+      : {};
+  }
+
+  function optionalBoolean(value: unknown): boolean | undefined {
+    return typeof value === 'boolean' ? value : undefined;
+  }
+
+  router.post('/mailbox/connections/:id/aliases/refresh', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id');
+      await assertMailboxConnectionAccess(actor, id);
+      const connection = await refreshMailboxSendAsAliases(db, actor.tenant_id, id);
+      res.json({ connection, message: 'Sender aliases refreshed from the mailbox provider.' });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/mailbox/connections/:id/sender', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id');
+      const connection = await assertMailboxConnectionAccess(actor, id);
+      const selectedEmail = String(req.body?.selected_send_as_email ?? '').trim().toLowerCase();
+      if (!selectedEmail || !selectedEmail.includes('@')) throw validationError('Choose a valid verified sender address.');
+      const aliases = Array.isArray(connection.settings?.send_as_aliases)
+        ? connection.settings.send_as_aliases as Array<Record<string, unknown>>
+        : [];
+      const selected = aliases.find(alias =>
+        String(alias.email_address ?? '').trim().toLowerCase() === selectedEmail && alias.verified !== false
+      );
+      if (!selected) {
+        throw validationError('That sender address is not a verified alias for this mailbox. Refresh aliases or choose another address.');
+      }
+      const updated = await emailMessageRepo.updateMailboxConnection(db, actor.tenant_id, id, {
+        settings: {
+          selected_send_as_email: selectedEmail,
+          selected_send_as_name: typeof selected.display_name === 'string' ? selected.display_name : null,
+          sender_selected_at: new Date().toISOString(),
+          sender_selected_by: actor.actor_id,
+        },
+      });
+      res.json({ connection: updated ?? connection, message: `Outbound drafts will use ${selectedEmail} as the visible sender.` });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/mailbox/connections/:id/status', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const id = p(req, 'id');
+      const parsed = z.object({
+        active: z.boolean(),
+        context_sync_enabled: z.boolean().optional(),
+        send_enabled: z.boolean().optional(),
+        provider_draft_enabled: z.boolean().optional(),
+        is_default_sender: z.boolean().optional(),
+        account_ingest_scope: z.enum(['owned_accounts', 'accessible_accounts']).optional(),
+      }).safeParse(req.body ?? {});
+      if (!parsed.success) throw parsed.error;
+      const connection = await assertMailboxConnectionAccess(actor, id);
+      if (!parsed.data.active) {
+        const updated = await emailMessageRepo.updateMailboxConnection(db, actor.tenant_id, id, {
+          status: 'disconnected',
+          context_sync_enabled: false,
+          send_enabled: false,
+          provider_draft_enabled: false,
+          send_status: 'disabled',
+          send_last_error: null,
+          is_default_sender: false,
+          last_error: null,
+          settings: {
+            previous_capabilities: {
+              status: connection.status,
+              context_sync_enabled: connection.context_sync_enabled,
+              send_enabled: connection.send_enabled,
+              provider_draft_enabled: connection.provider_draft_enabled,
+              send_status: connection.send_status,
+              is_default_sender: connection.is_default_sender,
+              account_ingest_scope: connection.settings?.account_ingest_scope ?? 'owned_accounts',
+            },
+            deactivated_at: new Date().toISOString(),
+            deactivated_by: actor.actor_id,
+          },
+        });
+        res.json({
+          connection: updated ?? connection,
+          message: 'Mailbox paused. CRMy will not read or send from this mailbox until it is activated again.',
+        });
+        return;
+      }
+      if (!connection.access_token_enc && !connection.refresh_token_enc) {
+        throw validationError('Reconnect this mailbox with OAuth before activating it.');
+      }
+      const previous = previousConnectionCapabilities(connection);
+      const contextSyncEnabled = parsed.data.context_sync_enabled
+        ?? optionalBoolean(previous.context_sync_enabled)
+        ?? true;
+      const sendEnabled = parsed.data.send_enabled
+        ?? optionalBoolean(previous.send_enabled)
+        ?? false;
+      const providerDraftEnabled = parsed.data.provider_draft_enabled
+        ?? optionalBoolean(previous.provider_draft_enabled)
+        ?? false;
+      if (sendEnabled && !mailboxHasSendScope(connection)) {
+        throw validationError('Reauthorize this mailbox with send permission before activating it as a sender.');
+      }
+      if (providerDraftEnabled && !mailboxHasDraftScope(connection)) {
+        throw validationError('Reauthorize this mailbox with provider draft permission before activating provider drafts.');
+      }
+      const isDefaultSender = sendEnabled && (
+        parsed.data.is_default_sender
+        ?? optionalBoolean(previous.is_default_sender)
+        ?? connection.is_default_sender
+      );
+      const updated = await emailMessageRepo.updateMailboxConnection(db, actor.tenant_id, id, {
+        status: 'connected',
+        context_sync_enabled: contextSyncEnabled,
+        send_enabled: sendEnabled,
+        provider_draft_enabled: sendEnabled && providerDraftEnabled,
+        send_status: sendEnabled ? 'ready' : 'disabled',
+        send_last_error: null,
+        is_default_sender: isDefaultSender,
+        last_error: null,
+        settings: {
+          account_ingest_scope: parsed.data.account_ingest_scope ?? connection.settings?.account_ingest_scope ?? 'owned_accounts',
+          activated_at: new Date().toISOString(),
+          activated_by: actor.actor_id,
+        },
+      });
+      res.json({
+        connection: updated ?? connection,
+        message: sendEnabled
+          ? 'Mailbox activated for customer context and approved outbound drafts.'
+          : 'Mailbox activated for customer context.',
+      });
+    } catch (err) { handleError(res, err); }
+  });
+
   router.post('/mailbox/connections/:id/sync', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
       const id = p(req, 'id');
-      if (!isGlobalActor(actor)) {
-        const userId = await getActorUserId(db, actor);
-        const check = await db.query(
-          'SELECT id FROM mailbox_connections WHERE tenant_id = $1 AND id = $2 AND user_id = $3',
-          [actor.tenant_id, id, userId],
-        );
-        if (check.rowCount === 0) throw new CrmyError('NOT_FOUND', 'Mailbox connection not found', 404);
-      }
+      await assertMailboxConnectionAccess(actor, id);
       const job = await emailMessageRepo.enqueueMailboxSyncJob(db, actor.tenant_id, id, { requested_by: actor.actor_id });
       res.status(202).json({
         job,
@@ -3461,6 +3916,15 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.post('/action-context/human-unblock', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const handler = toolHandler(db, 'action_context_request_human_unblock');
+      const result = await handler(actionContextHumanUnblock.parse(req.body ?? {}), actor);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
   router.get('/briefing/:subject_type/:subject_id', async (req: Request, res: Response) => {
     try {
       const actor = getActor(req);
@@ -3473,6 +3937,8 @@ export function apiRouter(db: DbPool): Router {
         include_stale: req.query.include_stale === 'true',
         context_radius: qs(req.query.context_radius),
         token_budget: req.query.token_budget ? Number(qs(req.query.token_budget)) : undefined,
+        token_budget_profile: qs(req.query.token_budget_profile),
+        evidence_mode: qs(req.query.evidence_mode),
         format: qs(req.query.format) ?? 'json',
       }, actor);
       res.json(result);
@@ -3651,6 +4117,88 @@ export function apiRouter(db: DbPool): Router {
     } catch (err) { handleError(res, err); }
   });
 
+  router.get('/admin/oauth-readiness', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const origin = requestOrigin(req);
+      const providers = [
+        await oauthReadiness(db, actor.tenant_id, 'mailbox', 'google', origin),
+        await oauthReadiness(db, actor.tenant_id, 'mailbox', 'microsoft', origin),
+        await oauthReadiness(db, actor.tenant_id, 'calendar', 'google', origin),
+        await oauthReadiness(db, actor.tenant_id, 'calendar', 'microsoft', origin),
+      ];
+      res.json({
+        data: providers,
+        summary: {
+          ready: providers.filter(item => item.ready).length,
+          total: providers.length,
+          mail_ready: providers.filter(item => item.kind === 'mailbox' && item.ready).length,
+          calendar_ready: providers.filter(item => item.kind === 'calendar' && item.ready).length,
+        },
+      });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/admin/oauth-apps', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const data = await listTenantOAuthApps(db, actor.tenant_id);
+      res.json({ data, total: data.length });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.put('/admin/oauth-apps/:provider', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const provider = p(req, 'provider');
+      if (!['google', 'microsoft'].includes(provider)) {
+        res.status(400).json({ error: 'Provider must be google or microsoft' });
+        return;
+      }
+      const clientId = String(req.body?.client_id ?? '').trim();
+      const clientSecret = typeof req.body?.client_secret === 'string' && req.body.client_secret.trim()
+        ? req.body.client_secret.trim()
+        : undefined;
+      const enabled = req.body?.enabled !== false;
+      if (!clientId) {
+        res.status(400).json({ error: 'Client ID is required for a tenant-owned OAuth app' });
+        return;
+      }
+      if (!clientSecret) {
+        const existingApps = await listTenantOAuthApps(db, actor.tenant_id);
+        const existing = existingApps.find(app => app.provider === provider);
+        if (!existing?.has_client_secret) {
+          res.status(400).json({ error: 'Client secret is required before saving a tenant-owned OAuth app' });
+          return;
+        }
+      }
+      const data = await upsertTenantOAuthApp(db, actor.tenant_id, provider as 'google' | 'microsoft', {
+        client_id: clientId,
+        client_secret: clientSecret,
+        microsoft_tenant_id: typeof req.body?.microsoft_tenant_id === 'string' ? req.body.microsoft_tenant_id : undefined,
+        enabled,
+      }, actor.actor_id);
+      res.json({ oauth_app: data });
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/admin/oauth-apps/:provider', async (req: Request, res: Response) => {
+    try {
+      if (!requireAdmin(req, res)) return;
+      const actor = getActor(req);
+      const provider = p(req, 'provider');
+      if (!['google', 'microsoft'].includes(provider)) {
+        res.status(400).json({ error: 'Provider must be google or microsoft' });
+        return;
+      }
+      await deleteTenantOAuthApp(db, actor.tenant_id, provider as 'google' | 'microsoft');
+      res.json({ deleted: true });
+    } catch (err) { handleError(res, err); }
+  });
+
 	  router.post('/admin/db-config/test', async (req: Request, res: Response) => {
 	    try {
 	      if (!requireAdmin(req, res)) return;
@@ -3815,6 +4363,160 @@ export function apiRouter(db: DbPool): Router {
 	        data,
 	        next_cursor: rows.length > limit ? data[data.length - 1]?.created_at ?? null : null,
 	      });
+	    } catch (err) { handleError(res, err); }
+	  });
+
+	  router.get('/admin/actor-connections', async (req: Request, res: Response) => {
+	    try {
+	      if (!requireAdmin(req, res)) return;
+	      const actor = getActor(req);
+	      const result = await db.query(
+	        `SELECT
+	           a.id AS actor_id,
+	           a.display_name AS actor_name,
+	           a.actor_type,
+	           a.is_active,
+	           u.id AS user_id,
+	           COALESCE(u.email, a.email) AS user_email,
+	           u.name AS user_name,
+	           mb.mailbox_connections,
+	           cal.calendar_connections
+	         FROM actors a
+	         LEFT JOIN users u ON u.id = a.user_id AND u.tenant_id = a.tenant_id
+	         LEFT JOIN LATERAL (
+	           SELECT COALESCE(jsonb_agg(jsonb_build_object(
+	             'id', m.id,
+	             'provider', m.provider,
+	             'email_address', m.email_address,
+	             'display_name', m.display_name,
+	             'status', m.status,
+	             'context_sync_enabled', m.context_sync_enabled,
+	             'send_enabled', m.send_enabled,
+	             'provider_draft_enabled', m.provider_draft_enabled,
+	             'send_status', m.send_status,
+	             'send_last_error', m.send_last_error,
+	             'is_default_sender', m.is_default_sender,
+	             'created_at', m.created_at,
+	             'last_sync_at', m.last_sync_at,
+	             'last_message_at', (
+	               SELECT max(COALESCE(em.received_at, em.sent_at, em.created_at))
+	               FROM email_messages em
+	               WHERE em.tenant_id = m.tenant_id AND em.mailbox_connection_id = m.id
+	             ),
+	             'total_messages', (
+	               SELECT count(*)::int
+	               FROM email_messages em
+	               WHERE em.tenant_id = m.tenant_id AND em.mailbox_connection_id = m.id
+	             ),
+	             'customer_messages', (
+	               SELECT count(*)::int
+	               FROM email_messages em
+	               WHERE em.tenant_id = m.tenant_id AND em.mailbox_connection_id = m.id
+	                 AND em.classification IN ('customer', 'mixed')
+	             ),
+	             'processed_messages', (
+	               SELECT count(*)::int
+	               FROM email_messages em
+	               WHERE em.tenant_id = m.tenant_id AND em.mailbox_connection_id = m.id
+	                 AND em.processing_status = 'processed'
+	             ),
+	             'raw_context_sources', (
+	               SELECT count(DISTINCT em.raw_context_source_id)::int
+	               FROM email_messages em
+	               WHERE em.tenant_id = m.tenant_id AND em.mailbox_connection_id = m.id
+	                 AND em.raw_context_source_id IS NOT NULL
+	             ),
+	             'signals_created', (
+	               SELECT COALESCE(sum((em.extraction_receipt->>'signals_created')::int), 0)::int
+	               FROM email_messages em
+	               WHERE em.tenant_id = m.tenant_id AND em.mailbox_connection_id = m.id
+	                 AND em.extraction_receipt ? 'signals_created'
+	             ),
+	             'memory_created', (
+	               SELECT COALESCE(sum((em.extraction_receipt->>'memory_created')::int), 0)::int
+	               FROM email_messages em
+	               WHERE em.tenant_id = m.tenant_id AND em.mailbox_connection_id = m.id
+	                 AND em.extraction_receipt ? 'memory_created'
+	             ),
+	             'last_error', m.last_error,
+	             'updated_at', m.updated_at
+	           ) ORDER BY m.is_default_sender DESC, m.updated_at DESC), '[]'::jsonb) AS mailbox_connections
+	           FROM mailbox_connections m
+	           WHERE m.tenant_id = a.tenant_id AND m.user_id = u.id
+	         ) mb ON true
+	         LEFT JOIN LATERAL (
+	           SELECT COALESCE(jsonb_agg(jsonb_build_object(
+	             'id', c.id,
+	             'provider', c.provider,
+	             'email_address', c.email_address,
+	             'display_name', c.display_name,
+	             'status', c.status,
+	             'created_at', c.created_at,
+	             'last_sync_at', c.last_sync_at,
+	             'last_event_at', (
+	               SELECT max(ce.starts_at)
+	               FROM calendar_events ce
+	               WHERE ce.tenant_id = c.tenant_id AND ce.calendar_connection_id = c.id
+	             ),
+	             'total_events', (
+	               SELECT count(*)::int
+	               FROM calendar_events ce
+	               WHERE ce.tenant_id = c.tenant_id AND ce.calendar_connection_id = c.id
+	             ),
+	             'processed_events', (
+	               SELECT count(*)::int
+	               FROM calendar_events ce
+	               WHERE ce.tenant_id = c.tenant_id AND ce.calendar_connection_id = c.id
+	                 AND ce.processing_status = 'processed'
+	             ),
+	             'raw_context_sources', (
+	               SELECT count(DISTINCT ce.raw_context_source_id)::int
+	               FROM calendar_events ce
+	               WHERE ce.tenant_id = c.tenant_id AND ce.calendar_connection_id = c.id
+	                 AND ce.raw_context_source_id IS NOT NULL
+	             ),
+	             'signals_created', (
+	               SELECT COALESCE(sum((ce.extraction_receipt->>'signals_created')::int), 0)::int
+	               FROM calendar_events ce
+	               WHERE ce.tenant_id = c.tenant_id AND ce.calendar_connection_id = c.id
+	                 AND ce.extraction_receipt ? 'signals_created'
+	             ),
+	             'memory_created', (
+	               SELECT COALESCE(sum((ce.extraction_receipt->>'memory_created')::int), 0)::int
+	               FROM calendar_events ce
+	               WHERE ce.tenant_id = c.tenant_id AND ce.calendar_connection_id = c.id
+	                 AND ce.extraction_receipt ? 'memory_created'
+	             ),
+	             'last_error', c.last_error,
+	             'updated_at', c.updated_at
+	           ) ORDER BY c.updated_at DESC), '[]'::jsonb) AS calendar_connections
+	           FROM calendar_connections c
+	           WHERE c.tenant_id = a.tenant_id AND c.user_id = u.id
+	         ) cal ON true
+	         WHERE a.tenant_id = $1
+	           AND a.actor_type = 'human'
+	         ORDER BY a.is_active DESC, a.display_name ASC`,
+	        [actor.tenant_id],
+	      );
+	      const data = result.rows.map(row => {
+	        const mailboxes = Array.isArray(row.mailbox_connections) ? row.mailbox_connections : [];
+	        const calendars = Array.isArray(row.calendar_connections) ? row.calendar_connections : [];
+	        return {
+	          ...row,
+	          mailbox_count: mailboxes.length,
+	          calendar_count: calendars.length,
+	          sender_count: mailboxes.filter((mailbox: Record<string, unknown>) => mailbox.send_enabled === true).length,
+	          ready_sender_count: mailboxes.filter((mailbox: Record<string, unknown>) => mailbox.send_enabled === true && mailbox.send_status === 'ready').length,
+	          connected_mailbox_count: mailboxes.filter((mailbox: Record<string, unknown>) => mailbox.status === 'connected').length,
+	          connected_calendar_count: calendars.filter((calendar: Record<string, unknown>) => calendar.status === 'connected').length,
+	          email_processed_count: mailboxes.reduce((sum: number, mailbox: Record<string, unknown>) => sum + Number(mailbox.processed_messages ?? 0), 0),
+	          calendar_processed_count: calendars.reduce((sum: number, calendar: Record<string, unknown>) => sum + Number(calendar.processed_events ?? 0), 0),
+	          raw_context_source_count: [...mailboxes, ...calendars].reduce((sum: number, connection: Record<string, unknown>) => sum + Number(connection.raw_context_sources ?? 0), 0),
+	          signal_count: [...mailboxes, ...calendars].reduce((sum: number, connection: Record<string, unknown>) => sum + Number(connection.signals_created ?? 0), 0),
+	          memory_count: [...mailboxes, ...calendars].reduce((sum: number, connection: Record<string, unknown>) => sum + Number(connection.memory_created ?? 0), 0),
+	        };
+	      });
+	      res.json({ data, total: data.length });
 	    } catch (err) { handleError(res, err); }
 	  });
 
@@ -4271,7 +4973,11 @@ export function inboundRouter(db: DbPool): Router {
       }
       await completeMailboxOAuth(db, provider as 'google' | 'microsoft', code, state, requestOrigin(req));
       res.redirect('/app/emails?tab=connections&connected=mailbox');
-    } catch (err) { handleError(res, err); }
+    } catch (err) {
+      const callbackProvider = p(req, 'provider') === 'microsoft' ? 'microsoft' : 'google';
+      const message = oauthCallbackErrorMessage(err, callbackProvider, 'mailbox');
+      res.redirect(`/app/emails?tab=connections&mailbox_error=${encodeURIComponent(message)}`);
+    }
   });
 
   router.get('/calendar/oauth/:provider/callback', async (req: Request, res: Response) => {
@@ -4289,7 +4995,11 @@ export function inboundRouter(db: DbPool): Router {
       }
       await completeCalendarOAuth(db, provider as 'google' | 'microsoft', code, state, requestOrigin(req));
       res.redirect('/app/activities?tab=connections&connected=calendar');
-    } catch (err) { handleError(res, err); }
+    } catch (err) {
+      const callbackProvider = p(req, 'provider') === 'microsoft' ? 'microsoft' : 'google';
+      const message = oauthCallbackErrorMessage(err, callbackProvider, 'calendar');
+      res.redirect(`/app/activities?tab=connections&calendar_error=${encodeURIComponent(message)}`);
+    }
   });
 
   // ── Inbound email webhook (no auth — HMAC-signed by provider) ─────────────

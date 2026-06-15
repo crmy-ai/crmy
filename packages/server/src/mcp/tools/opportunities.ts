@@ -321,7 +321,7 @@ export function opportunityTools(db: DbPool): ToolDef[] {
     {
       name: 'opportunity_delete',
       tier: 'admin',
-      description: 'Permanently delete an opportunity and all associated data. This is a destructive action that requires admin or owner role. For lost deals, prefer closing with opportunity_advance_stage to preserve analytics.',
+      description: 'Archive an opportunity while preserving evidence, lineage, Handoffs, and writeback anchors. This hides the opportunity from active workflows and requires admin or owner role. For lost deals, prefer closing with opportunity_advance_stage to preserve analytics.',
       inputSchema: z.object({
         id: z.string().uuid(),
         idempotency_key: z.string().max(128).optional(),

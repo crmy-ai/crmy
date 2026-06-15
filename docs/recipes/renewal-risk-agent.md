@@ -118,7 +118,7 @@ crmy briefing "account:Brightside Health" --format json
         "priority": "normal"
       }
     ],
-    "stale_warnings": [
+    "staleness_warnings": [
       {
         "id": "d0000000-0000-4000-f000-000000000009",
         "context_type": "research",

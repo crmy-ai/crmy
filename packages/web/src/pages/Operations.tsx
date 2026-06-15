@@ -94,6 +94,21 @@ const DATA_QUALITY_COPY: Record<string, { label: string; description: string }> 
   },
 };
 
+const QUEUE_COPY: Record<string, { label: string; description?: string }> = {
+  email_delivery_jobs: {
+    label: 'Outbound email delivery',
+    description: 'Provider send jobs for approved or direct customer emails.',
+  },
+  mailbox_sync_jobs: {
+    label: 'Mailbox sync',
+    description: 'Customer Email mailbox sync jobs.',
+  },
+  calendar_sync_jobs: {
+    label: 'Calendar sync',
+    description: 'Customer Activity calendar sync jobs.',
+  },
+};
+
 const REPAIRABLE_DATA_QUALITY_CHECKS = new Set([
   'activities_missing_canonical_subject',
   'current_context_missing_search_index',
@@ -217,6 +232,7 @@ function SystemOfRecordCard({
 function QueueCard({ queue }: { queue: any }) {
   const counts = queue.counts_by_status ?? {};
   const failureCount = queueFailureCount(queue);
+  const copy = QUEUE_COPY[queue.name] ?? { label: queue.label ?? queue.name };
   return (
     <div className={`rounded-xl border p-4 ${statusClass(counts, queue.available !== false)}`}>
       <div className="flex items-start gap-3">
@@ -229,9 +245,10 @@ function QueueCard({ queue }: { queue: any }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-foreground truncate">{queue.label ?? queue.name}</p>
+            <p className="text-sm font-semibold text-foreground truncate">{copy.label}</p>
             <span className="text-xs font-mono text-muted-foreground">{queue.name}</span>
           </div>
+          {copy.description && <p className="mt-1 text-xs text-muted-foreground">{copy.description}</p>}
           {queue.oldest_pending_at && (
             <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
               <Clock className="w-3 h-3" />
@@ -624,10 +641,11 @@ export default function OperationsPage() {
   const attentionItems = useMemo(() => {
     const queueItems = attentionQueues.map(queue => {
       const failures = queueFailureCount(queue);
+      const copy = QUEUE_COPY[queue.name] ?? { label: queue.label ?? queue.name };
       return {
         id: `queue-${queue.name}`,
         type: 'Work queue',
-        title: queue.label ?? queue.name,
+        title: copy.label,
         detail: queue.available === false
           ? 'Queue is unavailable.'
           : failures > 0

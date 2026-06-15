@@ -171,7 +171,7 @@ export function useCaseTools(db: DbPool): ToolDef[] {
     {
       name: 'use_case_delete',
       tier: 'admin',
-      description: 'Delete a use case by UUID. This permanently removes the use case and unlinks all associated contacts. Consider advancing to "sunset" stage instead to preserve the historical record.',
+      description: 'Archive a use case by UUID while preserving evidence, lineage, Handoffs, and writeback anchors. Consider advancing to "sunset" stage when the workload is complete and should remain active in lifecycle reporting.',
       inputSchema: useCaseDelete,
       handler: async (input: z.infer<typeof useCaseDelete>, actor: ActorContext) => {
         return runUseCaseOperation(db, actor, 'use_case_delete', input, async () => {

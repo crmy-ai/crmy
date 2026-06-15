@@ -45,9 +45,9 @@ crmy({ action: "contact.search", params: { q: "Sarah Chen", limit: 10 } })
 crmy({ action: "account.search", params: { q: "Acme", limit: 10 } })
 ```
 
-### 3. Brief before acting
+### 3. Brief and check Action Context before acting
 
-Before outreach, deal changes, handoffs, or context writes, call `briefing.get`.
+Before outreach, deal changes, handoffs, or context writes, call `briefing.get` for customer context and `action_context.get` when the work may affect a customer, record, system, or commitment.
 
 ```js
 crmy({
@@ -62,7 +62,21 @@ crmy({
 })
 ```
 
+```js
+crmy({
+  action: "action_context.get",
+  params: {
+    subject_type: "contact",
+    subject_id: "<uuid>",
+    context_radius: "adjacent",
+    proposed_action: { action_type: "customer_outreach" }
+  }
+})
+```
+
 Use `context_radius: "account_wide"` for deal reviews, renewal risk, and handoffs where related account/contact context matters.
+After sends, approvals, writebacks, assignments, workflows, or sequences, call `context.lineage` and inspect `lineage.outcomes` before dependent follow-up.
+If Action Context returns `human_unblock.required`, call `action_context.unblock` so the approval or assignment preserves the packet, proof, and handoff snapshot.
 
 ### 4. Check context quality
 
@@ -156,6 +170,9 @@ crmy({ action: "hitl.status", params: { id: "<hitl-request-id>" } })
 | Action | Required params | Notes |
 |---|---|---|
 | `briefing.get` | `subject_type`, `subject_id` | Supports `context_radius`, `token_budget`, `context_types`, `include_stale`, `format` |
+| `action_context.get` | `subject_type`, `subject_id` | Returns readiness, source posture, recommended actions, review requirements, and proof |
+| `action_context.unblock` | `subject_type`, `subject_id` | Creates a HITL approval or assignment from Action Context human-unblock guidance |
+| `context.lineage` | one subject or artifact id | Trace Raw Context through Signals, Memory, Handoffs, writebacks, audit, and outcome rollups |
 
 Subject types: `contact`, `account`, `opportunity`, `use_case`.
 
@@ -239,9 +256,10 @@ Use assignments for work that should be done later. Use HITL for approval before
 
 1. `search` or `contact.search` to resolve the person.
 2. `briefing.get` for current context.
-3. `activity.create` with the call summary and structured `detail`.
-4. `context.ingest_auto` for messy notes or transcript excerpts. Review resulting Signals before confirming Memory.
-5. `assignment.create` for the follow-up.
+3. `action_context.get` if the follow-up may affect the customer or records.
+4. `activity.create` with the call summary and structured `detail`.
+5. `context.ingest_auto` for messy notes or transcript excerpts. Review resulting Signals before confirming Memory.
+6. `assignment.create` for the follow-up.
 
 ### Prepare outreach
 
@@ -249,7 +267,7 @@ Use assignments for work that should be done later. Use HITL for approval before
 2. `context.semantic_search` for the specific objection or goal.
 3. Draft the message grounded in context.
 4. `activity.create` for the draft.
-5. `hitl.submit` if the message is high-stakes.
+5. `action_context.unblock` if Action Context says human review is required; otherwise use `hitl.submit` only for approval requests not based on Action Context.
 6. After approval, log the final send.
 
 ### Review a deal

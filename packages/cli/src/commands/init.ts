@@ -805,6 +805,7 @@ export function initCommand(): Command {
       if (seedDemo) {
         console.log('    Try the demo data:');
         console.log('    \x1b[1mnpx -y @crmy/cli briefing "account:Northstar Labs"\x1b[0m');
+        console.log('    \x1b[1mnpx -y @crmy/cli action-context "account:Northstar Labs" --action customer_outreach\x1b[0m');
         console.log('    \x1b[1mnpx -y @crmy/cli context signal-groups\x1b[0m');
         console.log('    \x1b[1mnpx -y @crmy/cli context lineage --subject "account:Northstar Labs"\x1b[0m');
         console.log('    \x1b[1mnpx -y @crmy/cli hitl list\x1b[0m\n');
@@ -822,7 +823,7 @@ export function initCommand(): Command {
           console.log('    \x1b[1mnpx -y @crmy/cli agent-smoke --with-model\x1b[0m\n');
         }
         console.log('    Demo Prompt - Ask your agent to run this with CRMy MCP tools:');
-        console.log('    \x1b[1mUse the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.\x1b[0m\n');
+        console.log('    \x1b[1mUse the CRMy MCP tools to resolve "Northstar Labs", get a briefing, get Action Context for customer outreach, inspect Signals needing attention, check lineage outcomes, and tell me the safest next action with evidence.\x1b[0m\n');
       }
     });
 }

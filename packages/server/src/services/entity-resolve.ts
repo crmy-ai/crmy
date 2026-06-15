@@ -374,11 +374,13 @@ async function resolveAccounts(
   const domainQuery = hints?.email_domain ?? (q.includes('.') && !q.includes(' ') ? q : null);
   if (domainQuery) {
     const r = await db.query<{ id: UUID; name: string; domain?: string; aliases: string[] }>(
-      `SELECT id, name, domain, aliases FROM accounts
-	       WHERE tenant_id = $1
-	         AND merged_into IS NULL
-	         AND archived_at IS NULL
-	         AND LOWER(domain) = LOWER($2)
+      `SELECT DISTINCT a.id, a.name, a.domain, a.aliases
+       FROM accounts a
+       LEFT JOIN account_domains ad ON ad.tenant_id = a.tenant_id AND ad.account_id = a.id
+	     WHERE a.tenant_id = $1
+	       AND a.merged_into IS NULL
+	       AND a.archived_at IS NULL
+	       AND (LOWER(a.domain) = LOWER($2) OR LOWER(ad.domain) = LOWER($2))
        LIMIT $3`,
       [tenantId, domainQuery, limit],
     );
@@ -452,12 +454,14 @@ async function resolveAccounts(
   // ── 4. ILIKE substring on name + alias ────────────────────────────────────
   if (candidates.size < limit) {
     const r = await db.query<{ id: UUID; name: string; domain?: string; aliases: string[] }>(
-      `SELECT id, name, domain, aliases FROM accounts
-	       WHERE tenant_id = $1
-	         AND merged_into IS NULL
-	         AND archived_at IS NULL
-	         AND (name ILIKE $2 OR domain ILIKE $2
-              OR EXISTS (SELECT 1 FROM unnest(aliases) _a WHERE _a ILIKE $2))
+      `SELECT DISTINCT a.id, a.name, a.domain, a.aliases
+       FROM accounts a
+       LEFT JOIN account_domains ad ON ad.tenant_id = a.tenant_id AND ad.account_id = a.id
+	     WHERE a.tenant_id = $1
+	       AND a.merged_into IS NULL
+	       AND a.archived_at IS NULL
+	       AND (a.name ILIKE $2 OR a.domain ILIKE $2 OR ad.domain ILIKE $2
+              OR EXISTS (SELECT 1 FROM unnest(a.aliases) _a WHERE _a ILIKE $2))
        LIMIT $3`,
       [tenantId, pattern, limit],
     );
