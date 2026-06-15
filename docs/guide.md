@@ -132,6 +132,7 @@ Then follow the core CRMy workflow:
 
 ```bash
 crmy briefing "account:Northstar Labs"
+crmy action-context "account:Northstar Labs" --action customer_outreach
 crmy context lineage --subject "account:Northstar Labs"
 crmy context raw-sources
 crmy context signal-groups
@@ -241,7 +242,7 @@ npx -y @crmy/cli reset-password --email admin@yourcompany.com
 ### Develop from source
 
 ```bash
-git clone https://github.com/codycharris/crmy.git
+git clone https://github.com/crmy-ai/crmy.git
 cd crmy
 npm install
 npm run build
@@ -284,6 +285,7 @@ Created by `crmy init`. Stored in your project root. Auto-added to `.gitignore`.
 | `CRMY_TENANT_ID` | No | `default` | Default tenant slug |
 | `CRMY_ALLOW_PUBLIC_REGISTRATION` | No | — | Set `true` to keep unauthenticated registration open after initial workspace setup |
 | `CRMY_CORS_ORIGINS` | No | — | Comma-separated browser origins allowed to call the API cross-origin |
+| `CRMY_PUBLIC_URL` | Hosted/proxied OAuth | request origin / `http://localhost:3000` | Public base URL used to generate mailbox/calendar OAuth redirect URIs behind tunnels, reverse proxies, or hosted domains |
 | `CRMY_TRUST_PROXY` | No | — | Set to `1` when CRMy runs behind one trusted reverse proxy |
 | `CRMY_API_KEY` | No | — | API key for CLI auth (overrides .crmy.json) |
 | `CRMY_SERVER_URL` | No | — | Server URL for remote CLI mode |
@@ -293,7 +295,25 @@ Created by `crmy init`. Stored in your project root. Auto-added to `.gitignore`.
 | `CONTEXT_EXTRACTION_RECOVERY_TIMEOUT_MS` | No | `45000` | Fallback extraction timeout after an empty valid response |
 | `CONTEXT_EXTRACTION_REPAIR_TIMEOUT_MS` | No | `30000` | JSON repair timeout after malformed model output |
 | `RAW_CONTEXT_SUBJECT_MATCH_TIMEOUT_MS` | No | `15000` | Hard timeout for automatic Raw Context record matching |
+| `CRMY_DEPLOYMENT_MODE` | No | `single_instance` | Set `multi_instance` only when each app has `CRMY_INSTANCE_ID` and sticky MCP routing |
+| `CRMY_INSTANCE_ID` | Multi-instance | — | Stable unique id for this app process; required for durable MCP session ownership |
+| `CRMY_MCP_SESSION_MODE` | Multi-instance | — | Must be `sticky` for multi-instance deployments; route by `mcp-session-id` |
+| `CRMY_MCP_SESSION_TTL_SECONDS` | No | `1800` | Durable MCP session expiry window |
+| `CRMY_MCP_STALE_INSTANCE_SECONDS` | No | `120` | Expire sessions owned by app instances that stop heartbeating |
 | `SOURCE_SYNC_FETCH_TIMEOUT_MS` | No | `30000` | Mailbox/calendar provider HTTP timeout |
+| `CRMY_MANAGED_OAUTH_APPS_ENABLED` | Hosted SaaS | — | Enables CRMy-managed Google/Microsoft OAuth apps as the default System Connections app source |
+| `CRMY_MANAGED_GOOGLE_CLIENT_ID` / `CRMY_MANAGED_GOOGLE_CLIENT_SECRET` | Hosted SaaS | — | CRMy-managed Google OAuth app used for hosted mailbox and calendar consent when no tenant-owned override exists |
+| `CRMY_MANAGED_MICROSOFT_CLIENT_ID` / `CRMY_MANAGED_MICROSOFT_CLIENT_SECRET` | Hosted SaaS | — | CRMy-managed Microsoft OAuth app used for hosted mailbox and calendar consent when no tenant-owned override exists |
+| `CRMY_MANAGED_MICROSOFT_TENANT_ID` | Hosted SaaS | `common` | Microsoft tenant for the CRMy-managed Microsoft OAuth app |
+| `GOOGLE_MAIL_CLIENT_ID` / `GOOGLE_MAIL_CLIENT_SECRET` | Self-hosted mailbox OAuth | — | Google OAuth app credentials for Gmail Mailbox Context and sender identity |
+| `GOOGLE_MAIL_REDIRECT_URI` | Mailbox OAuth | `/api/v1/mailbox/oauth/google/callback` | Override Google mailbox OAuth callback URL |
+| `MICROSOFT_MAIL_CLIENT_ID` / `MICROSOFT_MAIL_CLIENT_SECRET` | Self-hosted mailbox OAuth | — | Microsoft Entra app credentials for Outlook Mailbox Context and sender identity |
+| `MICROSOFT_MAIL_REDIRECT_URI` | Mailbox OAuth | `/api/v1/mailbox/oauth/microsoft/callback` | Override Microsoft mailbox OAuth callback URL |
+| `GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET` | Self-hosted calendar OAuth | — | Google OAuth app credentials for Customer Activity calendar context |
+| `GOOGLE_CALENDAR_REDIRECT_URI` | Calendar OAuth | `/api/v1/calendar/oauth/google/callback` | Override Google Calendar OAuth callback URL |
+| `MICROSOFT_CALENDAR_CLIENT_ID` / `MICROSOFT_CALENDAR_CLIENT_SECRET` | Self-hosted calendar OAuth | — | Microsoft Entra app credentials for Customer Activity calendar context |
+| `MICROSOFT_CALENDAR_REDIRECT_URI` | Calendar OAuth | `/api/v1/calendar/oauth/microsoft/callback` | Override Microsoft Calendar OAuth callback URL |
+| `MICROSOFT_TENANT_ID` | Microsoft OAuth | `common` | Microsoft tenant for OAuth authorization |
 | `CONNECTOR_FETCH_TIMEOUT_MS` | No | `30000` | Systems-of-record connector HTTP timeout |
 | `SLACK_SEND_TIMEOUT_MS` | No | `10000` | Slack webhook delivery timeout |
 
@@ -552,7 +572,7 @@ Meeting and activity capture for customer context. Tabs cover **Meetings**, **Ne
 
 #### Customer Email (`/app/emails`)
 
-Customer-facing inbox and governed outbound drafting. Tabs cover **Customer Inbox**, **Needs Review**, **Drafts & Approvals**, and **Connections**. CRMy filters internal email noise, links customer messages to revenue records, processes useful messages as Raw Context, and routes agent-generated drafts through review.
+Customer-facing inbox and governed outbound drafting. Tabs cover **Mailbox Context**, **Needs Review**, **Outbound Actions**, and **Mailboxes & Senders**. CRMy filters internal email noise, links customer messages to revenue records, processes useful messages as Raw Context, and routes agent-generated drafts through visible sender identity and review.
 
 #### Handoffs (`/app/handoffs`)
 
@@ -564,19 +584,19 @@ Scoped GTM workbench for asking questions, retrieving Active Context, using CRMy
 
 #### Actors (`/app/settings/actors`)
 
-Admin-only actor and user management for humans, agents, scopes, API keys, and registrations.
+Admin-only actor and user management for humans, agents, scopes, API keys, registrations, and work-app coverage. Human actors show binary mailbox/calendar/sender badges first; expanded details show the connected email address, provider, connection date, last sync, latest message/event, processed volume, Raw Context sources, Signals, Memory, and any sync or sender issue. Admins can pause a mailbox/calendar without deleting OAuth tokens, or disconnect it when the actor needs to reauthorize.
 
 #### Context (`/app/context`)
 
 The Context page is the dedicated workspace for the customer-context lifecycle. Raw Context is the user-facing label for raw observations/source material. The primary tabs are:
 
-- **Raw Context tab**: source volume and recent processing outcomes across activities, inbound/outbound emails, Add Context imports, Systems of Record sync runs, MCP/REST/CLI context writes, and future source types
+- **Raw Context tab**: source volume and recent processing outcomes across activities, calendar events, inbound/outbound emails, Add Context imports, Systems of Record sync runs, MCP/REST/CLI context writes, and future source types. Source rows link to Lineage so users can trace Raw Context into Signals, Memory, Handoffs, and actions.
 - **Signals tab**: inferred customer claims that need confirmation, dismissal, more evidence, or Handoff review before agents rely on them
 - **Memory tab**: confirmed operational customer context agents retrieve into Active Context through briefings and search
 - **Lineage tab**: source-to-action timeline showing how Raw Context produced Signals, confirmed Memory, handoffs, writebacks, and audit history
 - **Sources action**: secondary link for choosing how context enters CRMy: Add Context, MCP/API, Customer Email, and Customer Activity
 - **Graph action**: secondary link for record-centered exploration of related records, Current Memory, recent activity, and open handoffs
-- **Dual search modes**: keyword (full-text, client-side) and **semantic** (pgvector similarity). The toggle sits inline in the search bar. If semantic search is unavailable, it falls back to keyword automatically with a warning banner. Admins enable semantic retrieval in Database Settings by using a pgvector-capable database, setting `ENABLE_PGVECTOR=true`, and adding `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` to the server environment.
+- **Dual search modes**: keyword (full-text, client-side) and **semantic** (pgvector similarity). The toggle sits inline in the search bar. If semantic retrieval is not ready after a semantic search, the results area explains that CRMy is showing keyword matches. Admins see a direct link to Database Settings; non-admin users are prompted to ask an admin.
 - **Database connection editing**: local setup can test a Postgres URL and write `.env.db`; hosted/production deployments show the current connection and semantic status but keep connection changes in server environment configuration.
 - **Filter** by subject type (contact, account, opportunity, use case) and context type
 - **Needs Review toggle** to surface Current Memory past its `valid_until` date
@@ -777,13 +797,24 @@ Accounts represent organizations. Accounts can have parent/child hierarchies, he
 
 | Tool | Description |
 |---|---|
-| `account_create` | Create an account. Required: `name`. Optional: `domain`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `aliases`, `tags`, `custom_fields` |
+| `account_create` | Create an account. Required: `name`. Optional: `domain`, `additional_domains`, `industry`, `employee_count`, `annual_revenue`, `currency_code`, `website`, `parent_id`, `aliases`, `tags`, `custom_fields` |
 | `account_get` | Get an account with its contacts and open opportunities |
-| `account_search` | Search with filters: `query`, `industry`, `owner_id`, `min_revenue`, `tags`. Query matches name, domain, and any alias. |
-| `account_update` | Patch any fields. Supports `aliases` array. |
+| `account_search` | Search with filters: `query`, `industry`, `owner_id`, `min_revenue`, `tags`. Query matches name, primary/additional domains, and any alias. |
+| `account_update` | Patch any fields. Supports `aliases` and `additional_domains` arrays. |
 | `account_set_health_score` | Set score (0-100) with `rationale` |
 | `account_get_hierarchy` | Get parent/child tree |
+| `account_merge` | Merge a duplicate account into a primary account. Moves contacts, opportunities, activities, context, email, calendar links, and domains, then archives the duplicate. Admin/owner role required. |
+| `account_split_domains` | Move one or more domains from an account to another account. Can also move matching contacts, email, meetings, and opportunity links. Admin/owner role required. |
 | `account_delete` | Archive an account while preserving evidence and lineage anchors. Admin/owner role required. |
+
+### Domain collisions and cleanup
+
+Account domains are globally unique inside a tenant because CRMy uses them to associate mailbox and calendar context with the right customer. If a user adds a primary or additional domain that already belongs to another account, CRMy returns a conflict with the domain, owning account id/name, and current owner domain so the user can open the right record instead of guessing.
+
+Admins can repair collisions in two ways:
+
+- **Move domains** when a company record has extra domains that belong to another account. Use the account drawer's Account Governance section, `POST /api/v1/accounts/:id/split-domains`, or `account_split_domains`.
+- **Merge accounts** when the collision reveals duplicate customer records. Use the account drawer's Account Governance section, `POST /api/v1/accounts/:id/merge`, or `account_merge`.
 
 ### CLI
 
@@ -801,6 +832,8 @@ GET    /api/v1/accounts?q=acme&industry=tech
 POST   /api/v1/accounts
 GET    /api/v1/accounts/:id
 PATCH  /api/v1/accounts/:id
+POST   /api/v1/accounts/:id/split-domains { target_account_id, domains, move_matching_records? } (admin/owner only)
+POST   /api/v1/accounts/:id/merge         { secondary_id } (admin/owner only)
 DELETE /api/v1/accounts/:id          (admin/owner only)
 ```
 
@@ -865,7 +898,9 @@ Customer Activity is the meeting/call/note context feed. Calendar meetings, phon
 
 Calendar capture is optional. Meeting transcripts and call notes can still feed context through **Add Context**, `activity_add_context`, `calendar_event_add_context`, or `context_ingest_auto`.
 
-Calendar and meeting association uses the same account-first Subject Graph resolver as Raw Context extraction. CRMy still uses deterministic attendee email and account-domain matching first, but opportunity and use-case links are only added when the resolver can identify them inside the matched account scope. Ambiguous child records stay reviewable instead of being guessed.
+Calendar and meeting association uses the same account-first Subject Graph resolver as Raw Context extraction. CRMy still uses deterministic attendee email and account-domain matching first, including account **Additional Domains**, but opportunity and use-case links are only added when the resolver can identify them inside the matched account scope. Ambiguous child records stay reviewable instead of being guessed.
+
+Availability suggestions are action-boundary context, not raw calendar memory. Agents can call `availability_suggest_times` with a customer record, date range, duration, timezone, and optional internal actor IDs. CRMy checks connected internal actor calendars through provider free/busy, ranks windows with customer timing preferences from Memory, and returns clear caveats. It does not expose raw calendar event details, does not confirm customer availability unless that person explicitly exists as a connected calendar actor, and does not create or send calendar invites.
 
 ### Activity types
 
@@ -901,10 +936,12 @@ Default types are seeded and organized by category. Meeting classifications are 
 | `activity_complete` | Mark as completed with optional timestamp and note |
 | `activity_update` | Patch `subject`, `body`, `status`, `due_at` |
 | `activity_get_timeline` | Get timeline for any subject object |
+| `availability_suggest_times` | Suggest meeting windows from connected internal calendar free/busy plus customer timing preferences from Memory. Returns caveats and does not create invites |
 | `calendar_connection_list` | List calendar connections and meeting-capture health |
 | `calendar_event_search` | Search customer meetings by validation and processing state |
 | `calendar_event_get` | Get one meeting and linked artifacts |
 | `calendar_event_process` | Process a ready meeting as Raw Context |
+| `calendar_connection_start` | Start Google or Microsoft calendar OAuth from MCP/CLI and return a browser `auth_url` for the current human-linked actor |
 | `calendar_event_add_context` | Add transcript/notes/summary to a meeting and process it |
 | `meeting_classification_list` | List tenant meeting classifications |
 
@@ -917,7 +954,9 @@ crmy activities meeting <id>
 crmy activities add-context <id> --file transcript.txt --type transcript
 crmy activities process <id>
 crmy activities connections
+crmy activities connect-calendar google --scope owned_accounts
 crmy activities classifications
+crmy tools call availability_suggest_times '{"account_id":"<account-id>","duration_minutes":30,"timezone":"America/Los_Angeles","limit":3}'
 ```
 
 ### REST API
@@ -929,6 +968,7 @@ PATCH  /api/v1/activities/:id
 POST   /api/v1/activities/:id/context
 GET    /api/v1/calendar/connections
 POST   /api/v1/calendar/connections/:provider/start
+PATCH  /api/v1/calendar/connections/:id/status
 POST   /api/v1/calendar/connections/:id/sync
 GET    /api/v1/calendar-events
 GET    /api/v1/calendar-events/:id
@@ -1366,7 +1406,8 @@ Use `context_extract { activity_id }` to manually re-run extraction on any activ
 context_diff {
   subject_type: "account",
   subject_id: "...",
-  since: "7d"    // or "24h", "30m", or ISO timestamp
+  since: "7d",   // or "24h", "30m", or ISO timestamp
+  limit: 50      // max entries per bucket; default 50, max 100
 }
 ```
 
@@ -1375,7 +1416,9 @@ Returns:
 - `superseded_entries` — entries that were replaced (the old, now-inactive versions)
 - `newly_stale` — entries whose `valid_until` fell within the window
 - `resolved_entries` — entries that were reviewed (confirmed accurate) in the window
-- `summary` — counts of each category
+- `summary` — counts of each returned category and per-bucket `truncated` flags
+
+If a `summary.truncated` bucket is true, narrow the time window or fetch specific entries before treating the diff as complete.
 
 ### MCP tools
 
@@ -1401,11 +1444,13 @@ Returns:
 | `context_supersede` | Replace an entry with updated content |
 | `context_review` | Mark an entry as reviewed (confirm still accurate) |
 | `context_stale` | List Current Memory past `valid_until` that needs review |
-| `context_diff` | Catch-up diff since a timestamp: new, superseded, stale, and resolved entries |
+| `context_diff` | Bounded catch-up diff since a timestamp: new, superseded, stale, resolved, and truncation flags |
 | `context_extract` | Re-run the extraction pipeline on a specific activity (backfill or retry) |
 | `context_stale_assign` | Trigger the Memory Health review loop on-demand for the current tenant |
 | `context_semantic_search` | Semantic (vector) similarity search using pgvector. Falls back gracefully with `fallback_available: true` if pgvector or embeddings are not configured. Requires a pgvector-capable database, `ENABLE_PGVECTOR=true`, and server-side `EMBEDDING_PROVIDER` settings. |
 | `context_embed_backfill` | Generate embeddings for context entries that have not yet been embedded. Use `dry_run: true` first to see pending count. |
+
+`context_lineage_get` also returns an `outcomes` rollup. Use it after sends, approvals, writebacks, assignment completion, or workflow/sequence steps to see completed outcomes, pending human or system work, failed side effects, and recommended follow-up before the next agent acts. Agents that are unsure which tool path to take can call `tool_guide` with `workflow: "post_action_follow_up"` to get this path directly.
 
 ### CLI
 
@@ -1481,20 +1526,28 @@ Returns a structured object:
 
 ```json
 {
-  "record": { ... },
-  "related": { ... },
-  "activities": [ ... ],
-  "open_assignments": [ ... ],
-  "context": {
-    "transcript": [ ... ],
-    "objection": [ ... ],
-    "competitive_intel": [ ... ]
-  },
-  "stale_warnings": [
-    { "id": "...", "context_type": "research", "valid_until": "2026-01-01", "body": "..." }
-  ]
+  "briefing": {
+    "subject": { "...": "..." },
+    "subject_type": "account",
+    "related_objects": { "contacts": [ ... ], "opportunities": [ ... ] },
+    "activities": [ ... ],
+    "open_assignments": [ ... ],
+    "context_entries": {
+      "objection": [ ... ],
+      "next_step": [ ... ]
+    },
+    "signals": {
+      "risk": [ ... ]
+    },
+    "signal_groups": [ ... ],
+    "staleness_warnings": [
+      { "id": "...", "context_type": "research", "valid_until": "2026-01-01", "body": "..." }
+    ]
+  }
 }
 ```
+
+Optional fields include `signals`, `signal_groups`, `active_sequences`, `contradiction_warnings`, `adjacent_context`, `token_estimate`, `truncated`, and `dropped_entries`.
 
 ### Context radius
 
@@ -1518,24 +1571,41 @@ When `adjacent_context` is present in the response, it lists each related subjec
 
 ### Token budget
 
-Pass `token_budget` (integer, minimum 100) to get a priority-ranked, budget-constrained context pack that fits within a caller-specified token estimate. This is the primary mechanism for loading the right context into an LLM without overflow.
+Pass `token_budget` (integer, minimum 100) or `token_budget_profile` to get a priority-ranked, budget-constrained context pack that fits within a caller-specified token estimate. This applies across direct and adjacent/account-wide Memory entries, then returns selected entries under `context_entries` or `adjacent_context` based on their subject. This is the primary mechanism for loading the right context into an LLM without overflow.
+
+Profiles keep common agent calls simple:
+
+| Profile | Use when | Approx budget |
+|---|---|---:|
+| `tiny` | routing, classification, lightweight agent task checks | 900 |
+| `standard` | ordinary briefing and customer outreach prep | 2200 |
+| `deep` | account/deal reviews that need broader context | 6000 |
+| `evidence_heavy` | Memory promotion, external writeback, or high-risk changes | 4000 |
 
 ```
 briefing_get {
-  subject_type: "contact",
+  subject_type: "account",
   subject_id: "...",
-  token_budget: 4000
+  context_radius: "account_wide",
+  token_budget_profile: "standard",
+  evidence_mode: "summary"
 }
 ```
 
 How it works:
 
-1. Each context entry is scored: `effective_confidence × priority_weight`, where `effective_confidence = stored_confidence × 0.5^(age_days / half_life_days)` (from the type registry)
+1. Each context entry is scored from confidence, type priority, evidence support, and freshness decay. When called through Action Context, proposed action type adds ranking boosts.
 2. Entries are sorted by score descending (most important, freshest first)
 3. Entries are greedily packed until the budget is exhausted; the last entry that partially fits has its body truncated
-4. The response includes `token_estimate` (actual tokens used) and `truncated: true` if any body was cut
+4. The response includes `token_estimate` (actual tokens used), `truncated: true` if any body was cut, and `context_packing` with effective profile, budget, evidence mode, and ranking strategy
 
-When no `token_budget` is given, all entries are returned sorted by score, and `token_estimate` is still included for reference.
+When no `token_budget` or `token_budget_profile` is given, `briefing_get` returns all matching entries without budget packing. `action_context_get` may infer a profile from `proposed_action` when that helps keep the action packet small. Calls without an effective budget omit `token_estimate`, `truncated`, and `dropped_entries`, but still include `context_packing` so callers know which evidence mode and ranking strategy were used.
+
+`evidence_mode` controls how much proof travels in the first packet:
+
+- `summary` returns compact evidence references and short snippets. This is the default.
+- `full` returns complete evidence payloads when the agent must inspect proof in detail.
+- `none` omits evidence arrays for cheapest context scanning. Use Lineage or `context_get` later when proof is needed.
 
 #### `dropped_entries` (v0.7+)
 
@@ -1792,6 +1862,8 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 | `opportunity_create`, `opportunity_update`, `opportunity_advance_stage`, `opportunity_delete` | `opportunities:write` |
 | `pipeline_summary`, `pipeline_forecast` | `opportunities:read` |
 | `activity_get`, `activity_search`, `activity_get_timeline`, `calendar_connection_list`, `calendar_event_search`, `calendar_event_get` | `activities:read` |
+| `calendar_connection_start` | `activities:write` |
+| `availability_suggest_times` | `activities:read`, `context:read` |
 | `activity_create`, `activity_update`, `activity_complete` | `activities:write` |
 | `activity_add_context`, `calendar_event_process`, `calendar_event_add_context` | `activities:write`, `context:write` |
 | `assignment_get`, `assignment_list` | `assignments:read` |
@@ -1800,11 +1872,13 @@ Scope enforcement is the authorization layer for API key and agent access. Every
 | `use_case_create`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_unlink_contact` | `accounts:write` |
 | `use_case_link_contact` | `accounts:write`, `contacts:read` |
 | `context_get`, `context_search`, `context_list`, `context_raw_source_list`, `context_raw_source_get`, `context_signal_group_list`, `context_signal_group_get`, `context_stale`, `context_diff`, `briefing_get`, `action_context_get` | `context:read` |
+| `action_context_request_human_unblock` | `context:read`, `agent:write`, `hitl:write`, `assignments:write` |
 | `context_add`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_review`, `context_extract`, `context_ingest`, `context_ingest_auto`, `context_bulk_mark_stale`, `context_embed_backfill`, `context_stale_assign`, `context_review_batch`, `context_resolve_contradiction`, `context_consolidate` | `context:write` |
 | `context_signal_group_promote`, `context_signal_group_complete_details`, `context_signal_handoff`, `context_signal_group_reject`, `context_raw_source_reprocess` | `context:write` |
 | `context_detect_contradictions`, `context_semantic_search`, `context_lineage_get`, `customer_record_resolve` | `context:read` |
 | `context_contradiction_assign` | `context:read`, `assignments:write` |
 | `email_get`, `email_search`, `email_message_search`, `email_message_get`, `mailbox_connection_list`, `email_draft_preview` | `activities:read` plus `context:read` for draft preview |
+| `mailbox_connection_start` | `activities:write` |
 | `email_create`, `email_draft_save`, `email_message_ignore` | `activities:write` |
 | `email_ingest`, `email_message_process`, `email_message_link` | `activities:write`, `context:write` |
 | `hitl_check_status`, `hitl_list_pending` | `hitl:read` |
@@ -2113,12 +2187,16 @@ GET    /api/v1/workflows/:id/runs?status=completed
 
 Register HTTP endpoints to receive event notifications. Webhooks include automatic retry logic and delivery tracking.
 
+CRMy signs outbound webhook deliveries with the `X-CRMy-Signature` header using HMAC-SHA256 over the raw JSON body. A signing secret is generated automatically when the endpoint is created. Copy it after creation, reveal it intentionally when configuring the receiving service, or rotate it from Settings when it may have been exposed. Rotation invalidates the previous secret immediately. This outbound webhook secret is separate from the inbound email webhook secret in **Settings -> System Connections -> Inbound Webhook**.
+
 ### MCP tools
 
 | Tool | Description |
 |---|---|
-| `webhook_create` | Register an endpoint. Required: `url`, `events` (array of event types) |
-| `webhook_get` | Get endpoint details (includes the signing secret) |
+| `webhook_create` | Register an endpoint. Required: `url`, `events` (array of event types). Returns the generated signing secret once |
+| `webhook_get` | Get endpoint details with masked signing-secret state |
+| `webhook_reveal_secret` | Reveal the full signing secret for receiver setup or repair |
+| `webhook_rotate_secret` | Regenerate the signing secret. The previous secret stops working immediately |
 | `webhook_update` | Update `url`, `events`, `active`, `description` |
 | `webhook_delete` | Remove endpoint |
 | `webhook_list` | List endpoints. Filter by `active` |
@@ -2129,6 +2207,8 @@ Register HTTP endpoints to receive event notifications. Webhooks include automat
 ```bash
 crmy webhooks create
 crmy webhooks list --active
+crmy webhooks secret <id>
+crmy webhooks rotate-secret <id>
 crmy webhooks deliveries --endpoint <id> --status failed
 crmy webhooks delete <id>
 ```
@@ -2139,6 +2219,8 @@ crmy webhooks delete <id>
 GET    /api/v1/webhooks
 POST   /api/v1/webhooks            { url, events: ["contact.created", ...] }
 GET    /api/v1/webhooks/:id
+POST   /api/v1/webhooks/:id/secret/reveal
+POST   /api/v1/webhooks/:id/secret/rotate
 PATCH  /api/v1/webhooks/:id        { active: false }
 DELETE /api/v1/webhooks/:id
 GET    /api/v1/webhooks/:id/deliveries
@@ -2148,17 +2230,25 @@ GET    /api/v1/webhooks/:id/deliveries
 
 ## Customer Email
 
-Customer Email is an optional context feed and governed response workspace. Connect a mailbox when you want customer threads auto-matched to customer records and processed into Signals and Memory. Emails can also feed context through **Add Context** or MCP `context_ingest_auto` without connecting a mailbox.
+Customer Email has two explicit surfaces:
 
-Email association uses deterministic contact email, reply-chain, and account-domain matching first, then enriches the link with the same account-first Subject Graph resolver used by Raw Context. This lets CRMy match an opportunity or use case mentioned in an email under the right account while leaving ambiguous references in review.
+- **Mailbox Context** reads connected customer mailboxes, links useful threads to customer records, and processes them into Raw Context, Signals, and Memory.
+- **Outbound Actions** drafts, approves, provider-drafts, and sends customer email through a visible sender identity.
+
+Connect a mailbox when you want customer threads auto-matched to customer records and processed into Signals and Memory. Emails can also feed context through **Add Context** or MCP `context_ingest_auto` without connecting a mailbox.
+
+Email association uses deterministic contact email, reply-chain, and account-domain matching first, including account **Additional Domains**, then enriches the link with the same account-first Subject Graph resolver used by Raw Context. This lets CRMy match an opportunity or use case mentioned in an email under the right account while leaving ambiguous references in review.
 
 ### How it works
 
 1. **Connect a mailbox** — users connect Gmail or Microsoft 365 from `/app/emails` so customer-facing messages can sync into CRMy.
 2. **Filter before storage** — admin source filters skip internal-only, automated, spam/trash, newsletter, and excluded-domain messages before extraction by default.
-3. **Match customer records** — CRMy links messages using known contact email, account domain, reply/thread hints, and Subject Graph account-scoped opportunity/use-case matching.
+3. **Match customer records** — CRMy links messages using known contact email, account primary/additional domains, reply/thread hints, and Subject Graph account-scoped opportunity/use-case matching.
 4. **Process useful messages** — linked customer messages can become Raw Context, producing Signals, Memory, or review items.
-5. **Draft safely** — users can generate or edit customer replies from Memory, Signals, recent email context, and linked records. Agent-generated drafts land in **Drafts & Approvals** first.
+5. **Draft safely** — users can generate or edit customer replies from Memory, Signals, recent email context, and linked records. Agent-generated drafts land in **Outbound Actions** first.
+6. **Send with a known identity** — CRMy uses the actor's send-enabled default mailbox when available, then the actor's only send-enabled mailbox, then the tenant fallback/shared provider. If no sender exists, users can save a draft but cannot approve or send.
+7. **Record sent email as account context** — once provider delivery succeeds, CRMy records the sent email as Account Activity and Raw Context with `source_authorship: crmy` and `customer_authored: false`. Agents can see what your team promised or asked without mistaking your words for the customer's words. In Raw Context and Lineage this appears as seller-authored context; customer replies appear as customer-authored evidence when synced back.
+8. **Process replies back into context** — replies synced through the actor mailbox match by provider thread/conversation first, then message headers, then customer-record fallback. Customer replies are processed as customer-authored context when they arrive through Mailbox Context or an inbound webhook.
 
 ### Mailbox and source filters
 
@@ -2172,9 +2262,83 @@ Current mailbox connectors:
 | Microsoft 365 / Outlook | Built-in | User mailbox OAuth and sync jobs |
 | Inbound webhook providers | Advanced | Requires explicit tenant ID and `x-webhook-signature` HMAC using the tenant inbound secret |
 
-### Governed outbound provider
+### Mailbox senders and fallback provider
 
-Outbound delivery still uses the governed email provider configuration. SMTP is built in; additional providers can be added via plugins.
+Mailbox setup has two independent choices:
+
+- **Use this mailbox for customer context** enables customer thread sync and processing.
+- **Use this mailbox to send approved drafts** enables the mailbox as the actor sender identity. Gmail and Outlook provider-draft creation is available when the mailbox is authorized with draft/write scopes.
+
+Existing mailbox connections remain context-only until reauthorized with send/draft scopes. **Settings -> System Connections -> Shared Sender** configures the tenant fallback/shared email provider. It is used when a customer draft has no actor mailbox sender, and it also sends sequence or system-generated emails such as invites and password resets. Current customer-draft routing does not expose a per-draft override to force the shared provider when a ready actor mailbox sender is available.
+
+#### Configure Gmail or Outlook mailbox OAuth
+
+There are two setup paths:
+
+- **Admin path:** open **Settings -> System Connections -> OAuth**, choose **Google Workspace** or **Microsoft 365**, and verify the selected provider's first-connection preflight. Hosted SaaS tenants use the CRMy-managed provider app by default. Enterprise tenants can save a tenant-owned OAuth app override when they need their own consent screen, security review, verified publisher, or domain app restrictions. Self-hosted installs use environment-managed OAuth app credentials. The page shows the active app source, copyable redirect URIs, setup blockers, guided setup steps, missing setup details, and requested scopes. Do not ask the first actor to connect until mailbox and calendar show ready in the preflight panel. It never shows OAuth secrets or tokens after save. Admins monitor which actors have connected mailbox, sender, and calendar access from **Settings -> Actors**.
+- **User path:** open **Customer Email -> Mailboxes & Senders** to connect a mailbox, or **Customer Activity -> Connections** to connect a calendar. Users working from Claude, Codex, or the CLI can also call `mailbox_connection_start` / `calendar_connection_start` or run `crmy emails connect <provider>` / `crmy activities connect-calendar <provider>`. If OAuth is ready, CRMy returns a provider `auth_url`; the user opens that URL in a browser, finishes provider consent, then returns to MCP/CLI and lists connections to confirm `status=connected`. If OAuth is missing, users can request admin setup and admins can jump directly to the OAuth readiness page.
+
+OAuth app source precedence is tenant-owned app, then CRMy-managed hosted app, then self-hosted environment app. Tenant-owned secrets are encrypted and stored as write-only credentials; list and readiness responses only show whether a secret exists. Each mailbox/calendar connection records the OAuth client that issued its tokens so refresh uses the same app later; if an admin removes or changes that app, affected users should reauthorize their mailbox or calendar. Self-hosted/local users can ignore tenant-owned app settings and use `.env` credentials.
+
+Mailbox setup:
+
+1. Choose the app source:
+   - Hosted SaaS default: use the CRMy-managed Google/Microsoft app shown as ready in System Connections.
+   - Enterprise override: save a tenant-owned app in **System Connections -> OAuth** and add the CRMy redirect URL in that provider app.
+   - Self-hosted/local: create a provider OAuth app and add the CRMy redirect URL.
+     Google uses `https://your-crmy-host/api/v1/mailbox/oauth/google/callback`; Microsoft uses `https://your-crmy-host/api/v1/mailbox/oauth/microsoft/callback`; local development uses `http://localhost:3000` with the same paths.
+2. For self-hosted installs, set the app credentials in `.env`:
+   - Google: `GOOGLE_MAIL_CLIENT_ID`, `GOOGLE_MAIL_CLIENT_SECRET`, optional `GOOGLE_MAIL_REDIRECT_URI`
+   - Microsoft: `MICROSOFT_MAIL_CLIENT_ID`, `MICROSOFT_MAIL_CLIENT_SECRET`, optional `MICROSOFT_MAIL_REDIRECT_URI`, optional `MICROSOFT_TENANT_ID`
+3. Restart CRMy if you changed deployment environment variables. Tenant-owned app settings take effect immediately after save.
+4. Open `/app/emails`, choose **Mailboxes & Senders**, and connect Gmail or Outlook.
+5. Choose the mailbox permissions:
+   - **Use this mailbox for customer context** requests read access and enables Mailbox Context sync.
+   - **Use this mailbox to send approved drafts** requests send access and makes this mailbox eligible as the actor sender.
+   - **Create Gmail/Outlook provider drafts when supported** requests draft/write access so CRMy can push reviewed drafts to the provider draft folder.
+6. Choose the ingest scope:
+   - **Only my accounts** stores and processes synced messages only when CRMy can match them to accounts owned by the connected actor.
+   - **All accounts I can access** stores and processes synced messages when CRMy can match them to any account visible to that actor. For managers, this follows CRMy's visible-team/book access model.
+7. If CRMy can discover verified send-as aliases, choose the visible **Send as** identity on the same Mailboxes & Senders card. Alias discovery is best-effort so the first connection can still succeed; Gmail and Outlook use the authenticated mailbox address when alias discovery is unavailable.
+
+CRMy validates the scopes returned by the provider callback. If the provider does not grant send or draft/write permission, the mailbox remains connected for context but is not marked send-ready. Reauthorize the mailbox with the relevant toggle enabled after updating provider consent.
+
+Calendar setup uses the same admin/user split and the same app-source precedence. Hosted tenants can use the CRMy-managed app immediately when enabled, enterprise tenants can use the same tenant-owned Google/Microsoft override, and self-hosted installs configure `GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET` or `MICROSOFT_CALENDAR_CLIENT_ID` / `MICROSOFT_CALENDAR_CLIENT_SECRET`. The calendar redirect paths are `/api/v1/calendar/oauth/google/callback` and `/api/v1/calendar/oauth/microsoft/callback`. Users then connect their own calendar from **Customer Activity -> Connections**. Calendar OAuth is read-only, verifies the provider account email before saving, and feeds customer meeting context; calendar writeback is not enabled.
+
+Calendar ingest scope controls what synced meetings become CRMy records:
+
+- **Meetings with my accounts** stores and processes meetings only when attendees match accounts owned by the connected actor.
+- **Accounts I can access** stores and processes meetings when attendees match any account visible to that actor.
+- **All external meetings** stores external meetings that pass source filters even before CRMy can match a customer record, leaving unmatched items reviewable in Customer Activity.
+
+Mailbox and calendar matching use account primary domain plus **Additional Domains**. Add domains such as acquired brands, regional domains, or product-specific domains on the Account record so customer email and meeting attendees match the right account without overloading account aliases.
+
+Troubleshooting:
+
+- **OAuth app not ready:** hosted admins should verify the CRMy-managed app is enabled, enterprise admins should verify the tenant-owned client ID/secret are saved, and self-hosted admins should check the missing env var names in **System Connections -> OAuth**. CRMy records a setup request with the server-provided setup blockers instead of sending users to a broken provider redirect.
+- **Redirect URI mismatch:** Google and Microsoft require an exact string match. For local development, use the `http://localhost:3000/.../callback` URI shown in **System Connections -> OAuth** even if your browser is on `127.0.0.1`; CRMy normalizes loopback redirects to `localhost`. When CRMy is behind a tunnel, reverse proxy, or hosted domain, set `CRMY_PUBLIC_URL=https://your-crmy-host`, copy the exact redirect URI shown in **System Connections -> OAuth** into the provider app, then retry consent.
+- **Connected context-only but now needs send/drafts:** reauthorize the mailbox from **Mailboxes & Senders** with the send or provider-draft toggle enabled.
+- **Who has connected mail/calendar:** admins can review mailbox, sender, and calendar coverage badges and expanded details in **Settings -> Actors**, including connected email, connection date, last sync, latest message/event, processed volume, Raw Context sources, Signals, Memory, and latest issue.
+
+Requested scopes:
+
+| Provider | Context | Send | Provider drafts |
+|---|---|---|---|
+| Google Workspace / Gmail | `openid email profile`, `gmail.readonly` | `gmail.send` | `gmail.compose` |
+| Microsoft 365 / Outlook | `openid email profile offline_access`, `User.Read`, `Mail.Read` | `Mail.Send` | `Mail.ReadWrite` |
+
+Sender resolution order for drafts and sends:
+
+1. Actor's send-enabled default mailbox.
+2. Actor's only send-enabled mailbox.
+3. Tenant fallback/shared provider configured in **Settings -> System Connections -> Shared Sender**.
+4. No sender: CRMy draft only; approval and send are disabled.
+
+Sent outbound email becomes part of the customer timeline after delivery. CRMy marks that source as CRMy/seller-authored context, so briefings can use it for commitments, asks, follow-up actions, and reply-chain history without treating it as customer-authored truth.
+
+Replies sync back only through connected mailboxes or inbound webhooks. For mailbox replies, CRMy matches provider thread/conversation first, then message headers, then customer-record fallback.
+
+Operational recovery lives in **Reliability** (`/app/operations`). If delivery is uncertain, provider draft creation fails, or mailbox sync needs operator attention, the email drawer and Reliability queue show retry/reconcile actions with user-facing status instead of hiding the failure.
 
 ```json
 {
@@ -2200,19 +2364,20 @@ Outbound delivery still uses the governed email provider configuration. SMTP is 
 
 | Tool | Description |
 |---|---|
-| `mailbox_connection_list` | List mailbox connections and processing summary visible to the current user |
+| `mailbox_connection_list` | List mailbox connections, context/sender capabilities, and processing summary visible to the current user |
+| `mailbox_connection_start` | Start Gmail or Outlook OAuth from MCP/CLI and return a browser `auth_url` for the current human-linked actor |
 | `email_message_search` | Search customer email messages from mailbox sync, inbound webhooks, manual ingest, and outbound sends |
 | `email_message_get` | Get one canonical email message |
 | `email_message_link` | Link or relink a message to a customer record before processing |
 | `email_message_process` | Process a linked customer message as Raw Context |
 | `email_message_ignore` | Ignore a message so it no longer needs review |
-| `email_draft_preview` | Generate a customer email draft preview from Memory, Signals, source email, and linked records |
-| `email_draft_save` | Save an edited/generated draft, request approval, or explicitly send when allowed |
+| `email_draft_preview` | Generate a customer email draft preview from Memory, Signals, source email, linked records, and selected sender identity |
+| `email_draft_save` | Save an edited/generated draft, request approval, push a provider draft when supported, or explicitly send when allowed |
 | `email_create` | Legacy governed outbound email creation. Required: `to_address`, `subject`. Optional: `body_html`, `body_text`, `contact_id`, `account_id`, `opportunity_id`, `use_case_id`, `require_approval` |
 | `email_get` | Get email by ID |
 | `email_search` | Search by `contact_id`, `status` |
-| `email_provider_set` | Configure the tenant's email provider (SMTP, etc.) |
-| `email_provider_get` | Get current email provider config (passwords redacted) |
+| `email_provider_set` | Configure the tenant fallback/shared email provider (SMTP, etc.) |
+| `email_provider_get` | Get fallback/shared email provider config (passwords redacted) |
 
 ### Email statuses
 
@@ -2230,12 +2395,26 @@ draft → pending_approval → approved → sending → sent
 - **failed**: provider error or no provider configured
 - **rejected**: HITL reviewer rejected the email
 
+### Mailbox and calendar controls
+
+Admins can see actor connection coverage in **Settings → Actors**. The first view is intentionally binary: email connected, calendar connected, and sender active/paused. Expanding an actor shows provider details, last sync, latest issue, and actions.
+
+- **Deactivate** pauses CRMy use of that mailbox or calendar while preserving the OAuth connection. A paused mailbox is not read and is not used as a sender. A paused calendar is not read and is not used for availability.
+- **Activate** restores the prior capabilities when OAuth tokens are still available. If credentials were removed or scopes are missing, CRMy asks the user to reconnect through OAuth.
+- **Disconnect** deletes the connection and stored OAuth tokens. Reconnecting requires provider consent again.
+
+Individual users can manage their own mailbox from **Customer Email → Mailboxes & Senders** and their own calendar from **Customer Activity → Connections**.
+
+Connection cards show each source's ingest scope and sync stats, including items skipped because they were outside the selected account scope. These skips are expected when a mailbox or calendar sees customer-like conversations that do not belong to the connected actor's selected book.
+
 ### CLI
 
 ```bash
 crmy emails create           # interactive
 crmy emails list --status pending_approval
 crmy emails get <id>
+crmy emails connections
+crmy emails connect google --scope owned_accounts
 crmy emails messages --view review
 crmy emails process <message-id>
 crmy emails draft-preview --source-email <message-id>
@@ -2248,9 +2427,11 @@ crmy emails ignore-message <message-id>
 ```
 GET    /api/v1/emails?contact_id=...&status=sent
 POST   /api/v1/emails
+GET    /api/v1/emails/sender
 GET    /api/v1/emails/:id
 GET    /api/v1/mailbox/connections
 POST   /api/v1/mailbox/connections/:provider/start
+PATCH  /api/v1/mailbox/connections/:id/status
 POST   /api/v1/mailbox/connections/:id/sync
 GET    /api/v1/email-messages
 GET    /api/v1/email-messages/:id
@@ -2496,6 +2677,18 @@ CRMy is the policy boundary between agent inference and operational change. Agen
 
 Action Context is the tool agents should use before preparing meaningful customer action. It is not a blanket approval requirement. It gives the agent one compact packet with Memory, Signals, stale or conflicting context, source authority, allowed actions, warnings, expected proof, and review requirements when risk demands them.
 
+Every response includes `action_packet`, an agent-facing decision packet:
+
+- `use_as_truth`: confirmed Current Memory the agent can rely on.
+- `use_with_caution`: unconfirmed Signals, ready Signal groups, or source-authority details that may guide work but should be caveated.
+- `do_not_use_as_truth`: stale Memory, unresolved Signal groups, contradictions, blocking assignments, policy blocks, or permission boundaries.
+- `evidence_to_cite`: the best evidence-backed items to quote or cite when explaining the recommendation.
+- `source_posture`: whether the packet is mainly backed by customer-authored evidence, CRMy/seller-authored context, systems of record, internal notes/meetings, mixed sources, or weak/unknown evidence. Seller-authored context can guide follow-up but should not be treated as customer truth.
+- `recommended_actions`: the next operational steps an agent can take now, including whether the step affects a customer/system, whether review is required, and which tool to call next.
+- `action_boundaries`: allowed actions, warnings, blocked conditions, and review-required reasons.
+- `human_unblock`: the smallest human question CRMy can identify when review is required.
+- `next_tools`: recommended CRMy tools for the next step.
+
 Use the result in three practical modes:
 
 | Mode | Agent behavior | Typical use |
@@ -2506,11 +2699,14 @@ Use the result in three practical modes:
 
 Warnings do not automatically become Handoffs. `required_handoffs` should mean the action cannot execute without review; non-blocking issues stay visible in `guidance.warning_reasons` and `checks`.
 
+When the packet says review is required, agents can create the human decision directly with `action_context_request_human_unblock`. It records a handoff snapshot first, then creates either a HITL approval request or an assignment with the Action Context packet, proof, and agent reasoning attached. This is the preferred bridge from “CRMy says stop” to “a human has the exact thing to review.”
+
 CLI users can retrieve the same packet without dropping to the generic tool bridge:
 
 ```bash
 crmy action-context "account:Northstar Labs" --action customer_outreach
 crmy action-context "opportunity:Agent Context Rollout" --action external_writeback --object-type opportunity --fields stage,amount --json
+crmy action-context unblock "account:Northstar Labs" --action customer_outreach --type approval --priority high
 ```
 
 Built-in Action Policies protect high-risk actions before custom rules run:
@@ -2543,6 +2739,7 @@ Set `auto_approve_after_seconds` to auto-approve if no human responds within the
 
 | Tool | Description |
 |---|---|
+| `action_context_request_human_unblock` | Create a HITL approval or assignment from Action Context review guidance, preserving the action packet and handoff snapshot |
 | `hitl_submit_request` | Submit a request. Required: `action_type`, `action_summary`, `action_payload`. Optional: `auto_approve_after_seconds` |
 | `hitl_check_status` | Check the status of a request |
 | `hitl_list_pending` | List pending requests |
@@ -2596,7 +2793,7 @@ GET    /api/v1/search?q=acme&limit=10
 
 ## Systems of Record
 
-Systems of Record connect CRMy to the enterprise sources that already hold customer state. In 0.8, the connector framework supports HubSpot, Salesforce, Databricks, and Snowflake through one governed model.
+Systems of Record connect CRMy to the enterprise sources that already hold customer state. The connector framework supports HubSpot, Salesforce, Databricks, and Snowflake through one governed model.
 
 Use **Settings → Systems of Record** to:
 
@@ -2639,7 +2836,7 @@ Security notes:
 - External writes require configured mappings and writeback modes. Arbitrary agent-generated SQL writes are not allowed.
 - Sync respects mapping source authority. External-authoritative mappings can update CRMy directly; CRMy-authoritative, read-only, and approval-required mappings create conflicts instead of overwriting existing records. Bidirectional mappings update only when CRMy has not diverged from the last synced value.
 - Databricks and Snowflake writeback previews block requests unless the mapping has an admin-defined `writeback_config.sql_template` and the payload only uses configured writable fields. Add `writeback_config.parameter_order` when SQL parameters must bind in a specific order.
-- `context_entry` mappings are reserved in 0.8. They create reviewable sync conflicts until connector/system author actors are available, rather than silently writing memory.
+- `context_entry` mappings are reserved. They create reviewable sync conflicts until connector/system author actors are available, rather than silently writing memory.
 
 Automation notes:
 
@@ -2847,13 +3044,13 @@ npx -y @crmy/cli agent-smoke
 Then ask the connected agent:
 
 ```text
-Use the CRMy MCP tools to resolve the customer record "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.
+Use the CRMy MCP tools to resolve the customer record "Northstar Labs", get a briefing, get Action Context for customer outreach, list Signals that need attention, check lineage outcomes, and tell me the safest next action with the evidence you used.
 ```
 
 Hermes Agent prompt:
 
 ```text
-Use mcp_crmy_customer_record_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, then call mcp_crmy_context_signal_group_list for Signals needing attention. Tell me the safest next action with the evidence you used.
+Use mcp_crmy_customer_record_resolve to resolve "Northstar Labs", call mcp_crmy_briefing_get, call mcp_crmy_action_context_get for customer outreach, call mcp_crmy_context_signal_group_list for Signals needing attention, then call mcp_crmy_context_lineage_get to check outcomes. Tell me the safest next action with the evidence you used.
 ```
 
 **HTTP (remote agents):**
@@ -2864,28 +3061,28 @@ Authorization: Bearer <jwt-or-api-key>
 Content-Type: application/json
 ```
 
-Uses the MCP Streamable HTTP transport. Initialization creates an `mcp-session-id`; later GET, POST, and DELETE requests can reuse that session as long as they authenticate as the same actor and scope set. Idle sessions are evicted automatically.
+Uses the MCP Streamable HTTP transport. Initialization creates an `mcp-session-id`; later GET, POST, and DELETE requests can reuse that session as long as they authenticate as the same actor and scope set. Idle sessions are evicted automatically. In multi-instance deployments, CRMy records session ownership durably and requires sticky routing by `mcp-session-id`; wrong-instance requests return a clear reinitialize/sticky-routing error instead of creating an unsafe replacement session.
 
 ### Full tool list
 
 | Category | Tools |
 |---|---|
-| Briefing | `briefing_get`, `action_context_get` |
+| Briefing | `briefing_get`, `action_context_get`, `action_context_request_human_unblock` |
 | Context | `context_ingest_auto`, `context_ingest`, `context_raw_source_list`, `context_raw_source_get`, `context_raw_source_reprocess`, `context_add`, `context_get`, `context_find`, `context_list`, `context_lineage_get`, `context_signal_group_list`, `context_signal_group_get`, `context_signal_group_complete_details`, `context_signal_group_promote`, `context_signal_handoff`, `context_signal_group_reject`, `context_signal_promote`, `context_signal_reject`, `context_supersede`, `context_search`, `context_semantic_search`, `context_review`, `context_review_batch`, `context_bulk_mark_stale`, `context_stale`, `context_diff`, `context_extract`, `context_stale_assign`, `context_detect_contradictions`, `context_contradiction_assign`, `context_resolve_contradiction`, `context_consolidate`, `context_embed_backfill` |
 | Agent Handoffs | `agent_capture_handoff`, `agent_resume_handoff` |
 | Actors | `actor_register`, `actor_get`, `actor_list`, `actor_update`, `actor_whoami`, `actor_expertise`, `agent_register_specialization`, `agent_find_specialist`, `agent_set_availability` |
 | Assignments | `assignment_create`, `assignment_get`, `assignment_list`, `assignment_update`, `assignment_accept`, `assignment_complete`, `assignment_decline`, `assignment_start`, `assignment_block`, `assignment_cancel` |
 | HITL | `hitl_submit_request`, `hitl_check_status`, `hitl_list_pending`, `hitl_resolve` |
-| Activities and Calendar | `activity_create`, `activity_get`, `activity_search`, `activity_add_context`, `activity_complete`, `activity_update`, `activity_get_timeline`, `calendar_connection_list`, `calendar_event_search`, `calendar_event_get`, `calendar_event_process`, `calendar_event_add_context`, `meeting_classification_list` |
+| Activities and Calendar | `activity_create`, `activity_get`, `activity_search`, `activity_add_context`, `activity_complete`, `activity_update`, `activity_get_timeline`, `availability_suggest_times`, `calendar_connection_list`, `calendar_connection_start`, `calendar_event_search`, `calendar_event_get`, `calendar_event_process`, `calendar_event_add_context`, `meeting_classification_list` |
 | Contacts | `contact_create`, `contact_get`, `contact_search`, `contact_update`, `contact_set_lifecycle`, `contact_get_timeline`, `contact_get_opportunities`, `contact_score`, `contact_merge`, `contact_delete` |
-| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_merge`, `account_health_report`, `account_delete` |
+| Accounts | `account_create`, `account_get`, `account_search`, `account_update`, `account_set_health_score`, `account_get_hierarchy`, `account_merge`, `account_split_domains`, `account_health_report`, `account_delete` |
 | Opportunities | `opportunity_create`, `opportunity_get`, `opportunity_search`, `opportunity_advance_stage`, `opportunity_update`, `opportunity_health_score`, `opportunity_delete` |
 | Messaging | `message_channel_create`, `message_channel_update`, `message_channel_get`, `message_channel_delete`, `message_channel_list`, `message_send`, `message_delivery_get`, `message_delivery_search` |
 | Use Cases | `use_case_create`, `use_case_get`, `use_case_search`, `use_case_update`, `use_case_delete`, `use_case_advance_stage`, `use_case_update_consumption`, `use_case_set_health`, `use_case_link_contact`, `use_case_unlink_contact`, `use_case_list_contacts`, `use_case_get_timeline`, `use_case_summary` |
 | Registries | `activity_type_list`, `activity_type_add`, `activity_type_remove`, `context_type_list`, `context_type_add`, `context_type_remove` |
 | Workflows | `workflow_create`, `workflow_get`, `workflow_update`, `workflow_delete`, `workflow_list`, `workflow_run_list`, `workflow_test`, `workflow_clone`, `workflow_trigger`, `workflow_run_replay`, `workflow_template_list` |
-| Webhooks | `webhook_create`, `webhook_get`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
-| Emails | `email_create`, `email_get`, `email_search`, `mailbox_connection_list`, `email_message_search`, `email_message_get`, `email_message_link`, `email_message_process`, `email_message_ignore`, `email_draft_preview`, `email_draft_save`, `email_ingest`, `email_provider_set`, `email_provider_get` |
+| Webhooks | `webhook_create`, `webhook_get`, `webhook_reveal_secret`, `webhook_rotate_secret`, `webhook_update`, `webhook_delete`, `webhook_list`, `webhook_list_deliveries` |
+| Emails | `email_create`, `email_get`, `email_search`, `mailbox_connection_list`, `mailbox_connection_start`, `email_message_search`, `email_message_get`, `email_message_link`, `email_message_process`, `email_message_ignore`, `email_draft_preview`, `email_draft_save`, `email_ingest`, `email_provider_set`, `email_provider_get` |
 | Email Sequences | `sequence_create`, `sequence_get`, `sequence_update`, `sequence_delete`, `sequence_list`, `sequence_enroll`, `sequence_unenroll`, `sequence_pause`, `sequence_resume`, `sequence_advance`, `sequence_enrollment_get`, `sequence_enrollment_context`, `sequence_enrollment_list`, `sequence_draft_step`, `sequence_analytics`, `sequence_clone` |
 | Custom Fields | `custom_field_create`, `custom_field_update`, `custom_field_delete`, `custom_field_list` |
 | Record Resolution | `customer_record_resolve` |
@@ -3062,7 +3259,9 @@ Base URL for REST resources: `/api/v1`. Auth endpoints are mounted separately at
 |---|---|---|
 | GET | `/webhooks` | List endpoints |
 | POST | `/webhooks` | Register endpoint |
-| GET | `/webhooks/:id` | Get endpoint |
+| GET | `/webhooks/:id` | Get endpoint with masked signing-secret state |
+| POST | `/webhooks/:id/secret/reveal` | Reveal the full signing secret for receiver setup |
+| POST | `/webhooks/:id/secret/rotate` | Regenerate the signing secret; the previous secret stops working immediately |
 | PATCH | `/webhooks/:id` | Update |
 | DELETE | `/webhooks/:id` | Remove |
 | GET | `/webhooks/:id/deliveries` | Delivery log |
@@ -3075,10 +3274,16 @@ Customer Email is the mailbox-facing Raw Context layer. Connect Gmail, Outlook, 
 |---|---|---|
 | GET | `/emails` | List/search governed outbound email drafts and send history |
 | POST | `/emails` | Draft a governed follow-up email |
+| GET | `/emails/sender` | Resolve the current actor sender identity for outbound drafts and sends |
 | GET | `/emails/:id` | Get outbound email |
-| GET | `/mailbox/connections` | List mailbox connections and customer-email processing summary |
-| POST | `/mailbox/connections/:provider/start` | Start a Gmail or Outlook mailbox connection |
+| POST | `/emails/:id/provider-draft/retry` | Retry provider draft creation for an editable outbound email |
+| POST | `/emails/:id/delivery-resolution` | Retry, mark sent, or mark failed for failed or delivery-uncertain outbound email |
+| GET | `/mailbox/connections` | List mailbox connections, context/sender capabilities, and customer-email processing summary |
+| POST | `/mailbox/connections/:provider/start` | Start a Gmail or Outlook mailbox connection with context/sender permission choices |
+| PATCH | `/mailbox/connections/:id/status` | Activate or deactivate a mailbox connection without deleting OAuth credentials |
 | POST | `/mailbox/connections/:id/sync` | Queue a mailbox sync job |
+| POST | `/mailbox/connections/:id/aliases/refresh` | Refresh verified sender aliases for a Gmail or Outlook mailbox |
+| PATCH | `/mailbox/connections/:id/sender` | Choose the verified sender alias used by outbound drafts from that mailbox |
 | GET | `/email-messages` | List canonical customer email messages |
 | GET | `/email-messages/:id` | Get customer email message, linked records, and processing receipt |
 | PATCH | `/email-messages/:id/classification` | Mark a message as customer, mixed, internal, automated, or unknown |
@@ -3086,7 +3291,11 @@ Customer Email is the mailbox-facing Raw Context layer. Connect Gmail, Outlook, 
 | POST | `/email-messages/:id/process` | Process an email as Raw Context |
 | POST | `/email-messages/:id/ignore` | Hide a message from review queues |
 | POST | `/emails/draft-preview` | Generate an editable customer email draft preview |
-| POST | `/emails/drafts` | Save a CRMy draft, request approval, or explicit send when allowed |
+| POST | `/emails/drafts` | Save a CRMy draft, request approval, push a provider draft when supported, or explicit send when allowed |
+| POST | `/availability/suggest-times` | Suggest meeting windows from connected internal calendar free/busy and customer timing preferences |
+| GET | `/admin/oauth-readiness` | Admin-only Google/Microsoft mailbox and calendar OAuth readiness without secret values |
+| GET/PUT/DELETE | `/admin/oauth-apps/:provider` | Admin-only tenant-owned Google/Microsoft OAuth app overrides; secrets are write-only |
+| GET | `/admin/actor-connections` | Admin-only actor mailbox sender and calendar connection coverage |
 
 ### Messaging Channels
 

@@ -7,6 +7,7 @@ import type { DbPool } from '../../db/pool.js';
 import type { ActorContext, HITLRequest, UUID } from '@crmy/shared';
 import { withTransaction } from '../../db/transaction.js';
 import * as hitlRepo from '../../db/repos/hitl.js';
+import * as emailRepo from '../../db/repos/emails.js';
 import { emitEvent } from '../../events/emitter.js';
 import { notFound, validationError } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
@@ -35,6 +36,22 @@ function hitlPayload(payload: unknown): Record<string, unknown> {
 }
 
 async function applyApprovedHITLAction(db: DbPool, actor: ActorContext, request: HITLRequest) {
+  if (request.action_type === 'email.send') {
+    const email = await emailRepo.getEmailByHitlRequestId(db, actor.tenant_id, request.id);
+    if (email) {
+      await emailRepo.updateEmailStatus(db, actor.tenant_id, email.id, 'approved', {
+        hitl_resolution: {
+          status: 'approved',
+          reviewer_id: request.reviewer_id ?? null,
+          review_note: request.review_note ?? null,
+          resolved_at: request.resolved_at ?? null,
+        },
+      });
+      await emailRepo.enqueueEmailDeliveryJob(db, actor.tenant_id, email.id, { reason: 'hitl_approved' });
+      return { email };
+    }
+  }
+
   const createdRecord = await applyApprovedRecordCreation(db, actor, request);
   if (createdRecord) return { created_record: createdRecord };
 
@@ -156,6 +173,19 @@ export function hitlTools(db: DbPool): ToolDef[] {
             input.note,
           );
           if (!request) throw notFound('HITL Request (or already resolved)', input.request_id);
+          if (request.action_type === 'email.send' && input.decision === 'rejected') {
+            const email = await emailRepo.getEmailByHitlRequestId(tx, actor.tenant_id, request.id);
+            if (email) {
+              await emailRepo.updateEmailStatus(tx, actor.tenant_id, email.id, 'rejected', {
+                hitl_resolution: {
+                  status: 'rejected',
+                  reviewer_id: request.reviewer_id ?? actor.actor_id,
+                  review_note: request.review_note ?? input.note ?? null,
+                  resolved_at: request.resolved_at ?? null,
+                },
+              });
+            }
+          }
           const applied = input.decision === 'approved'
             ? await applyApprovedHITLAction(tx, actor, request)
             : {};

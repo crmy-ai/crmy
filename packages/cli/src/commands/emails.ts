@@ -33,13 +33,22 @@ export function emailsCommand(): Command {
   cmd.command('list')
     .description('List governed outbound emails')
     .option('--contact <id>', 'Filter by contact ID')
+    .option('--account <id>', 'Filter by account ID')
+    .option('--opportunity <id>', 'Filter by opportunity ID')
+    .option('--use-case <id>', 'Filter by use case ID')
+    .option('--q <query>', 'Search subject, body, participants, or linked account')
     .option('--status <status>', 'Filter by status')
+    .option('--limit <n>', 'Maximum rows to return', '20')
     .action(async (opts) => {
       const client = await getClient();
       const result = await client.call('email_search', {
         contact_id: opts.contact,
+        account_id: opts.account,
+        opportunity_id: opts.opportunity,
+        use_case_id: opts.useCase,
+        q: opts.q,
         status: opts.status,
-        limit: 20,
+        limit: Number(opts.limit) || 20,
       });
       const data = JSON.parse(result);
       const emails = data.emails ?? data.data ?? (Array.isArray(data) ? data : []);
@@ -146,6 +155,44 @@ export function emailsCommand(): Command {
       await client.close();
     });
 
+  cmd.command('connect <provider>')
+    .description('Start Gmail or Outlook mailbox OAuth and print the browser consent URL')
+    .option('--email <email>', 'Mailbox address. Defaults to your CRMy user email.')
+    .option('--name <name>', 'Display name for the mailbox connection')
+    .option('--scope <scope>', 'owned_accounts or accessible_accounts', 'owned_accounts')
+    .option('--no-context', 'Do not use this mailbox for customer context')
+    .option('--no-send', 'Do not request send permission')
+    .option('--no-provider-drafts', 'Do not request provider draft creation permission')
+    .option('--no-default-sender', 'Do not make this the default sender')
+    .action(async (provider, opts) => {
+      if (!['google', 'microsoft'].includes(provider)) {
+        throw new Error('Provider must be google or microsoft.');
+      }
+      const client = await getClient();
+      const result = await client.call('mailbox_connection_start', {
+        provider,
+        email_address: opts.email,
+        display_name: opts.name,
+        account_ingest_scope: opts.scope === 'accessible_accounts' ? 'accessible_accounts' : 'owned_accounts',
+        context_sync_enabled: opts.context !== false,
+        send_enabled: opts.send !== false,
+        provider_draft_enabled: opts.providerDrafts !== false,
+        is_default_sender: opts.defaultSender !== false,
+      });
+      const data = JSON.parse(result);
+      console.log(`Mailbox connection status: ${data.status}`);
+      console.log(data.message);
+      if (data.auth_url) {
+        console.log('\nOpen this URL in a browser to finish provider consent:\n');
+        console.log(data.auth_url);
+        console.log('\nAfter consent completes, run: crmy emails connections');
+      } else if (data.setup_check?.setup_blockers?.length) {
+        console.log('\nSetup blockers:');
+        for (const blocker of data.setup_check.setup_blockers) console.log(`- ${blocker}`);
+      }
+      await client.close();
+    });
+
   cmd.command('get <id>')
     .action(async (id) => {
       const client = await getClient();
@@ -156,6 +203,7 @@ export function emailsCommand(): Command {
     });
 
   cmd.command('create')
+    .description('Create a governed outbound email through the same Action Context and sender-resolution path as save-draft')
     .action(async () => {
       const { default: inquirer } = await import('inquirer');
       const answers = await inquirer.prompt([
@@ -175,10 +223,11 @@ export function emailsCommand(): Command {
         require_approval: answers.require_approval,
       });
       const data = JSON.parse(result);
-      console.log(`\n  Created email: ${data.email.id}  status: ${data.email.status}\n`);
+      console.log(`\n  Created email: ${data.email.id}  status: ${data.email.status ?? data.status}\n`);
       if (data.hitl_request_id) {
         console.log(`  HITL approval required: ${data.hitl_request_id}\n`);
       }
+      if (data.sender) console.log(`  From: ${data.sender.from_name ?? ''} <${data.sender.from_email ?? 'not configured'}>\n`);
       await client.close();
     });
 

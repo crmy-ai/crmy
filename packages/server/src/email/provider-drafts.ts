@@ -3,6 +3,8 @@
 
 import { CrmyError, type UUID } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
+import * as emailRepo from '../db/repos/emails.js';
+import { createMailboxDraft } from './mailbox-delivery.js';
 
 export interface ProviderDraftInput {
   email_id: UUID;
@@ -18,14 +20,19 @@ export interface ProviderDraftResult {
 }
 
 export async function createProviderDraft(
-  _db: DbPool,
-  _tenantId: UUID,
-  _input: ProviderDraftInput,
+  db: DbPool,
+  tenantId: UUID,
+  input: ProviderDraftInput,
 ): Promise<ProviderDraftResult> {
-  throw new CrmyError(
-    'VALIDATION_ERROR',
-    'Provider draft folders are not enabled yet. Save this as a CRMy draft or send it for approval.',
-    412,
-    { code: 'unsupported_capability' },
-  );
+  const email = await emailRepo.getEmail(db, tenantId, input.email_id);
+  if (!email) {
+    throw new CrmyError('NOT_FOUND', 'Email draft not found', 404);
+  }
+  if (email.sender_type !== 'actor_mailbox') {
+    return {
+      status: 'unsupported_capability',
+      message: 'Provider drafts are available only for connected Gmail or Outlook mailbox senders. Save this as a CRMy draft instead.',
+    };
+  }
+  return createMailboxDraft(db, tenantId, email);
 }

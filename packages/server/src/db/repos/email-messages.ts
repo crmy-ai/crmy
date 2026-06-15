@@ -8,6 +8,7 @@ export type EmailClassification = 'customer' | 'mixed' | 'internal' | 'automated
 export type EmailProcessingStatus = 'unprocessed' | 'processing' | 'processed' | 'needs_review' | 'skipped' | 'failed' | 'ignored';
 export type MailboxProvider = 'google' | 'microsoft' | 'webhook';
 export type MailboxConnectionStatus = 'configuration_required' | 'connected' | 'syncing' | 'error' | 'disconnected';
+export type MailboxSendStatus = 'not_authorized' | 'ready' | 'disabled' | 'error';
 
 export interface MailboxConnection {
   id: UUID;
@@ -25,6 +26,12 @@ export interface MailboxConnection {
   token_expires_at?: string | null;
   sync_stats?: Record<string, unknown>;
   settings: Record<string, unknown>;
+  context_sync_enabled: boolean;
+  send_enabled: boolean;
+  provider_draft_enabled: boolean;
+  send_status: MailboxSendStatus;
+  send_last_error?: string | null;
+  is_default_sender: boolean;
   last_sync_at?: string | null;
   last_error?: string | null;
   created_at: string;
@@ -76,6 +83,10 @@ export interface EmailMessage {
   draft_origin?: string | null;
   hitl_request_id?: UUID | null;
   provider_draft_status?: string | null;
+  mailbox_email_address?: string | null;
+  mailbox_display_name?: string | null;
+  reply_to_email_message_id?: UUID | null;
+  conversation_root_email_message_id?: UUID | null;
 }
 
 export interface EmailSubjectSummary {
@@ -86,6 +97,11 @@ export interface EmailSubjectSummary {
   drafts: number;
   pending_approvals: number;
   needs_review: number;
+  inbound_needs_review: number;
+  outbound_drafts: number;
+  outbound_pending_approvals: number;
+  outbound_failed: number;
+  outbound_rejected: number;
   latest_at?: string | null;
 }
 
@@ -117,6 +133,8 @@ export interface EmailMessageInput {
   activity_id?: UUID | null;
   raw_context_source_id?: UUID | null;
   email_id?: UUID | null;
+  reply_to_email_message_id?: UUID | null;
+  conversation_root_email_message_id?: UUID | null;
   extraction_receipt?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
   received_at?: string | null;
@@ -187,19 +205,32 @@ export async function createPlaceholderConnection(
     status?: MailboxConnectionStatus;
     last_error?: string | null;
     settings?: Record<string, unknown>;
+    context_sync_enabled?: boolean;
+    send_enabled?: boolean;
+    provider_draft_enabled?: boolean;
+    send_status?: MailboxSendStatus;
+    send_last_error?: string | null;
+    is_default_sender?: boolean;
   },
 ): Promise<MailboxConnection> {
   const result = await db.query(
     `INSERT INTO mailbox_connections (
-       tenant_id, user_id, provider, email_address, display_name, status, last_error, settings
+       tenant_id, user_id, provider, email_address, display_name, status, last_error, settings,
+       context_sync_enabled, send_enabled, provider_draft_enabled, send_status, send_last_error, is_default_sender
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12,$13,$14)
      ON CONFLICT (tenant_id, user_id, provider, email_address)
      DO UPDATE SET
        display_name = COALESCE(EXCLUDED.display_name, mailbox_connections.display_name),
        status = EXCLUDED.status,
        last_error = EXCLUDED.last_error,
        settings = mailbox_connections.settings || EXCLUDED.settings,
+       context_sync_enabled = EXCLUDED.context_sync_enabled,
+       send_enabled = EXCLUDED.send_enabled,
+       provider_draft_enabled = EXCLUDED.provider_draft_enabled,
+       send_status = EXCLUDED.send_status,
+       send_last_error = EXCLUDED.send_last_error,
+       is_default_sender = EXCLUDED.is_default_sender,
        updated_at = now()
      RETURNING *`,
     [
@@ -211,6 +242,12 @@ export async function createPlaceholderConnection(
       data.status ?? 'configuration_required',
       data.last_error ?? null,
       JSON.stringify(data.settings ?? {}),
+      data.context_sync_enabled ?? true,
+      data.send_enabled ?? false,
+      data.provider_draft_enabled ?? false,
+      data.send_status ?? (data.send_enabled ? 'ready' : 'not_authorized'),
+      data.send_last_error ?? null,
+      data.is_default_sender ?? false,
     ],
   );
   return result.rows[0] as MailboxConnection;
@@ -223,7 +260,9 @@ export async function updateMailboxConnection(
   patch: Partial<Pick<MailboxConnection,
     'status' | 'scopes' | 'sync_cursor' | 'provider_account_id' | 'access_token_enc' |
     'refresh_token_enc' | 'token_expires_at' | 'sync_stats' | 'settings' |
-    'last_sync_at' | 'last_error' | 'display_name' | 'email_address'
+    'last_sync_at' | 'last_error' | 'display_name' | 'email_address' |
+    'context_sync_enabled' | 'send_enabled' | 'provider_draft_enabled' |
+    'send_status' | 'send_last_error' | 'is_default_sender'
   >>,
 ): Promise<MailboxConnection | null> {
   const sets = ['updated_at = now()'];
@@ -240,6 +279,12 @@ export async function updateMailboxConnection(
     'last_error',
     'display_name',
     'email_address',
+    'context_sync_enabled',
+    'send_enabled',
+    'provider_draft_enabled',
+    'send_status',
+    'send_last_error',
+    'is_default_sender',
   ] as const;
   for (const field of scalarFields) {
     if (field in patch) {
@@ -345,11 +390,12 @@ export async function upsertEmailMessage(
        from_email, from_name, to_emails, cc_emails, subject, body_text, body_html,
        snippet, classification, processing_status, processing_reason, contact_id,
        account_id, opportunity_id, use_case_id, activity_id, raw_context_source_id,
-       email_id, extraction_receipt, metadata, received_at, sent_at
+       email_id, reply_to_email_message_id, conversation_root_email_message_id,
+       extraction_receipt, metadata, received_at, sent_at
      )
      VALUES (
        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
-       $21,$22,$23,$24,$25,$26,$27,$28,$29::jsonb,$30::jsonb,$31,$32
+       $21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31::jsonb,$32::jsonb,$33,$34
      )
      ON CONFLICT (tenant_id, mailbox_connection_id, provider_message_id)
        WHERE provider_message_id IS NOT NULL
@@ -365,9 +411,18 @@ export async function upsertEmailMessage(
        body_text = COALESCE(EXCLUDED.body_text, email_messages.body_text),
        body_html = COALESCE(EXCLUDED.body_html, email_messages.body_html),
        snippet = COALESCE(EXCLUDED.snippet, email_messages.snippet),
-       classification = EXCLUDED.classification,
-       processing_status = EXCLUDED.processing_status,
-       processing_reason = EXCLUDED.processing_reason,
+       classification = CASE
+         WHEN email_messages.processing_status IN ('processed', 'ignored', 'skipped') THEN email_messages.classification
+         ELSE EXCLUDED.classification
+       END,
+       processing_status = CASE
+         WHEN email_messages.processing_status IN ('processed', 'ignored', 'skipped') THEN email_messages.processing_status
+         ELSE EXCLUDED.processing_status
+       END,
+       processing_reason = CASE
+         WHEN email_messages.processing_status IN ('processed', 'ignored', 'skipped') THEN email_messages.processing_reason
+         ELSE EXCLUDED.processing_reason
+       END,
        contact_id = COALESCE(EXCLUDED.contact_id, email_messages.contact_id),
        account_id = COALESCE(EXCLUDED.account_id, email_messages.account_id),
        opportunity_id = COALESCE(EXCLUDED.opportunity_id, email_messages.opportunity_id),
@@ -375,6 +430,8 @@ export async function upsertEmailMessage(
        activity_id = COALESCE(EXCLUDED.activity_id, email_messages.activity_id),
        raw_context_source_id = COALESCE(EXCLUDED.raw_context_source_id, email_messages.raw_context_source_id),
        email_id = COALESCE(EXCLUDED.email_id, email_messages.email_id),
+       reply_to_email_message_id = COALESCE(EXCLUDED.reply_to_email_message_id, email_messages.reply_to_email_message_id),
+       conversation_root_email_message_id = COALESCE(EXCLUDED.conversation_root_email_message_id, email_messages.conversation_root_email_message_id),
        extraction_receipt = email_messages.extraction_receipt || EXCLUDED.extraction_receipt,
        metadata = email_messages.metadata || EXCLUDED.metadata,
        received_at = COALESCE(EXCLUDED.received_at, email_messages.received_at),
@@ -410,6 +467,8 @@ export async function upsertEmailMessage(
       input.activity_id ?? null,
       input.raw_context_source_id ?? null,
       input.email_id ?? null,
+      input.reply_to_email_message_id ?? null,
+      input.conversation_root_email_message_id ?? null,
       JSON.stringify(input.extraction_receipt ?? {}),
       JSON.stringify(input.metadata ?? {}),
       input.received_at ?? null,
@@ -419,6 +478,71 @@ export async function upsertEmailMessage(
   return result.rows[0] as EmailMessage;
 }
 
+export async function listSendEnabledMailboxConnections(
+  db: DbPool,
+  tenantId: UUID,
+  userId: UUID,
+): Promise<MailboxConnection[]> {
+  const result = await db.query(
+    `SELECT * FROM mailbox_connections
+     WHERE tenant_id = $1
+       AND user_id = $2
+       AND send_enabled = true
+       AND send_status = 'ready'
+       AND status = 'connected'
+     ORDER BY is_default_sender DESC, created_at DESC`,
+    [tenantId, userId],
+  );
+  return result.rows as MailboxConnection[];
+}
+
+export async function findReplyLink(
+  db: DbPool,
+  tenantId: UUID,
+  input: {
+    mailbox_connection_id?: UUID | null;
+    thread_id?: string | null;
+    in_reply_to?: string | null;
+    references_header?: string[];
+  },
+): Promise<EmailMessage | null> {
+  const headerRefs = [input.in_reply_to, ...(input.references_header ?? [])].filter(Boolean) as string[];
+  if (input.thread_id) {
+    const threadResult = await db.query(
+      `SELECT * FROM email_messages
+       WHERE tenant_id = $1
+         AND direction = 'outbound'
+         AND email_id IS NOT NULL
+         AND thread_id = $2
+         AND ($3::uuid IS NULL OR mailbox_connection_id = $3)
+       ORDER BY COALESCE(sent_at, created_at) DESC
+       LIMIT 1`,
+      [tenantId, input.thread_id, input.mailbox_connection_id ?? null],
+    );
+    if (threadResult.rows[0]) return rowToMessage(threadResult.rows[0]);
+  }
+  if (headerRefs.length > 0) {
+    const headerResult = await db.query(
+      `SELECT em.*
+       FROM email_messages em
+       LEFT JOIN emails e ON e.id = em.email_id AND e.tenant_id = em.tenant_id
+       WHERE em.tenant_id = $1
+         AND em.direction = 'outbound'
+         AND em.email_id IS NOT NULL
+         AND (
+           em.message_id = ANY($2::text[])
+           OR em.provider_message_id = ANY($2::text[])
+           OR e.provider_msg_id = ANY($2::text[])
+         )
+       ORDER BY COALESCE(em.sent_at, em.created_at) DESC
+       LIMIT 1`,
+      [tenantId, headerRefs],
+    );
+    if (headerResult.rows[0]) return rowToMessage(headerResult.rows[0]);
+  }
+  return null;
+}
+
 export async function getEmailMessage(db: DbPool, tenantId: UUID, id: UUID): Promise<EmailMessage | null> {
   const result = await db.query(
     `SELECT em.*,
@@ -426,17 +550,20 @@ export async function getEmailMessage(db: DbPool, tenantId: UUID, id: UUID): Pro
        a.name AS account_name,
        o.name AS opportunity_name,
        u.name AS use_case_name,
-       e.status AS email_status,
-       e.draft_origin,
-       e.hitl_request_id,
-       e.provider_draft_status
-     FROM email_messages em
-     LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
-     LEFT JOIN accounts a ON a.id = em.account_id AND a.tenant_id = em.tenant_id
-     LEFT JOIN opportunities o ON o.id = em.opportunity_id AND o.tenant_id = em.tenant_id
-     LEFT JOIN use_cases u ON u.id = em.use_case_id AND u.tenant_id = em.tenant_id
-     LEFT JOIN emails e ON e.id = em.email_id AND e.tenant_id = em.tenant_id
-     WHERE em.tenant_id = $1 AND em.id = $2`,
+	       e.status AS email_status,
+	       e.draft_origin,
+	       e.hitl_request_id,
+	       e.provider_draft_status,
+	       mb.email_address AS mailbox_email_address,
+	       mb.display_name AS mailbox_display_name
+	     FROM email_messages em
+	     LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
+	     LEFT JOIN accounts a ON a.id = em.account_id AND a.tenant_id = em.tenant_id
+	     LEFT JOIN opportunities o ON o.id = em.opportunity_id AND o.tenant_id = em.tenant_id
+	     LEFT JOIN use_cases u ON u.id = em.use_case_id AND u.tenant_id = em.tenant_id
+	     LEFT JOIN emails e ON e.id = em.email_id AND e.tenant_id = em.tenant_id
+	     LEFT JOIN mailbox_connections mb ON mb.id = em.mailbox_connection_id AND mb.tenant_id = em.tenant_id
+	     WHERE em.tenant_id = $1 AND em.id = $2`,
     [tenantId, id],
   );
   return result.rows[0] ? rowToMessage(result.rows[0]) : null;
@@ -522,12 +649,13 @@ export async function listEmailMessages(
     params.push(filters.cursor);
   }
 
-  const from = `FROM email_messages em
-    LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
-    LEFT JOIN accounts a ON a.id = em.account_id AND a.tenant_id = em.tenant_id
-    LEFT JOIN opportunities o ON o.id = em.opportunity_id AND o.tenant_id = em.tenant_id
-    LEFT JOIN use_cases u ON u.id = em.use_case_id AND u.tenant_id = em.tenant_id
-    LEFT JOIN emails e ON e.id = em.email_id AND e.tenant_id = em.tenant_id`;
+	  const from = `FROM email_messages em
+	    LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
+	    LEFT JOIN accounts a ON a.id = em.account_id AND a.tenant_id = em.tenant_id
+	    LEFT JOIN opportunities o ON o.id = em.opportunity_id AND o.tenant_id = em.tenant_id
+	    LEFT JOIN use_cases u ON u.id = em.use_case_id AND u.tenant_id = em.tenant_id
+	    LEFT JOIN emails e ON e.id = em.email_id AND e.tenant_id = em.tenant_id
+	    LEFT JOIN mailbox_connections mb ON mb.id = em.mailbox_connection_id AND mb.tenant_id = em.tenant_id`;
   const where = conditions.join(' AND ');
   const countResult = await db.query(`SELECT count(*)::int AS total ${from} WHERE ${where}`, params);
 
@@ -538,10 +666,12 @@ export async function listEmailMessages(
        a.name AS account_name,
        o.name AS opportunity_name,
        u.name AS use_case_name,
-       e.status AS email_status,
-       e.draft_origin,
-       e.hitl_request_id,
-       e.provider_draft_status
+	       e.status AS email_status,
+	       e.draft_origin,
+	       e.hitl_request_id,
+	       e.provider_draft_status,
+	       mb.email_address AS mailbox_email_address,
+	       mb.display_name AS mailbox_display_name
      ${from}
      WHERE ${where}
      ORDER BY COALESCE(em.received_at, em.sent_at, em.created_at) DESC
@@ -596,10 +726,16 @@ export async function summarizeEmailMessagesBySubject(
        count(*) FILTER (WHERE e.status = 'draft')::int AS drafts,
        count(*) FILTER (WHERE e.status = 'pending_approval')::int AS pending_approvals,
        count(*) FILTER (
-         WHERE em.processing_status IN ('needs_review','failed','unprocessed')
-            OR em.classification = 'unknown'
-            OR e.status IN ('pending_approval','failed','rejected')
-       )::int AS needs_review,
+         WHERE em.direction = 'inbound'
+           AND (
+             em.processing_status IN ('needs_review','failed','unprocessed')
+             OR em.classification = 'unknown'
+           )
+       )::int AS inbound_needs_review,
+       count(*) FILTER (WHERE em.direction = 'outbound' AND e.status = 'draft')::int AS outbound_drafts,
+       count(*) FILTER (WHERE em.direction = 'outbound' AND e.status = 'pending_approval')::int AS outbound_pending_approvals,
+       count(*) FILTER (WHERE em.direction = 'outbound' AND e.status = 'failed')::int AS outbound_failed,
+       count(*) FILTER (WHERE em.direction = 'outbound' AND e.status = 'rejected')::int AS outbound_rejected,
        max(COALESCE(em.received_at, em.sent_at, em.created_at)) AS latest_at
      FROM email_messages em
      LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
@@ -624,7 +760,12 @@ export async function summarizeEmailMessagesBySubject(
     outbound: Number(row.outbound ?? 0),
     drafts: Number(row.drafts ?? 0),
     pending_approvals: Number(row.pending_approvals ?? 0),
-    needs_review: Number(row.needs_review ?? 0),
+    needs_review: Number(row.inbound_needs_review ?? 0),
+    inbound_needs_review: Number(row.inbound_needs_review ?? 0),
+    outbound_drafts: Number(row.outbound_drafts ?? 0),
+    outbound_pending_approvals: Number(row.outbound_pending_approvals ?? 0),
+    outbound_failed: Number(row.outbound_failed ?? 0),
+    outbound_rejected: Number(row.outbound_rejected ?? 0),
     latest_at: (row.latest_at as string | null | undefined) ?? null,
   }));
 }
@@ -683,7 +824,80 @@ export async function updateEmailMessage(
      RETURNING *`,
     params,
   );
-  return result.rows[0] ? getEmailMessage(db, tenantId, id) : null;
+	  return result.rows[0] ? getEmailMessage(db, tenantId, id) : null;
+	}
+
+export async function markOutboundEmailMessageDelivered(
+  db: DbPool,
+  tenantId: UUID,
+  emailId: UUID,
+  delivery: {
+    provider_message_id?: string | null;
+    message_id?: string | null;
+    thread_id?: string | null;
+    metadata?: Record<string, unknown>;
+  },
+): Promise<EmailMessage | null> {
+  const result = await db.query(
+    `UPDATE email_messages
+     SET provider_message_id = COALESCE($3, provider_message_id),
+         message_id = COALESCE($4, message_id),
+         thread_id = COALESCE($5, thread_id),
+         sent_at = COALESCE(sent_at, now()),
+         processing_status = CASE
+           WHEN processing_status IN ('processed', 'ignored') THEN processing_status
+           ELSE 'unprocessed'
+         END,
+         processing_reason = CASE
+           WHEN processing_status IN ('processed', 'ignored') THEN processing_reason
+           ELSE 'Outbound email delivered; account activity and CRMy-authored context processing is pending.'
+         END,
+         metadata = metadata || $6::jsonb,
+         updated_at = now()
+     WHERE tenant_id = $1
+       AND email_id = $2
+       AND direction = 'outbound'
+     RETURNING *`,
+    [
+      tenantId,
+      emailId,
+      delivery.provider_message_id ?? null,
+      delivery.message_id ?? null,
+      delivery.thread_id ?? null,
+      JSON.stringify(delivery.metadata ?? {}),
+    ],
+  );
+  return result.rows[0] ? rowToMessage(result.rows[0]) : null;
+}
+
+export async function claimDeliveredOutboundEmailMessagesForProcessing(
+  db: DbPool,
+  limit = 10,
+): Promise<EmailMessage[]> {
+  const result = await db.query(
+    `WITH target AS (
+       SELECT em.id
+       FROM email_messages em
+       LEFT JOIN emails e ON e.id = em.email_id AND e.tenant_id = em.tenant_id
+       WHERE em.direction = 'outbound'
+         AND em.classification IN ('customer', 'mixed')
+         AND em.processing_status = 'unprocessed'
+         AND em.ignored_at IS NULL
+         AND (em.sent_at IS NOT NULL OR e.status = 'sent')
+       ORDER BY COALESCE(em.sent_at, em.created_at) ASC
+       LIMIT $1
+       FOR UPDATE OF em SKIP LOCKED
+     )
+     UPDATE email_messages em
+     SET processing_status = 'processing',
+         processing_reason = 'Processing delivered outbound email as account activity and CRMy-authored context.',
+         updated_at = now()
+     FROM target
+     WHERE em.id = target.id
+     RETURNING em.*`,
+    [limit],
+  );
+  return result.rows.map(rowToMessage);
 }
 
 export async function summarizeEmailMessages(
@@ -696,6 +910,9 @@ export async function summarizeEmailMessages(
   needs_review: number;
   processed: number;
   internal: number;
+  inbound_customer: number;
+  inbound_needs_review: number;
+  inbound_processed: number;
 }> {
   const params: unknown[] = [tenantId];
   let ownerClause = '';
@@ -719,7 +936,25 @@ export async function summarizeEmailMessages(
        count(*) FILTER (WHERE classification IN ('customer','mixed'))::int AS customer,
        count(*) FILTER (WHERE processing_status IN ('needs_review','failed','unprocessed') OR classification = 'unknown')::int AS needs_review,
        count(*) FILTER (WHERE processing_status = 'processed')::int AS processed,
-       count(*) FILTER (WHERE classification IN ('internal','automated'))::int AS internal
+       count(*) FILTER (WHERE classification IN ('internal','automated'))::int AS internal,
+       count(*) FILTER (
+         WHERE direction = 'inbound'
+           AND ignored_at IS NULL
+           AND classification IN ('customer','mixed')
+       )::int AS inbound_customer,
+       count(*) FILTER (
+         WHERE direction = 'inbound'
+           AND ignored_at IS NULL
+           AND (
+             processing_status IN ('needs_review','failed','unprocessed')
+             OR classification = 'unknown'
+           )
+       )::int AS inbound_needs_review,
+       count(*) FILTER (
+         WHERE direction = 'inbound'
+           AND ignored_at IS NULL
+           AND processing_status = 'processed'
+       )::int AS inbound_processed
      FROM email_messages em
      LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
      LEFT JOIN accounts a ON a.id = em.account_id AND a.tenant_id = em.tenant_id
@@ -734,6 +969,9 @@ export async function summarizeEmailMessages(
     needs_review: Number(result.rows[0]?.needs_review ?? 0),
     processed: Number(result.rows[0]?.processed ?? 0),
     internal: Number(result.rows[0]?.internal ?? 0),
+    inbound_customer: Number(result.rows[0]?.inbound_customer ?? 0),
+    inbound_needs_review: Number(result.rows[0]?.inbound_needs_review ?? 0),
+    inbound_processed: Number(result.rows[0]?.inbound_processed ?? 0),
   };
 }
 

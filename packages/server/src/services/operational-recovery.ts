@@ -10,6 +10,7 @@ export type RecoverableQueue =
   | 'agent_turns'
   | 'context_embedding_jobs'
   | 'mailbox_sync_jobs'
+  | 'email_delivery_jobs'
   | 'calendar_sync_jobs'
   | 'webhook_deliveries'
   | 'message_deliveries'
@@ -173,6 +174,33 @@ const SPECS: Record<RecoverableQueue, RecoverySpec> = {
         SET status = 'failed',
             locked_at = NULL,
             last_error = COALESCE($3, last_error),
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, status
+      `,
+    },
+    newStatus: { retry: 'pending', park: 'failed', mark_failed: 'failed' },
+  },
+  email_delivery_jobs: {
+    selectSql: 'SELECT id, status FROM email_delivery_jobs WHERE tenant_id = $1 AND id = $2',
+    updateSql: {
+      retry: `
+        UPDATE email_delivery_jobs
+        SET status = 'pending',
+            available_at = now(),
+            locked_at = NULL,
+            last_error = NULL,
+            updated_at = now()
+        WHERE tenant_id = $1 AND id = $2
+        RETURNING id, status
+      `,
+      park: null,
+      mark_failed: `
+        UPDATE email_delivery_jobs
+        SET status = 'failed',
+            locked_at = NULL,
+            last_error = COALESCE($3, last_error),
+            available_at = 'infinity'::timestamptz,
             updated_at = now()
         WHERE tenant_id = $1 AND id = $2
         RETURNING id, status

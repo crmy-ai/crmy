@@ -4,7 +4,7 @@
 import { TopBar } from '@/components/layout/TopBar';
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowRight, Bot, CalendarDays, CheckCircle2, FileText, GitBranch, LayoutGrid, Library, List, Mail, Network, Search, Sparkles } from 'lucide-react';
+import { ArrowRight, Bot, CalendarDays, CheckCircle2, FileText, GitBranch, LayoutGrid, Library, List, Mail, Network, Sparkles } from 'lucide-react';
 import { ContextBrowser } from '@/components/crm/ContextBrowser';
 import { ContextLineageView } from '@/components/crm/ContextLineageView';
 import { ObservationsDashboard } from '@/components/crm/ObservationsDashboard';
@@ -283,16 +283,12 @@ export default function ContextPage() {
           : tab === 'graph'
           ? 'Explore related records, Current Memory, recent activity, and open handoffs.'
           : headerDescription('Search persistent Memory agents retrieve into Active Context', contextTotal, 'entry', 'entries')}
-        badge={(
-          <span className={`hidden md:inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
-            semanticRetrievalReady
-              ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-              : 'border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400'
-          }`}>
-            {semanticRetrievalReady ? <CheckCircle2 className="w-3 h-3" /> : <Search className="w-3 h-3" />}
-            {semanticRetrievalReady ? 'Semantic search ready' : 'Keyword fallback'}
+        badge={semanticRetrievalReady ? (
+          <span className="hidden items-center gap-1 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 md:inline-flex">
+            <CheckCircle2 className="w-3 h-3" />
+            Semantic search ready
           </span>
-        )}
+        ) : null}
       >
         {tab === 'signals' && <HeaderViewToggle value={signalViewMode} onChange={setSignalViewMode} />}
         {tab === 'browser' && <HeaderViewToggle value={memoryViewMode} onChange={setMemoryViewMode} />}

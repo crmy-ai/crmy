@@ -38,7 +38,7 @@ For every outreach target, call `briefing_get` with:
 - `format`: "json"
 
 ### 2. Evaluate stale warnings
-Check the `stale_warnings` array in the briefing response. For each stale entry:
+Check the `staleness_warnings` array in the briefing response. For each stale entry:
 - If `context_type` is "competitive_intel" or "objection": Do NOT reference this information in outreach. It may be wrong.
 - If `context_type` is "research": Avoid referencing specific facts from the stale entry (team sizes, org chart details).
 - If `context_type` is "preference": Use with caution — preferences change slowly but do change.
@@ -236,7 +236,7 @@ crmy briefing "contact:Priya Nair" --format json
         "valid_until": "2026-05-10T00:00:00.000Z"
       }
     ],
-    "stale_warnings": [
+    "staleness_warnings": [
       {
         "id": "d0000000-0000-4000-f000-000000000009",
         "context_type": "research",
@@ -271,7 +271,7 @@ crmy briefing "contact:Priya Nair" --format json
 
 ## Step 3 — Read stale warnings and decide whether to act
 
-The briefing includes a `stale_warnings` array. Each entry is a context entry whose `valid_until` has passed but remains `is_current: true`. Before drafting outreach, you need to decide what to do about stale data.
+The briefing includes a `staleness_warnings` array. Each entry is a context entry whose `valid_until` has passed but remains `is_current: true`. Before drafting outreach, you need to decide what to do about stale data.
 
 **How to interpret stale warnings:**
 

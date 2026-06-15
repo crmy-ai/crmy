@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CRMy API",
-    "version": "0.8.9",
+    "version": "0.9.0",
     "description": "The operational customer context backend for AI agents. MCP-native, PostgreSQL-backed, open source. Application endpoints require `Authorization: Bearer <jwt-or-api-key>` except `/auth/register` and `/auth/login`; provider OAuth callbacks and inbound email webhooks use provider state or tenant-scoped HMAC signatures instead.",
     "license": {
       "name": "Apache-2.0"
@@ -156,6 +156,9 @@
           },
           "total": {
             "type": "integer"
+          },
+          "total_is_estimate": {
+            "type": "boolean"
           },
           "data": {
             "type": "array",
@@ -1050,6 +1053,293 @@
           "created_at"
         ]
       },
+      "ActiveSequenceEnrollment": {
+        "type": "object",
+        "properties": {
+          "enrollment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sequence_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sequence_name": {
+            "type": "string"
+          },
+          "current_step": {
+            "type": "integer"
+          },
+          "total_steps": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "paused"
+            ]
+          },
+          "next_send_at": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "goal_event": {
+            "type": "string"
+          },
+          "enrolled_by_actor_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "enrollment_id",
+          "sequence_id",
+          "sequence_name",
+          "current_step",
+          "total_steps",
+          "status"
+        ]
+      },
+      "ContradictionWarning": {
+        "type": "object",
+        "properties": {
+          "entry_a": {
+            "$ref": "#/components/schemas/ContextEntryRecord"
+          },
+          "entry_b": {
+            "$ref": "#/components/schemas/ContextEntryRecord"
+          },
+          "conflict_field": {
+            "type": "string"
+          },
+          "conflict_evidence": {
+            "type": "string"
+          },
+          "suggested_action": {
+            "type": "string",
+            "enum": [
+              "supersede_older",
+              "supersede_lower_confidence",
+              "manual_review"
+            ]
+          },
+          "detected_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entry_a",
+          "entry_b",
+          "conflict_field",
+          "conflict_evidence",
+          "suggested_action",
+          "detected_at"
+        ]
+      },
+      "AdjacentContext": {
+        "type": "object",
+        "properties": {
+          "subject_type": {
+            "type": "string",
+            "enum": [
+              "contact",
+              "account",
+              "opportunity",
+              "use_case"
+            ]
+          },
+          "subject_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "context_entries": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ContextEntryRecord"
+              }
+            }
+          }
+        },
+        "required": [
+          "subject_type",
+          "subject_id",
+          "context_entries"
+        ]
+      },
+      "Briefing": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "subject_type": {
+            "type": "string",
+            "enum": [
+              "contact",
+              "account",
+              "opportunity",
+              "use_case"
+            ]
+          },
+          "related_objects": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            }
+          },
+          "activities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "open_assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AssignmentRecord"
+            }
+          },
+          "context_entries": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ContextEntryRecord"
+              }
+            }
+          },
+          "signals": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ContextEntryRecord"
+              }
+            }
+          },
+          "signal_groups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "staleness_warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextEntryRecord"
+            }
+          },
+          "active_sequences": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActiveSequenceEnrollment"
+            }
+          },
+          "contradiction_warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContradictionWarning"
+            }
+          },
+          "adjacent_context": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdjacentContext"
+            }
+          },
+          "token_estimate": {
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "dropped_entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "context_type": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "confidence": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "context_type"
+              ]
+            }
+          },
+          "context_packing": {
+            "type": "object",
+            "properties": {
+              "token_budget_profile": {
+                "type": "string",
+                "enum": [
+                  "tiny",
+                  "standard",
+                  "deep",
+                  "evidence_heavy"
+                ]
+              },
+              "token_budget": {
+                "type": "integer"
+              },
+              "evidence_mode": {
+                "type": "string",
+                "enum": [
+                  "summary",
+                  "full",
+                  "none"
+                ]
+              },
+              "ranking_strategy": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "evidence_mode",
+              "ranking_strategy"
+            ]
+          }
+        },
+        "required": [
+          "subject",
+          "subject_type",
+          "related_objects",
+          "activities",
+          "open_assignments",
+          "context_entries",
+          "staleness_warnings"
+        ]
+      },
+      "BriefingResponse": {
+        "type": "object",
+        "properties": {
+          "briefing": {
+            "$ref": "#/components/schemas/Briefing"
+          },
+          "briefing_text": {
+            "type": "string"
+          }
+        },
+        "description": "JSON briefing by default. When format=text is requested, briefing_text is returned instead."
+      },
       "GenericList": {
         "type": "object",
         "properties": {
@@ -1068,6 +1358,9 @@
           },
           "total": {
             "type": "number"
+          },
+          "total_is_estimate": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -1087,6 +1380,1536 @@
         },
         "required": [
           "success"
+        ]
+      },
+      "ContextLineageNode": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "record",
+              "raw_context",
+              "activity",
+              "signal",
+              "signal_group",
+              "memory",
+              "retrieval",
+              "handoff",
+              "writeback",
+              "audit"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "subject_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "contact",
+              "account",
+              "opportunity",
+              "use_case"
+            ]
+          },
+          "subject_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "object_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "display_order": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "label"
+        ]
+      },
+      "ContextLineageEdge": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "target",
+          "relation"
+        ]
+      },
+      "ContextLineageOutcome": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "handoff",
+              "writeback",
+              "activity",
+              "action_receipt",
+              "audit"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "occurred_at": {
+            "type": "string"
+          },
+          "object_id": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "impact": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "pending",
+              "failed",
+              "informational"
+            ]
+          },
+          "follow_up": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "status",
+          "node_id",
+          "impact"
+        ]
+      },
+      "ContextLineageResponse": {
+        "type": "object",
+        "properties": {
+          "lineage": {
+            "type": "object",
+            "properties": {
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ContextLineageNode"
+                }
+              },
+              "edges": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ContextLineageEdge"
+                }
+              },
+              "outcomes": {
+                "type": "object",
+                "properties": {
+                  "recent": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ContextLineageOutcome"
+                    }
+                  },
+                  "pending": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ContextLineageOutcome"
+                    }
+                  },
+                  "failed": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/ContextLineageOutcome"
+                    }
+                  },
+                  "completed_count": {
+                    "type": "integer"
+                  },
+                  "pending_count": {
+                    "type": "integer"
+                  },
+                  "failed_count": {
+                    "type": "integer"
+                  },
+                  "recommended_follow_up": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "recent",
+                  "pending",
+                  "failed",
+                  "completed_count",
+                  "pending_count",
+                  "failed_count",
+                  "recommended_follow_up"
+                ]
+              },
+              "summary": {
+                "type": "object",
+                "properties": {
+                  "records": {
+                    "type": "integer"
+                  },
+                  "raw_context": {
+                    "type": "integer"
+                  },
+                  "signals": {
+                    "type": "integer"
+                  },
+                  "signal_groups": {
+                    "type": "integer"
+                  },
+                  "memory": {
+                    "type": "integer"
+                  },
+                  "retrievals": {
+                    "type": "integer"
+                  },
+                  "action_receipts": {
+                    "type": "integer"
+                  },
+                  "handoffs": {
+                    "type": "integer"
+                  },
+                  "writebacks": {
+                    "type": "integer"
+                  },
+                  "audit_events": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "records",
+                  "raw_context",
+                  "signals",
+                  "signal_groups",
+                  "memory",
+                  "handoffs",
+                  "writebacks",
+                  "audit_events"
+                ]
+              }
+            },
+            "required": [
+              "nodes",
+              "edges",
+              "summary"
+            ]
+          }
+        },
+        "required": [
+          "lineage"
+        ]
+      },
+      "ActionContextPacketEvidence": {
+        "type": "object",
+        "properties": {
+          "source_type": {
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "source_ref": {
+            "type": "string"
+          },
+          "source_label": {
+            "type": "string"
+          },
+          "observed_at": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          }
+        }
+      },
+      "ActionContextPacketItem": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "memory",
+              "signal",
+              "signal_group",
+              "stale_memory",
+              "contradiction",
+              "assignment",
+              "source_authority",
+              "policy",
+              "permission"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "context_type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionContextPacketEvidence"
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "summary"
+        ]
+      },
+      "ActionContextSourcePosture": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string"
+          },
+          "dominant_source": {
+            "type": "string",
+            "enum": [
+              "customer_authored",
+              "seller_authored",
+              "system_of_record",
+              "internal",
+              "mixed",
+              "unknown"
+            ]
+          },
+          "counts": {
+            "type": "object",
+            "properties": {
+              "customer_authored": {
+                "type": "integer"
+              },
+              "seller_authored": {
+                "type": "integer"
+              },
+              "system_of_record": {
+                "type": "integer"
+              },
+              "internal": {
+                "type": "integer"
+              },
+              "unknown": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "customer_authored",
+              "seller_authored",
+              "system_of_record",
+              "internal",
+              "unknown"
+            ]
+          },
+          "customer_authored_claims_present": {
+            "type": "boolean"
+          },
+          "seller_authored_context_present": {
+            "type": "boolean"
+          },
+          "weak_or_unknown_sources_present": {
+            "type": "boolean"
+          },
+          "instructions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "summary",
+          "dominant_source",
+          "counts",
+          "customer_authored_claims_present",
+          "seller_authored_context_present",
+          "weak_or_unknown_sources_present",
+          "instructions"
+        ]
+      },
+      "ActionContextRecommendedAction": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary",
+              "background"
+            ]
+          },
+          "can_execute_now": {
+            "type": "boolean"
+          },
+          "customer_or_system_effect": {
+            "type": "boolean"
+          },
+          "requires_human_review": {
+            "type": "boolean"
+          },
+          "next_tool": {
+            "type": "string"
+          },
+          "reason_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "proposed_action_type": {
+            "type": "string",
+            "enum": [
+              "customer_outreach",
+              "assignment_create",
+              "memory_promote",
+              "record_update",
+              "external_writeback",
+              "sequence_step",
+              "workflow_action",
+              "agent_task"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "description",
+          "priority",
+          "can_execute_now",
+          "customer_or_system_effect",
+          "requires_human_review"
+        ]
+      },
+      "ActionContextActionPacket": {
+        "type": "object",
+        "properties": {
+          "action_type": {
+            "type": "string",
+            "enum": [
+              "customer_outreach",
+              "assignment_create",
+              "memory_promote",
+              "record_update",
+              "external_writeback",
+              "sequence_step",
+              "workflow_action",
+              "agent_task"
+            ]
+          },
+          "objective": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready",
+              "review_needed",
+              "blocked"
+            ]
+          },
+          "risk_level": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "operating_mode": {
+            "type": "string",
+            "enum": [
+              "inform",
+              "warn",
+              "require_review"
+            ]
+          },
+          "can_execute": {
+            "type": "boolean"
+          },
+          "agent_instructions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "use_as_truth": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionContextPacketItem"
+            }
+          },
+          "use_with_caution": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionContextPacketItem"
+            }
+          },
+          "do_not_use_as_truth": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionContextPacketItem"
+            }
+          },
+          "evidence_to_cite": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionContextPacketItem"
+            }
+          },
+          "source_posture": {
+            "$ref": "#/components/schemas/ActionContextSourcePosture"
+          },
+          "recommended_actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionContextRecommendedAction"
+            }
+          },
+          "action_boundaries": {
+            "type": "object",
+            "properties": {
+              "allowed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "blocked": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "required_review": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "allowed",
+              "warnings",
+              "blocked",
+              "required_review"
+            ]
+          },
+          "human_unblock": {
+            "type": "object",
+            "properties": {
+              "required": {
+                "type": "boolean"
+              },
+              "question": {
+                "type": "string"
+              },
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "handoff_type": {
+                "type": "string",
+                "enum": [
+                  "assignment",
+                  "signal_review",
+                  "policy_approval",
+                  "source_conflict"
+                ]
+              }
+            },
+            "required": [
+              "required",
+              "question",
+              "reasons"
+            ]
+          },
+          "next_tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "objective",
+          "status",
+          "risk_level",
+          "operating_mode",
+          "can_execute",
+          "agent_instructions",
+          "use_as_truth",
+          "use_with_caution",
+          "do_not_use_as_truth",
+          "evidence_to_cite",
+          "source_posture",
+          "recommended_actions",
+          "action_boundaries",
+          "next_tools"
+        ]
+      },
+      "ActionContextResponse": {
+        "type": "object",
+        "properties": {
+          "action_context": {
+            "type": "object",
+            "properties": {
+              "subject_type": {
+                "type": "string",
+                "enum": [
+                  "contact",
+                  "account",
+                  "opportunity",
+                  "use_case"
+                ]
+              },
+              "subject_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "generated_at": {
+                "type": "string"
+              },
+              "operating_mode": {
+                "type": "string",
+                "enum": [
+                  "inform",
+                  "warn",
+                  "require_review"
+                ]
+              },
+              "guidance": {
+                "type": "object",
+                "properties": {
+                  "summary": {
+                    "type": "string"
+                  },
+                  "can_execute": {
+                    "type": "boolean"
+                  },
+                  "warning_reasons": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "review_reasons": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "recommended_next_steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "summary",
+                  "can_execute",
+                  "warning_reasons",
+                  "review_reasons",
+                  "recommended_next_steps"
+                ]
+              },
+              "action_packet": {
+                "$ref": "#/components/schemas/ActionContextActionPacket"
+              },
+              "briefing": {
+                "type": "object",
+                "additionalProperties": {},
+                "description": "Briefing payload for the same subject."
+              },
+              "readiness": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ready",
+                      "review_needed",
+                      "blocked"
+                    ]
+                  },
+                  "risk_level": {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high"
+                    ]
+                  },
+                  "reasons": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "blockers": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "review_required": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "status",
+                  "risk_level",
+                  "reasons",
+                  "blockers",
+                  "review_required"
+                ]
+              },
+              "checks": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "allowed_actions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "required_handoffs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": {}
+                }
+              },
+              "proof": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "subject_type",
+              "subject_id",
+              "generated_at",
+              "operating_mode",
+              "guidance",
+              "action_packet",
+              "briefing",
+              "readiness",
+              "checks",
+              "allowed_actions",
+              "required_handoffs",
+              "proof"
+            ]
+          }
+        },
+        "required": [
+          "action_context"
+        ]
+      },
+      "ActionContextHumanUnblockResponse": {
+        "type": "object",
+        "properties": {
+          "created_type": {
+            "type": "string",
+            "enum": [
+              "approval",
+              "assignment"
+            ]
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "assignment_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "assignment": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "status": {
+            "type": "string"
+          },
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action_packet": {
+            "$ref": "#/components/schemas/ActionContextActionPacket"
+          },
+          "mutation": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        },
+        "required": [
+          "created_type",
+          "snapshot_id",
+          "event_id",
+          "action_packet",
+          "mutation"
+        ]
+      },
+      "OAuthReadinessResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "mailbox",
+                    "calendar"
+                  ]
+                },
+                "provider": {
+                  "type": "string",
+                  "enum": [
+                    "google",
+                    "microsoft"
+                  ]
+                },
+                "label": {
+                  "type": "string"
+                },
+                "configured": {
+                  "type": "boolean"
+                },
+                "ready": {
+                  "type": "boolean"
+                },
+                "can_start_oauth": {
+                  "type": "boolean"
+                },
+                "setup_status": {
+                  "type": "string",
+                  "enum": [
+                    "ready",
+                    "tenant_app_incomplete",
+                    "managed_app_unavailable",
+                    "self_hosted_env_missing"
+                  ]
+                },
+                "setup_blockers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "admin_action": {
+                  "type": "string"
+                },
+                "user_action": {
+                  "type": "string"
+                },
+                "redirect_uri": {
+                  "type": "string"
+                },
+                "callback_path": {
+                  "type": "string"
+                },
+                "accepted_env_vars": {
+                  "type": "object",
+                  "properties": {
+                    "client_id": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "client_secret": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "redirect_uri": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "client_id",
+                    "client_secret",
+                    "redirect_uri"
+                  ]
+                },
+                "configured_env_vars": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "missing_env_vars": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "scopes": {
+                  "type": "object",
+                  "properties": {
+                    "context": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "send": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "drafts": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "context"
+                  ]
+                },
+                "app_source": {
+                  "type": "string",
+                  "enum": [
+                    "tenant_owned",
+                    "crmy_managed",
+                    "self_hosted_env",
+                    "missing"
+                  ]
+                },
+                "tenant_owned_configured": {
+                  "type": "boolean"
+                },
+                "crmy_managed_available": {
+                  "type": "boolean"
+                },
+                "self_hosted_env_configured": {
+                  "type": "boolean"
+                },
+                "hosted_managed_enabled": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "kind",
+                "provider",
+                "label",
+                "configured",
+                "ready",
+                "can_start_oauth",
+                "setup_status",
+                "setup_blockers",
+                "admin_action",
+                "user_action",
+                "redirect_uri",
+                "callback_path",
+                "accepted_env_vars",
+                "configured_env_vars",
+                "missing_env_vars",
+                "scopes",
+                "app_source",
+                "tenant_owned_configured",
+                "crmy_managed_available",
+                "self_hosted_env_configured",
+                "hosted_managed_enabled"
+              ]
+            }
+          },
+          "summary": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "data",
+          "summary"
+        ]
+      },
+      "OAuthConnectionStartResponse": {
+        "type": "object",
+        "properties": {
+          "connection": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "auth_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "oauth_ready": {
+            "type": "boolean"
+          },
+          "setup_check": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "mailbox",
+                  "calendar"
+                ]
+              },
+              "provider": {
+                "type": "string",
+                "enum": [
+                  "google",
+                  "microsoft"
+                ]
+              },
+              "label": {
+                "type": "string"
+              },
+              "configured": {
+                "type": "boolean"
+              },
+              "ready": {
+                "type": "boolean"
+              },
+              "can_start_oauth": {
+                "type": "boolean"
+              },
+              "setup_status": {
+                "type": "string",
+                "enum": [
+                  "ready",
+                  "tenant_app_incomplete",
+                  "managed_app_unavailable",
+                  "self_hosted_env_missing"
+                ]
+              },
+              "setup_blockers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "admin_action": {
+                "type": "string"
+              },
+              "user_action": {
+                "type": "string"
+              },
+              "redirect_uri": {
+                "type": "string"
+              },
+              "callback_path": {
+                "type": "string"
+              },
+              "accepted_env_vars": {
+                "type": "object",
+                "properties": {
+                  "client_id": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "client_secret": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "redirect_uri": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "client_id",
+                  "client_secret",
+                  "redirect_uri"
+                ]
+              },
+              "configured_env_vars": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "missing_env_vars": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "scopes": {
+                "type": "object",
+                "properties": {
+                  "context": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "send": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "drafts": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "context"
+                ]
+              },
+              "app_source": {
+                "type": "string",
+                "enum": [
+                  "tenant_owned",
+                  "crmy_managed",
+                  "self_hosted_env",
+                  "missing"
+                ]
+              },
+              "tenant_owned_configured": {
+                "type": "boolean"
+              },
+              "crmy_managed_available": {
+                "type": "boolean"
+              },
+              "self_hosted_env_configured": {
+                "type": "boolean"
+              },
+              "hosted_managed_enabled": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "kind",
+              "provider",
+              "label",
+              "configured",
+              "ready",
+              "can_start_oauth",
+              "setup_status",
+              "setup_blockers",
+              "admin_action",
+              "user_action",
+              "redirect_uri",
+              "callback_path",
+              "accepted_env_vars",
+              "configured_env_vars",
+              "missing_env_vars",
+              "scopes",
+              "app_source",
+              "tenant_owned_configured",
+              "crmy_managed_available",
+              "self_hosted_env_configured",
+              "hosted_managed_enabled"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "oauth_required",
+              "configuration_required"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "connection",
+          "auth_url",
+          "oauth_ready",
+          "setup_check",
+          "status",
+          "message"
+        ]
+      },
+      "TenantOAuthAppRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "google",
+              "microsoft"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "has_client_secret": {
+            "type": "boolean"
+          },
+          "microsoft_tenant_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "provider",
+          "enabled",
+          "client_id",
+          "has_client_secret",
+          "created_at",
+          "updated_at"
+        ]
+      },
+      "MailboxConnectionListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "total": {
+            "type": "number"
+          },
+          "total_is_estimate": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "oauth_ready": {
+            "type": "object",
+            "properties": {
+              "google": {
+                "type": "boolean"
+              },
+              "microsoft": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "google",
+              "microsoft"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "oauth_ready"
+        ]
+      },
+      "CalendarConnectionListResponse": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": {}
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "total": {
+            "type": "number"
+          },
+          "total_is_estimate": {
+            "type": "boolean"
+          },
+          "summary": {
+            "type": "object",
+            "additionalProperties": {}
+          },
+          "oauth_ready": {
+            "type": "object",
+            "properties": {
+              "google": {
+                "type": "boolean"
+              },
+              "microsoft": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "google",
+              "microsoft"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "oauth_ready"
+        ]
+      },
+      "ActorConnectionSummary": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "actor_id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "actor_name": {
+                  "type": "string"
+                },
+                "actor_type": {
+                  "type": "string",
+                  "enum": [
+                    "human",
+                    "agent"
+                  ]
+                },
+                "is_active": {
+                  "type": "boolean"
+                },
+                "user_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid"
+                },
+                "user_email": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "user_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "mailbox_connections": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "calendar_connections": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": {}
+                  }
+                },
+                "mailbox_count": {
+                  "type": "integer"
+                },
+                "calendar_count": {
+                  "type": "integer"
+                },
+                "sender_count": {
+                  "type": "integer"
+                },
+                "ready_sender_count": {
+                  "type": "integer"
+                },
+                "connected_mailbox_count": {
+                  "type": "integer"
+                },
+                "connected_calendar_count": {
+                  "type": "integer"
+                },
+                "email_processed_count": {
+                  "type": "integer"
+                },
+                "calendar_processed_count": {
+                  "type": "integer"
+                },
+                "raw_context_source_count": {
+                  "type": "integer"
+                },
+                "signal_count": {
+                  "type": "integer"
+                },
+                "memory_count": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "actor_id",
+                "actor_name",
+                "actor_type",
+                "is_active",
+                "mailbox_connections",
+                "calendar_connections",
+                "mailbox_count",
+                "calendar_count",
+                "sender_count",
+                "ready_sender_count",
+                "connected_mailbox_count",
+                "connected_calendar_count"
+              ]
+            }
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total"
         ]
       },
       "AuthRegister": {
@@ -1125,6 +2948,11 @@
           },
           "password": {
             "type": "string"
+          },
+          "tenant_slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
           }
         },
         "required": [
@@ -1429,6 +3257,13 @@
             },
             "default": []
           },
+          "additional_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": []
+          },
           "tags": {
             "type": "array",
             "items": {
@@ -1517,6 +3352,12 @@
             "format": "uuid"
           },
           "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "additional_domains": {
             "type": "array",
             "items": {
               "type": "string"
@@ -3489,6 +5330,26 @@
           "token_budget": {
             "type": "integer",
             "minimum": 100
+          },
+          "token_budget_profile": {
+            "type": "string",
+            "enum": [
+              "tiny",
+              "standard",
+              "deep",
+              "evidence_heavy"
+            ],
+            "description": "Named token budget preset. Explicit token_budget wins when both are supplied."
+          },
+          "evidence_mode": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "full",
+              "none"
+            ],
+            "default": "summary",
+            "description": "summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries."
           }
         }
       },
@@ -3533,6 +5394,26 @@
           "token_budget": {
             "type": "integer",
             "minimum": 100
+          },
+          "token_budget_profile": {
+            "type": "string",
+            "enum": [
+              "tiny",
+              "standard",
+              "deep",
+              "evidence_heavy"
+            ],
+            "description": "Named token budget preset. If omitted, CRMy infers one from proposed_action when useful. Explicit token_budget wins."
+          },
+          "evidence_mode": {
+            "type": "string",
+            "enum": [
+              "summary",
+              "full",
+              "none"
+            ],
+            "default": "summary",
+            "description": "summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries."
           },
           "emit_retrieval_event": {
             "type": "boolean",
@@ -3629,6 +5510,194 @@
           "subject_id"
         ]
       },
+      "ActionContextHumanUnblock": {
+        "type": "object",
+        "properties": {
+          "subject_type": {
+            "type": "string",
+            "enum": [
+              "contact",
+              "account",
+              "opportunity",
+              "use_case"
+            ]
+          },
+          "subject_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "proposed_action": {
+            "type": "object",
+            "properties": {
+              "action_type": {
+                "type": "string",
+                "enum": [
+                  "customer_outreach",
+                  "assignment_create",
+                  "memory_promote",
+                  "record_update",
+                  "external_writeback",
+                  "sequence_step",
+                  "workflow_action",
+                  "agent_task"
+                ]
+              },
+              "object_type": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "contact",
+                      "account",
+                      "opportunity",
+                      "activity",
+                      "use_case",
+                      "context_entry"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "contact",
+                      "account",
+                      "opportunity",
+                      "use_case"
+                    ]
+                  }
+                ]
+              },
+              "field_names": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "source_context_entry_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "signal_group_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "system_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "mapping_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "external_object": {
+                "type": "string",
+                "minLength": 1
+              },
+              "payload": {
+                "type": "object",
+                "additionalProperties": {}
+              },
+              "approved": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "action_type"
+            ]
+          },
+          "request_type": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "approval",
+              "assignment"
+            ],
+            "default": "auto",
+            "description": "auto chooses approval for policy/signal review and assignment when an assignee is provided."
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "description": "Human-facing title. Defaults to the Action Context unblock question."
+          },
+          "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000,
+            "description": "The smallest decision or correction needed from the human."
+          },
+          "assignee_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Human or agent actor to assign when request_type is assignment."
+          },
+          "reviewer_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Human actor to notify/escalate when request_type is approval."
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "urgent"
+            ],
+            "default": "normal"
+          },
+          "due_at": {
+            "type": "string"
+          },
+          "sla_minutes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reasoning": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "Agent summary of what it found and why it stopped. Defaults to Action Context guidance."
+          },
+          "tools_called": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "tool_name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "args_summary": {
+                  "type": "string"
+                },
+                "result_summary": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "tool_name"
+              ]
+            },
+            "default": []
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
+          }
+        },
+        "required": [
+          "subject_type",
+          "subject_id"
+        ]
+      },
       "WebhookCreate": {
         "type": "object",
         "properties": {
@@ -3677,6 +5746,15 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "WebhookRotateSecret": {
+        "type": "object",
+        "properties": {
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128
           }
         }
       },
@@ -3777,16 +5855,33 @@
             "type": "string",
             "format": "uuid"
           },
+          "account_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "opportunity_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "use_case_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "q": {
+            "type": "string"
+          },
           "status": {
             "type": "string",
             "enum": [
               "draft",
               "pending_approval",
               "approved",
+              "queued_for_delivery",
               "sending",
               "sent",
               "failed",
-              "rejected"
+              "rejected",
+              "delivery_uncertain"
             ]
           },
           "limit": {
@@ -8168,6 +10263,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -8280,6 +10385,16 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       },
@@ -8328,6 +10443,218 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/merge": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Merge a duplicate account into this account (admin/owner only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "secondary_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Duplicate account UUID to merge into the path account"
+                  },
+                  "idempotency_key": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "secondary_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{id}/split-domains": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Move one or more domains from this account to another account (admin/owner only)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "target_account_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Account UUID that should own the moved domains"
+                  },
+                  "domains": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "minItems": 1
+                  },
+                  "move_matching_records": {
+                    "type": "boolean"
+                  },
+                  "idempotency_key": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target_account_id",
+                  "domains"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
             "content": {
               "application/json": {
                 "schema": {
@@ -12921,7 +15248,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GenericObject"
+                  "$ref": "#/components/schemas/ContextLineageResponse"
                 }
               }
             }
@@ -13948,7 +16275,72 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GenericObject"
+                  "$ref": "#/components/schemas/ActionContextResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/action-context/human-unblock": {
+      "post": {
+        "tags": [
+          "Briefing"
+        ],
+        "summary": "Create a human approval or assignment from Action Context unblock guidance",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionContextHumanUnblock"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionContextHumanUnblockResponse"
                 }
               }
             }
@@ -14084,6 +16476,38 @@
             "required": false,
             "name": "token_budget",
             "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "tiny",
+                "standard",
+                "deep",
+                "evidence_heavy"
+              ],
+              "description": "Named token budget preset. Explicit token_budget wins when both are supplied."
+            },
+            "required": false,
+            "description": "Named token budget preset. Explicit token_budget wins when both are supplied.",
+            "name": "token_budget_profile",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "summary",
+                "full",
+                "none"
+              ],
+              "default": "summary",
+              "description": "summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries."
+            },
+            "required": false,
+            "description": "summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries.",
+            "name": "evidence_mode",
+            "in": "query"
           }
         ],
         "responses": {
@@ -14092,75 +16516,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "properties": {
-                    "record": {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    "related": {
-                      "type": "object",
-                      "additionalProperties": {}
-                    },
-                    "activities": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": {}
-                      }
-                    },
-                    "open_assignments": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": {}
-                      }
-                    },
-                    "context": {
-                      "type": "object",
-                      "additionalProperties": {
-                        "type": "array",
-                        "items": {
-                          "$ref": "#/components/schemas/ContextEntryRecord"
-                        }
-                      }
-                    },
-                    "stale_warnings": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "context_type": {
-                            "type": "string"
-                          },
-                          "valid_until": {
-                            "type": "string"
-                          },
-                          "body": {
-                            "type": "string"
-                          }
-                        },
-                        "required": [
-                          "id",
-                          "context_type",
-                          "valid_until",
-                          "body"
-                        ]
-                      }
-                    }
-                  },
-                  "required": [
-                    "record",
-                    "related",
-                    "activities",
-                    "open_assignments",
-                    "context",
-                    "stale_warnings"
-                  ]
+                  "$ref": "#/components/schemas/BriefingResponse"
                 }
               }
             }
@@ -14398,7 +16754,7 @@
         "tags": [
           "Webhooks"
         ],
-        "summary": "Get a webhook endpoint (includes signing secret)",
+        "summary": "Get a webhook endpoint with masked signing-secret state",
         "security": [
           {
             "BearerAuth": []
@@ -14550,6 +16906,120 @@
         }
       }
     },
+    "/webhooks/{id}/secret/reveal": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Reveal the full signing secret for a webhook endpoint",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}/secret/rotate": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Rotate the signing secret for a webhook endpoint",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookRotateSecret"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/webhooks/{id}/deliveries": {
       "get": {
         "tags": [
@@ -14662,14 +17132,51 @@
           {
             "schema": {
               "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "account_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "opportunity_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "required": false,
+            "name": "use_case_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "q",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
               "enum": [
                 "draft",
                 "pending_approval",
                 "approved",
+                "queued_for_delivery",
                 "sending",
                 "sent",
                 "failed",
-                "rejected"
+                "rejected",
+                "delivery_uncertain"
               ]
             },
             "required": false,
@@ -14723,7 +17230,7 @@
         "tags": [
           "Emails"
         ],
-        "summary": "Create/draft an email — auto-submits HITL request when require_approval is true",
+        "summary": "Create/draft an email; delivered sends become CRMy-authored account activity and context",
         "security": [
           {
             "BearerAuth": []
@@ -14752,6 +17259,104 @@
           },
           "400": {
             "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/emails/sender": {
+      "get": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Resolve the current actor sender identity for outbound email drafts and sends",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sender": {
+                      "type": "object",
+                      "properties": {
+                        "sender_type": {
+                          "type": "string",
+                          "enum": [
+                            "actor_mailbox",
+                            "tenant_provider",
+                            "unknown"
+                          ]
+                        },
+                        "from_email": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "email"
+                        },
+                        "from_name": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "mailbox_connection_id": {
+                          "type": [
+                            "string",
+                            "null"
+                          ],
+                          "format": "uuid"
+                        },
+                        "provider": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "can_send": {
+                          "type": "boolean"
+                        },
+                        "can_provider_draft": {
+                          "type": "boolean"
+                        },
+                        "reason": {
+                          "type": "string"
+                        },
+                        "reply_handling": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "sender_type",
+                        "can_send",
+                        "can_provider_draft",
+                        "reason",
+                        "reply_handling"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "sender"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
             "content": {
               "application/json": {
                 "schema": {
@@ -14879,7 +17484,7 @@
         "tags": [
           "Emails"
         ],
-        "summary": "Persist a manual or agent-generated customer email draft, request approval, or explicitly send now",
+        "summary": "Persist, approve, provider-draft, or send customer email with CRMy-authored context after delivery",
         "security": [
           {
             "BearerAuth": []
@@ -15186,7 +17791,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GenericList"
+                  "$ref": "#/components/schemas/CalendarConnectionListResponse"
                 }
               }
             }
@@ -15242,6 +17847,14 @@
                   },
                   "display_name": {
                     "type": "string"
+                  },
+                  "meeting_ingest_scope": {
+                    "type": "string",
+                    "enum": [
+                      "owned_accounts",
+                      "accessible_accounts",
+                      "all_meetings"
+                    ]
                   }
                 }
               }
@@ -15254,7 +17867,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GenericObject"
+                  "$ref": "#/components/schemas/OAuthConnectionStartResponse"
                 }
               }
             }
@@ -15318,6 +17931,110 @@
         "responses": {
           "204": {
             "description": "Deleted"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/calendar/connections/{id}/status": {
+      "patch": {
+        "tags": [
+          "Calendar"
+        ],
+        "summary": "Activate or deactivate a calendar connection",
+        "description": "Deactivation pauses CRMy calendar use while preserving OAuth credentials. Disconnecting is handled by DELETE and removes the connection.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "meeting_ingest_scope": {
+                    "type": "string",
+                    "enum": [
+                      "owned_accounts",
+                      "accessible_accounts",
+                      "all_meetings"
+                    ]
+                  }
+                },
+                "required": [
+                  "active"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "401": {
             "description": "Unauthorized",
@@ -15923,6 +18640,157 @@
         }
       }
     },
+    "/availability/suggest-times": {
+      "post": {
+        "tags": [
+          "Calendar"
+        ],
+        "summary": "Suggest meeting times from connected internal calendar free/busy and customer timing preferences",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "subject_type": {
+                    "type": "string",
+                    "enum": [
+                      "account",
+                      "contact",
+                      "opportunity",
+                      "use_case"
+                    ]
+                  },
+                  "subject_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "account_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "contact_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "opportunity_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "use_case_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "actor_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "maxItems": 10
+                  },
+                  "duration_minutes": {
+                    "type": "integer",
+                    "minimum": 15,
+                    "maximum": 480
+                  },
+                  "date_start": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "date_end": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "timezone": {
+                    "type": "string"
+                  },
+                  "business_hours_start": {
+                    "type": "string",
+                    "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$"
+                  },
+                  "business_hours_end": {
+                    "type": "string",
+                    "pattern": "^([01]?\\d|2[0-3]):[0-5]\\d$"
+                  },
+                  "business_days_only": {
+                    "type": "boolean"
+                  },
+                  "increment_minutes": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 120
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/emails/{id}": {
       "get": {
         "tags": [
@@ -15968,6 +18836,435 @@
             }
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Edit a draft, failed, or rejected outbound email",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "to_email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "to_name": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "body_text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "body_html": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/emails/{id}/request-approval": {
+      "post": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Request approval for a governed outbound email draft",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  },
+                  "idempotency_key": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/emails/{id}/send": {
+      "post": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Send an approved or explicitly allowed outbound email draft",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "idempotency_key": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/emails/{id}/provider-draft/retry": {
+      "post": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Retry provider draft creation for an editable outbound email",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/emails/{id}/delivery-resolution": {
+      "post": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Retry or manually reconcile failed or delivery-uncertain outbound email",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "retry",
+                      "mark_sent",
+                      "mark_failed"
+                    ]
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 1000
+                  }
+                },
+                "required": [
+                  "action"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/mailbox/connections": {
@@ -15987,7 +19284,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GenericList"
+                  "$ref": "#/components/schemas/MailboxConnectionListResponse"
                 }
               }
             }
@@ -16030,13 +19327,51 @@
             "in": "path"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email_address": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "display_name": {
+                    "type": "string"
+                  },
+                  "context_sync_enabled": {
+                    "type": "boolean"
+                  },
+                  "send_enabled": {
+                    "type": "boolean"
+                  },
+                  "provider_draft_enabled": {
+                    "type": "boolean"
+                  },
+                  "is_default_sender": {
+                    "type": "boolean"
+                  },
+                  "account_ingest_scope": {
+                    "type": "string",
+                    "enum": [
+                      "owned_accounts",
+                      "accessible_accounts"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
         "responses": {
           "202": {
             "description": "Success",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GenericObject"
+                  "$ref": "#/components/schemas/OAuthConnectionStartResponse"
                 }
               }
             }
@@ -16161,6 +19496,294 @@
         }
       }
     },
+    "/mailbox/connections/{id}/status": {
+      "patch": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Activate or deactivate a mailbox connection",
+        "description": "Deactivation pauses mailbox context sync and sender use while preserving OAuth credentials. Disconnecting is handled by DELETE and removes the connection.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "active": {
+                    "type": "boolean"
+                  },
+                  "context_sync_enabled": {
+                    "type": "boolean"
+                  },
+                  "send_enabled": {
+                    "type": "boolean"
+                  },
+                  "provider_draft_enabled": {
+                    "type": "boolean"
+                  },
+                  "is_default_sender": {
+                    "type": "boolean"
+                  },
+                  "account_ingest_scope": {
+                    "type": "string",
+                    "enum": [
+                      "owned_accounts",
+                      "accessible_accounts"
+                    ]
+                  }
+                },
+                "required": [
+                  "active"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailbox/connections/{id}/aliases/refresh": {
+      "post": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Refresh verified send-as aliases for a Gmail or Outlook mailbox connection",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mailbox/connections/{id}/sender": {
+      "patch": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Choose the verified send-as identity used for outbound drafts from this mailbox",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Record UUID"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "selected_send_as_email": {
+                    "type": "string",
+                    "format": "email"
+                  }
+                },
+                "required": [
+                  "selected_send_as_email"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/email-messages": {
       "get": {
         "tags": [
@@ -16224,6 +19847,38 @@
           },
           {
             "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "contact_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "account_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "opportunity_id",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "use_case_id",
+            "in": "query"
+          },
+          {
+            "schema": {
               "type": "boolean"
             },
             "required": false,
@@ -16254,6 +19909,73 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GenericList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/email-messages/subject-summary": {
+      "get": {
+        "tags": [
+          "Emails"
+        ],
+        "summary": "Summarize linked customer email activity for contact or account records",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "contact",
+                "account"
+              ]
+            },
+            "required": true,
+            "name": "subject_type",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "ids",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -20596,7 +24318,7 @@
                       "use_case",
                       "context_entry"
                     ],
-                    "description": "CRMy typed object that external records sync into. In 0.8, contact/account/opportunity/activity sync directly; use_case and context_entry mappings create reviewable conflicts until their typed adapters are available."
+                    "description": "CRMy typed object that external records sync into. contact/account/opportunity/activity sync directly; use_case and context_entry mappings create reviewable conflicts until their typed adapters are available."
                   },
                   "external_object": {
                     "type": "string",
@@ -21351,7 +25073,9 @@
                   },
                   "idempotency_key": {
                     "type": "string",
-                    "maxLength": 128
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "description": "Required stable operation key. Reuse the same key when retrying the same external writeback request."
                   }
                 },
                 "required": [
@@ -21360,7 +25084,8 @@
                   "external_object",
                   "operation",
                   "writeback_mode",
-                  "payload"
+                  "payload",
+                  "idempotency_key"
                 ]
               }
             }
@@ -22004,6 +25729,293 @@
         }
       }
     },
+    "/admin/oauth-readiness": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Inspect Google and Microsoft mailbox/calendar OAuth readiness without exposing secrets",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthReadinessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/oauth-apps": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List tenant-owned Google and Microsoft OAuth app overrides without secret values",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/TenantOAuthAppRecord"
+                      }
+                    },
+                    "total": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "total"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/oauth-apps/{provider}": {
+      "put": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Create or update a tenant-owned OAuth app override for Google or Microsoft",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "google",
+                "microsoft"
+              ]
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "client_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "client_secret": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Write-only. Omit on update to preserve the existing encrypted secret."
+                  },
+                  "microsoft_tenant_id": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "client_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "oauth_app": {
+                      "$ref": "#/components/schemas/TenantOAuthAppRecord"
+                    }
+                  },
+                  "required": [
+                    "oauth_app"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "Remove a tenant-owned OAuth app override so the tenant uses CRMy-managed or self-hosted defaults",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "google",
+                "microsoft"
+              ]
+            },
+            "required": true,
+            "name": "provider",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "deleted": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleted"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/admin/actors": {
       "get": {
         "tags": [
@@ -22042,6 +26054,51 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GenericList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/actor-connections": {
+      "get": {
+        "tags": [
+          "Admin"
+        ],
+        "summary": "List human actor mailbox sender and calendar connection coverage",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActorConnectionSummary"
                 }
               }
             }
@@ -22889,7 +26946,7 @@
         "tags": [
           "Search"
         ],
-        "summary": "Cross-entity full-text search across revenue objects, context, and handoffs",
+        "summary": "Cross-entity full-text search across customer records, context, and handoffs",
         "security": [
           {
             "BearerAuth": []

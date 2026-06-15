@@ -13,8 +13,13 @@ import { actorHasScope, assertCanGrantScopes, enforceToolScopes, effectiveJwtSco
 import { recoverOperationalJob } from '../dist/services/operational-recovery.js';
 import { getAllTools, getToolsForActor } from '../dist/mcp/server.js';
 import { isSameMcpActor } from '../dist/mcp/session-registry.js';
+import {
+  actorIdentityFingerprint,
+  actorScopeFingerprint,
+  durableSessionMatchesActor,
+} from '../dist/db/repos/mcp-sessions.js';
 import { runIdempotent } from '../dist/db/repos/idempotency.js';
-import { searchContextEntries } from '../dist/db/repos/context-entries.js';
+import { diffContextEntries, searchContextEntries } from '../dist/db/repos/context-entries.js';
 import { claimPendingRawContextSources, listRawContextSources } from '../dist/db/repos/raw-context-sources.js';
 import { DEFAULT_CONTEXT_TYPES } from '../dist/db/repos/context-type-registry.js';
 import { withTransaction } from '../dist/db/transaction.js';
@@ -154,6 +159,410 @@ test('inbound email webhook requires explicit tenant and signature', async () =>
   assert.match(source, /Explicit tenant_id query parameter or x-crmy-tenant-id header is required/);
   assert.match(source, /Missing webhook signature/);
   assert.match(source, /timingSafeEqual/);
+});
+
+test('outbound webhook secrets are explicit reveal/rotate actions and not leaked in normal reads', async () => {
+  const schemaSource = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
+  const repoSource = await readFile(new URL('../src/db/repos/webhooks.ts', import.meta.url), 'utf8');
+  const toolSource = await readFile(new URL('../src/mcp/tools/webhooks.ts', import.meta.url), 'utf8');
+  const routerSource = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  const scopesSource = await readFile(new URL('../src/auth/scopes.ts', import.meta.url), 'utf8');
+  const settingsSource = await readFile(new URL('../../web/src/pages/Settings.tsx', import.meta.url), 'utf8');
+  const hooksSource = await readFile(new URL('../../web/src/api/hooks.ts', import.meta.url), 'utf8');
+
+  assert.match(schemaSource, /webhookRevealSecret/);
+  assert.match(schemaSource, /webhookRotateSecret/);
+  assert.match(repoSource, /generateWebhookSecret/);
+  assert.match(repoSource, /rotateWebhookSecret/);
+  assert.match(toolSource, /function publicWebhook/);
+  assert.match(toolSource, /const \{ secret, \.\.\.safe \} = webhook/);
+  assert.match(toolSource, /webhook_reveal_secret/);
+  assert.match(toolSource, /webhook_rotate_secret/);
+  assert.match(toolSource, /beforeData: publicWebhook\(before\)/);
+  assert.match(toolSource, /afterData: publicWebhook\(webhook\)/);
+  assert.match(routerSource, /\/webhooks\/:id\/secret\/reveal/);
+  assert.match(routerSource, /\/webhooks\/:id\/secret\/rotate/);
+  assert.match(scopesSource, /webhook_reveal_secret: \['webhooks:write'\]/);
+  assert.match(scopesSource, /webhook_rotate_secret: \['webhooks:write'\]/);
+  assert.match(hooksSource, /useRevealWebhookSecret/);
+  assert.match(hooksSource, /useRotateWebhookSecret/);
+  assert.match(settingsSource, /Signing secret/);
+  assert.match(settingsSource, /Reveal/);
+  assert.match(settingsSource, /Regenerate/);
+  assert.match(settingsSource, /Copy this now if you just generated it/);
+});
+
+test('email search and subject summaries keep rejected outbound actions discoverable', async () => {
+  const schemaSource = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
+  const emailRepoSource = await readFile(new URL('../src/db/repos/emails.ts', import.meta.url), 'utf8');
+  const messageRepoSource = await readFile(new URL('../src/db/repos/email-messages.ts', import.meta.url), 'utf8');
+  const routerSource = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  const emailToolSource = await readFile(new URL('../src/mcp/tools/email.ts', import.meta.url), 'utf8');
+
+  assert.match(schemaSource, /account_id: uuid\.optional\(\)/);
+  assert.match(schemaSource, /opportunity_id: uuid\.optional\(\)/);
+  assert.match(schemaSource, /use_case_id: uuid\.optional\(\)/);
+  assert.match(schemaSource, /q: z\.string\(\)\.optional\(\)/);
+  assert.match(emailRepoSource, /filters: \{\n\s+contact_id\?: UUID;\n\s+account_id\?: UUID;/);
+  assert.match(emailRepoSource, /e\.account_id = \$\$\{idx\} OR c\.account_id = \$\$\{idx\}/);
+  assert.match(routerSource, /account_id: qs\(req\.query\.account_id\)/);
+  assert.match(emailToolSource, /account_id: input\.account_id/);
+  assert.match(messageRepoSource, /outbound_rejected/);
+  assert.match(messageRepoSource, /outbound_pending_approvals/);
+  assert.match(messageRepoSource, /needs_review: Number\(row\.inbound_needs_review/);
+});
+
+test('email HITL rejection is persisted during resolution instead of relying only on event handlers', async () => {
+  const hitlSource = await readFile(new URL('../src/mcp/tools/hitl.ts', import.meta.url), 'utf8');
+  const emailRepoSource = await readFile(new URL('../src/db/repos/emails.ts', import.meta.url), 'utf8');
+
+  assert.match(hitlSource, /request\.action_type === 'email\.send' && input\.decision === 'rejected'/);
+  assert.match(hitlSource, /updateEmailStatus\(tx, actor\.tenant_id, email\.id, 'rejected'/);
+  assert.match(hitlSource, /hitl_resolution/);
+  assert.match(emailRepoSource, /generation_metadata = COALESCE\(generation_metadata/);
+  assert.match(emailRepoSource, /\|\| \$4::jsonb/);
+});
+
+test('mailbox and calendar connection scopes are enforced with account additional domains', async () => {
+  const migrationSource = await readFile(new URL('../migrations/082_account_domains.sql', import.meta.url), 'utf8');
+  const accountsRepoSource = await readFile(new URL('../src/db/repos/accounts.ts', import.meta.url), 'utf8');
+  const emailSource = await readFile(new URL('../src/services/customer-email.ts', import.meta.url), 'utf8');
+  const activitySource = await readFile(new URL('../src/services/customer-activity.ts', import.meta.url), 'utf8');
+  const syncSource = await readFile(new URL('../src/services/source-sync.ts', import.meta.url), 'utf8');
+  const routerSource = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  const openapiSource = await readFile(new URL('../src/openapi/paths.ts', import.meta.url), 'utf8');
+  const accountToolsSource = await readFile(new URL('../src/mcp/tools/accounts.ts', import.meta.url), 'utf8');
+  const emailUiSource = await readFile(new URL('../../web/src/pages/Emails.tsx', import.meta.url), 'utf8');
+  const activityUiSource = await readFile(new URL('../../web/src/pages/Activities.tsx', import.meta.url), 'utf8');
+  const accountDrawerSource = await readFile(new URL('../../web/src/components/crm/AccountDrawer.tsx', import.meta.url), 'utf8');
+  const hooksSource = await readFile(new URL('../../web/src/api/hooks.ts', import.meta.url), 'utf8');
+  const friendlyErrorsSource = await readFile(new URL('../../web/src/lib/friendlyErrors.ts', import.meta.url), 'utf8');
+  const guideSource = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
+
+  assert.match(migrationSource, /CREATE TABLE IF NOT EXISTS account_domains/);
+  assert.match(migrationSource, /account_domains_tenant_domain_unique/);
+  assert.match(accountsRepoSource, /additional_domains/);
+  assert.match(accountsRepoSource, /hydrateAccountDomains/);
+  assert.match(accountsRepoSource, /getAccountDomainConflicts/);
+  assert.match(accountsRepoSource, /domain_conflicts/);
+  assert.match(accountsRepoSource, /resolution_actions/);
+  assert.match(accountsRepoSource, /ON CONFLICT \(tenant_id, lower\(domain\)\)/);
+  assert.match(accountsRepoSource, /WHERE account_domains\.account_id = EXCLUDED\.account_id/);
+  assert.match(emailSource, /LEFT JOIN account_domains ad/);
+  assert.match(emailSource, /previewEmailAssociation/);
+  assert.match(activitySource, /LEFT JOIN account_domains ad/);
+  assert.match(activitySource, /requireLinkedCustomer/);
+  assert.match(syncSource, /account_ingest_scope/);
+  assert.match(syncSource, /meeting_ingest_scope/);
+  assert.match(syncSource, /out_of_scope_skipped/);
+  assert.match(routerSource, /account_ingest_scope: z\.enum\(\['owned_accounts', 'accessible_accounts'\]\)/);
+  assert.match(routerSource, /meeting_ingest_scope: z\.enum\(\['owned_accounts', 'accessible_accounts', 'all_meetings'\]\)/);
+  assert.match(routerSource, /router\.post\('\/accounts\/:id\/merge'/);
+  assert.match(routerSource, /router\.post\('\/accounts\/:id\/split-domains'/);
+  assert.match(openapiSource, /path: '\/accounts\/\{id\}\/merge'/);
+  assert.match(openapiSource, /path: '\/accounts\/\{id\}\/split-domains'/);
+  assert.match(openapiSource, /409: err409/);
+  assert.match(accountToolsSource, /name: 'account_split_domains'/);
+  assert.match(accountToolsSource, /requireAdmin\(actor\)/);
+  assert.match(accountToolsSource, /account\.domains_split/);
+  assert.match(accountToolsSource, /account_merge/);
+  assert.match(accountToolsSource, /email_messages/);
+  assert.match(accountToolsSource, /calendar_events/);
+  assert.match(emailUiSource, /Only my accounts/);
+  assert.match(emailUiSource, /All accounts I can access/);
+  assert.match(activityUiSource, /Meetings with my accounts/);
+  assert.match(activityUiSource, /All external meetings/);
+  assert.match(accountDrawerSource, /AccountGovernanceSection/);
+  assert.match(accountDrawerSource, /Move domains to another account/);
+  assert.match(accountDrawerSource, /Merge a duplicate into this account/);
+  assert.match(hooksSource, /useMergeAccount/);
+  assert.match(hooksSource, /useSplitAccountDomains/);
+  assert.match(friendlyErrorsSource, /friendlyDomainConflictError/);
+  assert.match(friendlyErrorsSource, /already belongs to/);
+  assert.match(guideSource, /Additional Domains/);
+  assert.match(guideSource, /outside the selected account scope/);
+  assert.match(guideSource, /Domain collisions and cleanup/);
+  assert.match(guideSource, /account_split_domains/);
+});
+
+test('mail and calendar OAuth readiness is admin visible without leaking secrets', async () => {
+  const sourceSync = await readFile(new URL('../src/services/source-sync.ts', import.meta.url), 'utf8');
+  const routerSource = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  const openapiRegistry = await readFile(new URL('../src/openapi/registry.ts', import.meta.url), 'utf8');
+  const openapiPaths = await readFile(new URL('../src/openapi/paths.ts', import.meta.url), 'utf8');
+  const hooksSource = await readFile(new URL('../../web/src/api/hooks.ts', import.meta.url), 'utf8');
+  const messagingSettings = await readFile(new URL('../../web/src/components/settings/MessagingSettings.tsx', import.meta.url), 'utf8');
+  const emailsPage = await readFile(new URL('../../web/src/pages/Emails.tsx', import.meta.url), 'utf8');
+  const activitiesPage = await readFile(new URL('../../web/src/pages/Activities.tsx', import.meta.url), 'utf8');
+  const migration = await readFile(new URL('../migrations/081_tenant_oauth_apps.sql', import.meta.url), 'utf8');
+
+  assert.match(sourceSync, /export interface OAuthReadinessItem/);
+  assert.match(sourceSync, /missing_env_vars/);
+  assert.match(sourceSync, /configured_env_vars/);
+  assert.match(sourceSync, /setup_status/);
+  assert.match(sourceSync, /setup_blockers/);
+  assert.match(sourceSync, /can_start_oauth/);
+  assert.match(sourceSync, /readinessActions/);
+  assert.match(sourceSync, /oauthCallbackErrorMessage/);
+  assert.match(sourceSync, /CRMY_PUBLIC_URL/);
+  assert.match(sourceSync, /normalizeLoopbackOAuthOrigin/);
+  assert.match(sourceSync, /url\.hostname === '127\.0\.0\.1'/);
+  assert.match(sourceSync, /localhost/);
+  assert.match(sourceSync, /app_source: 'tenant_owned' \| 'crmy_managed' \| 'self_hosted_env' \| 'missing'/);
+  assert.match(sourceSync, /CRMY_MANAGED_GOOGLE_CLIENT_ID/);
+  assert.match(sourceSync, /CRMY_MANAGED_MICROSOFT_CLIENT_SECRET/);
+  assert.match(sourceSync, /hostedManagedOAuthEnabled/);
+  assert.match(sourceSync, /oauth_client_id: config\.clientId/);
+  assert.match(sourceSync, /oauthConfigForClientId/);
+  assert.match(sourceSync, /connectionOAuthClientId\(connection\.settings\)/);
+  assert.match(sourceSync, /encryptSecret\(\{ client_secret: clientSecret \}\)/);
+  assert.match(sourceSync, /decryptTenantOAuthSecret/);
+  assert.match(sourceSync, /export async function upsertTenantOAuthApp/);
+  assert.match(sourceSync, /export async function deleteTenantOAuthApp/);
+  assert.doesNotMatch(sourceSync, /clientSecret: config\.clientSecret/);
+  assert.match(routerSource, /router\.get\('\/admin\/oauth-readiness'/);
+  assert.match(routerSource, /router\.get\('\/admin\/oauth-apps'/);
+  assert.match(routerSource, /router\.put\('\/admin\/oauth-apps\/:provider'/);
+  assert.match(routerSource, /router\.delete\('\/admin\/oauth-apps\/:provider'/);
+  assert.match(routerSource, /if \(!requireAdmin\(req, res\)\) return;/);
+  assert.match(routerSource, /oauthReadiness\(db, actor\.tenant_id, 'mailbox', 'google'/);
+  assert.match(routerSource, /oauthReadiness\(db, actor\.tenant_id, 'calendar', 'microsoft'/);
+  assert.match(routerSource, /setup_check: setupCheck/);
+  assert.match(routerSource, /oauth_setup_blockers: setupCheck\.setup_blockers/);
+  assert.match(routerSource, /oauthCallbackErrorMessage\(err/);
+  assert.match(routerSource, /Client secret is required before saving a tenant-owned OAuth app/);
+  assert.match(routerSource, /mailbox_error=\$\{encodeURIComponent\(message\)\}/);
+  assert.match(routerSource, /calendar_error=\$\{encodeURIComponent\(message\)\}/);
+  assert.match(emailsPage, /mailbox_error/);
+  assert.match(emailsPage, /Mailbox connection needs attention/);
+  assert.match(activitiesPage, /calendar_error/);
+  assert.match(activitiesPage, /Calendar connection needs attention/);
+  assert.match(openapiRegistry, /OAuthReadinessResponse/);
+  assert.match(openapiRegistry, /OAuthConnectionStartResponse/);
+  assert.match(openapiRegistry, /setup_check: oauthReadinessItemShape/);
+  assert.match(openapiRegistry, /TenantOAuthAppRecord/);
+  assert.match(openapiPaths, /path: '\/admin\/oauth-readiness'/);
+  assert.match(openapiPaths, /path: '\/admin\/oauth-apps'/);
+  assert.match(openapiPaths, /path: '\/admin\/oauth-apps\/\{provider\}'/);
+  assert.match(hooksSource, /useTenantOAuthApps/);
+  assert.match(hooksSource, /setup_blockers: string\[\]/);
+  assert.match(hooksSource, /can_start_oauth: boolean/);
+  assert.match(hooksSource, /useUpsertTenantOAuthApp/);
+  assert.match(hooksSource, /useDeleteTenantOAuthApp/);
+  assert.match(messagingSettings, /selectedProvider/);
+  assert.match(messagingSettings, /Google Workspace/);
+  assert.match(messagingSettings, /Microsoft 365/);
+  assert.match(messagingSettings, /TenantOAuthAppCard/);
+  assert.match(messagingSettings, /OAuthPreflightPanel/);
+  assert.match(messagingSettings, /Ready for first user connection/);
+  assert.match(messagingSettings, /Fix before first actor connection/);
+  assert.match(messagingSettings, /Enterprise App Credentials/);
+  assert.match(messagingSettings, /Save enterprise app/);
+  assert.match(messagingSettings, /OAuthRedirectUrisPanel/);
+  assert.match(messagingSettings, /Paste these into \{setupLabel\}/);
+  assert.doesNotMatch(messagingSettings, /Enterprise tenant-owned app/);
+  assert.match(messagingSettings, /CRMy-managed app/);
+  assert.match(messagingSettings, /label: 'OAuth'/);
+  assert.doesNotMatch(messagingSettings, /useAdminActorConnections/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS tenant_oauth_apps/);
+  assert.match(migration, /UNIQUE \(tenant_id, provider\)/);
+  assert.match(migration, /client_secret_enc\s+JSONB/);
+});
+
+test('admin actor connection coverage excludes provider token fields', async () => {
+  const routerSource = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  const webHooks = await readFile(new URL('../../web/src/api/hooks.ts', import.meta.url), 'utf8');
+  const actorsSettings = await readFile(new URL('../../web/src/components/settings/ActorsSettings.tsx', import.meta.url), 'utf8');
+
+  assert.match(routerSource, /router\.get\('\/admin\/actor-connections'/);
+  assert.match(routerSource, /mailbox_connections/);
+  assert.match(routerSource, /calendar_connections/);
+  assert.match(routerSource, /ready_sender_count/);
+  assert.match(routerSource, /'created_at', m\.created_at/);
+  assert.match(routerSource, /'processed_messages'/);
+  assert.match(routerSource, /'total_messages'/);
+  assert.match(routerSource, /'customer_messages'/);
+  assert.match(routerSource, /'last_message_at'/);
+  assert.match(routerSource, /'processed_events'/);
+  assert.match(routerSource, /'total_events'/);
+  assert.match(routerSource, /'last_event_at'/);
+  assert.match(routerSource, /raw_context_source_count/);
+  assert.match(routerSource, /signal_count/);
+  assert.match(routerSource, /memory_count/);
+  assert.doesNotMatch(routerSource.match(/router\.get\('\/admin\/actor-connections'[\s\S]*?router\.get\('\/admin\/users'/)?.[0] ?? '', /access_token_enc|refresh_token_enc|provider_account_id|scopes/);
+  assert.match(webHooks, /useAdminActorConnections/);
+  assert.match(webHooks, /ActorConnectionSummary/);
+  assert.match(webHooks, /email_processed_count/);
+  assert.match(webHooks, /calendar_processed_count/);
+  assert.match(webHooks, /useUpdateMailboxConnectionStatus/);
+  assert.match(webHooks, /useUpdateCalendarConnectionStatus/);
+  assert.match(actorsSettings, /useAdminActorConnections/);
+  assert.match(actorsSettings, /connectionSummaryLine/);
+  assert.match(actorsSettings, /Connected \{connectionDate\(record\.created_at\)\}/);
+  assert.match(actorsSettings, /Raw Context source/);
+  assert.match(actorsSettings, /Memory entry/);
+  assert.match(actorsSettings, /Email connected/);
+  assert.match(actorsSettings, /No email/);
+  assert.match(actorsSettings, /Sender active/);
+  assert.match(actorsSettings, /Sender paused/);
+  assert.match(actorsSettings, /Calendar connected/);
+  assert.match(actorsSettings, /No calendar/);
+  assert.match(actorsSettings, /Needs connection attention/);
+  assert.match(actorsSettings, /Mailbox, sender, and calendar coverage/);
+  assert.match(actorsSettings, /Deactivate/);
+  assert.match(actorsSettings, /Disconnect/);
+  assert.match(actorsSettings, /\/settings\/connections/);
+});
+
+test('mailbox and calendar connections support reversible deactivation and destructive disconnect UX', async () => {
+  const routerSource = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  const sourceSync = await readFile(new URL('../src/services/source-sync.ts', import.meta.url), 'utf8');
+  const openapiPaths = await readFile(new URL('../src/openapi/paths.ts', import.meta.url), 'utf8');
+  const hooksSource = await readFile(new URL('../../web/src/api/hooks.ts', import.meta.url), 'utf8');
+  const emailsPage = await readFile(new URL('../../web/src/pages/Emails.tsx', import.meta.url), 'utf8');
+  const activitiesPage = await readFile(new URL('../../web/src/pages/Activities.tsx', import.meta.url), 'utf8');
+  const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
+
+  assert.match(routerSource, /router\.patch\('\/mailbox\/connections\/:id\/status'/);
+  assert.match(routerSource, /router\.patch\('\/calendar\/connections\/:id\/status'/);
+  assert.match(routerSource, /previous_capabilities/);
+  assert.match(routerSource, /Reconnect this mailbox with OAuth before activating it/);
+  assert.match(routerSource, /Reconnect this calendar with OAuth before activating it/);
+  assert.match(sourceSync, /Mailbox sync paused because this connection is deactivated/);
+  assert.match(sourceSync, /Calendar sync paused because this connection is deactivated/);
+  assert.match(openapiPaths, /path: '\/mailbox\/connections\/\{id\}\/status'/);
+  assert.match(openapiPaths, /path: '\/calendar\/connections\/\{id\}\/status'/);
+  assert.match(hooksSource, /useUpdateMailboxConnectionStatus/);
+  assert.match(hooksSource, /useUpdateCalendarConnectionStatus/);
+  assert.match(emailsPage, /Disconnect mailbox/);
+  assert.match(emailsPage, /Paused\. CRMy is not reading this mailbox/);
+  assert.match(activitiesPage, /Disconnect calendar/);
+  assert.match(activitiesPage, /Paused\. CRMy is not reading this calendar/);
+  assert.match(guide, /Deactivate\*\* pauses CRMy use/);
+  assert.match(guide, /Disconnect\*\* deletes the connection and stored OAuth tokens/);
+});
+
+test('scoped overview and personal connection setup keep mailbox/calendar OAuth user friendly', async () => {
+  const dashboard = await readFile(new URL('../../web/src/pages/Dashboard.tsx', import.meta.url), 'utf8');
+  const emailsPage = await readFile(new URL('../../web/src/pages/Emails.tsx', import.meta.url), 'utf8');
+  const activitiesPage = await readFile(new URL('../../web/src/pages/Activities.tsx', import.meta.url), 'utf8');
+
+  assert.match(dashboard, /crmy-overview-personal-connections-hidden/);
+  assert.match(dashboard, /user\?\.role === 'member' \|\| user\?\.role === 'manager'/);
+  assert.match(dashboard, /Connect your work apps to build customer memory automatically/);
+  assert.match(dashboard, /Email is connected\. Add calendar to capture meetings and availability context/);
+  assert.match(dashboard, /Calendar is connected\. Add email to capture customer threads and replies/);
+  assert.match(dashboard, /Show connection setup/);
+  assert.match(dashboard, /mailboxConnected && calendarConnected/);
+  assert.match(dashboard, /\/emails\?tab=connections/);
+  assert.match(dashboard, /\/activities\?tab=connections/);
+
+  assert.match(emailsPage, /Choose provider/);
+  assert.match(emailsPage, /Connect your work mailbox/);
+  assert.match(emailsPage, /Connect another mailbox/);
+  assert.match(emailsPage, /Choose mailbox/);
+  assert.match(emailsPage, /What CRMy uses/);
+  assert.match(emailsPage, /Use email for customer context/);
+  assert.match(emailsPage, /Send approved drafts from this mailbox/);
+  assert.match(emailsPage, /Create provider drafts when available/);
+  assert.match(emailsPage, /CRMy filters for customer conversations/);
+  assert.match(emailsPage, /Ask an admin to enable .* connections/);
+  assert.match(emailsPage, /Open System Connections/);
+  assert.match(emailsPage, /mailboxConnections = connections\.filter/);
+  assert.doesNotMatch(emailsPage, /Set up inbound webhook/);
+  assert.doesNotMatch(emailsPage, /Open inbound setup/);
+  assert.doesNotMatch(emailsPage, /Redirect path/);
+  assert.doesNotMatch(emailsPage, /Access model/);
+  assert.doesNotMatch(emailsPage, /Keep the inbox focused on customer communication/);
+
+  assert.match(activitiesPage, /Choose calendar/);
+  assert.match(activitiesPage, /What CRMy uses/);
+  assert.match(activitiesPage, /CRMy looks for customer meetings/);
+  assert.match(activitiesPage, /CRMy reads meeting metadata so customer meetings can be matched to accounts and contacts/);
+  assert.match(activitiesPage, /read-only calendar access/);
+  assert.match(activitiesPage, /CRMy does not create invites from this setup/);
+  assert.match(activitiesPage, /Ask an admin to enable .* connections/);
+  assert.match(activitiesPage, /Open System Connections/);
+  assert.doesNotMatch(activitiesPage, /Redirect path/);
+  assert.doesNotMatch(activitiesPage, /Access model/);
+  assert.doesNotMatch(activitiesPage, /Keep Activities focused on customer meetings/);
+});
+
+test('mailbox and calendar connection setup responses and OpenAPI expose OAuth readiness cleanly', async () => {
+  const sourceSync = await readFile(new URL('../src/services/source-sync.ts', import.meta.url), 'utf8');
+  const routerSource = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  const openapiRegistry = await readFile(new URL('../src/openapi/registry.ts', import.meta.url), 'utf8');
+  const openapiPaths = await readFile(new URL('../src/openapi/paths.ts', import.meta.url), 'utf8');
+  const emailTools = await readFile(new URL('../src/mcp/tools/email.ts', import.meta.url), 'utf8');
+  const calendarTools = await readFile(new URL('../src/mcp/tools/calendar.ts', import.meta.url), 'utf8');
+  const scopesSource = await readFile(new URL('../src/auth/scopes.ts', import.meta.url), 'utf8');
+  const cliEmails = await readFile(new URL('../../cli/src/commands/emails.ts', import.meta.url), 'utf8');
+  const cliActivities = await readFile(new URL('../../cli/src/commands/activities.ts', import.meta.url), 'utf8');
+  const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
+  const envExample = await readFile(new URL('../../../.env.example', import.meta.url), 'utf8');
+
+  assert.match(sourceSync, /verifiedProviderCalendarIdentity/);
+  assert.match(sourceSync, /Connected calendar identity mismatch/);
+  assert.match(sourceSync, /verified_provider_email/);
+  assert.match(sourceSync, /rejected the OAuth callback/);
+  assert.match(sourceSync, /Provider API request timed out/);
+  assert.match(routerSource, /const setupCheck = await oauthReadiness\(db, actor\.tenant_id, 'calendar'/);
+  assert.match(routerSource, /const setupCheck = await oauthReadiness\(db, actor\.tenant_id, 'mailbox'/);
+  assert.match(routerSource, /oauth_ready: Boolean\(authUrl\)/);
+  assert.match(routerSource, /setup_check: setupCheck/);
+  assert.match(routerSource, /connection = await calendarRepo\.updateCalendarConnection/);
+  assert.match(routerSource, /connection = await emailMessageRepo\.updateMailboxConnection/);
+  assert.match(routerSource, /oauth_setup_status: setupCheck\.setup_status/);
+  assert.match(openapiRegistry, /MailboxConnectionListResponse/);
+  assert.match(openapiRegistry, /CalendarConnectionListResponse/);
+  assert.match(openapiRegistry, /OAuthConnectionStartResponse/);
+  assert.match(openapiRegistry, /oauth_ready: oauthReadyShape/);
+  assert.match(openapiPaths, /ok\(OAuthConnectionStartResponse\)/);
+  assert.match(openapiPaths, /ok\(MailboxConnectionListResponse\)/);
+  assert.match(openapiPaths, /ok\(CalendarConnectionListResponse\)/);
+  assert.match(emailTools, /name: 'mailbox_connection_start'/);
+  assert.match(emailTools, /Open auth_url in a browser/);
+  assert.match(emailTools, /A human-linked user is required to connect a mailbox/);
+  assert.match(calendarTools, /name: 'calendar_connection_start'/);
+  assert.match(calendarTools, /Open auth_url in a browser/);
+  assert.match(calendarTools, /A human-linked user is required to connect a calendar/);
+  assert.match(scopesSource, /mailbox_connection_start: \['activities:write'\]/);
+  assert.match(scopesSource, /calendar_connection_start: \['activities:write'\]/);
+  assert.match(cliEmails, /command\('connect <provider>'\)/);
+  assert.match(cliActivities, /command\('connect-calendar <provider>'\)/);
+  assert.match(guide, /Settings -> Actors/);
+  assert.match(guide, /first-connection preflight/);
+  assert.match(guide, /mailbox_connection_start/);
+  assert.match(guide, /crmy emails connect <provider>/);
+  assert.match(guide, /Do not ask the first actor to connect until mailbox and calendar show ready/);
+  assert.match(guide, /CRMY_PUBLIC_URL=https:\/\/your-crmy-host/);
+  assert.match(envExample, /CRMY_PUBLIC_URL=https:\/\/crmy\.example\.com/);
+});
+
+test('availability suggestions use free-busy boundaries without exposing raw calendar details', async () => {
+  const availabilitySource = await readFile(new URL('../src/services/availability.ts', import.meta.url), 'utf8');
+  const calendarTools = await readFile(new URL('../src/mcp/tools/calendar.ts', import.meta.url), 'utf8');
+  const scopes = await readFile(new URL('../src/auth/scopes.ts', import.meta.url), 'utf8');
+  const routerSource = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  const cliClient = await readFile(new URL('../../cli/src/client.ts', import.meta.url), 'utf8');
+  const agentEngine = await readFile(new URL('../src/agent/engine.ts', import.meta.url), 'utf8');
+  const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
+
+  assert.match(availabilitySource, /googleBusyIntervals/);
+  assert.match(availabilitySource, /calendar\/v3\/freeBusy/);
+  assert.match(availabilitySource, /microsoftBusyIntervals/);
+  assert.match(availabilitySource, /calendar\/getSchedule/);
+  assert.match(availabilitySource, /raw_calendar_event_details_returned: false/);
+  assert.match(availabilitySource, /customer_availability_is_confirmed: false/);
+  assert.match(availabilitySource, /assertSubjectAccess/);
+  assert.match(availabilitySource, /getVisibleOwnerIds/);
+  assert.match(calendarTools, /name: 'availability_suggest_times'/);
+  assert.match(calendarTools, /does not create or send invites/);
+  assert.match(scopes, /availability_suggest_times: \['activities:read', 'context:read'\]/);
+  assert.match(routerSource, /router\.post\('\/availability\/suggest-times'/);
+  assert.match(cliClient, /availability_suggest_times: \{ method: 'POST', path: \(\) => '\/api\/v1\/availability\/suggest-times' \}/);
+  assert.match(agentEngine, /'availability_suggest_times'/);
+  assert.match(guide, /Availability suggestions are action-boundary context/);
 });
 
 class FakeTransactionClient {
@@ -321,6 +730,84 @@ test('context search defaults to confirmed Memory and only includes Signals when
   await searchContextEntries(signalDb, baseInput.tenantId, { memory_status: 'signal', limit: 20 });
   assert.match(signalDb.queries[0], /c\.memory_status = \$2/);
   assert.deepEqual(signalDb.params[0], [baseInput.tenantId, 'signal']);
+});
+
+test('high-volume context surfaces use stable timestamp plus id cursors', async () => {
+  const paginationRepo = await readFile(new URL('../src/db/repos/pagination.ts', import.meta.url), 'utf8');
+  const contextRepo = await readFile(new URL('../src/db/repos/context-entries.ts', import.meta.url), 'utf8');
+  const rawContextRepo = await readFile(new URL('../src/db/repos/raw-context-sources.ts', import.meta.url), 'utf8');
+  const activitiesRepo = await readFile(new URL('../src/db/repos/activities.ts', import.meta.url), 'utf8');
+  const signalGroupsRepo = await readFile(new URL('../src/db/repos/signal-groups.ts', import.meta.url), 'utf8');
+
+  assert.match(paginationRepo, /encodeStableCursor/);
+  assert.match(paginationRepo, /decodeStableCursor/);
+  assert.match(paginationRepo, /base64url/);
+  assert.match(paginationRepo, /AND \${idExpression} < \$\${idx \+ 1}::uuid/);
+
+  for (const source of [contextRepo, rawContextRepo, activitiesRepo]) {
+    assert.match(source, /addStableDescCursorCondition/);
+    assert.match(source, /ORDER BY .*created_at DESC, .*id DESC/);
+    assert.match(source, /encodeStableCursor\(\{ sort_value: .*created_at, id:/s);
+  }
+
+  assert.match(signalGroupsRepo, /SIGNAL_GROUP_SORT_RANK_SQL/);
+  assert.match(signalGroupsRepo, /sg\.id < \$\$\{idx \+ 2\}::uuid/);
+  assert.match(signalGroupsRepo, /sg\.updated_at DESC, sg\.id DESC/);
+  assert.match(signalGroupsRepo, /rank: signalGroupSortRank/);
+});
+
+class FakeContextDiffDb {
+  constructor() {
+    this.queries = [];
+    this.params = [];
+  }
+
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    this.queries.push(text);
+    this.params.push([...params]);
+    return {
+      rows: [
+        { id: 'entry-1' },
+        { id: 'entry-2' },
+        { id: 'entry-3' },
+      ],
+      rowCount: 3,
+    };
+  }
+}
+
+test('context diff caps each catch-up bucket and reports truncation', async () => {
+  const db = new FakeContextDiffDb();
+  const subjectId = '22222222-2222-4222-8222-222222222222';
+  const diff = await diffContextEntries(db, baseInput.tenantId, 'account', subjectId, '2026-06-01T00:00:00.000Z', 2);
+  const sharedSchemas = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
+  const contextTools = await readFile(new URL('../src/mcp/tools/context-entries.ts', import.meta.url), 'utf8');
+  const mcpDocs = await readFile(new URL('../../../docs/mcp-tools.md', import.meta.url), 'utf8');
+  const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
+
+  assert.equal(diff.limit, 2);
+  assert.equal(diff.new_entries.length, 2);
+  assert.equal(diff.superseded_entries.length, 2);
+  assert.equal(diff.newly_stale.length, 2);
+  assert.equal(diff.resolved_entries.length, 2);
+  assert.deepEqual(diff.truncated, {
+    new_entries: true,
+    superseded_entries: true,
+    newly_stale: true,
+    resolved_entries: true,
+  });
+  assert.equal(db.queries.length, 4);
+  assert.ok(db.queries.every(query => /LIMIT \$5/.test(query)));
+  assert.ok(db.params.every(params => params[4] === 3));
+  assert.match(sharedSchemas, /Maximum entries to return per diff bucket/);
+  assert.match(contextTools, /function normalizeSinceTimestamp/);
+  assert.match(contextTools, /since must be an ISO timestamp or a relative duration/);
+  assert.match(contextTools, /Get a bounded catch-up diff/);
+  assert.match(mcpDocs, /max 100 per bucket/);
+  assert.match(mcpDocs, /summary\.truncated/);
+  assert.match(guide, /max entries per bucket/);
+  assert.match(guide, /summary\.truncated/);
 });
 
 test('signal auto-promotion requires evidence and configured confidence threshold', () => {
@@ -3391,6 +3878,7 @@ test('MCP manifests keep scoped agents focused and expose the router first', asy
   assert.equal(postMeetingTools[0].name, 'tool_guide');
   assert.equal(adminTools[0].name, 'tool_guide');
   assert.equal(readOnlyTools.some(tool => tool.name === 'context_find'), true);
+  assert.equal(readOnlyTools.some(tool => tool.name === 'context_diff'), true);
   assert.equal(postMeetingTools.some(tool => tool.name === 'context_find'), true);
   assert.ok(readOnlyTools.length <= 31);
   assert.ok(postMeetingTools.length <= 56);
@@ -3403,6 +3891,9 @@ test('MCP manifests keep scoped agents focused and expose the router first', asy
   assert.match(result.avoid_tools.join(' '), /context_add/);
   const signalGuide = await guide.handler({ workflow: 'review_signals' }, memberActor);
   assert.equal(signalGuide.recommended_tools[0], 'context_find');
+  const postActionGuide = await guide.handler({ workflow: 'post_action_follow_up' }, memberActor);
+  assert.equal(postActionGuide.recommended_tools[0], 'context_lineage_get');
+  assert.match(postActionGuide.next_step, /lineage\.outcomes/);
 });
 
 test('retry-sensitive MCP operations expose idempotency keys', () => {
@@ -3746,6 +4237,14 @@ test('system-of-record writebacks carry Action Context into previews, HITL, and 
 
 test('Context Lineage connects Action Context receipts back to proof and retrieval events', async () => {
   const source = await readFile(new URL('../src/services/context-lineage.ts', import.meta.url), 'utf8');
+  const sharedTypes = await readFile(new URL('../../shared/src/types.ts', import.meta.url), 'utf8');
+  const cliContext = await readFile(new URL('../../cli/src/commands/context.ts', import.meta.url), 'utf8');
+  const agentEngine = await readFile(new URL('../src/agent/engine.ts', import.meta.url), 'utf8');
+  const toolGuide = await readFile(new URL('../src/mcp/tools/guide.ts', import.meta.url), 'utf8');
+  const openapiRegistry = await readFile(new URL('../src/openapi/registry.ts', import.meta.url), 'utf8');
+  const openapiPaths = await readFile(new URL('../src/openapi/paths.ts', import.meta.url), 'utf8');
+  const mcpDocs = await readFile(new URL('../../../docs/mcp-tools.md', import.meta.url), 'utf8');
+  const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
   assert.match(source, /metadata \? 'action_context'/);
   assert.match(source, /retrieval-action-receipt/);
   assert.match(source, /retrieval-action-target/);
@@ -3760,6 +4259,138 @@ test('Context Lineage connects Action Context receipts back to proof and retriev
   assert.match(source, /Handoff audit receipt/);
   assert.match(source, /action-target-receipt/);
   assert.match(source, /relation:\s*'receipted'/);
+  assert.match(sharedTypes, /export interface ContextLineageOutcome/);
+  assert.match(sharedTypes, /outcomes\?:/);
+  assert.match(source, /function buildLineageOutcomes/);
+  assert.match(source, /pending_count/);
+  assert.match(source, /failed_count/);
+  assert.match(source, /recommended_follow_up/);
+  assert.match(source, /Refresh briefing or Action Context after completed outcomes/);
+  assert.match(cliContext, /Outcomes:/);
+  assert.match(cliContext, /recommended_follow_up/);
+  assert.match(agentEngine, /Use lineage outcomes as the source of truth/);
+  assert.match(agentEngine, /context_lineage_get/);
+  assert.match(toolGuide, /post_action_follow_up/);
+  assert.match(toolGuide, /lineage\.outcomes\.pending/);
+  assert.match(openapiRegistry, /ContextLineageResponse/);
+  assert.match(openapiRegistry, /ContextLineageOutcome/);
+  assert.match(openapiPaths, /ok\(ContextLineageResponse\)/);
+  assert.match(mcpDocs, /\{ lineage: \{ nodes, edges, outcomes, summary \} \}/);
+  assert.match(mcpDocs, /post_action_follow_up/);
+  assert.match(guide, /outcomes` rollup/);
+});
+
+test('Briefing REST contract matches the actual agent-facing briefing envelope', async () => {
+  const sharedTypes = await readFile(new URL('../../shared/src/types.ts', import.meta.url), 'utf8');
+  const sharedSchemas = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
+  const openapiRegistry = await readFile(new URL('../src/openapi/registry.ts', import.meta.url), 'utf8');
+  const openapiPaths = await readFile(new URL('../src/openapi/paths.ts', import.meta.url), 'utf8');
+  const restRouter = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  const briefingTool = await readFile(new URL('../src/mcp/tools/context-entries.ts', import.meta.url), 'utf8');
+  const actionContextTool = await readFile(new URL('../src/mcp/tools/action-context.ts', import.meta.url), 'utf8');
+  const briefingService = await readFile(new URL('../src/services/briefing.ts', import.meta.url), 'utf8');
+  const actionContextService = await readFile(new URL('../src/services/action-context.ts', import.meta.url), 'utf8');
+  const contextRepo = await readFile(new URL('../src/db/repos/context-entries.ts', import.meta.url), 'utf8');
+  const cliClient = await readFile(new URL('../../cli/src/client.ts', import.meta.url), 'utf8');
+  const cliBriefing = await readFile(new URL('../../cli/src/commands/briefing.ts', import.meta.url), 'utf8');
+  const cliActionContext = await readFile(new URL('../../cli/src/commands/action-context.ts', import.meta.url), 'utf8');
+  const readme = await readFile(new URL('../../../README.md', import.meta.url), 'utf8');
+  const mcpDocs = await readFile(new URL('../../../docs/mcp-tools.md', import.meta.url), 'utf8');
+  const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
+
+  assert.match(sharedTypes, /export type TokenBudgetProfile/);
+  assert.match(sharedTypes, /export type EvidenceMode/);
+  assert.match(sharedTypes, /context_packing\?: ContextPackingMetadata/);
+  assert.match(sharedSchemas, /export const tokenBudgetProfile/);
+  assert.match(sharedSchemas, /export const evidenceMode/);
+  assert.match(sharedSchemas, /token_budget_profile: tokenBudgetProfile\.optional/);
+  assert.match(sharedSchemas, /evidence_mode: evidenceMode\.default\('summary'\)/);
+  assert.match(sharedTypes, /dropped_entries\?:/);
+  assert.match(briefingTool, /return \{ briefing \}/);
+  assert.match(briefingTool, /return \{ briefing_text: formatBriefingText\(briefing\) \}/);
+  assert.match(briefingTool, /Check staleness_warnings before acting/);
+  assert.match(briefingTool, /token_budget_profile: input\.token_budget_profile/);
+  assert.match(briefingTool, /evidence_mode: input\.evidence_mode/);
+  assert.match(actionContextTool, /token_budget_profile and evidence_mode/);
+  assert.match(openapiRegistry, /BriefingResponse/);
+  assert.match(openapiRegistry, /briefing: briefingShape\.optional/);
+  assert.match(openapiRegistry, /briefing_text: z\.string\(\)\.optional/);
+  assert.match(openapiRegistry, /context_packing/);
+  assert.match(openapiRegistry, /token_budget_profile: S\.tokenBudgetProfile\.optional/);
+  assert.match(openapiRegistry, /evidence_mode: S\.evidenceMode/);
+  assert.match(openapiRegistry, /related_objects/);
+  assert.match(openapiRegistry, /context_entries/);
+  assert.match(openapiRegistry, /staleness_warnings/);
+  assert.match(openapiRegistry, /contradiction_warnings/);
+  assert.match(openapiRegistry, /adjacent_context/);
+  assert.match(openapiRegistry, /token_estimate/);
+  assert.match(openapiRegistry, /dropped_entries/);
+  assert.match(openapiPaths, /ok\(BriefingResponse\)/);
+  assert.doesNotMatch(openapiPaths, /stale_warnings/);
+  assert.match(briefingService, /function groupAdjacentContext/);
+  assert.match(briefingService, /TOKEN_BUDGET_PROFILES/);
+  assert.match(briefingService, /defaultTokenBudgetProfileForAction/);
+  assert.match(briefingService, /function actionTypeBoost/);
+  assert.match(briefingService, /function applyEvidenceModeToEntry/);
+  assert.match(briefingService, /ranking_strategy/);
+  assert.match(briefingService, /context_packing/);
+  assert.match(briefingService, /const budgetedEntries = \[\.\.\.ownEntries, \.\.\.adjacentEntries\]/);
+  assert.match(briefingService, /const selectedOwnEntries = result\.entries\.filter/);
+  assert.match(briefingService, /const selectedAdjacentEntries = result\.entries\.filter/);
+  assert.match(briefingService, /adjacent_context = groupAdjacentContext\(applyEvidenceModeToEntries\(selectedAdjacentEntries, evidenceMode\)\)/);
+  assert.match(actionContextService, /token_budget_profile: input\.token_budget_profile/);
+  assert.match(actionContextService, /evidence_mode: input\.evidence_mode/);
+  assert.match(actionContextService, /proposed_action_type: input\.proposed_action\?\.action_type/);
+  assert.match(restRouter, /token_budget_profile: qs\(req\.query\.token_budget_profile\)/);
+  assert.match(restRouter, /evidence_mode: qs\(req\.query\.evidence_mode\)/);
+  assert.match(cliClient, /token_budget_profile/);
+  assert.match(cliClient, /evidence_mode/);
+  assert.match(cliBriefing, /--token-profile <profile>/);
+  assert.match(cliBriefing, /--evidence-mode <mode>/);
+  assert.match(cliActionContext, /--token-profile <profile>/);
+  assert.match(cliActionContext, /--evidence-mode <mode>/);
+  assert.match(contextRepo, /const subjectTypes = subjects\.map/);
+  assert.match(contextRepo, /FROM unnest\(\$2::text\[\], \$3::uuid\[\]\) AS scoped\(subject_type, subject_id\)/);
+  assert.doesNotMatch(contextRepo, /subject_id = ANY\(\$2::uuid\[\]\)/);
+  assert.match(readme, /How CRMy Reduces Token Use/);
+  assert.match(readme, /budget profiles \(`tiny`, `standard`, `deep`, `evidence_heavy`\)/);
+  assert.match(readme, /evidence_mode: "summary"/);
+  assert.match(mcpDocs, /staleness_warnings/);
+  assert.match(mcpDocs, /dropped_entries/);
+  assert.match(mcpDocs, /token_budget_profile/);
+  assert.match(mcpDocs, /evidence_mode/);
+  assert.match(mcpDocs, /across direct and adjacent\/account-wide Memory entries/);
+  assert.match(guide, /staleness_warnings/);
+  assert.match(guide, /dropped_entries/);
+  assert.match(guide, /Profiles keep common agent calls simple/);
+  assert.match(guide, /evidence_mode` controls how much proof travels/);
+  assert.match(guide, /applies across direct and adjacent\/account-wide Memory entries/);
+  assert.doesNotMatch(mcpDocs, /stale_warnings/);
+});
+
+test('email and calendar sources remain traceable and preserve authorship semantics in Raw Context UI', async () => {
+  const extractionSource = await readFile(new URL('../src/agent/extraction.ts', import.meta.url), 'utf8');
+  const emailSource = await readFile(new URL('../src/services/customer-email.ts', import.meta.url), 'utf8');
+  const activitySource = await readFile(new URL('../src/services/customer-activity.ts', import.meta.url), 'utf8');
+  const observationsSource = await readFile(new URL('../../web/src/components/crm/ObservationsDashboard.tsx', import.meta.url), 'utf8');
+
+  assert.match(extractionSource, /Source Authorship: CRMy\/seller-authored outbound email/);
+  assert.match(extractionSource, /Do not infer customer claims or intent from the seller-authored text/);
+  assert.match(extractionSource, /source:crmy-authored/);
+  assert.match(extractionSource, /outbound-context/);
+  assert.match(emailSource, /source_authorship: 'crmy'/);
+  assert.match(emailSource, /customer_authored: false/);
+  assert.match(emailSource, /evidence_weight: 'self_authored_action_context'/);
+  assert.match(emailSource, /source_authorship: 'customer_or_external'/);
+  assert.match(emailSource, /customer_authored: true/);
+  assert.match(activitySource, /raw_context_source_id: rawSource\?\.id/);
+  assert.match(activitySource, /signals_created: extraction\.signals_created/);
+  assert.match(activitySource, /memory_created: extraction\.memory_created/);
+  assert.match(observationsSource, /calendar_event/);
+  assert.match(observationsSource, /Calendar events/);
+  assert.match(observationsSource, /Seller-authored: treat as our words/);
+  assert.match(observationsSource, /Customer-authored evidence/);
+  assert.match(observationsSource, /tab=lineage&raw_context_source_id=\$\{source\.id\}/);
 });
 
 test('Handoff and writeback receipts preserve Action Context metadata for lineage proof', async () => {
@@ -3783,7 +4414,9 @@ test('external side effects persist provider-call attempt receipts before provid
   const writebackRepoSource = await readFile(new URL('../src/db/repos/systems-of-record.ts', import.meta.url), 'utf8');
   const emailDeliverySource = await readFile(new URL('../src/email/delivery.ts', import.meta.url), 'utf8');
   const emailRepoSource = await readFile(new URL('../src/db/repos/emails.ts', import.meta.url), 'utf8');
+  const emailDeliveryMigration = await readFile(new URL('../migrations/080_email_delivery_jobs.sql', import.meta.url), 'utf8');
   const dataQualitySource = await readFile(new URL('../src/services/data-quality.ts', import.meta.url), 'utf8');
+  const hitlEmailHandlerSource = await readFile(new URL('../src/email/hitl-handler.ts', import.meta.url), 'utf8');
 
   assert.match(writebackSource, /providerCallReceipt/);
   assert.match(writebackSource, /status:\s*'started'/);
@@ -3797,16 +4430,64 @@ test('external side effects persist provider-call attempt receipts before provid
   assert.match(writebackSource, /status: result\.ok \? 'completed' : 'failed'/);
 
   assert.match(emailRepoSource, /export async function claimEmailForDelivery/);
-  assert.match(emailRepoSource, /status IN \('draft', 'approved'\)/);
+  assert.match(emailRepoSource, /export async function enqueueEmailDeliveryJob/);
+  assert.match(emailRepoSource, /SET status = 'queued_for_delivery'/);
+  assert.match(emailRepoSource, /export async function recoverStaleEmailDeliveryState/);
   assert.match(emailRepoSource, /export async function mergeEmailGenerationMetadata/);
+  assert.match(emailDeliveryMigration, /CREATE TABLE IF NOT EXISTS email_delivery_jobs/);
+  assert.match(emailDeliveryMigration, /email_delivery_jobs_active_unique/);
   assert.match(emailDeliverySource, /deliveryAttempt/);
   assert.match(emailDeliverySource, /provider_call_started/);
+  assert.match(emailDeliverySource, /processEmailDeliveryJobs/);
   assert.match(emailDeliverySource, /claimEmailForDelivery\(db, tenantId, emailId, deliveryAttempt\)/);
   assert.ok(emailDeliverySource.indexOf('claimEmailForDelivery') < emailDeliverySource.indexOf('provider.send'));
   assert.match(emailDeliverySource, /idempotency_key: deliveryAttempt\.idempotency_key/);
   assert.match(emailDeliverySource, /manual_reconciliation_required/);
+  assert.match(emailRepoSource, /status IN \('draft', 'approved', 'queued_for_delivery', 'failed', 'delivery_uncertain'\)/);
+  assert.match(emailRepoSource, /status IN \('draft', 'approved', 'failed', 'delivery_uncertain'\)/);
+  assert.doesNotMatch(hitlEmailHandlerSource, /deliverEmail/);
+  assert.match(hitlEmailHandlerSource, /Delivery is intentionally not performed here/);
   assert.match(dataQualitySource, /stuck_external_writebacks_executing/);
   assert.match(dataQualitySource, /stuck_emails_sending/);
+});
+
+test('outbound email tools use actor-visible access filters', async () => {
+  const emailToolSource = await readFile(new URL('../src/mcp/tools/email.ts', import.meta.url), 'utf8');
+  const emailRepoSource = await readFile(new URL('../src/db/repos/emails.ts', import.meta.url), 'utf8');
+
+  assert.match(emailToolSource, /async function assertOutboundEmailAccess/);
+  assert.match(emailToolSource, /await assertOutboundEmailAccess\(db, actor, email\)/);
+  assert.match(emailToolSource, /const ownerFilter = await resolveOwnerFilter\(db, actor\)/);
+  assert.match(emailToolSource, /owner_ids: ownerFilter\.owner_ids/);
+  assert.match(emailToolSource, /return saveEmailDraft\(db, actor/);
+  assert.match(emailRepoSource, /owner_ids\?: UUID\[\]/);
+  assert.match(emailRepoSource, /c\.owner_id = ANY/);
+  assert.match(emailRepoSource, /o\.owner_id = ANY/);
+  assert.match(emailRepoSource, /uc\.owner_id = ANY/);
+});
+
+test('mailbox sync preserves processed messages and verifies provider identity', async () => {
+  const emailMessageRepoSource = await readFile(new URL('../src/db/repos/email-messages.ts', import.meta.url), 'utf8');
+  const sourceSyncSource = await readFile(new URL('../src/services/source-sync.ts', import.meta.url), 'utf8');
+
+  assert.match(emailMessageRepoSource, /email_messages\.processing_status IN \('processed', 'ignored', 'skipped'\)/);
+  assert.match(sourceSyncSource, /verifiedProviderMailboxIdentity/);
+  assert.match(sourceSyncSource, /Connected mailbox identity mismatch/);
+  assert.match(sourceSyncSource, /oauth2\/v3\/userinfo/);
+  assert.match(sourceSyncSource, /gmail\/v1\/users\/me\/profile/);
+  assert.match(sourceSyncSource, /Google accepted OAuth, but the Gmail API is not enabled/);
+  assert.match(sourceSyncSource, /provider_status/);
+  assert.match(sourceSyncSource, /fetchMailboxSendAsAliases/);
+  assert.match(sourceSyncSource, /gmail\/v1\/users\/me\/settings\/sendAs/);
+  assert.match(sourceSyncSource, /CRMy will use the primary mailbox address until aliases are refreshed/);
+  assert.doesNotMatch(sourceSyncSource, /gmail\.settings\.basic/);
+  assert.match(sourceSyncSource, /selected_send_as_email/);
+  assert.match(sourceSyncSource, /Sender aliases are available only for Gmail or Microsoft/);
+  assert.match(sourceSyncSource, /cursorRecovered/);
+  assert.match(sourceSyncSource, /Gmail history cursor expired/);
+  assert.match(sourceSyncSource, /raw\.historyId \? String\(raw\.historyId\) : nextCursor/);
+  assert.match(sourceSyncSource, /headers\['in-reply-to'\]/);
+  assert.match(sourceSyncSource, /references_header: String\(headers\.references/);
 });
 
 test('production release gates cover packaging, secrets, HTTP hardening, and timeouts', async () => {
@@ -3929,6 +4610,70 @@ test('agent-assisted record updates carry Action Context proof into audit metada
   assert.match(opportunityTools, /verifiedActionContextMetadataForReceipt/);
   assert.match(opportunityTools, /action_context: actionContextMetadata/);
   assert.match(quickAdd, /patch: payload, action_context: draftResult\.action_context/);
+});
+
+test('Action Context returns an agent-ready action packet', async () => {
+  const sharedTypes = await readFile(new URL('../../shared/src/types.ts', import.meta.url), 'utf8');
+  const sharedSchemas = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
+  const actionContext = await readFile(new URL('../src/services/action-context.ts', import.meta.url), 'utf8');
+  const actionContextTool = await readFile(new URL('../src/mcp/tools/action-context.ts', import.meta.url), 'utf8');
+  const scopes = await readFile(new URL('../src/auth/scopes.ts', import.meta.url), 'utf8');
+  const router = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  const openapiRegistry = await readFile(new URL('../src/openapi/registry.ts', import.meta.url), 'utf8');
+  const openapiPaths = await readFile(new URL('../src/openapi/paths.ts', import.meta.url), 'utf8');
+  const cliCommand = await readFile(new URL('../../cli/src/commands/action-context.ts', import.meta.url), 'utf8');
+  const mcpDocs = await readFile(new URL('../../../docs/mcp-tools.md', import.meta.url), 'utf8');
+  const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
+
+  assert.match(sharedTypes, /export interface ActionContextActionPacket/);
+  assert.match(sharedTypes, /export interface ActionContextRecommendedAction/);
+  assert.match(sharedTypes, /export interface ActionContextSourcePosture/);
+  assert.match(sharedTypes, /use_as_truth: ActionContextPacketItem\[\]/);
+  assert.match(sharedTypes, /source_posture: ActionContextSourcePosture/);
+  assert.match(sharedTypes, /recommended_actions: ActionContextRecommendedAction\[\]/);
+  assert.match(sharedTypes, /human_unblock\?:/);
+  assert.match(actionContext, /function buildActionPacket/);
+  assert.match(actionContext, /function buildRecommendedActions/);
+  assert.match(actionContext, /function buildSourcePosture/);
+  assert.match(actionContext, /source_authorship/);
+  assert.match(actionContext, /customer_authored/);
+  assert.match(actionContext, /self_authored/);
+  assert.match(actionContext, /use_as_truth: useAsTruth/);
+  assert.match(actionContext, /use_with_caution: cautionItems/);
+  assert.match(actionContext, /do_not_use_as_truth: doNotUseAsTruth/);
+  assert.match(actionContext, /evidence_to_cite: evidenceToCite/);
+  assert.match(actionContext, /source_posture: sourcePosture/);
+  assert.match(actionContext, /recommended_actions: buildRecommendedActions/);
+  assert.match(actionContext, /action_context_request_human_unblock/);
+  assert.match(actionContext, /buildHumanUnblock/);
+  assert.match(actionContext, /nextToolsForAction/);
+  assert.match(actionContext, /action_packet: buildActionPacket/);
+  assert.match(sharedSchemas, /export const actionContextHumanUnblock = z\.object/);
+  assert.match(actionContextTool, /name:\s*'action_context_request_human_unblock'/);
+  assert.match(actionContextTool, /snapshotRepo\.createSnapshot/);
+  assert.match(actionContextTool, /hitlRepo\.createHITLRequest/);
+  assert.match(actionContextTool, /assignmentRepo\.createAssignment/);
+  assert.match(scopes, /action_context_request_human_unblock:\s*\['context:read', 'agent:write', 'hitl:write', 'assignments:write'\]/);
+  assert.match(router, /router\.post\('\/action-context\/human-unblock'/);
+  assert.match(openapiRegistry, /ActionContextResponse/);
+  assert.match(openapiRegistry, /ActionContextActionPacket/);
+  assert.match(openapiRegistry, /ActionContextHumanUnblockResponse/);
+  assert.match(openapiPaths, /ok\(ActionContextResponse\)/);
+  assert.match(openapiPaths, /created\(ActionContextHumanUnblockResponse\)/);
+  assert.match(cliCommand, /Action packet:/);
+  assert.match(cliCommand, /Source posture:/);
+  assert.match(cliCommand, /Recommended actions:/);
+  assert.match(cliCommand, /Use as truth:/);
+  assert.match(cliCommand, /Human unblock:/);
+  assert.match(cliCommand, /action_context_request_human_unblock/);
+  assert.match(mcpDocs, /Action packet/);
+  assert.match(mcpDocs, /recommended_actions/);
+  assert.match(mcpDocs, /source_posture/);
+  assert.match(mcpDocs, /action_context_request_human_unblock/);
+  assert.match(guide, /Every response includes `action_packet`/);
+  assert.match(guide, /recommended_actions/);
+  assert.match(guide, /source_posture/);
+  assert.match(guide, /action_context_request_human_unblock/);
 });
 
 test('assignments enforce scoped subject access and carry verified Action Context receipts', async () => {
@@ -4132,6 +4877,34 @@ test('MCP session reuse requires the same authenticated actor and scopes', async
   assert.match(source, /Session ids are state handles, not bearer credentials/);
   assert.match(source, /const actor = await extractMcpActor\(req\);/);
   assert.match(source, /isSameMcpActor\(actor,\s*existingSession\.actor\)/);
+});
+
+test('durable MCP session rows are bound to actor identity and scope fingerprints', () => {
+  const session = {
+    id: 'mcp-session-1',
+    tenant_id: memberActor.tenant_id,
+    actor_id: memberActor.actor_id,
+    actor_type: memberActor.actor_type,
+    actor_role: memberActor.role,
+    scope_hash: actorScopeFingerprint(memberActor),
+    actor_identity_hash: actorIdentityFingerprint(memberActor),
+    owning_instance_id: 'web-1',
+    transport_state: 'active',
+    created_at: new Date().toISOString(),
+    last_seen_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 60_000).toISOString(),
+    closed_at: null,
+    close_reason: null,
+    metadata: {},
+  };
+
+  assert.equal(durableSessionMatchesActor(session, memberActor), true);
+  assert.equal(
+    durableSessionMatchesActor(session, { ...memberActor, scopes: [...memberActor.scopes].reverse() }),
+    true,
+  );
+  assert.equal(durableSessionMatchesActor(session, { ...memberActor, actor_id: 'other-member' }), false);
+  assert.equal(durableSessionMatchesActor(session, { ...memberActor, scopes: ['context:read'] }), false);
 });
 
 test('every tool has an explicit scope mapping unless intentionally public', () => {

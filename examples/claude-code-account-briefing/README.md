@@ -2,7 +2,7 @@
 
 Use this example when you want Claude Code to prove CRMy's agent-facing value path in about a minute.
 
-This is intentionally smaller than a recipe. It only verifies that Claude Code can resolve a customer record, retrieve a briefing, inspect Signals, and recommend a safe next action from CRMy evidence.
+This is intentionally smaller than a recipe. It verifies that Claude Code can resolve a customer record, retrieve a briefing, check Action Context, inspect Signals, check lineage outcomes, and recommend a safe next action from CRMy evidence.
 
 ## Prerequisites
 
@@ -33,7 +33,7 @@ If Claude Code runs outside the shell where `.crmy.json` is available, set `DATA
 Paste this into Claude Code:
 
 ```text
-Use the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used.
+Use the CRMy MCP tools to resolve the account "Northstar Labs", get a briefing, get Action Context for customer outreach, list Signals that need attention, check lineage outcomes, and tell me the safest next action with the evidence you used.
 ```
 
 ## Expected Path
@@ -42,9 +42,11 @@ Claude Code should call:
 
 1. `customer_record_resolve` for `Northstar Labs`.
 2. `briefing_get` for the resolved account.
-3. `context_signal_group_list` with `attention_only: true`.
+3. `action_context_get` with `proposed_action.action_type: "customer_outreach"`.
+4. `context_signal_group_list` with `attention_only: true`.
+5. `context_lineage_get` for the resolved account.
 
-The answer should mention confirmed Memory separately from unconfirmed Signals, explain which Signal needs review, and recommend a safe next action such as reviewing or routing the sensitive Signal to a Handoff.
+The answer should mention confirmed Memory separately from unconfirmed Signals, explain which Signal needs review, respect Action Context boundaries, and recommend a safe next action such as reviewing or routing the sensitive Signal to a Handoff.
 
 ## Troubleshooting
 

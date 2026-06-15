@@ -243,7 +243,7 @@ function readinessLabel(status: SignalReadinessStatus) {
 
 function statusLabel(status: SignalGroup['status']) {
   if (status === 'ready') return 'Ready for Memory';
-  if (status === 'conflicting') return 'Blocked by conflict';
+  if (status === 'conflicting') return 'Conflict review';
   if (status === 'blocked') return 'Needs approval';
   if (status === 'promoted') return 'Memory created';
   if (status === 'dismissed') return 'Dismissed';
@@ -558,11 +558,11 @@ function memoryCandidateState(readiness: SignalReadiness) {
     };
   }
   return {
-    label: readiness.status === 'approval_required' ? 'Needs approval' : 'Blocked',
+    label: readiness.status === 'approval_required' ? 'Needs approval' : 'Needs review',
     className: 'border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400',
     helper: readiness.status === 'approval_required'
       ? 'A reviewer should approve this before agents rely on it as Memory.'
-      : 'Repair the blocker below before this can become confirmed Memory.',
+      : 'Add the missing review input below before this can become confirmed Memory.',
   };
 }
 
@@ -707,7 +707,7 @@ function trustExplanation(group: SignalGroup) {
 
 function promotionStatusText(group: SignalGroup) {
   if (group.status === 'promoted') return 'Memory created';
-  if (group.status === 'conflicting') return 'Blocked by conflict';
+  if (group.status === 'conflicting') return 'Conflict review';
   if (group.status === 'blocked') return canPromote(group) ? 'Needs your confirmation' : 'Needs approval';
   if (group.aggregate_confidence >= promotionThreshold(group)) return 'Will become Memory automatically';
   return 'Below threshold';
@@ -1462,7 +1462,7 @@ export function SignalGroupsBrowser({
                       <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{resolutionTitle(resolution, readiness)}</p>
                       {blockerSummary && (
                         <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-xs leading-5 text-amber-700 dark:text-amber-300">
-                          <span className="font-semibold">Why blocked:</span> {blockerSummary}
+                          <span className="font-semibold">What's needed:</span> {blockerSummary}
                         </div>
                       )}
                       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">

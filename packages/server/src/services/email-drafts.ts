@@ -16,8 +16,8 @@ import * as emailRepo from '../db/repos/emails.js';
 import * as emailMessageRepo from '../db/repos/email-messages.js';
 import * as hitlRepo from '../db/repos/hitl.js';
 import { emitEvent } from '../events/emitter.js';
-import { deliverEmail } from '../email/delivery.js';
 import { createProviderDraft } from '../email/provider-drafts.js';
+import { publicSender, resolveEmailSender } from '../email/sender-identity.js';
 import { callLLM, requireTenantLLMConfig } from '../agent/providers/llm.js';
 import { formatBriefingText } from './briefing.js';
 import {
@@ -231,8 +231,9 @@ async function buildResponsePacket(
   let briefingText = '';
   let memoryCount = 0;
   let signalCount = 0;
-  const actionContext = await getEmailActionContext(db, actor, ctx, input);
-  const actionContextSummary = actionContext ? summarizeActionContext(actionContext) : undefined;
+	  const actionContext = await getEmailActionContext(db, actor, ctx, input);
+	  const sender = await resolveEmailSender(db, actor);
+	  const actionContextSummary = actionContext ? summarizeActionContext(actionContext) : undefined;
   if (actionContext) {
     briefingText = formatBriefingText(actionContext.briefing).slice(0, 12000);
     memoryCount = Object.values(actionContext.briefing.context_entries ?? {}).reduce((sum, entries) => sum + entries.length, 0);
@@ -246,7 +247,8 @@ async function buildResponsePacket(
       intent: input.intent,
       tone: input.tone,
       instruction: input.instruction ?? '',
-      recipient: { email: ctx.to_address, name: ctx.to_name },
+	      recipient: { email: ctx.to_address, name: ctx.to_name },
+	      sender: publicSender(sender),
       linked_records: {
         subject_type: ctx.subject_type,
         subject_id: ctx.subject_id,
@@ -271,17 +273,18 @@ async function buildResponsePacket(
         'Do not invent customer commitments, dates, pricing, or approvals.',
       ],
     },
-    context_used: {
+	    context_used: {
       subject_type: ctx.subject_type,
       subject_id: ctx.subject_id,
       source_email_message_id: ctx.sourceMessage?.id,
       memory_count: memoryCount,
       signal_count: signalCount,
       used_unconfirmed_signals: signalCount > 0,
-      action_context: actionContextSummary,
-    },
-  };
-}
+	      action_context: actionContextSummary,
+	      sender: publicSender(sender),
+	    },
+	  };
+	}
 
 function parseDraftJson(raw: string): { subject: string; body_text: string } | null {
   const match = raw.match(/\{[\s\S]*\}/);
@@ -338,9 +341,10 @@ export async function previewEmailDraft(db: DbPool, actor: ActorContext, input: 
   }
   if (!draft) throw validationError('Workspace Agent returned an email draft that CRMy could not parse. Try a shorter instruction or adjust the model settings.');
 
-  return {
-    ...draft,
-    context_used,
+	  return {
+	    ...draft,
+	    sender: context_used.sender,
+	    context_used,
     warnings: [
       ...(context_used.used_unconfirmed_signals
         ? ['Relevant Signals were available. CRMy treated them as unconfirmed context while drafting.']
@@ -361,29 +365,19 @@ export async function previewEmailDraft(db: DbPool, actor: ActorContext, input: 
 export async function saveEmailDraft(db: DbPool, actor: ActorContext, input: EmailDraftSaveInput) {
   const ctx = await resolveDraftContext(db, actor, input);
   if (!ctx.to_address) throw validationError('A recipient email address is required.');
+  const sender = await resolveEmailSender(db, actor);
   const actionContext = await getEmailActionContext(db, actor, ctx, input);
   const actionContextSummary = actionContext ? summarizeActionContext(actionContext) : undefined;
   const generationMetadata = { ...input.generation_metadata };
   delete generationMetadata.action_context;
-  if (input.delivery_action === 'send_now' && actionContext && !actionContext.guidance.can_execute) {
-    throw validationError('Action Context requires review before this email can be sent. Save the draft or send it for approval instead.');
+	  if (input.delivery_action === 'send_now' && actionContext && !actionContext.guidance.can_execute) {
+	    throw validationError('Action Context requires review before this email can be sent. Save the draft or send it for approval instead.');
+	  }
+  if (input.delivery_action !== 'save_draft' && !sender.can_send) {
+    throw validationError('No send-enabled sender is configured. Save this as a CRMy draft, or connect a mailbox sender / fallback sending provider first.');
   }
-  if (input.draft_target === 'provider_draft') {
-    await emitEvent(db, {
-      tenantId: actor.tenant_id,
-      eventType: 'email.draft_provider_push_failed',
-      actorId: actor.actor_id,
-      actorType: actor.actor_type,
-      objectType: 'email',
-      afterData: { to_address: ctx.to_address, subject: input.subject },
-      metadata: { reason: 'unsupported_capability' },
-    });
-    await createProviderDraft(db, actor.tenant_id, {
-      email_id: '00000000-0000-0000-0000-000000000000' as UUID,
-      to_email: ctx.to_address,
-      subject: input.subject,
-      body_text: input.body_text,
-    });
+  if (input.draft_target === 'provider_draft' && !sender.can_provider_draft) {
+    throw validationError('The selected sender does not support provider drafts. Save this as a CRMy draft instead.');
   }
 
   const userId = await getActorUserId(db, actor);
@@ -419,18 +413,49 @@ export async function saveEmailDraft(db: DbPool, actor: ActorContext, input: Ema
     subject: input.subject,
     body_html: input.body_html,
     body_text: input.body_text,
-    status,
+	    status,
     hitl_request_id: hitlRequestId as UUID | undefined,
-    created_by: userId ?? undefined,
-    draft_origin: input.draft_origin,
+	    created_by: userId ?? undefined,
+	    from_email: sender.from_email ?? null,
+	    from_name: sender.from_name ?? null,
+	    sender_type: sender.sender_type,
+	    mailbox_connection_id: sender.mailbox_connection_id ?? null,
+	    draft_origin: input.draft_origin,
     draft_target: input.draft_target,
     source_email_message_id: input.source_email_message_id as UUID | undefined,
     provider_draft_status: 'not_requested',
     generation_metadata: {
       ...generationMetadata,
-      ...(actionContextSummary ? { action_context: actionContextSummary } : {}),
-    },
-  });
+	      ...(actionContextSummary ? { action_context: actionContextSummary } : {}),
+	      sender: publicSender(sender),
+	    },
+	  });
+
+  let emailForResponse = email;
+  let providerDraftWarning: string | undefined;
+  let providerDraftError: string | undefined;
+  if (input.draft_target === 'provider_draft') {
+    try {
+      const providerDraft = await createProviderDraft(db, actor.tenant_id, {
+        email_id: email.id,
+        to_email: ctx.to_address,
+        subject: input.subject,
+        body_text: input.body_text,
+      });
+      emailForResponse = await emailRepo.updateProviderDraftStatus(db, actor.tenant_id, email.id, {
+        provider_draft_status: providerDraft.status === 'created' ? 'created' : 'unsupported',
+        provider_draft_id: providerDraft.provider_draft_id,
+        metadata: { provider_draft: providerDraft },
+      }) ?? email;
+    } catch (err) {
+      emailForResponse = await emailRepo.updateProviderDraftStatus(db, actor.tenant_id, email.id, {
+        provider_draft_status: 'failed',
+        metadata: { provider_draft_error: err instanceof Error ? err.message : 'Provider draft creation failed' },
+      }) ?? email;
+      providerDraftWarning = 'The CRMy draft was saved, but provider draft creation failed. You can retry provider draft creation later or continue with the saved CRMy draft.';
+      providerDraftError = err instanceof Error ? err.message : 'Provider draft creation failed';
+    }
+  }
 
   if (hitlRequestId) {
     await hitlRepo.mergeHITLActionPayload(db, actor.tenant_id, hitlRequestId as UUID, {
@@ -440,41 +465,56 @@ export async function saveEmailDraft(db: DbPool, actor: ActorContext, input: Ema
         id: email.id,
         subject: input.subject,
         body_text: input.body_text,
-        to_email: ctx.to_address,
-        to_name: ctx.to_name,
-        status: email.status,
-        draft_origin: input.draft_origin,
-        draft_target: input.draft_target,
-      },
-    });
-  }
+	      to_email: ctx.to_address,
+	      to_name: ctx.to_name,
+	      status: email.status,
+	      draft_origin: input.draft_origin,
+	      draft_target: input.draft_target,
+	      sender: publicSender(sender),
+	    },
+	  });
+	}
 
-  const providerConfig = await emailRepo.getProvider(db, actor.tenant_id);
-  await emailMessageRepo.upsertEmailMessage(db, actor.tenant_id, {
-    direction: 'outbound',
-    source: 'outbound',
-    from_email: providerConfig?.from_email ?? 'unknown@local',
-    from_name: providerConfig?.from_name ?? undefined,
-    to_emails: [ctx.to_address],
+	  await emailMessageRepo.upsertEmailMessage(db, actor.tenant_id, {
+	    direction: 'outbound',
+	    source: 'outbound',
+	    from_email: sender.from_email ?? 'unknown@local',
+	    from_name: sender.from_name ?? undefined,
+	    to_emails: [ctx.to_address],
     subject: input.subject,
     body_html: input.body_html,
     body_text: input.body_text,
     classification: 'customer',
-    processing_status: input.delivery_action === 'send_now' ? 'processed' : 'unprocessed',
-    processing_reason: status === 'pending_approval' ? 'Waiting for governed send approval.' : 'Outbound draft recorded.',
+    processing_status: 'unprocessed',
+    processing_reason: status === 'pending_approval'
+      ? 'Waiting for governed send approval.'
+      : input.delivery_action === 'send_now'
+        ? 'Outbound draft recorded; account activity and context processing starts after provider delivery.'
+        : 'Outbound draft recorded.',
     contact_id: ctx.linked.contact_id,
     account_id: ctx.linked.account_id,
     opportunity_id: ctx.linked.opportunity_id,
     use_case_id: ctx.linked.use_case_id,
-    email_id: email.id,
-    user_id: userId ?? undefined,
-    metadata: {
-      draft_origin: input.draft_origin,
-      draft_target: input.draft_target,
-      source_email_message_id: input.source_email_message_id,
-      action_context: actionContextSummary,
-    },
-  });
+	    email_id: email.id,
+	    mailbox_connection_id: sender.mailbox_connection_id ?? undefined,
+	    thread_id: ctx.sourceMessage?.thread_id,
+	    in_reply_to: ctx.sourceMessage?.message_id ?? ctx.sourceMessage?.provider_message_id,
+	    references_header: [
+	      ...(ctx.sourceMessage?.references_header ?? []),
+	      ctx.sourceMessage?.message_id ?? ctx.sourceMessage?.provider_message_id ?? '',
+	    ].filter(Boolean),
+	    reply_to_email_message_id: ctx.sourceMessage?.id,
+	    conversation_root_email_message_id: ctx.sourceMessage?.conversation_root_email_message_id ?? ctx.sourceMessage?.id,
+	    user_id: userId ?? undefined,
+	    metadata: {
+	      draft_origin: input.draft_origin,
+	      draft_target: input.draft_target,
+	      source_email_message_id: input.source_email_message_id,
+	      action_context: actionContextSummary,
+	      sender: publicSender(sender),
+	      reply_handling: sender.reply_handling,
+	    },
+	  });
 
   const eventId = await emitEvent(db, {
     tenantId: actor.tenant_id,
@@ -484,11 +524,12 @@ export async function saveEmailDraft(db: DbPool, actor: ActorContext, input: Ema
     objectType: 'email',
     objectId: email.id,
     afterData: { id: email.id, to: email.to_email, subject: email.subject, status: email.status },
-    metadata: {
-      ...generationMetadata,
-      ...(actionContextSummary ? { action_context: actionContextSummary } : {}),
-    },
-  });
+	    metadata: {
+	      ...generationMetadata,
+	      ...(actionContextSummary ? { action_context: actionContextSummary } : {}),
+	      sender: publicSender(sender),
+	    },
+	  });
   await emitEvent(db, {
     tenantId: actor.tenant_id,
     eventType: 'email.created',
@@ -501,15 +542,18 @@ export async function saveEmailDraft(db: DbPool, actor: ActorContext, input: Ema
   });
 
   if (input.delivery_action === 'send_now') {
-    await deliverEmail(db, actor.tenant_id, email.id);
-    status = 'sending';
+    await emailRepo.enqueueEmailDeliveryJob(db, actor.tenant_id, email.id, { reason: 'send_now' });
+    status = 'queued_for_delivery';
   }
 
-  const latest = await emailRepo.getEmail(db, actor.tenant_id, email.id);
-  return {
-    email: latest ?? email,
-    hitl_request_id: hitlRequestId,
-    event_id: eventId,
-    status,
-  };
-}
+	  const latest = await emailRepo.getEmail(db, actor.tenant_id, email.id);
+	  return {
+	    email: latest ?? emailForResponse,
+	    hitl_request_id: hitlRequestId,
+	    event_id: eventId,
+	    status,
+	    sender: publicSender(sender),
+	    warning: providerDraftWarning,
+	    provider_draft_error: providerDraftError,
+	  };
+	}

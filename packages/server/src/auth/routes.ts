@@ -79,6 +79,18 @@ export function authRouter(
 ): Router {
   const router = Router();
   const secret = new TextEncoder().encode(jwtSecret);
+  const cookieAuthEnabled = process.env.CRMY_BROWSER_COOKIE_AUTH === 'true';
+
+  function setBrowserSessionCookie(res: Response, token: string): void {
+    if (!cookieAuthEnabled) return;
+    res.cookie('crmy_session', token, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      path: '/',
+      maxAge: 8 * 60 * 60 * 1000,
+    });
+  }
 
   // POST /auth/register
   router.post('/register', async (req: Request, res: Response) => {
@@ -171,6 +183,7 @@ export function authRouter(
         .setExpirationTime('8h')
         .sign(secret);
 
+      setBrowserSessionCookie(res, token);
       res.status(201).json({
         token,
         user: { id: user.id, email: user.email, name: user.name, role: user.role, manager_id: user.manager_id, tenant_id: tenant.id },
@@ -216,12 +229,29 @@ export function authRouter(
     try {
       const data = authLogin.parse(req.body);
 
-      // Look up by email first — password verification happens in application
-      // code using timingSafeEqual, not in SQL, to prevent timing oracles.
+      // Look up by email and optional tenant slug. Password verification happens
+      // in application code using timingSafeEqual, not in SQL, to prevent timing
+      // oracles. Local/single-workspace installs can still sign in with just an
+      // email; hosted/multi-workspace installs can disambiguate by tenant_slug.
       const result = await db.query(
-        'SELECT * FROM users WHERE email = $1',
-        [data.email],
+        `SELECT u.*, t.slug AS tenant_slug, t.name AS tenant_name
+         FROM users u
+         JOIN tenants t ON t.id = u.tenant_id
+         WHERE u.email = $1
+           AND ($2::text IS NULL OR t.slug = $2)
+         ORDER BY u.created_at ASC`,
+        [data.email, data.tenant_slug ?? null],
       );
+
+      if (!data.tenant_slug && result.rows.length > 1) {
+        res.status(409).json({
+          type: 'https://crmy.ai/errors/workspace_required',
+          title: 'Workspace Required',
+          status: 409,
+          detail: 'This email belongs to more than one workspace. Enter the workspace slug and try again.',
+        });
+        return;
+      }
 
       const user = result.rows[0];
       const passwordOk = user?.password_hash ? verifyPassword(data.password, user.password_hash) : false;
@@ -258,6 +288,7 @@ export function authRouter(
         .setExpirationTime('8h')
         .sign(secret);
 
+      setBrowserSessionCookie(res, token);
       res.json({
         token,
         user: { id: user.id, email: user.email, name: user.name, role: user.role, manager_id: user.manager_id, tenant_id: user.tenant_id },

@@ -26,6 +26,23 @@ function safeSystem(row: Record<string, unknown>): ExternalSystem {
   };
 }
 
+function pagedResponse<T>(
+  rows: T[],
+  limit: number,
+  cursorFor: (row: T) => unknown,
+): PaginatedResponse<T> {
+  const hasMore = rows.length > limit;
+  const data = hasMore ? rows.slice(0, limit) : rows;
+  const lastRow = data[data.length - 1];
+  const cursorValue = lastRow ? cursorFor(lastRow) : undefined;
+  return {
+    data,
+    total: data.length + (hasMore ? 1 : 0),
+    total_is_estimate: true,
+    next_cursor: hasMore && typeof cursorValue === 'string' ? cursorValue : undefined,
+  };
+}
+
 export async function createSystem(
   db: DbPool,
   tenantId: UUID,
@@ -145,16 +162,13 @@ export async function listSystems(
   if (filters.status) { conditions.push(`status = $${idx}`); params.push(filters.status); idx++; }
   if (filters.cursor) { conditions.push(`created_at < $${idx}`); params.push(filters.cursor); idx++; }
   const where = conditions.join(' AND ');
-  const count = await db.query(`SELECT count(*)::int AS total FROM external_systems WHERE ${where}`, params);
   params.push(filters.limit + 1);
   const result = await db.query(
     `SELECT * FROM external_systems WHERE ${where} ORDER BY created_at DESC LIMIT $${idx}`,
     params,
   );
   const rows = result.rows.map(safeSystem);
-  const hasMore = rows.length > filters.limit;
-  const data = hasMore ? rows.slice(0, filters.limit) : rows;
-  return { data, total: count.rows[0].total, next_cursor: hasMore ? data[data.length - 1].created_at : undefined };
+  return pagedResponse(rows, filters.limit, row => row.created_at);
 }
 
 export async function upsertMapping(
@@ -231,16 +245,13 @@ export async function listMappings(
   if (filters.is_active !== undefined) { conditions.push(`is_active = $${idx}`); params.push(filters.is_active); idx++; }
   if (filters.cursor) { conditions.push(`created_at < $${idx}`); params.push(filters.cursor); idx++; }
   const where = conditions.join(' AND ');
-  const count = await db.query(`SELECT count(*)::int AS total FROM external_object_mappings WHERE ${where}`, params);
   params.push(filters.limit + 1);
   const result = await db.query(
     `SELECT * FROM external_object_mappings WHERE ${where} ORDER BY created_at DESC LIMIT $${idx}`,
     params,
   );
   const rows = result.rows as ExternalObjectMapping[];
-  const hasMore = rows.length > filters.limit;
-  const data = hasMore ? rows.slice(0, filters.limit) : rows;
-  return { data, total: count.rows[0].total, next_cursor: hasMore ? data[data.length - 1].created_at : undefined };
+  return pagedResponse(rows, filters.limit, row => row.created_at);
 }
 
 export async function updateMappingCheckpoint(
@@ -330,13 +341,10 @@ export async function listSyncRuns(
   if (filters.status) { conditions.push(`status = $${idx}`); params.push(filters.status); idx++; }
   if (filters.cursor) { conditions.push(`started_at < $${idx}`); params.push(filters.cursor); idx++; }
   const where = conditions.join(' AND ');
-  const count = await db.query(`SELECT count(*)::int AS total FROM external_sync_runs WHERE ${where}`, params);
   params.push(filters.limit + 1);
   const result = await db.query(`SELECT * FROM external_sync_runs WHERE ${where} ORDER BY started_at DESC LIMIT $${idx}`, params);
   const rows = result.rows as ExternalSyncRun[];
-  const hasMore = rows.length > filters.limit;
-  const data = hasMore ? rows.slice(0, filters.limit) : rows;
-  return { data, total: count.rows[0].total, next_cursor: hasMore ? data[data.length - 1].started_at : undefined };
+  return pagedResponse(rows, filters.limit, row => row.started_at);
 }
 
 export async function upsertRecordRef(
@@ -432,13 +440,10 @@ export async function listConflicts(
   if (filters.object_id) { conditions.push(`object_id = $${idx}`); params.push(filters.object_id); idx++; }
   if (filters.cursor) { conditions.push(`created_at < $${idx}`); params.push(filters.cursor); idx++; }
   const where = conditions.join(' AND ');
-  const count = await db.query(`SELECT count(*)::int AS total FROM external_sync_conflicts WHERE ${where}`, params);
   params.push(filters.limit + 1);
   const result = await db.query(`SELECT * FROM external_sync_conflicts WHERE ${where} ORDER BY created_at DESC LIMIT $${idx}`, params);
   const rows = result.rows as ExternalSyncConflict[];
-  const hasMore = rows.length > filters.limit;
-  const data = hasMore ? rows.slice(0, filters.limit) : rows;
-  return { data, total: count.rows[0].total, next_cursor: hasMore ? data[data.length - 1].created_at : undefined };
+  return pagedResponse(rows, filters.limit, row => row.created_at);
 }
 
 export async function getConflict(
@@ -626,11 +631,8 @@ export async function listWritebacks(
   if (filters.status) { conditions.push(`status = $${idx}`); params.push(filters.status); idx++; }
   if (filters.cursor) { conditions.push(`created_at < $${idx}`); params.push(filters.cursor); idx++; }
   const where = conditions.join(' AND ');
-  const count = await db.query(`SELECT count(*)::int AS total FROM external_writeback_requests WHERE ${where}`, params);
   params.push(filters.limit + 1);
   const result = await db.query(`SELECT * FROM external_writeback_requests WHERE ${where} ORDER BY created_at DESC LIMIT $${idx}`, params);
   const rows = result.rows as ExternalWritebackRequest[];
-  const hasMore = rows.length > filters.limit;
-  const data = hasMore ? rows.slice(0, filters.limit) : rows;
-  return { data, total: count.rows[0].total, next_cursor: hasMore ? data[data.length - 1].created_at : undefined };
+  return pagedResponse(rows, filters.limit, row => row.created_at);
 }

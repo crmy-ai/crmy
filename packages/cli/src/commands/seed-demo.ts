@@ -82,6 +82,7 @@ export function seedDemoCommand(): Command {
         console.log('Try it:');
         console.log('  crmy briefing "contact:Maya Patel"');
         console.log('  crmy briefing "account:Northstar Labs"');
+        console.log('  crmy action-context "account:Northstar Labs" --action customer_outreach');
         console.log('  crmy context signal-groups');
         console.log('  crmy context lineage --subject "account:Northstar Labs"');
         console.log('  crmy hitl list');

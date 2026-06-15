@@ -12,6 +12,7 @@ import {
   useAccounts,
   useActors,
   useActivities,
+  useCalendarConnections,
   useCalendarEvents,
   useContacts,
   useContextEntries,
@@ -24,6 +25,7 @@ import {
   useStaleContextEntries,
   useSystemSyncRuns,
   useSystemWritebacks,
+  useMailboxConnections,
   useUseCases,
 } from '@/api/hooks';
 import { getUser } from '@/api/client';
@@ -63,6 +65,7 @@ import {
 } from 'lucide-react';
 
 const ACTIVATION_SKIPPED_STORAGE_KEY = 'crmy-activation-skipped-steps';
+const PERSONAL_CONNECTIONS_HIDDEN_STORAGE_KEY = 'crmy-overview-personal-connections-hidden';
 type FocusRecordType = EntityType | 'handoff' | 'unknown';
 type FocusFilterType = 'all' | EntityType | 'handoff' | 'source';
 type DrawerRecordType = 'account' | 'contact' | 'opportunity' | 'use-case';
@@ -693,12 +696,110 @@ function PipelinePulseItem({
   );
 }
 
+function PersonalConnectionsPanel({
+  mailboxConnected,
+  calendarConnected,
+  onHide,
+}: {
+  mailboxConnected: boolean;
+  calendarConnected: boolean;
+  onHide: () => void;
+}) {
+  const headline = mailboxConnected
+    ? 'Email is connected. Add calendar to capture meetings and availability context.'
+    : calendarConnected
+      ? 'Calendar is connected. Add email to capture customer threads and replies.'
+      : 'Connect your work apps to build customer memory automatically.';
+  const detail = mailboxConnected || calendarConnected
+    ? 'CRMy uses connected work apps to keep agent briefings current without asking you to paste every customer touchpoint.'
+    : 'Email brings in customer threads and replies. Calendar brings in meetings, notes, and availability context. Together they help agents act with the latest customer memory.';
+  const stepsComplete = Number(mailboxConnected) + Number(calendarConnected);
+  const itemCls = 'rounded-xl border border-border bg-background/65 p-3';
+  const readyCls = 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
+  const actionCls = 'border-primary/25 bg-primary/10 text-primary';
+
+  return (
+    <section className="rounded-2xl border border-primary/20 bg-primary/5 p-4 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />
+            <h2 className="font-display text-base font-semibold text-foreground">{headline}</h2>
+          </div>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{detail}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-muted-foreground">
+            {stepsComplete}/2 connected
+          </span>
+          <button
+            type="button"
+            onClick={onHide}
+            className="inline-flex h-8 items-center justify-center rounded-lg px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            Hide
+          </button>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <Link to="/emails?tab=connections" className={`${itemCls} group transition-colors hover:border-primary/30 hover:bg-muted/30`}>
+          <div className="flex items-start gap-3">
+            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${mailboxConnected ? readyCls : actionCls}`}>
+              <Mail className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-foreground">{mailboxConnected ? 'Email connected' : 'Connect email'}</span>
+                {mailboxConnected ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                ) : (
+                  <ArrowRight className="h-4 w-4 text-primary transition-transform group-hover:translate-x-0.5" />
+                )}
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                Customer threads and replies can become context for briefings, drafts, and follow-up.
+              </span>
+            </span>
+          </div>
+        </Link>
+        <Link to="/activities?tab=connections" className={`${itemCls} group transition-colors hover:border-primary/30 hover:bg-muted/30`}>
+          <div className="flex items-start gap-3">
+            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${calendarConnected ? readyCls : actionCls}`}>
+              <CalendarClock className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center justify-between gap-2">
+                <span className="text-sm font-semibold text-foreground">{calendarConnected ? 'Calendar connected' : 'Connect calendar'}</span>
+                {calendarConnected ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                ) : (
+                  <ArrowRight className="h-4 w-4 text-primary transition-transform group-hover:translate-x-0.5" />
+                )}
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                Meetings, notes, and availability context help agents suggest next steps with timing awareness.
+              </span>
+            </span>
+          </div>
+        </Link>
+      </div>
+    </section>
+  );
+}
+
 function ScopedOverviewDashboard() {
   const user = getUser();
   const isManager = user?.role === 'manager';
   const openDrawer = useAppStore(s => s.openDrawer);
   const [focusTypeFilter, setFocusTypeFilter] = useState<FocusFilterType>('all');
   const [focusRecordId, setFocusRecordId] = useState('');
+  const [personalConnectionsHidden, setPersonalConnectionsHidden] = useState(() => {
+    try {
+      return localStorage.getItem(PERSONAL_CONNECTIONS_HIDDEN_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
   const { data: hitlData } = useHITLRequests() as any;
   const { data: memoryData } = useContextEntries({ memory_status: 'active', limit: 1 }) as any;
   const { data: nextStepMemoryData } = useContextEntries({ memory_status: 'active', context_type: 'next_step', limit: 200 }) as any;
@@ -707,6 +808,8 @@ function ScopedOverviewDashboard() {
   const { data: activitiesData } = useActivities({ limit: 1 }) as any;
   const { data: emailReviewData } = useEmailMessages({ view: 'review', direction: 'inbound', include_internal: false, limit: 10 }) as any;
   const { data: meetingNeedsContextData } = useCalendarEvents({ tab: 'needs_context', limit: 10 }) as any;
+  const { data: mailboxConnectionsData } = useMailboxConnections() as any;
+  const { data: calendarConnectionsData } = useCalendarConnections() as any;
   const { data: accountsData } = useAccounts({ limit: 100 }) as any;
   const { data: contactsData } = useContacts({ limit: 100 }) as any;
   const { data: opportunitiesData } = useOpportunities({ limit: 100 }) as any;
@@ -734,6 +837,11 @@ function ScopedOverviewDashboard() {
   const memoryTotal = Number(memoryData?.total ?? 0);
   const signalGroupTotal = Number(signalGroupData?.total ?? 0);
   const observationsTotal = Number(activitiesData?.total ?? 0);
+  const mailboxConnected = ((mailboxConnectionsData?.data ?? []) as any[]).some(connection => connection.status === 'connected');
+  const calendarConnected = ((calendarConnectionsData?.data ?? []) as any[]).some(connection => connection.status === 'connected');
+  const personalConnectionsComplete = mailboxConnected && calendarConnected;
+  const showPersonalConnections = (user?.role === 'member' || user?.role === 'manager') && !personalConnectionsComplete && !personalConnectionsHidden;
+  const showPersonalConnectionsRestore = (user?.role === 'member' || user?.role === 'manager') && !personalConnectionsComplete && personalConnectionsHidden;
   const openPipelineValue = Number(pipelineData?.total_value ?? 0);
   const openOpportunities = opportunities.filter(opp => !['closed_won', 'closed_lost'].includes(String(opp.stage ?? '')));
   const closingSoon = openOpportunities
@@ -1008,11 +1116,46 @@ function ScopedOverviewDashboard() {
     return item.record_type === selectedEntityType && item.record_id === focusRecordId;
   });
   const visibleFocusItems = filteredFocusItems.slice(0, 7);
+  const hidePersonalConnections = () => {
+    setPersonalConnectionsHidden(true);
+    try {
+      localStorage.setItem(PERSONAL_CONNECTIONS_HIDDEN_STORAGE_KEY, 'true');
+    } catch {
+      // Keep the current session hidden even if storage is unavailable.
+    }
+  };
+  const restorePersonalConnections = () => {
+    setPersonalConnectionsHidden(false);
+    try {
+      localStorage.removeItem(PERSONAL_CONNECTIONS_HIDDEN_STORAGE_KEY);
+    } catch {
+      // Ignore storage failures.
+    }
+  };
 
   return (
     <div className="flex h-full flex-col">
       <TopBar title="Overview" icon={Brain} iconClassName="text-primary" description={scopedDescription} />
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
+        {showPersonalConnectionsRestore && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={restorePersonalConnections}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Show connection setup
+            </button>
+          </div>
+        )}
+        {showPersonalConnections && (
+          <PersonalConnectionsPanel
+            mailboxConnected={mailboxConnected}
+            calendarConnected={calendarConnected}
+            onHide={hidePersonalConnections}
+          />
+        )}
         <section className="rounded-2xl border border-border bg-surface p-4 shadow-sm">
           <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>

@@ -33,6 +33,7 @@ const opsJobRecover = z.object({
     'agent_turns',
     'context_embedding_jobs',
     'mailbox_sync_jobs',
+    'email_delivery_jobs',
     'calendar_sync_jobs',
     'webhook_deliveries',
     'message_deliveries',
@@ -341,6 +342,25 @@ const QUEUE_SPECS: QueueSpec[] = [
       FROM mailbox_sync_jobs
       WHERE tenant_id = $1 AND status IN ('failed', 'processing')
       ORDER BY updated_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'email_delivery_jobs',
+    pendingStatuses: ['pending', 'processing', 'failed'],
+    countSql: `
+      SELECT status, count(*)::int AS count, min(created_at) AS oldest_created_at
+      FROM email_delivery_jobs
+      WHERE tenant_id = $1
+      GROUP BY status
+    `,
+    failureSql: `
+      SELECT j.id, j.email_id, e.to_email, e.from_email, e.subject, j.status,
+             j.attempts, j.max_attempts, j.last_error, j.available_at, j.updated_at
+      FROM email_delivery_jobs j
+      LEFT JOIN emails e ON e.id = j.email_id AND e.tenant_id = j.tenant_id
+      WHERE j.tenant_id = $1 AND j.status IN ('failed', 'processing')
+      ORDER BY j.updated_at ASC
       LIMIT $2
     `,
   },

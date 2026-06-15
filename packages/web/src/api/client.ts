@@ -5,6 +5,7 @@ import { friendlyErrorMessage } from '../lib/friendlyErrors';
 
 const BASE = '/api/v1';
 const DEFAULT_REQUEST_TIMEOUT_MS = Number(import.meta.env.VITE_CRMY_API_TIMEOUT_MS ?? 30_000);
+const USE_BROWSER_COOKIE_AUTH = import.meta.env.VITE_CRMY_BROWSER_COOKIE_AUTH === 'true';
 
 /**
  * Structured API error that preserves the full response body so callers can
@@ -20,10 +21,12 @@ export class ApiError extends Error {
 }
 
 function getToken(): string | null {
+  if (USE_BROWSER_COOKIE_AUTH) return null;
   return localStorage.getItem('crmy_token');
 }
 
 export function setToken(token: string) {
+  if (USE_BROWSER_COOKIE_AUTH) return;
   localStorage.setItem('crmy_token', token);
 }
 
@@ -57,6 +60,7 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
       ...opts,
       headers,
       signal: opts.signal ?? controller.signal,
+      credentials: USE_BROWSER_COOKIE_AUTH ? 'same-origin' : opts.credentials,
     });
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
@@ -98,10 +102,10 @@ export const api = {
 
 // Auth endpoints (no /api/v1 prefix)
 export const auth = {
-  login: (email: string, password: string) =>
+  login: (email: string, password: string, tenantSlug?: string) =>
     request<{ token: string; user: { id: string; email: string; name: string; role: string; tenant_id: string } }>(
       '/auth/login',
-      { method: 'POST', body: JSON.stringify({ email: email.trim(), password }) },
+      { method: 'POST', body: JSON.stringify({ email: email.trim(), password, tenant_slug: tenantSlug?.trim() || undefined }) },
     ),
   register: (data: { email: string; password: string; name: string; tenant_name: string }) =>
     request<{ token: string; user: { id: string; email: string; name: string; role: string; tenant_id: string } }>(

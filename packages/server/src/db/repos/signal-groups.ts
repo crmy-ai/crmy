@@ -3,9 +3,22 @@
 
 import type { ContextEntry, PaginatedResponse, SubjectType, UUID } from '@crmy/shared';
 import type { DbPool } from '../pool.js';
+import { decodeStableCursor, encodeStableCursor } from './pagination.js';
 
 export type SignalGroupStatus = 'gathering' | 'ready' | 'promoted' | 'blocked' | 'dismissed' | 'conflicting' | 'merged';
 export type SignalGroupRelation = 'supports' | 'conflicts' | 'supersedes';
+
+function signalGroupSortRank(status: SignalGroupStatus): number {
+  switch (status) {
+    case 'conflicting': return 0;
+    case 'blocked': return 1;
+    case 'ready': return 2;
+    case 'gathering': return 3;
+    default: return 4;
+  }
+}
+
+const SIGNAL_GROUP_SORT_RANK_SQL = "CASE sg.status WHEN 'conflicting' THEN 0 WHEN 'blocked' THEN 1 WHEN 'ready' THEN 2 WHEN 'gathering' THEN 3 ELSE 4 END";
 
 export interface SignalGroup {
   id: UUID;
@@ -415,9 +428,28 @@ export async function listSignalGroups(
       idx++;
     }
   }
-  if (filters.cursor) {
-    conditions.push(`sg.updated_at < $${idx++}`);
-    params.push(filters.cursor);
+  const decodedCursor = decodeStableCursor(filters.cursor);
+  if (decodedCursor) {
+    const rank = typeof (decodedCursor as Record<string, unknown>).rank === 'number'
+      ? (decodedCursor as Record<string, unknown>).rank as number
+      : undefined;
+    if (rank !== undefined && decodedCursor.id) {
+      conditions.push(`(
+        ${SIGNAL_GROUP_SORT_RANK_SQL} > $${idx}
+        OR (
+          ${SIGNAL_GROUP_SORT_RANK_SQL} = $${idx}
+          AND (
+            sg.updated_at < $${idx + 1}
+            OR (sg.updated_at = $${idx + 1} AND sg.id < $${idx + 2}::uuid)
+          )
+        )
+      )`);
+      params.push(rank, decodedCursor.sort_value, decodedCursor.id);
+      idx += 3;
+    } else {
+      conditions.push(`sg.updated_at < $${idx++}`);
+      params.push(decodedCursor.sort_value);
+    }
   }
 
   const where = conditions.join(' AND ');
@@ -434,8 +466,8 @@ export async function listSignalGroups(
      FROM signal_groups sg
      WHERE ${where}
        ORDER BY
-         CASE sg.status WHEN 'conflicting' THEN 0 WHEN 'blocked' THEN 1 WHEN 'ready' THEN 2 WHEN 'gathering' THEN 3 ELSE 4 END,
-       sg.updated_at DESC
+         ${SIGNAL_GROUP_SORT_RANK_SQL},
+       sg.updated_at DESC, sg.id DESC
      LIMIT $${idx}`,
     params,
   );
@@ -444,7 +476,13 @@ export async function listSignalGroups(
   const page = hasMore ? data.slice(0, filters.limit) : data;
   return {
     data: page,
-    next_cursor: hasMore ? page[page.length - 1]?.updated_at : undefined,
+    next_cursor: hasMore && page.length > 0
+      ? encodeStableCursor({
+        sort_value: page[page.length - 1].updated_at,
+        id: page[page.length - 1].id,
+        rank: signalGroupSortRank(page[page.length - 1].status),
+      })
+      : undefined,
     total: count.rows[0]?.total ?? 0,
   };
 }

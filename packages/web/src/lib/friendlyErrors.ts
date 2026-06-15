@@ -2,9 +2,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export function friendlyErrorMessage(error: unknown, fallback = 'Try again.'): string {
+  const domainConflict = friendlyDomainConflictError(error);
+  if (domainConflict) return domainConflict;
   const raw = rawErrorMessage(error).trim();
   if (!raw) return fallback;
   return friendlyModelProviderError(raw) || stripRawJsonTail(raw) || fallback;
+}
+
+function friendlyDomainConflictError(error: unknown): string | null {
+  if (!error || typeof error !== 'object') return null;
+  const record = error as Record<string, unknown>;
+  const conflicts = Array.isArray(record.domain_conflicts) ? record.domain_conflicts as Array<Record<string, unknown>> : [];
+  const first = conflicts[0];
+  if (!first) return null;
+  const account = first.existing_account && typeof first.existing_account === 'object'
+    ? first.existing_account as Record<string, unknown>
+    : {};
+  const domain = String(first.domain ?? 'This domain');
+  const accountName = String(account.name ?? 'another account');
+  const accountDomain = account.domain ? ` (${String(account.domain)})` : '';
+  return `${domain} already belongs to ${accountName}${accountDomain}. Remove it here, open that account to move the domain, or ask an admin to merge/split the accounts.`;
 }
 
 export function friendlyModelProviderError(message: string): string | null {

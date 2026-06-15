@@ -109,16 +109,31 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   webhook_list: { method: 'GET', path: () => '/api/v1/webhooks' },
   webhook_get: { method: 'GET', path: (i) => `/api/v1/webhooks/${i.id}` },
   webhook_update: { method: 'PATCH', path: (i) => `/api/v1/webhooks/${i.id}` },
+  webhook_reveal_secret: { method: 'POST', path: (i) => `/api/v1/webhooks/${i.id}/secret/reveal` },
+  webhook_rotate_secret: { method: 'POST', path: (i) => `/api/v1/webhooks/${i.id}/secret/rotate` },
   webhook_delete: { method: 'DELETE', path: (i) => `/api/v1/webhooks/${i.id}` },
   webhook_list_deliveries: { method: 'GET', path: (i) => `/api/v1/webhooks/${i.endpoint_id ?? i.id}/deliveries` },
 
   // Emails
   email_create: { method: 'POST', path: () => '/api/v1/emails' },
   email_get: { method: 'GET', path: (i) => `/api/v1/emails/${i.id}` },
-  email_search: { method: 'GET', path: (i) => `/api/v1/emails?limit=${i.limit ?? 20}` },
+  email_search: {
+    method: 'GET',
+    path: (i) => queryPath('/api/v1/emails', { ...i, limit: i.limit ?? 20 }, [
+      'limit',
+      'contact_id',
+      'account_id',
+      'opportunity_id',
+      'use_case_id',
+      'q',
+      'status',
+      'cursor',
+    ]),
+  },
   email_draft_preview: { method: 'POST', path: () => '/api/v1/emails/draft-preview' },
   email_draft_save: { method: 'POST', path: () => '/api/v1/emails/drafts' },
   mailbox_connection_list: { method: 'GET', path: () => '/api/v1/mailbox/connections' },
+  mailbox_connection_start: { method: 'POST', path: (i) => `/api/v1/mailbox/connections/${i.provider}/start` },
   email_message_search: {
     method: 'GET',
     path: (i) => queryPath('/api/v1/email-messages', { ...i, view: i.view ?? 'customer', limit: i.limit ?? 20 }, [
@@ -233,9 +248,12 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
 
 	  // Action Context
 	  action_context_get: { method: 'POST', path: () => '/api/v1/action-context' },
+	  action_context_request_human_unblock: { method: 'POST', path: () => '/api/v1/action-context/human-unblock' },
 
-	  // Calendar / Customer Activity
+  // Calendar / Customer Activity
+  availability_suggest_times: { method: 'POST', path: () => '/api/v1/availability/suggest-times' },
   calendar_connection_list: { method: 'GET', path: () => '/api/v1/calendar/connections' },
+  calendar_connection_start: { method: 'POST', path: (i) => `/api/v1/calendar/connections/${i.provider}/start` },
   calendar_event_search: { method: 'GET', path: (i) => `/api/v1/calendar-events?limit=${i.limit ?? 20}${i.q ? `&q=${encodeURIComponent(i.q as string)}` : ''}${i.tab ? `&tab=${i.tab}` : ''}${i.classification ? `&classification=${i.classification}` : ''}${i.validation_status ? `&validation_status=${i.validation_status}` : ''}${i.processing_status ? `&processing_status=${i.processing_status}` : ''}${i.include_internal ? '&include_internal=true' : ''}${i.cursor ? `&cursor=${i.cursor}` : ''}` },
   calendar_event_get: { method: 'GET', path: (i) => `/api/v1/calendar-events/${i.id}` },
   calendar_event_process: { method: 'POST', path: (i) => `/api/v1/calendar-events/${i.id}/process` },
@@ -267,7 +285,23 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   context_type_remove: { method: 'DELETE', path: (i) => `/api/v1/context-types/${i.type_name}` },
 
   // Briefing
-  briefing_get: { method: 'GET', path: (i) => `/api/v1/briefing/${i.subject_type}/${i.subject_id}?format=${i.format ?? 'json'}${i.since ? `&since=${i.since}` : ''}${i.include_stale ? '&include_stale=true' : ''}${i.context_types ? `&context_types=${(i.context_types as string[]).join(',')}` : ''}` },
+  briefing_get: {
+    method: 'GET',
+    path: (i) => queryPath(`/api/v1/briefing/${i.subject_type}/${i.subject_id}`, {
+      ...i,
+      format: i.format ?? 'json',
+      context_types: Array.isArray(i.context_types) ? (i.context_types as string[]).join(',') : i.context_types,
+    }, [
+      'format',
+      'since',
+      'include_stale',
+      'context_types',
+      'context_radius',
+      'token_budget',
+      'token_budget_profile',
+      'evidence_mode',
+    ]),
+  },
 
   // Assignment: Start, Block, Cancel
   assignment_start: { method: 'POST', path: (i) => `/api/v1/assignments/${i.id}/start` },

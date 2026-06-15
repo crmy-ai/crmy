@@ -1,7 +1,8 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from '@/hooks/use-toast';
 import {
@@ -10,11 +11,14 @@ import {
   useUpdateMessagingChannel, useDeleteMessagingChannel,
   useInboundEmailConfig, useGenerateInboundSecret,
   useSourceFilters, useUpdateSourceFilters,
+  useOAuthReadiness,
+  useTenantOAuthApps, useUpsertTenantOAuthApp, useDeleteTenantOAuthApp,
+  type OAuthReadinessItem, type TenantOAuthApp,
 } from '@/api/hooks';
 import {
   Mail, MessageSquare, Plus, Trash2, Pencil,
   Power, PowerOff, Star, Eye, EyeOff, X, Send, CheckCircle2, Download, RefreshCw, Copy,
-  SlidersHorizontal,
+  SlidersHorizontal, KeyRound, CalendarClock, AlertCircle, ExternalLink,
 } from 'lucide-react';
 
 // ─── Provider Config Registry ────────────────────────────────────────────────
@@ -209,7 +213,7 @@ function ConfigForm({
   );
 }
 
-// ─── Email Provider Section ──────────────────────────────────────────────────
+// ─── Shared Email Provider Section ───────────────────────────────────────────
 
 function EmailProviderSection() {
   const { data, isLoading } = useEmailProvider() as { data: Record<string, unknown> | undefined; isLoading: boolean };
@@ -287,8 +291,10 @@ function EmailProviderSection() {
           <Mail className="w-5 h-5 text-blue-500" />
         </div>
         <div>
-          <h3 className="text-sm font-semibold text-foreground">Email Provider</h3>
-          <p className="text-xs text-muted-foreground">Configure outbound email delivery for agent-drafted emails and sequences.</p>
+          <h3 className="text-sm font-semibold text-foreground">Shared Email Provider</h3>
+          <p className="text-xs text-muted-foreground">
+            Fallback sender for customer emails when an actor mailbox is not available, plus sequence and system setup emails.
+          </p>
         </div>
         <div className="ml-auto">
           {configured ? (
@@ -305,6 +311,12 @@ function EmailProviderSection() {
         <div className="text-sm text-muted-foreground py-4">Loading...</div>
       ) : (
         <div className="rounded-lg border border-border bg-card p-4 space-y-4">
+          <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-3 text-sm">
+            <p className="font-medium text-foreground">Actor mailboxes are preferred for customer outreach.</p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+              CRMy sends governed customer drafts from the actor's connected, send-enabled mailbox first. This shared provider is used when no actor mailbox sender is available, and for sequence or system-generated emails such as invites and password resets. Replies only become context when they arrive through a connected mailbox or inbound webhook.
+            </p>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div className="space-y-1">
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Provider</label>
@@ -319,7 +331,7 @@ function EmailProviderSection() {
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">From Name</label>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Shared From Name</label>
               <input
                 type="text"
                 value={fromName}
@@ -329,7 +341,7 @@ function EmailProviderSection() {
               />
             </div>
             <div className="space-y-1">
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">From Email</label>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Shared From Email</label>
               <input
                 type="email"
                 value={fromEmail}
@@ -351,7 +363,7 @@ function EmailProviderSection() {
 
           <div className="flex justify-end pt-2">
             <button onClick={handleSave} disabled={updateProvider.isPending} className={btnPrimary}>
-              {updateProvider.isPending ? 'Saving...' : 'Save Email Provider'}
+              {updateProvider.isPending ? 'Saving...' : 'Save Shared Provider'}
             </button>
           </div>
         </div>
@@ -871,17 +883,567 @@ function InboundEmailSection() {
   );
 }
 
+function envList(groups: OAuthReadinessItem['accepted_env_vars']): string[] {
+  return [...groups.client_id, ...groups.client_secret, ...groups.redirect_uri];
+}
+
+type OAuthProvider = 'google' | 'microsoft';
+
+const OAUTH_PROVIDER_META: Record<OAuthProvider, {
+  label: string;
+  setupUrl: string;
+  setupLabel: string;
+}> = {
+  google: {
+    label: 'Google Workspace',
+    setupUrl: 'https://console.cloud.google.com/apis/credentials',
+    setupLabel: 'Google Cloud',
+  },
+  microsoft: {
+    label: 'Microsoft 365',
+    setupUrl: 'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
+    setupLabel: 'Microsoft Entra',
+  },
+};
+
+function readinessTone(ready: boolean) {
+  return ready
+    ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300'
+    : 'border-amber-500/25 bg-amber-500/10 text-amber-200';
+}
+
+function oauthSourceLabel(source?: OAuthReadinessItem['app_source']) {
+  switch (source) {
+    case 'tenant_owned': return 'Tenant-owned app';
+    case 'crmy_managed': return 'CRMy-managed app';
+    case 'self_hosted_env': return 'Self-hosted env app';
+    default: return 'Setup required';
+  }
+}
+
+function OAuthPreflightPanel({
+  items,
+  providerLabel,
+}: {
+  items: OAuthReadinessItem[];
+  providerLabel: string;
+}) {
+  const readyCount = items.filter(item => item.ready).length;
+  const allReady = items.length > 0 && readyCount === items.length;
+  const activeSource = items.find(item => item.ready)?.app_source ?? items[0]?.app_source ?? 'missing';
+  const blockers = Array.from(new Set(items.flatMap(item => item.setup_blockers ?? [])));
+  const statusText = allReady
+    ? 'Ready for first user connection'
+    : readyCount > 0
+      ? `${readyCount} of ${items.length} capabilities ready`
+      : 'Setup needed before users connect';
+
+  return (
+    <div className={`rounded-xl border p-4 shadow-sm ${allReady ? 'border-emerald-500/25 bg-emerald-500/8' : 'border-amber-500/25 bg-amber-500/8'}`}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${readinessTone(allReady)}`}>
+              {statusText}
+            </span>
+            <span className="rounded-full border border-border bg-background px-2 py-0.5 text-xs font-semibold text-muted-foreground">
+              Active source: {oauthSourceLabel(activeSource)}
+            </span>
+          </div>
+          <h3 className="mt-2 text-sm font-semibold text-foreground">{providerLabel} connection preflight</h3>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            Verify this before asking the first actor to connect. Once ready, users connect mailbox from Customer Email and calendar from Customer Activity.
+          </p>
+        </div>
+        <div className="grid gap-2 text-xs sm:grid-cols-2 lg:min-w-80">
+          {items.map(item => (
+            <div key={`${item.kind}-${item.provider}-preflight`} className="rounded-lg border border-border bg-card px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-foreground">{item.kind === 'mailbox' ? 'Mailbox + Sender' : 'Calendar Context'}</span>
+                <span className={item.ready ? 'text-emerald-300' : 'text-amber-200'}>{item.ready ? 'Ready' : 'Needs setup'}</span>
+              </div>
+              <p className="mt-1 line-clamp-2 text-muted-foreground">{item.ready ? item.user_action : item.admin_action}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {!allReady && blockers.length > 0 && (
+        <div className="mt-3 rounded-lg border border-amber-500/25 bg-background/70 p-3">
+          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-amber-200">
+            <AlertCircle className="h-3.5 w-3.5" /> Fix before first actor connection
+          </p>
+          <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+            {blockers.map(blocker => <li key={blocker}>{blocker}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TenantOAuthAppCard({
+  provider,
+  providerLabel,
+  app,
+  items,
+}: {
+  provider: OAuthProvider;
+  providerLabel: string;
+  app?: TenantOAuthApp;
+  items: OAuthReadinessItem[];
+}) {
+  const upsert = useUpsertTenantOAuthApp();
+  const reset = useDeleteTenantOAuthApp();
+  const activeSource = items.find(item => item.ready)?.app_source ?? items[0]?.app_source ?? 'missing';
+  const managedAvailable = items.some(item => item.crmy_managed_available);
+  const selfHostedReady = items.some(item => item.self_hosted_env_configured);
+  const hostedManagedEnabled = items.some(item => item.hosted_managed_enabled);
+  const [clientId, setClientId] = useState(app?.client_id ?? '');
+  const [clientSecret, setClientSecret] = useState('');
+  const [microsoftTenantId, setMicrosoftTenantId] = useState(app?.microsoft_tenant_id ?? 'common');
+
+  useEffect(() => {
+    setClientId(app?.client_id ?? '');
+    setClientSecret('');
+    setMicrosoftTenantId(app?.microsoft_tenant_id ?? 'common');
+  }, [app?.client_id, app?.microsoft_tenant_id, provider]);
+
+  const save = async () => {
+    try {
+      await upsert.mutateAsync({
+        provider,
+        data: {
+          client_id: clientId.trim(),
+          client_secret: clientSecret.trim() || undefined,
+          microsoft_tenant_id: provider === 'microsoft' ? microsoftTenantId.trim() || 'common' : undefined,
+          enabled: true,
+        },
+      });
+      toast({ title: 'Tenant-owned OAuth app saved', description: `${providerLabel} connections will use this app after users reconnect.` });
+      setClientSecret('');
+    } catch (err) {
+      toast({
+        title: 'Could not save OAuth app',
+        description: err instanceof Error ? err.message : 'Check the client ID and secret, then try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const clear = async () => {
+    try {
+      await reset.mutateAsync(provider);
+      toast({ title: 'Tenant-owned OAuth app removed', description: managedAvailable ? 'CRMy-managed OAuth is active again.' : 'Self-hosted env credentials will be used if configured.' });
+    } catch (err) {
+      toast({
+        title: 'Could not remove OAuth app',
+        description: err instanceof Error ? err.message : 'Refresh and try again.',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">Enterprise App Credentials</h3>
+            <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${readinessTone(activeSource !== 'missing')}`}>
+              {oauthSourceLabel(activeSource)}
+            </span>
+            {app?.has_client_secret && (
+              <span className="rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">Secret saved</span>
+            )}
+          </div>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            Use this only if your tenant requires its own consent screen, publisher identity, security review, or domain app restrictions.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-1.5 text-[11px] font-semibold lg:justify-end">
+          <span className={`rounded-full border px-2 py-0.5 ${managedAvailable ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300' : 'border-border bg-background text-muted-foreground'}`}>
+            CRMy-managed {managedAvailable ? 'available' : hostedManagedEnabled ? 'not configured' : 'off'}
+          </span>
+          <span className={`rounded-full border px-2 py-0.5 ${selfHostedReady ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300' : 'border-border bg-background text-muted-foreground'}`}>
+            Self-hosted env {selfHostedReady ? 'ready' : 'not set'}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Client ID</label>
+            <input
+              value={clientId}
+              onChange={event => setClientId(event.target.value)}
+              placeholder={provider === 'google' ? 'Google OAuth client ID' : 'Microsoft application client ID'}
+              className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Client Secret</label>
+              {app?.has_client_secret && <span className="text-[11px] font-medium text-muted-foreground">Leave blank to keep current</span>}
+            </div>
+            <input
+              type="password"
+              value={clientSecret}
+              onChange={event => setClientSecret(event.target.value)}
+              placeholder={app?.has_client_secret ? 'Existing secret saved' : 'OAuth client secret'}
+              className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+          {provider === 'microsoft' && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Microsoft tenant</label>
+              <input
+                value={microsoftTenantId}
+                onChange={event => setMicrosoftTenantId(event.target.value)}
+                placeholder="common or tenant id"
+                className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+          )}
+          <div className="flex flex-wrap items-end gap-2">
+            <button
+              type="button"
+              onClick={save}
+              disabled={!clientId.trim() || (!app?.has_client_secret && !clientSecret.trim()) || upsert.isPending}
+              className="inline-flex h-9 items-center rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {upsert.isPending ? 'Saving...' : 'Save enterprise app'}
+            </button>
+            {app?.has_client_secret && (
+              <button
+                type="button"
+                onClick={clear}
+                disabled={reset.isPending}
+                className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+              >
+                {reset.isPending ? 'Removing...' : 'Use CRMy-managed app'}
+              </button>
+            )}
+          </div>
+      </div>
+    </div>
+  );
+}
+
+function OAuthRedirectUrisPanel({
+  items,
+  providerLabel,
+  setupUrl,
+  setupLabel,
+}: {
+  items: OAuthReadinessItem[];
+  providerLabel: string;
+  setupUrl: string;
+  setupLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const copy = (value: string) => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true);
+      setCopiedKey(value);
+      setTimeout(() => setCopied(false), 1500);
+      setTimeout(() => setCopiedKey(null), 1500);
+    });
+  };
+
+  return (
+    <div className="rounded-xl border border-primary/25 bg-primary/5 p-4 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-wider text-primary">Redirect URI</p>
+          <h3 className="mt-1 text-sm font-semibold text-foreground">Paste these into {setupLabel}</h3>
+          <div className="mt-3 space-y-2">
+            {items.map(item => {
+              const label = item.kind === 'mailbox' ? 'Mailbox + Sender' : 'Calendar Context';
+              return (
+                <div key={`${item.kind}-${item.provider}-redirect`} className="rounded-lg border border-border bg-background p-2.5">
+                  <div className="mb-1 flex items-center gap-2">
+                    {item.kind === 'calendar' ? <CalendarClock className="h-3.5 w-3.5 text-primary" /> : <Mail className="h-3.5 w-3.5 text-primary" />}
+                    <span className="text-xs font-semibold text-foreground">{label}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <code className="min-w-0 flex-1 truncate rounded-md border border-border bg-card px-2 py-2 text-xs text-foreground">
+                      {item.redirect_uri}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={() => copy(item.redirect_uri)}
+                      className="inline-flex h-8 items-center gap-1 rounded-md border border-border px-2 text-xs font-semibold text-foreground hover:bg-muted"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      {copied && copiedKey === item.redirect_uri ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-3 lg:w-80">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">How to configure in {setupLabel}</p>
+          <ol className="mt-2 space-y-1.5 text-xs text-muted-foreground">
+            <li><span className="font-semibold text-foreground">1.</span> Create a {providerLabel} OAuth app.</li>
+            <li><span className="font-semibold text-foreground">2.</span> Paste the redirect URI values shown here.</li>
+            <li><span className="font-semibold text-foreground">3.</span> Add the client ID and secret below when using an enterprise app.</li>
+            <li><span className="font-semibold text-foreground">4.</span> Save, then users connect from Email or Activity.</li>
+          </ol>
+          <a href={setupUrl} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
+            Open {setupLabel} <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OAuthCapabilityCard({ item }: { item: OAuthReadinessItem }) {
+  const configured = item.ready;
+  const title = item.kind === 'mailbox' ? 'Mailbox + Sender Identity' : 'Calendar Context';
+  const destination = item.kind === 'mailbox' ? 'Customer Email -> Mailboxes & Senders' : 'Customer Activity -> Connections';
+  const description = item.kind === 'mailbox'
+    ? 'Users connect their work mailbox for customer email context, approved sends, and provider drafts when authorized.'
+    : 'Users connect their work calendar so customer meetings can become activity context.';
+  const setupReason = item.setup_blockers?.[0] ?? (item.app_source === 'missing'
+    ? 'No OAuth app source is ready for this capability yet.'
+    : `${oauthSourceLabel(item.app_source)} is selected, but this capability still needs setup.`);
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 shadow-sm">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-lg bg-primary/10 p-1.5 text-primary">
+              {item.kind === 'calendar' ? <CalendarClock className="h-4 w-4" /> : <Mail className="h-4 w-4" />}
+            </span>
+            <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+            <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${readinessTone(configured)}`}>
+              {configured ? 'Ready for users' : 'Missing setup'}
+            </span>
+          </div>
+          <p className="max-w-2xl text-sm text-muted-foreground">{description}</p>
+          <p className="text-xs text-muted-foreground">User-facing destination: <span className="font-medium text-foreground">{destination}</span></p>
+        </div>
+      </div>
+
+      {!configured && (
+        <div className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/8 p-3">
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+            <AlertCircle className="h-4 w-4 text-amber-300" /> Setup needed before users can connect
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{setupReason}</p>
+          {item.admin_action && <p className="mt-1 text-xs text-muted-foreground">{item.admin_action}</p>}
+        </div>
+      )}
+
+      <details className="mt-3 rounded-lg border border-border bg-muted/20">
+        <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-foreground">Advanced details</summary>
+        <div className="space-y-3 border-t border-border px-3 py-3">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Environment variables</p>
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              {envList(item.accepted_env_vars).map(name => (
+                <code key={`${item.kind}-${item.provider}-${name}`} className={`rounded border px-1.5 py-0.5 text-[11px] ${
+                  item.configured_env_vars.includes(name) ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300' : 'border-border bg-background text-muted-foreground'
+                }`}>
+                  {name}
+                </code>
+              ))}
+            </div>
+            {!configured && item.missing_env_vars.length > 0 && (
+              <p className="mt-2 text-xs text-muted-foreground">Missing: {item.missing_env_vars.join(', ')}</p>
+            )}
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Scopes requested</p>
+            <div className="mt-1 space-y-1 text-xs text-muted-foreground">
+              <p><span className="text-foreground">Context:</span> {item.scopes.context.join(', ')}</p>
+              {item.scopes.send && <p><span className="text-foreground">Send:</span> {item.scopes.send.join(', ')}</p>}
+              {item.scopes.drafts && <p><span className="text-foreground">Drafts:</span> {item.scopes.drafts.join(', ')}</p>}
+            </div>
+          </div>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function GoogleOutlookOAuthSection() {
+  const readinessQ = useOAuthReadiness();
+  const tenantAppsQ = useTenantOAuthApps();
+  const [selectedProvider, setSelectedProvider] = useState<OAuthProvider>('google');
+  const readiness = readinessQ.data?.data ?? [];
+  const tenantApps = tenantAppsQ.data?.data ?? [];
+  const readinessByProvider = useMemo(() => ({
+    google: readiness.filter(item => item.provider === 'google'),
+    microsoft: readiness.filter(item => item.provider === 'microsoft'),
+  }), [readiness]);
+  const tenantAppByProvider = useMemo(() => ({
+    google: tenantApps.find(app => app.provider === 'google'),
+    microsoft: tenantApps.find(app => app.provider === 'microsoft'),
+  }), [tenantApps]);
+  const selectedItems = readinessByProvider[selectedProvider];
+  const selectedMeta = OAUTH_PROVIDER_META[selectedProvider];
+  const selectedReady = selectedItems.length > 0 && selectedItems.every(item => item.ready);
+  const googleReady = readinessByProvider.google.some(item => item.ready);
+  const microsoftReady = readinessByProvider.microsoft.some(item => item.ready);
+
+  useEffect(() => {
+    if (!readiness.length) return;
+    if (!googleReady && microsoftReady) setSelectedProvider('microsoft');
+  }, [googleReady, microsoftReady, readiness.length]);
+
+  return (
+    <div className="space-y-5">
+      <div className="rounded-xl border border-primary/20 bg-primary/5 p-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="rounded-lg bg-primary/15 p-2">
+              <KeyRound className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-semibold text-foreground">{selectedMeta.label} OAuth setup</h3>
+                {!readinessQ.isLoading && (
+                  <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${readinessTone(selectedReady)}`}>
+                    {selectedReady ? 'Ready for users' : 'Setup required'}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                Prepare OAuth once. Hosted tenants can use CRMy-managed OAuth by default; self-hosted installs use environment credentials; enterprise tenants can bring their own provider app.
+              </p>
+            </div>
+          </div>
+          <div className="inline-flex w-full rounded-lg border border-border bg-background p-1 lg:w-auto">
+            {(Object.keys(OAUTH_PROVIDER_META) as OAuthProvider[]).map(provider => (
+              <button
+                key={provider}
+                type="button"
+                onClick={() => setSelectedProvider(provider)}
+                className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors lg:flex-none ${
+                  selectedProvider === provider
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {OAUTH_PROVIDER_META[provider].label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {readinessQ.isLoading || tenantAppsQ.isLoading ? (
+        <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Checking OAuth readiness...</div>
+      ) : readinessQ.isError || tenantAppsQ.isError ? (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Could not load OAuth readiness</p>
+              <p className="mt-1 text-xs text-muted-foreground">Retry after confirming your admin session is still active.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => { readinessQ.refetch(); tenantAppsQ.refetch(); }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> Retry
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {selectedItems.length > 0 ? (
+            <>
+              <OAuthPreflightPanel
+                items={selectedItems}
+                providerLabel={selectedMeta.label}
+              />
+              <OAuthRedirectUrisPanel
+                items={selectedItems}
+                providerLabel={selectedMeta.label}
+                setupUrl={selectedMeta.setupUrl}
+                setupLabel={selectedMeta.setupLabel}
+              />
+              <TenantOAuthAppCard
+                provider={selectedProvider}
+                providerLabel={selectedMeta.label}
+                app={tenantAppByProvider[selectedProvider]}
+                items={selectedItems}
+              />
+              {selectedItems.map(item => (
+                <OAuthCapabilityCard
+                  key={`${item.kind}-${item.provider}`}
+                  item={item}
+                />
+              ))}
+            </>
+          ) : (
+            <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
+              OAuth readiness is not available for {selectedMeta.label}. Refresh or check the server logs.
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="rounded-xl border border-border bg-card p-4">
+        <div className="flex items-start gap-3">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-400" />
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">Shared Sender stays separate</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              The Shared Sender tab is for fallback, sequence, invite, password reset, and system delivery. User mailbox senders are configured by each actor from Customer Email after OAuth is ready.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────────────────────────
 
-type MessagingTab = 'email-provider' | 'source-filters' | 'inbound-email' | 'notifications';
+type MessagingTab = 'email-provider' | 'oauth' | 'source-filters' | 'inbound-email' | 'notifications';
+
+function parseMessagingTab(value: string | null): MessagingTab | null {
+  if (value === 'oauth' || value === 'email-provider' || value === 'source-filters' || value === 'inbound-email' || value === 'notifications') {
+    return value;
+  }
+  return null;
+}
 
 export default function MessagingSettings() {
-  const [activeTab, setActiveTab] = useState<MessagingTab>('email-provider');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<MessagingTab>(() => parseMessagingTab(searchParams.get('tab')) ?? 'oauth');
+  useEffect(() => {
+    const next = parseMessagingTab(searchParams.get('tab'));
+    if (next && next !== activeTab) setActiveTab(next);
+  }, [activeTab, searchParams]);
+  const selectTab = (tab: MessagingTab) => {
+    setActiveTab(tab);
+    const next = new URLSearchParams(searchParams);
+    if (tab === 'oauth') next.delete('tab');
+    else next.set('tab', tab);
+    setSearchParams(next, { replace: true });
+  };
   const tabs: { key: MessagingTab; label: string; description: string; Icon: React.ElementType }[] = [
     {
+      key: 'oauth',
+      label: 'OAuth',
+      description: 'Prepare mailbox and calendar OAuth for users.',
+      Icon: KeyRound,
+    },
+    {
       key: 'email-provider',
-      label: 'Email Provider',
-      description: 'Send approved drafts and sequence emails.',
+      label: 'Shared Sender',
+      description: 'Fallback and system email delivery.',
       Icon: Mail,
     },
     {
@@ -891,31 +1453,31 @@ export default function MessagingSettings() {
       Icon: SlidersHorizontal,
     },
     {
-      key: 'inbound-email',
-      label: 'Inbound Webhook',
-      description: 'Receive customer replies from inbound parse providers.',
-      Icon: Download,
-    },
-    {
       key: 'notifications',
       label: 'Notifications',
       description: 'Route workflow and alert messages to channels like Slack.',
       Icon: MessageSquare,
+    },
+    {
+      key: 'inbound-email',
+      label: 'Inbound Webhook',
+      description: 'Receive customer replies from inbound parse providers.',
+      Icon: Download,
     },
   ];
 
   return (
     <div className="w-full space-y-5">
       <div>
-        <h2 className="font-display font-bold text-lg text-foreground mb-1">Messaging</h2>
-        <p className="text-sm text-muted-foreground">Configure how CRMy sends approved customer messages, receives customer replies, and routes operational notifications.</p>
+        <h2 className="font-display font-bold text-lg text-foreground mb-1">System Connections</h2>
+        <p className="text-sm text-muted-foreground">Configure provider OAuth, fallback sending, inbound email, source filters, and operational notifications.</p>
       </div>
 
       <div className="flex flex-wrap gap-1 border-b border-border">
         {tabs.map(({ key, label, Icon }) => (
           <button
             key={key}
-            onClick={() => setActiveTab(key)}
+            onClick={() => selectTab(key)}
             className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
               activeTab === key
                 ? 'border-primary text-foreground'
@@ -930,6 +1492,7 @@ export default function MessagingSettings() {
 
       <section className="space-y-4">
         {activeTab === 'email-provider' && <EmailProviderSection />}
+        {activeTab === 'oauth' && <GoogleOutlookOAuthSection />}
         {activeTab === 'source-filters' && <SourceFiltersSection />}
         {activeTab === 'inbound-email' && <InboundEmailSection />}
         {activeTab === 'notifications' && <MessagingChannelsSection />}

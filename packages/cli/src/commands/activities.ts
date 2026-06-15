@@ -143,6 +143,39 @@ export function activitiesCommand(): Command {
       await client.close();
     });
 
+  cmd.command('connect-calendar <provider>')
+    .description('Start Google or Microsoft calendar OAuth and print the browser consent URL')
+    .option('--email <email>', 'Calendar account email. Defaults to your CRMy user email.')
+    .option('--name <name>', 'Display name for the calendar connection')
+    .option('--scope <scope>', 'owned_accounts, accessible_accounts, or all_meetings', 'owned_accounts')
+    .action(async (provider, opts) => {
+      if (!['google', 'microsoft'].includes(provider)) {
+        throw new Error('Provider must be google or microsoft.');
+      }
+      const scope = ['owned_accounts', 'accessible_accounts', 'all_meetings'].includes(opts.scope)
+        ? opts.scope
+        : 'owned_accounts';
+      const client = await getClient();
+      const result = await client.call('calendar_connection_start', {
+        provider,
+        email_address: opts.email,
+        display_name: opts.name,
+        meeting_ingest_scope: scope,
+      });
+      const data = JSON.parse(result);
+      console.log(`Calendar connection status: ${data.status}`);
+      console.log(data.message);
+      if (data.auth_url) {
+        console.log('\nOpen this URL in a browser to finish provider consent:\n');
+        console.log(data.auth_url);
+        console.log('\nAfter consent completes, run: crmy activities connections');
+      } else if (data.setup_check?.setup_blockers?.length) {
+        console.log('\nSetup blockers:');
+        for (const blocker of data.setup_check.setup_blockers) console.log(`- ${blocker}`);
+      }
+      await client.close();
+    });
+
   cmd.command('classifications')
     .description('List meeting classifications and validation rules')
     .option('--include-disabled', 'Include disabled classifications')

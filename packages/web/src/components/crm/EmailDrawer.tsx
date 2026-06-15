@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAppStore } from '@/store/appStore';
-import { useEmail, useRequestEmailApproval, useSendEmailNow, useUpdateEmailDraft } from '@/api/hooks';
+import { useEmail, useHITLRequest, useRequestEmailApproval, useResolveEmailDelivery, useRetryProviderDraft, useSendEmailNow, useUpdateEmailDraft } from '@/api/hooks';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,10 +27,12 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: typeof
   draft: { label: 'Draft', color: 'bg-muted text-muted-foreground', icon: FileEdit },
   pending_approval: { label: 'Pending Approval', color: 'bg-warning/15 text-warning', icon: Clock },
   approved: { label: 'Approved', color: 'bg-emerald-500/15 text-emerald-500', icon: CheckCircle2 },
+  queued_for_delivery: { label: 'Queued to Send', color: 'bg-blue-500/15 text-blue-500', icon: Send },
   sending: { label: 'Sending', color: 'bg-blue-500/15 text-blue-500', icon: Send },
   sent: { label: 'Sent', color: 'bg-emerald-500/15 text-emerald-500', icon: CheckCircle2 },
   failed: { label: 'Failed', color: 'bg-destructive/15 text-destructive', icon: AlertCircle },
   rejected: { label: 'Rejected', color: 'bg-destructive/15 text-destructive', icon: XCircle },
+  delivery_uncertain: { label: 'Delivery Uncertain', color: 'bg-warning/15 text-warning', icon: AlertCircle },
 };
 
 export function EmailDrawer() {
@@ -40,11 +42,15 @@ export function EmailDrawer() {
   const updateDraft = useUpdateEmailDraft();
   const requestApproval = useRequestEmailApproval();
   const sendNow = useSendEmailNow();
+  const retryProviderDraft = useRetryProviderDraft();
+  const resolveDelivery = useResolveEmailDelivery();
   const [toEmail, setToEmail] = useState('');
   const [subject, setSubject] = useState('');
   const [bodyText, setBodyText] = useState('');
 
   const email = (data as any)?.email ?? data;
+  const hitlQ = useHITLRequest(email?.hitl_request_id);
+  const hitlRequest = (hitlQ.data as any)?.request;
 
   useEffect(() => {
     if (!email) return;
@@ -60,9 +66,13 @@ export function EmailDrawer() {
   const cfg = STATUS_CONFIG[email.status] ?? STATUS_CONFIG.draft;
   const Icon = cfg.icon;
   const editable = ['draft', 'failed', 'rejected'].includes(email.status);
+  const rejected = email.status === 'rejected';
   const dirty = toEmail !== (email.to_email ?? email.to ?? '') || subject !== (email.subject ?? '') || bodyText !== (email.body_text ?? email.body ?? '');
-  const actionPending = updateDraft.isPending || requestApproval.isPending || sendNow.isPending;
+  const actionPending = updateDraft.isPending || requestApproval.isPending || sendNow.isPending || retryProviderDraft.isPending || resolveDelivery.isPending;
   const actionContext = email.generation_metadata?.action_context;
+  const hitlResolution = email.generation_metadata?.hitl_resolution;
+  const reviewNote = hitlRequest?.review_note ?? hitlResolution?.review_note;
+  const resolvedAt = hitlRequest?.resolved_at ?? hitlResolution?.resolved_at;
   const directSendBlocked = Boolean(actionContext?.review_required || actionContext?.guidance?.can_execute === false);
 
   const saveChanges = async () => {
@@ -105,6 +115,32 @@ export function EmailDrawer() {
     }
   };
 
+  const retryDraftPush = async () => {
+    try {
+      await retryProviderDraft.mutateAsync(id);
+      toast({ title: 'Provider draft retry started', description: 'CRMy refreshed the provider draft status for this email.' });
+    } catch (err) {
+      toast({ title: 'Could not create provider draft', description: friendlyErrorMessage(err, 'Save as a CRMy draft or reauthorize the mailbox.'), variant: 'destructive' });
+    }
+  };
+
+  const repairDelivery = async (action: 'retry' | 'mark_sent' | 'mark_failed') => {
+    const note = action === 'mark_sent'
+      ? window.prompt('Optional note: where did you confirm this email was sent?') ?? undefined
+      : action === 'mark_failed'
+      ? window.prompt('Optional note: why should this be marked failed?') ?? undefined
+      : undefined;
+    try {
+      await resolveDelivery.mutateAsync({ id, action, note });
+      toast({
+        title: action === 'retry' ? 'Delivery retry queued' : action === 'mark_sent' ? 'Email marked sent' : 'Email marked failed',
+        description: action === 'retry' ? 'Reliability will pick this up on the next background worker tick.' : undefined,
+      });
+    } catch (err) {
+      toast({ title: 'Could not repair delivery state', description: friendlyErrorMessage(err, 'Try again from Reliability.'), variant: 'destructive' });
+    }
+  };
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
@@ -131,11 +167,11 @@ export function EmailDrawer() {
             <span className="text-sm text-foreground">{email.to ?? email.to_email}</span>
           </div>
         )}
-        {email.from && (
+        {(email.from || email.from_email) && (
           <div className="flex items-center gap-2">
             <User className="w-3.5 h-3.5 text-muted-foreground" />
             <span className="text-xs text-muted-foreground">From:</span>
-            <span className="text-sm text-foreground">{email.from}</span>
+            <span className="text-sm text-foreground">{email.from ?? email.from_email}</span>
           </div>
         )}
         {email.created_at && (
@@ -153,6 +189,73 @@ export function EmailDrawer() {
           </div>
         )}
       </div>
+
+      {rejected && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3">
+          <div className="flex items-start gap-2">
+            <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">Rejected by reviewer</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Revise this draft in place, then send it for approval again. Direct send is disabled for rejected drafts.
+              </p>
+              {reviewNote && (
+                <p className="mt-2 rounded-md bg-background/60 px-2 py-1.5 text-xs text-foreground">
+                  {reviewNote}
+                </p>
+              )}
+              {resolvedAt && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Rejected {format(new Date(resolvedAt), 'PPp')}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {email.provider_draft_status === 'failed' && (
+        <div className="rounded-lg border border-warning/30 bg-warning/10 p-3">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground">Provider draft was not created</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                The CRMy draft is still saved. Retry pushing it to Gmail or Outlook after checking mailbox authorization.
+              </p>
+            </div>
+            <Button size="sm" variant="outline" onClick={retryDraftPush} disabled={actionPending}>
+              {retryProviderDraft.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+              Retry
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {email.status === 'delivery_uncertain' && (
+        <div className="rounded-lg border border-warning/30 bg-warning/10 p-3">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground">Delivery needs confirmation</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                CRMy started provider delivery but could not confirm the final state. Check the mailbox or provider before retrying.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" onClick={() => repairDelivery('retry')} disabled={actionPending}>
+                  Retry delivery
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => repairDelivery('mark_sent')} disabled={actionPending}>
+                  Mark sent
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => repairDelivery('mark_failed')} disabled={actionPending}>
+                  Mark failed
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Body */}
       <div className="border-t border-border pt-3">
@@ -197,17 +300,19 @@ export function EmailDrawer() {
             </Button>
             <Button variant="outline" onClick={requestReview} disabled={actionPending}>
               {requestApproval.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              Send for approval
+              {rejected ? 'Send revised draft for approval' : 'Send for approval'}
             </Button>
-            <Button
-              onClick={sendDirectly}
-              disabled={actionPending || directSendBlocked}
-              title={directSendBlocked ? 'Action Context requires approval before this email can be sent.' : undefined}
-              className="bg-blue-600 text-white hover:bg-blue-500"
-            >
-              {sendNow.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}
-              Send now
-            </Button>
+            {!rejected && (
+              <Button
+                onClick={sendDirectly}
+                disabled={actionPending || directSendBlocked}
+                title={directSendBlocked ? 'Action Context requires approval before this email can be sent.' : undefined}
+                className="bg-blue-600 text-white hover:bg-blue-500"
+              >
+                {sendNow.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}
+                Send now
+              </Button>
+            )}
             {directSendBlocked && (
               <p className="basis-full text-right text-xs text-muted-foreground">
                 Action Context requires approval before sending this draft.

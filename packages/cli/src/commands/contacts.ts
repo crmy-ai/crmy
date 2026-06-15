@@ -76,7 +76,7 @@ export function contactsCommand(): Command {
     });
 
   cmd.command('delete <contact>')
-    .description('Permanently delete a contact (admin/owner only)')
+    .description('Archive a contact while preserving evidence and lineage anchors (admin/owner only)')
     .action(async (contact) => {
       const { default: inquirer } = await import('inquirer');
       const client = await getClient();

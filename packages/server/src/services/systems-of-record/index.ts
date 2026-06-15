@@ -720,7 +720,7 @@ async function applyRecord(
       field_name: 'unsupported_object_type',
       local_value: { reason: 'mapping_not_syncable' },
       external_value: {
-        message: `${mapping.object_type} mappings are not syncable in this 0.8 release path.`,
+        message: `${mapping.object_type} mappings are not syncable through this connector path yet.`,
         fields: record.fields,
       },
     });

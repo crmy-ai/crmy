@@ -8,6 +8,21 @@ import type { DbPool } from '../db/pool.js';
 import type { ActorContext } from '@crmy/shared';
 import { effectiveJwtScopes } from './scopes.js';
 
+function cookieValue(header: string | undefined, name: string): string | undefined {
+  if (!header) return undefined;
+  for (const part of header.split(';')) {
+    const [rawKey, ...rawValue] = part.trim().split('=');
+    if (rawKey === name) {
+      try {
+        return decodeURIComponent(rawValue.join('='));
+      } catch {
+        return rawValue.join('=');
+      }
+    }
+  }
+  return undefined;
+}
+
 declare global {
   namespace Express {
     interface Request {
@@ -21,7 +36,10 @@ export function authMiddleware(db: DbPool, jwtSecret: string) {
 
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
+    const cookieToken = process.env.CRMY_BROWSER_COOKIE_AUTH === 'true'
+      ? cookieValue(req.headers.cookie, 'crmy_session')
+      : undefined;
+    if (!authHeader?.startsWith('Bearer ') && !cookieToken) {
       res.status(401).json({
         type: 'https://crmy.ai/errors/unauthorized',
         title: 'Unauthorized',
@@ -31,7 +49,7 @@ export function authMiddleware(db: DbPool, jwtSecret: string) {
       return;
     }
 
-    const token = authHeader.slice(7);
+    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : cookieToken ?? '';
 
     // Try JWT first
     if (!token.startsWith('crmy_')) {

@@ -3,7 +3,17 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAccount, useUpdateAccount, useDeleteAccount, useUsers, useCustomFields, useEmailSubjectSummary } from '@/api/hooks';
+import { getUser } from '@/api/client';
+import {
+  useAccount,
+  useUpdateAccount,
+  useDeleteAccount,
+  useUsers,
+  useCustomFields,
+  useEmailSubjectSummary,
+  useMergeAccount,
+  useSplitAccountDomains,
+} from '@/api/hooks';
 import { useAppStore } from '@/store/appStore';
 import { Globe, Users, DollarSign, Heart, Pencil, ChevronLeft, Trash2, Mail } from 'lucide-react';
 import { DrawerTabBar, type DrawerView } from './DrawerTabBar';
@@ -16,6 +26,7 @@ import { CopyIconButton } from './CopyIconButton';
 import { toast } from '@/components/ui/use-toast';
 import { DatePicker } from '@/components/ui/date-picker';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
+import { EntityCombobox } from '@/components/ui/entity-combobox';
 
 const inputClass = 'w-full h-10 px-3 rounded-md border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-1 focus:ring-ring';
 const labelClass = 'text-xs font-mono text-muted-foreground uppercase tracking-wider';
@@ -39,6 +50,112 @@ function formatRevenue(revenue: number) {
   return `$${revenue}`;
 }
 
+function AccountGovernanceSection({
+  account,
+  domains,
+}: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  account: any;
+  domains: string[];
+}) {
+  const mergeAccount = useMergeAccount(account.id);
+  const splitDomains = useSplitAccountDomains(account.id);
+  const [secondaryId, setSecondaryId] = useState('');
+  const [targetId, setTargetId] = useState('');
+  const [domainInput, setDomainInput] = useState('');
+  const [moveRecords, setMoveRecords] = useState(true);
+  const normalizedDomains = domainInput
+    .split(',')
+    .map(domain => domain.trim().toLowerCase())
+    .filter(Boolean);
+
+  const handleMerge = async () => {
+    if (!secondaryId || secondaryId === account.id) return;
+    try {
+      await mergeAccount.mutateAsync({ secondary_id: secondaryId });
+      setSecondaryId('');
+      toast({ title: 'Duplicate account merged' });
+    } catch (err) {
+      toast({ title: 'Could not merge accounts', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+    }
+  };
+
+  const handleSplit = async () => {
+    if (!targetId || targetId === account.id || normalizedDomains.length === 0) return;
+    try {
+      await splitDomains.mutateAsync({ target_account_id: targetId, domains: normalizedDomains, move_matching_records: moveRecords });
+      setTargetId('');
+      setDomainInput('');
+      toast({ title: 'Domains moved' });
+    } catch (err) {
+      toast({ title: 'Could not move domains', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+    }
+  };
+
+  return (
+    <DrawerSection title="Account Governance" defaultOpen={false}>
+      <div className="space-y-5">
+        <div className="rounded-lg border border-border bg-muted/30 p-3">
+          <p className="text-sm font-semibold text-foreground">Move domains to another account</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            Use this when an added domain belongs to a different company record. CRMy will move matching contacts, email, meetings, and open opportunity links when possible.
+          </p>
+          <div className="mt-3 space-y-3">
+            <div className="space-y-1.5">
+              <label className={labelClass}>Domains to move</label>
+              <input
+                value={domainInput}
+                onChange={event => setDomainInput(event.target.value)}
+                placeholder={domains.length ? domains.join(', ') : 'example.com'}
+                className={inputClass}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className={labelClass}>Target Account</label>
+              <EntityCombobox entityType="account" value={targetId} onChange={setTargetId} placeholder="Search target account..." />
+            </div>
+            <label className="flex items-start gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={moveRecords}
+                onChange={event => setMoveRecords(event.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-border accent-primary"
+              />
+              <span>Move matching customer records with these domains.</span>
+            </label>
+            <button
+              type="button"
+              onClick={handleSplit}
+              disabled={!targetId || targetId === account.id || normalizedDomains.length === 0 || splitDomains.isPending}
+              className="h-9 w-full rounded-md bg-primary text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+            >
+              {splitDomains.isPending ? 'Moving...' : 'Move Domains'}
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-muted/30 p-3">
+          <p className="text-sm font-semibold text-foreground">Merge a duplicate into this account</p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            This keeps the current account and archives the duplicate after moving its contacts, opportunities, activity, context, email, calendar links, and domains.
+          </p>
+          <div className="mt-3 space-y-3">
+            <EntityCombobox entityType="account" value={secondaryId} onChange={setSecondaryId} placeholder="Search duplicate account..." />
+            <button
+              type="button"
+              onClick={handleMerge}
+              disabled={!secondaryId || secondaryId === account.id || mergeAccount.isPending}
+              className="h-9 w-full rounded-md border border-destructive/40 text-sm font-semibold text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-40"
+            >
+              {mergeAccount.isPending ? 'Merging...' : 'Merge Duplicate'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </DrawerSection>
+  );
+}
+
 function AccountEditForm({
   account,
   onSave,
@@ -59,6 +176,7 @@ function AccountEditForm({
     industry: account.industry ?? '',
     website: account.website ?? '',
     domain: account.domain ?? '',
+    additional_domains: Array.isArray(account.additional_domains) ? account.additional_domains.join(', ') : '',
     employee_count: account.employee_count != null ? String(account.employee_count) : '',
     annual_revenue: account.annual_revenue != null ? String(account.annual_revenue) : '',
     health_score: account.health_score != null ? String(account.health_score) : '',
@@ -92,6 +210,7 @@ function AccountEditForm({
     for (const [k, v] of Object.entries(fields)) {
       if (v === '') continue;
       if (k === 'employee_count' || k === 'annual_revenue' || k === 'health_score') payload[k] = Number(v) || 0;
+      else if (k === 'additional_domains') payload[k] = v.split(',').map(item => item.trim()).filter(Boolean);
       else payload[k] = v;
     }
     const cfPayload: Record<string, unknown> = {};
@@ -120,6 +239,7 @@ function AccountEditForm({
           { key: 'industry', label: 'Industry', type: 'text', placeholder: 'e.g. Technology' },
           { key: 'website', label: 'Website', type: 'url', placeholder: 'https://acme.com' },
           { key: 'domain', label: 'Domain', type: 'text', placeholder: 'acme.com' },
+          { key: 'additional_domains', label: 'Additional Domains', type: 'text', placeholder: 'acme.io, northstarlabs.com' },
           { key: 'employee_count', label: 'Employees', type: 'number', placeholder: '250' },
           { key: 'annual_revenue', label: 'Annual Revenue ($)', type: 'number', placeholder: '5000000' },
           { key: 'health_score', label: 'Health Score (0–100)', type: 'number', placeholder: '75' },
@@ -218,13 +338,23 @@ export function AccountDrawer() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: accountData, isLoading } = useAccount(drawerEntityId ?? '') as any;
   const emailSummaryQ = useEmailSubjectSummary('account', drawerEntityId ? [drawerEntityId] : []);
-  const emailSummary = ((emailSummaryQ.data as any)?.data ?? [])[0] as { total?: number; inbound?: number; outbound?: number; drafts?: number; pending_approvals?: number } | undefined;
+  const emailSummary = ((emailSummaryQ.data as any)?.data ?? [])[0] as {
+    total?: number;
+    inbound?: number;
+    outbound?: number;
+    outbound_drafts?: number;
+    outbound_pending_approvals?: number;
+    outbound_failed?: number;
+    outbound_rejected?: number;
+  } | undefined;
   const emailStats = {
     total: emailSummary?.total ?? 0,
     inbound: emailSummary?.inbound ?? 0,
     outbound: emailSummary?.outbound ?? 0,
-    drafts: emailSummary?.drafts ?? 0,
-    pendingApprovals: emailSummary?.pending_approvals ?? 0,
+    drafts: emailSummary?.outbound_drafts ?? 0,
+    pendingApprovals: emailSummary?.outbound_pending_approvals ?? 0,
+    failed: emailSummary?.outbound_failed ?? 0,
+    rejected: emailSummary?.outbound_rejected ?? 0,
   };
   const updateAccount = useUpdateAccount(drawerEntityId ?? '');
   const deleteAccount = useDeleteAccount(drawerEntityId ?? '');
@@ -254,8 +384,11 @@ export function AccountDrawer() {
   const industry: string = account.industry ?? '';
   const website: string = account.website ?? '';
   const domain: string = account.domain ?? '';
+  const additionalDomains: string[] = Array.isArray(account.additional_domains) ? account.additional_domains : [];
   const aliases: string[] = Array.isArray(account.aliases) ? account.aliases : [];
   const tags: string[] = Array.isArray(account.tags) ? account.tags : [];
+  const user = getUser();
+  const isAccountAdmin = user?.role === 'admin' || user?.role === 'owner';
   const revenue: number = account.annual_revenue ?? 0;
   const employeeCount: number = account.employee_count ?? 0;
   const healthScore: number = account.health_score ?? 0;
@@ -360,11 +493,13 @@ export function AccountDrawer() {
                 <Mail className="h-4 w-4 text-blue-400" />
               </span>
               <div>
-                <p className="text-sm font-semibold text-foreground">Email context</p>
+                <p className="text-sm font-semibold text-foreground">Email context and actions</p>
                 <p className="text-xs text-muted-foreground">
                   {emailStats.total} linked · {emailStats.inbound} in · {emailStats.outbound} out
                   {emailStats.drafts > 0 ? ` · ${emailStats.drafts} draft${emailStats.drafts === 1 ? '' : 's'}` : ''}
-                  {emailStats.pendingApprovals > 0 ? ` · ${emailStats.pendingApprovals} approval${emailStats.pendingApprovals === 1 ? '' : 's'}` : ''}
+                  {emailStats.pendingApprovals > 0 ? ` · ${emailStats.pendingApprovals} approval${emailStats.pendingApprovals === 1 ? '' : 's'} waiting` : ''}
+                  {emailStats.rejected > 0 ? ` · ${emailStats.rejected} rejected action${emailStats.rejected === 1 ? '' : 's'}` : ''}
+                  {emailStats.failed > 0 ? ` · ${emailStats.failed} failed send${emailStats.failed === 1 ? '' : 's'}` : ''}
                 </p>
               </div>
             </div>
@@ -377,7 +512,7 @@ export function AccountDrawer() {
               }}
               className="rounded-lg border border-border bg-muted px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted/80"
             >
-              View email context
+              View email
             </button>
           </div>
         </div>
@@ -403,6 +538,7 @@ export function AccountDrawer() {
           { key: 'industry', label: 'Industry', value: industry },
           { key: 'website', label: 'Website', value: website },
           { key: 'domain', label: 'Domain', value: domain },
+          { key: 'additional_domains', label: 'Additional Domains', value: additionalDomains.length ? additionalDomains.join(', ') : undefined },
           { key: 'aliases', label: 'Aliases', value: aliases.length ? aliases.join(', ') : undefined },
           { key: 'tags', label: 'Tags', value: tags.length ? tags.join(', ') : undefined },
           { key: 'created_at', label: 'Created', value: account.created_at ? new Date(account.created_at as string).toLocaleDateString() : undefined },
@@ -433,6 +569,10 @@ export function AccountDrawer() {
 
       {/* Custom Fields */}
       <CustomFieldsSection objectType="account" values={(account.custom_fields ?? {}) as Record<string, unknown>} />
+
+      {isAccountAdmin && (
+        <AccountGovernanceSection account={account} domains={[domain, ...additionalDomains].filter(Boolean)} />
+      )}
 
       {/* Context */}
       <ContextPanel subjectType="account" subjectId={drawerEntityId!} />

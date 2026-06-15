@@ -1,7 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { DbPool } from '../db/pool.js';
-import type { Briefing, UUID, SubjectType, ContextEntry, AdjacentContext, ActiveSequenceEnrollment } from '@crmy/shared';
+import type {
+  ActionContextProposedActionType,
+  Briefing,
+  ContextEvidence,
+  EvidenceMode,
+  UUID,
+  SubjectType,
+  ContextEntry,
+  AdjacentContext,
+  ActiveSequenceEnrollment,
+  TokenBudgetProfile,
+} from '@crmy/shared';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as accountRepo from '../db/repos/accounts.js';
 import * as oppRepo from '../db/repos/opportunities.js';
@@ -43,6 +54,7 @@ function computePriorityScore(
   entry: ContextEntry,
   weights: Map<string, { priority_weight: number; confidence_half_life_days: number | null }>,
   now: Date,
+  actionType?: ActionContextProposedActionType,
 ): number {
   const w = weights.get(entry.context_type) ?? { priority_weight: 1.0, confidence_half_life_days: null };
   const ageDays = (now.getTime() - new Date(entry.created_at).getTime()) / 86400000;
@@ -50,7 +62,8 @@ function computePriorityScore(
   const decayFactor = w.confidence_half_life_days != null
     ? Math.pow(0.5, ageDays / w.confidence_half_life_days)
     : 1.0;
-  return baseConf * decayFactor * w.priority_weight;
+  const evidenceBoost = Math.min((entry.evidence?.length ?? 0) * 0.04, 0.16);
+  return baseConf * decayFactor * w.priority_weight * actionTypeBoost(entry.context_type, actionType) * (1 + evidenceBoost);
 }
 
 /**
@@ -70,9 +83,10 @@ function applyTokenBudget(
   entries: ContextEntry[],
   weights: Map<string, { priority_weight: number; confidence_half_life_days: number | null }>,
   tokenBudget: number,
+  actionType?: ActionContextProposedActionType,
 ): TokenBudgetResult {
   const now = new Date();
-  const scored = entries.map(e => ({ entry: e, score: computePriorityScore(e, weights, now) }));
+  const scored = entries.map(e => ({ entry: e, score: computePriorityScore(e, weights, now, actionType) }));
   scored.sort((a, b) => b.score - a.score);
 
   const packed: ContextEntry[] = [];
@@ -117,6 +131,100 @@ function applyTokenBudget(
   };
 }
 
+const TOKEN_BUDGET_PROFILES: Record<TokenBudgetProfile, number> = {
+  tiny: 900,
+  standard: 2200,
+  deep: 6000,
+  evidence_heavy: 4000,
+};
+
+export function defaultTokenBudgetProfileForAction(actionType?: ActionContextProposedActionType): TokenBudgetProfile | undefined {
+  switch (actionType) {
+    case 'assignment_create':
+    case 'agent_task':
+      return 'tiny';
+    case 'memory_promote':
+    case 'external_writeback':
+      return 'evidence_heavy';
+    case 'customer_outreach':
+    case 'sequence_step':
+    case 'workflow_action':
+    case 'record_update':
+      return 'standard';
+    default:
+      return undefined;
+  }
+}
+
+function actionTypeBoost(contextType: string, actionType?: ActionContextProposedActionType): number {
+  const type = contextType.toLowerCase();
+  const outreach = new Set(['next_step', 'commitment', 'objection', 'preference', 'stakeholder', 'relationship_map', 'success_criteria', 'buying_process', 'deal_risk', 'competitive_intel']);
+  const writeback = new Set(['decision', 'key_fact', 'commitment', 'forecast_signal', 'deal_risk', 'buying_process', 'success_criteria']);
+  const memory = new Set(['commitment', 'decision', 'deal_risk', 'objection', 'next_step', 'success_criteria', 'buying_process', 'forecast_signal']);
+
+  switch (actionType) {
+    case 'customer_outreach':
+    case 'sequence_step':
+      return outreach.has(type) ? 1.25 : type === 'agent_reasoning' ? 0.75 : 1.0;
+    case 'external_writeback':
+    case 'record_update':
+    case 'workflow_action':
+      return writeback.has(type) ? 1.25 : type === 'agent_reasoning' ? 0.75 : 1.0;
+    case 'memory_promote':
+      return memory.has(type) ? 1.3 : 1.0;
+    case 'assignment_create':
+    case 'agent_task':
+      return ['next_step', 'deal_risk', 'commitment'].includes(type) ? 1.2 : 1.0;
+    default:
+      return 1.0;
+  }
+}
+
+function effectiveTokenBudget(input?: { token_budget?: number; token_budget_profile?: TokenBudgetProfile; proposed_action_type?: ActionContextProposedActionType }) {
+  const profile = input?.token_budget_profile ?? defaultTokenBudgetProfileForAction(input?.proposed_action_type);
+  return {
+    profile,
+    budget: input?.token_budget ?? (profile ? TOKEN_BUDGET_PROFILES[profile] : undefined),
+  };
+}
+
+function compactEvidence(evidence: ContextEvidence, mode: EvidenceMode): ContextEvidence | null {
+  if (mode === 'full') return evidence;
+  if (mode === 'none') return null;
+  const snippet = typeof evidence.snippet === 'string'
+    ? evidence.snippet.replace(/\s+/g, ' ').slice(0, 220)
+    : undefined;
+  return {
+    source_type: evidence.source_type,
+    source_id: evidence.source_id,
+    source_ref: evidence.source_ref,
+    source_label: evidence.source_label,
+    observed_at: evidence.observed_at,
+    speaker: evidence.speaker,
+    confidence: evidence.confidence,
+    snippet,
+    customer_authored: evidence.customer_authored,
+    source_authorship: evidence.source_authorship,
+    evidence_weight: evidence.evidence_weight,
+    evidence_role: evidence.evidence_role,
+    context_origin: evidence.context_origin,
+  };
+}
+
+function applyEvidenceModeToEntry(entry: ContextEntry, mode: EvidenceMode): ContextEntry {
+  if (mode === 'full') return entry;
+  return {
+    ...entry,
+    evidence: (entry.evidence ?? [])
+      .map(evidence => compactEvidence(evidence, mode))
+      .filter((evidence): evidence is ContextEvidence => Boolean(evidence)),
+  };
+}
+
+function applyEvidenceModeToEntries(entries: ContextEntry[], mode: EvidenceMode): ContextEntry[] {
+  return mode === 'full' ? entries : entries.map(entry => applyEvidenceModeToEntry(entry, mode));
+}
+
 /** Group context entries by context_type. */
 function groupByType(entries: ContextEntry[]): Record<string, ContextEntry[]> {
   const grouped: Record<string, ContextEntry[]> = {};
@@ -125,6 +233,25 @@ function groupByType(entries: ContextEntry[]): Record<string, ContextEntry[]> {
     grouped[e.context_type].push(e);
   }
   return grouped;
+}
+
+function groupAdjacentContext(entries: ContextEntry[]): AdjacentContext[] | undefined {
+  if (entries.length === 0) return undefined;
+  const bySubject = new Map<string, ContextEntry[]>();
+  for (const entry of entries) {
+    const key = `${entry.subject_type}:${entry.subject_id}`;
+    if (!bySubject.has(key)) bySubject.set(key, []);
+    bySubject.get(key)!.push(entry);
+  }
+
+  return Array.from(bySubject.values()).map(subjectEntries => {
+    const first = subjectEntries[0];
+    return {
+      subject_type: first.subject_type,
+      subject_id: first.subject_id,
+      context_entries: groupByType(subjectEntries),
+    };
+  });
 }
 
 function summarizeEvidence(entry: ContextEntry): string | undefined {
@@ -226,10 +353,15 @@ export async function assembleBriefing(
     include_stale?: boolean;
     context_radius?: 'direct' | 'adjacent' | 'account_wide';
     token_budget?: number;
+    token_budget_profile?: TokenBudgetProfile;
+    evidence_mode?: EvidenceMode;
+    proposed_action_type?: ActionContextProposedActionType;
   },
 ): Promise<Briefing> {
   const sinceDate = parseSince(options?.since);
   const radius = options?.context_radius ?? 'direct';
+  const evidenceMode = options?.evidence_mode ?? 'summary';
+  const tokenBudget = effectiveTokenBudget(options);
 
   // 1. Fetch type weights for scoring (priority 4)
   const typeWeights = await contextTypeRepo.getTypeWeightsMap(db, tenantId);
@@ -286,6 +418,7 @@ export async function assembleBriefing(
     : rawSignals;
 
   // 7. Adjacent / account-wide context (priority 2)
+  let adjacentEntries: ContextEntry[] = [];
   let adjacent_context: AdjacentContext[] | undefined;
   if (radius !== 'direct') {
     const radiusSubjects = await resolveRadiusSubjects(
@@ -299,24 +432,7 @@ export async function assembleBriefing(
       const filtered = options?.context_types?.length
         ? allAdjacent.filter(e => options.context_types!.includes(e.context_type))
         : allAdjacent;
-
-      // Group by origin subject
-      const bySubject = new Map<string, ContextEntry[]>();
-      for (const entry of filtered) {
-        const key = `${entry.subject_type}:${entry.subject_id}`;
-        if (!bySubject.has(key)) bySubject.set(key, []);
-        bySubject.get(key)!.push(entry);
-      }
-
-      adjacent_context = [];
-      for (const [, entries] of bySubject) {
-        const first = entries[0];
-        adjacent_context.push({
-          subject_type: first.subject_type,
-          subject_id: first.subject_id,
-          context_entries: groupByType(entries),
-        });
-      }
+      adjacentEntries = filtered;
     }
   }
 
@@ -326,22 +442,31 @@ export async function assembleBriefing(
   let droppedEntries: Array<{ context_type: string; title?: string; confidence?: number }> | undefined;
   let context_entries: Record<string, ContextEntry[]>;
 
-  if (options?.token_budget) {
-    const result = applyTokenBudget(ownEntries, typeWeights, options.token_budget);
+  if (tokenBudget.budget) {
+    const budgetedEntries = [...ownEntries, ...adjacentEntries];
+    const result = applyTokenBudget(budgetedEntries, typeWeights, tokenBudget.budget, options?.proposed_action_type);
     tokenEstimate = result.tokenEstimate;
     truncated = result.truncated;
     droppedEntries = result.dropped_entries;
-    context_entries = groupByType(result.entries);
+    const selectedOwnEntries = result.entries.filter(
+      entry => entry.subject_type === subjectType && entry.subject_id === subjectId,
+    );
+    const selectedAdjacentEntries = result.entries.filter(
+      entry => !(entry.subject_type === subjectType && entry.subject_id === subjectId),
+    );
+    context_entries = groupByType(applyEvidenceModeToEntries(selectedOwnEntries, evidenceMode));
+    adjacent_context = groupAdjacentContext(applyEvidenceModeToEntries(selectedAdjacentEntries, evidenceMode));
   } else {
-    context_entries = groupByType(ownEntries);
+    context_entries = groupByType(applyEvidenceModeToEntries(ownEntries, evidenceMode));
+    adjacent_context = groupAdjacentContext(applyEvidenceModeToEntries(adjacentEntries, evidenceMode));
   }
 
   // 9. Staleness warnings
-  const staleness_warnings = await contextRepo.listStaleEntries(db, tenantId, {
+  const staleness_warnings = applyEvidenceModeToEntries(await contextRepo.listStaleEntries(db, tenantId, {
     subject_type: subjectType,
     subject_id: subjectId,
     limit: 50,
-  });
+  }), evidenceMode);
 
   // 10. Contradiction warnings (direct radius only — skip on adjacent to avoid N+1)
   let contradiction_warnings: import('@crmy/shared').ContradictionWarning[] | undefined;
@@ -401,7 +526,7 @@ export async function assembleBriefing(
     open_assignments,
     context_entries,
     ...(signalGroupsWithReadiness.length > 0 ? { signal_groups: signalGroupsWithReadiness } : {}),
-    ...(ownSignals.length > 0 ? { signals: groupByType(ownSignals) } : {}),
+    ...(ownSignals.length > 0 ? { signals: groupByType(applyEvidenceModeToEntries(ownSignals, evidenceMode)) } : {}),
     staleness_warnings,
     ...(active_sequences?.length ? { active_sequences } : {}),
     ...(contradiction_warnings?.length ? { contradiction_warnings } : {}),
@@ -409,6 +534,14 @@ export async function assembleBriefing(
     ...(tokenEstimate !== undefined ? { token_estimate: tokenEstimate } : {}),
     ...(truncated !== undefined ? { truncated } : {}),
     ...(droppedEntries?.length ? { dropped_entries: droppedEntries } : {}),
+    context_packing: {
+      ...(tokenBudget.profile ? { token_budget_profile: tokenBudget.profile } : {}),
+      ...(tokenBudget.budget ? { token_budget: tokenBudget.budget } : {}),
+      evidence_mode: evidenceMode,
+      ranking_strategy: options?.proposed_action_type
+        ? `confidence_decay_type_priority_evidence_boost_action_${options.proposed_action_type}`
+        : 'confidence_decay_type_priority_evidence_boost',
+    },
   };
 }
 

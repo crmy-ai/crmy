@@ -3,6 +3,7 @@
 
 import type { DbPool } from '../pool.js';
 import type { PaginatedResponse, SubjectType, UUID } from '@crmy/shared';
+import { addStableDescCursorCondition, encodeStableCursor } from './pagination.js';
 
 export interface RawContextSource {
   id: UUID;
@@ -335,10 +336,7 @@ export async function listRawContextSources(
     params.push(textQuery, `%${textQuery}%`);
     idx += 2;
   }
-  if (filters.cursor) {
-    conditions.push(`r.created_at < $${idx++}`);
-    params.push(filters.cursor);
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'r.created_at', 'r.id');
   if (filters.owner_ids) {
     const actorIds = filters.actor_ids ?? [];
     if (filters.owner_ids.length === 0) {
@@ -368,7 +366,7 @@ export async function listRawContextSources(
   const count = await db.query(`SELECT count(*)::int AS total FROM raw_context_sources r WHERE ${where}`, params);
   params.push(filters.limit + 1);
   const rows = await db.query(
-    `SELECT r.* FROM raw_context_sources r WHERE ${where} ORDER BY r.created_at DESC LIMIT $${idx}`,
+    `SELECT r.* FROM raw_context_sources r WHERE ${where} ORDER BY r.created_at DESC, r.id DESC LIMIT $${idx}`,
     params,
   );
   const data = rows.rows as RawContextSource[];
@@ -376,7 +374,9 @@ export async function listRawContextSources(
   const page = hasMore ? data.slice(0, filters.limit) : data;
   return {
     data: page,
-    next_cursor: hasMore ? page[page.length - 1]?.created_at : undefined,
+    next_cursor: hasMore && page.length > 0
+      ? encodeStableCursor({ sort_value: page[page.length - 1].created_at, id: page[page.length - 1].id })
+      : undefined,
     total: count.rows[0]?.total ?? 0,
   };
 }

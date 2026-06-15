@@ -8,8 +8,11 @@ import type { DbPool } from '../../db/pool.js';
 import * as calendarRepo from '../../db/repos/calendar.js';
 import { assertSubjectAccess, getActorUserId, isGlobalActor, resolveOwnerFilter } from '../../services/access-control.js';
 import { processCalendarEvent, processMeetingArtifact } from '../../services/customer-activity.js';
+import { suggestAvailabilityTimes } from '../../services/availability.js';
+import { buildOAuthUrl, oauthReadiness } from '../../services/source-sync.js';
 import type { ToolDef } from '../server.js';
 import { runToolOperation } from '../tool-operation.js';
+import { mutationReceipt } from '../mutation-receipt.js';
 
 async function assertCalendarEventAccess(db: DbPool, actor: ActorContext, event: calendarRepo.CalendarEvent): Promise<void> {
   if (isGlobalActor(actor)) return;
@@ -32,6 +35,32 @@ async function assertCalendarEventAccess(db: DbPool, actor: ActorContext, event:
 export function calendarTools(db: DbPool): ToolDef[] {
   return [
     {
+      name: 'availability_suggest_times',
+      tier: 'extended',
+      description: 'Suggest meeting times using connected internal actor calendar free/busy plus customer timing preferences from Memory. Returns ranked windows, checked calendar identities, freshness, and caveats. Does not expose raw calendar event details and does not create or send invites.',
+      inputSchema: z.object({
+        subject_type: z.enum(['account', 'contact', 'opportunity', 'use_case']).optional().describe('Customer record type for preference context and access checks.'),
+        subject_id: z.string().uuid().optional().describe('Customer record id for preference context and access checks.'),
+        account_id: z.string().uuid().optional().describe('Shortcut for subject_type=account.'),
+        contact_id: z.string().uuid().optional().describe('Shortcut for subject_type=contact.'),
+        opportunity_id: z.string().uuid().optional().describe('Shortcut for subject_type=opportunity.'),
+        use_case_id: z.string().uuid().optional().describe('Shortcut for subject_type=use_case.'),
+        actor_ids: z.array(z.string().uuid()).max(10).optional().describe('Human actor calendars to check. Defaults to the current human/session owner when available.'),
+        duration_minutes: z.number().int().min(15).max(480).optional().default(30),
+        date_start: z.string().datetime().optional().describe('Earliest candidate start time. Defaults to the next rounded hour.'),
+        date_end: z.string().datetime().optional().describe('Latest candidate end time. Defaults to 14 days after date_start. Max range is 45 days.'),
+        timezone: z.string().optional().default('UTC').describe('Timezone used for business-hour filtering and display labels, e.g. America/Los_Angeles.'),
+        business_hours_start: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/).optional().default('09:00'),
+        business_hours_end: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/).optional().default('17:00'),
+        business_days_only: z.boolean().optional().default(true),
+        increment_minutes: z.number().int().min(5).max(120).optional().default(30),
+        limit: z.number().int().min(1).max(10).optional().default(3),
+      }),
+      handler: async (input, actor: ActorContext) => {
+        return suggestAvailabilityTimes(db, actor, input);
+      },
+    },
+    {
       name: 'calendar_connection_list',
       tier: 'extended',
       description: 'List calendar connections and meeting-capture health visible to the current user.',
@@ -42,6 +71,84 @@ export function calendarTools(db: DbPool): ToolDef[] {
         const data = await calendarRepo.listCalendarConnections(db, actor.tenant_id, userId);
         const summary = await calendarRepo.summarizeCalendarEvents(db, actor.tenant_id, ownerFilter.owner_ids);
         return { calendar_connections: data, total: data.length, summary };
+      },
+    },
+    {
+      name: 'calendar_connection_start',
+      tier: 'extended',
+      description: 'Start Google or Microsoft calendar OAuth for the current human-linked actor and return the browser auth_url to finish provider consent. Use this from MCP/CLI when the user does not want to open the CRMy web UI. Pure agent actors without a linked human user cannot connect a calendar.',
+      inputSchema: z.object({
+        provider: z.enum(['google', 'microsoft']).describe('Calendar provider to connect. google = Google Calendar, microsoft = Outlook/Microsoft 365 Calendar.'),
+        email_address: z.string().email().optional().describe('Calendar account email. Defaults to the current user email when omitted.'),
+        display_name: z.string().optional(),
+        meeting_ingest_scope: z.enum(['owned_accounts', 'accessible_accounts', 'all_meetings']).optional().default('owned_accounts'),
+        idempotency_key: z.string().max(128).optional(),
+      }),
+      handler: async (input, actor: ActorContext) => {
+        return runToolOperation(db, actor, 'calendar_connection_start', input, async () => {
+          const userId = await getActorUserId(db, actor);
+          if (!userId) {
+            throw new Error('A human-linked user is required to connect a calendar. Use a user API key/session, or ask the human calendar owner to connect it.');
+          }
+          const user = await db.query('SELECT email, name FROM users WHERE tenant_id = $1 AND id = $2 LIMIT 1', [actor.tenant_id, userId]);
+          const email = String(input.email_address ?? user.rows[0]?.email ?? '').trim().toLowerCase();
+          if (!email || !email.includes('@')) throw new Error('A valid calendar email address is required.');
+          const meetingIngestScope = input.meeting_ingest_scope === 'accessible_accounts' || input.meeting_ingest_scope === 'all_meetings'
+            ? input.meeting_ingest_scope
+            : 'owned_accounts';
+          const setupCheck = await oauthReadiness(db, actor.tenant_id, 'calendar', input.provider);
+          let connection = await calendarRepo.createPlaceholderCalendarConnection(db, actor.tenant_id, {
+            user_id: userId,
+            provider: input.provider,
+            email_address: email,
+            display_name: String(input.display_name ?? user.rows[0]?.name ?? ''),
+            status: 'configuration_required',
+            last_error: null,
+            settings: {
+              setup_required: true,
+              meeting_ingest_scope: meetingIngestScope,
+              setup_started_from: 'mcp',
+              next_step: 'Open the returned auth_url in a browser to finish calendar OAuth.',
+            },
+          });
+          const authUrl = setupCheck.can_start_oauth
+            ? await buildOAuthUrl(db, 'calendar', input.provider, {
+                kind: 'calendar',
+                provider: input.provider,
+                tenant_id: actor.tenant_id,
+                user_id: userId,
+                email_address: email,
+                display_name: String(input.display_name ?? user.rows[0]?.name ?? ''),
+                meeting_ingest_scope: meetingIngestScope,
+              })
+            : null;
+          if (!authUrl) {
+            connection = await calendarRepo.updateCalendarConnection(db, actor.tenant_id, connection.id, {
+              last_error: setupCheck.setup_blockers[0] ?? 'Calendar OAuth setup is not ready yet.',
+              settings: {
+                setup_required: true,
+                oauth_configured: false,
+                oauth_ready: false,
+                oauth_setup_status: setupCheck.setup_status,
+                oauth_setup_blockers: setupCheck.setup_blockers,
+                oauth_app_source: setupCheck.app_source,
+                oauth_redirect_uri: setupCheck.redirect_uri,
+                meeting_ingest_scope: meetingIngestScope,
+              },
+            }) ?? connection;
+          }
+          return {
+            connection,
+            auth_url: authUrl,
+            oauth_ready: Boolean(authUrl),
+            setup_check: setupCheck,
+            status: authUrl ? 'oauth_required' : 'configuration_required',
+            message: authUrl
+              ? 'Open auth_url in a browser, finish provider consent, then return here and list calendar connections to confirm status=connected.'
+              : setupCheck.user_action,
+            mutation: mutationReceipt(actor, { objectType: 'calendar_connection', objectId: connection.id }),
+          };
+        });
       },
     },
     {

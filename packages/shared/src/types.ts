@@ -63,6 +63,7 @@ export interface Account {
   owner_id?: UUID;
   health_score?: number;
   aliases: string[];
+  additional_domains?: string[];
   tags: string[];
   custom_fields: Record<string, unknown>;
   created_by?: UUID;
@@ -197,6 +198,7 @@ export interface PaginatedResponse<T> {
   data: T[];
   next_cursor?: string;
   total: number;
+  total_is_estimate?: boolean;
 }
 
 export interface ActorContext {
@@ -212,7 +214,7 @@ export interface OperationResult<T> {
   event_id: number;
 }
 
-// -- v0.8 systems-of-record overlay --
+// -- Systems-of-record overlay --
 
 export type SystemOfRecordType = 'hubspot' | 'salesforce' | 'databricks' | 'snowflake';
 export type ExternalOrigin = 'crmy' | 'crm_sync' | 'warehouse_sync' | 'agent' | 'workflow' | 'sequence';
@@ -389,7 +391,9 @@ export interface WebhookEndpoint {
   id: UUID;
   tenant_id: UUID;
   url: string;
-  secret: string;
+  secret?: string;
+  has_secret?: boolean;
+  secret_masked?: string | null;
   events: string[];
   active: boolean;
   description?: string;
@@ -434,12 +438,16 @@ export interface Email {
   account_id?: UUID;
   opportunity_id?: UUID;
   use_case_id?: UUID;
-  subject: string;
-  body_html?: string;
-  body_text?: string;
-  from_address: string;
-  to_address: string;
-  status: 'draft' | 'pending_approval' | 'approved' | 'sending' | 'sent' | 'failed' | 'rejected';
+	  subject: string;
+	  body_html?: string;
+	  body_text?: string;
+	  from_address: string;
+	  from_email?: string | null;
+	  from_name?: string | null;
+	  sender_type?: 'actor_mailbox' | 'tenant_provider' | 'unknown';
+	  mailbox_connection_id?: UUID | null;
+	  to_address: string;
+  status: 'draft' | 'pending_approval' | 'approved' | 'queued_for_delivery' | 'sending' | 'sent' | 'failed' | 'rejected' | 'delivery_uncertain';
   hitl_request_id?: UUID;
   sent_at?: string;
   created_by?: UUID;
@@ -886,9 +894,29 @@ export interface ContextLineageEdge {
   data?: Record<string, unknown>;
 }
 
+export interface ContextLineageOutcome {
+  kind: 'handoff' | 'writeback' | 'activity' | 'action_receipt' | 'audit';
+  label: string;
+  status: string;
+  occurred_at?: string;
+  object_id?: string;
+  node_id: string;
+  impact: 'completed' | 'pending' | 'failed' | 'informational';
+  follow_up?: string;
+}
+
 export interface ContextLineage {
   nodes: ContextLineageNode[];
   edges: ContextLineageEdge[];
+  outcomes?: {
+    recent: ContextLineageOutcome[];
+    pending: ContextLineageOutcome[];
+    failed: ContextLineageOutcome[];
+    completed_count: number;
+    pending_count: number;
+    failed_count: number;
+    recommended_follow_up: string[];
+  };
   summary: {
     records: number;
     raw_context: number;
@@ -1086,6 +1114,16 @@ export interface ActiveSequenceEnrollment {
   enrolled_by_actor_id?: UUID;
 }
 
+export type TokenBudgetProfile = 'tiny' | 'standard' | 'deep' | 'evidence_heavy';
+export type EvidenceMode = 'summary' | 'full' | 'none';
+
+export interface ContextPackingMetadata {
+  token_budget_profile?: TokenBudgetProfile;
+  token_budget?: number;
+  evidence_mode: EvidenceMode;
+  ranking_strategy: string;
+}
+
 export interface Briefing {
   subject: Record<string, unknown>;
   subject_type: SubjectType;
@@ -1104,10 +1142,14 @@ export interface Briefing {
   contradiction_warnings?: ContradictionWarning[];
   /** Context from related entities (populated when context_radius !== 'direct'). */
   adjacent_context?: AdjacentContext[];
-  /** Estimated token count for this briefing (populated when token_budget is set). */
+  /** Estimated token count for this briefing (populated when token_budget or token_budget_profile is set). */
   token_estimate?: number;
-  /** True if context entries were truncated to fit within token_budget. */
+  /** True if context entries were truncated to fit within the effective token budget. */
   truncated?: boolean;
+  /** Entries omitted because token_budget was exhausted. */
+  dropped_entries?: Array<{ context_type: string; title?: string; confidence?: number }>;
+  /** Explains budget preset, effective budget, evidence detail, and ranking strategy used for this briefing. */
+  context_packing?: ContextPackingMetadata;
 }
 
 export type ActionContextProposedActionType =
@@ -1141,6 +1183,8 @@ export interface ActionContextGetInput {
   include_stale?: boolean;
   context_radius?: 'direct' | 'adjacent' | 'account_wide';
   token_budget?: number;
+  token_budget_profile?: TokenBudgetProfile;
+  evidence_mode?: EvidenceMode;
   emit_retrieval_event?: boolean;
   proposed_action?: ActionContextProposedAction;
 }
@@ -1182,6 +1226,94 @@ export interface ActionContextAllowedAction {
   policy?: ActionContextPolicySummary;
 }
 
+export interface ActionContextPacketEvidence {
+  source_type?: string;
+  source_id?: string;
+  source_ref?: string;
+  source_label?: string;
+  observed_at?: string;
+  snippet?: string;
+  confidence?: number;
+}
+
+export interface ActionContextPacketItem {
+  kind:
+    | 'memory'
+    | 'signal'
+    | 'signal_group'
+    | 'stale_memory'
+    | 'contradiction'
+    | 'assignment'
+    | 'source_authority'
+    | 'policy'
+    | 'permission';
+  id?: UUID | string;
+  context_type?: string;
+  title: string;
+  summary: string;
+  status?: string;
+  confidence?: number;
+  evidence_refs?: ActionContextPacketEvidence[];
+}
+
+export interface ActionContextRecommendedAction {
+  id: string;
+  label: string;
+  description: string;
+  priority: 'primary' | 'secondary' | 'background';
+  can_execute_now: boolean;
+  customer_or_system_effect: boolean;
+  requires_human_review: boolean;
+  next_tool?: string;
+  reason_refs?: string[];
+  proposed_action_type?: ActionContextProposedActionType;
+}
+
+export interface ActionContextSourcePosture {
+  summary: string;
+  dominant_source: 'customer_authored' | 'seller_authored' | 'system_of_record' | 'internal' | 'mixed' | 'unknown';
+  counts: {
+    customer_authored: number;
+    seller_authored: number;
+    system_of_record: number;
+    internal: number;
+    unknown: number;
+  };
+  customer_authored_claims_present: boolean;
+  seller_authored_context_present: boolean;
+  weak_or_unknown_sources_present: boolean;
+  instructions: string[];
+}
+
+export interface ActionContextActionPacket {
+  action_type?: ActionContextProposedActionType;
+  objective: string;
+  status: ActionContextReadinessStatus;
+  risk_level: ActionContextRiskLevel;
+  operating_mode: ActionContextOperatingMode;
+  can_execute: boolean;
+  agent_instructions: string[];
+  use_as_truth: ActionContextPacketItem[];
+  use_with_caution: ActionContextPacketItem[];
+  do_not_use_as_truth: ActionContextPacketItem[];
+  evidence_to_cite: ActionContextPacketItem[];
+  source_posture: ActionContextSourcePosture;
+  recommended_actions: ActionContextRecommendedAction[];
+  action_boundaries: {
+    allowed: string[];
+    warnings: string[];
+    blocked: string[];
+    required_review: string[];
+  };
+  human_unblock?: {
+    required: boolean;
+    question: string;
+    reasons: string[];
+    handoff_type?: 'assignment' | 'signal_review' | 'policy_approval' | 'source_conflict';
+  };
+  next_tools: string[];
+}
+
 export interface ActionContext {
   subject_type: SubjectType;
   subject_id: UUID;
@@ -1194,6 +1326,8 @@ export interface ActionContext {
     review_reasons: string[];
     recommended_next_steps: string[];
   };
+  /** Compact agent-facing packet: trusted facts, caveats, action boundaries, human unblockers, and next tools. */
+  action_packet: ActionContextActionPacket;
   briefing: Briefing;
   readiness: {
     status: ActionContextReadinessStatus;

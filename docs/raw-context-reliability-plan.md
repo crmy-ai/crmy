@@ -103,7 +103,7 @@ Operators should not need database IDs or manual SQL to recover normal extractio
 
 ## Release Bar
 
-Current status: met for the 0.8.x Raw Context reliability hardening pass.
+Current status: met for the 0.9 Raw Context reliability hardening pass.
 
 This capability is ready for v0.9 confidence when:
 

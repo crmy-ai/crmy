@@ -1,7 +1,7 @@
 // Copyright 2026 CRMy Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
@@ -14,9 +14,13 @@ import {
   useEmailSubjectSummary,
   useIgnoreEmailMessage,
   useMailboxConnections,
+  useDeleteMailboxConnection,
   useProcessEmailMessage,
+  useRefreshMailboxAliases,
   useStartMailboxConnection,
   useSyncMailboxConnection,
+  useUpdateMailboxConnectionStatus,
+  useUpdateMailboxSender,
   useUpdateEmailMessage,
   useUpdateEmailMessageClassification,
 } from '@/api/hooks';
@@ -57,10 +61,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
+import { getUser } from '@/api/client';
 
 type CustomerEmailTab = 'customer' | 'review' | 'outbound' | 'connections';
-type MailboxProvider = 'google' | 'microsoft' | 'webhook';
+type MailboxProvider = 'google' | 'microsoft';
+type AccountIngestScope = 'owned_accounts' | 'accessible_accounts';
 type OutboundFilter = 'attention' | 'drafts' | 'approvals' | 'sent_failed';
+type ScopedEmailFilter = 'all' | 'context' | 'actions';
 
 type EmailMessage = {
   id: string;
@@ -88,8 +95,12 @@ type EmailMessage = {
   use_case_id?: string | null;
   use_case_name?: string | null;
   activity_id?: string | null;
-  raw_context_source_id?: string | null;
-  extraction_receipt?: Record<string, unknown>;
+	  raw_context_source_id?: string | null;
+	  mailbox_email_address?: string | null;
+	  mailbox_display_name?: string | null;
+	  reply_to_email_message_id?: string | null;
+	  conversation_root_email_message_id?: string | null;
+	  extraction_receipt?: Record<string, unknown>;
   received_at?: string | null;
   sent_at?: string | null;
   created_at: string;
@@ -102,8 +113,36 @@ type Connection = {
   display_name?: string | null;
   status: string;
   last_sync_at?: string | null;
-  last_error?: string | null;
-  sync_stats?: Record<string, number>;
+	  last_error?: string | null;
+	  sync_stats?: Record<string, number>;
+	  context_sync_enabled?: boolean;
+	  send_enabled?: boolean;
+	  provider_draft_enabled?: boolean;
+	  send_status?: string;
+	  send_last_error?: string | null;
+	  is_default_sender?: boolean;
+	  settings?: {
+      account_ingest_scope?: AccountIngestScope;
+	    send_as_aliases?: Array<{ email_address: string; display_name?: string | null; verified?: boolean; is_primary?: boolean; is_default?: boolean }>;
+	    selected_send_as_email?: string;
+	    selected_send_as_name?: string | null;
+	    alias_sync_status?: string;
+	    alias_sync_warning?: string | null;
+	  };
+	};
+
+type EmailSubjectSummary = {
+  total?: number;
+  inbound?: number;
+  outbound?: number;
+  drafts?: number;
+  pending_approvals?: number;
+  needs_review?: number;
+  inbound_needs_review?: number;
+  outbound_drafts?: number;
+  outbound_pending_approvals?: number;
+  outbound_failed?: number;
+  outbound_rejected?: number;
 };
 
 const MAILBOX_PROVIDER_COPY: Record<MailboxProvider, {
@@ -127,19 +166,13 @@ const MAILBOX_PROVIDER_COPY: Record<MailboxProvider, {
     credentialLabel: 'Microsoft Entra OAuth app',
     callbackPath: '/api/v1/mailbox/oauth/microsoft/callback',
   },
-  webhook: {
-    label: 'Inbound webhook',
-    title: 'Set up inbound webhook',
-    description: 'Use SendGrid, Postmark, Mailgun, or another provider to post inbound customer email to CRMy.',
-    credentialLabel: 'Inbound parse provider',
-  },
 };
 
 const TABS: Array<{ key: CustomerEmailTab; label: string; icon: typeof Mail }> = [
-  { key: 'customer', label: 'Customer Inbox', icon: Inbox },
-  { key: 'review', label: 'Needs Review', icon: AlertCircle },
-  { key: 'outbound', label: 'Drafts & Approvals', icon: Send },
-  { key: 'connections', label: 'Connections', icon: SlidersHorizontal },
+	  { key: 'customer', label: 'Mailbox Context', icon: Inbox },
+	  { key: 'review', label: 'Needs Review', icon: AlertCircle },
+	  { key: 'outbound', label: 'Outbound Actions', icon: Send },
+	  { key: 'connections', label: 'Mailboxes & Senders', icon: SlidersHorizontal },
 ];
 
 const CLASSIFICATION: Record<string, { label: string; className: string }> = {
@@ -164,10 +197,12 @@ const OUTBOUND_STATUS: Record<string, { label: string; className: string; icon: 
   draft: { label: 'Draft', className: STATUS_TONES.muted, icon: FileEdit },
   pending_approval: { label: 'Pending approval', className: STATUS_TONES.warning, icon: Clock },
   approved: { label: 'Approved', className: STATUS_TONES.success, icon: CheckCircle2 },
+  queued_for_delivery: { label: 'Queued to send', className: STATUS_TONES.info, icon: Send },
   sending: { label: 'Sending', className: STATUS_TONES.info, icon: Send },
   sent: { label: 'Sent', className: STATUS_TONES.success, icon: CheckCircle2 },
   failed: { label: 'Failed', className: STATUS_TONES.destructive, icon: AlertCircle },
   rejected: { label: 'Rejected', className: STATUS_TONES.destructive, icon: XCircle },
+  delivery_uncertain: { label: 'Delivery uncertain', className: STATUS_TONES.warning, icon: AlertCircle },
 };
 
 function ts(message: EmailMessage): string {
@@ -276,15 +311,33 @@ function ConnectionCard({
   connection,
   onSync,
   onSetup,
+  onToggleActive,
+  onDisconnect,
+  onRefreshAliases,
+  onSelectSender,
+  aliasActionPending,
+  connectionActionPending,
 }: {
   connection: Connection;
   onSync: (id: string) => void;
   onSetup: (provider: MailboxProvider, connection?: Connection) => void;
+  onToggleActive: (connection: Connection, active: boolean) => void;
+  onDisconnect: (connection: Connection) => void;
+  onRefreshAliases: (id: string) => void;
+  onSelectSender: (id: string, email: string) => void;
+  aliasActionPending?: boolean;
+  connectionActionPending?: boolean;
 }) {
   const connected = connection.status === 'connected';
+  const paused = connection.status === 'disconnected';
+  const canToggle = connected || paused;
   const provider = MAILBOX_PROVIDER_COPY[connection.provider];
-  const statusLabel = connected ? 'Connected' : connection.status === 'error' ? 'Sync needs attention' : 'Needs OAuth setup';
-  const statusTone = connected ? STATUS_TONES.success : connection.status === 'error' ? STATUS_TONES.destructive : STATUS_TONES.warning;
+  const statusLabel = connected ? `Connected as ${connection.email_address}` : paused ? 'Paused' : connection.status === 'error' ? 'Sync needs attention' : 'Waiting for admin OAuth setup';
+  const statusTone = connected ? STATUS_TONES.success : connection.status === 'error' ? STATUS_TONES.destructive : paused ? STATUS_TONES.muted : STATUS_TONES.warning;
+  const aliases = (connection.settings?.send_as_aliases ?? []).filter(alias => alias?.email_address && alias.verified !== false);
+  const selectedSender = connection.settings?.selected_send_as_email ?? connection.email_address;
+  const selectedAlias = aliases.find(alias => alias.email_address?.toLowerCase() === selectedSender.toLowerCase());
+  const accountScope = connection.settings?.account_ingest_scope === 'accessible_accounts' ? 'Accounts I can access' : 'Only my accounts';
   return (
     <div className="rounded-xl border border-border bg-card/70 p-4">
       <div className="flex items-start justify-between gap-3">
@@ -298,19 +351,40 @@ function ConnectionCard({
           </div>
           <p className="mt-1 text-sm text-muted-foreground">{connection.email_address}</p>
         </div>
-        {connected ? (
-          <Button variant="outline" size="sm" onClick={() => onSync(connection.id)} className="gap-1.5">
-            <RefreshCw className="h-3.5 w-3.5" /> Sync
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          {connected ? (
+            <Button variant="outline" size="sm" onClick={() => onSync(connection.id)} className="gap-1.5">
+              <RefreshCw className="h-3.5 w-3.5" /> Sync
+            </Button>
+          ) : !paused ? (
+            <Button variant="outline" size="sm" onClick={() => onSetup(connection.provider, connection)} className="gap-1.5">
+              <SlidersHorizontal className="h-3.5 w-3.5" /> Setup guide
+            </Button>
+          ) : null}
+          {canToggle && (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={connectionActionPending}
+              onClick={() => onToggleActive(connection, !connected)}
+            >
+              {connected ? 'Deactivate' : 'Activate'}
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={connectionActionPending}
+            onClick={() => onDisconnect(connection)}
+            className="border-destructive/30 text-destructive hover:bg-destructive/10"
+          >
+            Disconnect mailbox
           </Button>
-        ) : (
-          <Button variant="outline" size="sm" onClick={() => onSetup(connection.provider, connection)} className="gap-1.5">
-            <SlidersHorizontal className="h-3.5 w-3.5" /> Setup guide
-          </Button>
-        )}
+        </div>
       </div>
       <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-        {connection.sync_stats && Object.keys(connection.sync_stats).length > 0 && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
+	        {connection.sync_stats && Object.keys(connection.sync_stats).length > 0 && (
+	          <div className="mb-2 flex flex-wrap gap-1.5">
             <span className="rounded-md border border-blue-500/20 bg-blue-500/8 px-2 py-0.5 text-blue-200">
               {connection.sync_stats.customer_synced ?? 0} customer synced
             </span>
@@ -320,13 +394,71 @@ function ConnectionCard({
             <span className="rounded-md border border-border bg-muted/20 px-2 py-0.5">
               {(connection.sync_stats.filtered_spam_trash ?? 0) + (connection.sync_stats.filtered_automated ?? 0)} noise skipped
             </span>
-          </div>
-        )}
-        {!connected && (
-          <p>
-            Live sync is waiting for provider setup. The guide shows the mailbox, customer filtering, and OAuth steps needed before CRMy can poll this inbox.
-          </p>
-        )}
+            <span className="rounded-md border border-border bg-muted/20 px-2 py-0.5">
+              {connection.sync_stats.out_of_scope_skipped ?? 0} outside scope
+            </span>
+	          </div>
+	        )}
+	        <div className="mb-2 flex flex-wrap gap-1.5">
+	          <span className={`rounded-md border px-2 py-0.5 ${connection.context_sync_enabled === false ? 'border-border bg-muted/20' : 'border-emerald-500/20 bg-emerald-500/8 text-emerald-200'}`}>
+	            Context {connection.context_sync_enabled === false ? 'off' : 'on'}
+	          </span>
+            <span className="rounded-md border border-blue-500/20 bg-blue-500/8 px-2 py-0.5 text-blue-200">
+              Ingest: {accountScope}
+            </span>
+	          <span className={`rounded-md border px-2 py-0.5 ${connection.send_enabled ? 'border-blue-500/20 bg-blue-500/8 text-blue-200' : 'border-border bg-muted/20'}`}>
+	            Sender {connection.send_enabled ? connection.send_status ?? 'enabled' : 'off'}
+	          </span>
+	          {connection.provider_draft_enabled && (
+	            <span className="rounded-md border border-purple-500/20 bg-purple-500/8 px-2 py-0.5 text-purple-200">Provider drafts</span>
+	          )}
+	          {connection.is_default_sender && (
+	            <span className="rounded-md border border-amber-500/20 bg-amber-500/8 px-2 py-0.5 text-amber-200">Default sender</span>
+	          )}
+	        </div>
+	        {connection.send_enabled && (
+	          <div className="mb-2 rounded-lg border border-border bg-background/40 p-3">
+	            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+	              <div className="min-w-0">
+	                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Send as</p>
+	                <p className="mt-0.5 truncate text-sm text-foreground">
+	                  {selectedAlias?.display_name ? `${selectedAlias.display_name} <${selectedSender}>` : selectedSender}
+	                </p>
+	                {connection.settings?.alias_sync_warning && (
+	                  <p className="mt-1 text-xs text-warning">{connection.settings.alias_sync_warning}</p>
+	                )}
+	              </div>
+	              <div className="flex shrink-0 items-center gap-2">
+	                {aliases.length > 1 && (
+	                  <select
+	                    value={selectedSender}
+	                    disabled={aliasActionPending}
+	                    onChange={event => onSelectSender(connection.id, event.target.value)}
+	                    className="h-8 rounded-md border border-border bg-background px-2 text-xs text-foreground"
+	                  >
+	                    {aliases.map(alias => (
+	                      <option key={alias.email_address} value={alias.email_address}>
+	                        {alias.display_name ? `${alias.display_name} <${alias.email_address}>` : alias.email_address}
+	                      </option>
+	                    ))}
+	                  </select>
+	                )}
+	                {connection.provider === 'google' && (
+	                  <Button variant="outline" size="sm" onClick={() => onRefreshAliases(connection.id)} disabled={!connected || aliasActionPending} className="h-8 gap-1.5">
+	                    <RefreshCw className="h-3.5 w-3.5" /> Aliases
+	                  </Button>
+	                )}
+	              </div>
+	            </div>
+	          </div>
+	        )}
+	        {paused ? (
+	          <p>Paused. CRMy is not reading this mailbox or using it as a sender.</p>
+	        ) : !connected && (
+	          <p>
+	            Live sync or sender permissions are waiting for provider setup. The guide shows the mailbox, customer filtering, and OAuth steps needed before CRMy can use this mailbox.
+	          </p>
+	        )}
         {connection.last_sync_at
           ? <p>{`Last sync ${formatDistanceToNow(new Date(connection.last_sync_at), { addSuffix: true })}`}</p>
           : <p>{connection.last_error || 'OAuth credentials are required before live mailbox sync can run.'}</p>}
@@ -500,11 +632,50 @@ function MessageDetail({
                   <span className="text-muted-foreground">From </span>
                   <span className="text-foreground">{message.from_name ? `${message.from_name} <${message.from_email}>` : message.from_email}</span>
                 </div>
-                <div>
-                  <span className="text-muted-foreground">To </span>
-                  <span className="text-foreground">{(message.to_emails ?? []).join(', ') || 'Unknown'}</span>
-                </div>
-              </div>
+	                <div>
+	                  <span className="text-muted-foreground">To </span>
+	                  <span className="text-foreground">{(message.to_emails ?? []).join(', ') || 'Unknown'}</span>
+	                </div>
+	                <div>
+	                  <span className="text-muted-foreground">Source mailbox </span>
+	                  <span className="text-foreground">{message.mailbox_email_address ?? 'Manual / outbound action'}</span>
+	                </div>
+	                <div>
+	                  <span className="text-muted-foreground">Context authorship </span>
+	                  <span className="text-foreground">
+	                    {message.direction === 'outbound'
+	                      ? 'CRMy-authored sent email, not customer-authored truth'
+	                      : 'Customer / external email context'}
+	                  </span>
+	                </div>
+	                {message.email_id && (
+	                  <div>
+	                    <span className="text-muted-foreground">Linked outbound action </span>
+	                    <span className="text-foreground">{String(message.email_id).slice(0, 8)}</span>
+	                  </div>
+	                )}
+	                {message.activity_id && (
+	                  <div>
+	                    <span className="text-muted-foreground">Account activity </span>
+	                    <span className="text-foreground">{String(message.activity_id).slice(0, 8)}</span>
+	                  </div>
+	                )}
+	                {message.raw_context_source_id && (
+	                  <div>
+	                    <span className="text-muted-foreground">Raw Context source </span>
+	                    <span className="text-foreground">{String(message.raw_context_source_id).slice(0, 8)}</span>
+	                  </div>
+	                )}
+	                {(message.reply_to_email_message_id || message.conversation_root_email_message_id) && (
+	                  <div>
+	                    <span className="text-muted-foreground">Reply chain </span>
+	                    <span className="text-foreground">
+	                      {message.reply_to_email_message_id ? `reply to ${message.reply_to_email_message_id.slice(0, 8)}` : 'conversation root'}
+	                      {message.conversation_root_email_message_id ? ` · root ${message.conversation_root_email_message_id.slice(0, 8)}` : ''}
+	                    </span>
+	                  </div>
+	                )}
+	              </div>
               <pre className="mt-4 max-h-[360px] overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/25 p-3 font-sans text-sm leading-relaxed text-foreground">
                 {message.body_text || message.snippet || '(empty body)'}
               </pre>
@@ -571,13 +742,19 @@ export default function EmailsPage() {
   const [q, setQ] = useState('');
   const [classification, setClassification] = useState('');
   const [outboundFilter, setOutboundFilter] = useState<OutboundFilter>('attention');
+  const [scopedFilter, setScopedFilter] = useState<ScopedEmailFilter>('all');
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [setupOpen, setSetupOpen] = useState(false);
   const [setupProvider, setSetupProvider] = useState<MailboxProvider | null>(null);
-  const [setupStep, setSetupStep] = useState(0);
-  const [setupEmail, setSetupEmail] = useState('');
-  const [setupDisplayName, setSetupDisplayName] = useState('');
+	  const [setupStep, setSetupStep] = useState(0);
+	  const [setupEmail, setSetupEmail] = useState('');
+	  const [setupDisplayName, setSetupDisplayName] = useState('');
+	  const [setupContextSync, setSetupContextSync] = useState(true);
+	  const [setupSendEnabled, setSetupSendEnabled] = useState(true);
+	  const [setupProviderDrafts, setSetupProviderDrafts] = useState(true);
+  const [setupAccountScope, setSetupAccountScope] = useState<AccountIngestScope>('owned_accounts');
 
   const scopedParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const tabParam = scopedParams.get('tab') as CustomerEmailTab | null;
@@ -594,8 +771,31 @@ export default function EmailsPage() {
       setTab(tabParam);
     }
   }, [scoped, tabParam]);
+
+  useEffect(() => {
+    const message = scopedParams.get('mailbox_error');
+    if (!message) return;
+    toast({
+      title: 'Mailbox connection needs attention',
+      description: message,
+      variant: 'destructive',
+    });
+    const next = new URLSearchParams(scopedParams);
+    next.delete('mailbox_error');
+    navigate(`${location.pathname}?${next.toString()}`, { replace: true });
+  }, [location.pathname, navigate, scopedParams]);
+
   const scopedSummaryQ = useEmailSubjectSummary(scopedSubjectType, scopedSubjectId ? [scopedSubjectId] : []);
-  const scopedSummary = ((scopedSummaryQ.data as any)?.data ?? [])[0] as { total?: number; inbound?: number; outbound?: number; drafts?: number; pending_approvals?: number; needs_review?: number } | undefined;
+  const scopedSummary = ((scopedSummaryQ.data as any)?.data ?? [])[0] as EmailSubjectSummary | undefined;
+  const scopedInboundReviewCount = scopedSummary?.inbound_needs_review ?? scopedSummary?.needs_review ?? 0;
+  const scopedOutboundDraftCount = scopedSummary?.outbound_drafts ?? scopedSummary?.drafts ?? 0;
+  const scopedOutboundPendingCount = scopedSummary?.outbound_pending_approvals ?? scopedSummary?.pending_approvals ?? 0;
+  const scopedOutboundFailedCount = scopedSummary?.outbound_failed ?? 0;
+  const scopedOutboundRejectedCount = scopedSummary?.outbound_rejected ?? 0;
+  const scopedOutboundActionCount = scopedOutboundDraftCount + scopedOutboundPendingCount + scopedOutboundFailedCount + scopedOutboundRejectedCount;
+  const scopedClearHref = scopedOutboundActionCount > 0 && ((scopedSummary?.inbound ?? 0) === 0 || scopedFilter === 'actions')
+    ? '/emails?tab=outbound'
+    : '/emails';
 
   const messageView = scoped ? 'all' : tab === 'review' ? 'review' : tab === 'customer' ? 'customer' : 'all';
   const messagesQ = useEmailMessages({
@@ -613,13 +813,32 @@ export default function EmailsPage() {
 
   const outboundQ = useEmails({ limit: 500 }) as any;
   const outboundEmails: any[] = outboundQ.data?.data ?? [];
+  const mailboxSummary = summary as {
+    customer?: number;
+    needs_review?: number;
+    processed?: number;
+    inbound_customer?: number;
+    inbound_needs_review?: number;
+    inbound_processed?: number;
+  };
   const connectionsQ = useMailboxConnections() as any;
   const connections: Connection[] = connectionsQ.data?.data ?? [];
-  const mailboxConnected = connections.some(connection => connection.status === 'connected');
+  const mailboxConnections = connections.filter(connection => connection.provider === 'google' || connection.provider === 'microsoft');
+  const oauthReady = connectionsQ.data?.oauth_ready as Record<'google' | 'microsoft', boolean> | undefined;
+  const currentUser = getUser();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'owner';
+  const mailboxConnected = mailboxConnections.some(connection => connection.status === 'connected');
   const startGoogle = useStartMailboxConnection('google');
   const startMicrosoft = useStartMailboxConnection('microsoft');
   const syncConnection = useSyncMailboxConnection();
+  const refreshAliases = useRefreshMailboxAliases();
+  const updateMailboxSender = useUpdateMailboxSender();
+  const updateMailboxStatus = useUpdateMailboxConnectionStatus();
+  const deleteMailboxConnection = useDeleteMailboxConnection();
   const setupCopy = setupProvider ? MAILBOX_PROVIDER_COPY[setupProvider] : null;
+  const selectedProviderReady = (setupProvider === 'google' || setupProvider === 'microsoft')
+    ? oauthReady?.[setupProvider] === true
+    : false;
   const setupSaving = startGoogle.isPending || startMicrosoft.isPending;
   const emailFilterConfigs: FilterConfig[] = !scoped && (tab === 'outbound' || tab === 'connections') ? [] : [
     {
@@ -648,17 +867,45 @@ export default function EmailsPage() {
     });
     if (outboundFilter === 'drafts') return searched.filter(email => email.status === 'draft');
     if (outboundFilter === 'approvals') return searched.filter(email => email.status === 'pending_approval');
-    if (outboundFilter === 'sent_failed') return searched.filter(email => ['sent', 'failed', 'rejected'].includes(email.status));
-    return searched.filter(email => ['draft', 'pending_approval', 'failed', 'rejected'].includes(email.status));
+    if (outboundFilter === 'sent_failed') return searched.filter(email => ['sent', 'failed', 'rejected', 'delivery_uncertain'].includes(email.status));
+    return searched.filter(email => ['draft', 'pending_approval', 'queued_for_delivery', 'sending', 'failed', 'rejected', 'delivery_uncertain'].includes(email.status));
   }, [outboundEmails, outboundFilter, q]);
-  const outboundAttentionCount = outboundEmails.filter(email => ['draft', 'pending_approval', 'failed', 'rejected'].includes(email.status)).length;
+  const outboundAttentionCount = outboundEmails.filter(email => ['draft', 'pending_approval', 'queued_for_delivery', 'sending', 'failed', 'rejected', 'delivery_uncertain'].includes(email.status)).length;
+  const mailboxCustomerCount = mailboxSummary.inbound_customer ?? mailboxSummary.customer ?? 0;
+  const mailboxReviewCount = mailboxSummary.inbound_needs_review ?? mailboxSummary.needs_review ?? 0;
+  const mailboxProcessedCount = mailboxSummary.inbound_processed ?? mailboxSummary.processed ?? 0;
+  const searchStats = scoped
+    ? [
+        `${scopedSummary?.total ?? messages.length} linked`,
+        `${scopedInboundReviewCount} mailbox ${scopedInboundReviewCount === 1 ? 'item' : 'items'} need review`,
+        `${scopedOutboundActionCount} outbound ${scopedOutboundActionCount === 1 ? 'action' : 'actions'}`,
+      ]
+    : tab === 'outbound'
+    ? [
+        `${outboundEmails.length} outbound`,
+        `${outboundAttentionCount} need attention`,
+        `${outboundEmails.filter(email => email.status === 'sent').length} sent`,
+      ]
+    : [
+        `${mailboxCustomerCount} customer`,
+        `${mailboxReviewCount} need review`,
+        `${mailboxProcessedCount} processed`,
+      ];
 
-  const visibleMessages = useMemo(() => {
-    const list = !scoped && tab === 'outbound'
+  const filteredMessages = useMemo(() => {
+    let list = !scoped && tab === 'outbound'
       ? messages.filter(message => message.direction === 'outbound')
       : messages;
-    return list.slice((page - 1) * pageSize, page * pageSize);
-  }, [messages, page, pageSize, scoped, tab]);
+    if (scoped && scopedFilter === 'context') {
+      list = list.filter(message => message.direction === 'inbound');
+    } else if (scoped && scopedFilter === 'actions') {
+      list = list.filter(message => message.direction === 'outbound');
+    }
+    return list;
+  }, [messages, scoped, scopedFilter, tab]);
+  const visibleMessages = useMemo(() => {
+    return filteredMessages.slice((page - 1) * pageSize, page * pageSize);
+  }, [filteredMessages, page, pageSize]);
 
   const openMessage = (message: EmailMessage) => {
     if (message.direction === 'outbound' && message.email_id) {
@@ -668,22 +915,61 @@ export default function EmailsPage() {
     setSelectedMessageId(message.id);
   };
 
-  const openSetup = (provider: MailboxProvider, connection?: Connection) => {
-    setSetupProvider(provider);
-    setSetupStep(0);
-    setSetupEmail(connection?.email_address ?? '');
-    setSetupDisplayName(connection?.display_name ?? '');
-  };
+  const openSetup = (provider?: MailboxProvider, connection?: Connection) => {
+    setSetupOpen(true);
+    setSetupProvider(provider ?? null);
+	    setSetupStep(0);
+	    setSetupEmail(connection?.email_address ?? '');
+	    setSetupDisplayName(connection?.display_name ?? '');
+	    setSetupContextSync(connection?.context_sync_enabled ?? true);
+	    setSetupSendEnabled(connection?.send_enabled ?? true);
+	    setSetupProviderDrafts(connection?.provider_draft_enabled ?? true);
+    setSetupAccountScope(connection?.settings?.account_ingest_scope ?? 'owned_accounts');
+	  };
 
   const closeSetup = () => {
+    setSetupOpen(false);
     setSetupProvider(null);
     setSetupStep(0);
-    setSetupEmail('');
-    setSetupDisplayName('');
+	    setSetupEmail('');
+	    setSetupDisplayName('');
+	    setSetupContextSync(true);
+	    setSetupSendEnabled(true);
+	    setSetupProviderDrafts(true);
+    setSetupAccountScope('owned_accounts');
+	  };
+
+  const toggleMailboxActive = (connection: Connection, active: boolean) => {
+    updateMailboxStatus.mutate({ id: connection.id, active }, {
+      onSuccess: () => toast({ title: active ? 'Mailbox activated' : 'Mailbox paused' }),
+      onError: (err) => toast({
+        title: active ? 'Could not activate mailbox' : 'Could not pause mailbox',
+        description: err instanceof Error ? err.message : 'Try again or reconnect the mailbox.',
+        variant: 'destructive',
+      }),
+    });
+  };
+
+  const disconnectMailbox = (connection: Connection) => {
+    const email = connection.email_address || MAILBOX_PROVIDER_COPY[connection.provider]?.label || 'this mailbox';
+    const ok = window.confirm(`Disconnect ${email}? This removes the mailbox connection and OAuth tokens. Reconnecting requires provider consent again.`);
+    if (!ok) return;
+    deleteMailboxConnection.mutate(connection.id, {
+      onSuccess: () => toast({ title: 'Mailbox disconnected' }),
+      onError: (err) => toast({
+        title: 'Could not disconnect mailbox',
+        description: err instanceof Error ? err.message : 'Try again from Mailboxes & Senders.',
+        variant: 'destructive',
+      }),
+    });
   };
 
   const nextSetupStep = () => {
-    if (setupStep === 0 && setupProvider !== 'webhook' && !setupEmail.trim().includes('@')) {
+    if (setupStep === 0 && !setupProvider) {
+      toast({ title: 'Choose a mailbox provider', description: 'Select Gmail or Outlook to continue.', variant: 'destructive' });
+      return;
+    }
+    if (setupStep === 1 && !setupEmail.trim().includes('@')) {
       toast({ title: 'Mailbox email required', description: 'Enter the Gmail or Outlook mailbox CRMy should watch.', variant: 'destructive' });
       return;
     }
@@ -691,19 +977,23 @@ export default function EmailsPage() {
   };
 
   const saveMailboxSetup = async () => {
-    if (!setupProvider || setupProvider === 'webhook') {
-      navigate('/app/settings/messaging');
-      closeSetup();
+    if (!setupProvider) {
+      toast({ title: 'Choose a mailbox provider', description: 'Select Gmail or Outlook before connecting.', variant: 'destructive' });
       return;
     }
     if (!setupEmail.trim().includes('@')) {
       toast({ title: 'Mailbox email required', description: 'Enter a valid mailbox email before saving setup.', variant: 'destructive' });
       return;
     }
-    const payload = {
-      email_address: setupEmail.trim().toLowerCase(),
-      display_name: setupDisplayName.trim(),
-    };
+	    const payload = {
+	      email_address: setupEmail.trim().toLowerCase(),
+	      display_name: setupDisplayName.trim(),
+	      context_sync_enabled: setupContextSync,
+	      send_enabled: setupSendEnabled,
+	      provider_draft_enabled: setupSendEnabled && setupProviderDrafts,
+	      is_default_sender: setupSendEnabled,
+        account_ingest_scope: setupAccountScope,
+	    };
     try {
       const result = setupProvider === 'google'
         ? await startGoogle.mutateAsync(payload) as any
@@ -713,10 +1003,11 @@ export default function EmailsPage() {
         return;
       }
       toast({
-        title: `${MAILBOX_PROVIDER_COPY[setupProvider].label} setup saved`,
-        description: 'CRMy saved the mailbox and setup steps. Complete OAuth credentials before live sync runs.',
+        title: 'Admin setup requested',
+        description: `${MAILBOX_PROVIDER_COPY[setupProvider].label} is waiting for an admin to finish OAuth setup before live sync or sender permissions can run.`,
       });
       closeSetup();
+      if (isAdmin) navigate('/settings/connections');
     } catch (err) {
       toast({
         title: 'Could not save mailbox setup',
@@ -743,11 +1034,11 @@ export default function EmailsPage() {
                 <div className="flex items-center gap-2">
                   <Mail className="h-4 w-4 text-blue-300" />
                   <p className="text-sm font-semibold text-foreground">
-                    Email context{scopedLabel ? ` for ${scopedLabel}` : ''}
+                    Email context and actions{scopedLabel ? ` for ${scopedLabel}` : ''}
                   </p>
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Linked inbound, outbound, draft, and approval-gated email for this {scopedSubjectType}.
+                  Mailbox context and outbound draft actions linked to this {scopedSubjectType}.
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
                   <span>{scopedSummary?.total ?? messages.length} linked</span>
@@ -755,14 +1046,39 @@ export default function EmailsPage() {
                   <span>{scopedSummary?.inbound ?? messages.filter(message => message.direction === 'inbound').length} in</span>
                   <span>·</span>
                   <span>{scopedSummary?.outbound ?? messages.filter(message => message.direction === 'outbound').length} out</span>
-                  {(scopedSummary?.drafts ?? 0) > 0 && <span>· {scopedSummary?.drafts} drafts</span>}
-                  {(scopedSummary?.pending_approvals ?? 0) > 0 && <span>· {scopedSummary?.pending_approvals} approvals</span>}
-                  {(scopedSummary?.needs_review ?? 0) > 0 && <span>· {scopedSummary?.needs_review} need review</span>}
+                  {scopedOutboundDraftCount > 0 && <span>· {scopedOutboundDraftCount} draft{scopedOutboundDraftCount === 1 ? '' : 's'}</span>}
+                  {scopedOutboundPendingCount > 0 && <span>· {scopedOutboundPendingCount} approval{scopedOutboundPendingCount === 1 ? '' : 's'} waiting</span>}
+                  {scopedOutboundRejectedCount > 0 && <span>· {scopedOutboundRejectedCount} rejected action{scopedOutboundRejectedCount === 1 ? '' : 's'}</span>}
+                  {scopedOutboundFailedCount > 0 && <span>· {scopedOutboundFailedCount} failed send{scopedOutboundFailedCount === 1 ? '' : 's'}</span>}
+                  {scopedInboundReviewCount > 0 && <span>· {scopedInboundReviewCount} mailbox item{scopedInboundReviewCount === 1 ? '' : 's'} need review</span>}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {[
+                    { key: 'all' as const, label: 'All linked', count: scopedSummary?.total ?? messages.length },
+                    { key: 'context' as const, label: 'Mailbox context', count: scopedSummary?.inbound ?? 0 },
+                    { key: 'actions' as const, label: 'Outbound actions', count: scopedSummary?.outbound ?? 0 },
+                  ].map(item => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => {
+                        setScopedFilter(item.key);
+                        setPage(1);
+                      }}
+                      className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
+                        scopedFilter === item.key
+                          ? 'border-blue-500/40 bg-blue-500/15 text-blue-100'
+                          : 'border-border bg-background/50 text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {item.label} · {item.count}
+                    </button>
+                  ))}
                 </div>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
-                <Button variant="outline" onClick={() => navigate('/emails?tab=outbound')}>View all drafts</Button>
-                <Button variant="outline" onClick={() => navigate('/emails')}>Clear scope</Button>
+                <Button variant="outline" onClick={() => navigate('/emails?tab=outbound')}>View outbound actions</Button>
+                <Button variant="outline" onClick={() => navigate(scopedClearHref)}>Clear scope</Button>
               </div>
             </div>
           </div>
@@ -789,7 +1105,13 @@ export default function EmailsPage() {
             {!mailboxConnected && (
               <div className="flex shrink-0 gap-2">
                 <Button variant="ghost" onClick={() => navigate('/context?tab=sources')}>View Sources</Button>
-                <Button variant="outline" onClick={() => setTab('connections')}>Connect mailbox</Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setTab('connections')}
+                  className="border-primary/30 bg-primary/10 text-primary hover:border-primary/40 hover:bg-primary/15 hover:text-primary"
+                >
+                  Connect mailbox
+                </Button>
               </div>
             )}
             {mailboxConnected && (
@@ -820,6 +1142,11 @@ export default function EmailsPage() {
               >
                 <Icon className="h-3.5 w-3.5" />
                 {item.label}
+                {item.key === 'review' && mailboxReviewCount > 0 && (
+                  <span className="ml-0.5 rounded-full border border-amber-500/25 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-amber-200">
+                    {mailboxReviewCount}
+                  </span>
+                )}
                 {item.key === 'outbound' && outboundAttentionCount > 0 && (
                   <span className="ml-0.5 rounded-full border border-blue-500/25 bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-blue-200">
                     {outboundAttentionCount}
@@ -847,11 +1174,12 @@ export default function EmailsPage() {
           entityType="emails"
           searchSuffix={(
             <div className="hidden items-center gap-2 text-xs text-muted-foreground lg:flex">
-              <span>{scoped ? (scopedSummary?.total ?? messages.length) : (summary.customer ?? 0)} customer</span>
-              <span>·</span>
-              <span>{scoped ? (scopedSummary?.needs_review ?? 0) : (summary.needs_review ?? 0)} need review</span>
-              <span>·</span>
-              <span>{scoped ? messages.filter(message => message.processing_status === 'processed').length : (summary.processed ?? 0)} processed</span>
+              {searchStats.map((stat, index) => (
+                <Fragment key={stat}>
+                  {index > 0 && <span>·</span>}
+                  <span>{stat}</span>
+                </Fragment>
+              ))}
             </div>
           )}
         />
@@ -860,55 +1188,51 @@ export default function EmailsPage() {
       <div className="flex-1 overflow-y-auto px-4 py-4 md:px-6">
         {!scoped && tab === 'connections' ? (
           <div className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-3">
-              <button
-                type="button"
-                onClick={() => openSetup('google')}
-                className="rounded-xl border border-border bg-card/70 p-4 text-left hover:bg-muted/35"
-              >
-                <Mail className="h-5 w-5 text-blue-300" />
-                <h3 className="mt-3 text-sm font-semibold text-foreground">Set up Gmail</h3>
-                <p className="mt-1 text-sm text-muted-foreground">Guided setup for read-only customer email sync from Google Workspace.</p>
-                <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-blue-300">
-                  Open setup guide <ArrowRight className="h-3 w-3" />
+            <button
+              type="button"
+              onClick={() => openSetup()}
+              className="flex w-full flex-col gap-4 rounded-xl border border-blue-500/25 bg-blue-500/8 p-4 text-left hover:bg-blue-500/12 md:flex-row md:items-center md:justify-between"
+            >
+              <div className="flex min-w-0 items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-blue-500/25 bg-blue-500/12">
+                  <MailCheck className="h-5 w-5 text-blue-200" />
                 </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => openSetup('microsoft')}
-                className="rounded-xl border border-border bg-card/70 p-4 text-left hover:bg-muted/35"
-              >
-                <Mail className="h-5 w-5 text-blue-300" />
-                <h3 className="mt-3 text-sm font-semibold text-foreground">Set up Outlook</h3>
-                <p className="mt-1 text-sm text-muted-foreground">Guided setup for read-only customer email sync from Microsoft 365.</p>
-                <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-blue-300">
-                  Open setup guide <ArrowRight className="h-3 w-3" />
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => openSetup('webhook')}
-                className="rounded-xl border border-border bg-card/70 p-4 text-left hover:bg-muted/35"
-              >
-                <SlidersHorizontal className="h-5 w-5 text-blue-300" />
-                <h3 className="mt-3 text-sm font-semibold text-foreground">Set up inbound webhook</h3>
-                <p className="mt-1 text-sm text-muted-foreground">Guided path for SendGrid, Postmark, Mailgun, or another inbound provider.</p>
-                <span className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-blue-300">
-                  Open setup guide <ArrowRight className="h-3 w-3" />
-                </span>
-              </button>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              {connections.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground md:col-span-2">
-                  No mailbox connections yet. Set up Gmail, Outlook, or an inbound webhook to start capturing customer email.
+                <div className="min-w-0">
+                  <h3 className="text-sm font-semibold text-foreground">
+                    {mailboxConnections.length > 0 ? 'Connect another mailbox' : 'Connect your work mailbox'}
+                  </h3>
+                  <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                    Choose Gmail or Outlook, then decide whether CRMy should use the mailbox for customer context, approved sends, and provider drafts.
+                  </p>
                 </div>
-              ) : connections.map(connection => (
+              </div>
+              <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-200">
+                Start setup <ArrowRight className="h-3.5 w-3.5" />
+              </span>
+            </button>
+            <div className="grid gap-3 md:grid-cols-2">
+              {mailboxConnections.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground md:col-span-2">
+                  No personal mailbox connected yet. Connect Gmail or Outlook to capture customer email context and use your mailbox as a governed sender.
+                </div>
+              ) : mailboxConnections.map(connection => (
                 <ConnectionCard
                   key={connection.id}
                   connection={connection}
                   onSync={(id) => syncConnection.mutate(id, { onSuccess: () => toast({ title: 'Mailbox sync queued' }) })}
                   onSetup={openSetup}
+                  onToggleActive={toggleMailboxActive}
+                  onDisconnect={disconnectMailbox}
+                  onRefreshAliases={(id) => refreshAliases.mutate(id, {
+                    onSuccess: () => toast({ title: 'Sender aliases refreshed', description: 'Verified Gmail send-as addresses are available for this mailbox.' }),
+                    onError: (err) => toast({ title: 'Could not refresh aliases', description: err instanceof Error ? err.message : 'Try again after reauthorizing Gmail.', variant: 'destructive' }),
+                  })}
+                  onSelectSender={(id, selected_send_as_email) => updateMailboxSender.mutate({ id, selected_send_as_email }, {
+                    onSuccess: () => toast({ title: 'Sender updated', description: `Outbound drafts will use ${selected_send_as_email}.` }),
+                    onError: (err) => toast({ title: 'Could not update sender', description: err instanceof Error ? err.message : 'Choose a verified alias.', variant: 'destructive' }),
+                  })}
+                  aliasActionPending={refreshAliases.isPending || updateMailboxSender.isPending}
+                  connectionActionPending={updateMailboxStatus.isPending || deleteMailboxConnection.isPending}
                 />
               ))}
             </div>
@@ -970,7 +1294,9 @@ export default function EmailsPage() {
                         <Badge variant="outline" className={STATUS_TONES.muted}>Provider draft: {email.provider_draft_status}</Badge>
                       )}
                     </div>
-                    <p className="mt-1 truncate text-xs text-muted-foreground">To {email.to_email}</p>
+	                    <p className="mt-1 truncate text-xs text-muted-foreground">
+	                      To {email.to_email} · From {email.from_email ?? (email.sender_type === 'unknown' ? 'not configured' : 'fallback provider')}
+	                    </p>
                     {email.hitl_request_id && (
                       <p className="mt-1 truncate text-xs text-blue-300">Approval linked · {String(email.hitl_request_id).slice(0, 8)}</p>
                     )}
@@ -991,177 +1317,250 @@ export default function EmailsPage() {
             </p>
             <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
               {scoped
-                ? 'Inbound, outbound, draft, and approval-gated email linked to this record will appear here.'
+                ? 'Mailbox context and outbound actions linked to this record will appear here.'
                 : tab === 'review'
                 ? 'Ambiguous, unmatched, or failed customer emails will appear here.'
-                : 'Connect a mailbox or inbound webhook so customer conversations can become Raw Context, Signals, and Memory.'}
+                : 'Connect a mailbox so customer conversations can become Raw Context, Signals, and Memory.'}
             </p>
           </div>
         ) : (
           <CompactList className="space-y-2">
             {visibleMessages.map(message => <MessageRow key={message.id} message={message} onOpen={openMessage} />)}
-            <PaginationBar page={page} pageSize={pageSize} total={messages.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
+            <PaginationBar page={page} pageSize={pageSize} total={filteredMessages.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
           </CompactList>
         )}
       </div>
 
       <MessageDetail id={selectedMessageId} onClose={() => setSelectedMessageId(null)} />
 
-      <Dialog open={Boolean(setupProvider)} onOpenChange={(open) => { if (!open) closeSetup(); }}>
-        {setupProvider && setupCopy && (
-          <DialogContent className="sm:max-w-2xl">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <MailCheck className="h-5 w-5 text-blue-500" /> {setupCopy.title}
-              </DialogTitle>
-            </DialogHeader>
+      <Dialog open={setupOpen} onOpenChange={(open) => { if (!open) closeSetup(); }}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MailCheck className="h-5 w-5 text-blue-500" /> Connect mailbox
+            </DialogTitle>
+          </DialogHeader>
 
-            <div className="space-y-4">
-              <p className="text-sm text-muted-foreground">{setupCopy.description}</p>
-              <div className="grid gap-2 md:grid-cols-4">
-                {['Mailbox', 'Customer filter', 'Provider setup', 'Review'].map((label, index) => (
-                  <MailboxSetupStep key={label} active={setupStep === index} index={index} label={label} />
-                ))}
-              </div>
-
-              {setupStep === 0 && (
-                <section className="rounded-xl border border-border bg-card/70 p-4">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    {setupProvider === 'webhook' ? 'Choose inbound provider setup' : 'Choose the mailbox CRMy should watch'}
-                  </h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {setupProvider === 'webhook'
-                      ? 'Inbound webhooks are best for provider-level parse routes. They post received customer email to CRMy without giving CRMy mailbox polling access.'
-                      : 'CRMy uses this mailbox as an observation source. It reads customer-facing email for context extraction, but outbound sending still goes through governed Drafts & Approvals.'}
-                  </p>
-                  {setupProvider !== 'webhook' && (
-                    <div className="mt-4 grid gap-3 md:grid-cols-2">
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Mailbox email</label>
-                        <Input
-                          value={setupEmail}
-                          onChange={event => setSetupEmail(event.target.value)}
-                          placeholder="seller@company.com"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Display name</label>
-                        <Input
-                          value={setupDisplayName}
-                          onChange={event => setSetupDisplayName(event.target.value)}
-                          placeholder="Optional"
-                        />
-                      </div>
-                    </div>
-                  )}
-                </section>
-              )}
-
-              {setupStep === 1 && (
-                <section className="rounded-xl border border-border bg-card/70 p-4">
-                  <h3 className="text-sm font-semibold text-foreground">Keep the inbox focused on customer communication</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    CRMy classifies email before extraction so internal noise does not become Raw Context by accident.
-                  </p>
-                  <div className="mt-4 grid gap-2 md:grid-cols-3">
-                    <div className="rounded-lg border border-blue-500/20 bg-blue-500/8 p-3">
-                      <p className="text-sm font-semibold text-blue-200">Shown by default</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Customer and mixed customer-facing threads.</p>
-                    </div>
-                    <div className="rounded-lg border border-border bg-background/40 p-3">
-                      <p className="text-sm font-semibold text-foreground">Skipped by default</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Internal-only and automated messages.</p>
-                    </div>
-                    <div className="rounded-lg border border-purple-500/20 bg-purple-500/8 p-3">
-                      <p className="text-sm font-semibold text-purple-200">Reviewable</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Ambiguous messages go to Needs Review instead of being over-linked.</p>
-                    </div>
-                  </div>
-                </section>
-              )}
-
-              {setupStep === 2 && (
-                <section className="rounded-xl border border-border bg-card/70 p-4">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    {setupProvider === 'webhook' ? 'Configure the inbound parse endpoint' : `Prepare ${setupCopy.credentialLabel}`}
-                  </h3>
-                  {setupProvider === 'webhook' ? (
-                    <div className="mt-3 space-y-3 text-sm text-muted-foreground">
-                      <p>Use this path when your email provider can post inbound messages to CRMy. Provider setup lives with advanced messaging settings.</p>
-                      <div className="rounded-lg border border-border bg-background/40 p-3">
-                        <p className="font-medium text-foreground">Next step</p>
-                        <p className="mt-1">Open advanced inbound setup, choose your provider, and copy the webhook endpoint into that provider.</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-3 space-y-3 text-sm text-muted-foreground">
-                      <p>
-                        Live mailbox sync requires OAuth credentials configured by an admin. Until then, CRMy saves this as a setup request and shows exactly what remains.
-                      </p>
-                      <div className="grid gap-2 md:grid-cols-2">
-                        <div className="rounded-lg border border-border bg-background/40 p-3">
-                          <p className="font-medium text-foreground">Redirect path</p>
-                          <code className="mt-1 block break-all rounded bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
-                            {setupCopy.callbackPath}
-                          </code>
-                        </div>
-                        <div className="rounded-lg border border-border bg-background/40 p-3">
-                          <p className="font-medium text-foreground">Access model</p>
-                          <p className="mt-1 text-xs">Read customer mail, classify threads, and process customer-facing messages as Raw Context. Writeback and outbound sends remain governed.</p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </section>
-              )}
-
-              {setupStep === 3 && (
-                <section className="rounded-xl border border-border bg-card/70 p-4">
-                  <h3 className="text-sm font-semibold text-foreground">Review setup</h3>
-                  <div className="mt-3 grid gap-2 text-sm">
-                    <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
-                      <span className="text-muted-foreground">Source</span>
-                      <span className="font-medium text-foreground">{setupCopy.label}</span>
-                    </div>
-                    {setupProvider !== 'webhook' && (
-                      <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
-                        <span className="text-muted-foreground">Mailbox</span>
-                        <span className="font-medium text-foreground">{setupEmail.trim() || 'Required'}</span>
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
-                      <span className="text-muted-foreground">Default processing</span>
-                      <span className="font-medium text-foreground">Customer and mixed threads only</span>
-                    </div>
-                    <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
-                      <span className="text-muted-foreground">Outbound email</span>
-                      <span className="font-medium text-foreground">Governed separately</span>
-                    </div>
-                  </div>
-                </section>
-              )}
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Connect a Gmail or Outlook mailbox so CRMy can capture customer email context and, when enabled, send approved drafts from the right identity.
+            </p>
+            <div className="grid gap-2 md:grid-cols-4">
+              {['Choose provider', 'Choose mailbox', 'What CRMy uses', 'Connect'].map((label, index) => (
+                <MailboxSetupStep key={label} active={setupStep === index} index={index} label={label} />
+              ))}
             </div>
 
-            <DialogFooter className="gap-2">
-              <Button variant="outline" onClick={closeSetup}>Cancel</Button>
-              {setupStep > 0 && (
-                <Button variant="outline" onClick={() => setSetupStep(step => Math.max(step - 1, 0))}>
-                  Back
-                </Button>
-              )}
-              {setupStep < 3 ? (
-                <Button onClick={nextSetupStep} className="gap-1.5 bg-blue-600 text-white hover:bg-blue-500">
-                  Continue <ArrowRight className="h-3.5 w-3.5" />
-                </Button>
-              ) : (
-                <Button onClick={saveMailboxSetup} disabled={setupSaving} className="gap-1.5 bg-blue-600 text-white hover:bg-blue-500">
-                  {setupSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                  {setupProvider === 'webhook' ? 'Open inbound setup' : 'Save setup request'}
-                </Button>
-              )}
-            </DialogFooter>
-          </DialogContent>
-        )}
+            {setupStep === 0 && (
+              <section className="rounded-xl border border-border bg-card/70 p-4">
+                <h3 className="text-sm font-semibold text-foreground">Choose your mailbox provider</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Pick the work inbox CRMy should connect. Provider setup details stay in System Connections for admins.
+                </p>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {(['google', 'microsoft'] as MailboxProvider[]).map(providerKey => {
+                    const provider = MAILBOX_PROVIDER_COPY[providerKey];
+                    const selected = setupProvider === providerKey;
+                    const ready = oauthReady?.[providerKey];
+                    return (
+                      <button
+                        key={providerKey}
+                        type="button"
+                        onClick={() => setSetupProvider(providerKey)}
+                        className={`rounded-xl border p-4 text-left transition-colors ${
+                          selected ? 'border-blue-500/45 bg-blue-500/12' : 'border-border bg-background/40 hover:bg-muted/35'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <Mail className="h-4 w-4 text-blue-300" />
+                            <span className="text-sm font-semibold text-foreground">{provider.label}</span>
+                          </div>
+                          <Badge variant="outline" className={ready === false ? STATUS_TONES.warning : ready === true ? STATUS_TONES.success : STATUS_TONES.muted}>
+                            {ready === false ? 'Admin setup needed' : ready === true ? 'Ready' : 'Checking setup'}
+                          </Badge>
+                        </div>
+                        <p className="mt-2 text-xs text-muted-foreground">{provider.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            {setupStep === 1 && (
+              <section className="rounded-xl border border-border bg-card/70 p-4">
+                <h3 className="text-sm font-semibold text-foreground">Choose the mailbox CRMy should watch</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  CRMy can use this mailbox for customer context, and optionally as the visible sender for approved outbound drafts.
+                </p>
+                <div className="mt-4 space-y-3">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Mailbox email</label>
+                      <Input
+                        value={setupEmail}
+                        onChange={event => setSetupEmail(event.target.value)}
+                        placeholder="seller@company.com"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Display name</label>
+                      <Input
+                        value={setupDisplayName}
+                        onChange={event => setSetupDisplayName(event.target.value)}
+                        placeholder="Optional"
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-start gap-3 rounded-lg border border-border bg-background/40 p-3">
+                    <input type="checkbox" checked={setupContextSync} onChange={event => setSetupContextSync(event.target.checked)} className="mt-1" />
+                    <span>
+                      <span className="block text-sm font-semibold text-foreground">Use email for customer context</span>
+                      <span className="block text-xs text-muted-foreground">Read customer-facing threads, link them to records, and process useful messages into Raw Context, Signals, and Memory.</span>
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-3 rounded-lg border border-border bg-background/40 p-3">
+                    <input type="checkbox" checked={setupSendEnabled} onChange={event => setSetupSendEnabled(event.target.checked)} className="mt-1" />
+                    <span>
+                      <span className="block text-sm font-semibold text-foreground">Send approved drafts from this mailbox</span>
+                      <span className="block text-xs text-muted-foreground">Outbound Actions will show this mailbox as From. Customer replies can sync back through the same mailbox as context.</span>
+                    </span>
+                  </label>
+                  <label className={`flex items-start gap-3 rounded-lg border border-border bg-background/40 p-3 ${!setupSendEnabled ? 'opacity-60' : ''}`}>
+                    <input type="checkbox" checked={setupProviderDrafts && setupSendEnabled} disabled={!setupSendEnabled} onChange={event => setSetupProviderDrafts(event.target.checked)} className="mt-1" />
+                    <span>
+                      <span className="block text-sm font-semibold text-foreground">Create provider drafts when available</span>
+                      <span className="block text-xs text-muted-foreground">CRMy drafts stay governed; this also allows pushing a reviewed draft into the mailbox draft folder.</span>
+                    </span>
+                  </label>
+                </div>
+              </section>
+            )}
+
+            {setupStep === 2 && (
+              <section className="rounded-xl border border-border bg-card/70 p-4">
+                <h3 className="text-sm font-semibold text-foreground">CRMy filters for customer conversations</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  CRMy reads customer-facing threads so agents can brief, draft, and follow up with context.
+                </p>
+                <div className="mt-4 grid gap-2 md:grid-cols-3">
+                  <div className="rounded-lg border border-blue-500/20 bg-blue-500/8 p-3">
+                    <p className="text-sm font-semibold text-blue-200">Customer context</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Customer and mixed customer-facing threads.</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-background/40 p-3">
+                    <p className="text-sm font-semibold text-foreground">Approved sending</p>
+                    <p className="mt-1 text-xs text-muted-foreground">If enabled, approved drafts can use this mailbox as the From address.</p>
+                  </div>
+                  <div className="rounded-lg border border-purple-500/20 bg-purple-500/8 p-3">
+                    <p className="text-sm font-semibold text-purple-200">Replies return</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Replies can sync back through this mailbox and become customer context.</p>
+                  </div>
+                </div>
+                <div className="mt-4 rounded-lg border border-border bg-background/40 p-3">
+                  <p className="text-sm font-semibold text-foreground">Which accounts should this mailbox feed?</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    CRMy matches customer emails by contact email and account domains, including additional domains on the account.
+                  </p>
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    {([
+                      ['owned_accounts', 'Only my accounts', 'Use this for a focused personal inbox.'],
+                      ['accessible_accounts', 'All accounts I can access', 'Use this when your inbox covers a team or shared book.'],
+                    ] as Array<[AccountIngestScope, string, string]>).map(([value, label, description]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setSetupAccountScope(value)}
+                        className={`rounded-lg border p-3 text-left transition-colors ${
+                          setupAccountScope === value ? 'border-blue-500/45 bg-blue-500/12' : 'border-border bg-card/40 hover:bg-muted/35'
+                        }`}
+                      >
+                        <span className="block text-sm font-semibold text-foreground">{label}</span>
+                        <span className="mt-1 block text-xs text-muted-foreground">{description}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {setupStep === 3 && setupCopy && (
+              <section className="rounded-xl border border-border bg-card/70 p-4">
+                <h3 className="text-sm font-semibold text-foreground">
+                  {selectedProviderReady
+                    ? `Connect ${setupCopy.label}`
+                    : isAdmin
+                      ? 'OAuth setup required'
+                      : `Ask an admin to enable ${setupCopy.label} connections`}
+                </h3>
+                <div className="mt-3 grid gap-2 text-sm">
+                  <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
+                    <span className="text-muted-foreground">Provider</span>
+                    <span className="font-medium text-foreground">{setupCopy.label}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
+                    <span className="text-muted-foreground">Mailbox</span>
+                    <span className="font-medium text-foreground">{setupEmail.trim() || 'Required'}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
+                    <span className="text-muted-foreground">Context</span>
+                    <span className="font-medium text-foreground">{setupContextSync ? 'Customer conversations on' : 'Off'}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
+                    <span className="text-muted-foreground">Ingest scope</span>
+                    <span className="font-medium text-foreground">{setupAccountScope === 'accessible_accounts' ? 'Accounts I can access' : 'Only my accounts'}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
+                    <span className="text-muted-foreground">Outbound email</span>
+                    <span className="font-medium text-foreground">{setupSendEnabled ? 'Use mailbox as sender' : 'Fallback provider only'}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border bg-background/40 px-3 py-2">
+                    <span className="text-muted-foreground">Provider drafts</span>
+                    <span className="font-medium text-foreground">{setupSendEnabled && setupProviderDrafts ? 'Enabled when supported' : 'Off'}</span>
+                  </div>
+                </div>
+                <div className={`mt-4 rounded-lg border p-3 text-sm ${
+                  selectedProviderReady ? 'border-blue-500/20 bg-blue-500/8 text-muted-foreground' : 'border-amber-500/20 bg-amber-500/8 text-muted-foreground'
+                }`}>
+                  {selectedProviderReady
+                    ? `CRMy will send you to ${setupCopy.label} consent. When you return, mailbox context and sender options will appear here.`
+                    : isAdmin
+                      ? 'Prepare System Connections -> OAuth, then users can connect their own mailbox here.'
+                      : 'Your workspace admin needs to enable this provider before you can connect your mailbox.'}
+                  {!selectedProviderReady && isAdmin && (
+                    <Button variant="outline" size="sm" onClick={() => navigate('/settings/connections')} className="mt-3">
+                      Open System Connections
+                    </Button>
+                  )}
+                </div>
+              </section>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={closeSetup}>Cancel</Button>
+            {setupStep > 0 && (
+              <Button variant="outline" onClick={() => setSetupStep(step => Math.max(step - 1, 0))}>
+                Back
+              </Button>
+            )}
+            {setupStep < 3 ? (
+              <Button onClick={nextSetupStep} className="gap-1.5 bg-blue-600 text-white hover:bg-blue-500">
+                Continue <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            ) : (
+              <Button onClick={saveMailboxSetup} disabled={setupSaving || !setupProvider} className="gap-1.5 bg-blue-600 text-white hover:bg-blue-500">
+                {setupSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {selectedProviderReady
+                  ? `Connect ${setupCopy?.label ?? 'mailbox'}`
+                  : isAdmin
+                    ? 'Save and open OAuth setup'
+                    : 'Request admin setup'}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
 
     </div>

@@ -62,7 +62,7 @@ export function accountsCommand(): Command {
     });
 
   cmd.command('delete <account>')
-    .description('Permanently delete an account (admin/owner only)')
+    .description('Archive an account while preserving evidence and lineage anchors (admin/owner only)')
     .action(async (account) => {
       const { default: inquirer } = await import('inquirer');
       const client = await getClient();

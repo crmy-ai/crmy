@@ -202,7 +202,7 @@ export default function Contacts() {
                         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all">
                           {(emailSummaryByContact.get(c.id as string)?.total ?? 0) > 0 && (
                             <button onClick={(e) => { e.stopPropagation(); openEmailContext(c); }}
-                              className="p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors" title="View email context">
+                              className="p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors" title="View linked email">
                               <Mail className="w-3.5 h-3.5 text-blue-400" />
                             </button>
                           )}
@@ -237,7 +237,7 @@ export default function Contacts() {
                 <div className="absolute top-3 right-3 flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-all">
                   {(emailSummaryByContact.get(c.id as string)?.total ?? 0) > 0 && (
                     <button onClick={(e) => { e.stopPropagation(); openEmailContext(c); }}
-                      className="p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors" title="View email context">
+                      className="p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors" title="View linked email">
                       <Mail className="w-3.5 h-3.5 text-blue-400" />
                     </button>
                   )}

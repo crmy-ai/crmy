@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { useAdminActors, useApproveActor, useCreateActor, useCreateUser, useInviteUser, useRejectActor, useResetUserPassword, useUpdateActor, useUpdateUser, useApiKeys, useCreateApiKey, useRevokeApiKey, useAgentSpecializations, useUpsertSpecialization, useDeleteSpecialization, useSetActorAvailability, type AdminActorRow } from '@/api/hooks';
+import { useAdminActors, useApproveActor, useCreateActor, useCreateUser, useInviteUser, useRejectActor, useResetUserPassword, useUpdateActor, useUpdateUser, useApiKeys, useCreateApiKey, useRevokeApiKey, useAgentSpecializations, useUpsertSpecialization, useDeleteSpecialization, useSetActorAvailability, useAdminActorConnections, useUpdateMailboxConnectionStatus, useUpdateCalendarConnectionStatus, useDeleteMailboxConnection, useDeleteCalendarConnection, type AdminActorRow, type ActorConnectionSummary } from '@/api/hooks';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
 import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -15,6 +15,7 @@ import {
   Pencil, Trash2, Shield, Phone, MessageSquare,
   Plus, X, CheckCircle2, CircleDot, Power, PowerOff,
   Key, Copy, ChevronRight, Lock, Star, Wifi, WifiOff, Coffee, Send,
+  Mail, CalendarClock, AlertTriangle, ExternalLink,
 } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -43,6 +44,292 @@ interface ActorRow extends AdminActorRow {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+type ConnectionRecord = Record<string, unknown>;
+
+function connectionText(value: unknown): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function connectionNumber(value: unknown): number {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function connectionDate(value: unknown): string {
+  const raw = connectionText(value);
+  if (!raw) return 'Never';
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? raw : date.toLocaleString();
+}
+
+function compactCount(value: number, singular: string, plural = `${singular}s`): string {
+  return `${value.toLocaleString()} ${value === 1 ? singular : plural}`;
+}
+
+function primaryMailbox(summary?: ActorConnectionSummary): ConnectionRecord | undefined {
+  const mailboxes = summary?.mailbox_connections ?? [];
+  return mailboxes.find(connection => connection.status === 'connected' && connection.is_default_sender === true)
+    ?? mailboxes.find(connection => connection.status === 'connected')
+    ?? mailboxes[0];
+}
+
+function connectionSummaryLine(summary?: ActorConnectionSummary): string | null {
+  if (!summary) return null;
+  const mailbox = primaryMailbox(summary);
+  const email = connectionText(mailbox?.email_address);
+  const processed = (summary.email_processed_count ?? 0) + (summary.calendar_processed_count ?? 0);
+  const parts: string[] = [];
+  if (email) parts.push(`Email: ${email}`);
+  if (processed > 0) parts.push(`${processed.toLocaleString()} processed`);
+  if ((summary.raw_context_source_count ?? 0) > 0) parts.push(`${summary.raw_context_source_count?.toLocaleString()} Raw Context`);
+  if ((summary.signal_count ?? 0) > 0) parts.push(`${summary.signal_count?.toLocaleString()} Signals`);
+  if ((summary.memory_count ?? 0) > 0) parts.push(`${summary.memory_count?.toLocaleString()} Memory`);
+  return parts.length ? parts.join(' · ') : null;
+}
+
+function latestConnectionIssue(summary?: ActorConnectionSummary): string | null {
+  if (!summary) return null;
+  const issue = [...summary.mailbox_connections, ...summary.calendar_connections]
+    .find(connection => connectionText(connection.last_error));
+  return issue ? connectionText(issue.last_error) : null;
+}
+
+function hasConnectionAttention(summary?: ActorConnectionSummary): boolean {
+  if (!summary) return false;
+  if (latestConnectionIssue(summary)) return true;
+  return summary.mailbox_connections.some(connection => (
+    connection.send_enabled === true &&
+    connectionText(connection.send_status) !== 'ready'
+  ));
+}
+
+function ConnectionBadge({
+  label,
+  state,
+}: {
+  label: string;
+  state: 'ready' | 'attention' | 'missing';
+}) {
+  const cls = state === 'ready'
+    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+    : state === 'attention'
+      ? 'border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400'
+      : 'border-border bg-muted/40 text-muted-foreground';
+  return (
+    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${cls}`}>
+      {label}
+    </span>
+  );
+}
+
+function ActorConnectionBadges({ summary }: { summary?: ActorConnectionSummary }) {
+  const mailboxIssue = summary?.mailbox_connections.some(connection => connectionText(connection.last_error)) ?? false;
+  const calendarIssue = summary?.calendar_connections.some(connection => connectionText(connection.last_error)) ?? false;
+  const mailboxState = !summary || summary.connected_mailbox_count === 0
+    ? 'missing'
+    : mailboxIssue
+      ? 'attention'
+      : 'ready';
+  const senderState = !summary || summary.sender_count === 0
+    ? 'missing'
+    : summary.ready_sender_count > 0
+      ? 'ready'
+      : 'attention';
+  const calendarState = !summary || summary.connected_calendar_count === 0
+    ? 'missing'
+    : calendarIssue
+      ? 'attention'
+      : 'ready';
+  return (
+    <div className="flex flex-wrap gap-1">
+      <ConnectionBadge label={mailboxState === 'missing' ? 'No email' : mailboxState === 'attention' ? 'Email attention' : 'Email connected'} state={mailboxState} />
+      <ConnectionBadge label={calendarState === 'missing' ? 'No calendar' : calendarState === 'attention' ? 'Calendar attention' : 'Calendar connected'} state={calendarState} />
+      <ConnectionBadge label={senderState === 'missing' ? 'No sender' : senderState === 'attention' ? 'Sender paused' : 'Sender active'} state={senderState} />
+    </div>
+  );
+}
+
+function ConnectionRecordList({
+  title,
+  icon: Icon,
+  records,
+  empty,
+  kind,
+  actorName,
+  onToggleActive,
+  onDisconnect,
+  pending,
+}: {
+  title: string;
+  icon: React.ElementType;
+  records: ConnectionRecord[];
+  empty: string;
+  kind: 'mailbox' | 'calendar';
+  actorName: string;
+  onToggleActive: (record: ConnectionRecord, active: boolean) => void;
+  onDisconnect: (record: ConnectionRecord) => void;
+  pending?: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm font-semibold text-foreground">{title}</span>
+        </div>
+        <span className="text-xs text-muted-foreground">{records.length}</span>
+      </div>
+      {records.length === 0 ? (
+        <div className="px-4 py-3 text-xs text-muted-foreground">{empty}</div>
+      ) : (
+        <div className="divide-y divide-border">
+          {records.map((record, idx) => {
+            const email = connectionText(record.email_address) || 'No email';
+            const provider = connectionText(record.provider) || 'unknown provider';
+            const status = connectionText(record.status) || 'unknown';
+            const active = status === 'connected' || status === 'syncing' || status === 'error';
+            const canToggle = active || status === 'disconnected';
+            const sendStatus = connectionText(record.send_status);
+            const issue = connectionText(record.last_error);
+            const total = kind === 'mailbox' ? connectionNumber(record.total_messages) : connectionNumber(record.total_events);
+            const processed = kind === 'mailbox' ? connectionNumber(record.processed_messages) : connectionNumber(record.processed_events);
+            const rawContext = connectionNumber(record.raw_context_sources);
+            const signals = connectionNumber(record.signals_created);
+            const memory = connectionNumber(record.memory_created);
+            const lastSource = kind === 'mailbox' ? record.last_message_at : record.last_event_at;
+            return (
+              <div key={`${provider}-${email}-${idx}`} className="px-4 py-3 text-xs">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-foreground">{email}</span>
+                      <span className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-medium capitalize text-muted-foreground">{provider}</span>
+                      <span className={`rounded border px-1.5 py-0.5 font-medium ${active ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'border-border bg-background text-muted-foreground'}`}>
+                        {active ? `${kind === 'mailbox' ? 'Email' : 'Calendar'} connected` : 'Paused'}
+                      </span>
+                      {sendStatus && <span className="rounded border border-border bg-background px-1.5 py-0.5 font-medium text-muted-foreground">sender {sendStatus}</span>}
+                    </div>
+                    <p className="mt-1 text-muted-foreground">
+                      Connected {connectionDate(record.created_at)} · Last sync {connectionDate(record.last_sync_at)}
+                      {connectionText(lastSource) ? ` · Latest ${kind === 'mailbox' ? 'message' : 'event'} ${connectionDate(lastSource)}` : ''}
+                    </p>
+                    <p className="mt-1 text-muted-foreground">
+                      {compactCount(total, kind === 'mailbox' ? 'message' : 'event')} seen · {compactCount(processed, 'processed')} · {compactCount(rawContext, 'Raw Context source')} · {compactCount(signals, 'Signal')} · {compactCount(memory, 'Memory entry', 'Memory entries')}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-1.5">
+                    {canToggle && (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => onToggleActive(record, !active)}
+                        className="rounded-lg border border-border px-2 py-1 font-semibold text-muted-foreground hover:text-foreground disabled:opacity-50"
+                      >
+                        {active ? 'Deactivate' : 'Activate'}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => {
+                        const ok = window.confirm(`Disconnect ${email} from ${actorName}? This removes the ${kind === 'mailbox' ? 'mailbox' : 'calendar'} connection and OAuth tokens. Reconnecting requires provider consent again.`);
+                        if (ok) onDisconnect(record);
+                      }}
+                      className="rounded-lg border border-destructive/30 px-2 py-1 font-semibold text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                    >
+                      Disconnect
+                    </button>
+                  </div>
+                </div>
+                {!active && <p className="mt-1 text-muted-foreground">Paused. CRMy is not reading this {kind === 'mailbox' ? 'mailbox or using it as a sender' : 'calendar'}.</p>}
+                {issue && (
+                  <p className="mt-1 flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                    <AlertTriangle className="h-3 w-3" /> {issue}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActorConnectionsPanel({ actor, summary }: { actor: ActorRow; summary?: ActorConnectionSummary }) {
+  const updateMailboxStatus = useUpdateMailboxConnectionStatus();
+  const updateCalendarStatus = useUpdateCalendarConnectionStatus();
+  const deleteMailbox = useDeleteMailboxConnection();
+  const deleteCalendar = useDeleteCalendarConnection();
+  const pending = updateMailboxStatus.isPending || updateCalendarStatus.isPending || deleteMailbox.isPending || deleteCalendar.isPending;
+  const handleError = (title: string, err: unknown) => {
+    toast({ title, description: err instanceof Error ? err.message : 'The connection could not be updated.', variant: 'destructive' });
+  };
+  return (
+    <div className="rounded-lg border border-border bg-card overflow-hidden">
+      <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <Mail className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-semibold text-foreground">Mailbox, sender, and calendar coverage</span>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {connectionSummaryLine(summary) ?? 'No mailbox or calendar context has been processed for this actor yet.'}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">Admins can pause CRMy use without removing OAuth tokens, or disconnect to remove the connection completely. Tokens and provider secrets are never shown here.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <a href="/app/emails?tab=connections" className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground">
+            Mailboxes <ExternalLink className="h-3 w-3" />
+          </a>
+          <a href="/app/activities?tab=connections" className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground">
+            Calendars <ExternalLink className="h-3 w-3" />
+          </a>
+          <a href="/settings/connections" className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground">
+            OAuth setup <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
+      </div>
+      <div className="grid gap-3 p-4 lg:grid-cols-2">
+        <ConnectionRecordList
+          title="Mailbox context and senders"
+          icon={Mail}
+          records={summary?.mailbox_connections ?? []}
+          empty="No mailbox connected for this actor."
+          kind="mailbox"
+          actorName={actor.display_name}
+          pending={pending}
+          onToggleActive={(record, active) => updateMailboxStatus.mutate({ id: connectionText(record.id), active }, {
+            onSuccess: () => toast({ title: active ? 'Mailbox activated' : 'Mailbox paused' }),
+            onError: err => handleError(active ? 'Could not activate mailbox' : 'Could not pause mailbox', err),
+          })}
+          onDisconnect={(record) => deleteMailbox.mutate(connectionText(record.id), {
+            onSuccess: () => toast({ title: 'Mailbox disconnected' }),
+            onError: err => handleError('Could not disconnect mailbox', err),
+          })}
+        />
+        <ConnectionRecordList
+          title="Calendar context"
+          icon={CalendarClock}
+          records={summary?.calendar_connections ?? []}
+          empty="No calendar connected for this actor."
+          kind="calendar"
+          actorName={actor.display_name}
+          pending={pending}
+          onToggleActive={(record, active) => updateCalendarStatus.mutate({ id: connectionText(record.id), active }, {
+            onSuccess: () => toast({ title: active ? 'Calendar activated' : 'Calendar paused' }),
+            onError: err => handleError(active ? 'Could not activate calendar' : 'Could not pause calendar', err),
+          })}
+          onDisconnect={(record) => deleteCalendar.mutate(connectionText(record.id), {
+            onSuccess: () => toast({ title: 'Calendar disconnected' }),
+            onError: err => handleError('Could not disconnect calendar', err),
+          })}
+        />
+      </div>
+    </div>
+  );
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -114,7 +401,7 @@ const SCOPE_GROUPS = [
   ]},
   { label: 'Admin Setup', scopes: [
     { value: 'api_keys:admin', label: 'Manage API keys' },
-    { value: 'email_provider:admin', label: 'Manage inbound email' },
+    { value: 'email_provider:admin', label: 'Manage shared email provider' },
   ]},
   { label: 'Workflows / Messaging', scopes: [
     { value: 'workflows:read', label: 'Read workflows' },
@@ -136,9 +423,11 @@ const SCOPE_GROUPS = [
 
 function ActorDetailPanel({
   actor,
+  connections,
   onClose,
 }: {
   actor: ActorRow;
+  connections?: ActorConnectionSummary;
   onClose: () => void;
 }) {
   const updateActor = useUpdateActor();
@@ -347,6 +636,8 @@ function ActorDetailPanel({
             )}
           </div>
         </div>
+
+        <ActorConnectionsPanel actor={actor} summary={connections} />
 
         {/* ── Specializations (agents only) ── */}
         {actor.actor_type === 'agent' && (
@@ -677,6 +968,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
   // Data
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: actorsData, isLoading } = useAdminActors() as { data?: { data: ActorRow[] }; isLoading: boolean };
+  const { data: actorConnectionsData } = useAdminActorConnections();
   const allActors: ActorRow[] = actorsData?.data ?? [];
 
   // Mutations
@@ -713,6 +1005,12 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
   const [editChannels, setEditChannels] = useState<ContactChannel[]>([]);
 
   // Computed
+  const connectionByActorId = useMemo(() => {
+    const map = new Map<string, ActorConnectionSummary>();
+    for (const summary of actorConnectionsData?.data ?? []) map.set(summary.actor_id, summary);
+    return map;
+  }, [actorConnectionsData]);
+
   const filtered = useMemo(() => {
     let result = [...allActors];
     if (tab !== 'all') result = result.filter(a => a.actor_type === tab);
@@ -731,6 +1029,9 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
     if (quickFilter === 'needs_scope_review') result = result.filter(a => (a.scopes ?? []).length <= 1 || a.registration_status === 'pending_review');
     if (quickFilter === 'inactive') result = result.filter(a => !a.is_active || a.user_is_active === false);
     if (quickFilter === 'pending_review') result = result.filter(a => a.registration_status === 'pending_review');
+    if (quickFilter === 'mailbox_connected') result = result.filter(a => (connectionByActorId.get(a.id)?.connected_mailbox_count ?? 0) > 0);
+    if (quickFilter === 'calendar_connected') result = result.filter(a => (connectionByActorId.get(a.id)?.connected_calendar_count ?? 0) > 0);
+    if (quickFilter === 'connection_attention') result = result.filter(a => hasConnectionAttention(connectionByActorId.get(a.id)));
     if (search) {
       const q = search.toLowerCase();
       result = result.filter(a =>
@@ -748,7 +1049,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
       });
     }
     return result;
-  }, [allActors, tab, search, activeFilters, quickFilter, sort]);
+  }, [allActors, tab, search, activeFilters, quickFilter, sort, connectionByActorId]);
 
   useEffect(() => { setPage(1); }, [tab, search, activeFilters, quickFilter, sort]);
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
@@ -1050,6 +1351,9 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
           { key: 'needs_scope_review', label: 'Needs scope review', count: allActors.filter(a => (a.scopes ?? []).length <= 1 || a.registration_status === 'pending_review').length },
           { key: 'inactive', label: 'Inactive', count: allActors.filter(a => !a.is_active || a.user_is_active === false).length },
           { key: 'pending_review', label: 'Pending review', count: allActors.filter(a => a.registration_status === 'pending_review').length },
+          { key: 'mailbox_connected', label: 'Email connected', count: allActors.filter(a => (connectionByActorId.get(a.id)?.connected_mailbox_count ?? 0) > 0).length },
+          { key: 'calendar_connected', label: 'Calendar connected', count: allActors.filter(a => (connectionByActorId.get(a.id)?.connected_calendar_count ?? 0) > 0).length },
+          { key: 'connection_attention', label: 'Needs connection attention', count: allActors.filter(a => hasConnectionAttention(connectionByActorId.get(a.id))).length },
         ].map(filter => (
           <button
             key={filter.key}
@@ -1241,6 +1545,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Contact</th>
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Role / Model</th>
                     <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Status</th>
+                    <th className="text-left px-4 py-3 text-xs font-display font-semibold text-muted-foreground">Connections</th>
                     <th className="px-2 py-3 w-20" />
                   </tr>
                 </thead>
@@ -1249,7 +1554,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                     <React.Fragment key={actor.id}>
                       {editingId === actor.id ? (
                         <tr>
-                          <td colSpan={7} className="p-4 bg-muted/20 border-b border-border last:border-0">
+                          <td colSpan={8} className="p-4 bg-muted/20 border-b border-border last:border-0">
                             <p className="text-xs font-display font-semibold text-muted-foreground uppercase tracking-wider mb-3">Edit Actor</p>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
                               <div className="space-y-1">
@@ -1349,6 +1654,16 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                               {actor.is_active ? 'Active' : 'Inactive'}
                             </span>
                           </td>
+                          <td className="px-4 py-3">
+                            <div className="space-y-1">
+                              <ActorConnectionBadges summary={connectionByActorId.get(actor.id)} />
+                              {connectionSummaryLine(connectionByActorId.get(actor.id)) && (
+                                <p className="max-w-[260px] truncate text-xs text-muted-foreground">
+                                  {connectionSummaryLine(connectionByActorId.get(actor.id))}
+                                </p>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-2 py-3" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-1 justify-end">
                               {actor.registration_status === 'pending_review' && (
@@ -1421,8 +1736,8 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                         <AnimatePresence>
                           {expandedActorId === actor.id && (
                             <tr>
-                              <td colSpan={7}>
-                                <ActorDetailPanel actor={actor} onClose={() => setExpandedActorId(null)} />
+                              <td colSpan={8}>
+                                <ActorDetailPanel actor={actor} connections={connectionByActorId.get(actor.id)} onClose={() => setExpandedActorId(null)} />
                               </td>
                             </tr>
                           )}
@@ -1593,6 +1908,15 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                     )}
                   </div>
 
+                  <div className="mt-2">
+                    <ActorConnectionBadges summary={connectionByActorId.get(actor.id)} />
+                    {connectionSummaryLine(connectionByActorId.get(actor.id)) && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {connectionSummaryLine(connectionByActorId.get(actor.id))}
+                      </p>
+                    )}
+                  </div>
+
                   {/* Contact info */}
                   {(actor.phone || getContactChannels(actor.metadata).length > 0) && (
                     <div className="mt-2 pt-2 border-t border-border flex flex-wrap gap-x-3 gap-y-1">
@@ -1613,7 +1937,7 @@ export default function ActorsSettings({ view: viewProp, onViewChange }: ActorsS
                   <AnimatePresence>
                     {expandedActorId === actor.id && (
                       <div className="mt-3 -mx-4 -mb-4">
-                        <ActorDetailPanel actor={actor} onClose={() => setExpandedActorId(null)} />
+                        <ActorDetailPanel actor={actor} connections={connectionByActorId.get(actor.id)} onClose={() => setExpandedActorId(null)} />
                       </div>
                     )}
                   </AnimatePresence>

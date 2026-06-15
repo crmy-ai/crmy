@@ -17,13 +17,36 @@ import { authMiddleware } from './auth/middleware.js';
 import { apiRouter, inboundRouter } from './rest/router.js';
 import { agentRouter } from './agent/routes.js';
 import { createMcpServer } from './mcp/server.js';
-import { mcpSessions, registerMcpSession, removeMcpSession, touchMcpSession, evictStaleMcpSessions, isSameMcpActor } from './mcp/session-registry.js';
+import {
+  mcpSessions,
+  registerMcpSession,
+  removeMcpSession,
+  touchMcpSession,
+  evictStaleMcpSessions,
+  isSameMcpActor,
+  startMcpResourceNotificationListener,
+} from './mcp/session-registry.js';
+import {
+  closeMcpSessionRecord,
+  durableSessionMatchesActor,
+  expireMcpSessionRecord,
+  expireMcpSessionsForInstance,
+  expireSessionsOwnedByStaleInstances,
+  expireTimedOutMcpSessions,
+  getMcpSession,
+  heartbeatMcpInstance,
+  isDurableSessionUsable,
+  touchMcpSessionRecord,
+  upsertMcpSession,
+} from './db/repos/mcp-sessions.js';
 import { autoApproveExpired, expireOldRequests } from './db/repos/hitl.js';
 import { cleanExpiredSessions } from './db/repos/agent.js';
 import { processPendingExtractions } from './agent/extraction.js';
 import { processPendingAgentTurns } from './agent/turn-runner.js';
 import { processStaleEntries } from './services/staleness.js';
 import { getSampleDataStatus, seedSampleData } from './services/sample-data.js';
+import { actorRateLimitMiddleware, enforceActorRateLimit } from './services/rate-limit.js';
+import { redactSecrets } from './lib/secrets.js';
 import { loadPlugins, shutdownPlugins, type PluginConfig } from './plugins/index.js';
 import { CrmyError, unauthorized, type ActorContext } from '@crmy/shared';
 
@@ -48,6 +71,23 @@ const SERVER_VERSION: string = (() => {
     return 'unknown';
   }
 })();
+
+const MCP_INSTANCE_ID = process.env.CRMY_INSTANCE_ID?.trim()
+  || `local-${process.pid}-${randomUUID()}`;
+const MCP_SESSION_TTL_MS = Math.max(60, Number(process.env.CRMY_MCP_SESSION_TTL_SECONDS ?? 30 * 60)) * 1000;
+const MCP_STALE_INSTANCE_MS = Math.max(60, Number(process.env.CRMY_MCP_STALE_INSTANCE_SECONDS ?? 120)) * 1000;
+
+function safeLogError(err: unknown): unknown {
+  if (err instanceof Error) {
+    return redactSecrets({
+      name: err.name,
+      message: err.message,
+      code: (err as { code?: unknown }).code,
+      status: (err as { status?: unknown }).status,
+    });
+  }
+  return redactSecrets(err);
+}
 
 export type ProgressStep = 'db_connect' | 'migrations' | 'seed_defaults';
 export type ProgressStatus = 'start' | 'done' | 'error';
@@ -117,6 +157,22 @@ export function loadConfig(): ServerConfig {
       '  Generate a real secret:  openssl rand -hex 32',
     );
   }
+  if (process.env.CRMY_DEPLOYMENT_MODE === 'multi_instance') {
+    const instanceId = process.env.CRMY_INSTANCE_ID?.trim();
+    const mcpSessionMode = process.env.CRMY_MCP_SESSION_MODE?.trim();
+    if (!instanceId) {
+      throw new Error(
+        'CRMY_INSTANCE_ID is required when CRMY_DEPLOYMENT_MODE=multi_instance.\n' +
+        '  Set a stable unique id per app instance so MCP session ownership and expiry are durable.',
+      );
+    }
+    if (mcpSessionMode !== 'sticky') {
+      throw new Error(
+        'CRMY_MCP_SESSION_MODE=sticky is required when CRMY_DEPLOYMENT_MODE=multi_instance.\n' +
+        '  Configure the load balancer to route by mcp-session-id. CRMy will reject wrong-instance session requests clearly instead of creating unsafe in-process sessions.',
+      );
+    }
+  }
 
   return {
     databaseUrl,
@@ -162,6 +218,16 @@ export async function createApp(config: ServerConfig) {
   // First-run: create admin from env vars or warn if no users exist
   await checkFirstRun(db, config.tenantSlug);
 
+  await expireMcpSessionsForInstance(db, MCP_INSTANCE_ID, 'server_startup').catch((err) => {
+    console.warn('[mcp] Failed to expire previous sessions for this instance:', safeLogError(err));
+  });
+  await heartbeatMcpInstance(db, MCP_INSTANCE_ID, {
+    version: SERVER_VERSION,
+    deployment_mode: process.env.CRMY_DEPLOYMENT_MODE ?? 'single_instance',
+  }).catch((err) => {
+    console.warn('[mcp] Failed to write initial instance heartbeat:', safeLogError(err));
+  });
+
   // Seed demo data if requested via CRMY_SEED_DEMO=true (Docker / CI path)
   if (process.env.CRMY_SEED_DEMO === 'true') {
     try {
@@ -179,6 +245,12 @@ export async function createApp(config: ServerConfig) {
   }
 
   const app = express();
+  let stopMcpResourceNotifications: () => Promise<void> = async () => {};
+  try {
+    stopMcpResourceNotifications = await startMcpResourceNotificationListener(db);
+  } catch (err) {
+    console.warn('[mcp] Cross-instance resource notifications are unavailable:', safeLogError(err));
+  }
   app.set('trust proxy', parseTrustProxy(process.env.CRMY_TRUST_PROXY ?? process.env.TRUST_PROXY));
   app.use(helmet({
     contentSecurityPolicy: {
@@ -326,28 +398,108 @@ export async function createApp(config: ServerConfig) {
   const handleMcpRequest = async (req: express.Request, res: express.Response): Promise<void> => {
     try {
       const sessionId = req.headers['mcp-session-id'] as string | undefined;
+      const actor = await extractMcpActor(req);
+      await enforceActorRateLimit(db, actor, `MCP ${req.method}`);
 
       // Reuse existing session (subsequent GET/POST from same client).
       // Session ids are state handles, not bearer credentials; every request
       // must still authenticate as the actor that initialized the session.
-      const existingSession = sessionId ? mcpSessions.get(sessionId) : undefined;
-      if (sessionId && existingSession) {
-        const actor = await extractMcpActor(req);
+      if (sessionId) {
+        const existingSession = mcpSessions.get(sessionId);
+        let durableSession = await getMcpSession(db, sessionId);
+
+        if (!durableSession && existingSession && isSameMcpActor(actor, existingSession.actor)) {
+          durableSession = await upsertMcpSession(db, {
+            sessionId,
+            actor,
+            owningInstanceId: MCP_INSTANCE_ID,
+            ttlMs: MCP_SESSION_TTL_MS,
+            metadata: {
+              recovered_from_local_registry: true,
+              recovery_reason: 'durable_catalog_missing',
+            },
+          });
+        }
+
+        if (!durableSession) {
+          throw new CrmyError(
+            'CONFLICT',
+            'MCP session was not found. Reinitialize the MCP session and retry.',
+            410,
+            { reason: 'mcp_session_not_found' },
+          );
+        }
+        if (!durableSessionMatchesActor(durableSession, actor)) {
+          throw unauthorized('MCP session belongs to a different actor or scope set');
+        }
+        if (!isDurableSessionUsable(durableSession)) {
+          throw new CrmyError(
+            'CONFLICT',
+            'MCP session is closed or expired. Reinitialize the MCP session and retry.',
+            410,
+            {
+              reason: durableSession.close_reason ?? durableSession.transport_state,
+              transport_state: durableSession.transport_state,
+            },
+          );
+        }
+        if (!existingSession) {
+          if (durableSession.owning_instance_id !== MCP_INSTANCE_ID) {
+            throw new CrmyError(
+              'CONFLICT',
+              'MCP session belongs to another CRMy instance. Configure sticky routing by mcp-session-id or reinitialize the session.',
+              409,
+              { reason: 'mcp_session_wrong_instance' },
+            );
+          }
+          await expireMcpSessionRecord(db, sessionId, 'local_transport_missing');
+          throw new CrmyError(
+            'CONFLICT',
+            'MCP session transport is no longer active on this instance. Reinitialize the MCP session and retry.',
+            410,
+            { reason: 'mcp_session_transport_missing' },
+          );
+        }
         if (!isSameMcpActor(actor, existingSession.actor)) {
           throw unauthorized('MCP session belongs to a different actor or scope set');
         }
-        touchMcpSession(sessionId); // reset idle TTL
+        touchMcpSession(sessionId); // reset local idle TTL
+        await touchMcpSessionRecord(db, sessionId, MCP_SESSION_TTL_MS, MCP_INSTANCE_ID);
         await existingSession.transport.handleRequest(req, res, req.body);
         return;
       }
 
+      if (req.method !== 'POST') {
+        throw new CrmyError(
+          'VALIDATION_ERROR',
+          'MCP session id is required for GET and DELETE requests. Initialize a session with POST /mcp first.',
+          400,
+          { reason: 'mcp_session_id_required' },
+        );
+      }
+
       // New session — authenticate and create
-      const actor = await extractMcpActor(req);
       const server = createMcpServer(db, actor, () => actor);
+      let durableRegistration: Promise<unknown> | undefined;
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (sid) => {
           registerMcpSession(sid, server, transport, actor);
+          durableRegistration = upsertMcpSession(db, {
+            sessionId: sid,
+            actor,
+            owningInstanceId: MCP_INSTANCE_ID,
+            ttlMs: MCP_SESSION_TTL_MS,
+            metadata: {
+              transport: 'streamable_http',
+              server_version: SERVER_VERSION,
+            },
+          }).catch((err) => {
+            removeMcpSession(sid);
+            transport.close?.().catch(() => {});
+            console.error('[mcp] Failed to record durable session:', safeLogError(err));
+            throw err;
+          });
         },
       });
 
@@ -356,6 +508,7 @@ export async function createApp(config: ServerConfig) {
         for (const [sid, s] of mcpSessions) {
           if (s.transport === transport) {
             removeMcpSession(sid);
+            closeMcpSessionRecord(db, sid, 'transport_closed').catch(() => {});
             break;
           }
         }
@@ -363,8 +516,9 @@ export async function createApp(config: ServerConfig) {
 
       await server.connect(transport);
       await transport.handleRequest(req, res, req.body);
+      await durableRegistration;
     } catch (err) {
-      console.error('MCP error:', err);
+      console.error('MCP error:', safeLogError(err));
       if (!res.headersSent) {
         if (err instanceof CrmyError) {
           res.status(err.status).json(err.toJSON());
@@ -380,9 +534,22 @@ export async function createApp(config: ServerConfig) {
   app.get('/mcp', handleMcpRequest);
   app.delete('/mcp', handleMcpRequest);
 
+  const mcpHeartbeatInterval = setInterval(async () => {
+    try {
+      await heartbeatMcpInstance(db, MCP_INSTANCE_ID, {
+        version: SERVER_VERSION,
+        deployment_mode: process.env.CRMY_DEPLOYMENT_MODE ?? 'single_instance',
+      });
+      await expireTimedOutMcpSessions(db);
+      await expireSessionsOwnedByStaleInstances(db, MCP_STALE_INSTANCE_MS);
+    } catch (err) {
+      console.warn('[mcp] Session heartbeat/expiry failed:', safeLogError(err));
+    }
+  }, 30_000);
+
   // Authenticated API routes
-  app.use('/api/v1', authMiddleware(db, config.jwtSecret), apiRouter(db));
-  app.use('/api/v1/agent', authMiddleware(db, config.jwtSecret), agentRouter(db));
+  app.use('/api/v1', authMiddleware(db, config.jwtSecret), actorRateLimitMiddleware(db), apiRouter(db));
+  app.use('/api/v1/agent', authMiddleware(db, config.jwtSecret), actorRateLimitMiddleware(db), agentRouter(db));
 
   // Serve web UI — public/ is populated at build time by scripts/copy-web.cjs
   // and ships inside the @crmy/server npm tarball alongside dist/.
@@ -401,7 +568,8 @@ export async function createApp(config: ServerConfig) {
   const { checkHitlSlaExpiry } = await import('./hitl/sla-checker.js');
   const { refreshStaleScores } = await import('./services/scoring.js');
   const { processPendingRawContextSources } = await import('./services/raw-context-processing.js');
-  const { processMailboxSyncJobs } = await import('./services/customer-email.js');
+  const { processMailboxSyncJobs, processDeliveredOutboundEmailContextJobs } = await import('./services/customer-email.js');
+  const { processEmailDeliveryJobs } = await import('./email/delivery.js');
   const { processCalendarSyncJobs } = await import('./services/customer-activity.js');
   const { processSequenceDue, handleSequenceGoalEvent, resolveSequenceGoalContactId } = await import('./services/sequence-executor.js');
   const { refreshSequenceAnalytics } = await import('./services/sequence-analytics.js');
@@ -409,6 +577,7 @@ export async function createApp(config: ServerConfig) {
   const { createWorkflowEngine } = await import('./workflows/engine.js');
   const workflowEngine = createWorkflowEngine(db);
   let backgroundWorkerRunning = false;
+  const backgroundTasksInFlight = new Set<Promise<unknown>>();
   const BACKGROUND_WORKER_LOCK_KEY = 8444219208;
   const BACKGROUND_TASK_TIMEOUT_MS = Number(process.env.BACKGROUND_TASK_TIMEOUT_MS ?? 45_000);
   async function tryAcquireBackgroundLock(): Promise<boolean> {
@@ -420,22 +589,25 @@ export async function createApp(config: ServerConfig) {
   }
   async function runBackgroundTask(name: string, task: () => Promise<unknown>, failures: string[]): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const taskPromise = task();
+    backgroundTasksInFlight.add(taskPromise);
+    taskPromise.finally(() => backgroundTasksInFlight.delete(taskPromise)).catch(() => {});
     try {
       await Promise.race([
-        task(),
+        taskPromise,
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error(`${name} timed out after ${BACKGROUND_TASK_TIMEOUT_MS}ms`)), BACKGROUND_TASK_TIMEOUT_MS);
         }),
       ]);
     } catch (err) {
       failures.push(name);
-      console.error(`[background] ${name} failed:`, err);
+      console.error(`[background] ${name} failed:`, safeLogError(err));
     } finally {
       if (timer) clearTimeout(timer);
     }
   }
   const hitlInterval = setInterval(async () => {
-    if (backgroundWorkerRunning) return;
+    if (backgroundWorkerRunning || backgroundTasksInFlight.size > 0) return;
     let lockHeld = false;
     try {
       backgroundWorkerRunning = true;
@@ -453,6 +625,8 @@ export async function createApp(config: ServerConfig) {
       await runBackgroundTask('webhook_retries', () => processWebhookRetries(db), failures);
       await runBackgroundTask('context_outbox', () => processContextOutbox(db), failures);
       await runBackgroundTask('context_embedding_jobs', () => processEmbeddingJobs(db), failures);
+      await runBackgroundTask('email_delivery_jobs', () => processEmailDeliveryJobs(db), failures);
+      await runBackgroundTask('delivered_outbound_email_context', () => processDeliveredOutboundEmailContextJobs(db), failures);
       await runBackgroundTask('mailbox_sync_jobs', () => processMailboxSyncJobs(db), failures);
       await runBackgroundTask('calendar_sync_jobs', () => processCalendarSyncJobs(db), failures);
       await runBackgroundTask('context_stale_scores', () => refreshStaleScores(db), failures);
@@ -465,7 +639,7 @@ export async function createApp(config: ServerConfig) {
       // Refresh sequence analytics rollup
       await runBackgroundTask('sequence_analytics', () => refreshSequenceAnalytics(db), failures);
       // Evict idle MCP sessions (30-minute TTL)
-      evictStaleMcpSessions();
+      await evictStaleMcpSessions(db);
       if (failures.length > 0) {
         markBackgroundTickFailure(new Error(`Background tasks failed: ${failures.join(', ')}`));
       } else {
@@ -475,13 +649,13 @@ export async function createApp(config: ServerConfig) {
       // Log the error but keep the interval running — a transient DB error
       // should not permanently disable all background maintenance tasks.
       markBackgroundTickFailure(err);
-      console.error('Background worker error:', err);
+      console.error('Background worker error:', safeLogError(err));
     } finally {
       if (lockHeld) {
         try {
           await releaseBackgroundLock();
         } catch (err) {
-          console.warn('[background] Failed to release advisory lock:', err);
+          console.warn('[background] Failed to release advisory lock:', safeLogError(err));
         }
       }
       backgroundWorkerRunning = false;
@@ -562,7 +736,7 @@ export async function createApp(config: ServerConfig) {
   const { startRetryLoop, stopRetryLoop } = await import('./messaging/delivery.js');
   startRetryLoop(db);
 
-  return { app, db, hitlInterval, stopRetryLoop };
+  return { app, db, hitlInterval, mcpHeartbeatInterval, stopRetryLoop, stopMcpResourceNotifications };
 }
 
 /**
@@ -655,7 +829,7 @@ async function seedDefaults(db: DbPool, tenantSlug: string): Promise<void> {
 // Direct startup
 async function main() {
   const config = loadConfig();
-  const { app, hitlInterval, stopRetryLoop } = await createApp(config);
+  const { app, hitlInterval, mcpHeartbeatInterval, stopRetryLoop, stopMcpResourceNotifications } = await createApp(config);
 
   const server = app.listen(config.port, () => {
     console.log(`crmy server ready on :${config.port}`);
@@ -667,7 +841,9 @@ async function main() {
       console.error('Could not start CRMy server:', err.message);
     }
     clearInterval(hitlInterval);
+    clearInterval(mcpHeartbeatInterval);
     stopRetryLoop();
+    await stopMcpResourceNotifications();
     await shutdownPlugins();
     await closePool();
     process.exit(1);
@@ -676,7 +852,10 @@ async function main() {
   // Graceful shutdown
   const shutdown = async () => {
     clearInterval(hitlInterval);
+    clearInterval(mcpHeartbeatInterval);
     stopRetryLoop();
+    await expireMcpSessionsForInstance(getPool(), MCP_INSTANCE_ID, 'server_shutdown').catch(() => {});
+    await stopMcpResourceNotifications();
     await shutdownPlugins();
     server.close();
     await closePool();

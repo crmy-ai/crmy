@@ -90,7 +90,7 @@ export function oppsCommand(): Command {
     });
 
   cmd.command('delete <opportunity>')
-    .description('Permanently delete an opportunity (admin/owner only)')
+    .description('Archive an opportunity while preserving evidence and lineage anchors (admin/owner only)')
     .action(async (opportunity) => {
       const { default: inquirer } = await import('inquirer');
       const client = await getClient();

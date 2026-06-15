@@ -52,13 +52,13 @@ Keep write tools confirmation enabled while testing. CRMy tools are scoped to th
 Paste this into ChatGPT after selecting the CRMy Developer Mode app:
 
 ```text
-Use only the CRMy app tools. Resolve the account "Northstar Labs", get a briefing, list Signals that need attention, and tell me the safest next action with the evidence you used. Do not use web browsing or built-in search.
+Use only the CRMy app tools. Resolve the account "Northstar Labs", get a briefing, get Action Context for customer outreach, list Signals that need attention, check lineage outcomes, and tell me the safest next action with the evidence you used. Do not use web browsing or built-in search.
 ```
 
 If ChatGPT has trouble selecting tools, be explicit:
 
 ```text
-First call CRMy customer_record_resolve for "Northstar Labs". Then call CRMy briefing_get for the resolved account. Then call CRMy context_signal_group_list with attention_only true. Summarize confirmed Memory separately from unconfirmed Signals.
+First call CRMy customer_record_resolve for "Northstar Labs". Then call CRMy briefing_get for the resolved account. Then call CRMy action_context_get with proposed_action.action_type "customer_outreach". Then call CRMy context_signal_group_list with attention_only true and CRMy context_lineage_get for the account. Summarize confirmed Memory separately from unconfirmed Signals and respect Action Context boundaries.
 ```
 
 ## Expected Path
@@ -67,9 +67,11 @@ ChatGPT should call:
 
 1. `customer_record_resolve` for `Northstar Labs`.
 2. `briefing_get` for the resolved account.
-3. `context_signal_group_list` with `attention_only: true`.
+3. `action_context_get` with `proposed_action.action_type: "customer_outreach"`.
+4. `context_signal_group_list` with `attention_only: true`.
+5. `context_lineage_get` for the resolved account.
 
-The answer should mention confirmed Memory separately from unconfirmed Signals, explain which Signal needs review, and recommend a safe next action such as reviewing or routing the sensitive Signal to a Handoff.
+The answer should mention confirmed Memory separately from unconfirmed Signals, explain which Signal needs review, respect Action Context boundaries, and recommend a safe next action such as reviewing or routing the sensitive Signal to a Handoff.
 
 ## Troubleshooting
 

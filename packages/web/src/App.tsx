@@ -70,8 +70,10 @@ function ThemeApplier() {
 }
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
+  const cookieAuthEnabled = import.meta.env.VITE_CRMY_BROWSER_COOKIE_AUTH === 'true';
   const token = localStorage.getItem('crmy_token');
-  if (!token) {
+  const user = getUser();
+  if (!token && !(cookieAuthEnabled && user)) {
     return <Navigate to="/login" replace />;
   }
   return <>{children}</>;

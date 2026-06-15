@@ -28,11 +28,12 @@ import { toast } from '@/hooks/use-toast';
 import { useSlashSearchFocus } from '@/hooks/useSlashSearchFocus';
 
 type ObservationStatus = 'Processed' | 'Needs review' | 'No context found' | 'Failed';
-type ObservationSource = 'activity' | 'inbound_email' | 'outbound_email' | 'system_sync' | 'add_context' | 'mcp' | 'context_api';
+type ObservationSource = 'activity' | 'calendar_event' | 'inbound_email' | 'outbound_email' | 'system_sync' | 'add_context' | 'mcp' | 'context_api';
 type VolumeStatus = 'processed' | 'failed';
 
 const SOURCE_OPTIONS: Array<{ value: ObservationSource; label: string; color: string }> = [
   { value: 'activity',       label: 'Activities',      color: 'bg-sky-500' },
+  { value: 'calendar_event',  label: 'Calendar events', color: 'bg-cyan-500' },
   { value: 'inbound_email',  label: 'Inbound emails',  color: 'bg-blue-500' },
   { value: 'outbound_email', label: 'Outbound emails', color: 'bg-indigo-500' },
   { value: 'system_sync',    label: 'System syncs',    color: 'bg-amber-500' },
@@ -81,7 +82,14 @@ function classifyContextSource(entry: any): { source: ObservationSource; type: s
     .map((item: any) => item?.source_type ?? item?.source ?? item?.channel ?? item?.system_type)
     .find(Boolean);
   const raw = String(entry.source ?? evidenceSource ?? '').toLowerCase();
+  if (entry.structured_data?.source_authorship === 'crmy' || entry.structured_data?.customer_authored === false) {
+    return { source: 'outbound_email', type: 'Seller-authored email context' };
+  }
+  if (entry.structured_data?.customer_authored === true && (raw.includes('email') || raw.includes('inbound'))) {
+    return { source: 'inbound_email', type: 'Customer email context' };
+  }
   if (raw.includes('mcp') || raw.includes('agent')) return { source: 'mcp', type: 'Agent/MCP context' };
+  if (raw.includes('calendar') || raw.includes('meeting')) return { source: 'calendar_event', type: 'Calendar context' };
   if (raw.includes('activity')) return { source: 'activity', type: 'Activity context' };
   if (raw.includes('email')) return { source: raw.includes('inbound') ? 'inbound_email' : 'outbound_email', type: 'Email context' };
   if (raw.includes('sync') || raw.includes('hubspot') || raw.includes('salesforce') || raw.includes('databricks') || raw.includes('snowflake')) {
@@ -105,6 +113,35 @@ function evidenceDetail(entry: any) {
     : 'Memory created from direct context input';
 }
 
+function provenanceLabel(metadata?: Record<string, unknown> | null) {
+  if (!metadata) return null;
+  if (metadata.source_authorship === 'crmy' || metadata.customer_authored === false) {
+    return 'Seller-authored: treat as our words';
+  }
+  if (metadata.customer_authored === true || metadata.source_authorship === 'customer_or_external') {
+    return 'Customer-authored evidence';
+  }
+  return null;
+}
+
+function pluralize(count: number, singular: string, plural = `${singular}s`) {
+  return `${count.toLocaleString()} ${count === 1 ? singular : plural}`;
+}
+
+function contextOutcomeDetail(input: { memory: number; signals: number; skipped?: number }) {
+  const parts: string[] = [];
+  if (input.memory > 0) {
+    parts.push(`Supported ${pluralize(input.memory, 'Memory entry', 'Memory entries')}`);
+  }
+  if (input.signals > 0) {
+    parts.push(`Extracted ${pluralize(input.signals, 'Signal')}`);
+  }
+  if ((input.skipped ?? 0) > 0) {
+    parts.push(`${pluralize(input.skipped ?? 0, 'item')} skipped`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 function statusFromRawSource(status?: string): ObservationStatus {
   if (status === 'failed') return 'Failed';
   if (status === 'needs_review' || status === 'pending' || status === 'processing') return 'Needs review';
@@ -125,6 +162,7 @@ function rawStatusFilter(status: 'all' | ObservationStatus) {
 function classifyRawSource(sourceType?: string | null): { source: ObservationSource; type: string } {
   const raw = String(sourceType ?? '').toLowerCase();
   if (raw.includes('mcp') || raw.includes('agent')) return { source: 'mcp', type: 'Agent/MCP' };
+  if (raw.includes('calendar') || raw.includes('meeting')) return { source: 'calendar_event', type: 'Calendar event' };
   if (raw.includes('inbound') && raw.includes('email')) return { source: 'inbound_email', type: 'Inbound email' };
   if (raw.includes('email')) return { source: 'outbound_email', type: 'Outbound email' };
   if (raw.includes('sync') || raw.includes('hubspot') || raw.includes('salesforce') || raw.includes('databricks') || raw.includes('snowflake')) {
@@ -275,18 +313,22 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
       const memory = Number(source.memory_created ?? 0);
       const signals = Number(source.signals_created ?? 0);
       const skipped = Number(source.skipped ?? 0);
-      const counts = memory > 0 || signals > 0 || skipped > 0
-        ? `${memory} Memory, ${signals} Signals${skipped > 0 ? `, ${skipped} skipped` : ''}`
-        : source.failure_reason ?? 'Processing source context';
+      const counts = contextOutcomeDetail({ memory, signals, skipped })
+        ?? source.failure_reason
+        ?? 'Processing source context';
+      const provenance = provenanceLabel(source.metadata);
       return {
         id: `raw-source-${source.id}`,
         source: classified.source,
         type: classified.type,
         title: source.source_label ?? source.source_ref ?? 'Raw context source',
-        detail: source.failure_reason ? `${counts}; ${source.failure_reason}` : counts,
+        detail: [
+          provenance,
+          source.failure_reason ? `${counts}; ${source.failure_reason}` : counts,
+        ].filter(Boolean).join(' · '),
         timestamp: source.processed_at ?? source.created_at,
         status,
-        href: source.subject_type && source.subject_id ? `/context?tab=${signals > 0 ? 'signals' : 'browser'}` : '/context?tab=observations',
+        href: `/context?tab=lineage&raw_context_source_id=${source.id}`,
         actionLabel: ['Failed', 'No context found'].includes(status) ? 'Retry' : undefined,
         actionDisabled: reprocessSource.isPending,
         onAction: ['Failed', 'No context found'].includes(status)
@@ -307,12 +349,13 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
       const subject = String(activity.subject ?? '').toLowerCase();
       const isManualImport = activity.type === 'note' && (subject.includes('ingested document') || subject.includes('auto-ingested'));
       const isInboundEmail = activity.type === 'email' && activity.direction === 'inbound';
+      const isCalendar = String(activity.source_agent ?? '').startsWith('calendar:') || Boolean(activity.detail?.calendar_event_id);
       const counts = contextByActivity.get(activity.id);
       const hasMemory = Boolean(counts?.memory);
       const hasSignals = Boolean(counts?.signals);
       const status: ObservationStatus = hasMemory ? 'Processed' : hasSignals ? 'Needs review' : 'No context found';
-      const source: ObservationSource = isManualImport ? 'add_context' : isInboundEmail ? 'inbound_email' : 'activity';
-      const sourceType = isManualImport ? 'Add Context' : isInboundEmail ? 'Inbound email' : activity.type ?? 'Activity';
+      const source: ObservationSource = isManualImport ? 'add_context' : isInboundEmail ? 'inbound_email' : isCalendar ? 'calendar_event' : 'activity';
+      const sourceType = isManualImport ? 'Add Context' : isInboundEmail ? 'Inbound email' : isCalendar ? 'Calendar event' : activity.type ?? 'Activity';
       const title = activity.subject ?? activity.body?.slice?.(0, 80) ?? 'Untitled activity';
       return {
         id: `activity-${activity.id}`,
@@ -320,7 +363,7 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
         type: sourceType,
         title,
         detail: hasMemory || hasSignals
-          ? `${counts?.memory ?? 0} Memory, ${counts?.signals ?? 0} Signals`
+          ? contextOutcomeDetail({ memory: counts?.memory ?? 0, signals: counts?.signals ?? 0 }) ?? 'Context extracted from this source'
           : `${activity.subject_type ? `Linked to ${String(activity.subject_type).replace('_', ' ')}` : 'Captured source'}; no extracted context in recent results`,
         timestamp: activity.occurred_at ?? activity.created_at,
         status,
@@ -378,12 +421,13 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
         const status: ObservationStatus = isSignal ? 'Needs review' : 'Processed';
         const title = entry.title ?? String(entry.body ?? '').slice(0, 80) ?? 'Untitled context';
         const subject = entry.subject_type ? `${String(entry.subject_type).replace('_', ' ')} context` : 'Customer context';
+        const provenance = provenanceLabel(entry.structured_data);
         return {
           id: `context-${entry.id}`,
           source: classified.source,
           type: classified.type,
           title,
-          detail: `${subject}; ${evidenceDetail(entry)}`,
+          detail: [subject, provenance, evidenceDetail(entry)].filter(Boolean).join('; '),
           timestamp: entry.created_at,
           status,
           href: isSignal ? '/context?tab=signals' : '/context?tab=browser',

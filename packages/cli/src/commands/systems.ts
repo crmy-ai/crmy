@@ -138,7 +138,7 @@ export function systemsCommand(): Command {
   cmd.command('upsert-mapping')
     .description('Create or update a system-of-record object mapping')
     .requiredOption('--system <id>', 'System ID')
-    .requiredOption('--object-type <type>', 'CRMy object type: contact, account, opportunity, or activity. use_case/context_entry mappings are accepted for conflict review but are not directly synced in 0.8.')
+    .requiredOption('--object-type <type>', 'CRMy object type: contact, account, opportunity, or activity. use_case/context_entry mappings are accepted for conflict review but are not directly synced yet.')
     .requiredOption('--external-object <name>', 'External object/table/view name')
     .requiredOption('--field-mapping <json|@file>', 'JSON object mapping CRMy fields to external fields')
     .option('--id <id>', 'Existing mapping ID to update')
