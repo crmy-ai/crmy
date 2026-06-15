@@ -1,3 +1,139 @@
+# CRMy v0.9.1
+
+CRMy v0.9.1 is the email context workflow release — the hardening line that makes customer email easier to connect, easier to trust, easier to send from the right identity, and easier for agents to follow from source message to Raw Context, Signals, Memory, activity, approval, and reply.
+
+Before an agent drafts or sends customer email, CRMy now does more than generate copy. It resolves who is sending, what mailbox is used for context, whether replies can flow back into Memory, what evidence is safe to cite, and whether the action needs human approval. v0.9.1 turns email from a disconnected side surface into a first-class customer context source and governed action path.
+
+## Release Focus
+
+v0.9.1 focuses on email context, sender identity, and setup clarity:
+
+- make mailbox context and outbound email actions explicit and traceable;
+- prefer the actor's connected mailbox as sender identity, with tenant fallback provider kept for shared/system delivery;
+- process sent email back into account activity and CRMy-authored context without treating CRMy's own words as customer-authored truth;
+- improve Gmail/Outlook OAuth setup for admins and user self-service mailbox/calendar connection flows;
+- expose mailbox and calendar connection paths through UI, MCP, and CLI for agent-first users;
+- add stable cursor pagination and token budget controls for high-volume context retrieval.
+
+## Highlights
+
+### Email Context Workflow
+
+- Customer Email is split into clearer surfaces: **Mailbox Context** for customer-message ingestion and **Outbound Actions** for governed drafts, approvals, provider drafts, and sends.
+- Connected mailboxes now carry explicit context-sync, send, provider-draft, default-sender, and status fields.
+- Drafts and sends persist sender metadata, including `from_email`, `from_name`, `sender_type`, and `mailbox_connection_id`.
+- Sender resolution now prefers the actor's send-enabled mailbox, then tenant fallback provider, and leaves save-draft-only behavior when no sender is available.
+- Rejected outbound emails remain discoverable, show reviewer context, block direct send, and can be revised in place for approval resubmission.
+- Email search and subject summaries now keep rejected, failed, pending, draft, and account-linked outbound records visible instead of letting them disappear between scoped and global views.
+
+### Sent Email Becomes Context Safely
+
+- Sent email is recorded as account activity and becomes context for future agents.
+- CRMy distinguishes seller/CRMy-authored outbound email from customer-authored evidence, so agents can see what your team said without treating it as what the customer claimed.
+- Email and calendar sources are traceable through Raw Context, Signal, Memory, Lineage, and account activity views.
+- Reply-chain metadata, sender identity, linked records, and provider thread/conversation context are preserved so follow-up replies can be matched back to the original workflow.
+
+### Mailbox, Calendar, and OAuth Setup
+
+- System Connections now separates provider OAuth setup from personal mailbox/calendar connection.
+- Hosted deployments can use CRMy-managed Google/Microsoft OAuth apps, while enterprise tenants can bring tenant-owned OAuth apps when they need custom consent, publisher identity, security review, or domain restrictions.
+- Admins can see actor mailbox, sender, and calendar coverage from Actor settings.
+- Members and managers get a guided Overview prompt to connect email and calendar, with simpler copy focused on customer memory value instead of redirect-path details.
+- Gmail/Outlook connection flows support self-service browser auth from the UI, and MCP/CLI tools can return an `auth_url` for users working through agent harnesses.
+
+### Actor Controls and Scope
+
+- Admins can activate, deactivate, or disconnect actor mailbox/calendar connections while preserving the distinction between reversible pause and destructive disconnect.
+- Users can deactivate or disconnect their own mailbox/calendar from Customer Email and Customer Activity.
+- Mailbox and calendar ingestion scopes support owned-account versus accessible-account modes, using account domains and additional domains to match customer records.
+- Account domain collision handling, account splitting, and account merge support help admins resolve ambiguous or misassigned customer domains.
+
+### Agent-Facing Email Tools
+
+- MCP email tools now document mailbox connections as both context sources and sender identities.
+- `email_create`, `email_draft_preview`, and `email_draft_save` expose selected sender information and explain how sends flow through approval, provider draft, or delivery.
+- `mailbox_connection_start` and `calendar_connection_start` let a human-linked actor start OAuth from MCP/CLI by returning a browser auth URL.
+- Tenant shared sender settings are now documented as fallback/shared/system delivery, not the user's personal mailbox.
+
+### Retrieval, Scale, and Token Control
+
+- Context, Raw Context, Signal Group, and Activity list pagination now use stable timestamp-plus-id cursors so high-volume timestamp ties do not skip or duplicate rows.
+- Briefings and Action Context now support token budget profiles: `tiny`, `standard`, `deep`, and `evidence_heavy`.
+- `evidence_mode` lets agents choose compact evidence summaries, full proof inline, or no evidence arrays for cheap scanning.
+- Ranking now accounts for confidence, freshness decay, context type priority, evidence support, and proposed action relevance.
+- README now includes a dedicated section explaining how CRMy reduces token usage by compressing Raw Context into Signals/Memory, using action-sized retrieval, and keeping proof available on demand.
+
+### Release and Operations Polish
+
+- OpenAPI was regenerated for the new email, OAuth, sender identity, Action Context, pagination, and token-budget contracts.
+- Durability/static coverage now checks email visibility, mailbox/calendar setup, sender metadata, OAuth readiness, stable cursor pagination, briefing contract parity, and docs alignment.
+- Packaged server web assets were rebuilt for the npm release.
+
+## Published Packages
+
+Published to npm:
+
+- `@crmy/core@0.9.1`
+- `@crmy/shared@0.9.1`
+- `@crmy/server@0.9.1`
+- `@crmy/web@0.9.1`
+- `@crmy/cli@0.9.1`
+- `@crmy/openclaw-plugin@0.9.1`
+
+## Quick Validation
+
+For a fresh local demo:
+
+```bash
+npx -y @crmy/cli init --demo
+npx -y @crmy/cli doctor
+npx -y @crmy/cli agent-smoke
+npx -y @crmy/cli briefing "account:Northstar Labs"
+npx -y @crmy/cli action-context "account:Northstar Labs" --action customer_outreach
+```
+
+To validate the email setup path, open CRMy and use:
+
+1. **Settings -> System Connections -> OAuth** to verify Google/Microsoft readiness.
+2. **Customer Email -> Mailboxes & Senders** to connect a personal mailbox.
+3. **Customer Activity -> Connections** to connect calendar context.
+4. **Settings -> Actors** to confirm mailbox, sender, and calendar coverage.
+5. **Customer Email -> Outbound Actions** to draft, review, reject/revise, approve, or send with visible sender identity.
+
+## Validation Run
+
+Before publish:
+
+- `npm run build`
+- `npm run lint`
+- `npm run test:durability --workspace=packages/server` — 156/156 passing
+- `npm run generate:openapi --workspace=packages/server`
+- `npm publish --workspaces --include-workspace-root --dry-run`
+- npm registry verification for all six `0.9.1` packages
+
+## Notes and Caveats
+
+- Real Gmail and Microsoft provider behavior still depends on tenant OAuth configuration, granted scopes, provider policy, and mailbox permissions. Test with real tenant credentials before making production email-delivery claims.
+- CRMy-managed OAuth apps are supported as the intended hosted-SaaS direction, while self-hosted/local installs can continue using environment-managed OAuth credentials.
+- Calendar free/busy suggestions intentionally avoid exposing raw calendar event details.
+- Full multi-instance hosted MCP/session portability still depends on sticky routing and the documented durable runtime architecture.
+- Global rate limiting remains a post-0.9 roadmap item; actor-scoped request controls and operational safeguards are in place, but large hosted deployments should still front CRMy with platform-level controls.
+
+## Community Testing Wanted
+
+The highest-value feedback for v0.9.1 is real email and calendar workflow testing:
+
+- Gmail and Outlook OAuth setup with different tenant policies;
+- actor mailbox send, provider draft, and tenant fallback sender behavior;
+- rejected email revision and approval resubmission;
+- customer replies syncing back into account context;
+- sent email appearing as CRMy-authored activity and context;
+- mailbox/calendar ingestion scope behavior for owned versus accessible accounts;
+- domain collisions, account split/merge flows, and ambiguous customer matching;
+- MCP/CLI-only mailbox or calendar connection paths using returned auth URLs.
+
+If you are testing CRMy with real GTM email/calendar data, please share sanitized threads, missed record matches, reply-chain edge cases, OAuth setup blockers, and places where agent-facing context is too large, too thin, or missing proof.
+
 # CRMy v0.9.0
 
 CRMy v0.9.0 is the agent reliability and polish release — the hardening line that brings durable workspace agent execution, richer email and inbox surfaces, and a tighter admin and object UX into a coherent whole.
