@@ -46,6 +46,7 @@ import { resolveLlmTimeoutMs } from '../dist/agent/provider-utils.js';
 import { callLLM } from '../dist/agent/providers/llm.js';
 import { previewRecordDraft } from '../dist/services/record-drafts.js';
 import { processNextBatch as processContextOutboxBatch } from '../dist/workers/context_ingestion_worker.service.js';
+import { listCrmyEvalSuites, runCrmyEval } from '../dist/evals/runner.js';
 
 const baseInput = {
   tenantId: '11111111-1111-4111-8111-111111111111',
@@ -1489,7 +1490,7 @@ function registrySchemasForFixture(registry = {}) {
 }
 
 test('Raw Context golden corpus covers core GTM extraction scenarios', async () => {
-  const corpusPath = new URL('./fixtures/raw-context-golden-corpus.json', import.meta.url);
+  const corpusPath = new URL('../src/evals/fixtures/raw-context-golden-corpus.json', import.meta.url);
   const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
   assert.ok(Array.isArray(corpus));
   assert.ok(corpus.length >= 8);
@@ -1560,7 +1561,7 @@ test('Raw Context golden corpus covers core GTM extraction scenarios', async () 
 });
 
 test('Raw Context custom registry corpus respects tenant Memory vocabulary', async () => {
-  const corpusPath = new URL('./fixtures/raw-context-custom-registry-corpus.json', import.meta.url);
+  const corpusPath = new URL('../src/evals/fixtures/raw-context-custom-registry-corpus.json', import.meta.url);
   const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
   assert.ok(Array.isArray(corpus));
   assert.ok(corpus.length >= 4);
@@ -1616,6 +1617,84 @@ test('Raw Context custom registry corpus respects tenant Memory vocabulary', asy
       }
     }
   }
+});
+
+test('local eval harness wraps deterministic customer-context corpora', async () => {
+  const sharedSchemas = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
+  assert.match(sharedSchemas, /raw_context_extraction_quality/);
+  assert.match(sharedSchemas, /export const evalRunProfile/);
+  assert.match(sharedSchemas, /implementation_status/);
+  assert.match(sharedSchemas, /uses_golden_model_output/);
+  assert.match(sharedSchemas, /model_metadata/);
+
+  const suites = await listCrmyEvalSuites();
+  const suiteNames = suites.map(suite => suite.name);
+  assert.deepEqual(suiteNames, [
+    'raw_context_extraction',
+    'raw_context_custom_registry',
+    'record_resolution',
+    'raw_context_extraction_quality',
+    'retrieval_quality',
+    'action_context',
+    'source_attribution',
+    'tool_choice',
+    'agent_trajectory',
+  ]);
+  const contractSuites = suites.filter(suite => suite.profiles.includes('contract'));
+  assert.ok(contractSuites.every(suite => suite.deterministic && !suite.requires_model && !suite.requires_database));
+  assert.equal(suites.find(suite => suite.name === 'raw_context_extraction')?.uses_golden_model_output, true);
+  assert.equal(suites.find(suite => suite.name === 'raw_context_extraction_quality')?.uses_golden_model_output, false);
+
+  const run = await runCrmyEval();
+  assert.equal(run.version, 'crmy.eval_result.v1');
+  assert.equal(run.profile, 'contract');
+  assert.equal(run.status, 'pass');
+  assert.equal(run.totals.failed, 0);
+  assert.equal(run.totals.errored, 0);
+  assert.ok(run.totals.cases >= 20);
+  assert.equal(run.results.every(result => result.status === 'pass'), true);
+  assert.ok(run.scores.expected_signal_recall > 0.9);
+  assert.equal(run.scores.forbidden_link_precision, 1);
+});
+
+test('active context quality evals run seeded gates and live extraction without golden input', async () => {
+  const seeded = await runCrmyEval({ profile: 'seeded_context' });
+  assert.equal(seeded.status, 'pass');
+  assert.equal(seeded.totals.cases, 3);
+  assert.equal(seeded.scores.required_context_recall, 1);
+  assert.equal(seeded.scores.scope_leak_count, 0);
+  assert.equal(seeded.scores.readiness_decision_accuracy, 1);
+  assert.equal(seeded.scores.unsafe_writeback_allowed, 0);
+  assert.equal(seeded.scores.unsafe_customer_claim_allowed, 0);
+
+  const skippedLive = await runCrmyEval({ profile: 'live_model' });
+  assert.equal(skippedLive.status, 'skipped');
+  assert.equal(skippedLive.results.every(result => result.status === 'skipped'), true);
+
+  const live = await runCrmyEval({
+    profile: 'live_model',
+    liveExtractionModelCaller: async ({ fixture }) => {
+      const entries = (fixture.expected_signal_types ?? []).map((contextType, index) => ({
+        context_type: contextType,
+        title: `${contextType} from ${fixture.id}`,
+        body: fixture.document,
+        confidence: fixture.must_not_auto_promote ? 0.5 : 0.9,
+        structured_data: {},
+        evidence: [{ source_type: fixture.source_type ?? 'raw_context', snippet: fixture.document.slice(0, 80), confidence: 0.9 }],
+        tags: ['injected_eval'],
+      }));
+      const recordProposals = fixture.expected_behavior === 'propose_child_record_for_review'
+        ? [{ record_type: 'opportunity', name: 'Injected proposal', confidence: 0.8, reason: 'Fixture expects a proposal.', fields: { name: 'Injected proposal' } }]
+        : [];
+      return JSON.stringify({ context_entries: entries, record_proposals: recordProposals });
+    },
+  });
+  assert.equal(live.status, 'pass');
+  assert.equal(live.model_metadata.caller, 'injected');
+  assert.equal(live.suites[0].uses_golden_model_output, false);
+  assert.equal(live.results.every(result => result.expected?.uses_golden_model_output === false), true);
+  assert.equal(live.scores.parse_success, 1);
+  assert.ok(live.scores.expected_signal_recall >= 0.85);
 });
 
 const extractionTenantId = '11111111-1111-4111-8111-111111111111';
@@ -2077,7 +2156,7 @@ class FakeExtractionDb {
 }
 
 test('Raw Context corpus can replay through extraction write and grouping pipeline without a live model', async () => {
-  const corpusPath = new URL('./fixtures/raw-context-golden-corpus.json', import.meta.url);
+  const corpusPath = new URL('../src/evals/fixtures/raw-context-golden-corpus.json', import.meta.url);
   const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
   const fixture = corpus.find(item => item.id === 'procurement_and_security_path');
   assert.ok(fixture);
@@ -2106,7 +2185,7 @@ test('Raw Context corpus can replay through extraction write and grouping pipeli
 });
 
 test('Raw Context corpus replay records a clean no-context receipt without creating Signals', async () => {
-  const corpusPath = new URL('./fixtures/raw-context-golden-corpus.json', import.meta.url);
+  const corpusPath = new URL('../src/evals/fixtures/raw-context-golden-corpus.json', import.meta.url);
   const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
   const fixture = corpus.find(item => item.id === 'no_customer_specific_context');
   assert.ok(fixture);
@@ -2663,7 +2742,7 @@ async function withMockSubjectDetectionLLM(candidates, fn) {
 }
 
 test('Record resolution golden corpus covers account-scoped and ambiguous GTM references', async () => {
-  const corpusPath = new URL('./fixtures/record-resolution-golden-corpus.json', import.meta.url);
+  const corpusPath = new URL('../src/evals/fixtures/record-resolution-golden-corpus.json', import.meta.url);
   const corpus = JSON.parse(await readFile(corpusPath, 'utf8'));
   assert.ok(Array.isArray(corpus));
   assert.ok(corpus.length >= 8);

@@ -1,0 +1,164 @@
+[
+  {
+    "id": "custom_implementation_owner_ready",
+    "title": "Custom implementation owner Signal is ready when required details are present",
+    "registry": {
+      "custom_types": [
+        {
+          "type_name": "implementation_owner",
+          "label": "Implementation Owner",
+          "is_extractable": true,
+          "json_schema": {
+            "type": "object",
+            "properties": {
+              "person_name": { "type": "string" },
+              "responsibility": { "type": "string" },
+              "coverage_area": { "type": "string" },
+              "confidence_basis": { "type": "string" }
+            },
+            "required": ["person_name", "responsibility", "coverage_area", "confidence_basis"]
+          }
+        }
+      ]
+    },
+    "document": "Avery will own the EMEA rollout implementation, coordinate enablement, and report weekly adoption blockers.",
+    "expected_signal_types": ["implementation_owner"],
+    "expected_readiness": {
+      "implementation_owner": "ready_for_memory"
+    },
+    "golden_model_output": {
+      "context_entries": [
+        {
+          "context_type": "implementation_owner",
+          "title": "Avery owns EMEA rollout implementation",
+          "body": "Avery will own the EMEA rollout implementation and coordinate enablement.",
+          "confidence": 0.88,
+          "structured_data": {
+            "person_name": "Avery",
+            "responsibility": "own rollout implementation and coordinate enablement",
+            "coverage_area": "EMEA rollout",
+            "confidence_basis": "stated directly in meeting notes"
+          },
+          "evidence": [{ "source_type": "meeting_notes", "snippet": "Avery will own the EMEA rollout implementation" }]
+        }
+      ],
+      "record_proposals": []
+    }
+  },
+  {
+    "id": "custom_implementation_owner_missing_required_detail",
+    "title": "Custom implementation owner Signal remains reviewable when required detail is missing",
+    "registry": {
+      "custom_types": [
+        {
+          "type_name": "implementation_owner",
+          "label": "Implementation Owner",
+          "is_extractable": true,
+          "json_schema": {
+            "type": "object",
+            "properties": {
+              "person_name": { "type": "string" },
+              "responsibility": { "type": "string" },
+              "coverage_area": { "type": "string" },
+              "confidence_basis": { "type": "string" }
+            },
+            "required": ["person_name", "responsibility", "coverage_area", "confidence_basis"]
+          }
+        }
+      ]
+    },
+    "document": "Avery may help with rollout, but the team did not confirm which region or ownership scope.",
+    "expected_signal_types": ["implementation_owner"],
+    "expected_readiness": {
+      "implementation_owner": "needs_more_detail"
+    },
+    "expected_missing_details": {
+      "implementation_owner": ["Coverage Area", "Confidence Basis"]
+    },
+    "must_not_auto_promote": true,
+    "golden_model_output": {
+      "context_entries": [
+        {
+          "context_type": "implementation_owner",
+          "title": "Avery may help with rollout",
+          "body": "Avery may help with rollout, but ownership scope is not confirmed.",
+          "confidence": 0.67,
+          "structured_data": {
+            "person_name": "Avery",
+            "responsibility": "may help with rollout"
+          },
+          "evidence": [{ "source_type": "meeting_notes", "snippet": "Avery may help with rollout" }]
+        }
+      ],
+      "record_proposals": []
+    }
+  },
+  {
+    "id": "admin_disabled_key_fact_is_unsupported",
+    "title": "Disabled default type is treated as unsupported by the active registry",
+    "registry": {
+      "disabled_types": ["key_fact"]
+    },
+    "document": "The customer said CRM writeback approvals are important but the admin disabled generic Key Fact extraction.",
+    "expected_signal_types": [],
+    "expected_unsupported_types": ["key_fact"],
+    "golden_model_output": {
+      "context_entries": [
+        {
+          "context_type": "key_fact",
+          "title": "CRM writeback approvals matter",
+          "body": "The customer said CRM writeback approvals are important.",
+          "confidence": 0.82,
+          "structured_data": { "fact": "CRM writeback approvals are important" },
+          "evidence": [{ "source_type": "meeting_notes", "snippet": "CRM writeback approvals are important" }]
+        }
+      ],
+      "record_proposals": []
+    }
+  },
+  {
+    "id": "admin_stricter_success_criteria_blocks_incomplete_memory",
+    "title": "Admin stricter required fields block incomplete Success Criteria from Memory",
+    "registry": {
+      "overrides": [
+        {
+          "type_name": "success_criteria",
+          "json_schema": {
+            "type": "object",
+            "properties": {
+              "criterion": { "type": "string" },
+              "measurement": { "type": "string" },
+              "owner": { "type": "string" },
+              "priority": { "type": "string", "enum": ["critical", "high", "medium", "low"] }
+            },
+            "required": ["criterion", "measurement", "owner"]
+          }
+        }
+      ]
+    },
+    "document": "The customer wants faster rep prep, but did not define the measurement or owner.",
+    "expected_signal_types": ["success_criteria"],
+    "expected_readiness": {
+      "success_criteria": "needs_more_detail"
+    },
+    "expected_missing_details": {
+      "success_criteria": ["Measurement", "Owner"]
+    },
+    "must_not_auto_promote": true,
+    "golden_model_output": {
+      "context_entries": [
+        {
+          "context_type": "success_criteria",
+          "title": "Customer wants faster rep prep",
+          "body": "The customer wants faster rep prep, but measurement and owner are not defined.",
+          "confidence": 0.79,
+          "structured_data": {
+            "criterion": "faster rep prep"
+          },
+          "evidence": [{ "source_type": "meeting_notes", "snippet": "wants faster rep prep" }]
+        }
+      ],
+      "record_proposals": []
+    }
+  }
+]

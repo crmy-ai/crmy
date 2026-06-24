@@ -1,0 +1,281 @@
+[
+  {
+    "id": "champion_role_from_call",
+    "title": "Champion role from customer call",
+    "source_type": "call_transcript",
+    "source_occurred_at": "2026-05-12T17:00:00.000Z",
+    "document": "Maya said she will sponsor the evaluation with the VP of Sales, collect feedback from the pilot team, and push for a decision before the June steering meeting.",
+    "subject_hints": ["account:Northstar", "contact:Maya Patel", "opportunity:Agent Context Rollout"],
+    "expected_signal_types": ["stakeholder", "commitment", "buying_process"],
+    "expected_behavior": "create_reviewable_signals",
+    "must_not_auto_promote": false,
+    "golden_model_output": {
+      "context_entries": [
+        {
+          "context_type": "stakeholder",
+          "title": "Maya will sponsor the evaluation",
+          "body": "Maya said she will sponsor the evaluation with the VP of Sales.",
+          "confidence": 0.9,
+          "structured_data": { "person_name": "Maya", "role": "evaluation sponsor", "influence": "champion" },
+          "evidence": [{ "source_type": "call_transcript", "snippet": "Maya said she will sponsor the evaluation with the VP of Sales" }]
+        },
+        {
+          "context_type": "commitment",
+          "title": "Maya will collect pilot feedback",
+          "body": "Maya committed to collect feedback from the pilot team.",
+          "confidence": 0.86,
+          "structured_data": { "owner": "Maya", "commitment": "collect pilot feedback" },
+          "evidence": [{ "source_type": "call_transcript", "snippet": "collect feedback from the pilot team" }]
+        },
+        {
+          "context_type": "buying_process",
+          "title": "June steering meeting decision path",
+          "body": "The team is targeting a decision before the June steering meeting.",
+          "confidence": 0.84,
+          "structured_data": { "step": "June steering meeting", "target_outcome": "decision" },
+          "evidence": [{ "source_type": "call_transcript", "snippet": "push for a decision before the June steering meeting" }]
+        }
+      ],
+      "record_proposals": []
+    }
+  },
+  {
+    "id": "procurement_and_security_path",
+    "title": "Procurement and security path",
+    "source_type": "email",
+    "source_occurred_at": "2026-05-14T21:30:00.000Z",
+    "document": "Jordan confirmed procurement needs the DPA and InfoSec questionnaire before legal can approve the pilot expansion.",
+    "subject_hints": ["account:Northstar", "opportunity:Agent Context Rollout"],
+    "expected_signal_types": ["buying_process", "methodology_gap", "deal_risk"],
+    "expected_behavior": "create_reviewable_signals",
+    "must_not_auto_promote": true,
+    "golden_model_output": {
+      "context_entries": [
+        {
+          "context_type": "buying_process",
+          "title": "Procurement, InfoSec, and legal approval path",
+          "body": "Procurement needs the DPA and InfoSec questionnaire before legal can approve the pilot expansion.",
+          "confidence": 0.8,
+          "structured_data": { "steps": ["DPA", "InfoSec questionnaire", "legal approval"] },
+          "evidence": [{ "source_type": "email", "snippet": "procurement needs the DPA and InfoSec questionnaire before legal can approve" }]
+        },
+        {
+          "context_type": "methodology_gap",
+          "title": "Security and legal approval gap",
+          "body": "The approval path still has security and legal blockers.",
+          "confidence": 0.78,
+          "structured_data": { "gap": "security/legal approval", "blocker": "DPA and questionnaire" },
+          "evidence": [{ "source_type": "email", "snippet": "before legal can approve the pilot expansion" }]
+        },
+        {
+          "context_type": "deal_risk",
+          "title": "Procurement dependencies could delay expansion",
+          "body": "Pilot expansion depends on procurement, InfoSec, and legal completion.",
+          "confidence": 0.77,
+          "structured_data": { "risk": "approval delay", "severity": "medium" },
+          "evidence": [{ "source_type": "email", "snippet": "procurement needs the DPA" }]
+        }
+      ],
+      "record_proposals": []
+    }
+  },
+  {
+    "id": "success_criteria_from_workshop",
+    "title": "Success criteria from workshop",
+    "source_type": "meeting_notes",
+    "source_occurred_at": "2026-05-15T18:00:00.000Z",
+    "document": "The success criteria are reducing manual account research by 40%, improving rep prep time, and proving handoff approvals before any CRM writeback.",
+    "subject_hints": ["account:Northstar", "use_case:AI Account Prep"],
+    "expected_signal_types": ["success_criteria", "key_fact"],
+    "expected_behavior": "create_reviewable_signals",
+    "must_not_auto_promote": false,
+    "golden_model_output": {
+      "context_entries": [
+        {
+          "context_type": "success_criteria",
+          "title": "Reduce manual account research by 40%",
+          "body": "The workshop defined success as reducing manual account research by 40% and improving rep prep time.",
+          "confidence": 0.9,
+          "structured_data": { "metric": "manual account research", "target": "40% reduction" },
+          "evidence": [{ "source_type": "meeting_notes", "snippet": "reducing manual account research by 40%" }]
+        },
+        {
+          "context_type": "key_fact",
+          "title": "Writeback approvals are part of success criteria",
+          "body": "The customer wants to prove handoff approvals before CRM writeback.",
+          "confidence": 0.86,
+          "structured_data": { "fact": "handoff approvals required before CRM writeback" },
+          "evidence": [{ "source_type": "meeting_notes", "snippet": "proving handoff approvals before any CRM writeback" }]
+        }
+      ],
+      "record_proposals": []
+    }
+  },
+  {
+    "id": "new_opportunity_under_known_account",
+    "title": "New opportunity hinted under a known account",
+    "source_type": "call_notes",
+    "source_occurred_at": "2026-05-16T19:00:00.000Z",
+    "document": "Nike wants to explore a separate customer success rollout for EMEA after the US pilot stabilizes.",
+    "subject_hints": ["account:Nike"],
+    "expected_signal_types": ["key_fact", "forecast_signal"],
+    "expected_behavior": "propose_child_record_for_review",
+    "must_not_auto_promote": true,
+    "golden_model_output": {
+      "context_entries": [
+        {
+          "context_type": "key_fact",
+          "title": "Nike is exploring an EMEA customer success rollout",
+          "body": "Nike wants to explore a separate customer success rollout for EMEA after the US pilot stabilizes.",
+          "confidence": 0.76,
+          "structured_data": { "region": "EMEA", "initiative": "customer success rollout" },
+          "evidence": [{ "source_type": "call_notes", "snippet": "separate customer success rollout for EMEA" }]
+        },
+        {
+          "context_type": "forecast_signal",
+          "title": "Possible expansion after US pilot",
+          "body": "The EMEA rollout appears to be a future expansion contingent on the US pilot stabilizing.",
+          "confidence": 0.72,
+          "structured_data": { "signal": "possible expansion", "condition": "US pilot stabilizes" },
+          "evidence": [{ "source_type": "call_notes", "snippet": "after the US pilot stabilizes" }]
+        }
+      ],
+      "record_proposals": [
+        {
+          "record_type": "opportunity",
+          "name": "EMEA Customer Success Rollout",
+          "confidence": 0.78,
+          "reason": "The source mentions a separate EMEA rollout under Nike with no existing child record confirmed.",
+          "fields": { "account_name": "Nike", "stage": "qualification" }
+        }
+      ]
+    }
+  },
+  {
+    "id": "first_name_disambiguation_in_account",
+    "title": "First-name contact disambiguation within account scope",
+    "source_type": "email",
+    "source_occurred_at": "2026-05-17T16:00:00.000Z",
+    "document": "Maya asked us to send the rollout recap to her before Friday so she can brief finance.",
+    "subject_hints": ["account:Northstar"],
+    "expected_signal_types": ["commitment", "stakeholder"],
+    "expected_behavior": "resolve_contact_inside_account_scope",
+    "must_not_auto_promote": true,
+    "golden_model_output": {
+      "context_entries": [
+        {
+          "context_type": "commitment",
+          "title": "Maya asked for rollout recap before Friday",
+          "body": "Maya asked CRMy to send the rollout recap before Friday so she can brief finance.",
+          "confidence": 0.8,
+          "structured_data": { "owner": "CRMy", "requester": "Maya", "due": "Friday" },
+          "evidence": [{ "source_type": "email", "snippet": "send the rollout recap to her before Friday" }]
+        },
+        {
+          "context_type": "stakeholder",
+          "title": "Maya will brief finance",
+          "body": "Maya is involved in briefing finance on the rollout.",
+          "confidence": 0.74,
+          "structured_data": { "person_name": "Maya", "role": "finance briefer" },
+          "evidence": [{ "source_type": "email", "snippet": "so she can brief finance" }]
+        }
+      ],
+      "record_proposals": []
+    }
+  },
+  {
+    "id": "duplicate_transcript_same_event",
+    "title": "Duplicate transcript for the same event",
+    "source_type": "call_transcript",
+    "source_occurred_at": "2026-05-12T17:00:00.000Z",
+    "document": "Maya said she will sponsor the evaluation with the VP of Sales, collect feedback from the pilot team, and push for a decision before the June steering meeting.",
+    "subject_hints": ["account:Northstar", "contact:Maya Patel", "opportunity:Agent Context Rollout"],
+    "expected_signal_types": ["stakeholder", "commitment", "buying_process"],
+    "expected_behavior": "dedupe_existing_receipt",
+    "must_not_auto_promote": true,
+    "golden_model_output": {
+      "context_entries": [
+        {
+          "context_type": "stakeholder",
+          "title": "Maya will sponsor the evaluation",
+          "body": "Maya said she will sponsor the evaluation with the VP of Sales.",
+          "confidence": 0.9,
+          "structured_data": { "person_name": "Maya", "role": "evaluation sponsor", "influence": "champion" },
+          "evidence": [{ "source_type": "call_transcript", "snippet": "Maya said she will sponsor the evaluation with the VP of Sales" }]
+        },
+        {
+          "context_type": "commitment",
+          "title": "Maya will collect pilot feedback",
+          "body": "Maya committed to collect feedback from the pilot team.",
+          "confidence": 0.86,
+          "structured_data": { "owner": "Maya", "commitment": "collect pilot feedback" },
+          "evidence": [{ "source_type": "call_transcript", "snippet": "collect feedback from the pilot team" }]
+        },
+        {
+          "context_type": "buying_process",
+          "title": "June steering meeting decision path",
+          "body": "The team is targeting a decision before the June steering meeting.",
+          "confidence": 0.84,
+          "structured_data": { "step": "June steering meeting", "target_outcome": "decision" },
+          "evidence": [{ "source_type": "call_transcript", "snippet": "push for a decision before the June steering meeting" }]
+        }
+      ],
+      "record_proposals": []
+    }
+  },
+  {
+    "id": "no_customer_specific_context",
+    "title": "No customer-specific context",
+    "source_type": "note",
+    "source_occurred_at": "2026-05-18T15:00:00.000Z",
+    "document": "Reminder to update the team on the new demo environment and clean up the sample workspace.",
+    "subject_hints": [],
+    "expected_signal_types": [],
+    "expected_behavior": "skip_no_customer_specific_context",
+    "must_not_auto_promote": true,
+    "golden_model_output": {
+      "context_entries": [],
+      "record_proposals": []
+    }
+  },
+  {
+    "id": "conflicting_later_evidence",
+    "title": "Later event conflicts with prior commitment",
+    "source_type": "email",
+    "source_occurred_at": "2026-05-22T14:00:00.000Z",
+    "document": "Maya said the June steering meeting is now blocked because legal will not review the DPA until procurement finishes vendor onboarding.",
+    "subject_hints": ["account:Northstar", "contact:Maya Patel", "opportunity:Agent Context Rollout"],
+    "expected_signal_types": ["deal_risk", "buying_process", "forecast_signal"],
+    "expected_behavior": "create_conflict_or_review_signal",
+    "must_not_auto_promote": true,
+    "golden_model_output": {
+      "context_entries": [
+        {
+          "context_type": "deal_risk",
+          "title": "June steering meeting is blocked by legal timing",
+          "body": "The June steering meeting is now blocked because legal will not review the DPA until procurement finishes vendor onboarding.",
+          "confidence": 0.82,
+          "structured_data": { "risk": "legal review blocked", "severity": "high" },
+          "evidence": [{ "source_type": "email", "snippet": "June steering meeting is now blocked" }]
+        },
+        {
+          "context_type": "buying_process",
+          "title": "Procurement onboarding precedes legal DPA review",
+          "body": "Legal review depends on procurement finishing vendor onboarding.",
+          "confidence": 0.8,
+          "structured_data": { "dependency": "vendor onboarding before legal DPA review" },
+          "evidence": [{ "source_type": "email", "snippet": "legal will not review the DPA until procurement finishes vendor onboarding" }]
+        },
+        {
+          "context_type": "forecast_signal",
+          "title": "June timing is at risk",
+          "body": "The timing for the June steering meeting appears at risk due to procurement and legal blockers.",
+          "confidence": 0.74,
+          "structured_data": { "forecast_impact": "timing risk" },
+          "evidence": [{ "source_type": "email", "snippet": "now blocked because legal will not review the DPA" }]
+        }
+      ],
+      "record_proposals": []
+    }
+  }
+]

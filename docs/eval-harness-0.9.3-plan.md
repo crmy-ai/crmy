@@ -589,10 +589,12 @@ Recommended commands:
 
 ```bash
 crmy eval list
+crmy eval list --all
 crmy eval describe <suite>
-crmy eval run --suite retrieval_quality
-crmy eval run --suite action_context --profile local
-crmy eval run --suite agent_trajectory --model gpt-5.2
+crmy eval run --profile contract
+crmy eval run --profile seeded_context
+crmy eval run --profile agent_runtime
+crmy eval run --profile live_model --require-live
 crmy eval run --all --output ./eval-runs
 crmy eval compare <baseline_run_id_or_path> <candidate_run_id_or_path>
 crmy eval export <run_id_or_path> --format jsonl
@@ -607,7 +609,7 @@ Helpful flags:
 |---|---|
 | `--suite` | Select one suite. |
 | `--case` | Run one case or case pattern. |
-| `--profile` | Use a named eval profile such as `local`, `ci`, `model`, `live-connectors`. |
+| `--profile` | Use `contract`, `live_model`, `seeded_context`, or `agent_runtime`. |
 | `--tenant` | Run against an existing tenant when appropriate. |
 | `--seed` | Load a deterministic fixture seed. |
 | `--model` | Override Workspace Agent or judge model. |
@@ -615,6 +617,7 @@ Helpful flags:
 | `--redact` | Redact exported artifacts. Defaults to true for external export. |
 | `--output` | Write run artifacts to a directory. |
 | `--fail-under` | Fail process when aggregate score is below threshold. |
+| `--require-live` | Treat missing live-model eval configuration as a failure instead of a skip. |
 | `--changed-since` | Run cases touched since a Git ref for faster development loops. |
 | `--export` | Export to a named external format after running. |
 
@@ -846,10 +849,11 @@ For 0.9.3, database persistence should be optional unless the UI requires it.
 
 Recommended CI stages:
 
-1. Fast deterministic evals, no model, no embeddings.
-2. Optional embedding evals when configured.
-3. Optional model-backed evals when provider credentials are configured.
-4. Optional live connector certification evals in provider-specific environments.
+1. `crmy eval run --profile contract` for fast deterministic corpora, no model and no external services.
+2. `crmy eval run --profile seeded_context` for production briefing/Action Context/source-attribution service behavior against a fixture DB.
+3. `crmy eval run --profile live_model --require-live` for release candidates when provider credentials are configured.
+4. `crmy eval run --profile agent_runtime` for reported tool-choice and trajectory smoke coverage.
+5. Optional live connector certification evals in provider-specific environments when that suite lands.
 
 Recommended release gates:
 
@@ -857,8 +861,10 @@ Recommended release gates:
 |---|---|
 | Raw Context corpus | 100% deterministic pass. |
 | Record resolution corpus | 100% deterministic pass. |
+| Live extraction parse success | 100% when `--require-live` is used. |
+| Live extraction expected Signal recall | At least 0.85 when `--require-live` is used. |
 | Action Context high-risk false-allow rate | 0. |
-| Source attribution unsupported claim rate for customer-facing drafts | 0 in deterministic fixtures. |
+| Source attribution unsupported claim rate for customer-facing drafts | 0. |
 | Scope leak count | 0. |
 | Tool choice safe-front-door miss rate | 0 for canonical workflows. |
 | Durable replay duplicate-write count | 0. |
@@ -869,6 +875,8 @@ Score thresholds can be relaxed for experimental, model-backed, or semantic case
 ## Implementation Plan
 
 ### Phase 1: Schemas And Local Runner
+
+Status: **Implemented foundation.**
 
 - Add shared eval case/result/trace schemas.
 - Add fixture loader for JSON and JSONL.
@@ -885,6 +893,12 @@ Exit criteria:
 
 ### Phase 2: Retrieval And Action Context Suites
 
+Status: **Implemented first seeded gate.** The 0.9.3 runner now includes a
+small fixture DB that calls production `assembleBriefing` and
+`getActionContext` paths and scores retrieval recall, scope leaks, stale
+warnings, readiness decisions, unsafe writeback allowance, and source
+attribution safety. Broaden the corpus before 1.0.
+
 - Add seeded retrieval cases for Northstar and at least one ambiguous/stale/conflicting account.
 - Add `briefing_get` and `action_context_get` graders.
 - Add token packing and evidence-mode diagnostics.
@@ -897,6 +911,10 @@ Exit criteria:
 - High-risk false-allow cases fail the eval run.
 
 ### Phase 3: Tool Choice And Agent Trajectory
+
+Status: **Implemented smoke coverage.** The 0.9.3 runner reports tool-choice
+and trajectory scores using scripted or injected model-call outputs. This is
+not yet a release-blocking cross-runtime benchmark.
 
 - Add scenario prompts and expected tool paths.
 - Run Workspace Agent against deterministic fake/provider stubs where possible.

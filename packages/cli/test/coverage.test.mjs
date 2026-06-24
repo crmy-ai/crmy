@@ -123,6 +123,38 @@ test('Action Context has a friendly CLI command and efficient REST mapping', asy
   assert.match(routerSource, /router\.post\('\/action-context\/human-unblock'/);
 });
 
+test('Eval harness has a local CLI command and deterministic runner wiring', async () => {
+  const indexSource = await read('packages/cli/src/index.ts');
+  const commandSource = await read('packages/cli/src/commands/eval.ts');
+  const serverIndexSource = await read('packages/server/src/index.ts');
+  const runnerSource = await read('packages/server/src/evals/runner.ts');
+  const serverBuildScript = await read('packages/server/scripts/copy-web.cjs');
+
+  assert.match(indexSource, /evalCommand/);
+  assert.match(commandSource, /command\('list'\)/);
+  assert.match(commandSource, /command\('describe <suite>'\)/);
+  assert.match(commandSource, /command\('run'\)/);
+  assert.match(commandSource, /--profile <profile>/);
+  assert.match(commandSource, /--require-live/);
+  assert.match(commandSource, /--fail-under <score>/);
+  assert.match(commandSource, /--output <dir>/);
+  assert.match(commandSource, /includePlanned/);
+  assert.match(commandSource, /runCrmyEval/);
+  assert.match(commandSource, /listCrmyEvalSuites/);
+  assert.match(serverIndexSource, /listCrmyEvalSuites, runCrmyEval/);
+  assert.match(runnerSource, /raw_context_extraction/);
+  assert.match(runnerSource, /raw_context_extraction_quality/);
+  assert.match(runnerSource, /raw_context_custom_registry/);
+  assert.match(runnerSource, /record_resolution/);
+  assert.match(runnerSource, /retrieval_quality/);
+  assert.match(runnerSource, /action_context/);
+  assert.match(runnerSource, /source_attribution/);
+  assert.match(runnerSource, /tool_choice/);
+  assert.match(runnerSource, /agent_trajectory/);
+  assert.match(runnerSource, /uses_golden_model_output/);
+  assert.match(serverBuildScript, /eval fixtures copied/);
+});
+
 test('new MCP agent workflow tools have scope entries', async () => {
   const scopesSource = await read('packages/server/src/auth/scopes.ts');
   for (const tool of ['email_draft_preview', 'email_draft_save', 'record_draft_preview', 'mailbox_connection_start', 'calendar_connection_start']) {

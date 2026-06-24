@@ -617,16 +617,24 @@ Acceptance target: a new user sees one product story, not a collection of adjace
 
 ## 0.9.3: Eval Harness, Product Knowledge, And Agent Quality Gates
 
-Status: **Planned for 0.9.3.** See
+Status: **Foundation landed for 0.9.3; expanding toward 1.0 proof.** See
 [CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md) and
 [Governed Product Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
 
-0.9.3 should make CRMy's customer-context promise measurable. The existing
-durability and corpus tests prove many internal invariants, but customers and
-agent builders also need a first-class way to evaluate retrieval quality, tool
-choice, Action Context decisions, source attribution, and full agent
-trajectories across models, prompts, embeddings, connectors, and tenant
-configuration.
+0.9.3 makes CRMy's customer-context promise measurable in layers. The default
+`contract` profile proves parser, promotion, readiness, and record-resolution
+plumbing against deterministic corpora. The `seeded_context` profile calls
+production briefing and Action Context services against a fixture DB and scores
+retrieval recall, scope leaks, stale warnings, readiness decisions, unsafe
+writeback allowance, and source attribution safety. The `live_model` profile
+measures extraction quality from messy source text when eval model credentials
+are configured, and the `agent_runtime` profile reports tool-choice and
+trajectory smoke scores.
+
+The remaining 1.0 proof work is breadth and portability: more redacted
+customer-derived cases, embedding/semantic retrieval comparisons, live connector
+certification, model-backed cross-runtime agent trajectories, and public
+benchmark artifacts.
 
 0.9.3 should also add optional governed product, solution, pricing,
 implementation, security, compliance, roadmap, and competitive knowledge
@@ -636,20 +644,27 @@ customer-facing product claims without turning CRMy into a CMS or making
 product knowledge required for briefings, Action Context, writeback, or local
 agent workflows.
 
-Recommended direction:
+Implemented 0.9.3 foundation:
 
-- Add stable eval case, eval result, and eval trace schemas.
-- Add a local-first CLI runner such as `crmy eval run --suite action_context`.
-- Wrap the Raw Context and record-resolution golden corpora as eval suites
-  instead of keeping them only as internal assertions.
-- Add first-class suites for retrieval quality, tool choice, Action Context,
-  source attribution, agent trajectory, and connector certification.
-- Emit trace artifacts with spans for subject resolution, retrieval, policy
-  evaluation, Action Context assembly, tool calls, handoffs, writeback previews,
-  and final output scoring.
-- Export eval runs to generic JSONL, OpenAI Evals-style datasets,
-  Ragas-compatible retrieval rows, and LangSmith-compatible traces or datasets
-  where configured.
+- Stable eval case, suite, result, profile, threshold, model metadata, and
+  artifact schemas.
+- Local-first CLI profiles: `contract`, `live_model`, `seeded_context`, and
+  `agent_runtime`.
+- Raw Context, custom registry, and record-resolution contract suites.
+- Live extraction quality suite that does not consume `golden_model_output` as
+  model input and skips cleanly unless live config is required.
+- Seeded retrieval, Action Context, and source-attribution gates.
+- Tool-choice and agent-trajectory smoke suites.
+- Native JSON and JSONL artifact output for Ragas/LangSmith-style offline
+  analysis.
+
+Recommended next direction:
+
+- Emit richer trace spans for subject resolution, retrieval, policy evaluation,
+  Action Context assembly, tool calls, handoffs, writeback previews, and final
+  output scoring.
+- Export eval runs to OpenAI Evals-style datasets, Ragas-compatible retrieval
+  rows, and LangSmith-compatible traces or datasets where configured.
 - Support redacted customer-derived eval cases so production failures can become
   offline regression tests without leaking unnecessary customer data.
 - Build a shared `KnowledgeRetrievalService` and expose it through MCP, REST,
@@ -722,6 +737,353 @@ Acceptance target: when configured, agents can retrieve product and competitive
 context through CRMy in a way that is more specific, safer, cited, policy-aware,
 and auditable than edge-only retrieval. When not configured, CRMy behaves like
 the 0.9 customer Memory and Action Context product.
+
+## 0.9.x-1.0: Neutral Customer-Context Control Plane
+
+Goal: make CRMy the runtime-neutral trust boundary for customer-facing agents.
+Every supported agent runtime should be able to ingest customer context,
+retrieve Active Context, request Action Context, route human decisions, preview
+governed writes, execute approved writeback, and inspect proof through the same
+contracts.
+
+This work reinforces the core positioning:
+
+```text
+Source ingestion -> Signal review -> Memory -> Action Context -> HITL -> Governed writeback -> Proof
+```
+
+The 0.9.3 eval and governed product-knowledge workstreams are complementary:
+evals prove whether the control-plane contracts work, while product knowledge
+extends the same governance model from customer truth to customer-facing product
+claims. The remaining items below should land across 0.9.x and 1.0 based on
+risk, runtime dependencies, and production scale requirements.
+
+### 1. Agent Runtime Certification Matrix
+
+Certify CRMy workflows across the agent runtimes and clients customers actually
+use.
+
+Target runtimes and clients:
+
+- CRMy Workspace Agent;
+- Codex and other CLI/workbench agents;
+- Claude Desktop / Claude Code MCP clients;
+- OpenAI Agents SDK;
+- LangGraph;
+- custom MCP clients;
+- REST-only agents and workflow runners.
+
+Canonical certification flow:
+
+```text
+customer_record_resolve
+  -> briefing_get
+  -> action_context_get
+  -> draft/preview
+  -> HITL or writeback
+  -> context_lineage_get
+```
+
+0.9.3 complement:
+
+- Seed certification cases through the eval harness.
+- Publish a small runtime compatibility report for the demo workflow.
+
+1.0 target:
+
+- Every certified runtime has a repeatable harness report covering read,
+  draft, human-unblock, writeback-preview, and lineage flows.
+
+### 2. Portable Action Context Contract
+
+Treat Action Context as the stable preflight contract agents use before
+meaningful customer-facing or system-changing work.
+
+The contract should remain versioned and portable across MCP, REST, CLI,
+Workspace Agent, workflows, sequences, and future SDKs.
+
+Required packet areas:
+
+- `operating_mode`;
+- `readiness`;
+- `policy`;
+- `source_posture`;
+- `allowed_actions`;
+- `human_unblock`;
+- `proof`;
+- `next_tools`;
+- `context_packing`.
+
+0.9.3 complement:
+
+- Add eval cases that assert contract shape, mode accuracy, and false-allow
+  behavior.
+- Document the Action Context contract as the agent preflight boundary.
+
+1.0 target:
+
+- Supported runtimes can consume the same Action Context packet without
+  CRMy-UI-specific assumptions.
+
+### 3. Universal Proof Receipt Format
+
+Standardize proof receipts across retrieval, email drafts, HITL, assignments,
+record drafts, workflows, sequences, writebacks, and agent turns.
+
+Every meaningful agent action should be able to answer:
+
+- what context was retrieved;
+- what evidence supported the action;
+- which Signals were unresolved;
+- what policy decision applied;
+- who approved or blocked it;
+- what external side effect happened;
+- where Lineage can be inspected.
+
+0.9.3 complement:
+
+- Include proof-completeness scoring in eval results.
+- Preserve product-knowledge retrieval receipts separately from customer Memory
+  receipts.
+
+1.0 target:
+
+- Retrieval, action, Handoff, writeback, and audit receipts share a consistent
+  envelope with stable references and export support.
+
+### 4. Source Connector Certification Program
+
+Make provider readiness measurable instead of anecdotal.
+
+Certified source classes:
+
+- Customer Email;
+- Customer Activity and calendars;
+- transcript and notes drops;
+- Salesforce;
+- HubSpot;
+- Databricks;
+- Snowflake;
+- future support, product-usage, document, and custom API sources.
+
+Certification dimensions:
+
+- sync correctness;
+- source authority;
+- field mapping;
+- retry and replay;
+- redaction and secret safety;
+- writeback preview and receipts;
+- lineage and proof;
+- skipped-source accounting;
+- scoped-access behavior.
+
+0.9.3 complement:
+
+- Add connector certification as an eval suite category.
+
+1.0 target:
+
+- Every first-class connector has a portable certification report before it is
+  positioned as production-ready.
+
+### 5. Context Source Registry And Health Model
+
+Represent every source as a governed source with ownership, freshness,
+authority, health, and failure state.
+
+Admins should be able to inspect:
+
+- source freshness and last successful sync;
+- failed extraction or sync attempts;
+- stale credentials;
+- unmapped fields;
+- duplicate-source risk;
+- source-authority posture;
+- skipped-source volume;
+- recovery actions.
+
+1.0 target:
+
+- Source health is visible to humans and available to agents through briefings,
+  Action Context, Lineage, Operations, and connector certification reports.
+
+### 6. Memory Governance Lifecycle
+
+Deepen Memory lifecycle controls beyond creation and retrieval.
+
+Lifecycle states and controls should include:
+
+- freshness policies;
+- confidence decay by context type;
+- revalidation queues;
+- contradiction review;
+- source revocation;
+- retention and redaction;
+- confidence recalibration;
+- supersession rules;
+- sensitive-claim approval rules.
+
+0.9.3 complement:
+
+- Add eval cases for stale, contradictory, unsupported, and source-revoked
+  claims.
+
+1.0 target:
+
+- CRMy can explain why a Memory item is current, stale, superseded, disputed,
+  sensitive, rejected, redacted, or unsafe to use.
+
+### 7. Agent Identity And Delegation Model
+
+Strengthen actor identity for agents across runtimes.
+
+Required identity boundaries:
+
+- agent registration;
+- runtime/client identity;
+- delegated human actor;
+- scope grants;
+- approval authority;
+- impersonation prevention;
+- actor/session fingerprints;
+- audit identity references.
+
+1.0 target:
+
+- Every agent action can answer which agent acted, on behalf of whom, with which
+  scopes, from which runtime, and under which approval authority.
+
+### 8. Control-Plane Event Stream
+
+Expose a durable event stream for agent runtimes, integrations, and operators.
+
+Event families:
+
+- Raw Context received, processed, failed, or reprocessed;
+- Signal created, grouped, ready, confirmed, rejected, or blocked;
+- Memory confirmed, stale, superseded, redacted, or revoked;
+- Action Context retrieved;
+- Handoff submitted, assigned, approved, rejected, or expired;
+- writeback previewed, requested, approved, executed, failed, or retried;
+- proof receipt created;
+- source health changed.
+
+1.0 target:
+
+- External agents and operator systems can subscribe to customer-context control
+  events without polling every CRMy surface.
+
+### 9. Policy Engine V2
+
+Make action policies more expressive, explainable, and portable.
+
+Policy inputs should include:
+
+- action type;
+- actor and delegated actor;
+- runtime/client identity;
+- subject type and record state;
+- field sensitivity;
+- source authority;
+- evidence strength;
+- customer-facing risk;
+- product-claim approval;
+- tenant-specific rules.
+
+Policy outputs should remain simple:
+
+- `allow`;
+- `inform`;
+- `warn`;
+- `draft_only`;
+- `approval_required`;
+- `blocked`.
+
+0.9.3 complement:
+
+- Add eval cases for false allow, false review, field authority, product-claim
+  approval, and customer-facing unsupported claims.
+
+1.0 target:
+
+- Policy decisions are explainable, auditable, portable across runtime surfaces,
+  and consistently attached to Action Context and proof receipts.
+
+### 10. Runtime-Neutral Handoff Protocol
+
+Make HITL and Handoff packets portable across CRMy UI, email/Slack-style
+notification channels, MCP clients, and external workflow systems.
+
+Required Handoff packet areas:
+
+- subject and action summary;
+- proposed action payload;
+- Action Context packet;
+- evidence and source posture;
+- policy decision;
+- human question;
+- allowed decisions;
+- deadline/SLA;
+- resulting proof receipt.
+
+1.0 target:
+
+- A human can approve, reject, clarify, reassign, or take over with the same
+  evidence packet regardless of where the request originated.
+
+### 11. Governed Product Knowledge Integration
+
+Use the 0.9.3 governed product-knowledge layer to extend the control plane from
+customer truth to customer-facing product claims.
+
+Control-plane requirements:
+
+- product claims stay separate from customer Memory;
+- retrieval returns citations, freshness, approval, visibility, and warnings;
+- customer-facing drafts cannot use stale, unapproved, internal-only, deprecated,
+  or unsupported product claims;
+- Action Context can include product-claim proof when an action depends on it;
+- Lineage can show which product-knowledge receipts influenced a draft or
+  action.
+
+0.9.3 target:
+
+- Ship the optional retrieval contract, proof receipts, and basic Action Context
+  or draft integration.
+
+1.0 target:
+
+- Product-knowledge retrieval participates in policy, proof, evals, and
+  customer-facing action governance without becoming required infrastructure.
+
+### 12. Eval And Benchmark Suite For Control-Plane Claims
+
+Use the 0.9.3 eval harness as the proof mechanism for the control-plane
+roadmap.
+
+Benchmark areas:
+
+- source ingestion quality;
+- Signal review quality;
+- Memory retrieval quality;
+- Action Context safety;
+- HITL routing;
+- governed writeback;
+- source attribution;
+- proof completeness;
+- runtime portability;
+- product-knowledge claim safety.
+
+0.9.3 target:
+
+- Run local contract, seeded-context, live-model, and agent-runtime smoke suites
+  and produce portable JSON/JSONL reports.
+
+1.0 target:
+
+- Publish a public benchmark suite showing that CRMy can act as the neutral
+  customer-context control plane across agent runtimes and source systems.
 
 ## 1.0: Resilience At Scale
 
@@ -962,6 +1324,9 @@ Acceptance target: 1.0 ships with measurable scale budgets, release gates, and r
 - Hosted browser deployments use session storage patterns appropriate for production SaaS, not long-lived bearer tokens in `localStorage`, while local/dev/self-hosted setup remains fast and understandable.
 - Developers can build against stable SDKs and MCP tools without reverse-engineering app behavior.
 - Admins can prove what happened, why it happened, who approved it, which systems changed, and what context the agent used.
+- Certified agent runtimes can complete the canonical control-plane flow: resolve customer, retrieve briefing, request Action Context, route human review or writeback preview, and inspect Lineage.
+- Action Context, proof receipts, Handoffs, source health, and policy decisions are stable contracts across MCP, REST, CLI, Workspace Agent, workflows, and sequences.
+- Product-knowledge retrieval, when configured, participates in policy, citation, freshness, eval, and proof flows without merging global product truth into customer Memory.
 
 ## Test Plan
 
@@ -985,6 +1350,9 @@ Acceptance target: 1.0 ships with measurable scale budgets, release gates, and r
 - **Queue recovery tests:** worker crash/restart, stale lock recovery, retry/backoff, dead-letter handling, context outbox recovery, raw extraction retry, embedding catch-up, and agent-turn continuation.
 - **Source-sync scale tests:** provider pagination, cursor replay, partial-page failure, skipped-source aggregate stats, dedupe, row-level errors, and checkpoint resume for mailbox, calendar, CRM, and warehouse sync.
 - **Agent/MCP resilience tests:** interrupted SSE stream, polling recovery, multi-instance routing, stale MCP session behavior, tool-call idempotency, broad-query limits, and scoped denied access.
+- **Runtime certification tests:** canonical control-plane flows pass across Workspace Agent, MCP clients, REST-only agents, and supported external agent runtimes without runtime-specific trust shortcuts.
+- **Control-plane contract tests:** Action Context, proof receipts, Handoff packets, source health, and policy decisions keep stable schemas and consistent behavior across MCP, REST, CLI, UI, workflows, and sequences.
+- **Product-knowledge governance tests:** product claims remain separate from customer Memory, customer-facing drafts exclude stale/unapproved/internal-only/unsupported claims, and retrieval receipts link citations back to approved sources.
 
 ## Implementation Notes
 

@@ -95,6 +95,92 @@ export const signalResolution = z.object({
   helper_text: z.string(),
 });
 
+// -- Eval harness schemas --
+
+export const evalSuiteName = z.enum([
+  'raw_context_extraction',
+  'raw_context_extraction_quality',
+  'raw_context_custom_registry',
+  'record_resolution',
+  'retrieval_quality',
+  'tool_choice',
+  'action_context',
+  'source_attribution',
+  'agent_trajectory',
+  'connector_certification',
+]);
+
+export const evalRunStatus = z.enum(['pass', 'fail', 'error', 'skipped']);
+export const evalRunProfile = z.enum(['contract', 'live_model', 'seeded_context', 'agent_runtime']);
+export const evalSuiteImplementationStatus = z.enum(['implemented', 'planned']);
+export const evalThreshold = z.object({
+  metric: z.string().min(1),
+  op: z.enum(['>=', '<=', '=']),
+  value: z.number(),
+});
+export const evalModelMetadata = z.object({
+  provider: z.string().optional(),
+  base_url: z.string().optional(),
+  model: z.string().optional(),
+  live_config_present: z.boolean().optional(),
+  caller: z.enum(['env', 'injected', 'none']).optional(),
+});
+
+export const evalCaseSummary = z.object({
+  id: z.string().min(1),
+  suite: evalSuiteName,
+  profile: evalRunProfile,
+  title: z.string().optional(),
+  status: evalRunStatus,
+  scores: z.record(z.number()),
+  expected: z.record(z.unknown()).optional(),
+  observed: z.record(z.unknown()).optional(),
+  artifacts: z.array(z.string()).optional(),
+  model_metadata: evalModelMetadata.optional(),
+  diagnostics: z.object({
+    missing_expected_items: z.array(z.string()),
+    forbidden_items_found: z.array(z.string()),
+    warnings: z.array(z.string()),
+  }),
+});
+
+export const evalSuiteSummary = z.object({
+  name: evalSuiteName,
+  title: z.string(),
+  description: z.string(),
+  deterministic: z.boolean(),
+  requires_model: z.boolean(),
+  requires_database: z.boolean(),
+  case_count: z.number().int().min(0),
+  implementation_status: evalSuiteImplementationStatus,
+  proof_scope: z.string(),
+  profiles: z.array(evalRunProfile),
+  quality_gate: z.boolean(),
+  uses_golden_model_output: z.boolean(),
+  limitations: z.array(z.string()),
+});
+
+export const evalRunSummary = z.object({
+  version: z.literal('crmy.eval_result.v1'),
+  run_id: z.string().min(1),
+  profile: evalRunProfile,
+  suites: z.array(evalSuiteSummary),
+  status: evalRunStatus,
+  thresholds: z.array(evalThreshold),
+  model_metadata: evalModelMetadata.optional(),
+  artifacts: z.array(z.string()),
+  totals: z.object({
+    cases: z.number().int().min(0),
+    passed: z.number().int().min(0),
+    failed: z.number().int().min(0),
+    errored: z.number().int().min(0),
+    skipped: z.number().int().min(0),
+  }),
+  scores: z.record(z.number()),
+  results: z.array(evalCaseSummary),
+  created_at: z.string(),
+});
+
 const tags = z.array(z.string()).default([]);
 const customFields = z.record(z.unknown()).default({});
 const idempotencyKey = z.string().max(128).optional();

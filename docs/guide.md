@@ -109,6 +109,44 @@ Use the model-backed smoke test to prove the full Raw Context engine:
 npx -y @crmy/cli agent-smoke --with-model
 ```
 
+Use the local eval harness to score customer-context corpora and active-context
+quality gates:
+
+```bash
+npx -y @crmy/cli eval list
+npx -y @crmy/cli eval list --all
+npx -y @crmy/cli eval run --profile contract
+npx -y @crmy/cli eval run --profile seeded_context
+npx -y @crmy/cli eval run --profile agent_runtime
+```
+
+The `contract` profile is the normal local/CI gate. It covers Raw Context
+extraction contracts, custom Memory registries, and account-scoped record
+resolution without a model, database, or external service. These suites use
+golden extraction fixtures and prove parser, promotion, readiness, and
+resolution plumbing; they do not prove live extraction quality.
+
+The `seeded_context` profile calls production briefing and Action Context
+services against a small fixture DB, then scores retrieval recall, scope leaks,
+stale warnings, readiness decisions, unsafe writeback allowance, and source
+attribution safety. The `agent_runtime` profile adds runnable tool-choice and
+trajectory smoke checks.
+
+To run live extraction quality, configure an eval model and use the live
+profile:
+
+```bash
+CRMY_EVAL_MODEL_PROVIDER=openai \
+CRMY_EVAL_MODEL_BASE_URL=https://api.openai.com/v1 \
+CRMY_EVAL_MODEL_NAME=gpt-5.2 \
+CRMY_EVAL_MODEL_API_KEY=sk-... \
+npx -y @crmy/cli eval run --profile live_model --require-live --output ./eval-runs
+```
+
+Without `--require-live`, the live profile exits as skipped when model
+credentials are absent. Eval output can be written as native JSON plus JSONL
+artifacts for Ragas/LangSmith-style offline analysis.
+
 Semantic retrieval is optional but recommended for serious context work. It lets CRMy find related Signals and Memory by meaning instead of exact keywords. To enable it, use Postgres with the pgvector extension, set `ENABLE_PGVECTOR=true` before running migrations on a fresh database, and configure embedding variables in the server environment:
 
 ```env
@@ -2920,7 +2958,7 @@ CRMy's 0.8-1.0 roadmap focuses on becoming the enterprise context and execution 
 
 The 0.8 direction expands CRMy beyond CRM-adjacent storage into a governed systems-of-record overlay across Salesforce, HubSpot, Databricks, and Snowflake. HubSpot is the first certified connector path; Salesforce, Databricks, and Snowflake share the same governed framework and should receive live-environment certification before production rollout. Connector and warehouse changes should emit normal CRMy events so existing Workflows, Sequences, HITL approvals, audit, and context extraction continue to operate through the same event bus.
 
-For 0.9.3, CRMy plans to add first-class eval harnesses for retrieval quality, tool choice, Action Context decisions, source attribution, agent trajectory, and connector certification, plus optional governed product knowledge retrieval for safe product, pricing, security, implementation, roadmap, and competitive claims. See the [CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md) and [Governed Product Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
+For 0.9.3, CRMy now has first-class local eval profiles for contract corpora, live-model extraction quality, seeded retrieval quality, Action Context decisions, source attribution, tool choice, and agent trajectory smoke coverage. Connector certification and governed product knowledge retrieval remain roadmap items for safe product, pricing, security, implementation, roadmap, and competitive claims. See the [CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md) and [Governed Product Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
 
 Read the full roadmap: [CRMy 0.8-1.0 Roadmap: Enterprise Systems-Of-Record Overlay](roadmap-0.8-1.0.md). For hosted multi-instance production requirements, see the [CRMy 1.0 Multi-Instance Runtime Plan](multi-instance-runtime-plan.md).
 

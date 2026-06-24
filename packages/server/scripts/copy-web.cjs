@@ -5,6 +5,14 @@
 const { cpSync, mkdirSync, existsSync, rmSync } = require('fs');
 const path = require('path');
 
+const evalSrc = path.resolve(__dirname, '../src/evals/fixtures');
+const evalDest = path.resolve(__dirname, '../dist/evals/fixtures');
+if (existsSync(evalSrc)) {
+  mkdirSync(evalDest, { recursive: true });
+  cpSync(evalSrc, evalDest, { recursive: true });
+  console.log('copy-web: eval fixtures copied to server/dist/evals/fixtures/');
+}
+
 const src  = path.resolve(__dirname, '../../web/dist');
 const dest = path.resolve(__dirname, '../public');
 

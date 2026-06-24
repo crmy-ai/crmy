@@ -1412,3 +1412,90 @@ export interface MessageDelivery {
   metadata: Record<string, unknown>;
   created_at: string;
 }
+
+// -- Eval harness contracts --
+
+export type EvalSuiteName =
+  | 'raw_context_extraction'
+  | 'raw_context_extraction_quality'
+  | 'raw_context_custom_registry'
+  | 'record_resolution'
+  | 'retrieval_quality'
+  | 'tool_choice'
+  | 'action_context'
+  | 'source_attribution'
+  | 'agent_trajectory'
+  | 'connector_certification';
+
+export type EvalRunStatus = 'pass' | 'fail' | 'error' | 'skipped';
+export type EvalRunProfile = 'contract' | 'live_model' | 'seeded_context' | 'agent_runtime';
+export type EvalSuiteImplementationStatus = 'implemented' | 'planned';
+
+export interface EvalThreshold {
+  metric: string;
+  op: '>=' | '<=' | '=';
+  value: number;
+}
+
+export interface EvalModelMetadata {
+  provider?: string;
+  base_url?: string;
+  model?: string;
+  live_config_present?: boolean;
+  caller?: 'env' | 'injected' | 'none';
+}
+
+export interface EvalCaseSummary {
+  id: string;
+  suite: EvalSuiteName;
+  profile: EvalRunProfile;
+  title?: string;
+  status: EvalRunStatus;
+  scores: Record<string, number>;
+  expected?: Record<string, unknown>;
+  observed?: Record<string, unknown>;
+  artifacts?: string[];
+  model_metadata?: EvalModelMetadata;
+  diagnostics: {
+    missing_expected_items: string[];
+    forbidden_items_found: string[];
+    warnings: string[];
+  };
+}
+
+export interface EvalSuiteSummary {
+  name: EvalSuiteName;
+  title: string;
+  description: string;
+  deterministic: boolean;
+  requires_model: boolean;
+  requires_database: boolean;
+  case_count: number;
+  implementation_status: EvalSuiteImplementationStatus;
+  proof_scope: string;
+  profiles: EvalRunProfile[];
+  quality_gate: boolean;
+  uses_golden_model_output: boolean;
+  limitations: string[];
+}
+
+export interface EvalRunSummary {
+  version: 'crmy.eval_result.v1';
+  run_id: string;
+  profile: EvalRunProfile;
+  suites: EvalSuiteSummary[];
+  status: EvalRunStatus;
+  thresholds: EvalThreshold[];
+  model_metadata?: EvalModelMetadata;
+  artifacts: string[];
+  totals: {
+    cases: number;
+    passed: number;
+    failed: number;
+    errored: number;
+    skipped: number;
+  };
+  scores: Record<string, number>;
+  results: EvalCaseSummary[];
+  created_at: string;
+}

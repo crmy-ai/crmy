@@ -1,0 +1,83 @@
+[
+  {
+    "id": "account_name_scopes_child_records",
+    "document": "We are working with Nike on the Pegasus expansion. Jacob can join the workshop next week.",
+    "expected_subjects": [
+      { "type": "account", "id": "acct-nike" },
+      { "type": "opportunity", "id": "opp-nike-pegasus" },
+      { "type": "contact", "id": "contact-nike-jacob" }
+    ],
+    "forbidden_subject_ids": ["opp-acme-pegasus", "contact-acme-jacob"],
+    "expected_account_scope": [{ "account_id": "acct-nike", "opportunities_checked": 1, "contacts_checked": 2 }],
+    "expected_skipped": []
+  },
+  {
+    "id": "account_alias_scopes_child_records",
+    "document": "NKE wants to expand the Pegasus expansion next quarter.",
+    "expected_subjects": [
+      { "type": "account", "id": "acct-nike" },
+      { "type": "opportunity", "id": "opp-nike-pegasus" }
+    ],
+    "forbidden_subject_ids": ["opp-acme-pegasus"],
+    "expected_account_scope": [{ "account_id": "acct-nike", "opportunities_checked": 1 }],
+    "expected_skipped": []
+  },
+  {
+    "id": "account_domain_scopes_contact",
+    "document": "The nike.example team said Jacob should review the implementation plan.",
+    "expected_subjects": [
+      { "type": "account", "id": "acct-nike" },
+      { "type": "contact", "id": "contact-nike-jacob" }
+    ],
+    "forbidden_subject_ids": ["contact-acme-jacob"],
+    "expected_account_scope": [{ "account_id": "acct-nike", "contacts_checked": 2 }],
+    "expected_skipped": []
+  },
+  {
+    "id": "same_first_name_without_account_scope_is_ambiguous",
+    "document": "Jacob said the rollout needs an updated security plan.",
+    "expected_subjects": [],
+    "forbidden_subject_ids": ["contact-nike-jacob", "contact-acme-jacob"],
+    "expected_skipped": [
+      { "name": "Jacob", "reason": "ambiguous_first_name_without_account_scope" }
+    ]
+  },
+  {
+    "id": "same_full_name_without_account_scope_is_ambiguous",
+    "document": "Maya Patel said the rollout needs a security review.",
+    "expected_subjects": [],
+    "forbidden_subject_ids": ["contact-nike-maya", "contact-acme-maya"],
+    "expected_skipped": [
+      { "name": "Maya Patel", "reason": "ambiguous_without_account_scope" }
+    ]
+  },
+  {
+    "id": "same_opportunity_name_without_account_scope_is_ambiguous",
+    "document": "The Pegasus expansion needs an updated security plan.",
+    "expected_subjects": [],
+    "forbidden_subject_ids": ["opp-nike-pegasus", "opp-acme-pegasus"],
+    "expected_skipped": [
+      { "name": "Pegasus expansion", "reason": "ambiguous_without_account_scope" }
+    ]
+  },
+  {
+    "id": "same_use_case_name_without_account_scope_is_ambiguous",
+    "document": "Forecast automation needs an executive business case before next steps.",
+    "expected_subjects": [],
+    "forbidden_subject_ids": ["uc-nike-forecasting", "uc-acme-forecasting"],
+    "expected_skipped": [
+      { "name": "Forecast automation", "reason": "ambiguous_without_account_scope" }
+    ]
+  },
+  {
+    "id": "account_scope_disambiguates_use_case",
+    "document": "Nike wants the Forecast automation use case reviewed before the next workshop.",
+    "expected_subjects": [
+      { "type": "account", "id": "acct-nike" },
+      { "type": "use_case", "id": "uc-nike-forecasting" }
+    ],
+    "forbidden_subject_ids": ["uc-acme-forecasting"],
+    "expected_account_scope": [{ "account_id": "acct-nike", "use_cases_checked": 1 }],
+    "expected_skipped": []
+  }
+]
