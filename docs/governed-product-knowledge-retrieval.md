@@ -2,145 +2,160 @@
 
 ## Status
 
-Planned for the 0.9.3 release as an optional capability, alongside the
-[CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md).
+Originally drafted before 0.9.1. **Revised for 0.9.3** to build on infrastructure
+that has since landed rather than duplicate it. Still an **optional** capability
+alongside the [CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md); it does
+not become a required dependency for customer Memory, briefings, Action Context,
+or writeback.
 
 This plan covers product, service, solution, pricing, implementation, roadmap,
 security, compliance, and competitive knowledge that can improve GTM agent
-outputs. It does not make product knowledge a required dependency for CRMy's
-core customer Memory, briefing, Action Context, or writeback flows.
+outputs — retrieved through a governed, cited, freshness-aware, auditable layer.
 
-## Decision
+## What Changed Since This Plan Was Drafted (and how it simplifies the design)
 
-CRMy should support product and competitive knowledge as an optional governed
-retrieval layer, not as a product knowledge database that users must maintain.
+The pre-0.9.1 plan assumed product knowledge needed a brand-new stack: a source
+registry, retriever adapters, a receipt store, ranking, and proof wiring. Most of
+that now exists for customer context and should be **reused**, not rebuilt:
 
-The core product remains customer Memory for AI sales agents:
+| Landed since draft | What it gives product knowledge for free |
+|---|---|
+| **Context Sources spine** (0.9.2): `context_source_connections` / `context_source_objects`, S3 / local-folder / HTTP providers, content hashing, processing receipts, match/processing/review states, `context_source_connection_*` and `context_source_object_*` tools | The "knowledge source registry + retriever adapters + sync + freshness" the old plan wanted to invent. Product docs/battlecards/changelogs ingest through the **same spine**, just routed to a different namespace. |
+| **Signals → Memory lifecycle** with readiness, confidence decay, duplicate-source/independent-source corroboration, contradiction detection | A proven lifecycle to mirror for **claim envelopes** (draft → reviewed → approved; conflict detection between competing claims). |
+| **Source-grounding gate** (0.9.3, #31): a claim only auto-promotes when its evidence is present in the source | The exact governance primitive product claims need — a claim is "approved for external use" only when **grounded in its cited source**. Reuse the helper. |
+| **Versioned Action Context packet** (0.9.x): `operating_mode`, `checks{}`, `proof{ expected_receipts }` | A first-class slot for a `product_knowledge` check and `used_knowledge_claim_ids` / `knowledge_retrieval_receipt_ids` proof — no new contract needed. |
+| **Token-budget profiles + `evidence_mode` + ranked packing** (briefing.ts) | Reuse for product-context packing and "dropped/excluded claim" reporting. |
+| **Per-session toolsets** (#30) | `knowledge_retrieve` slots into a focused toolset; agents only see it when the job needs it. |
+| **Eval harness + `crmy.eval_case.v1` + exporters + CI gate** (#29, #35) | The proof mechanism: a `product_knowledge` eval suite (source attribution, no-unsupported-claims, freshness filtering, golden drafts) instead of bespoke test scaffolding. |
+| **`email_draft_preview` carrying Action Context proof** (0.9.1) | The concrete draft-integration seam for approved, cited product claims. |
+| **`guide_search`** (read-only keyword search over CRMy's own docs) | Precedent for a corpus-retrieval tool. `knowledge_retrieve` is its **tenant-scoped, governed** sibling (approval, visibility, freshness, receipts). |
 
-Raw Context -> Signals -> Memory -> Briefing / Action Context -> Handoff /
-Writeback -> Proof.
+Net effect: this becomes mostly **new namespace + new service + reuse**, not a
+second platform. That is the "simple but powerful" core of the revision.
 
-Product knowledge should be additive:
+## Decision (unchanged in spirit)
 
-- If no product knowledge is configured, CRMy works as it does today.
-- If an actor compiles product knowledge at the edge, CRMy can accept optional
-  proof that the actor used external knowledge.
-- If an actor retrieves product knowledge through CRMy, CRMy provides value by
-  filtering, ranking, citing, warning, and recording proof.
+Support product and competitive knowledge as an **optional governed retrieval
+layer**, not a product-knowledge database users must maintain.
+
+The core product stays: `Raw Context -> Signals -> Memory -> Briefing / Action
+Context -> Handoff / Writeback -> Proof`. Product knowledge is a **sibling
+retrieval namespace** that follows the same lifecycle ideas and rides the same
+ingestion, proof, and eval rails.
 
 ## Problem
 
 Customer-aware agents still produce generic follow-ups when they cannot connect
 customer Memory to current product capabilities, proof points, limitations,
-implementation considerations, roadmap caveats, pricing/package notes, and
-competitive positioning.
+implementation caveats, roadmap notes, pricing/packaging notes, and competitive
+positioning. But that information changes fast. If CRMy forces users to copy and
+maintain product content, it becomes a stale enablement CMS and weakens the core
+promise.
 
-However, product and competitive information changes quickly. If CRMy requires
-users to copy and maintain product information in CRMy, the system becomes a
-stale enablement CMS and weakens the core product promise.
-
-The right question is not "where does product knowledge live?" The right
-question is "how does an agent know which product claims are safe to use for
-this customer action?"
+The right question is not "where does product knowledge live?" It is **"how does
+an agent know which product claims are safe to use for *this* customer action?"**
 
 ## Goals
 
-- Keep product knowledge optional and non-blocking.
+- Keep product knowledge optional and non-blocking (core flows unchanged when unconfigured).
 - Keep external systems authoritative for product content.
-- Provide a governed retrieval contract that external MCP agents, REST clients,
-  the Workspace Agent, email drafts, and briefings can all use.
-- Improve generated follow-ups by matching customer pain, use case, persona,
-  industry, and competitor context to approved product claims.
-- Prevent unsupported customer-facing claims.
-- Surface freshness, approval, visibility, evidence, and citations.
-- Record retrieval receipts so admins can inspect what product knowledge was
-  used by an agent.
-- Preserve CRMy's identity as the governed customer context and action layer.
+- Reuse the Context Sources spine, Action Context proof, grounding gate, token
+  budgeting, and eval harness rather than parallel machinery.
+- One backend `KnowledgeRetrievalService` behind MCP, REST, CLI, Workspace Agent,
+  briefings, and Action Context.
+- Improve follow-ups by matching customer pain/use-case/persona/industry/
+  competitor context to **approved, grounded** product claims.
+- Prevent unsupported customer-facing claims; surface freshness, approval,
+  visibility, evidence, citations, conflicts.
+- Record retrieval receipts as first-class proof, linked into Lineage and Action
+  Context.
 
 ## Non-Goals
 
-- Do not require product knowledge for core CRMy functionality.
-- Do not require local agent integration for the Workspace Agent.
-- Do not make MCP the only internal implementation path.
-- Do not turn CRMy into a generic knowledge base, CMS, battlecard platform,
-  roadmap system, or CPQ/pricing source of truth.
-- Do not merge product truth into customer Memory without a separate namespace.
-- Do not let customer-facing drafts use stale, unapproved, conflicting, or
-  internal-only product claims.
-- Do not require pgvector or embeddings for the first version.
+- Do not require product knowledge for core functionality.
+- Do not make MCP the only internal path (the Workspace Agent calls the service directly).
+- Do not become a generic CMS, battlecard platform, roadmap tool, or CPQ/pricing source of truth.
+- Do not merge product truth into customer Memory; keep a separate namespace.
+- Do not let customer-facing drafts use stale, unapproved, conflicting, or internal-only claims.
+- Do not require pgvector/embeddings for v1.
+- **Do not fork the source-ingestion model** — extend Context Sources with a knowledge source class.
 
-## Existing Architecture Constraints
+## Architecture: One Spine, Two Namespaces
 
-The current codebase is deliberately customer-subject scoped. Shared schemas
-limit subjects to contacts, accounts, opportunities, and use cases. Context
-entries, Signal groups, briefings, stale review, contradiction detection,
-Action Context, CLI commands, MCP tools, REST routes, and UI Context surfaces
-all revolve around customer records.
+The central design decision: **product knowledge enters through the same Context
+Sources pipeline as customer context, but lands in a product-knowledge namespace
+of claim envelopes instead of customer Memory.**
 
-That shape is a strength for customer Memory, but it resists global product
-truth. Reusing `context_entries` directly for global product claims would force
-claims onto arbitrary customer subjects, duplicate facts across accounts, and
-blur the distinction between:
+```text
+Customer context:   Source object -> Activity/Artifact -> Signals -> Memory
+Product knowledge:  Source object -> Claim Signal      -> Claim envelope (approved)
+                    \____________ same connections/objects spine ____________/
+```
 
-- "This customer is evaluating Competitor X."
-- "Our approved response to Competitor X is Y."
+- A `context_source_connections` row gains a **source class** of `product_knowledge`
+  (alongside today's customer transcript/note drops). Same S3/local/HTTP providers,
+  same sync, same content hashing, same processing receipts and review states.
+- Processing a product source object yields **claim signals** (extracted, draft,
+  reviewable) rather than customer Signals. A claim becomes an **approved claim**
+  only when it is reviewed/approved by policy **and grounded in its cited source**
+  (reusing the 0.9.3 grounding gate).
+- Retrieval, policy filtering, ranking, citations, warnings, and proof live in a
+  shared `KnowledgeRetrievalService`, exposed identically to every surface.
 
-Product knowledge needs a separate retrieval namespace even if it reuses the
-same lifecycle ideas: evidence, provenance, confidence, freshness, approval,
-visibility, staleness, contradiction warnings, and proof.
+This gives users **one mental model for how context enters CRMy**, one proof
+model, and one eval harness — while keeping customer truth and product truth in
+separate namespaces.
 
-## Operating Modes
+### Components (most already exist)
 
-| Mode | Behavior | CRMy responsibility |
+| Component | Status | Responsibility |
 |---|---|---|
-| No product knowledge configured | Core briefings, Action Context, drafts, and writeback safety work as today. | Return `not_configured` or omit product context. |
-| Edge-compiled knowledge | An actor retrieves product knowledge outside CRMy. | Optionally record edge-provided citations and mark them as not CRMy-verified. |
-| CRMy-governed retrieval | An actor asks CRMy for product context. | Retrieve from configured sources, filter by policy, cite evidence, warn, and record proof. |
-| Cached/indexed claims | CRMy stores source-derived snippets or claim envelopes. | Maintain freshness, source refs, approval metadata, visibility, search indexes, and retrieval receipts. |
+| Context Sources connection/object spine | **exists** | Source registration, providers, sync, hashing, processing receipts, review state. Add a `product_knowledge` source class. |
+| `KnowledgeRetrievalService` | **new** | Retrieval, policy filtering, ranking, warning generation, proof creation. The one internal boundary. |
+| Claim namespace (`knowledge_claims`) | **new** | Source-derived claim envelopes with scope, evidence, freshness, approval, visibility, conflict, status. |
+| Retrieval receipt store (`knowledge_retrieval_receipts`) | **new** (mirrors Action Context receipts/Lineage) | Durable proof of query, filters, returned/excluded claims, warnings, citations, source versions, actor. |
+| Grounding check | **reuse** (`extraction-grounding`) | A claim is external-safe only if grounded in its cited source text. |
+| Action Context `product_knowledge` check + proof | **reuse slot** | Adds to existing `checks{}` / `proof{}`; no new contract. |
+| Token-budget packer + `evidence_mode` | **reuse** | Packs product context within budget; reports dropped/excluded claims. |
+| Eval `product_knowledge` suite | **reuse harness** | Source attribution, no-unsupported-claims, freshness, golden drafts via `crmy.eval_case.v1`. |
+| Surface adapters (MCP/REST/CLI/UI/briefing/Action Context) | **new thin wrappers** | Call the one service. |
 
-## Recommended Architecture
+## Lifecycle: Claim Envelope (mirrors Signals → Memory)
 
-Build a shared backend `KnowledgeRetrievalService` and expose it through MCP,
-REST, CLI, UI, and the Workspace Agent.
-
-MCP should be the first-class external agent interface, but not the internal
-dependency boundary. The Workspace Agent should call the same backend service
-directly through the server. REST and CLI should call the same service through
-normal API routes. This avoids making the product depend on local MCP or local
-agent setup.
-
-### Components
-
-| Component | Responsibility |
+| Customer side | Product-knowledge side |
 |---|---|
-| `KnowledgeRetrievalService` | Shared retrieval, policy filtering, ranking, warning generation, and proof creation. |
-| Knowledge source registry | Configured external sources, source priority, source type, visibility defaults, and health. |
-| Retriever adapters | Pluggable readers for docs, changelogs, battlecards, websites, warehouses, support KBs, or custom APIs. |
-| Claim cache/index | Optional source-derived snippets or normalized claim envelopes for fast retrieval. |
-| Retrieval receipt store | Durable proof of query, filters, returned claims, excluded claims, warnings, citations, source versions, and actor. |
-| Product context policy | External-use, approval, freshness, source priority, conflict, and internal-only rules. |
-| Surface adapters | MCP tool, REST endpoint, CLI command, briefing enrichment, Action Context enrichment, Workspace Agent use, and UI display. |
+| Raw Context object | Product source object (same spine) |
+| Signal (inferred, evidence, readiness) | **Claim signal** (extracted, draft, evidence, source ref) |
+| Independent-source corroboration / readiness gate | **Grounding gate** (claim text supported by cited source) + approval policy |
+| Memory (confirmed, decay-aware, stale-aware) | **Approved claim** (approved, external-use flag, freshness window, conflict state) |
+| Contradiction detection | **Claim conflict detection** (competing claims for same scope) |
+| Stale review assignments | **Claim freshness review** (per-category windows, owner) |
 
-## Source Of Truth Boundaries
+Reusing these patterns means governance behaviors (staleness, conflict, review,
+proof) are familiar to users and largely reuse existing services.
+
+## Source Of Truth Boundaries (unchanged — still correct)
 
 | Belongs in CRMy core | Belongs in connectors/adapters | Belongs outside CRMy |
 |---|---|---|
-| Retrieval contract | Source-specific fetch and sync logic | Product doc authoring |
-| Policy and filtering | Source freshness and version metadata | Roadmap management |
-| Approval/visibility metadata | Source document IDs, hashes, URLs | Pricing system of record |
+| Retrieval contract, policy, filtering | Source-specific fetch/sync, paging, auth | Product doc authoring |
+| Approval/visibility/freshness metadata | Source version/hash, doc IDs, URLs | Roadmap & pricing systems of record |
 | Retrieval receipts and proof | Incremental sync checkpoints | Competitive research authoring |
-| Optional claim cache/index | Adapter-specific auth and paging | Legal/compliance approval systems |
-| Briefing and Action Context integration | Source-specific deletion/deprecation signals | CPQ and packaging workflow |
+| Optional claim cache/index | Source deprecation/deletion signals | Legal/compliance approval systems |
+| Briefing & Action Context integration | — | CPQ / packaging workflow |
 
-## MCP-First External Path
+Note the **distinction from Systems of Record**: SoR connectors (0.8) map and
+write back *customer records*. Product-knowledge sources are **retrieval-only**
+and never write back. They reuse connector *patterns* (health, sync, adapters),
+not the customer-record mappings or writeback paths.
 
-Add an MCP tool such as `knowledge_retrieve`.
+## Retrieval Contract: `knowledge_retrieve`
 
-The tool should retrieve product, service, solution, and competitive context
-with trust metadata. It should not silently create Memory or write to systems
-of record.
+First-class external MCP tool (placed in a `product_knowledge` toolset, and added
+to `customer_outreach` where drafting needs it). Retrieves with trust metadata;
+never creates Memory or writes to systems of record.
 
-Illustrative input:
+Input (illustrative):
 
 ```json
 {
@@ -159,7 +174,7 @@ Illustrative input:
 }
 ```
 
-Illustrative output:
+Output (illustrative):
 
 ```json
 {
@@ -169,8 +184,9 @@ Illustrative output:
       "id": "claim_123",
       "category": "competitive_response",
       "title": "Approved response to vendor lock-in objection",
-      "body": "Use the approved response text or summary here.",
+      "body": "Approved response text or summary.",
       "confidence": 0.92,
+      "grounded": true,
       "approval_status": "approved",
       "approved_for_external_use": true,
       "visibility": "external",
@@ -178,344 +194,187 @@ Illustrative output:
       "valid_until": "2026-08-01T00:00:00Z",
       "source_priority": "authoritative",
       "citations": [
-        {
-          "source_label": "Competitive battlecard",
-          "source_url": "https://example.invalid/battlecard",
-          "source_ref": "battlecard:v3"
-        }
+        { "source_label": "Competitive battlecard", "source_url": "https://example.invalid/battlecard", "source_ref": "battlecard:v3" }
       ]
     }
   ],
-  "excluded_claims": [
-    {
-      "id": "claim_456",
-      "reason": "internal_only"
-    }
-  ],
+  "excluded_claims": [ { "id": "claim_456", "reason": "internal_only" } ],
   "warnings": [],
-  "retrieval_receipt": {
-    "id": "receipt_789",
-    "policy": "customer_facing_approved_only",
-    "retrieved_at": "2026-06-06T12:00:00Z"
-  }
+  "retrieval_receipt": { "id": "receipt_789", "policy": "customer_facing_approved_only", "retrieved_at": "2026-06-06T12:00:00Z" }
 }
 ```
 
-## REST, CLI, UI, And Workspace Agent
+`status` values: `available`, `no_results`, `degraded` (source timeout),
+`not_configured`. Callers that do not explicitly require product context always
+continue on any non-`available` status.
 
-The MCP tool should be backed by the same server-side service used by other
-surfaces.
-
-| Surface | Recommended shape |
+| Surface | Shape |
 |---|---|
-| MCP | `knowledge_retrieve`, later `knowledge_source_list` and `knowledge_receipt_get`. |
-| REST | `POST /api/v1/knowledge/retrieve`; optional receipt detail route later. |
-| CLI | `crmy knowledge retrieve` plus `crmy tools call knowledge_retrieve` support. |
-| Workspace Agent | Internal service call, not local MCP. Uses the same policy and receipts. |
-| Briefings | Optional `include_product_context`; omission or `not_configured` does not fail the briefing. |
-| Action Context | Optional product checks and proof when a proposed action may use product claims. |
-| UI | Display product context in BriefingPanel and EmailDraftDrawer when present; keep setup under Context Sources or Settings. |
+| MCP | `knowledge_retrieve`; later `knowledge_source_list`, `knowledge_receipt_get`. In a `product_knowledge` toolset. |
+| REST | `POST /api/v1/knowledge/retrieve`; receipt detail route later. |
+| CLI | `crmy knowledge retrieve` (and works via `crmy tools call knowledge_retrieve`). |
+| Workspace Agent | Direct service call (not local MCP); same policy + receipts. |
+| Briefings | Optional `include_product_context`; `not_configured` never fails the briefing. |
+| Action Context | `product_knowledge` check + proof when a proposed action may use claims. |
+| UI | Product context in BriefingPanel / EmailDraftDrawer; setup under **Context → Sources** (its natural home now). |
 
-## Briefing And Action Context Integration
+## Briefing & Action Context Integration
 
-Product context should be a sibling to customer Memory, not mixed into Memory.
+Product context is a **sibling** to customer Memory, never mixed into it.
 
-Optional briefing shape:
+Briefing (available / unavailable):
+
+```json
+{ "product_context": { "status": "available", "relevant_claims": [], "proof_points": [],
+  "implementation_caveats": [], "competitive_context": [], "avoid_claims": [],
+  "warnings": [], "citations": [], "retrieval_receipt_id": "receipt_789" } }
+```
+```json
+{ "product_context": { "status": "not_configured", "warnings": [] } }
+```
+
+Action Context reuses the existing `checks{}` and `proof{}` slots:
 
 ```json
 {
-  "product_context": {
-    "status": "available",
-    "relevant_claims": [],
-    "proof_points": [],
-    "implementation_caveats": [],
-    "competitive_context": [],
-    "avoid_claims": [],
-    "warnings": [],
-    "citations": [],
-    "retrieval_receipt_id": "receipt_789"
-  }
+  "checks": { "product_knowledge": { "status": "ready", "approved_claim_count": 4,
+    "stale_claim_count": 0, "internal_only_excluded_count": 2, "conflicting_claim_count": 0,
+    "ungrounded_excluded_count": 0, "reasons": [] } },
+  "proof": { "used_knowledge_claim_ids": ["claim_123"],
+    "knowledge_retrieval_receipt_ids": ["receipt_789"], "expected_receipts": ["receipt_789"] }
 }
 ```
 
-If product context is unavailable, the briefing should still succeed:
+## Policy, Freshness, Failure Behavior, Ranking
 
-```json
-{
-  "product_context": {
-    "status": "not_configured",
-    "warnings": []
-  }
-}
-```
+These sections from the original plan remain correct and are retained:
 
-Action Context should add a product knowledge check only when product context
-is requested or when a proposed action asks to use product claims:
-
-```json
-{
-  "checks": {
-    "product_knowledge": {
-      "status": "ready",
-      "approved_claim_count": 4,
-      "stale_claim_count": 0,
-      "internal_only_excluded_count": 2,
-      "conflicting_claim_count": 0,
-      "reasons": []
-    }
-  },
-  "proof": {
-    "used_knowledge_claim_ids": ["claim_123"],
-    "knowledge_retrieval_receipt_ids": ["receipt_789"]
-  }
-}
-```
+- **Customer-facing policy default**: require approved + **grounded**; exclude
+  internal-only, stale, deprecated, and conflicting (unless allowed for internal
+  analysis); include citations and relevant caveats; record a receipt.
+- **Internal policy**: may include unapproved/stale/internal-only/conflicting/
+  draft claims, each clearly labeled with warnings.
+- **Freshness windows** (per category): competitive 30–60d; pricing/packaging
+  14–30d; roadmap 14–30d; security/compliance 30–90d; implementation 60–120d;
+  stable capabilities 90–180d; proof points 90–180d or source-specific.
+- **Failure behavior**: `not_configured` / `degraded` / `no_results` never break
+  the core flow; missing approval metadata = unapproved for customer-facing use;
+  ungrounded = excluded from customer-facing output.
+- **Ranking** (deterministic hybrid; no vectors required for v1): structured
+  filters → source priority → lexical/full-text → optional embeddings → customer
+  relevance (Memory, use case, pain, objections, persona, industry, competitor) →
+  **reuse the existing token-budget packer** with dropped/excluded summaries.
 
 ## Edge-Compiled Knowledge
 
-Actors may still compile product knowledge outside CRMy. This should remain
-allowed.
+Actors may still compile product knowledge outside CRMy. CRMy accepts optional
+edge-provided citations (title, source_url/label, retrieved_at, customer_facing_used,
+actor_attestation) and records them as **edge-provided, not CRMy-verified**. The
+value is honest proof, not false certification. (Decision below: edge-provided
+knowledge is *recorded* but does **not** satisfy customer-facing policy.)
 
-For trust and audit value, CRMy should accept optional edge-provided knowledge
-metadata:
+## Proof & Evaluation (new, reusing 0.9.3 rails)
 
-```json
-{
-  "external_knowledge_used": [
-    {
-      "title": "Vendor lock-in response",
-      "source_url": "https://example.invalid/source",
-      "source_label": "External battlecard",
-      "retrieved_at": "2026-06-06T12:00:00Z",
-      "customer_facing_used": true,
-      "actor_attestation": "retrieved_at_edge"
-    }
-  ]
-}
-```
+- **Receipts as proof**: `knowledge_retrieval_receipts` are emitted like Action
+  Context receipts and surfaced in **Lineage** (`context_lineage_get`) so admins
+  can trace which claims an agent used, why others were excluded, and from which
+  source versions.
+- **Eval suite**: add a `product_knowledge` suite to the eval harness, authored as
+  `crmy.eval_case.v1` cases. Metrics:
+  - `claim_source_attribution` — every returned customer-facing claim is grounded + cited;
+  - `unsupported_claim_rate` — drafts never assert ungrounded/unapproved claims (target 0);
+  - `freshness_exclusion_accuracy` — stale/expired claims excluded from customer-facing output;
+  - `policy_exclusion_accuracy` — internal-only/conflicting/deprecated excluded;
+  - `golden_draft_quality` — follow-ups use approved claims when present, draft conservatively when not.
+- **CI gate**: include the deterministic parts of the suite in the eval workflow;
+  the live-draft parts run under the live-model profile.
 
-CRMy should mark this as edge-provided and not CRMy-verified. The value is
-honest proof, not false certification.
+## Data Model Direction (lean; reuse first)
 
-## Policy Rules
+Reuse `context_source_connections` / `context_source_objects` (add a
+`source_class = 'product_knowledge'`). Add only:
 
-Customer-facing retrieval should default to:
+- `knowledge_claims` — source-derived claim envelopes:
+  tenant_id, claim_id, category, title/body/summary, structured scope (product,
+  competitor, persona, industry, use_case), source refs + source version/hash,
+  `grounded` flag, confidence, approval_status, visibility, external_use flag,
+  effective/expiry dates, last_verified_at, review_owner, status (active | stale |
+  deprecated | conflicting | rejected), search_vector, optional embedding.
+- `knowledge_retrieval_receipts` — query, normalized filters, returned/excluded
+  claim IDs + reasons, warnings, citations, source versions, policy, actor, timestamps.
+- optional `knowledge_claim_citations` if citations need their own rows.
 
-- require approved claims
-- exclude internal-only claims
-- exclude stale claims
-- exclude deprecated claims
-- exclude conflicting claims unless specifically allowed for internal analysis
-- include citations
-- include implementation caveats and limitations when relevant
-- record a retrieval receipt
+Avoid v1 tables for a full product catalog, features, battlecards, pricing plans,
+roadmap items, personas, industries, objections. **Start with claim envelopes +
+scopes derived from sources**, not a hand-maintained catalog.
 
-Internal retrieval may include:
+## Resolved Open Questions (decisions for this revision)
 
-- unapproved claims with warning
-- stale claims with warning
-- internal-only content
-- conflicting claims for analysis
-- draft or pending claims, clearly labeled
-
-## Freshness And Reliability
-
-Product claims should carry:
-
-- source type, ID, ref, URL, label, and version/hash
-- source updated timestamp
-- retrieved timestamp
-- effective date
-- valid-until or expiry date
-- last verified date
-- review owner
-- confidence
-- source priority
-- approval status
-- external-use flag
-- internal-only flag
-- deprecation status
-- conflict status
-
-Volatile categories should require short freshness windows:
-
-| Category | Suggested default |
+| Original question | Decision |
 |---|---|
-| Competitive claims | 30-60 days |
-| Pricing/package notes | 14-30 days |
-| Roadmap caveats | 14-30 days |
-| Security/compliance claims | 30-90 days |
-| Implementation requirements | 60-120 days |
-| Stable capabilities | 90-180 days |
-| Proof points | 90-180 days, or source-specific |
+| Off by default per tenant until configured? | **Yes.** Product context is `not_configured` until a `product_knowledge` source exists. |
+| First source systems? | **HTTP/document + S3/local drops first** (already supported providers); changelog/battlecard URLs next. Warehouse/support-KB adapters later, by demand. |
+| Can edge-provided knowledge satisfy customer-facing policy? | **No.** Recorded as not-verified proof only; never satisfies the approved+grounded customer-facing gate. |
+| Should CRMy write approval state back to source systems? | **No** in v1 — product-knowledge sources are retrieval-only. |
+| Categories requiring mandatory expiry? | Competitive, pricing/packaging, roadmap (short windows above); others get defaults with override. |
+| Minimum UI for source setup? | Reuse **Context → Sources**; no new primary nav (consistent with `what-belongs-where.md`). |
 
-## Retrieval Ranking
+Still genuinely open: claim-approval ownership per category (competitive vs
+pricing vs security/compliance); anonymization/approval workflow for
+customer-evidence proof points; whether claim approval ever needs a dedicated
+review queue separate from Handoffs.
 
-Start with deterministic hybrid retrieval:
+## Implementation Phases (revised to reuse what exists)
 
-1. Structured filters: audience, approval, visibility, product, competitor,
-   persona, industry, use case, category, freshness.
-2. Source priority: authoritative docs before notes or informal sources.
-3. Keyword/full-text search.
-4. Optional embeddings when configured.
-5. Customer relevance: match to customer Memory, use case, pain point,
-   objections, industry, persona, implementation stage, and competitor context.
-6. Token budget packing with dropped/excluded claim summaries.
+### Phase 1 — Contracts + no-op service
+Shared schemas (`knowledge_retrieve` I/O, claim envelope, receipt, `crmy.eval_case`
+product cases). `KnowledgeRetrievalService` returns `not_configured`. Regression
+tests prove core briefing/Action Context unchanged. Feature-flagged.
 
-Do not require vector search for the first version.
+### Phase 2 — Source class + retrieval over sources
+Add `product_knowledge` source class to Context Sources (reuse connection/object
+spine, providers, hashing, receipts). Implement deterministic policy filtering,
+lexical retrieval, grounding gate on claims, and `knowledge_retrieval_receipts`.
+Ship `knowledge_retrieve` (MCP) + `POST /api/v1/knowledge/retrieve`.
 
-## Failure Behavior
+### Phase 3 — Briefing + Action Context enrichment
+Optional `include_product_context`; product-context briefing section; Action
+Context `product_knowledge` check + proof using existing slots. Unavailable
+product context never fails the core response.
 
-| Scenario | Behavior |
-|---|---|
-| No sources configured | Return `not_configured`; core flow continues. |
-| Source timeout | Return `degraded`; continue unless caller explicitly requires product context. |
-| No relevant claims | Return `no_results`; do not invent. |
-| Stale claims found | Exclude from customer-facing output and warn. |
-| Internal-only claims found | Exclude from customer-facing output and count exclusions. |
-| Conflicting claims found | Exclude or require review, depending on audience and policy. |
-| Edge-provided claims | Record as not CRMy-verified. |
-| Missing approval metadata | Treat as unapproved for customer-facing use. |
+### Phase 4 — Workspace Agent + draft integration
+Workspace Agent + `email_draft_preview` request product context via the service;
+drafts include only approved, grounded, external-safe claims with citations,
+used-claim IDs, and receipt IDs in generation metadata.
 
-## Generated Follow-Up Requirements
+### Phase 5 — UI + CLI
+`crmy knowledge retrieve`; product context in BriefingPanel / EmailDraftDrawer;
+source setup under Context → Sources; show warnings, exclusions, approval,
+citations, and the `not_configured` state.
 
-A draft should improve only when product context is safely available. The draft
-service should:
+### Phase 6 — Claim cache/index + adapters
+Optional FTS + embeddings on claim envelopes; freshness/deprecation handling;
+additional source adapters only where users need them.
 
-- match customer pain or objection to an approved capability or response
-- include only approved external-safe claims for customer-facing drafts
-- include proof points only when they are approved and scoped
-- include implementation caveats when relevant
-- avoid stale, deprecated, internal-only, or conflicting claims
-- cite sources in generation metadata
-- record used claim IDs and retrieval receipt IDs
-- draft conservatively when no product context is found
-- never invent pricing, capabilities, roadmap commitments, security posture, or
-  competitive claims
-
-## Data Model Direction
-
-Prefer a small source and receipt model first:
-
-- `knowledge_sources`
-- `knowledge_retrieval_receipts`
-- optional `knowledge_claim_cache`
-- optional `knowledge_claim_citations`
-
-If cached claims are added, they should be source-derived claim envelopes, not
-a manually maintained catalog.
-
-Possible cached claim fields:
-
-- tenant ID
-- claim ID
-- claim category
-- title/body/summary
-- structured scope
-- source refs and source version/hash
-- confidence
-- approval status
-- visibility
-- external-use flag
-- effective/expiry dates
-- last verified date
-- review owner
-- status: active, stale, deprecated, conflicting, rejected
-- search vector
-- optional embedding
-
-Avoid first-version tables for full product catalog, features, battlecards,
-pricing plans, roadmap items, personas, industries, and objections. Start with
-claim envelopes and scopes.
-
-## Implementation Phases
-
-### Phase 1: Contracts And No-Op Service
-
-- Add shared schemas for product knowledge retrieval.
-- Add backend service interface.
-- Return `not_configured` when no sources exist.
-- Add MCP and REST shape behind a feature flag if needed.
-- Add tests that core briefing and Action Context behavior is unchanged.
-
-### Phase 2: MCP And REST Retrieval
-
-- Add `knowledge_retrieve`.
-- Add REST route.
-- Add deterministic policy filtering.
-- Add retrieval receipts.
-- Support manually configured simple HTTP/document source adapters if needed.
-
-### Phase 3: Briefing And Action Context Enrichment
-
-- Add optional `include_product_context`.
-- Add product context section to briefing payloads.
-- Add optional Action Context product checks and proof fields.
-- Ensure unavailable product context never fails the core response.
-
-### Phase 4: Workspace Agent And Draft Integration
-
-- Let Workspace Agent request product context through the backend service.
-- Add email draft packet support for approved product claims.
-- Add generation metadata for used claims, citations, warnings, and receipts.
-- Add customer-facing policy defaults.
-
-### Phase 5: UI And CLI
-
-- Add CLI retrieval command.
-- Add product context display in BriefingPanel and EmailDraftDrawer.
-- Add source setup under Context Sources or Settings, not primary navigation.
-- Show warnings, exclusions, approval status, and citations.
-
-### Phase 6: Claim Cache And Source Adapters
-
-- Add optional cache/index for source-derived claims.
-- Add FTS and optional embedding support.
-- Add source freshness and deprecation handling.
-- Add adapters only for sources users actually need.
-
-### Phase 7: Governance
-
-- Add stale review assignments for claims with owners.
-- Add conflict detection for competing product claims.
-- Add source priority conflict resolution.
-- Add admin review flows for approval and external-use status if CRMy becomes
-  responsible for claim envelopes.
+### Phase 7 — Governance
+Reuse stale-review assignments for claim freshness; reuse contradiction patterns
+for claim-conflict detection; source-priority conflict resolution; approval flows
+only if CRMy becomes responsible for claim approval.
 
 ## Tests Required
 
-- Core regression tests: customer briefing, Action Context, drafts, and writeback
-  still work with no product sources.
-- Contract tests: MCP, REST, shared schemas, and CLI output.
-- Policy tests: customer-facing retrieval excludes stale, internal-only,
-  deprecated, conflicting, and unapproved claims.
-- Edge-provided tests: CRMy records external citations as not verified.
-- Retrieval tests: structured filters, lexical fallback, optional embeddings,
-  ranking, token packing, and no-results behavior.
-- Proof tests: retrieval receipts link to draft metadata and Action Context
-  proof.
-- Security tests: tenant isolation, scoped access, source visibility, no leakage
-  into customer-facing packets.
-- UI tests: warnings, citations, approval status, and unavailable-state display.
-- Golden draft tests: follow-ups use approved claims when present and draft
-  conservatively when not.
-
-## Open Questions
-
-- Which source systems should be supported first?
-- Who owns approval for competitive, pricing, roadmap, security, and compliance
-  claims?
-- Should CRMy ever write approval state back to source systems?
-- Which categories require mandatory expiry?
-- How should customer evidence in proof points be anonymized and approved?
-- Should product context be off by default for all tenants until configured?
-- Should edge-provided knowledge be allowed to satisfy customer-facing policy, or
-  only recorded as not verified?
-- What should be the minimum UI for source setup without creating a new primary
-  product area?
+- **Core regression**: customer briefing, Action Context, drafts, writeback work with no product sources.
+- **Contract**: MCP/REST/CLI/shared-schema shapes; `crmy.eval_case.v1` product cases load.
+- **Policy**: customer-facing retrieval excludes stale, internal-only, deprecated, conflicting, ungrounded, and unapproved claims.
+- **Grounding**: a claim is external-safe only when grounded in its cited source.
+- **Edge-provided**: recorded as not-verified; does not satisfy customer-facing policy.
+- **Retrieval**: filters, lexical fallback, optional embeddings, ranking, token packing, no-results.
+- **Proof**: receipts link into Lineage, draft metadata, and Action Context proof.
+- **Security**: tenant isolation, scoped access, source visibility, no leakage into customer-facing packets.
+- **Eval suite (CI)**: source attribution, unsupported-claim-rate (0), freshness/policy exclusion accuracy, golden drafts.
 
 ## Product Principle
 
 CRMy should not make agents use product knowledge through CRMy. It should make
-agents want to use product knowledge through CRMy because the result is more
-specific, safer, cited, policy-aware, and auditable.
+agents *want* to — because the result is more specific, safer, grounded, cited,
+policy-aware, and auditable, on the same rails as everything else CRMy governs.
