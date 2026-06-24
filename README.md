@@ -4,7 +4,7 @@
 
 <h1 align="center">CRMy</h1>
 
-<h2 align="center">Governed customer context ebngine for AI agents — in 60 seconds, no CRM connector required.</h2>
+<h2 align="center">Governed customer context engine for AI agents — in 60 seconds, no CRM connector required.</h2>
 
 <p align="center">
   CRMy turns messy customer context into trusted active context: Drop in a transcript, meeting notes, etc. and CRMy returns an agent-ready briefing containing confirmed Memory, evidence-backed Signals, stale warnings, and a "safe to act?" check with audit-ready proof.
@@ -48,7 +48,7 @@ Without a governed context layer, agents ask the wrong questions:
 - Does this email, CRM update, or workflow need approval?
 - What proof exists after the agent acts?
 
-CRMy is the operating layer for those questions. Instead of dumping raw records into a prompt, CRMy gives agents the customer Memory, warnings, policy, evidence, and action boundaries they need before they engage a customer or change a system of record — leaveing an audit trail behind. It is the **trust boundary between your agents and your customer systems**, and you can prove the value with zero connectors before you ever wire up a CRM.
+CRMy is the operating layer for those questions. Instead of dumping raw records into a prompt, CRMy gives agents the customer Memory, warnings, policy, evidence, and action boundaries they need before they engage a customer or change a system of record — leaving an audit trail behind. It is the **trust boundary between your agents and your customer systems**, and you can prove the value with zero connectors before you ever wire up a CRM.
 
 ```text
 Raw Context -> Signals -> Memory -> Briefing + Action Context -> Handoff / Writeback -> Audit Trail
