@@ -36,6 +36,8 @@ When in doubt, ask: does this help a user understand or move the source-to-actio
 - Keep provider-specific behavior in provider adapters; the core engine should consume CRMy-shaped data.
 - Keep durable invariants in PostgreSQL: idempotency, uniqueness, current/stale state, row versions, replay safety, and transaction boundaries.
 - Use Action Context to make agents more effective first: inform low-risk work, warn on stale or inferred context, and require review only when action risk, authority, or evidence quality demands it.
+- Only auto-promote a Signal to Memory when its evidence is grounded in the source; model confidence alone must never mint Memory.
+- Narrow the agent-visible tool catalog per session with toolsets, never per credential; toolset selection only narrows the actor's scoped tools and never widens access.
 - Route external writes through preview, policy checks, allowed-field checks, approval when required, idempotency, execution receipts, and audit.
 - Preserve Lineage whenever source material becomes Signals, Memory, Handoffs, writebacks, or operator-facing recovery state.
 - Keep user-facing contracts stable across REST, CLI, MCP, and Web UI surfaces.
