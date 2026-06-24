@@ -19,6 +19,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { initCommand } from './commands/init.js';
+import { quickstartCommand } from './commands/quickstart.js';
 
 const _require = createRequire(import.meta.url);
 function getCLIVersion(): string {
@@ -75,6 +76,7 @@ program
 
 program.addCommand(authCommand());
 program.addCommand(initCommand());
+program.addCommand(quickstartCommand());
 program.addCommand(serverCommand());
 program.addCommand(mcpCommand());
 program.addCommand(contactsCommand());

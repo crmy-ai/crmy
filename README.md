@@ -162,9 +162,11 @@ export CRMY_ADMIN_PASSWORD="$(openssl rand -base64 24)"
 printf 'CRMy admin password: %s\n' "$CRMY_ADMIN_PASSWORD"
 
 npx -y @crmy/cli init --demo
-npx -y @crmy/cli doctor
+npx -y @crmy/cli quickstart
 npx -y @crmy/cli server
 ```
+
+`quickstart` is the fastest way to see the point of CRMy: with **no CRM connector configured**, it seeds demo context and shows CRMy resolving a customer, returning a governed briefing, checking Action Context, and proving lineage — the same path an agent runs over MCP. Connecting a CRM or warehouse is an optional upgrade, not a prerequisite. (`npx -y @crmy/cli doctor` runs the same checks as a pass/fail health check.)
 
 Open:
 
