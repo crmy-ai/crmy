@@ -50,6 +50,8 @@ Memory is confirmed operational customer context agents can rely on across sessi
 
 Signals become Memory only when evidence, confidence, subject resolution, policy, and readiness allow it. Repeated ingestion of the same source must not masquerade as independent corroboration.
 
+Confidence is self-reported by the extraction model, so it is never sufficient on its own for auto-promotion. CRMy applies a model-independent **source-grounding gate**: a Signal can only auto-promote to Memory when at least one of its evidence snippets is actually present in the source text it was extracted from. This means a weak or mis-calibrated model cannot silently mint Memory from a hallucinated claim — ungrounded claims stay reviewable Signals until a human confirms them. The check is intentionally lenient so its failures only add review, never lose context, and it can be disabled with `CRMY_REQUIRE_GROUNDED_AUTOPROMOTE=0`.
+
 ### 5. Retrieve Active Context
 
 Agents do not use the whole Memory store directly. They call retrieval tools such as `briefing_get`, `context_search`, semantic search, Graph, or Lineage. CRMy selects relevant Memory, Signals, activity, Handoffs, stale warnings, and token-budget metadata for the model-visible working set.
