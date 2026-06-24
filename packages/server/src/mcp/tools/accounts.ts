@@ -560,6 +560,7 @@ export function accountTools(db: DbPool): ToolDef[] {
         }
 
         let merged: Record<string, number> = {};
+        let responseMergedCount: Record<string, number> = {};
         let updatedPrimary: Account | null = null;
         let event_id: number | undefined;
         await withTransaction(db, async (tx) => {
@@ -604,6 +605,12 @@ export function accountTools(db: DbPool): ToolDef[] {
             outbound_emails: emails.rowCount ?? 0,
             calendar_events: calendarEvents.rowCount ?? 0,
             domains: domains.rowCount ?? 0,
+          };
+          responseMergedCount = {
+            contacts: merged.contacts,
+            opportunities: merged.opportunities,
+            use_cases: merged.use_cases,
+            activities: merged.activities,
           };
 
           // Merge aliases: add secondary domain, name, and aliases into primary
@@ -654,7 +661,7 @@ export function accountTools(db: DbPool): ToolDef[] {
         return {
           primary: updatedPrimary,
           secondary_id: input.secondary_id,
-          merged_count: merged,
+          merged_count: responseMergedCount,
           event_id,
           mutation: mutationReceipt(actor, {
             objectType: 'account',
