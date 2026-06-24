@@ -1,0 +1,41 @@
+name: Eval Harness
+
+# Gates merges on CRMy's customer-context contracts: extraction, record
+# resolution, retrieval quality, Action Context, source attribution, tool
+# choice, and agent trajectory. These profiles are deterministic and run fully
+# in-process, so they need no database and no model provider. The live-model
+# profile (raw_context_extraction_quality) is intentionally excluded — it
+# requires a configured model and runs outside CI.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build --workspace=packages/shared
+      - run: npm run build --workspace=packages/server
+      - run: npm run build --workspace=packages/cli
+
+      # Each profile fails the job (non-zero exit) if any case regresses or a
+      # profile quality threshold is missed.
+      - name: Contract suites (golden-output)
+        run: node packages/cli/dist/index.js eval run --profile contract
+
+      - name: Seeded-context suites (retrieval, Action Context, source attribution)
+        run: node packages/cli/dist/index.js eval run --profile seeded_context
+
+      - name: Agent-runtime suites (tool choice, agent trajectory)
+        run: node packages/cli/dist/index.js eval run --profile agent_runtime

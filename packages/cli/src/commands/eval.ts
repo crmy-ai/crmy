@@ -25,6 +25,8 @@ async function loadEvalRunner(): Promise<{
     requireLive?: boolean;
     failUnder?: number;
     output?: string;
+    casesFile?: string;
+    exportFormats?: string[];
   }) => Promise<EvalRunSummary>;
 }> {
   return await import('@crmy/server') as unknown as {
@@ -35,8 +37,22 @@ async function loadEvalRunner(): Promise<{
       requireLive?: boolean;
       failUnder?: number;
       output?: string;
+      casesFile?: string;
+      exportFormats?: string[];
     }) => Promise<EvalRunSummary>;
   };
+}
+
+const EXPORT_FORMATS = ['generic', 'openai', 'ragas', 'langsmith'];
+
+function parseExportFormats(value?: string): string[] | undefined {
+  if (!value?.trim()) return undefined;
+  const formats = value.split(',').map(item => item.trim()).filter(Boolean);
+  const unknown = formats.filter(format => !EXPORT_FORMATS.includes(format));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown eval export format: ${unknown.join(', ')}. Known: ${EXPORT_FORMATS.join(', ')}.`);
+  }
+  return formats;
 }
 
 function parseSuites(value?: string): EvalSuiteName[] | undefined {
@@ -171,7 +187,9 @@ export function evalCommand(): Command {
     .option('--profile <profile>', 'Eval profile: contract, live_model, seeded_context, or agent_runtime')
     .option('--all', 'Run all implemented suites')
     .option('--fail-under <score>', 'Fail if any emitted aggregate score is below this value (0-1)')
-    .option('--output <dir>', 'Write JSON and JSONL eval artifacts to a directory')
+    .option('--output <dir>', 'Write JSON, JSONL, and trace eval artifacts to a directory')
+    .option('--cases <file>', 'Run external eval cases (JSON array or JSONL, crmy.eval_case.v1) against one corpus-driven suite')
+    .option('--export <formats>', `Also write export files (requires --output): ${EXPORT_FORMATS.join(', ')}`)
     .option('--require-live', 'Fail live-model suites when CRMY_EVAL_MODEL_* config is absent')
     .option('--json', 'Print raw JSON result')
     .action(async (opts: {
@@ -180,10 +198,14 @@ export function evalCommand(): Command {
       all?: boolean;
       failUnder?: string;
       output?: string;
+      cases?: string;
+      export?: string;
       requireLive?: boolean;
       json?: boolean;
     }) => {
-      const suites = opts.all ? KNOWN_SUITES.filter(suite => suite !== 'connector_certification') : parseSuites(opts.suite);
+      // --all includes planned suites too; runCrmyEval reports them as skipped
+      // rather than dropping them, so the report is complete and auditable.
+      const suites = opts.all ? KNOWN_SUITES : parseSuites(opts.suite);
       const { runCrmyEval } = await loadEvalRunner();
       const run = await runCrmyEval({
         suites,
@@ -191,6 +213,8 @@ export function evalCommand(): Command {
         requireLive: opts.requireLive,
         failUnder: parseFailUnder(opts.failUnder),
         output: opts.output,
+        casesFile: opts.cases,
+        exportFormats: parseExportFormats(opts.export),
       });
       if (opts.json) {
         console.log(JSON.stringify(run, null, 2));

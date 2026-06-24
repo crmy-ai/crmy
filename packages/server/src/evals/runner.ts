@@ -15,7 +15,10 @@ import type {
   EvalSuiteName,
   EvalSuiteSummary,
   EvalThreshold,
+  EvalTrace,
 } from '@crmy/shared';
+import { evalCase as evalCaseSchema } from '@crmy/shared';
+import { EVAL_EXPORT_FORMATS, exportRun, isEvalExportFormat, toGenericJsonl, type EvalExportFormat } from './exporters.js';
 import type { DbPool } from '../db/pool.js';
 import type { AgentConfig, AgentToolDef, ConversationMessage, ToolCallRecord } from '../agent/types.js';
 import { DEFAULT_CONTEXT_TYPES } from '../db/repos/context-type-registry.js';
@@ -293,9 +296,23 @@ export interface RunEvalOptions {
   requireLive?: boolean;
   failUnder?: number;
   output?: string;
+  /** External eval-case file (JSON array or JSONL) to run in place of a bundled corpus. */
+  casesFile?: string;
+  /** Already-loaded external cases, injected for tests or programmatic use. */
+  externalCases?: CorpusFixture[];
+  /** Additional export formats to write alongside artifacts (requires output). */
+  exportFormats?: string[];
   liveExtractionModelCaller?: LiveExtractionModelCaller;
   agentModelCaller?: EvalAgentModelCaller;
 }
+
+/** Suites driven by a CorpusFixture array, so external cases can replace the bundled corpus. */
+const CORPUS_SUITES: EvalSuiteName[] = [
+  'raw_context_extraction',
+  'raw_context_extraction_quality',
+  'raw_context_custom_registry',
+  'record_resolution',
+];
 
 export interface ListEvalSuiteOptions {
   includePlanned?: boolean;
@@ -310,6 +327,60 @@ async function loadFixture(fileName: string): Promise<CorpusFixture[]> {
   const parsed = JSON.parse(raw) as unknown;
   if (!Array.isArray(parsed)) throw new Error(`Eval fixture ${fileName} must be an array.`);
   return parsed as CorpusFixture[];
+}
+
+/** Resolve a suite's corpus: externally provided cases override the bundled fixture. */
+async function corpusFor(fileName: string, options: RunEvalOptions): Promise<CorpusFixture[]> {
+  if (options.externalCases) return options.externalCases;
+  return loadFixture(fileName);
+}
+
+/**
+ * Load and validate an external eval-case file (JSON array or JSONL) against the
+ * crmy.eval_case.v1 schema. Redacted cases (no source text) are rejected for the
+ * live-model suite. EvalCase is a superset of CorpusFixture, so validated cases
+ * feed the corpus-driven suites directly.
+ */
+export async function loadExternalCases(file: string, suite: EvalSuiteName): Promise<CorpusFixture[]> {
+  const raw = (await readFile(file, 'utf8')).trim();
+  const records: unknown[] = raw.startsWith('[')
+    ? JSON.parse(raw)
+    : raw.split('\n').map(line => line.trim()).filter(Boolean).map(line => JSON.parse(line));
+  return records.map((record, index) => {
+    const parsed = evalCaseSchema.safeParse(record);
+    if (!parsed.success) {
+      throw new Error(`Eval case ${index} is invalid: ${parsed.error.issues.map(issue => `${issue.path.join('.')} ${issue.message}`).join('; ')}`);
+    }
+    const value = parsed.data;
+    if (value.suite !== suite) {
+      throw new Error(`Eval case "${value.id}" targets suite ${value.suite}, but the run selected ${suite}. Run one suite per --cases file.`);
+    }
+    if (value.redacted && suite === 'raw_context_extraction_quality') {
+      throw new Error(`Redacted eval case "${value.id}" cannot drive the live-model suite (it has no source text).`);
+    }
+    return value as unknown as CorpusFixture;
+  });
+}
+
+/** Coarse per-case execution trace derived from the case result. */
+function buildTrace(runId: string, result: EvalCaseSummary): EvalTrace {
+  return {
+    run_id: runId,
+    suite: result.suite,
+    case_id: result.id,
+    spans: [
+      {
+        name: 'evaluate',
+        status: result.status === 'error' ? 'error' : result.status === 'skipped' ? 'skipped' : 'ok',
+        detail: result.status,
+        attributes: {
+          scores: result.scores,
+          missing: result.diagnostics.missing_expected_items,
+          forbidden: result.diagnostics.forbidden_items_found,
+        },
+      },
+    ],
+  };
 }
 
 function suiteProfile(suite: EvalSuiteName): EvalRunProfile {
@@ -444,8 +515,8 @@ function arrayValue(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-async function runRawContextExtractionSuite(): Promise<EvalCaseSummary[]> {
-  const corpus = await loadFixture('raw-context-golden-corpus.json');
+async function runRawContextExtractionSuite(options: RunEvalOptions = {}): Promise<EvalCaseSummary[]> {
+  const corpus = await corpusFor('raw-context-golden-corpus.json', options);
   const schemas = defaultSchemas();
   const requiredIds = [
     'champion_role_from_call',
@@ -530,8 +601,8 @@ async function runRawContextExtractionSuite(): Promise<EvalCaseSummary[]> {
   });
 }
 
-async function runRawContextCustomRegistrySuite(): Promise<EvalCaseSummary[]> {
-  const corpus = await loadFixture('raw-context-custom-registry-corpus.json');
+async function runRawContextCustomRegistrySuite(options: RunEvalOptions = {}): Promise<EvalCaseSummary[]> {
+  const corpus = await corpusFor('raw-context-custom-registry-corpus.json', options);
   const requiredIds = [
     'custom_implementation_owner_ready',
     'custom_implementation_owner_missing_required_detail',
@@ -643,8 +714,8 @@ class FakeRawSubjectDb {
   }
 }
 
-async function runRecordResolutionSuite(): Promise<EvalCaseSummary[]> {
-  const corpus = await loadFixture('record-resolution-golden-corpus.json');
+async function runRecordResolutionSuite(options: RunEvalOptions = {}): Promise<EvalCaseSummary[]> {
+  const corpus = await corpusFor('record-resolution-golden-corpus.json', options);
   const requiredIds = [
     'account_name_scopes_child_records',
     'account_alias_scopes_child_records',
@@ -785,7 +856,7 @@ function encryptedEvalApiKey(): string | null {
 }
 
 async function runRawContextExtractionQualitySuite(options: RunEvalOptions): Promise<EvalCaseSummary[]> {
-  const corpus = await loadFixture('raw-context-golden-corpus.json');
+  const corpus = await corpusFor('raw-context-golden-corpus.json', options);
   const metadata = liveModelMetadata(options.liveExtractionModelCaller);
   const liveAvailable = Boolean(metadata.live_config_present);
   if (!liveAvailable && !options.requireLive) {
@@ -1700,13 +1771,13 @@ function selectSuites(options: RunEvalOptions): EvalSuiteName[] {
 async function runSuite(suite: EvalSuiteName, options: RunEvalOptions): Promise<EvalCaseSummary[]> {
   switch (suite) {
     case 'raw_context_extraction':
-      return runRawContextExtractionSuite();
+      return runRawContextExtractionSuite(options);
     case 'raw_context_extraction_quality':
       return runRawContextExtractionQualitySuite(options);
     case 'raw_context_custom_registry':
-      return runRawContextCustomRegistrySuite();
+      return runRawContextCustomRegistrySuite(options);
     case 'record_resolution':
-      return runRecordResolutionSuite();
+      return runRecordResolutionSuite(options);
     case 'retrieval_quality':
       return runRetrievalQualitySuite();
     case 'action_context':
@@ -1722,33 +1793,76 @@ async function runSuite(suite: EvalSuiteName, options: RunEvalOptions): Promise<
   }
 }
 
-async function writeArtifacts(outputDir: string, run: EvalRunSummary): Promise<string[]> {
+async function writeArtifacts(outputDir: string, run: EvalRunSummary, exportFormats: EvalExportFormat[]): Promise<string[]> {
   await mkdir(outputDir, { recursive: true });
+  const artifacts: string[] = [];
+
   const jsonPath = join(outputDir, `${run.run_id}.json`);
-  const jsonlPath = join(outputDir, `${run.run_id}.jsonl`);
   await writeFile(jsonPath, JSON.stringify(run, null, 2));
-  await writeFile(jsonlPath, run.results.map(result => JSON.stringify({
-    run_id: run.run_id,
-    suite: result.suite,
-    case_id: result.id,
-    status: result.status,
-    scores: result.scores,
-    expected: result.expected,
-    observed: result.observed,
-    diagnostics: result.diagnostics,
-  })).join('\n') + '\n');
-  return [jsonPath, jsonlPath];
+  artifacts.push(jsonPath);
+
+  // Generic JSONL (one row per case) — the default, tool-agnostic export.
+  const jsonlPath = join(outputDir, `${run.run_id}.jsonl`);
+  await writeFile(jsonlPath, toGenericJsonl(run));
+  artifacts.push(jsonlPath);
+
+  // Per-case execution traces.
+  const tracesPath = join(outputDir, `${run.run_id}.traces.jsonl`);
+  const traces = run.results.map(result => buildTrace(run.run_id, result));
+  await writeFile(tracesPath, traces.map(trace => JSON.stringify(trace)).join('\n') + '\n');
+  artifacts.push(tracesPath);
+
+  // Named external-tool export formats (generic is already written above).
+  for (const format of exportFormats) {
+    if (format === 'generic') continue;
+    const { filename, content } = exportRun(run, format);
+    const path = join(outputDir, filename);
+    await writeFile(path, content);
+    artifacts.push(path);
+  }
+
+  return artifacts;
 }
 
 export async function runCrmyEval(options: RunEvalOptions = {}): Promise<EvalRunSummary> {
   const profile = profileForRun(options);
   const selected = selectSuites(options);
-  const unsupported = selected.filter(suite => !IMPLEMENTED_SUITES.includes(suite));
-  if (unsupported.length > 0) {
-    throw new Error(`Eval suite not implemented yet: ${unsupported.join(', ')}`);
+
+  // External / redacted eval cases override the corpus of a single corpus-driven suite.
+  let externalCases = options.externalCases;
+  if (options.casesFile) {
+    if (selected.length !== 1 || !CORPUS_SUITES.includes(selected[0])) {
+      throw new Error(`--cases requires exactly one corpus-driven suite (${CORPUS_SUITES.join(', ')}).`);
+    }
+    externalCases = await loadExternalCases(options.casesFile, selected[0]);
+  }
+  const runOptions: RunEvalOptions = { ...options, externalCases };
+
+  // Validate requested export formats before running anything.
+  const exportFormats = (options.exportFormats ?? []).map(format => {
+    if (!isEvalExportFormat(format)) {
+      throw new Error(`Unknown eval export format: ${format}. Known: ${EVAL_EXPORT_FORMATS.join(', ')}.`);
+    }
+    return format;
+  });
+  if (exportFormats.length > 0 && !options.output) {
+    throw new Error('--export requires --output (a directory to write export files into).');
   }
 
-  const results = (await Promise.all(selected.map(suite => runSuite(suite, options)))).flat();
+  const supported = selected.filter(suite => IMPLEMENTED_SUITES.includes(suite));
+  const planned = selected.filter(suite => !IMPLEMENTED_SUITES.includes(suite));
+
+  // Planned-but-unimplemented suites (e.g. connector_certification) are reported
+  // as skipped rather than throwing, so `eval run --all` always produces a
+  // complete, auditable report instead of failing the whole run.
+  const ranResults = (await Promise.all(supported.map(suite => runSuite(suite, runOptions)))).flat();
+  const plannedResults = planned.map(suite => skippedCase({
+    id: `${suite}:not_implemented`,
+    suite,
+    title: `${SUITE_META[suite].title} (planned)`,
+    reason: 'Suite is planned but not implemented yet; skipped.',
+  }));
+  const results = [...ranResults, ...plannedResults];
   const suites = await Promise.all(selected.map(suiteSummary));
   const scores = averageScores(results);
   const thresholds = [
@@ -1800,7 +1914,7 @@ export async function runCrmyEval(options: RunEvalOptions = {}): Promise<EvalRun
     created_at: new Date().toISOString(),
   };
   if (options.output) {
-    run.artifacts = await writeArtifacts(options.output, run);
+    run.artifacts = await writeArtifacts(options.output, run, exportFormats);
   }
   return run;
 }
