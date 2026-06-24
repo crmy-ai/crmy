@@ -29,6 +29,7 @@ import * as customFieldRepo from '../db/repos/custom-fields.js';
 import * as signalGroupRepo from '../db/repos/signal-groups.js';
 import { decrypt } from './crypto.js';
 import { callLLM } from './providers/llm.js';
+import { groundedAutoPromoteRequired, isPromotionGrounded } from './extraction-grounding.js';
 import { attachSignalToGroup } from '../services/signal-groups.js';
 import { embedQuery, ensureEmbeddingBestEffort } from '../services/embedding-service.js';
 import type { RawContextRecordProposal } from '../services/raw-context-subjects.js';
@@ -1314,6 +1315,11 @@ export async function extractContextFromActivity(
   const outcome: ExtractionResult = { ...EMPTY_EXTRACTION_RESULT };
   const autoPromoteSignals = config.auto_promote_signals !== false;
   const autoPromoteThreshold = Number(config.signal_auto_promote_threshold ?? 0.85);
+  // Source-grounding gate: a Signal may only auto-promote to Memory when at least
+  // one of its evidence snippets is actually present in the source text. This is
+  // model-independent — it does not trust the model's self-reported confidence —
+  // so a weak model cannot silently mint Memory from a hallucinated claim.
+  const requireGroundedPromotion = groundedAutoPromoteRequired();
   for (const entry of entries) {
     try {
       const resolvedType = resolveExtractedContextType(entry.context_type, extractableTypes);
@@ -1407,7 +1413,8 @@ export async function extractContextFromActivity(
         outcome.needs_more_detail = (outcome.needs_more_detail ?? 0) + 1;
       }
 
-      const eligibleForGroupingPromotion = autoPromoteSignals && shouldAutoPromoteSignal({
+      const groundedForPromotion = !requireGroundedPromotion || isPromotionGrounded(evidence, content);
+      const eligibleForGroupingPromotion = autoPromoteSignals && groundedForPromotion && shouldAutoPromoteSignal({
         confidence: normalizedEntry.confidence ?? 0,
         threshold: autoPromoteThreshold,
         evidenceCount: evidence.length,
