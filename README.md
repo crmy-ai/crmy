@@ -39,7 +39,7 @@
 
 Your AI sales, CS, support, and RevOps agents can draft, summarize, and call APIs. They still hit walls when customer truth is scattered across CRM fields, meeting transcripts, emails, notes, calendar events, and human approvals.
 
-Without a governed context layer, agents ask the wrong questions:
+Without a governed context layer, agents can't answer the most critical questions:
 
 - Is this CRM field still current?
 - Did the customer actually say this, or did we infer it?
@@ -48,7 +48,7 @@ Without a governed context layer, agents ask the wrong questions:
 - Does this email, CRM update, or workflow need approval?
 - What proof exists after the agent acts?
 
-CRMy is the operating layer for those questions. Instead of dumping raw records into a prompt, CRMy gives agents the customer Memory, warnings, policy, evidence, and action boundaries they need before they engage a customer or change a system of record — leaving an audit trail behind. It is the **trust boundary between your agents and your customer systems**, and you can prove the value with zero connectors before you ever wire up a CRM.
+CRMy is the operating layer for these questions. Instead of dumping raw records into a prompt, CRMy gives agents the customer Memory, warnings, policy, evidence, and action boundaries they need before they engage a customer or change a system of record — leaving an audit trail behind. It is the **trust boundary between your agents and your customer systems**, and you can prove the value with zero connectors before you ever wire up a CRM.
 
 ```text
 Raw Context -> Signals -> Memory -> Briefing + Action Context -> Handoff / Writeback -> Audit Trail
