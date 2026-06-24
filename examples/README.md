@@ -9,12 +9,12 @@ Recipes in `docs/recipes/` explain broader agent workflows. Examples are smaller
 Run these checks first:
 
 ```bash
-npx -y @crmy/cli agent-smoke
+npx -y @crmy/cli quickstart
 npx -y @crmy/cli tools describe briefing_get
 npx -y @crmy/cli tools describe context_signal_group_list
 ```
 
-`agent-smoke` proves seeded demo data and the core MCP path. `tools describe` shows the current input shape for a tool, which is useful when an agent harness is choosing the wrong arguments.
+`quickstart` proves the seeded demo data and the core MCP path end to end, connector-free (it wraps the same checks as `agent-smoke`). `tools describe` shows the current input shape for a tool, which is useful when an agent harness is choosing the wrong arguments.
 
 ## Available Examples
 

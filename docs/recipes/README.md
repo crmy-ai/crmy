@@ -4,12 +4,15 @@ Recipes are workflow patterns for agents that use CRMy as the customer context a
 
 Use `examples/` when you want a deterministic one-minute harness check against seeded demo data. Use these recipes when you want to design a production agent workflow.
 
+Every recipe runs **connector-free** — they need only seeded or ingested context, not a CRM/warehouse connector. Run `npx -y @crmy/cli quickstart` first to confirm the seeded golden path works end to end.
+
 ## Recipe Conventions
 
 - Start by resolving records by name with `customer_record_resolve`. Do not require users to know UUIDs.
 - Use `briefing_get` before analysis or action so confirmed Memory and relevant Signals are loaded into Active Context.
 - Use `context_ingest_auto` for messy source material: transcripts, notes, emails, research packets, support updates, and meeting debriefs.
-- Treat Signals as inferred until they are confirmed, dismissed, or routed to Handoff.
+- Treat Signals as inferred until they are confirmed, dismissed, or routed to Handoff. Auto-promotion to Memory also requires the claim's evidence to be grounded in the source, so model confidence alone never mints trusted context.
+- Focus the tool catalog per job with a session toolset (e.g. `crmy mcp --toolset customer_outreach`, or `?toolset=` over HTTP MCP); call `tool_guide` to see which toolset matches a recipe. Toolsets narrow the working set per session — they never widen scope.
 - Use `action_context_get` before meaningful customer-facing action, forecast/action changes, or external writeback planning.
 - Use `context_add` only for advanced direct writes when the claim is already reviewed, typed, evidence-backed, and appropriate for the actor's scope.
 - Use idempotency keys for scheduled or retryable writes.

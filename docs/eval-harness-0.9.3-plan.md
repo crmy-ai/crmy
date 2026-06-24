@@ -2,7 +2,7 @@
 
 ## Status
 
-Planned for the 0.9.3 release.
+In progress for the 0.9.3 release. The local eval harness foundation and a production-path extraction quality eval have landed ([#29](https://github.com/crmy-ai/crmy/pull/29)); the remaining first-class suites below (retrieval quality, tool choice, Action Context, source attribution, agent trajectory, connector certification) are still planned.
 
 This plan turns CRMy's existing regression and durability coverage into a first-class eval harness for customer-context agents. The goal is not to replace the current test suite. The goal is to make CRMy's product promise measurable across datasets, models, prompts, embeddings, connectors, agent runtimes, and customer-specific configuration.
 

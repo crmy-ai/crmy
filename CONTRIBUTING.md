@@ -4,7 +4,7 @@ Thanks for your interest in contributing to CRMy! This guide will help you get o
 
 ## What CRMy needs most from contributors
 
-CRMy's differentiator is the core context engine: messy customer source material becomes Signals, confirmed Memory, scoped briefings, governed Handoffs, writeback receipts, and audit/Lineage. The highest-value community contributions are the ones that prove this loop under real-world conditions.
+CRMy's differentiator is the core context engine — the trust boundary between agents and customer systems: messy customer source material becomes Signals, source-grounded Memory, scoped briefings, governed Handoffs, writeback receipts, and audit/Lineage. The highest-value community contributions are the ones that prove this loop under real-world conditions.
 
 The most useful contributions right now are:
 
@@ -14,6 +14,7 @@ The most useful contributions right now are:
 4. **Record-resolution edge cases**: subsidiaries, aliases, shared domains, duplicate contact first names, same opportunity names under different accounts, stale CRM records, and partial transcript references.
 5. **Agent harness QA** for Claude Code, Claude Desktop, Codex, ChatGPT Developer Mode, Hermes, OpenClaw, and other MCP-capable environments.
 6. **Operational recovery tests** for failed extraction, retryable Raw Context, stuck agent turns, sync drift, writeback failures, and scoped-access denials.
+7. **Eval cases and suites** for the local eval harness (`crmy eval run`): labeled extraction corpora, record-resolution edge cases, retrieval-quality and tool-choice cases, and Action Context decisions — so model and prompt changes are measurable, not anecdotal.
 
 Feature ideas are welcome, but for the 0.9 line we prefer contributions that make the existing engine more reliable, measurable, and boring in production.
 
