@@ -19,6 +19,11 @@ export function mcpCommand(): Command {
   cmd
     .description('Start the local stdio MCP server for agents and IDEs')
     .option('--config <path>', 'Explicit path to a .crmy.json config file')
+    .option(
+      '--toolset <name>',
+      'Working set of tools to register for this session, e.g. standard, customer_outreach, systems_writeback, ops, or full. '
+        + 'Agents default to "standard"; pass "full" for the entire catalog. Overrides CRMY_MCP_TOOLSET. Run tool_guide to see options.',
+    )
     .addHelpText('after', `
 
 Examples:
@@ -158,7 +163,8 @@ Agent guidance:
         process.exit(1);
       }
 
-      const server    = createMcpServer(db, actor, () => actor);
+      const toolset   = (opts.toolset as string | undefined) ?? process.env.CRMY_MCP_TOOLSET;
+      const server    = createMcpServer(db, actor, () => actor, { toolset });
       const transport = new StdioServerTransport();
       await server.connect(transport);
     });

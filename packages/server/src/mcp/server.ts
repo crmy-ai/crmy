@@ -22,6 +22,7 @@ import type { ActorContext } from '@crmy/shared';
 import { CrmyError } from '@crmy/shared';
 import type { DbPool } from '../db/pool.js';
 import { actorHasScope, enforceToolScopes, getToolScopeRequirements } from '../auth/scopes.js';
+import { resolveToolsetName, selectToolset } from './toolsets.js';
 import { registerResources } from './resources.js';
 import { contactTools } from './tools/contacts.js';
 import { accountTools } from './tools/accounts.js';
@@ -188,15 +189,33 @@ function hasAnyObjectWriteScope(actor: ActorContext): boolean {
   ].some(scope => actorHasScope(actor, scope));
 }
 
-export function createMcpServer(db: DbPool, actor: ActorContext, getActor: () => ActorContext): McpServer {
+export function createMcpServer(
+  db: DbPool,
+  actor: ActorContext,
+  getActor: () => ActorContext,
+  options?: { toolset?: string | null },
+): McpServer {
   const server = new McpServer({
     name: 'CRMy',
     version: getServerVersion(),
   });
 
-  // Filter tools at connection time based on actor tier — agents see ~20 core tools;
-  // extended/analytics/admin tools are added only for actors that need them.
-  const tools = getToolsForActor(db, actor);
+  // Two-stage tool filtering at connection time:
+  //   1. getToolsForActor — the hard scope/tier boundary (what the actor MAY use).
+  //   2. selectToolset — a per-session working set that narrows further to the
+  //      job at hand (resolve/brief/outreach/writeback/ops/...). Selection can
+  //      only remove tools, never add them, so it is purely a context optimization;
+  //      call-time enforceToolScopes still guards every handler.
+  // The toolset is chosen per connection (not baked into the API key), so one
+  // key can open differently-focused sessions for different jobs. Autonomous
+  // agents default to the lean "standard" set; humans/admins keep "full".
+  const allowedTools = getToolsForActor(db, actor);
+  const toolsetName = resolveToolsetName(
+    options?.toolset,
+    actor.actor_type,
+    process.env.CRMY_MCP_DEFAULT_TOOLSET,
+  );
+  const tools = selectToolset(allowedTools, toolsetName);
 
   registerResources(server, db, getActor);
 

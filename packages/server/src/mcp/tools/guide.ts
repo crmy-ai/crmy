@@ -8,6 +8,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ActorContext } from '@crmy/shared';
 import type { ToolDef } from '../server.js';
+import { listToolsets } from '../toolsets.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -106,6 +107,25 @@ const workflowGuideInput = z.object({
   ]).default('first_steps').describe('The customer workflow you are trying to perform. Use first_steps when unsure.'),
 });
 
+/**
+ * Map each workflow to the named toolset that focuses a session on it. An agent
+ * unsure which tools it needs calls tool_guide, then reconnects (or asks its
+ * operator to connect) with the suggested toolset to shrink the catalog.
+ */
+const WORKFLOW_TOOLSET: Record<z.infer<typeof workflowGuideInput>['workflow'], string> = {
+  first_steps: 'standard',
+  record_lookup: 'record_lookup',
+  brief_before_action: 'standard',
+  ingest_raw_context: 'ingest',
+  review_signals: 'signal_review',
+  promote_memory: 'memory_promotion',
+  customer_outreach: 'customer_outreach',
+  record_update: 'record_update',
+  systems_writeback: 'systems_writeback',
+  post_action_follow_up: 'standard',
+  ops_recovery: 'ops',
+};
+
 const WORKFLOW_GUIDES: Record<z.infer<typeof workflowGuideInput>['workflow'], {
   summary: string;
   recommended_tools: string[];
@@ -190,10 +210,17 @@ export function guideTools(): ToolDef[] {
       inputSchema: workflowGuideInput,
       handler: async (input: z.infer<typeof workflowGuideInput>, _actor: ActorContext) => {
         const workflow = input.workflow ?? 'first_steps';
+        const focus_toolset = WORKFLOW_TOOLSET[workflow];
         return {
           workflow,
           ...WORKFLOW_GUIDES[workflow],
-          reminder: 'Use scoped agent credentials so the model only sees tools needed for its job. Avoid admin/full manifests for ordinary customer workflows.',
+          focus_toolset,
+          how_to_focus_tools:
+            `To shrink the tool catalog to just this job, start a session with the "${focus_toolset}" toolset: `
+            + `HTTP \`POST /mcp?toolset=${focus_toolset}\` (or header \`X-CRMy-Toolset: ${focus_toolset}\`), `
+            + `CLI \`crmy mcp --toolset ${focus_toolset}\`. Use "full" for the entire catalog. Toolsets are chosen per session, not per key.`,
+          available_toolsets: listToolsets(),
+          reminder: 'Toolsets narrow the working set per session; scoped credentials remain the hard access boundary. Prefer a focused toolset over the full catalog for autonomous agents.',
         };
       },
     },
