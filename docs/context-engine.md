@@ -1,6 +1,8 @@
 # CRMy Context Engine
 
-CRMy's core engine turns messy customer source material into operational Memory agents can safely use. It is the part of the platform most worth testing, extending, and hardening.
+CRMy's core engine turns messy customer source material into operational Memory agents can safely use. It is what makes CRMy the **trust boundary between agents and customer systems** — the layer an agent calls before it reads, decides, or acts. It is the part of the platform most worth testing, extending, and hardening.
+
+The engine works connector-free: transcripts, notes, and emails are enough to produce briefings, Action Context, and lineage. CRM and warehouse systems of record are an optional upgrade, not a prerequisite.
 
 The engine is not just storage. It is a loop:
 

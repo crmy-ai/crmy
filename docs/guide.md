@@ -1,6 +1,8 @@
 # CRMy User Guide
 
-Complete documentation for CRMy — the operational customer context layer for AI agents.
+Complete documentation for CRMy — the governed customer context layer that sits between AI agents and your customer systems. Messy context in; agent-ready Memory, Signals, Action Context, and proof out. CRMy works connector-free (transcripts, notes, and emails are enough); CRM and warehouse systems of record are an optional upgrade.
+
+New here? Run `npx -y @crmy/cli init --demo` then `npx -y @crmy/cli quickstart` to see the connector-free path end to end, or jump to [Getting Started](#getting-started).
 
 ---
 
@@ -77,16 +79,17 @@ export CRMY_ADMIN_PASSWORD="$(openssl rand -base64 24)"
 printf 'CRMy admin password: %s\n' "$CRMY_ADMIN_PASSWORD"
 npx -y @crmy/cli init --demo
 
-# 3. Check setup and start the server (REST API + MCP + Web UI at /app)
-npx -y @crmy/cli doctor
+# 3. See the connector-free value end to end (the path an agent runs over MCP)
+npx -y @crmy/cli quickstart
+
+# 4. Start the server (REST API + MCP + Web UI at /app)
 npx -y @crmy/cli server
 
-# 4. Add to Claude Code as an MCP server
+# 5. Add to Claude Code as an MCP server
 claude mcp add crmy -- npx -y @crmy/cli mcp
-
-# 5. Verify the seeded agent path
-npx -y @crmy/cli agent-smoke
 ```
+
+`quickstart` resolves a customer, returns a governed briefing, checks Action Context, and proves lineage — with no CRM connector configured. `npx -y @crmy/cli doctor` runs the same checks as a pass/fail health check, and `npx -y @crmy/cli agent-smoke` is the underlying smoke test.
 
 Prefer prompts? Run `npx -y @crmy/cli init` and choose whether to load demo data when prompted.
 
