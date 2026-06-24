@@ -1693,8 +1693,51 @@ test('active context quality evals run seeded gates and live extraction without 
   assert.equal(live.model_metadata.caller, 'injected');
   assert.equal(live.suites[0].uses_golden_model_output, false);
   assert.equal(live.results.every(result => result.expected?.uses_golden_model_output === false), true);
+  assert.equal(live.results.every(result => result.observed?.uses_model_output_override === false), true);
+  assert.equal(live.results.every(result => result.observed?.attempt_status === 'succeeded'), true);
   assert.equal(live.scores.parse_success, 1);
   assert.ok(live.scores.expected_signal_recall >= 0.85);
+});
+
+test('live extraction quality eval scores malformed, missing, and unsafe injected model output', async () => {
+  const malformed = await runCrmyEval({
+    profile: 'live_model',
+    liveExtractionModelCaller: async () => 'not json',
+  });
+  assert.equal(malformed.status, 'fail');
+  assert.equal(malformed.scores.parse_success, 0);
+  assert.equal(malformed.results.every(result => result.observed?.attempt_status === 'failed'), true);
+
+  const missing = await runCrmyEval({
+    profile: 'live_model',
+    liveExtractionModelCaller: async () => JSON.stringify({ context_entries: [], record_proposals: [] }),
+  });
+  assert.equal(missing.status, 'fail');
+  assert.equal(missing.scores.parse_success, 1);
+  assert.ok(missing.scores.expected_signal_recall < 0.85);
+
+  const unsafe = await runCrmyEval({
+    profile: 'live_model',
+    liveExtractionModelCaller: async ({ fixture }) => JSON.stringify({
+      context_entries: (fixture.expected_signal_types ?? []).map(contextType => ({
+        context_type: contextType,
+        title: `${contextType} from ${fixture.id}`,
+        body: fixture.document,
+        confidence: 0.99,
+        structured_data: {},
+        evidence: [{ source_type: fixture.source_type ?? 'raw_context', snippet: fixture.document.slice(0, 80), confidence: 0.99 }],
+        tags: ['unsafe_injected_eval'],
+      })),
+      record_proposals: fixture.expected_behavior === 'propose_child_record_for_review'
+        ? [{ record_type: 'opportunity', name: 'Unsafe proposal', confidence: 0.95, reason: 'Fixture expects a proposal.', fields: { name: 'Unsafe proposal' } }]
+        : [],
+    }),
+  });
+  assert.equal(unsafe.status, 'fail');
+  assert.ok(unsafe.scores.auto_promotion_safety < 1);
+  assert.ok(unsafe.results.some(result =>
+    result.diagnostics.missing_expected_items.includes('must-not-auto-promote output remained reviewable'),
+  ));
 });
 
 const extractionTenantId = '11111111-1111-4111-8111-111111111111';

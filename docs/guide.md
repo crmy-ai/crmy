@@ -143,6 +143,14 @@ CRMY_EVAL_MODEL_API_KEY=sk-... \
 npx -y @crmy/cli eval run --profile live_model --require-live --output ./eval-runs
 ```
 
+The live profile does not feed `golden_model_output` to the parser. It seeds an
+eval activity DB, calls production `extractContextFromActivity` without
+`modelOutputOverride`, and scores the persisted Signals, proposed records,
+evidence alignment, extraction attempt telemetry, and Raw Context receipt
+status. The eval API key is loaded from the environment and encrypted in memory
+for the same `callLLM` path used by tenant model settings; secrets are not
+written to eval artifacts.
+
 Without `--require-live`, the live profile exits as skipped when model
 credentials are absent. Eval output can be written as native JSON plus JSONL
 artifacts for Ragas/LangSmith-style offline analysis.

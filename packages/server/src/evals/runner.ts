@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type {
@@ -15,14 +16,16 @@ import type {
   EvalSuiteSummary,
   EvalThreshold,
 } from '@crmy/shared';
+import type { DbPool } from '../db/pool.js';
 import type { AgentConfig, AgentToolDef, ConversationMessage, ToolCallRecord } from '../agent/types.js';
-import { buildOpenAICompatibleHeaders, chatCompletionsUrl, providerUsesAnthropicFormat } from '../agent/provider-utils.js';
 import { DEFAULT_CONTEXT_TYPES } from '../db/repos/context-type-registry.js';
-import { parseExtractionOutput, shouldAutoPromoteSignal } from '../agent/extraction.js';
+import { extractContextFromActivity, parseExtractionOutput, shouldAutoPromoteSignal } from '../agent/extraction.js';
+import { encrypt } from '../agent/crypto.js';
 import { evaluateMemoryReadiness } from '../services/memory-readiness.js';
 import { detectRawContextSubjects } from '../services/raw-context-subjects.js';
 import { assembleBriefing } from '../services/briefing.js';
 import { getActionContext } from '../services/action-context.js';
+import { ExtractionEvalDb, type ExtractionEvalModelConfig } from './extraction-eval-db.js';
 
 const FIXTURE_DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const EVAL_VERSION = 'crmy.eval_result.v1' as const;
@@ -35,6 +38,7 @@ const SEED_OPPORTUNITY_ID = '55555555-5555-4555-8555-555555555555';
 const SEED_OTHER_ACCOUNT_ID = '66666666-6666-4666-8666-666666666666';
 const SEED_MAPPING_ID = '77777777-7777-4777-8777-777777777777';
 const SEED_SYSTEM_ID = '88888888-8888-4888-8888-888888888888';
+const LIVE_EXTRACTION_ACTIVITY_ID = '99999999-9999-4999-8999-999999999991';
 
 const CONTRACT_SUITES: EvalSuiteName[] = [
   'raw_context_extraction',
@@ -101,13 +105,13 @@ const SUITE_META: Record<EvalSuiteName, Omit<EvalSuiteSummary, 'case_count'>> = 
     description: 'Runs messy Raw Context documents through a live or injected extraction model response and scores extraction quality without golden output input.',
     deterministic: false,
     requires_model: true,
-    requires_database: false,
+    requires_database: true,
     implementation_status: 'implemented',
-    proof_scope: 'Measures source-text to structured-Signal quality: parse success, recall, evidence alignment, no-context precision, and unsafe false positives.',
+    proof_scope: 'Measures source-text to persisted Signal quality through the production activity extraction path: parse success, recall, evidence alignment, no-context precision, receipts, and unsafe false positives.',
     profiles: ['live_model'],
     quality_gate: true,
     uses_golden_model_output: false,
-    limitations: ['Skipped without eval model credentials unless --require-live is used.', 'Uses the production parser and extraction schema but not the full write/group DB pipeline.'],
+    limitations: ['Skipped without eval model credentials unless --require-live is used.', 'Uses an in-memory eval fixture DB rather than a shared external Postgres database.'],
   },
   raw_context_custom_registry: {
     name: 'raw_context_custom_registry',
@@ -422,9 +426,22 @@ function expectedEntriesForFixture(item: CorpusFixture): ExpectedEntryLabel[] {
   return (item.expected_signal_types ?? []).map(contextType => ({ context_type: contextType }));
 }
 
-function normalizedTextForEntry(entry: { title?: string; body?: string; evidence?: Array<Record<string, unknown>> }): string {
-  const evidence = (entry.evidence ?? []).map(item => Object.values(item).join(' ')).join(' ');
-  return `${entry.title ?? ''} ${entry.body ?? ''} ${evidence}`.toLowerCase();
+function normalizedTextForEntry(entry: { title?: unknown; body?: unknown; evidence?: unknown }): string {
+  const evidenceItems = Array.isArray(entry.evidence) ? entry.evidence : [];
+  const evidence = evidenceItems.map(item =>
+    item && typeof item === 'object'
+      ? Object.values(item as Record<string, unknown>).join(' ')
+      : String(item ?? ''),
+  ).join(' ');
+  return `${String(entry.title ?? '')} ${String(entry.body ?? '')} ${evidence}`.toLowerCase();
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function arrayValue(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
 }
 
 async function runRawContextExtractionSuite(): Promise<EvalCaseSummary[]> {
@@ -741,88 +758,30 @@ function liveModelMetadata(caller?: LiveExtractionModelCaller): EvalModelMetadat
   };
 }
 
-function extractionQualityPrompts(item: CorpusFixture): { system: string; user: string } {
-  const types = DEFAULT_CONTEXT_TYPES
-    .filter(type => type.is_extractable)
-    .map(type => `- ${type.type_name}: ${type.description ?? type.label}`)
-    .join('\n');
-  return {
-    system: [
-      'You are CRMy extraction quality evaluator runtime.',
-      'Extract only customer-specific GTM context supported by the source text.',
-      'Return strict JSON with keys "context_entries" and "record_proposals".',
-      'Each context entry must include context_type, title, body, confidence, structured_data, evidence, and tags.',
-      'Evidence snippets must be short excerpts from the source text.',
-      'If there is no useful customer-specific context, return {"context_entries":[],"record_proposals":[]}.',
-      '',
-      'Allowed context types:',
-      types,
-    ].join('\n'),
-    user: [
-      `Source type: ${item.source_type ?? 'raw_context'}`,
-      `Occurred at: ${item.source_occurred_at ?? 'unknown'}`,
-      `Subject hints: ${(item.subject_hints ?? []).join(', ') || 'none'}`,
-      '',
-      'Raw Context:',
-      item.document ?? '',
-    ].join('\n'),
+function installTemporaryEvalEncryptionKey(): () => void {
+  if (!process.env.CRMY_EVAL_MODEL_API_KEY) return () => {};
+  if (process.env.AGENT_ENCRYPTION_KEY || process.env.CRMY_ENCRYPTION_KEY || process.env.JWT_SECRET) return () => {};
+  const generated = `crmy-eval-${randomUUID()}-${randomUUID()}`;
+  process.env.CRMY_ENCRYPTION_KEY = generated;
+  return () => {
+    if (process.env.CRMY_ENCRYPTION_KEY === generated) delete process.env.CRMY_ENCRYPTION_KEY;
   };
 }
 
-async function fetchLiveExtractionResponse(input: LiveExtractionModelCallInput): Promise<string> {
-  const provider = process.env.CRMY_EVAL_MODEL_PROVIDER ?? 'custom';
-  const baseUrl = process.env.CRMY_EVAL_MODEL_BASE_URL;
-  const model = process.env.CRMY_EVAL_MODEL_NAME;
-  const apiKey = process.env.CRMY_EVAL_MODEL_API_KEY ?? '';
-  if (!baseUrl || !model) {
-    throw new Error('CRMY_EVAL_MODEL_BASE_URL and CRMY_EVAL_MODEL_NAME are required for live extraction evals.');
-  }
-  const timeoutMs = Number(process.env.CRMY_EVAL_MODEL_TIMEOUT_MS ?? 60_000);
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    if (providerUsesAnthropicFormat(provider)) {
-      const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 3000,
-          system: input.system,
-          messages: [{ role: 'user', content: input.user }],
-        }),
-        signal: controller.signal,
-      });
-      if (!res.ok) throw new Error(`Live extraction model failed with HTTP ${res.status}: ${(await res.text()).slice(0, 500)}`);
-      const data = await res.json() as { content?: Array<{ type?: string; text?: string }> };
-      return data.content?.find(item => item.type === 'text')?.text ?? '';
-    }
+function liveExtractionModelConfig(apiKeyEnc: string | null, caller?: LiveExtractionModelCaller): ExtractionEvalModelConfig {
+  return {
+    provider: process.env.CRMY_EVAL_MODEL_PROVIDER ?? 'custom',
+    baseUrl: process.env.CRMY_EVAL_MODEL_BASE_URL ?? 'http://crmy-eval-injected.local',
+    model: process.env.CRMY_EVAL_MODEL_NAME ?? (caller ? 'crmy-eval-injected-model' : 'crmy-eval-model'),
+    apiKeyEnc,
+    maxTokensPerTurn: Number(process.env.CRMY_EVAL_MODEL_MAX_TOKENS ?? 4096),
+    llmTimeoutMs: Number(process.env.CRMY_EVAL_MODEL_TIMEOUT_MS ?? 90_000),
+  };
+}
 
-    const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
-    const res = await fetch(chatCompletionsUrl(normalizedBaseUrl), {
-      method: 'POST',
-      headers: buildOpenAICompatibleHeaders(provider, normalizedBaseUrl, apiKey),
-      body: JSON.stringify({
-        model,
-        max_tokens: 3000,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: input.system },
-          { role: 'user', content: input.user },
-        ],
-      }),
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`Live extraction model failed with HTTP ${res.status}: ${(await res.text()).slice(0, 500)}`);
-    const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
-    return data.choices?.[0]?.message?.content ?? '';
-  } finally {
-    clearTimeout(timer);
-  }
+function encryptedEvalApiKey(): string | null {
+  const apiKey = process.env.CRMY_EVAL_MODEL_API_KEY;
+  return apiKey ? encrypt(apiKey) : null;
 }
 
 async function runRawContextExtractionQualitySuite(options: RunEvalOptions): Promise<EvalCaseSummary[]> {
@@ -848,124 +807,170 @@ async function runRawContextExtractionQualitySuite(options: RunEvalOptions): Pro
     }));
   }
 
-  return Promise.all(corpus.map(async item => {
-    const expectedEntries = expectedEntriesForFixture(item);
-    const forbiddenEntries = item.forbidden_entries ?? [];
-    const prompts = extractionQualityPrompts(item);
-    try {
-      const raw = options.liveExtractionModelCaller
-        ? await options.liveExtractionModelCaller({ fixture: item, system: prompts.system, user: prompts.user, model_metadata: metadata })
-        : await fetchLiveExtractionResponse({ fixture: item, system: prompts.system, user: prompts.user, model_metadata: metadata });
-      const output = parseExtractionOutput(raw);
-      const outputTypes = new Set(output.entries.map(entry => entry.context_type));
-      const missing: string[] = [];
-      const forbidden: string[] = [];
+  const restoreEncryptionKey = installTemporaryEvalEncryptionKey();
+  try {
+    const modelConfig = liveExtractionModelConfig(encryptedEvalApiKey(), options.liveExtractionModelCaller);
+    return await Promise.all(corpus.map(async item => {
+      const expectedEntries = expectedEntriesForFixture(item);
+      const forbiddenEntries = item.forbidden_entries ?? [];
+      const db = new ExtractionEvalDb({
+        tenantId: TENANT_ID,
+        activityId: LIVE_EXTRACTION_ACTIVITY_ID,
+        accountId: SEED_ACCOUNT_ID,
+        contactId: SEED_CONTACT_ID,
+        opportunityId: SEED_OPPORTUNITY_ID,
+        actorId: SEED_ACTOR_ID,
+        fixture: item,
+        modelConfig,
+      });
+      try {
+        const extractionResult = await extractContextFromActivity(db as unknown as DbPool, TENANT_ID, LIVE_EXTRACTION_ACTIVITY_ID, {
+          llmCallOverride: options.liveExtractionModelCaller
+            ? async ({ system, user }) => options.liveExtractionModelCaller!({ fixture: item, system, user, model_metadata: metadata })
+            : undefined,
+        });
+        const attempt = db.attempts.at(-1);
+        const rawSource = db.rawContextSources.get(`add_context:${LIVE_EXTRACTION_ACTIVITY_ID}`);
+        const outputTypes = new Set(db.contextEntries.map(entry => String(entry.context_type ?? '')).filter(Boolean));
+        const proposedRecords = extractionResult.proposed_records ?? [];
+        const missing: string[] = [];
+        const forbidden: string[] = [];
 
-      const expectedTypeCount = item.expected_signal_types?.length ?? 0;
-      const expectedTypeMatches = (item.expected_signal_types ?? []).filter(type => outputTypes.has(type)).length;
-      for (const expected of expectedEntries) {
-        const matches = output.entries.filter(entry => entry.context_type === expected.context_type);
-        if (matches.length === 0) {
-          missing.push(`entry ${expected.context_type}`);
-          continue;
+        if (attempt?.status === 'failed') {
+          missing.push(`model extraction attempt succeeded (${String(attempt.failure_code ?? 'failed')})`);
         }
-        if (expected.title_contains && !matches.some(entry => containsCaseInsensitive(entry.title, expected.title_contains))) {
-          missing.push(`${expected.context_type} title containing ${expected.title_contains}`);
-        }
-        if (expected.body_contains && !matches.some(entry => containsCaseInsensitive(entry.body, expected.body_contains))) {
-          missing.push(`${expected.context_type} body containing ${expected.body_contains}`);
-        }
-        for (const field of expected.required_structured_fields ?? []) {
-          if (!matches.some(entry => Object.prototype.hasOwnProperty.call(entry.structured_data ?? {}, field))) {
-            missing.push(`${expected.context_type} structured field ${field}`);
+
+        const expectedTypeCount = item.expected_signal_types?.length ?? 0;
+        const expectedTypeMatches = (item.expected_signal_types ?? []).filter(type => outputTypes.has(type)).length;
+        for (const expected of expectedEntries) {
+          const matches = db.contextEntries.filter(entry => entry.context_type === expected.context_type);
+          if (matches.length === 0) {
+            missing.push(`entry ${expected.context_type}`);
+            continue;
+          }
+          if (expected.title_contains && !matches.some(entry => containsCaseInsensitive(entry.title, expected.title_contains))) {
+            missing.push(`${expected.context_type} title containing ${expected.title_contains}`);
+          }
+          if (expected.body_contains && !matches.some(entry => containsCaseInsensitive(entry.body, expected.body_contains))) {
+            missing.push(`${expected.context_type} body containing ${expected.body_contains}`);
+          }
+          if (expected.evidence_contains && !matches.some(entry => containsCaseInsensitive(normalizedTextForEntry(entry), expected.evidence_contains))) {
+            missing.push(`${expected.context_type} evidence containing ${expected.evidence_contains}`);
+          }
+          for (const field of expected.required_structured_fields ?? []) {
+            if (!matches.some(entry => Object.prototype.hasOwnProperty.call(objectValue(entry.structured_data), field))) {
+              missing.push(`${expected.context_type} structured field ${field}`);
+            }
           }
         }
-      }
-      if (item.expected_behavior === 'propose_child_record_for_review' && output.proposedRecords.length === 0) {
-        missing.push('reviewable record proposal');
-      }
-      if (item.expected_behavior === 'skip_no_customer_specific_context' && output.entries.length > 0) {
-        forbidden.push('no-context case produced Signals');
-      }
-      for (const forbiddenEntry of forbiddenEntries) {
-        if (output.entries.some(entry => {
-          if (forbiddenEntry.context_type && entry.context_type !== forbiddenEntry.context_type) return false;
-          return containsCaseInsensitive(normalizedTextForEntry(entry), forbiddenEntry.text_contains);
-        })) {
-          forbidden.push(`forbidden claim ${forbiddenEntry.context_type ?? '*'}:${forbiddenEntry.text_contains ?? '*'}`);
+        if (item.expected_behavior === 'propose_child_record_for_review' && proposedRecords.length === 0) {
+          missing.push('reviewable record proposal');
         }
-      }
-      const evidenceAligned = output.entries.filter(entry => {
-        const evidence = entry.evidence ?? [];
-        if (evidence.length === 0) return false;
-        return evidence.some(itemEvidence => {
-          const snippet = String((itemEvidence as Record<string, unknown>).snippet ?? '').trim();
-          return snippet.length > 0 && containsCaseInsensitive(item.document, snippet.slice(0, Math.min(snippet.length, 60)));
-        });
-      }).length;
-      const autoPromotionSafety = output.entries.every(entry => {
-        if (!item.must_not_auto_promote) return true;
-        return !shouldAutoPromoteSignal({
-          confidence: entry.confidence ?? 0,
-          threshold: EXTRACTION_THRESHOLD,
-          evidenceCount: entry.evidence?.length ?? 0,
-          speculative: speculativeText(entry.title, entry.body),
-        });
-      });
-      if (!autoPromotionSafety) missing.push('must-not-auto-promote output remained reviewable');
+        if (item.expected_behavior === 'skip_no_customer_specific_context' && db.contextEntries.length > 0) {
+          forbidden.push('no-context case produced Signals');
+        }
+        for (const forbiddenEntry of forbiddenEntries) {
+          const signalHit = db.contextEntries.some(entry => {
+            if (forbiddenEntry.context_type && entry.context_type !== forbiddenEntry.context_type) return false;
+            return containsCaseInsensitive(normalizedTextForEntry(entry), forbiddenEntry.text_contains);
+          });
+          const proposalHit = proposedRecords.some(record =>
+            containsCaseInsensitive(JSON.stringify(record), forbiddenEntry.text_contains),
+          );
+          if (signalHit || proposalHit) {
+            forbidden.push(`forbidden claim ${forbiddenEntry.context_type ?? '*'}:${forbiddenEntry.text_contains ?? '*'}`);
+          }
+        }
 
-      return caseResult({
-        id: item.id,
-        suite: 'raw_context_extraction_quality',
-        title: item.title,
-        missing,
-        forbidden,
-        expected: {
-          expected_signal_types: item.expected_signal_types,
-          expected_entries: expectedEntries,
-          forbidden_entries: forbiddenEntries,
-          expected_behavior: item.expected_behavior,
-          uses_golden_model_output: false,
-        },
-        observed: {
-          output_context_types: [...outputTypes],
-          output_entry_count: output.entries.length,
-          record_proposal_count: output.proposedRecords.length,
-          raw_output_excerpt: raw.slice(0, 1000),
-        },
-        model_metadata: metadata,
-        scores: {
-          parse_success: 1,
-          expected_signal_recall: expectedTypeCount === 0 ? 1 : Number((expectedTypeMatches / expectedTypeCount).toFixed(3)),
-          no_context_precision: item.expected_behavior === 'skip_no_customer_specific_context' ? scoreBoolean(output.entries.length === 0) : 1,
-          forbidden_claim_precision: scoreBoolean(forbidden.length === 0),
-          evidence_alignment: output.entries.length === 0 ? 1 : Number((evidenceAligned / output.entries.length).toFixed(3)),
-          auto_promotion_safety: scoreBoolean(autoPromotionSafety),
-        },
-      });
-    } catch (err) {
-      return caseResult({
-        id: item.id,
-        suite: 'raw_context_extraction_quality',
-        title: item.title,
-        error: err,
-        expected: {
-          expected_signal_types: item.expected_signal_types,
-          uses_golden_model_output: false,
-        },
-        observed: { parse_success: false },
-        model_metadata: metadata,
-        scores: {
-          parse_success: 0,
-          expected_signal_recall: 0,
-          no_context_precision: item.expected_behavior === 'skip_no_customer_specific_context' ? 0 : 1,
-          forbidden_claim_precision: 0,
-          evidence_alignment: 0,
-          auto_promotion_safety: 0,
-        },
-      });
-    }
-  }));
+        const evidenceAligned = db.contextEntries.filter(entry => {
+          const evidence = arrayValue(entry.evidence);
+          if (evidence.length === 0) return false;
+          return evidence.some(itemEvidence => {
+            const snippet = String(objectValue(itemEvidence).snippet ?? '').trim();
+            return snippet.length > 0 && containsCaseInsensitive(item.document, snippet.slice(0, Math.min(snippet.length, 60)));
+          });
+        }).length;
+        const wouldAutoPromote = db.contextEntries.filter(entry =>
+          shouldAutoPromoteSignal({
+            confidence: Number(entry.confidence ?? 0),
+            threshold: EXTRACTION_THRESHOLD,
+            evidenceCount: arrayValue(entry.evidence).length,
+            speculative: speculativeText(String(entry.title ?? ''), String(entry.body ?? '')),
+          }),
+        );
+        const autoPromotionSafety = !item.must_not_auto_promote || wouldAutoPromote.length === 0;
+        if (!autoPromotionSafety) missing.push('must-not-auto-promote output remained reviewable');
+
+        return caseResult({
+          id: item.id,
+          suite: 'raw_context_extraction_quality',
+          title: item.title,
+          missing,
+          forbidden,
+          expected: {
+            expected_signal_types: item.expected_signal_types,
+            expected_entries: expectedEntries,
+            forbidden_entries: forbiddenEntries,
+            expected_behavior: item.expected_behavior,
+            uses_golden_model_output: false,
+          },
+          observed: {
+            output_context_types: [...outputTypes],
+            output_entry_count: db.contextEntries.length,
+            context_entry_ids: db.contextEntries.map(entry => entry.id),
+            record_proposal_count: proposedRecords.length,
+            extraction_result: extractionResult,
+            raw_context_source_status: rawSource?.status,
+            raw_context_source_stage: rawSource?.stage,
+            attempt_status: attempt?.status,
+            attempt_outcome: attempt?.outcome,
+            attempt_telemetry: attempt?.telemetry,
+            raw_output_excerpt: String(attempt?.raw_output_excerpt ?? '').slice(0, 1000),
+            uses_model_output_override: Boolean(objectValue(attempt?.telemetry).model_output_override),
+            query_count: db.queryLog.length,
+            would_auto_promote_count: wouldAutoPromote.length,
+          },
+          model_metadata: metadata,
+          scores: {
+            parse_success: attempt?.status === 'succeeded' ? 1 : 0,
+            expected_signal_recall: expectedTypeCount === 0 ? 1 : Number((expectedTypeMatches / expectedTypeCount).toFixed(3)),
+            no_context_precision: item.expected_behavior === 'skip_no_customer_specific_context' ? scoreBoolean(db.contextEntries.length === 0) : 1,
+            forbidden_claim_precision: scoreBoolean(forbidden.length === 0),
+            evidence_alignment: db.contextEntries.length === 0 ? 1 : Number((evidenceAligned / db.contextEntries.length).toFixed(3)),
+            auto_promotion_safety: scoreBoolean(autoPromotionSafety),
+          },
+        });
+      } catch (err) {
+        return caseResult({
+          id: item.id,
+          suite: 'raw_context_extraction_quality',
+          title: item.title,
+          error: err,
+          expected: {
+            expected_signal_types: item.expected_signal_types,
+            uses_golden_model_output: false,
+          },
+          observed: {
+            parse_success: false,
+            output_entry_count: db.contextEntries.length,
+            attempt_status: db.attempts.at(-1)?.status,
+            query_count: db.queryLog.length,
+          },
+          model_metadata: metadata,
+          scores: {
+            parse_success: 0,
+            expected_signal_recall: 0,
+            no_context_precision: item.expected_behavior === 'skip_no_customer_specific_context' ? 0 : 1,
+            forbidden_claim_precision: 0,
+            evidence_alignment: 0,
+            auto_promotion_safety: 0,
+          },
+        });
+      }
+    }));
+  } finally {
+    restoreEncryptionKey();
+  }
 }
 
 function seedNow(offsetDays = 0): string {

@@ -627,9 +627,10 @@ plumbing against deterministic corpora. The `seeded_context` profile calls
 production briefing and Action Context services against a fixture DB and scores
 retrieval recall, scope leaks, stale warnings, readiness decisions, unsafe
 writeback allowance, and source attribution safety. The `live_model` profile
-measures extraction quality from messy source text when eval model credentials
-are configured, and the `agent_runtime` profile reports tool-choice and
-trajectory smoke scores.
+measures extraction quality from messy source text by seeding an eval activity
+DB and calling production `extractContextFromActivity` without
+`modelOutputOverride` when eval model credentials are configured. The
+`agent_runtime` profile reports tool-choice and trajectory smoke scores.
 
 The remaining 1.0 proof work is breadth and portability: more redacted
 customer-derived cases, embedding/semantic retrieval comparisons, live connector
@@ -652,7 +653,8 @@ Implemented 0.9.3 foundation:
   `agent_runtime`.
 - Raw Context, custom registry, and record-resolution contract suites.
 - Live extraction quality suite that does not consume `golden_model_output` as
-  model input and skips cleanly unless live config is required.
+  model input, uses the production extraction/write/group/receipt path, and
+  skips cleanly unless live config is required.
 - Seeded retrieval, Action Context, and source-attribution gates.
 - Tool-choice and agent-trajectory smoke suites.
 - Native JSON and JSONL artifact output for Ragas/LangSmith-style offline
