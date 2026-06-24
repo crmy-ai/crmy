@@ -2,7 +2,8 @@
 
 ## Status
 
-Planned after the 0.9 release and before 1.0 as an optional capability.
+Planned for the 0.9.3 release as an optional capability, alongside the
+[CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md).
 
 This plan covers product, service, solution, pricing, implementation, roadmap,
 security, compliance, and competitive knowledge that can improve GTM agent

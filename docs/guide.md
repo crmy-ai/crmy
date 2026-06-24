@@ -2920,6 +2920,8 @@ CRMy's 0.8-1.0 roadmap focuses on becoming the enterprise context and execution 
 
 The 0.8 direction expands CRMy beyond CRM-adjacent storage into a governed systems-of-record overlay across Salesforce, HubSpot, Databricks, and Snowflake. HubSpot is the first certified connector path; Salesforce, Databricks, and Snowflake share the same governed framework and should receive live-environment certification before production rollout. Connector and warehouse changes should emit normal CRMy events so existing Workflows, Sequences, HITL approvals, audit, and context extraction continue to operate through the same event bus.
 
+For 0.9.3, CRMy plans to add first-class eval harnesses for retrieval quality, tool choice, Action Context decisions, source attribution, agent trajectory, and connector certification, plus optional governed product knowledge retrieval for safe product, pricing, security, implementation, roadmap, and competitive claims. See the [CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md) and [Governed Product Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
+
 Read the full roadmap: [CRMy 0.8-1.0 Roadmap: Enterprise Systems-Of-Record Overlay](roadmap-0.8-1.0.md). For hosted multi-instance production requirements, see the [CRMy 1.0 Multi-Instance Runtime Plan](multi-instance-runtime-plan.md).
 
 ---

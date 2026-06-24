@@ -615,14 +615,72 @@ Acceptance target: a new user sees one product story, not a collection of adjace
 - Do not require mailbox/calendar connections for emails, transcripts, or notes to feed Memory.
 - Do not let agents write directly to systems of record without policy, preview, idempotency, approval where required, and audit.
 
-## Post-0.9: Optional Governed Product Knowledge Retrieval
+## 0.9.3: Eval Harness, Product Knowledge, And Agent Quality Gates
 
-Status: **Planned after 0.9, before 1.0.** See
+Status: **Planned for 0.9.3.** See
+[CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md) and
+[Governed Product Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
+
+0.9.3 should make CRMy's customer-context promise measurable. The existing
+durability and corpus tests prove many internal invariants, but customers and
+agent builders also need a first-class way to evaluate retrieval quality, tool
+choice, Action Context decisions, source attribution, and full agent
+trajectories across models, prompts, embeddings, connectors, and tenant
+configuration.
+
+0.9.3 should also add optional governed product, solution, pricing,
+implementation, security, compliance, roadmap, and competitive knowledge
+retrieval. Customer Memory remains the core product. Product knowledge should
+be a sibling retrieval layer that helps agents connect customer context to safe
+customer-facing product claims without turning CRMy into a CMS or making
+product knowledge required for briefings, Action Context, writeback, or local
+agent workflows.
+
+Recommended direction:
+
+- Add stable eval case, eval result, and eval trace schemas.
+- Add a local-first CLI runner such as `crmy eval run --suite action_context`.
+- Wrap the Raw Context and record-resolution golden corpora as eval suites
+  instead of keeping them only as internal assertions.
+- Add first-class suites for retrieval quality, tool choice, Action Context,
+  source attribution, agent trajectory, and connector certification.
+- Emit trace artifacts with spans for subject resolution, retrieval, policy
+  evaluation, Action Context assembly, tool calls, handoffs, writeback previews,
+  and final output scoring.
+- Export eval runs to generic JSONL, OpenAI Evals-style datasets,
+  Ragas-compatible retrieval rows, and LangSmith-compatible traces or datasets
+  where configured.
+- Support redacted customer-derived eval cases so production failures can become
+  offline regression tests without leaking unnecessary customer data.
+- Build a shared `KnowledgeRetrievalService` and expose it through MCP, REST,
+  CLI, Workspace Agent, briefing, Action Context, and UI surfaces where
+  configured.
+- Keep external systems authoritative for product docs, battlecards,
+  changelogs, pricing, roadmap, security, and compliance material.
+- Store product-knowledge source metadata, optional source-derived claim
+  envelopes, freshness, approval, visibility, citations, and retrieval
+  receipts separately from customer Memory.
+- Prevent stale, unapproved, internal-only, deprecated, unsupported, or
+  conflicting product claims from reaching customer-facing draft packets.
+
+Acceptance target: a contributor or customer can run `crmy eval run --all
+--profile local` and receive a report showing whether CRMy retrieved the right
+Memory and Signals, chose safe tool paths, made correct Action Context
+decisions, preserved source attribution, avoided unsupported customer-facing
+claims, and left enough proof to audit the workflow. When governed product
+knowledge is configured, agents can retrieve product and competitive context in
+a cited, policy-aware, freshness-aware, and auditable way; when it is not
+configured, the core 0.9 customer Memory and Action Context product behaves as
+it does today.
+
+## 0.9.3: Optional Governed Product Knowledge Retrieval
+
+Status: **Planned for 0.9.3.** See
 [Governed Product Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
 
 After 0.9 hardens customer Memory, Action Context, source reliability, proof,
-and surface consistency, CRMy should evaluate an optional governed retrieval
-layer for product, service, solution, and competitive knowledge.
+and surface consistency, 0.9.3 should add an optional governed retrieval layer
+for product, service, solution, and competitive knowledge.
 
 This should not become a required dependency for core CRMy behavior. Customer
 briefings, Action Context, Workspace Agent flows, email drafts, and writeback
