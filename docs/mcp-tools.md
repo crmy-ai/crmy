@@ -13,7 +13,7 @@ Scopes decide what an actor **may** use; a **toolset** decides what a single ses
 - Defaults: autonomous **agents → `standard`** (a lean customer-reasoning loop), **humans/admins → `full`**. Operators can override the default with `CRMY_MCP_DEFAULT_TOOLSET`.
 - Every named toolset also includes the core navigation tools (`tool_guide`, `guide_search`, `actor_whoami`, `customer_record_resolve`, `briefing_get`, `action_context_get`, `context_find`) so a session can always orient and discover other toolsets.
 
-Available toolsets: `full`, `standard`, `record_lookup`, `ingest`, `signal_review`, `memory_promotion`, `customer_outreach`, `record_update`, `systems_writeback`, `ops`. Call `tool_guide` to see descriptions and the toolset that matches a workflow.
+Available toolsets: `full`, `standard`, `record_lookup`, `ingest`, `signal_review`, `memory_promotion`, `customer_outreach`, `record_update`, `systems_writeback`, `ops`, `product_knowledge`. Call `tool_guide` to see descriptions and the toolset that matches a workflow.
 
 ### tool_guide
 Read-only router for common MCP workflows. Use this when the agent is unsure which CRMy tool path to take.
@@ -24,6 +24,11 @@ Read-only router for common MCP workflows. Use this when the agent is unsure whi
 Search the CRMy guide for feature, concept, and workflow documentation.
 - **Input**: `query` (required), `section`
 - **Output**: `{ sections, available_sections }`
+
+### knowledge_retrieve
+Retrieve **governed product knowledge** — approved, source-grounded, cited product, pricing, implementation, security, and competitive claims — to ground a customer-facing action. Optional and non-blocking: it never creates Memory or writes to systems of record, and returns a clear `not_configured` status until a `product_knowledge` source is set up. In the `product_knowledge` and `customer_outreach` toolsets; requires `knowledge:read` (covered by the `read` wildcard). See [Governed Product Knowledge Retrieval](governed-product-knowledge-retrieval.md).
+- **Input**: `query` (required), `subject_type`, `subject_id`, `audience` (`customer_facing` | `internal`), `proposed_action`, `product_scope`, `competitor`, `persona`, `industry`, `require_approved`, `include_stale`, `limit`
+- **Output**: `{ status, claims[], excluded_claims[], warnings[], retrieval_receipt?, message? }` where `status` is `available` | `no_results` | `degraded` | `not_configured`
 
 Common safe paths:
 - **Unknown customer reference**: `customer_record_resolve` → `action_context_get` or `briefing_get`

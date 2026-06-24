@@ -232,6 +232,7 @@ crmy server
 | **Handoffs and approvals** | Route uncertain, sensitive, or governed work to humans with evidence attached. |
 | **Systems of record** | Configure CRM/warehouse sync and governed writeback through mappings, previews, approvals, and receipts. |
 | **Lineage and audit** | Trace source material into Signals, Memory, actions, reviews, writebacks, and receipts. |
+| **Product knowledge** *(optional)* | Retrieve approved, source-grounded, cited product and competitive claims to ground customer-facing drafts via `knowledge_retrieve`. Off until configured; never blocks core flows. |
 | **MCP, CLI, REST, UI** | Use the same engine from agent tools, scripts, integrations, and the web app. |
 
 ## How CRMy Reduces Token Use
