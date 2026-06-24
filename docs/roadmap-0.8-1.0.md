@@ -27,6 +27,15 @@ Related 1.0 runtime plan:
 
 - [CRMy 1.0 Multi-Instance Runtime Plan](multi-instance-runtime-plan.md)
 
+## Recently Landed (post-0.9.2)
+
+- **Local eval harness + production-path extraction quality eval** ([#29](https://github.com/crmy-ai/crmy/pull/29)) — makes extraction quality measurable, the foundation for capability-gated promotion.
+- **Per-session MCP toolsets** ([#30](https://github.com/crmy-ai/crmy/pull/30)) — narrow the registered tool catalog per session/job (not per key) so agents pick from a focused working set; scope enforcement unchanged.
+- **Source-grounding gate for auto-promotion** ([#31](https://github.com/crmy-ai/crmy/pull/31)) — a Signal only auto-promotes to Memory when its evidence is present in the source, so a weak model cannot silently mint Memory.
+- **Connector-free `crmy quickstart`** ([#32](https://github.com/crmy-ai/crmy/pull/32)) — one command shows the connector-free golden path (resolve → briefing → Action Context → lineage), reframing connectors as an optional upgrade.
+
+Next: per-tenant model **certification** (gate/raise the auto-promote bar using eval scores) and a `tool_choice` eval suite to prove toolset curation.
+
 ## What Prevents CRMy From Being The Default Today
 
 ### 1. System-of-record connectivity still needs live certification
