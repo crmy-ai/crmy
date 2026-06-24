@@ -4,6 +4,76 @@ All notable changes to CRMy are documented here.
 
 ---
 
+## [0.9.2] — 2026-06-23
+
+### Release Focus
+
+0.9.2 is the transcript ingestion, scale, and production hardening release. It expands CRMy beyond mailbox and calendar context with admin-managed transcript/raw-note drops, then tightens the runtime path for higher-volume, hosted, and agent-first deployments.
+
+### Highlights
+
+- **Transcript and note drops**: added admin-managed Context Source Drops for S3-compatible buckets and local self-hosted folders, with source-object tracking, content hashes, size limits, match state, processing state, review status, and linked records.
+- **Transcript parsing and matching**: added ingestion support for `.txt`, `.md`, `.vtt`, `.srt`, `.json`, `.docx`, and `.pdf`, with matching through sidecar metadata, provider calendar identifiers, meeting time plus attendee overlap, contact/account domains, and Subject Graph resolution.
+- **Raw Context pipeline integration**: transcript drops feed the same Source Object -> Meeting Artifact / Customer Activity -> Raw Context -> Signals -> Memory -> Lineage / Handoff path as other customer context sources.
+- **Reviewable failure modes**: oversized, unmatched, ambiguous, and failed transcript files remain visible in review/Handoff flows instead of being silently skipped.
+- **Production runtime hardening**: added PostgreSQL-backed unauthenticated auth throttling, production database TLS guardrails, migration startup modes, process roles, worker advisory-lock fixes, and durable outbound webhook backlog processing.
+- **Scale and retrieval**: added stable timestamp-plus-id cursor pagination and estimated totals across high-volume list surfaces, plus token budget profiles, ranked retrieval, and evidence-on-demand behavior.
+- **Agent and CLI parity**: added MCP, REST/OpenAPI, UI, and CLI surfaces for transcript source connection/object list, create, sync, resolve, reprocess, and ignore workflows.
+- **Dependency security**: upgraded production mail/form dependencies to clear high-severity audit findings and kept the production moderate audit clean.
+
+### Notes
+
+Live external-provider certification remains environment-dependent. Local folder transcript drops are intended for local/self-hosted installs unless explicitly enabled in production. Hosted multi-instance deployments should use separate `web`, `worker`, and migration jobs with sticky MCP routing as documented.
+
+---
+
+## [0.9.1] — 2026-06-15
+
+### Release Focus
+
+0.9.1 is the email context workflow release. It makes customer email easier to connect, easier to trust, easier to send from the right identity, and easier for agents to follow from source message to Raw Context, Signals, Memory, activity, approval, and reply.
+
+### Highlights
+
+- **Email workflow clarity**: split Customer Email into clearer Mailbox Context and Outbound Actions surfaces for customer-message ingestion, governed drafts, approvals, provider drafts, and sends.
+- **Sender identity model**: connected mailboxes now carry context-sync, send, provider-draft, default-sender, and status fields, while drafts and sends persist `from_email`, `from_name`, `sender_type`, and `mailbox_connection_id`.
+- **Actor mailbox preference**: outbound sends prefer the actor's send-enabled mailbox, then tenant fallback provider, and fall back to save-draft-only behavior when no sender exists.
+- **Rejected draft recovery**: rejected outbound emails remain discoverable, show reviewer context, block direct send, and can be revised in place for approval resubmission.
+- **Sent email as context**: sent email is recorded as account activity and becomes CRMy-authored context without treating CRMy's own words as customer-authored evidence.
+- **Mailbox/calendar OAuth setup**: System Connections separates provider OAuth setup from personal mailbox/calendar connection, with hosted CRMy-managed app support and enterprise tenant-owned OAuth app support.
+- **Actor connection controls**: admins can inspect mailbox, sender, and calendar coverage from Actor settings, while users can deactivate or disconnect their own mailbox/calendar from Customer Email and Customer Activity.
+- **Agent-facing email tools**: MCP and CLI flows can start mailbox/calendar OAuth by returning a browser auth URL, and email tools expose selected sender metadata and governed delivery behavior.
+- **Token and retrieval controls**: added stable cursor pagination for high-volume context surfaces and token budget/evidence controls for briefings and Action Context.
+
+### Notes
+
+Tenant shared sender settings remain fallback/shared/system delivery, not the user's personal mailbox. Live Gmail, Outlook, Google Calendar, and Microsoft Calendar flows should be certified in the target provider tenant before production claims.
+
+---
+
+## [0.9.0] — 2026-06-10
+
+### Release Focus
+
+0.9.0 is the agent reliability and polish release. It hardens durable workspace agent execution, richer email and inbox surfaces, admin/object UX, and the core guarantee that agents can retrieve what is true, stale, inferred, approved, risky, and safe to do next before acting.
+
+### Highlights
+
+- **Durable workspace agent execution**: hardened agent turns against partial tool execution, replay-unsafe side effects, stale turn state, and accidental double-execution on retry.
+- **Scoped record writes**: record-write tool exposure now requires explicit write permission scopes so agents cannot modify records outside their authority.
+- **Email and inbox surfaces**: rebuilt email drawer and inbox flows with full message thread view, context add, draft preview/save, message linking, ignore flows, and provider-level mailbox endpoints.
+- **Action Policy and HITL UX**: redesigned condition editing, HITL rules setup, pending writeback visibility, and approval/rejection flows.
+- **Context Lineage and governance**: simplified Lineage around source -> Signal -> Memory while keeping usage and audit detail available on demand.
+- **Object and drawer polish**: improved Accounts, Contacts, Opportunities, and Use Cases with consistent action bars, field editing, lifecycle controls, activity, timeline, and briefing navigation.
+- **Settings and systems of record**: redesigned Messaging and Systems of Record settings for clearer setup, connection state, sync status, and admin guidance.
+- **CLI and server startup**: improved migration/startup feedback, friendly CLI errors, `agent-smoke`, and tenant-safe search indexing.
+
+### Notes
+
+pgvector remains optional. Semantic search improves retrieval when configured, but lexical and deterministic paths continue to work without it. Live connector certification remains environment-dependent.
+
+---
+
 ## [0.8.7] — 2026-06-06
 
 ### Release Focus
