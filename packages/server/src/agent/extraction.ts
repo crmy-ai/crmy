@@ -90,6 +90,16 @@ export interface ExtractionModelOutput {
 }
 
 type ExtractionModelOutputOverride = ExtractionModelOutput | string;
+export type ExtractionLLMCallOverride = (input: {
+  tenantId: string;
+  activityId: string;
+  stage: 'primary' | 'recovery' | 'repair';
+  system: string;
+  user: string;
+  maxTokens: number;
+  timeoutMs: number;
+  responseFormat: 'json_object';
+}) => Promise<string>;
 
 interface ExtractionTelemetry {
   [key: string]: unknown;
@@ -1035,6 +1045,13 @@ export async function extractContextFromActivity(
      * the full write/group/receipt pipeline without a live model.
      */
     modelOutputOverride?: ExtractionModelOutputOverride;
+    /**
+     * Eval/test-only deterministic LLM response seam. Unlike modelOutputOverride,
+     * this still builds the production extraction packet and prompt, records an
+     * extraction attempt, parses the model response, writes Signals, and groups
+     * them through the normal pipeline.
+     */
+    llmCallOverride?: ExtractionLLMCallOverride;
   } = {},
 ): Promise<ExtractionResult> {
   // Load activity
@@ -1207,7 +1224,16 @@ export async function extractContextFromActivity(
       },
     });
     const llmResult = options.modelOutputOverride === undefined
-      ? await callExtractionLLM(db, tenantId, activity, content, extractableTypes, config.max_tokens_per_turn, extractionPacket)
+      ? await callExtractionLLM(
+          db,
+          tenantId,
+          activity,
+          content,
+          extractableTypes,
+          config.max_tokens_per_turn,
+          extractionPacket,
+          options.llmCallOverride,
+        )
       : buildOverrideExtractionResult(options.modelOutputOverride);
     extractionOutput = llmResult.output;
     extractionTelemetry = llmResult.telemetry;
@@ -1509,17 +1535,30 @@ async function callExtractionLLM(
   extractableTypes: { type_name: string; label: string; description?: string | null; extraction_prompt: string | null; json_schema: Record<string, unknown> | null }[],
   maxTokens: number,
   extractionPacket: ContextExtractionPacket | null,
+  llmCallOverride?: ExtractionLLMCallOverride,
 ): Promise<ExtractionLLMResult> {
   const systemPrompt = buildSystemPrompt(extractableTypes);
   const userPrompt = buildUserPrompt(activity, content, extractionPacket);
+  const primaryMaxTokens = Math.min(Math.max(maxTokens, 3000), 4000);
 
-  const responseText = await callLLM(db, tenantId, {
-    system: systemPrompt,
-    user: userPrompt,
-    maxTokens: Math.min(Math.max(maxTokens, 3000), 4000),
-    timeoutMs: CONTEXT_EXTRACTION_LLM_TIMEOUT_MS,
-    responseFormat: 'json_object',
-  });
+  const responseText = llmCallOverride
+    ? await llmCallOverride({
+        tenantId,
+        activityId: activity.id,
+        stage: 'primary',
+        system: systemPrompt,
+        user: userPrompt,
+        maxTokens: primaryMaxTokens,
+        timeoutMs: CONTEXT_EXTRACTION_LLM_TIMEOUT_MS,
+        responseFormat: 'json_object',
+      })
+    : await callLLM(db, tenantId, {
+        system: systemPrompt,
+        user: userPrompt,
+        maxTokens: primaryMaxTokens,
+        timeoutMs: CONTEXT_EXTRACTION_LLM_TIMEOUT_MS,
+        responseFormat: 'json_object',
+      });
   const telemetry: ExtractionTelemetry = {
     llm_calls: 1,
     primary_output_excerpt: llmOutputExcerpt(responseText) ?? undefined,
@@ -1539,7 +1578,7 @@ async function callExtractionLLM(
     const repaired = await repairExtractionResponse(db, tenantId, extractableTypes, maxTokens, {
       primaryOutput: responseText,
       primaryParseError,
-    }, telemetry);
+    }, telemetry, activity.id, llmCallOverride);
     return {
       output: repaired.output,
       telemetry: {
@@ -1559,14 +1598,27 @@ async function callExtractionLLM(
     };
   }
   const emptyPrimaryReason = new Error('Primary extraction returned valid JSON with no Signals or record proposals.');
+  const recoveryMaxTokens = Math.min(Math.max(maxTokens, 2000), 3000);
 
-  const recoveryText = await callLLM(db, tenantId, {
-    system: buildRecoverySystemPrompt(extractableTypes),
-    user: userPrompt,
-    maxTokens: Math.min(Math.max(maxTokens, 2000), 3000),
-    timeoutMs: CONTEXT_EXTRACTION_RECOVERY_TIMEOUT_MS,
-    responseFormat: 'json_object',
-  });
+  const recoverySystemPrompt = buildRecoverySystemPrompt(extractableTypes);
+  const recoveryText = llmCallOverride
+    ? await llmCallOverride({
+        tenantId,
+        activityId: activity.id,
+        stage: 'recovery',
+        system: recoverySystemPrompt,
+        user: userPrompt,
+        maxTokens: recoveryMaxTokens,
+        timeoutMs: CONTEXT_EXTRACTION_RECOVERY_TIMEOUT_MS,
+        responseFormat: 'json_object',
+      })
+    : await callLLM(db, tenantId, {
+        system: recoverySystemPrompt,
+        user: userPrompt,
+        maxTokens: recoveryMaxTokens,
+        timeoutMs: CONTEXT_EXTRACTION_RECOVERY_TIMEOUT_MS,
+        responseFormat: 'json_object',
+      });
   telemetry.llm_calls++;
   telemetry.recovery_output_excerpt = llmOutputExcerpt(recoveryText) ?? undefined;
   telemetry.empty_primary_recovered = true;
@@ -1589,7 +1641,7 @@ async function callExtractionLLM(
       primaryParseError: emptyPrimaryReason,
       recoveryOutput: recoveryText,
       recoveryParseError,
-    }, telemetry);
+    }, telemetry, activity.id, llmCallOverride);
     return {
       output: repaired.output,
       telemetry: {
@@ -1613,10 +1665,11 @@ async function repairExtractionResponse(
     recoveryParseError?: Error;
   },
   telemetry: ExtractionTelemetry,
+  activityId?: string,
+  llmCallOverride?: ExtractionLLMCallOverride,
 ): Promise<ExtractionLLMResult> {
-  const repairText = await callLLM(db, tenantId, {
-    system: buildJsonRepairSystemPrompt(extractableTypes),
-    user: [
+  const repairSystemPrompt = buildJsonRepairSystemPrompt(extractableTypes);
+  const repairUserPrompt = [
       'Convert the extraction output below into CRMy extraction JSON.',
       'If there are no usable customer-specific claims or possible new records, return {"context_entries":[],"record_proposals":[]}.',
       '',
@@ -1627,11 +1680,26 @@ async function repairExtractionResponse(
       input.primaryOutput.slice(0, 12_000),
       input.recoveryOutput ? '\nRecovery output:' : undefined,
       input.recoveryOutput?.slice(0, 12_000),
-    ].filter((line): line is string => line !== undefined).join('\n'),
-    maxTokens: Math.min(Math.max(maxTokens, 2000), 3000),
-    timeoutMs: CONTEXT_EXTRACTION_REPAIR_TIMEOUT_MS,
-    responseFormat: 'json_object',
-  });
+    ].filter((line): line is string => line !== undefined).join('\n');
+  const repairMaxTokens = Math.min(Math.max(maxTokens, 2000), 3000);
+  const repairText = llmCallOverride
+    ? await llmCallOverride({
+        tenantId,
+        activityId: activityId ?? '',
+        stage: 'repair',
+        system: repairSystemPrompt,
+        user: repairUserPrompt,
+        maxTokens: repairMaxTokens,
+        timeoutMs: CONTEXT_EXTRACTION_REPAIR_TIMEOUT_MS,
+        responseFormat: 'json_object',
+      })
+    : await callLLM(db, tenantId, {
+        system: repairSystemPrompt,
+        user: repairUserPrompt,
+        maxTokens: repairMaxTokens,
+        timeoutMs: CONTEXT_EXTRACTION_REPAIR_TIMEOUT_MS,
+        responseFormat: 'json_object',
+      });
   const nextTelemetry: ExtractionTelemetry = {
     ...telemetry,
     llm_calls: telemetry.llm_calls + 1,

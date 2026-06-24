@@ -261,6 +261,24 @@ Initial implementation:
 - Wrap `raw-context-custom-registry-corpus.json`.
 - Emit eval scores from the existing fixture expectations instead of only using assertions.
 
+0.9.3 implementation status:
+
+- `raw_context_extraction` remains a deterministic contract suite. It consumes
+  `golden_model_output` and proves parser, readiness, grouping, promotion, and
+  receipt plumbing after model output already exists.
+- `raw_context_extraction_quality` is the live-model quality suite. It uses the
+  same messy corpus as gold labels, seeds an eval activity database, calls
+  production `extractContextFromActivity` without `modelOutputOverride`, and
+  scores persisted Signals, proposed records, evidence, extraction attempts,
+  and Raw Context receipts.
+- Injected test callers substitute only the LLM response at the provider seam.
+  Live eval runs without an injected caller use the tenant `callLLM` path with
+  `CRMY_EVAL_MODEL_*` config loaded into the eval DB.
+- The current proof boundary is source text -> production extraction packet ->
+  model response -> parser/recovery -> Signal writes/grouping/receipts ->
+  quality scores. It does not yet prove a large redacted customer corpus,
+  connector-specific source fidelity, or cross-runtime agent trajectories.
+
 Release gate:
 
 - No known fixture regresses.
@@ -884,11 +902,15 @@ Status: **Implemented foundation.**
 - Add deterministic graders.
 - Add `crmy eval list`, `crmy eval describe`, and `crmy eval run`.
 - Convert Raw Context and record-resolution corpora into eval suites.
+- Add `raw_context_extraction_quality` as a live-model suite that calls the
+  production activity extraction path through an eval fixture DB.
 
 Exit criteria:
 
 - `crmy eval run --suite raw_context_extraction` works without model credentials.
 - `crmy eval run --suite record_resolution` works without model credentials.
+- `crmy eval run --suite raw_context_extraction_quality --require-live` uses
+  the production extraction pipeline when `CRMY_EVAL_MODEL_*` config is present.
 - CI can fail under deterministic regression thresholds.
 
 ### Phase 2: Retrieval And Action Context Suites
