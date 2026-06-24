@@ -4,6 +4,20 @@ All notable changes to CRMy are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Local eval harness + production-path extraction quality eval** ([#29](https://github.com/crmy-ai/crmy/pull/29)) — makes extraction quality measurable across datasets and models, the foundation for capability-gated promotion.
+- **Per-session MCP toolsets** ([#30](https://github.com/crmy-ai/crmy/pull/30)) — narrow the registered tool catalog per session/job via `--toolset`, `?toolset=`, or the `X-CRMy-Toolset` header. Selection never widens scope; autonomous agents default to a lean `standard` set, humans/admins to `full`. Override with `CRMY_MCP_DEFAULT_TOOLSET`.
+- **Connector-free `crmy quickstart`** ([#32](https://github.com/crmy-ai/crmy/pull/32)) — one command seeds demo context and runs the connector-free golden path (resolve → briefing → Action Context → lineage) with onboarding next steps.
+
+### Changed
+
+- **Source-grounding gate for Memory auto-promotion** ([#31](https://github.com/crmy-ai/crmy/pull/31)) — a Signal only auto-promotes to Memory when at least one evidence snippet is present in the source, so a weak model cannot silently mint Memory from a hallucinated claim. On by default; disable with `CRMY_REQUIRE_GROUNDED_AUTOPROMOTE=0`.
+
+---
+
 ## [0.9.2] — 2026-06-23
 
 ### Release Focus
