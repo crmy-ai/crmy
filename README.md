@@ -293,6 +293,23 @@ Common first tools:
 
 Use scoped API keys for agents whenever possible. Ordinary customer-reasoning agents should see a small workflow-specific tool set, not the full admin/operator catalog.
 
+### Focus the tool catalog per session
+
+CRMy exposes a large tool catalog. Registering all of it on every session hurts tool-selection accuracy and wastes context, so you can narrow the working set to the job at hand with a **toolset**. Toolsets are chosen per connection — not baked into the API key — so the same key can open a `customer_outreach` session and a `systems_writeback` session and get the right tools for each.
+
+```bash
+# stdio (CLI): pick a toolset for this session
+crmy mcp --toolset customer_outreach        # or: CRMY_MCP_TOOLSET=ops crmy mcp
+```
+
+```text
+# HTTP MCP: per-connection query param or header
+POST https://<your-crmy-host>/mcp?toolset=customer_outreach
+X-CRMy-Toolset: customer_outreach
+```
+
+Selection only ever *narrows* what the actor's scopes already allow — it can never widen access, and per-call scope enforcement is unchanged. Autonomous agents default to a lean `standard` set; human and admin sessions default to `full`. Set `CRMY_MCP_DEFAULT_TOOLSET=full` to restore the full catalog everywhere. Call `tool_guide` to see available toolsets and the one that matches your workflow.
+
 See [MCP tools](docs/mcp-tools.md) for the full tool catalog and scoped-access model.
 
 ## CLI And REST

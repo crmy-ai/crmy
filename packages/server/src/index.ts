@@ -532,8 +532,13 @@ export async function createApp(config: ServerConfig) {
         );
       }
 
-      // New session — authenticate and create
-      const server = createMcpServer(db, actor, () => actor);
+      // New session — authenticate and create. The working set ("toolset") is
+      // chosen per connection via ?toolset= or the X-CRMy-Toolset header, so the
+      // same key can open differently-focused sessions for different jobs.
+      const requestedToolset =
+        (typeof req.query?.toolset === 'string' ? req.query.toolset : undefined)
+        ?? (typeof req.headers['x-crmy-toolset'] === 'string' ? req.headers['x-crmy-toolset'] : undefined);
+      const server = createMcpServer(db, actor, () => actor, { toolset: requestedToolset });
       let durableRegistration: Promise<unknown> | undefined;
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
@@ -955,6 +960,16 @@ if (isMain && !process.env.CRMY_IMPORTED) {
 export { getPool, initPool, closePool } from './db/pool.js';
 export { runMigrations, getMigrationStatus } from './db/migrate.js';
 export { createMcpServer, getAllTools, getToolsForActor, normalizeToolInput } from './mcp/server.js';
+export {
+  CORE_TOOLS,
+  FULL_TOOLSET,
+  TOOLSET_DEFINITIONS,
+  isValidToolset,
+  listToolsets,
+  resolveToolsetName,
+  selectToolset,
+  toolNamesForToolset,
+} from './mcp/toolsets.js';
 export { describeTool, zodToJsonSchema } from './mcp/tool-describe.js';
 export { emitEvent } from './events/emitter.js';
 export { createWorkflowEngine } from './workflows/engine.js';

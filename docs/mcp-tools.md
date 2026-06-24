@@ -4,10 +4,21 @@
 
 CRMy exposes many tools, but agents should usually connect with scoped credentials so they only see the tools needed for their job. Avoid full admin/operator manifests for ordinary customer workflows.
 
+### Toolsets — focus the catalog per session
+
+Scopes decide what an actor **may** use; a **toolset** decides what a single session actually **registers**. Toolsets exist because a large registered catalog degrades tool-selection accuracy and wastes context.
+
+- Selection is **per connection, not per key**: `?toolset=<name>` or the `X-CRMy-Toolset` header on HTTP MCP, `crmy mcp --toolset <name>` or `CRMY_MCP_TOOLSET` on stdio. The same key can open differently-focused sessions for different jobs.
+- Selection only ever **narrows** the actor's scope-filtered tools. It can never grant access, and `enforceToolScopes` still runs on every call.
+- Defaults: autonomous **agents → `standard`** (a lean customer-reasoning loop), **humans/admins → `full`**. Operators can override the default with `CRMY_MCP_DEFAULT_TOOLSET`.
+- Every named toolset also includes the core navigation tools (`tool_guide`, `guide_search`, `actor_whoami`, `customer_record_resolve`, `briefing_get`, `action_context_get`, `context_find`) so a session can always orient and discover other toolsets.
+
+Available toolsets: `full`, `standard`, `record_lookup`, `ingest`, `signal_review`, `memory_promotion`, `customer_outreach`, `record_update`, `systems_writeback`, `ops`. Call `tool_guide` to see descriptions and the toolset that matches a workflow.
+
 ### tool_guide
 Read-only router for common MCP workflows. Use this when the agent is unsure which CRMy tool path to take.
 - **Input**: `workflow` (`first_steps`, `record_lookup`, `brief_before_action`, `ingest_raw_context`, `review_signals`, `promote_memory`, `customer_outreach`, `record_update`, `systems_writeback`, `post_action_follow_up`, `ops_recovery`)
-- **Output**: `{ workflow, summary, recommended_tools, avoid_tools, next_step, reminder }`
+- **Output**: `{ workflow, summary, recommended_tools, avoid_tools, next_step, focus_toolset, how_to_focus_tools, available_toolsets, reminder }`
 
 ### guide_search
 Search the CRMy guide for feature, concept, and workflow documentation.
