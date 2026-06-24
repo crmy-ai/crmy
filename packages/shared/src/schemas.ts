@@ -181,6 +181,47 @@ export const evalRunSummary = z.object({
   created_at: z.string(),
 });
 
+/** Portable eval-case contract for external/redacted case import (crmy.eval_case.v1). */
+export const evalCase = z.object({
+  version: z.literal('crmy.eval_case.v1'),
+  id: z.string().min(1),
+  suite: evalSuiteName,
+  title: z.string().optional(),
+  redacted: z.boolean().optional(),
+  source_type: z.string().optional(),
+  source_occurred_at: z.string().optional(),
+  document: z.string().optional(),
+  subject_hints: z.array(z.string()).optional(),
+  expected_signal_types: z.array(z.string()).optional(),
+  expected_entries: z.array(z.object({
+    context_type: z.string(),
+    title_contains: z.string().optional(),
+    body_contains: z.string().optional(),
+    evidence_contains: z.string().optional(),
+    required_structured_fields: z.array(z.string()).optional(),
+  })).optional(),
+  forbidden_entries: z.array(z.record(z.unknown())).optional(),
+  expected_unsupported_types: z.array(z.string()).optional(),
+  expected_behavior: z.string().optional(),
+  expected_readiness: z.record(z.string()).optional(),
+  expected_missing_details: z.record(z.array(z.string())).optional(),
+  expected_subject: z.object({ type: z.string(), id: z.string() }).optional(),
+  expected_subjects: z.array(z.object({ type: z.string(), id: z.string() })).optional(),
+  forbidden_subject_ids: z.array(z.string()).optional(),
+  expected_skipped: z.array(z.object({ name: z.string(), reason: z.string() })).optional(),
+  expected_account_scope: z.array(z.record(z.unknown())).optional(),
+  difficulty: z.string().optional(),
+  source_tags: z.array(z.string()).optional(),
+  must_not_auto_promote: z.boolean().optional(),
+  registry: z.object({
+    disabled_types: z.array(z.string()).optional(),
+    overrides: z.array(z.object({ type_name: z.string(), json_schema: z.record(z.unknown()).nullable().optional() })).optional(),
+    custom_types: z.array(z.object({ type_name: z.string(), is_extractable: z.boolean().optional(), json_schema: z.record(z.unknown()).nullable().optional() })).optional(),
+  }).optional(),
+  golden_model_output: z.unknown().optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
 const tags = z.array(z.string()).default([]);
 const customFields = z.record(z.unknown()).default({});
 const idempotencyKey = z.string().max(128).optional();

@@ -1445,6 +1445,23 @@ export interface EvalModelMetadata {
   caller?: 'env' | 'injected' | 'none';
 }
 
+/** One span in an eval execution trace (e.g. extraction, readiness, promotion). */
+export interface EvalSpan {
+  name: string;
+  status: 'ok' | 'error' | 'skipped';
+  duration_ms?: number;
+  detail?: string;
+  attributes?: Record<string, unknown>;
+}
+
+/** Source-to-score execution trace for a single eval case. */
+export interface EvalTrace {
+  run_id: string;
+  suite: EvalSuiteName;
+  case_id: string;
+  spans: EvalSpan[];
+}
+
 export interface EvalCaseSummary {
   id: string;
   suite: EvalSuiteName;
@@ -1456,11 +1473,59 @@ export interface EvalCaseSummary {
   observed?: Record<string, unknown>;
   artifacts?: string[];
   model_metadata?: EvalModelMetadata;
+  trace?: EvalTrace;
   diagnostics: {
     missing_expected_items: string[];
     forbidden_items_found: string[];
     warnings: string[];
   };
+}
+
+/**
+ * Stable, portable eval-case contract (`crmy.eval_case.v1`). A superset of the
+ * internal corpus fixtures so cases can be authored, exported, and re-imported
+ * across datasets, models, and tenants — including from production failures.
+ * `redacted` cases omit raw source text and are valid only for golden-output /
+ * deterministic suites (they cannot drive live-model extraction).
+ */
+export interface EvalCase {
+  version: 'crmy.eval_case.v1';
+  id: string;
+  suite: EvalSuiteName;
+  title?: string;
+  redacted?: boolean;
+  source_type?: string;
+  source_occurred_at?: string;
+  document?: string;
+  subject_hints?: string[];
+  expected_signal_types?: string[];
+  expected_entries?: Array<{
+    context_type: string;
+    title_contains?: string;
+    body_contains?: string;
+    evidence_contains?: string;
+    required_structured_fields?: string[];
+  }>;
+  forbidden_entries?: Array<Record<string, unknown>>;
+  expected_unsupported_types?: string[];
+  expected_behavior?: string;
+  expected_readiness?: Record<string, string>;
+  expected_missing_details?: Record<string, string[]>;
+  expected_subject?: { type: string; id: string };
+  expected_subjects?: Array<{ type: string; id: string }>;
+  forbidden_subject_ids?: string[];
+  expected_skipped?: Array<{ name: string; reason: string }>;
+  expected_account_scope?: Array<Record<string, unknown> & { account_id: string }>;
+  difficulty?: string;
+  source_tags?: string[];
+  must_not_auto_promote?: boolean;
+  registry?: {
+    disabled_types?: string[];
+    overrides?: Array<{ type_name: string; json_schema?: Record<string, unknown> | null }>;
+    custom_types?: Array<{ type_name: string; is_extractable?: boolean; json_schema?: Record<string, unknown> | null }>;
+  };
+  golden_model_output?: unknown;
+  metadata?: Record<string, unknown>;
 }
 
 export interface EvalSuiteSummary {
