@@ -8,7 +8,8 @@ import * as path from 'node:path';
 import crypto from 'node:crypto';
 import type { DbPool } from '../db/pool.js';
 import type { ActorContext, UUID } from '@crmy/shared';
-import { CrmyError, actionContextGet, actionContextHumanUnblock, notFound, validationError, workflowAction } from '@crmy/shared';
+import { CrmyError, actionContextGet, actionContextHumanUnblock, knowledgeRetrieve, notFound, validationError, workflowAction } from '@crmy/shared';
+import { retrieveKnowledge } from '../services/knowledge-retrieval.js';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as accountRepo from '../db/repos/accounts.js';
 import * as oppRepo from '../db/repos/opportunities.js';
@@ -316,6 +317,16 @@ export function apiRouter(db: DbPool): Router {
       const parsedInput = tool.inputSchema.parse(normalizeToolInput(input));
       const result = await tool.handler(parsedInput, actor);
       res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Product knowledge (optional, governed) ---
+  router.post('/knowledge/retrieve', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      enforceToolScopes('knowledge_retrieve', actor);
+      const input = knowledgeRetrieve.parse(req.body ?? {});
+      res.json(await retrieveKnowledge(db, actor, input));
     } catch (err) { handleError(res, err); }
   });
 

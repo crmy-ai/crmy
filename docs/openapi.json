@@ -14494,6 +14494,137 @@
         }
       }
     },
+    "/knowledge/retrieve": {
+      "post": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "Retrieve governed product/competitive knowledge for a customer action (optional, non-blocking)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "What product/competitive context the agent needs for this customer action."
+                  },
+                  "subject_type": {
+                    "type": "string",
+                    "enum": [
+                      "contact",
+                      "account",
+                      "opportunity",
+                      "use_case"
+                    ],
+                    "description": "Optional customer subject to tailor relevance."
+                  },
+                  "subject_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "audience": {
+                    "type": "string",
+                    "enum": [
+                      "customer_facing",
+                      "internal"
+                    ],
+                    "default": "customer_facing",
+                    "description": "customer_facing applies the strict approved+grounded+fresh policy; internal allows labeled warnings."
+                  },
+                  "proposed_action": {
+                    "type": "string",
+                    "description": "e.g. customer_outreach — used for policy and proof linkage."
+                  },
+                  "product_scope": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Product/edition scopes to match, e.g. [\"mcp\",\"self-hosted\"]."
+                  },
+                  "competitor": {
+                    "type": "string"
+                  },
+                  "persona": {
+                    "type": "string"
+                  },
+                  "industry": {
+                    "type": "string"
+                  },
+                  "require_approved": {
+                    "type": "boolean"
+                  },
+                  "include_stale": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "default": 8
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/context/detect-subjects": {
       "post": {
         "tags": [
