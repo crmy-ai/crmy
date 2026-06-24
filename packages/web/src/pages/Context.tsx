@@ -9,7 +9,8 @@ import { ContextBrowser } from '@/components/crm/ContextBrowser';
 import { ContextLineageView } from '@/components/crm/ContextLineageView';
 import { ObservationsDashboard } from '@/components/crm/ObservationsDashboard';
 import { SignalGroupsBrowser } from '@/components/crm/SignalGroupsBrowser';
-import { useActivities, useCalendarConnections, useContextEntries, useDbConfig, useMailboxConnections, useSignalGroups } from '@/api/hooks';
+import { useActivities, useCalendarConnections, useContextEntries, useContextSourceConnections, useDbConfig, useMailboxConnections, useSignalGroups } from '@/api/hooks';
+import { getUser } from '@/api/client';
 import { headerDescription } from '@/lib/headerCopy';
 import { ENTITY_COLORS } from '@/lib/entityColors';
 import { GraphTab } from './GraphExplorerPage';
@@ -97,10 +98,15 @@ function ContextProofStrip({
 function SourcesTab() {
   const { data: mailboxData } = useMailboxConnections() as any;
   const { data: calendarData } = useCalendarConnections() as any;
+  const { data: transcriptDropData } = useContextSourceConnections() as any;
   const mailboxConnections = mailboxData?.data ?? [];
   const calendarConnections = calendarData?.data ?? [];
+  const transcriptDrops = transcriptDropData?.data ?? [];
   const mailboxConnected = mailboxConnections.some((connection: any) => connection.status === 'connected');
   const calendarConnected = calendarConnections.some((connection: any) => connection.status === 'connected');
+  const transcriptDropConnected = transcriptDrops.length > 0;
+  const role = getUser()?.role;
+  const isAdmin = role === 'admin' || role === 'owner';
 
   const featuredCards = [
     {
@@ -124,8 +130,8 @@ function SourcesTab() {
       primary: 'Manage API Keys',
       primaryHref: '/settings/api-keys',
       primaryClassName: 'bg-[#6366f1] text-white hover:bg-[#6366f1]/90',
-      secondary: 'View Memory',
-      secondaryHref: '/context?tab=browser',
+      secondary: 'View Reliability',
+      secondaryHref: '/operations',
     },
   ];
 
@@ -149,17 +155,30 @@ function SourcesTab() {
       description: 'Connect a calendar when you want meetings tracked and flagged for missing notes or transcripts. Meeting debriefs can still be added manually.',
       primary: 'Open Customer Activity',
       primaryHref: '/activities',
-      secondary: calendarConnected ? 'Review connections' : 'Connect calendar',
-      secondaryHref: '/activities?tab=connections',
+      secondary: calendarConnected ? 'Meeting Sources' : 'Connect calendar',
+      secondaryHref: '/activities?tab=meeting_sources',
+    },
+    {
+      title: 'Transcript & Notes Drops',
+      Icon: FileText,
+      color: ENTITY_COLORS.context,
+      status: transcriptDropConnected ? 'Configured' : 'Optional source',
+      description: isAdmin
+        ? 'Connect an S3 bucket or local folder where meeting transcripts, call notes, and summaries land. CRMy matches files to meetings or records and keeps unmatched files in review.'
+        : 'Transcript drops are configured by admins. Files that need your judgment appear in Customer Activity, where you can link them to the right customer record.',
+      primary: isAdmin ? 'Manage Sources' : 'Review Meeting Context',
+      primaryHref: isAdmin ? '/activities?tab=meeting_sources' : '/activities?tab=needs_context',
+      secondary: 'Review needs context',
+      secondaryHref: '/activities?tab=needs_context',
     },
   ];
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-6">
       <div className="mb-5 max-w-3xl">
-        <h2 className="text-lg font-display font-semibold text-foreground">Context Sources</h2>
+        <h2 className="text-lg font-display font-semibold text-foreground">Raw Context Sources</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Choose how customer context enters CRMy. Every source feeds the same loop: Raw Context becomes Signals, confirmed Signals become Memory, and agents retrieve Action Context before acting.
+          Start here when you want to feed CRMy customer material directly. Add Context handles pasted or uploaded notes, emails, transcripts, and call summaries. MCP/API lets agents and scripts send messy context programmatically. CRMy turns each input into Raw Context, then Signals, Memory, and Action Context for agents.
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -191,10 +210,10 @@ function SourcesTab() {
       </div>
       <div className="mt-6">
         <div className="mb-3">
-          <h3 className="text-sm font-semibold text-foreground">Optional connected sources</h3>
-          <p className="mt-1 text-sm text-muted-foreground">Email and calendar work differently, so each has its own setup, filters, and review workflow.</p>
+          <h3 className="text-lg font-display font-semibold text-foreground">Connected sources</h3>
+          <p className="mt-1 text-sm text-muted-foreground">Connected sources are optional automation. Email brings in customer threads and replies, calendar brings in meetings and availability context, and transcript drops watch folders or buckets for notes and transcripts. Use them when you want CRMy to keep Memory current automatically; manual Add Context and MCP/API still work without them.</p>
         </div>
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid gap-4 lg:grid-cols-3">
           {connectedCards.map(({ title, Icon, color, status, description, primary, primaryHref, secondary, secondaryHref }) => (
             <section key={title} className="rounded-lg border border-border bg-card p-4">
               <div className="flex items-center gap-3">

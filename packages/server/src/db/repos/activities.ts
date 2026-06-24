@@ -3,7 +3,7 @@
 
 import type { DbPool } from '../pool.js';
 import { validationError, type Activity, type UUID, type PaginatedResponse } from '@crmy/shared';
-import { addStableDescCursorCondition, encodeStableCursor } from './pagination.js';
+import { addStableDescCursorCondition, encodeStableCursor, exactListTotalsEnabled, pageTotal } from './pagination.js';
 
 type ActivityCreateData = Partial<Activity> & { created_by?: UUID };
 
@@ -221,10 +221,10 @@ export async function searchActivities(
 
   const where = conditions.join(' AND ');
 
-  const countResult = await db.query(
-    `SELECT count(*)::int as total FROM activities a WHERE ${where}`,
-    params,
-  );
+  const exactTotals = exactListTotalsEnabled();
+  const countResult = exactTotals
+    ? await db.query(`SELECT count(*)::int as total FROM activities a WHERE ${where}`, params)
+    : null;
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
@@ -238,7 +238,7 @@ export async function searchActivities(
 
   return {
     data,
-    total: countResult.rows[0].total,
+    ...pageTotal(data.length, hasMore, exactTotals ? Number(countResult?.rows[0]?.total ?? 0) : undefined),
     next_cursor: hasMore && data.length > 0
       ? encodeStableCursor({ sort_value: data[data.length - 1].created_at, id: data[data.length - 1].id })
       : undefined,

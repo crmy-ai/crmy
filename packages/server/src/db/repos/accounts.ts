@@ -4,6 +4,7 @@
 import type { DbPool } from '../pool.js';
 import type { Account, Contact, Opportunity, UUID, PaginatedResponse } from '@crmy/shared';
 import { CrmyError } from '@crmy/shared';
+import { addStableDescCursorCondition, encodeStableCursor, exactListTotalsEnabled, pageTotal } from './pagination.js';
 
 interface MutationOptions {
   expectedVersion?: number;
@@ -335,22 +336,18 @@ export async function searchAccounts(
     params.push(filters.tags);
     idx++;
   }
-  if (filters.cursor) {
-    conditions.push(`a.created_at < $${idx}`);
-    params.push(filters.cursor);
-    idx++;
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'a.created_at', 'a.id');
 
   const where = conditions.join(' AND ');
 
-  const countResult = await db.query(
-    `SELECT count(*)::int as total FROM accounts a WHERE ${where}`,
-    params,
-  );
+  const exactTotals = exactListTotalsEnabled();
+  const countResult = exactTotals
+    ? await db.query(`SELECT count(*)::int as total FROM accounts a WHERE ${where}`, params)
+    : null;
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
-    `SELECT a.* FROM accounts a WHERE ${where} ORDER BY a.created_at DESC LIMIT $${idx}`,
+    `SELECT a.* FROM accounts a WHERE ${where} ORDER BY a.created_at DESC, a.id DESC LIMIT $${idx}`,
     params,
   );
 
@@ -360,8 +357,10 @@ export async function searchAccounts(
 
   return {
     data,
-    total: countResult.rows[0].total,
-    next_cursor: hasMore ? data[data.length - 1].created_at : undefined,
+    ...pageTotal(data.length, hasMore, exactTotals ? Number(countResult?.rows[0]?.total ?? 0) : undefined),
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({ sort_value: data[data.length - 1].created_at, id: data[data.length - 1].id })
+      : undefined,
   };
 }
 

@@ -54,6 +54,18 @@ import {
   validateMeetingEvent,
 } from '../services/customer-activity.js';
 import {
+  createContextSourceConnection,
+  deleteContextSourceConnection,
+  enqueueContextSourceSync,
+  getContextSourceObject,
+  ignoreContextSourceObject,
+  listContextSourceConnections,
+  listContextSourceObjects,
+  reprocessContextSourceObject,
+  resolveContextSourceObject,
+  updateContextSourceConnection,
+} from '../services/context-source-drops.js';
+import {
   buildOAuthUrl,
   completeCalendarOAuth,
   completeMailboxOAuth,
@@ -1792,6 +1804,115 @@ export function apiRouter(db: DbPool): Router {
         processing_reason: String(req.body?.reason ?? 'Ignored by user.'),
       });
       res.json({ calendar_event: updated });
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Transcript and raw-note source drops ---
+  router.get('/context-source-connections', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      res.json(await listContextSourceConnections(db, actor));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context-source-connections', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      const parsed = z.object({
+        name: z.string().min(1).max(200),
+        provider: z.enum(['s3', 'local_folder']),
+        config: z.record(z.unknown()).default({}),
+        credentials: z.record(z.unknown()).optional(),
+      }).parse(req.body ?? {});
+      const result = await createContextSourceConnection(db, actor, parsed);
+      res.status(201).json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/context-source-connections/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      const parsed = z.object({
+        name: z.string().min(1).max(200).optional(),
+        status: z.enum(['configured', 'syncing', 'error', 'disabled']).optional(),
+        config: z.record(z.unknown()).optional(),
+        credentials: z.record(z.unknown()).nullable().optional(),
+      }).parse(req.body ?? {});
+      res.json(await updateContextSourceConnection(db, actor, p(req, 'id'), parsed));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/context-source-connections/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      res.json(await deleteContextSourceConnection(db, actor, p(req, 'id')));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context-source-connections/:id/sync', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      res.status(202).json(await enqueueContextSourceSync(db, actor, p(req, 'id')));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/context-source-objects', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      res.json(await listContextSourceObjects(db, actor, {
+        connection_id: qs(req.query.connection_id),
+        match_status: qs(req.query.match_status) as any,
+        processing_status: qs(req.query.processing_status) as any,
+        q: qs(req.query.q),
+        account_id: qs(req.query.account_id),
+        contact_id: qs(req.query.contact_id),
+        opportunity_id: qs(req.query.opportunity_id),
+        use_case_id: qs(req.query.use_case_id),
+        calendar_event_id: qs(req.query.calendar_event_id),
+        limit: Math.min(qn(req.query.limit, 50), 100),
+        cursor: qs(req.query.cursor),
+      }));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.get('/context-source-objects/:id', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      res.json(await getContextSourceObject(db, actor, p(req, 'id')));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context-source-objects/:id/resolve', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const parsed = z.object({
+        calendar_event_id: z.string().uuid().optional(),
+        account_id: z.string().uuid().optional(),
+        contact_id: z.string().uuid().optional(),
+        opportunity_id: z.string().uuid().optional(),
+        use_case_id: z.string().uuid().optional(),
+        note: z.string().max(1000).optional(),
+      }).parse(req.body ?? {});
+      res.json(await resolveContextSourceObject(db, actor, p(req, 'id'), parsed));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context-source-objects/:id/reprocess', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      res.status(202).json(await reprocessContextSourceObject(db, actor, p(req, 'id')));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/context-source-objects/:id/ignore', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      const parsed = z.object({ reason: z.string().max(1000).optional() }).parse(req.body ?? {});
+      res.json(await ignoreContextSourceObject(db, actor, p(req, 'id'), parsed.reason));
     } catch (err) { handleError(res, err); }
   });
 

@@ -6,7 +6,7 @@ import type { ContextEntry, UUID, PaginatedResponse } from '@crmy/shared';
 import type { EmbeddingConfig } from '../../agent/providers/embeddings.js';
 import { embedText } from '../../agent/providers/embeddings.js';
 import { withTransaction } from '../transaction.js';
-import { addStableDescCursorCondition, encodeStableCursor } from './pagination.js';
+import { addStableDescCursorCondition, encodeStableCursor, exactListTotalsEnabled, pageTotal } from './pagination.js';
 
 export async function createContextEntry(
   db: DbPool,
@@ -730,10 +730,10 @@ export async function searchContextEntries(
 
   const where = conditions.join(' AND ');
 
-  const countResult = await db.query(
-    `SELECT count(*)::int as total FROM context_entries c WHERE ${where}`,
-    params,
-  );
+  const exactTotals = exactListTotalsEnabled();
+  const countResult = exactTotals
+    ? await db.query(`SELECT count(*)::int as total FROM context_entries c WHERE ${where}`, params)
+    : null;
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
@@ -756,7 +756,7 @@ export async function searchContextEntries(
 
   return {
     data,
-    total: countResult.rows[0].total,
+    ...pageTotal(data.length, hasMore, exactTotals ? Number(countResult?.rows[0]?.total ?? 0) : undefined),
     next_cursor: hasMore && data.length > 0
       ? encodeStableCursor({ sort_value: data[data.length - 1].created_at, id: data[data.length - 1].id })
       : undefined,

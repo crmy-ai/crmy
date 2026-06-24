@@ -164,6 +164,9 @@ test('inbound email webhook requires explicit tenant and signature', async () =>
 test('outbound webhook secrets are explicit reveal/rotate actions and not leaked in normal reads', async () => {
   const schemaSource = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
   const repoSource = await readFile(new URL('../src/db/repos/webhooks.ts', import.meta.url), 'utf8');
+  const dispatcherSource = await readFile(new URL('../src/webhooks/dispatcher.ts', import.meta.url), 'utf8');
+  const migrationSource = await readFile(new URL('../migrations/085_webhook_event_backlog.sql', import.meta.url), 'utf8');
+  const indexSource = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
   const toolSource = await readFile(new URL('../src/mcp/tools/webhooks.ts', import.meta.url), 'utf8');
   const routerSource = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
   const scopesSource = await readFile(new URL('../src/auth/scopes.ts', import.meta.url), 'utf8');
@@ -174,6 +177,16 @@ test('outbound webhook secrets are explicit reveal/rotate actions and not leaked
   assert.match(schemaSource, /webhookRotateSecret/);
   assert.match(repoSource, /generateWebhookSecret/);
   assert.match(repoSource, /rotateWebhookSecret/);
+  assert.match(repoSource, /ON CONFLICT \(endpoint_id, event_id\) WHERE event_id IS NOT NULL DO NOTHING/);
+  assert.match(repoSource, /status = 'pending'/);
+  assert.match(repoSource, /listWebhookBacklogEvents/);
+  assert.match(dispatcherSource, /enqueueWebhookDeliveriesForEvent/);
+  assert.match(dispatcherSource, /processWebhookEventBacklog/);
+  assert.match(dispatcherSource, /the normal retry worker will pick up the pending row/);
+  assert.match(migrationSource, /webhook_deliveries_endpoint_event_unique/);
+  assert.match(migrationSource, /webhook_deliveries_pending_retry_idx/);
+  assert.match(migrationSource, /DELETE FROM webhook_deliveries duplicate/);
+  assert.match(indexSource, /webhook_event_backlog/);
   assert.match(toolSource, /function publicWebhook/);
   assert.match(toolSource, /const \{ secret, \.\.\.safe \} = webhook/);
   assert.match(toolSource, /webhook_reveal_secret/);
@@ -455,7 +468,7 @@ test('scoped overview and personal connection setup keep mailbox/calendar OAuth 
   assert.match(dashboard, /Show connection setup/);
   assert.match(dashboard, /mailboxConnected && calendarConnected/);
   assert.match(dashboard, /\/emails\?tab=connections/);
-  assert.match(dashboard, /\/activities\?tab=connections/);
+  assert.match(dashboard, /\/activities\?tab=meeting_sources/);
 
   assert.match(emailsPage, /Choose provider/);
   assert.match(emailsPage, /Connect your work mailbox/);
@@ -738,11 +751,24 @@ test('high-volume context surfaces use stable timestamp plus id cursors', async 
   const rawContextRepo = await readFile(new URL('../src/db/repos/raw-context-sources.ts', import.meta.url), 'utf8');
   const activitiesRepo = await readFile(new URL('../src/db/repos/activities.ts', import.meta.url), 'utf8');
   const signalGroupsRepo = await readFile(new URL('../src/db/repos/signal-groups.ts', import.meta.url), 'utf8');
+  const accountsRepo = await readFile(new URL('../src/db/repos/accounts.ts', import.meta.url), 'utf8');
+  const contactsRepo = await readFile(new URL('../src/db/repos/contacts.ts', import.meta.url), 'utf8');
+  const opportunitiesRepo = await readFile(new URL('../src/db/repos/opportunities.ts', import.meta.url), 'utf8');
+  const assignmentsRepo = await readFile(new URL('../src/db/repos/assignments.ts', import.meta.url), 'utf8');
+  const emailsRepo = await readFile(new URL('../src/db/repos/emails.ts', import.meta.url), 'utf8');
+  const emailMessagesRepo = await readFile(new URL('../src/db/repos/email-messages.ts', import.meta.url), 'utf8');
+  const calendarRepo = await readFile(new URL('../src/db/repos/calendar.ts', import.meta.url), 'utf8');
+  const actorsRepo = await readFile(new URL('../src/db/repos/actors.ts', import.meta.url), 'utf8');
+  const useCasesRepo = await readFile(new URL('../src/db/repos/use-cases.ts', import.meta.url), 'utf8');
+  const webhooksRepo = await readFile(new URL('../src/db/repos/webhooks.ts', import.meta.url), 'utf8');
 
   assert.match(paginationRepo, /encodeStableCursor/);
   assert.match(paginationRepo, /decodeStableCursor/);
   assert.match(paginationRepo, /base64url/);
   assert.match(paginationRepo, /AND \${idExpression} < \$\${idx \+ 1}::uuid/);
+  assert.match(paginationRepo, /exactListTotalsEnabled/);
+  assert.match(paginationRepo, /CRMY_LIST_TOTAL_MODE/);
+  assert.match(paginationRepo, /total_is_estimate: true/);
 
   for (const source of [contextRepo, rawContextRepo, activitiesRepo]) {
     assert.match(source, /addStableDescCursorCondition/);
@@ -750,10 +776,95 @@ test('high-volume context surfaces use stable timestamp plus id cursors', async 
     assert.match(source, /encodeStableCursor\(\{ sort_value: .*created_at, id:/s);
   }
 
+  for (const source of [
+    accountsRepo,
+    contactsRepo,
+    opportunitiesRepo,
+    assignmentsRepo,
+    emailsRepo,
+    actorsRepo,
+    useCasesRepo,
+    webhooksRepo,
+  ]) {
+    assert.match(source, /addStableDescCursorCondition/);
+    assert.match(source, /ORDER BY .*created_at DESC, .*id DESC/);
+    assert.match(source, /encodeStableCursor\(\{ sort_value: .*created_at, id:/s);
+  }
+
+  assert.match(emailMessagesRepo, /addStableDescCursorCondition/);
+  assert.match(emailMessagesRepo, /COALESCE\(em\.received_at, em\.sent_at, em\.created_at\) DESC, em\.id DESC/);
+  assert.match(emailMessagesRepo, /encodeStableCursor\(\{\s*sort_value: data\[data\.length - 1\]\.received_at/s);
+
+  assert.match(calendarRepo, /addStableDescCursorCondition/);
+  assert.match(calendarRepo, /ORDER BY ce\.starts_at DESC, ce\.id DESC/);
+  assert.match(calendarRepo, /encodeStableCursor\(\{ sort_value: data\[data\.length - 1\]\.starts_at, id:/);
+
+  for (const source of [
+    accountsRepo,
+    contactsRepo,
+    opportunitiesRepo,
+    assignmentsRepo,
+    emailsRepo,
+    emailMessagesRepo,
+    calendarRepo,
+    actorsRepo,
+    useCasesRepo,
+    activitiesRepo,
+    contextRepo,
+    rawContextRepo,
+  ]) {
+    assert.match(source, /exactListTotalsEnabled/);
+    assert.match(source, /pageTotal/);
+  }
+
   assert.match(signalGroupsRepo, /SIGNAL_GROUP_SORT_RANK_SQL/);
   assert.match(signalGroupsRepo, /sg\.id < \$\$\{idx \+ 2\}::uuid/);
   assert.match(signalGroupsRepo, /sg\.updated_at DESC, sg\.id DESC/);
   assert.match(signalGroupsRepo, /rank: signalGroupSortRank/);
+});
+
+test('production database TLS requires verified certificates unless explicitly overridden', async () => {
+  const poolSource = await readFile(new URL('../src/db/pool.ts', import.meta.url), 'utf8');
+  const guideSource = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
+  const envSource = await readFile(new URL('../../../.env.example', import.meta.url), 'utf8');
+
+  assert.match(poolSource, /process\.env\.NODE_ENV === 'production'/);
+  assert.match(poolSource, /CRMY_ALLOW_INSECURE_DB_TLS/);
+  assert.match(poolSource, /Use sslmode=verify-full with a trusted CA/);
+  assert.match(poolSource, /sslMode === 'verify-full'/);
+  assert.match(guideSource, /CRMY_ALLOW_INSECURE_DB_TLS/);
+  assert.match(envSource, /CRMY_ALLOW_INSECURE_DB_TLS=false/);
+});
+
+test('unauthenticated auth throttling uses shared hashed buckets', async () => {
+  const authRoutesSource = await readFile(new URL('../src/auth/routes.ts', import.meta.url), 'utf8');
+  const rateLimitSource = await readFile(new URL('../src/services/rate-limit.ts', import.meta.url), 'utf8');
+  const migrationSource = await readFile(new URL('../migrations/084_auth_rate_limits.sql', import.meta.url), 'utf8');
+  const indexSource = await readFile(new URL('../src/index.ts', import.meta.url), 'utf8');
+  const envSource = await readFile(new URL('../../../.env.example', import.meta.url), 'utf8');
+  const guideSource = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(authRoutesSource, /new Map<string, RateBucket>/);
+  assert.doesNotMatch(authRoutesSource, /allowRequest\(/);
+  assert.doesNotMatch(authRoutesSource, /setInterval\(\(\) => \{/);
+  assert.match(authRoutesSource, /enforceUnauthenticatedRateLimit/);
+  assert.match(authRoutesSource, /auth:login:ip/);
+  assert.match(authRoutesSource, /auth:login:identity/);
+  assert.match(authRoutesSource, /auth:register:ip/);
+  assert.match(authRoutesSource, /auth:register:identity/);
+
+  assert.match(rateLimitSource, /auth_rate_limit_buckets/);
+  assert.match(rateLimitSource, /createHmac\('sha256'/);
+  assert.match(rateLimitSource, /CRMY_RATE_LIMIT_HASH_SECRET/);
+  assert.match(rateLimitSource, /purgeRateLimitBuckets/);
+
+  assert.match(migrationSource, /CREATE TABLE IF NOT EXISTS auth_rate_limit_buckets/);
+  assert.match(migrationSource, /PRIMARY KEY \(bucket_key, identity_hash, window_start\)/);
+  assert.match(migrationSource, /auth_rate_limit_buckets_stale_idx/);
+  assert.match(indexSource, /rate_limit_bucket_purge/);
+  assert.match(envSource, /CRMY_AUTH_LOGIN_IP_LIMIT=10/);
+  assert.match(envSource, /CRMY_AUTH_LOGIN_IDENTITY_LIMIT=20/);
+  assert.match(guideSource, /Shared login\/register rate-limit window/);
 });
 
 class FakeContextDiffDb {
@@ -4532,6 +4643,11 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   assert.match(envExample, /CRMY_ENCRYPTION_KEY=/);
   assert.match(envExample, /CRMY_CORS_ORIGINS=/);
   assert.match(envExample, /CRMY_TRUST_PROXY=1/);
+  assert.match(envExample, /CRMY_PROCESS_ROLE=all/);
+  assert.match(envExample, /CRMY_MIGRATION_MODE=validate/);
+  assert.match(envExample, /CRMY_BROWSER_COOKIE_AUTH=true/);
+  assert.match(envExample, /VITE_CRMY_BROWSER_COOKIE_AUTH=true/);
+  assert.match(envExample, /CRMY_ALLOW_BROWSER_BEARER_AUTH=false/);
   assert.match(envExample, /LLM_TIMEOUT_MS=60000/);
   assert.match(envExample, /AGENT_STREAM_TIMEOUT_MS=60000/);
   assert.match(envExample, /SOURCE_SYNC_FETCH_TIMEOUT_MS=30000/);
@@ -4540,8 +4656,23 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   assert.match(indexSource, /import cors from 'cors'/);
   assert.match(indexSource, /import helmet from 'helmet'/);
   assert.match(indexSource, /CRMY_ENCRYPTION_KEY is required in production/);
+  assert.match(indexSource, /CRMY_PROCESS_ROLE must be one of: all, web, worker/);
+  assert.match(indexSource, /CRMY_MIGRATION_MODE must be one of: auto, validate, skip/);
+  assert.match(indexSource, /process\.env\.NODE_ENV === 'production' \? 'validate' : 'auto'/);
+  assert.match(indexSource, /Database has \$\{status\.pending\.length\} pending migration/);
+  assert.match(indexSource, /crmy migrate run/);
+  assert.match(indexSource, /const servesHttp = config\.processRole !== 'worker'/);
+  assert.match(indexSource, /const runsWorkers = config\.processRole !== 'web'/);
+  assert.match(indexSource, /crmy worker ready/);
+  assert.match(indexSource, /process_role: config\.processRole/);
+  assert.match(indexSource, /runWithBackgroundLock/);
+  assert.match(indexSource, /const client = await db\.connect\(\)/);
+  assert.match(indexSource, /client\.query\('SELECT pg_try_advisory_lock/);
+  assert.match(indexSource, /client\.query\('SELECT pg_advisory_unlock/);
   assert.match(indexSource, /app\.set\('trust proxy', parseTrustProxy/);
   assert.match(indexSource, /CRMY_CORS_ORIGINS/);
+  assert.match(indexSource, /CRMY_BROWSER_COOKIE_AUTH=true is required when CRMY_DEPLOYMENT_MODE=multi_instance/);
+  assert.match(indexSource, /CRMY_ALLOW_BROWSER_BEARER_AUTH=true/);
   assert.match(authSource, /return req\.ip \|\| req\.socket\.remoteAddress \|\| 'unknown'/);
 
   assert.match(secretSource, /process\.env\.CRMY_ENCRYPTION_KEY \?\? process\.env\.AGENT_ENCRYPTION_KEY/);
@@ -4549,14 +4680,21 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   assert.match(schemasSource, /password: z\.string\(\)\.min\(12\)/);
   assert.doesNotMatch(authSource, /at least 8 characters/);
   assert.match(readme, /CRMY_ADMIN_PASSWORD="\$\(openssl rand -base64 24\)"/);
+  assert.match(readme, /CRMY_MIGRATION_MODE=validate/);
+  assert.match(readme, /run `crmy migrate run` as a one-shot migration job/);
   assert.match(readme, /`LLM_TIMEOUT_MS` \| Optional \| General Workspace Agent and background LLM timeout\. Default: `60000`\./);
   assert.match(readme, /`AGENT_STREAM_TIMEOUT_MS` \| Optional \| Streaming Workspace Agent provider timeout\. Default: `60000`\./);
   assert.match(readme, /`SOURCE_SYNC_FETCH_TIMEOUT_MS`/);
   assert.match(readme, /`CONNECTOR_FETCH_TIMEOUT_MS`/);
   assert.match(readme, /`SLACK_SEND_TIMEOUT_MS` \| Optional \| Slack webhook delivery timeout\. Default: `10000`\./);
   assert.match(guide, /CRMY_ADMIN_PASSWORD="\$\(openssl rand -base64 24\)"/);
+  assert.match(guide, /`CRMY_PROCESS_ROLE` \| No \| `all`/);
+  assert.match(guide, /`CRMY_MIGRATION_MODE` \| No \| dev: `auto`, production: `validate`/);
+  assert.match(guide, /web and worker processes fail fast when migrations are pending/);
   assert.match(guide, /`LLM_TIMEOUT_MS` \| No \| `60000`/);
   assert.match(guide, /`AGENT_STREAM_TIMEOUT_MS` \| No \| `60000`/);
+  assert.match(guide, /`CRMY_BROWSER_COOKIE_AUTH` \/ `VITE_CRMY_BROWSER_COOKIE_AUTH`/);
+  assert.match(guide, /`CRMY_ALLOW_BROWSER_BEARER_AUTH`/);
   assert.match(guide, /`SLACK_SEND_TIMEOUT_MS` \| No \| `10000`/);
   for (const weakExample of [
     'change-me-please-123',
@@ -4847,6 +4985,9 @@ test('migration runner uses a connection-scoped advisory lock', async () => {
   const source = await readFile(new URL('../src/db/migrate.ts', import.meta.url), 'utf8');
   assert.match(source, /pg_advisory_lock\(hashtext\('crmy:migrations'\)\)/);
   assert.match(source, /pg_advisory_unlock\(hashtext\('crmy:migrations'\)\)/);
+  assert.match(source, /isOptionalMigrationDisabled/);
+  assert.match(source, /file === '022_pgvector\.sql'/);
+  assert.match(source, /activeFiles = files\.filter/);
 });
 
 test('HITL approval rule routes are ordered before dynamic HITL id routes and require admin scope', async () => {
@@ -6042,4 +6183,55 @@ test('action readiness requires review when policy requires approval', () => {
   assert.equal(result.guidance.can_execute, false);
   assert.match(result.guidance.review_reasons.join(' '), /requires approval/);
   assert.equal(result.required_handoffs.at(-1).type, 'policy_approval');
+});
+
+test('transcript source drops are durable, reviewable, and integrated with activity context', async () => {
+  const migration = await readFile(new URL('../migrations/083_context_source_drops.sql', import.meta.url), 'utf8');
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS context_source_connections/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS context_source_objects/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS context_source_processing_jobs/);
+  assert.match(migration, /UNIQUE \(tenant_id, connection_id, object_key, content_hash\)/);
+  assert.match(migration, /account_id\s+UUID REFERENCES accounts/);
+
+  const service = await readFile(new URL('../src/services/context-source-drops.ts', import.meta.url), 'utf8');
+  assert.match(service, /CRMY_LOCAL_SOURCE_ROOTS/);
+  assert.match(service, /CRMY_ENABLE_LOCAL_CONTEXT_DROPS/);
+  assert.match(service, /context_source\.resolve/);
+  assert.match(service, /source_document_hash/);
+  assert.match(service, /parent_content_hash/);
+  assert.match(service, /customer_authored/);
+  assert.match(service, /FOR UPDATE SKIP LOCKED|claimProcessingJobs/);
+  assert.doesNotMatch(service, /console\.log\([^)]*text/i);
+
+  const activityService = await readFile(new URL('../src/services/customer-activity.ts', import.meta.url), 'utf8');
+  assert.match(activityService, /let activity = artifact\.activity_id/);
+  assert.doesNotMatch(activityService, /let activity = event\.activity_id \?/);
+  assert.match(activityService, /artifactSourceDetail/);
+
+  const router = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
+  for (const route of [
+    '/context-source-connections',
+    '/context-source-connections/:id/sync',
+    '/context-source-objects',
+    '/context-source-objects/:id/resolve',
+    '/context-source-objects/:id/reprocess',
+    '/context-source-objects/:id/ignore',
+  ]) {
+    assert.ok(router.includes(route), `Expected REST router to include ${route}`);
+  }
+
+  const mcp = await readFile(new URL('../src/mcp/tools/context-source-drops.ts', import.meta.url), 'utf8');
+  assert.match(mcp, /context_source_connection_create/);
+  assert.match(mcp, /context_source_object_resolve/);
+
+  const activitiesUi = await readFile(new URL('../../web/src/pages/Activities.tsx', import.meta.url), 'utf8');
+  assert.match(activitiesUi, /Transcript & Notes Sources/);
+  assert.match(activitiesUi, /MeetingContextShortcuts/);
+  assert.match(activitiesUi, /value === 'connections'\) return 'meeting_sources'/);
+  assert.match(activitiesUi, /TranscriptReviewList/);
+  assert.match(activitiesUi, /Resolve and process/);
+
+  const dataQuality = await readFile(new URL('../src/services/data-quality.ts', import.meta.url), 'utf8');
+  assert.match(dataQuality, /stale_context_source_sync_jobs/);
+  assert.match(dataQuality, /failed_context_source_objects/);
 });

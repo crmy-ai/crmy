@@ -11,7 +11,7 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { initPool, getPool, closePool, type DbPool } from './db/pool.js';
-import { runMigrations } from './db/migrate.js';
+import { getMigrationStatus, runMigrations } from './db/migrate.js';
 import { authRouter } from './auth/routes.js';
 import { authMiddleware } from './auth/middleware.js';
 import { apiRouter, inboundRouter } from './rest/router.js';
@@ -91,6 +91,8 @@ function safeLogError(err: unknown): unknown {
 
 export type ProgressStep = 'db_connect' | 'migrations' | 'seed_defaults';
 export type ProgressStatus = 'start' | 'done' | 'error';
+export type ProcessRole = 'all' | 'web' | 'worker';
+export type MigrationStartupMode = 'auto' | 'validate' | 'skip';
 
 export interface ServerConfig {
   databaseUrl: string;
@@ -98,6 +100,8 @@ export interface ServerConfig {
   port: number;
   tenantSlug: string;
   allowPublicRegistration: boolean;
+  processRole: ProcessRole;
+  migrationStartupMode: MigrationStartupMode;
   plugins?: PluginConfig[];
   /** Optional progress callback for CLI startup UI */
   onProgress?: (step: ProgressStep, status: ProgressStatus, detail?: string) => void;
@@ -137,9 +141,25 @@ function isSameRequestOrigin(req: express.Request, origin: string): boolean {
   }
 }
 
+function parseProcessRole(value: string | undefined): ProcessRole {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return 'all';
+  if (normalized === 'all' || normalized === 'web' || normalized === 'worker') return normalized;
+  throw new Error('CRMY_PROCESS_ROLE must be one of: all, web, worker');
+}
+
+function parseMigrationStartupMode(value: string | undefined): MigrationStartupMode {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return process.env.NODE_ENV === 'production' ? 'validate' : 'auto';
+  if (normalized === 'auto' || normalized === 'validate' || normalized === 'skip') return normalized;
+  throw new Error('CRMY_MIGRATION_MODE must be one of: auto, validate, skip');
+}
+
 export function loadConfig(): ServerConfig {
   const databaseUrl = process.env.DATABASE_URL;
   const jwtSecret = process.env.JWT_SECRET;
+  const processRole = parseProcessRole(process.env.CRMY_PROCESS_ROLE);
+  const migrationStartupMode = parseMigrationStartupMode(process.env.CRMY_MIGRATION_MODE);
 
   if (!databaseUrl) throw new Error('DATABASE_URL is required');
   if (!jwtSecret) throw new Error('JWT_SECRET is required');
@@ -160,6 +180,8 @@ export function loadConfig(): ServerConfig {
   if (process.env.CRMY_DEPLOYMENT_MODE === 'multi_instance') {
     const instanceId = process.env.CRMY_INSTANCE_ID?.trim();
     const mcpSessionMode = process.env.CRMY_MCP_SESSION_MODE?.trim();
+    const browserCookieAuth = process.env.CRMY_BROWSER_COOKIE_AUTH === 'true';
+    const allowBrowserBearerAuth = process.env.CRMY_ALLOW_BROWSER_BEARER_AUTH === 'true';
     if (!instanceId) {
       throw new Error(
         'CRMY_INSTANCE_ID is required when CRMY_DEPLOYMENT_MODE=multi_instance.\n' +
@@ -172,6 +194,13 @@ export function loadConfig(): ServerConfig {
         '  Configure the load balancer to route by mcp-session-id. CRMy will reject wrong-instance session requests clearly instead of creating unsafe in-process sessions.',
       );
     }
+    if (!browserCookieAuth && !allowBrowserBearerAuth) {
+      throw new Error(
+        'CRMY_BROWSER_COOKIE_AUTH=true is required when CRMY_DEPLOYMENT_MODE=multi_instance.\n' +
+        '  Hosted browser sessions should use HttpOnly cookies instead of localStorage bearer tokens. ' +
+        'Set CRMY_ALLOW_BROWSER_BEARER_AUTH=true only for a deliberate private deployment exception.',
+      );
+    }
   }
 
   return {
@@ -180,11 +209,36 @@ export function loadConfig(): ServerConfig {
     port: parseInt(process.env.PORT ?? '3000', 10),
     tenantSlug: process.env.CRMY_TENANT_ID ?? 'default',
     allowPublicRegistration: process.env.CRMY_ALLOW_PUBLIC_REGISTRATION === 'true',
+    processRole,
+    migrationStartupMode,
   };
+}
+
+async function prepareDatabaseMigrations(
+  db: DbPool,
+  config: ServerConfig,
+): Promise<string> {
+  if (config.migrationStartupMode === 'skip') {
+    return 'skipped by CRMY_MIGRATION_MODE';
+  }
+  if (config.migrationStartupMode === 'validate') {
+    const status = await getMigrationStatus(db);
+    if (status.pending.length > 0) {
+      throw new Error(
+        `Database has ${status.pending.length} pending migration(s): ${status.pending.join(', ')}.\n` +
+        '  Run `crmy migrate run` as a one-shot migration job, or set CRMY_MIGRATION_MODE=auto only for local/single-instance deployments.',
+      );
+    }
+    return 'up to date';
+  }
+  const ran = await runMigrations(db, config.onMigration);
+  return ran.length > 0 ? `${ran.length} applied` : 'up to date';
 }
 
 export async function createApp(config: ServerConfig) {
   const progress = config.onProgress ?? (() => {});
+  const servesHttp = config.processRole !== 'worker';
+  const runsWorkers = config.processRole !== 'web';
 
   progress('db_connect', 'start');
   let db: DbPool;
@@ -197,10 +251,8 @@ export async function createApp(config: ServerConfig) {
   }
 
   progress('migrations', 'start');
-  let ran: string[];
   try {
-    ran = await runMigrations(db, config.onMigration);
-    progress('migrations', 'done', ran.length > 0 ? `${ran.length} applied` : 'up to date');
+    progress('migrations', 'done', await prepareDatabaseMigrations(db, config));
   } catch (err) {
     progress('migrations', 'error', (err as Error).message);
     throw err;
@@ -246,10 +298,12 @@ export async function createApp(config: ServerConfig) {
 
   const app = express();
   let stopMcpResourceNotifications: () => Promise<void> = async () => {};
-  try {
-    stopMcpResourceNotifications = await startMcpResourceNotificationListener(db);
-  } catch (err) {
-    console.warn('[mcp] Cross-instance resource notifications are unavailable:', safeLogError(err));
+  if (servesHttp) {
+    try {
+      stopMcpResourceNotifications = await startMcpResourceNotificationListener(db);
+    } catch (err) {
+      console.warn('[mcp] Cross-instance resource notifications are unavailable:', safeLogError(err));
+    }
   }
   app.set('trust proxy', parseTrustProxy(process.env.CRMY_TRUST_PROXY ?? process.env.TRUST_PROXY));
   app.use(helmet({
@@ -534,18 +588,21 @@ export async function createApp(config: ServerConfig) {
   app.get('/mcp', handleMcpRequest);
   app.delete('/mcp', handleMcpRequest);
 
-  const mcpHeartbeatInterval = setInterval(async () => {
-    try {
-      await heartbeatMcpInstance(db, MCP_INSTANCE_ID, {
-        version: SERVER_VERSION,
-        deployment_mode: process.env.CRMY_DEPLOYMENT_MODE ?? 'single_instance',
-      });
-      await expireTimedOutMcpSessions(db);
-      await expireSessionsOwnedByStaleInstances(db, MCP_STALE_INSTANCE_MS);
-    } catch (err) {
-      console.warn('[mcp] Session heartbeat/expiry failed:', safeLogError(err));
-    }
-  }, 30_000);
+  const mcpHeartbeatInterval = servesHttp
+    ? setInterval(async () => {
+      try {
+        await heartbeatMcpInstance(db, MCP_INSTANCE_ID, {
+          version: SERVER_VERSION,
+          deployment_mode: process.env.CRMY_DEPLOYMENT_MODE ?? 'single_instance',
+          process_role: config.processRole,
+        });
+        await expireTimedOutMcpSessions(db);
+        await expireSessionsOwnedByStaleInstances(db, MCP_STALE_INSTANCE_MS);
+      } catch (err) {
+        console.warn('[mcp] Session heartbeat/expiry failed:', safeLogError(err));
+      }
+    }, 30_000)
+    : undefined;
 
   // Authenticated API routes
   app.use('/api/v1', authMiddleware(db, config.jwtSecret), actorRateLimitMiddleware(db), apiRouter(db));
@@ -562,7 +619,7 @@ export async function createApp(config: ServerConfig) {
   });
 
   // Background workers (every 60 seconds)
-  const { processWebhookRetries } = await import('./webhooks/dispatcher.js');
+  const { processWebhookRetries, processWebhookEventBacklog } = await import('./webhooks/dispatcher.js');
   const { processNextBatch: processContextOutbox } = await import('./workers/context_ingestion_worker.service.js');
   const { processEmbeddingJobs } = await import('./services/embedding-service.js');
   const { checkHitlSlaExpiry } = await import('./hitl/sla-checker.js');
@@ -571,8 +628,10 @@ export async function createApp(config: ServerConfig) {
   const { processMailboxSyncJobs, processDeliveredOutboundEmailContextJobs } = await import('./services/customer-email.js');
   const { processEmailDeliveryJobs } = await import('./email/delivery.js');
   const { processCalendarSyncJobs } = await import('./services/customer-activity.js');
+  const { processContextSourceSyncJobs, processContextSourceProcessingJobs } = await import('./services/context-source-drops.js');
   const { processSequenceDue, handleSequenceGoalEvent, resolveSequenceGoalContactId } = await import('./services/sequence-executor.js');
   const { refreshSequenceAnalytics } = await import('./services/sequence-analytics.js');
+  const { purgeRateLimitBuckets } = await import('./services/rate-limit.js');
   const { markBackgroundTickFailure, markBackgroundTickSuccess } = await import('./services/scheduler-health.js');
   const { createWorkflowEngine } = await import('./workflows/engine.js');
   const workflowEngine = createWorkflowEngine(db);
@@ -580,12 +639,23 @@ export async function createApp(config: ServerConfig) {
   const backgroundTasksInFlight = new Set<Promise<unknown>>();
   const BACKGROUND_WORKER_LOCK_KEY = 8444219208;
   const BACKGROUND_TASK_TIMEOUT_MS = Number(process.env.BACKGROUND_TASK_TIMEOUT_MS ?? 45_000);
-  async function tryAcquireBackgroundLock(): Promise<boolean> {
-    const result = await db.query('SELECT pg_try_advisory_lock($1::bigint) AS locked', [BACKGROUND_WORKER_LOCK_KEY]);
-    return result.rows[0]?.locked === true;
-  }
-  async function releaseBackgroundLock(): Promise<void> {
-    await db.query('SELECT pg_advisory_unlock($1::bigint)', [BACKGROUND_WORKER_LOCK_KEY]);
+  async function runWithBackgroundLock(task: () => Promise<void>): Promise<boolean> {
+    const client = await db.connect();
+    let locked = false;
+    try {
+      const result = await client.query('SELECT pg_try_advisory_lock($1::bigint) AS locked', [BACKGROUND_WORKER_LOCK_KEY]);
+      locked = result.rows[0]?.locked === true;
+      if (!locked) return false;
+      await task();
+      return true;
+    } finally {
+      if (locked) {
+        await client.query('SELECT pg_advisory_unlock($1::bigint)').catch((err) => {
+          console.warn('[background] Failed to release advisory lock:', safeLogError(err));
+        });
+      }
+      client.release();
+    }
   }
   async function runBackgroundTask(name: string, task: () => Promise<unknown>, failures: string[]): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -606,61 +676,57 @@ export async function createApp(config: ServerConfig) {
       if (timer) clearTimeout(timer);
     }
   }
-  const hitlInterval = setInterval(async () => {
+  const hitlInterval = runsWorkers ? setInterval(async () => {
     if (backgroundWorkerRunning || backgroundTasksInFlight.size > 0) return;
-    let lockHeld = false;
     try {
       backgroundWorkerRunning = true;
-      lockHeld = await tryAcquireBackgroundLock();
-      if (!lockHeld) return;
-      const failures: string[] = [];
-      await runBackgroundTask('hitl_auto_approve_expired', () => autoApproveExpired(db), failures);
-      await runBackgroundTask('hitl_expire_old_requests', () => expireOldRequests(db), failures);
-      await runBackgroundTask('hitl_sla_expiry', () => checkHitlSlaExpiry(db), failures);
-      await runBackgroundTask('agent_session_cleanup', () => cleanExpiredSessions(db), failures);
-      await runBackgroundTask('agent_turns', () => processPendingAgentTurns(db), failures);
-      await runBackgroundTask('context_pending_extractions', () => processPendingExtractions(db), failures);
-      await runBackgroundTask('raw_context_sources', () => processPendingRawContextSources(db), failures);
-      await runBackgroundTask('context_stale_entries', () => processStaleEntries(db), failures);
-      await runBackgroundTask('webhook_retries', () => processWebhookRetries(db), failures);
-      await runBackgroundTask('context_outbox', () => processContextOutbox(db), failures);
-      await runBackgroundTask('context_embedding_jobs', () => processEmbeddingJobs(db), failures);
-      await runBackgroundTask('email_delivery_jobs', () => processEmailDeliveryJobs(db), failures);
-      await runBackgroundTask('delivered_outbound_email_context', () => processDeliveredOutboundEmailContextJobs(db), failures);
-      await runBackgroundTask('mailbox_sync_jobs', () => processMailboxSyncJobs(db), failures);
-      await runBackgroundTask('calendar_sync_jobs', () => processCalendarSyncJobs(db), failures);
-      await runBackgroundTask('context_stale_scores', () => refreshStaleScores(db), failures);
-      // Purge workflow run history older than 90 days
-      await runBackgroundTask('workflow_run_purge', () => purgeOldWorkflowRuns(db), failures);
-      // Catch up workflow events that were persisted but missed by in-process delivery
-      await runBackgroundTask('workflow_backlog', () => workflowEngine.processBacklog(100), failures);
-      // Process due sequence enrollments
-      await runBackgroundTask('sequence_due_steps', () => processSequenceDue(db), failures);
-      // Refresh sequence analytics rollup
-      await runBackgroundTask('sequence_analytics', () => refreshSequenceAnalytics(db), failures);
-      // Evict idle MCP sessions (30-minute TTL)
-      await evictStaleMcpSessions(db);
-      if (failures.length > 0) {
-        markBackgroundTickFailure(new Error(`Background tasks failed: ${failures.join(', ')}`));
-      } else {
-        markBackgroundTickSuccess();
-      }
+      await runWithBackgroundLock(async () => {
+        const failures: string[] = [];
+        await runBackgroundTask('hitl_auto_approve_expired', () => autoApproveExpired(db), failures);
+        await runBackgroundTask('hitl_expire_old_requests', () => expireOldRequests(db), failures);
+        await runBackgroundTask('hitl_sla_expiry', () => checkHitlSlaExpiry(db), failures);
+        await runBackgroundTask('agent_session_cleanup', () => cleanExpiredSessions(db), failures);
+        await runBackgroundTask('agent_turns', () => processPendingAgentTurns(db), failures);
+        await runBackgroundTask('context_pending_extractions', () => processPendingExtractions(db), failures);
+        await runBackgroundTask('raw_context_sources', () => processPendingRawContextSources(db), failures);
+        await runBackgroundTask('context_stale_entries', () => processStaleEntries(db), failures);
+        await runBackgroundTask('webhook_event_backlog', () => processWebhookEventBacklog(db), failures);
+        await runBackgroundTask('webhook_retries', () => processWebhookRetries(db), failures);
+        await runBackgroundTask('context_outbox', () => processContextOutbox(db), failures);
+        await runBackgroundTask('context_embedding_jobs', () => processEmbeddingJobs(db), failures);
+        await runBackgroundTask('email_delivery_jobs', () => processEmailDeliveryJobs(db), failures);
+        await runBackgroundTask('delivered_outbound_email_context', () => processDeliveredOutboundEmailContextJobs(db), failures);
+        await runBackgroundTask('mailbox_sync_jobs', () => processMailboxSyncJobs(db), failures);
+        await runBackgroundTask('calendar_sync_jobs', () => processCalendarSyncJobs(db), failures);
+        await runBackgroundTask('context_source_sync_jobs', () => processContextSourceSyncJobs(db), failures);
+        await runBackgroundTask('context_source_processing_jobs', () => processContextSourceProcessingJobs(db), failures);
+        await runBackgroundTask('context_stale_scores', () => refreshStaleScores(db), failures);
+        // Purge workflow run history older than 90 days
+        await runBackgroundTask('workflow_run_purge', () => purgeOldWorkflowRuns(db), failures);
+        // Catch up workflow events that were persisted but missed by in-process delivery
+        await runBackgroundTask('workflow_backlog', () => workflowEngine.processBacklog(100), failures);
+        // Process due sequence enrollments
+        await runBackgroundTask('sequence_due_steps', () => processSequenceDue(db), failures);
+        // Refresh sequence analytics rollup
+        await runBackgroundTask('sequence_analytics', () => refreshSequenceAnalytics(db), failures);
+        await runBackgroundTask('rate_limit_bucket_purge', () => purgeRateLimitBuckets(db), failures);
+        // Evict idle MCP sessions (30-minute TTL)
+        await evictStaleMcpSessions(db);
+        if (failures.length > 0) {
+          markBackgroundTickFailure(new Error(`Background tasks failed: ${failures.join(', ')}`));
+        } else {
+          markBackgroundTickSuccess();
+        }
+      });
     } catch (err) {
       // Log the error but keep the interval running — a transient DB error
       // should not permanently disable all background maintenance tasks.
       markBackgroundTickFailure(err);
       console.error('Background worker error:', safeLogError(err));
     } finally {
-      if (lockHeld) {
-        try {
-          await releaseBackgroundLock();
-        } catch (err) {
-          console.warn('[background] Failed to release advisory lock:', safeLogError(err));
-        }
-      }
       backgroundWorkerRunning = false;
     }
-  }, 60_000);
+  }, 60_000) : undefined;
 
   // Load plugins
   if (config.plugins?.length) {
@@ -733,8 +799,12 @@ export async function createApp(config: ServerConfig) {
   registerWebhookDispatcher(db);
 
   // Start messaging retry loop (30s interval for exponential backoff retries)
-  const { startRetryLoop, stopRetryLoop } = await import('./messaging/delivery.js');
-  startRetryLoop(db);
+  let stopRetryLoop = (): void => {};
+  if (runsWorkers) {
+    const messagingDelivery = await import('./messaging/delivery.js');
+    messagingDelivery.startRetryLoop(db);
+    stopRetryLoop = messagingDelivery.stopRetryLoop;
+  }
 
   return { app, db, hitlInterval, mcpHeartbeatInterval, stopRetryLoop, stopMcpResourceNotifications };
 }
@@ -830,34 +900,39 @@ async function seedDefaults(db: DbPool, tenantSlug: string): Promise<void> {
 async function main() {
   const config = loadConfig();
   const { app, hitlInterval, mcpHeartbeatInterval, stopRetryLoop, stopMcpResourceNotifications } = await createApp(config);
+  let server: ReturnType<typeof app.listen> | undefined;
 
-  const server = app.listen(config.port, () => {
-    console.log(`crmy server ready on :${config.port}`);
-  });
-  server.on('error', async (err: NodeJS.ErrnoException) => {
-    if (err.code === 'EADDRINUSE') {
-      console.error(`Could not start CRMy server: port ${config.port} is already in use. Stop the other CRMy server process or set PORT to another value.`);
-    } else {
-      console.error('Could not start CRMy server:', err.message);
-    }
-    clearInterval(hitlInterval);
-    clearInterval(mcpHeartbeatInterval);
-    stopRetryLoop();
-    await stopMcpResourceNotifications();
-    await shutdownPlugins();
-    await closePool();
-    process.exit(1);
-  });
+  if (config.processRole === 'worker') {
+    console.log('crmy worker ready');
+  } else {
+    server = app.listen(config.port, () => {
+      console.log(`crmy server ready on :${config.port}`);
+    });
+    server.on('error', async (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`Could not start CRMy server: port ${config.port} is already in use. Stop the other CRMy server process or set PORT to another value.`);
+      } else {
+        console.error('Could not start CRMy server:', err.message);
+      }
+      if (hitlInterval) clearInterval(hitlInterval);
+      if (mcpHeartbeatInterval) clearInterval(mcpHeartbeatInterval);
+      stopRetryLoop();
+      await stopMcpResourceNotifications();
+      await shutdownPlugins();
+      await closePool();
+      process.exit(1);
+    });
+  }
 
   // Graceful shutdown
   const shutdown = async () => {
-    clearInterval(hitlInterval);
-    clearInterval(mcpHeartbeatInterval);
+    if (hitlInterval) clearInterval(hitlInterval);
+    if (mcpHeartbeatInterval) clearInterval(mcpHeartbeatInterval);
     stopRetryLoop();
     await expireMcpSessionsForInstance(getPool(), MCP_INSTANCE_ID, 'server_shutdown').catch(() => {});
     await stopMcpResourceNotifications();
     await shutdownPlugins();
-    server.close();
+    server?.close();
     await closePool();
     process.exit(0);
   };

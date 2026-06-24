@@ -3,6 +3,7 @@
 
 import type { DbPool } from '../pool.js';
 import type { PaginatedResponse, UUID } from '@crmy/shared';
+import { addStableDescCursorCondition, encodeStableCursor, exactListTotalsEnabled, pageTotal } from './pagination.js';
 
 export type EmailClassification = 'customer' | 'mixed' | 'internal' | 'automated' | 'unknown';
 export type EmailProcessingStatus = 'unprocessed' | 'processing' | 'processed' | 'needs_review' | 'skipped' | 'failed' | 'ignored';
@@ -644,10 +645,14 @@ export async function listEmailMessages(
       idx++;
     }
   }
-  if (filters.cursor) {
-    conditions.push(`COALESCE(em.received_at, em.sent_at, em.created_at) < $${idx++}`);
-    params.push(filters.cursor);
-  }
+  idx = addStableDescCursorCondition(
+    conditions,
+    params,
+    idx,
+    filters.cursor,
+    'COALESCE(em.received_at, em.sent_at, em.created_at)',
+    'em.id',
+  );
 
 	  const from = `FROM email_messages em
 	    LEFT JOIN contacts c ON c.id = em.contact_id AND c.tenant_id = em.tenant_id
@@ -657,7 +662,10 @@ export async function listEmailMessages(
 	    LEFT JOIN emails e ON e.id = em.email_id AND e.tenant_id = em.tenant_id
 	    LEFT JOIN mailbox_connections mb ON mb.id = em.mailbox_connection_id AND mb.tenant_id = em.tenant_id`;
   const where = conditions.join(' AND ');
-  const countResult = await db.query(`SELECT count(*)::int AS total ${from} WHERE ${where}`, params);
+  const exactTotals = exactListTotalsEnabled();
+  const countResult = exactTotals
+    ? await db.query(`SELECT count(*)::int AS total ${from} WHERE ${where}`, params)
+    : null;
 
   params.push(filters.limit + 1);
   const result = await db.query(
@@ -674,7 +682,7 @@ export async function listEmailMessages(
 	       mb.display_name AS mailbox_display_name
      ${from}
      WHERE ${where}
-     ORDER BY COALESCE(em.received_at, em.sent_at, em.created_at) DESC
+     ORDER BY COALESCE(em.received_at, em.sent_at, em.created_at) DESC, em.id DESC
      LIMIT $${idx}`,
     params,
   );
@@ -683,8 +691,13 @@ export async function listEmailMessages(
   const data = hasMore ? rows.slice(0, filters.limit) : rows;
   return {
     data,
-    total: Number(countResult.rows[0]?.total ?? 0),
-    next_cursor: hasMore ? (data[data.length - 1].received_at ?? data[data.length - 1].sent_at ?? data[data.length - 1].created_at) : undefined,
+    ...pageTotal(data.length, hasMore, exactTotals ? Number(countResult?.rows[0]?.total ?? 0) : undefined),
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({
+        sort_value: data[data.length - 1].received_at ?? data[data.length - 1].sent_at ?? data[data.length - 1].created_at,
+        id: data[data.length - 1].id,
+      })
+      : undefined,
   };
 }
 

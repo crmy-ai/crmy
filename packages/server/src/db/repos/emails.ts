@@ -3,6 +3,7 @@
 
 import type { DbPool } from '../pool.js';
 import type { UUID, PaginatedResponse } from '@crmy/shared';
+import { addStableDescCursorCondition, encodeStableCursor, exactListTotalsEnabled, pageTotal } from './pagination.js';
 
 export interface EmailRow {
   id: UUID;
@@ -509,11 +510,7 @@ export async function searchEmails(
     params.push(`%${filters.q.trim()}%`);
     idx++;
   }
-  if (filters.cursor) {
-    conditions.push(`e.created_at < $${idx}`);
-    params.push(filters.cursor);
-    idx++;
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'e.created_at', 'e.id');
 
   const where = conditions.join(' AND ');
   const from = `FROM emails e
@@ -521,11 +518,14 @@ export async function searchEmails(
     LEFT JOIN accounts a ON a.id = COALESCE(e.account_id, c.account_id) AND a.tenant_id = e.tenant_id
     LEFT JOIN opportunities o ON o.id = e.opportunity_id AND o.tenant_id = e.tenant_id
     LEFT JOIN use_cases uc ON uc.id = e.use_case_id AND uc.tenant_id = e.tenant_id`;
-  const countResult = await db.query(`SELECT count(*)::int as total ${from} WHERE ${where}`, params);
+  const exactTotals = exactListTotalsEnabled();
+  const countResult = exactTotals
+    ? await db.query(`SELECT count(*)::int as total ${from} WHERE ${where}`, params)
+    : null;
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
-    `SELECT e.* ${from} WHERE ${where} ORDER BY e.created_at DESC LIMIT $${idx}`,
+    `SELECT e.* ${from} WHERE ${where} ORDER BY e.created_at DESC, e.id DESC LIMIT $${idx}`,
     params,
   );
 
@@ -535,7 +535,9 @@ export async function searchEmails(
 
   return {
     data,
-    total: countResult.rows[0].total,
-    next_cursor: hasMore ? data[data.length - 1].created_at : undefined,
+    ...pageTotal(data.length, hasMore, exactTotals ? Number(countResult?.rows[0]?.total ?? 0) : undefined),
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({ sort_value: data[data.length - 1].created_at, id: data[data.length - 1].id })
+      : undefined,
   };
 }

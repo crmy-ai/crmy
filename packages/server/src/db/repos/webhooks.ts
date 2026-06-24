@@ -4,6 +4,7 @@
 import type { DbPool } from '../pool.js';
 import type { UUID, PaginatedResponse } from '@crmy/shared';
 import crypto from 'node:crypto';
+import { addStableDescCursorCondition, encodeStableCursor } from './pagination.js';
 
 export interface WebhookEndpointRow {
   id: UUID;
@@ -31,6 +32,18 @@ export interface WebhookDeliveryRow {
   next_retry_at?: string;
   delivered_at?: string;
   created_at: string;
+}
+
+export interface WebhookEventRow {
+  event_id: number;
+  tenant_id: UUID;
+  event_type: string;
+  actor_id?: string | null;
+  actor_type: string;
+  object_type: string;
+  object_id?: UUID | null;
+  after_data?: unknown;
+  metadata?: Record<string, unknown> | null;
 }
 
 export function generateWebhookSecret(): string {
@@ -124,18 +137,14 @@ export async function listWebhooks(
     params.push(filters.active);
     idx++;
   }
-  if (filters.cursor) {
-    conditions.push(`created_at < $${idx}`);
-    params.push(filters.cursor);
-    idx++;
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'created_at', 'id');
 
   const where = conditions.join(' AND ');
   const countResult = await db.query(`SELECT count(*)::int as total FROM webhook_endpoints WHERE ${where}`, params);
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
-    `SELECT * FROM webhook_endpoints WHERE ${where} ORDER BY created_at DESC LIMIT $${idx}`,
+    `SELECT * FROM webhook_endpoints WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT $${idx}`,
     params,
   );
 
@@ -146,7 +155,9 @@ export async function listWebhooks(
   return {
     data,
     total: countResult.rows[0].total,
-    next_cursor: hasMore ? data[data.length - 1].created_at : undefined,
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({ sort_value: data[data.length - 1].created_at, id: data[data.length - 1].id })
+      : undefined,
   };
 }
 
@@ -164,13 +175,24 @@ export async function getActiveWebhooksForEvent(
 export async function createDelivery(
   db: DbPool,
   data: { endpoint_id: UUID; event_id?: number; event_type: string; payload: unknown },
-): Promise<WebhookDeliveryRow> {
+): Promise<{ delivery: WebhookDeliveryRow; created: boolean }> {
   const result = await db.query(
     `INSERT INTO webhook_deliveries (endpoint_id, event_id, event_type, payload)
-     VALUES ($1, $2, $3, $4) RETURNING *`,
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (endpoint_id, event_id) WHERE event_id IS NOT NULL DO NOTHING
+     RETURNING *`,
     [data.endpoint_id, data.event_id ?? null, data.event_type, JSON.stringify(data.payload)],
   );
-  return result.rows[0] as WebhookDeliveryRow;
+  if (result.rows[0]) {
+    return { delivery: result.rows[0] as WebhookDeliveryRow, created: true };
+  }
+  const existing = await db.query(
+    `SELECT * FROM webhook_deliveries
+     WHERE endpoint_id = $1 AND event_id = $2
+     LIMIT 1`,
+    [data.endpoint_id, data.event_id ?? null],
+  );
+  return { delivery: existing.rows[0] as WebhookDeliveryRow, created: false };
 }
 
 export async function updateDeliveryStatus(
@@ -221,18 +243,14 @@ export async function listDeliveries(
     params.push(filters.status);
     idx++;
   }
-  if (filters.cursor) {
-    conditions.push(`created_at < $${idx}`);
-    params.push(filters.cursor);
-    idx++;
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'created_at', 'id');
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const countResult = await db.query(`SELECT count(*)::int as total FROM webhook_deliveries ${where}`, params);
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
-    `SELECT * FROM webhook_deliveries ${where} ORDER BY created_at DESC LIMIT $${idx}`,
+    `SELECT * FROM webhook_deliveries ${where} ORDER BY created_at DESC, id DESC LIMIT $${idx}`,
     params,
   );
 
@@ -243,16 +261,48 @@ export async function listDeliveries(
   return {
     data,
     total: countResult.rows[0].total,
-    next_cursor: hasMore ? data[data.length - 1].created_at : undefined,
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({ sort_value: data[data.length - 1].created_at, id: data[data.length - 1].id })
+      : undefined,
   };
 }
 
 export async function getPendingRetries(db: DbPool, limit: number): Promise<WebhookDeliveryRow[]> {
   const result = await db.query(
     `SELECT * FROM webhook_deliveries
-     WHERE status = 'retrying' AND next_retry_at <= now()
-     ORDER BY next_retry_at LIMIT $1`,
+     WHERE status = 'pending'
+        OR (status = 'retrying' AND next_retry_at <= now())
+     ORDER BY COALESCE(next_retry_at, created_at), id
+     LIMIT $1`,
     [limit],
   );
   return result.rows as WebhookDeliveryRow[];
+}
+
+export async function listWebhookBacklogEvents(db: DbPool, limit: number): Promise<WebhookEventRow[]> {
+  const result = await db.query(
+    `SELECT DISTINCT
+       e.id AS event_id,
+       e.tenant_id,
+       e.event_type,
+       e.actor_id,
+       e.actor_type,
+       e.object_type,
+       e.object_id,
+       e.after_data,
+       e.metadata
+     FROM events e
+     JOIN webhook_endpoints we
+       ON we.tenant_id = e.tenant_id
+      AND we.is_active = true
+      AND e.event_type = ANY(we.event_types)
+     LEFT JOIN webhook_deliveries wd
+       ON wd.endpoint_id = we.id
+      AND wd.event_id = e.id
+     WHERE wd.id IS NULL
+     ORDER BY e.id ASC
+     LIMIT $1`,
+    [limit],
+  );
+  return result.rows as WebhookEventRow[];
 }

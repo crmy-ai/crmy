@@ -9,6 +9,16 @@ import type { DbPool } from './pool.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.resolve(__dirname, '../../migrations');
 
+function isOptionalMigrationDisabled(file: string): boolean {
+  return file === '022_pgvector.sql' && process.env.ENABLE_PGVECTOR !== 'true';
+}
+
+function listMigrationFiles(): string[] {
+  return fs.readdirSync(MIGRATIONS_DIR)
+    .filter(f => f.endsWith('.sql'))
+    .sort();
+}
+
 export async function runMigrations(
   db: DbPool,
   onMigration?: (name: string, index: number, total: number) => void,
@@ -31,9 +41,7 @@ export async function runMigrations(
     const appliedSet = new Set(applied.rows.map(r => r.name as string));
 
     // Read migration files
-    const files = fs.readdirSync(MIGRATIONS_DIR)
-      .filter(f => f.endsWith('.sql'))
-      .sort();
+    const files = listMigrationFiles();
 
     const ran: string[] = [];
     const pending = files.filter(f => !appliedSet.has(f));
@@ -44,7 +52,7 @@ export async function runMigrations(
 
       // Migration 022 requires pgvector extension — skip unless explicitly opted in.
       // Supported on Supabase, Neon, RDS, and local Docker with pgvector/pgvector:pg16.
-      if (file === '022_pgvector.sql' && process.env.ENABLE_PGVECTOR !== 'true') {
+      if (isOptionalMigrationDisabled(file)) {
         console.log(`[migrate] Skipping ${file} (set ENABLE_PGVECTOR=true to enable semantic search)`);
         idx++;
         continue;
@@ -88,18 +96,15 @@ export async function getMigrationStatus(db: DbPool): Promise<{ applied: string[
     const applied = await db.query('SELECT name FROM _migrations ORDER BY name');
     const appliedSet = new Set(applied.rows.map(r => r.name as string));
 
-    const files = fs.readdirSync(MIGRATIONS_DIR)
-      .filter(f => f.endsWith('.sql'))
-      .sort();
+    const files = listMigrationFiles();
+    const activeFiles = files.filter(f => appliedSet.has(f) || !isOptionalMigrationDisabled(f));
 
     return {
-      applied: files.filter(f => appliedSet.has(f)),
-      pending: files.filter(f => !appliedSet.has(f)),
+      applied: activeFiles.filter(f => appliedSet.has(f)),
+      pending: activeFiles.filter(f => !appliedSet.has(f)),
     };
   } catch {
-    const files = fs.readdirSync(MIGRATIONS_DIR)
-      .filter(f => f.endsWith('.sql'))
-      .sort();
+    const files = listMigrationFiles().filter(f => !isOptionalMigrationDisabled(f));
     return { applied: [], pending: files };
   }
 }

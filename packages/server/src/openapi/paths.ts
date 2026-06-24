@@ -1634,6 +1634,119 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'get', path: '/context-source-connections',
+  tags: ['Calendar'],
+  summary: 'List admin-managed transcript and notes storage drops',
+  security: bearer,
+  responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context-source-connections',
+  tags: ['Calendar'],
+  summary: 'Create an S3-compatible or local-folder transcript/notes drop',
+  security: bearer,
+  request: { body: jsonBody(z.object({
+    name: z.string().min(1),
+    provider: z.enum(['s3', 'local_folder']),
+    config: z.record(z.unknown()),
+    credentials: z.record(z.unknown()).optional(),
+  })) },
+  responses: { 201: created(GenericObject), 400: err400, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'patch', path: '/context-source-connections/{id}',
+  tags: ['Calendar'],
+  summary: 'Update transcript/notes drop configuration or credentials',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(GenericObject) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'delete', path: '/context-source-connections/{id}',
+  tags: ['Calendar'],
+  summary: 'Delete a transcript/notes source drop',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(SuccessResult), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context-source-connections/{id}/sync',
+  tags: ['Calendar'],
+  summary: 'Queue sync for a transcript/notes source drop',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 202: ok(GenericObject), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/context-source-objects',
+  tags: ['Calendar'],
+  summary: 'List transcript/notes source objects with matching and processing state',
+  security: bearer,
+  request: { query: z.object({
+    connection_id: S.uuid.optional(),
+    match_status: z.enum(['unmatched', 'matched', 'ambiguous', 'needs_review', 'ignored', 'all']).optional(),
+    processing_status: z.enum(['discovered', 'queued', 'processing', 'processed', 'needs_review', 'failed', 'ignored', 'all']).optional(),
+    q: z.string().optional(),
+    account_id: S.uuid.optional(),
+    contact_id: S.uuid.optional(),
+    opportunity_id: S.uuid.optional(),
+    use_case_id: S.uuid.optional(),
+    calendar_event_id: S.uuid.optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+    cursor: z.string().optional(),
+  }) },
+  responses: { 200: ok(GenericList), 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'get', path: '/context-source-objects/{id}',
+  tags: ['Calendar'],
+  summary: 'Get one transcript/notes source object and lineage links',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 200: ok(GenericObject), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context-source-objects/{id}/resolve',
+  tags: ['Calendar'],
+  summary: 'Resolve a transcript/notes source object to a meeting or customer record',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(z.object({
+    calendar_event_id: S.uuid.optional(),
+    account_id: S.uuid.optional(),
+    contact_id: S.uuid.optional(),
+    opportunity_id: S.uuid.optional(),
+    use_case_id: S.uuid.optional(),
+    note: z.string().optional(),
+  })) },
+  responses: { 200: ok(GenericObject), 400: err400, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context-source-objects/{id}/reprocess',
+  tags: ['Calendar'],
+  summary: 'Queue transcript/notes source object reprocessing',
+  security: bearer,
+  request: { params: idParam },
+  responses: { 202: ok(GenericObject), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/context-source-objects/{id}/ignore',
+  tags: ['Calendar'],
+  summary: 'Ignore a transcript/notes source object',
+  security: bearer,
+  request: { params: idParam, body: jsonBody(z.object({ reason: z.string().optional() }), false) },
+  responses: { 200: ok(GenericObject), 403: err403, 404: err404 },
+});
+
+registry.registerPath({
   method: 'post', path: '/availability/suggest-times',
   tags: ['Calendar'],
   summary: 'Suggest meeting times from connected internal calendar free/busy and customer timing preferences',

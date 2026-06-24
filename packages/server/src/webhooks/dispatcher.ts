@@ -9,7 +9,21 @@ import * as webhookRepo from '../db/repos/webhooks.js';
 
 const MAX_ATTEMPTS = 5;
 const RETRY_BATCH_SIZE = 20;
+const EVENT_BACKLOG_BATCH_SIZE = 100;
 const REDACTED_RESPONSE_BODY = '[redacted: webhook response body omitted]';
+
+type DispatchableWebhookEvent = BusEvent | webhookRepo.WebhookEventRow;
+
+interface NormalizedWebhookEvent {
+  eventId: number;
+  tenantId: UUID;
+  eventType: string;
+  objectType: string;
+  objectId?: UUID | null;
+  actorType: string;
+  actorId?: string | null;
+  data?: unknown;
+}
 
 /** Sign a payload with HMAC-SHA256 using the endpoint secret. */
 function signPayload(payload: string, secret: string): string {
@@ -118,6 +132,96 @@ export async function processWebhookRetries(db: DbPool): Promise<number> {
   return processed;
 }
 
+function normalizeEvent(event: DispatchableWebhookEvent): NormalizedWebhookEvent {
+  if ('eventType' in event) {
+    return {
+      eventId: event.event_id,
+      tenantId: event.tenantId,
+      eventType: event.eventType,
+      objectType: event.objectType,
+      objectId: event.objectId,
+      actorType: event.actorType,
+      actorId: event.actorId,
+      data: event.afterData,
+    };
+  }
+
+  return {
+    eventId: event.event_id,
+    tenantId: event.tenant_id,
+    eventType: event.event_type,
+    objectType: event.object_type,
+    objectId: event.object_id,
+    actorType: event.actor_type,
+    actorId: event.actor_id,
+    data: event.after_data,
+  };
+}
+
+function payloadForEvent(event: NormalizedWebhookEvent): Record<string, unknown> {
+  return {
+    event_id: event.eventId,
+    event_type: event.eventType,
+    tenant_id: event.tenantId,
+    object_type: event.objectType,
+    object_id: event.objectId,
+    actor_type: event.actorType,
+    actor_id: event.actorId,
+    data: event.data,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+export async function enqueueWebhookDeliveriesForEvent(
+  db: DbPool,
+  event: DispatchableWebhookEvent,
+): Promise<{ created: number; existing: number; attempted: number }> {
+  const normalized = normalizeEvent(event);
+  const endpoints = await webhookRepo.getActiveWebhooksForEvent(db, normalized.tenantId, normalized.eventType);
+  if (endpoints.length === 0) return { created: 0, existing: 0, attempted: 0 };
+
+  const payload = JSON.stringify(payloadForEvent(normalized));
+  let created = 0;
+  let existing = 0;
+  let attempted = 0;
+
+  for (const endpoint of endpoints) {
+    const { delivery, created: deliveryCreated } = await webhookRepo.createDelivery(db, {
+      endpoint_id: endpoint.id,
+      event_id: normalized.eventId,
+      event_type: normalized.eventType,
+      payload: JSON.parse(payload),
+    });
+
+    if (!deliveryCreated) {
+      existing++;
+      continue;
+    }
+    created++;
+
+    // Fire-and-forget first attempt. If this process dies after inserting the
+    // delivery, the normal retry worker will pick up the pending row.
+    attemptDelivery(db, delivery.id, endpoint.url, endpoint.secret, payload, 0).catch((err) => {
+      console.error(`[webhook] delivery attempt failed for ${redactedEndpointLabel(endpoint.id, endpoint.url)}:`, err);
+    });
+    attempted++;
+  }
+
+  return { created, existing, attempted };
+}
+
+export async function processWebhookEventBacklog(db: DbPool, limit = EVENT_BACKLOG_BATCH_SIZE): Promise<{ events: number; created: number; existing: number; attempted: number }> {
+  const events = await webhookRepo.listWebhookBacklogEvents(db, limit);
+  const totals = { events: events.length, created: 0, existing: 0, attempted: 0 };
+  for (const event of events) {
+    const result = await enqueueWebhookDeliveriesForEvent(db, event);
+    totals.created += result.created;
+    totals.existing += result.existing;
+    totals.attempted += result.attempted;
+  }
+  return totals;
+}
+
 /**
  * Register the webhook dispatcher on the event bus.
  * For each emitted event, find matching active webhook endpoints and deliver.
@@ -125,38 +229,7 @@ export async function processWebhookRetries(db: DbPool): Promise<number> {
 export function registerWebhookDispatcher(db: DbPool): void {
   eventBus.on('crmy:event', async (event: BusEvent) => {
     try {
-      const endpoints = await webhookRepo.getActiveWebhooksForEvent(
-        db,
-        event.tenantId,
-        event.eventType,
-      );
-      if (endpoints.length === 0) return;
-
-      const payload = JSON.stringify({
-        event_id: event.event_id,
-        event_type: event.eventType,
-        tenant_id: event.tenantId,
-        object_type: event.objectType,
-        object_id: event.objectId,
-        actor_type: event.actorType,
-        actor_id: event.actorId,
-        data: event.afterData,
-        timestamp: new Date().toISOString(),
-      });
-
-      for (const endpoint of endpoints) {
-        const delivery = await webhookRepo.createDelivery(db, {
-          endpoint_id: endpoint.id,
-          event_id: event.event_id,
-          event_type: event.eventType,
-          payload: JSON.parse(payload),
-        });
-
-        // Fire-and-forget first attempt
-        attemptDelivery(db, delivery.id, endpoint.url, endpoint.secret, payload, 0).catch((err) => {
-          console.error(`[webhook] delivery attempt failed for ${redactedEndpointLabel(endpoint.id, endpoint.url)}:`, err);
-        });
-      }
+      await enqueueWebhookDeliveriesForEvent(db, event);
     } catch (err) {
       console.error('[webhook] dispatcher error:', err);
     }

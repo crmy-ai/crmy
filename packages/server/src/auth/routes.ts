@@ -14,41 +14,48 @@ import * as governorLimits from '../db/repos/governor-limits.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { hashAuthToken } from '../services/auth-lifecycle.js';
 import { assertCanGrantScopes, dedupeScopes, requireScopes } from './scopes.js';
+import { enforceUnauthenticatedRateLimit } from '../services/rate-limit.js';
 
-// ── Simple in-memory rate limiter ────────────────────────────────────────────
-// No external dependency. Keyed by "route:ip". Entries auto-expire.
-// For multi-process / multi-instance deployments, use a shared store (Redis)
-// instead — this protects single-instance deployments.
-
-interface RateBucket {
-  count: number;
-  resetAt: number;
-}
-const rateBuckets = new Map<string, RateBucket>();
-
-/** Returns true if the request is allowed, false if the limit is exceeded. */
-function allowRequest(key: string, maxRequests: number, windowMs: number): boolean {
-  const now = Date.now();
-  const bucket = rateBuckets.get(key);
-  if (!bucket || now >= bucket.resetAt) {
-    rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
-    return true;
-  }
-  if (bucket.count >= maxRequests) return false;
-  bucket.count++;
-  return true;
-}
-
-// Purge expired buckets every 10 minutes to prevent unbounded memory growth
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, bucket] of rateBuckets) {
-    if (now >= bucket.resetAt) rateBuckets.delete(key);
-  }
-}, 600_000).unref(); // .unref() so this timer won't keep the process alive
+const AUTH_RATE_LIMIT_WINDOW_SECONDS = Math.max(1, Math.floor(Number(process.env.CRMY_AUTH_RATE_LIMIT_WINDOW_MS ?? 15 * 60 * 1000) / 1000));
+const AUTH_REGISTER_IP_LIMIT = Number(process.env.CRMY_AUTH_REGISTER_IP_LIMIT ?? 5);
+const AUTH_REGISTER_IDENTITY_LIMIT = Number(process.env.CRMY_AUTH_REGISTER_IDENTITY_LIMIT ?? 3);
+const AUTH_LOGIN_IP_LIMIT = Number(process.env.CRMY_AUTH_LOGIN_IP_LIMIT ?? 10);
+const AUTH_LOGIN_IDENTITY_LIMIT = Number(process.env.CRMY_AUTH_LOGIN_IDENTITY_LIMIT ?? 20);
 
 function clientIp(req: Request): string {
   return req.ip || req.socket.remoteAddress || 'unknown';
+}
+
+function setRetryAfter(res: Response, resetAt?: string): void {
+  if (!resetAt) return;
+  const seconds = Math.max(1, Math.ceil((new Date(resetAt).getTime() - Date.now()) / 1000));
+  res.setHeader('Retry-After', seconds);
+}
+
+async function enforceAuthLimitOrRespond(
+  db: DbPool,
+  res: Response,
+  bucketKey: string,
+  identity: string,
+  limit: number,
+  detail: string,
+): Promise<boolean> {
+  try {
+    await enforceUnauthenticatedRateLimit(db, bucketKey, identity, limit, AUTH_RATE_LIMIT_WINDOW_SECONDS);
+    return true;
+  } catch (err) {
+    if (err && typeof err === 'object' && 'status' in err && (err as { status?: number }).status === 429) {
+      setRetryAfter(res, (err as { resetAt?: string }).resetAt);
+      res.status(429).json({
+        type: 'https://crmy.ai/errors/rate_limited',
+        title: 'Too Many Requests',
+        status: 429,
+        detail,
+      });
+      return false;
+    }
+    throw err;
+  }
 }
 
 function handleAuthRouteError(res: Response, err: unknown, fallbackDetail: string): void {
@@ -94,14 +101,18 @@ export function authRouter(
 
   // POST /auth/register
   router.post('/register', async (req: Request, res: Response) => {
-    // Rate limit: 5 registrations per 15 minutes per IP
-    if (!allowRequest(`register:${clientIp(req)}`, 5, 15 * 60 * 1000)) {
-      res.status(429).json({
-        type: 'https://crmy.ai/errors/rate_limited',
-        title: 'Too Many Requests',
-        status: 429,
-        detail: 'Too many registration attempts. Please try again later.',
-      });
+    try {
+      const allowed = await enforceAuthLimitOrRespond(
+        db,
+        res,
+        'auth:register:ip',
+        clientIp(req),
+        AUTH_REGISTER_IP_LIMIT,
+        'Too many registration attempts. Please try again later.',
+      );
+      if (!allowed) return;
+    } catch (err) {
+      handleAuthRouteError(res, err, 'Registration is temporarily unavailable');
       return;
     }
 
@@ -120,6 +131,21 @@ export function authRouter(
         return;
       }
       throw err;
+    }
+    try {
+      const registrationIdentity = `${data.email.toLowerCase()}:${data.tenant_name.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`;
+      const allowed = await enforceAuthLimitOrRespond(
+        db,
+        res,
+        'auth:register:identity',
+        registrationIdentity,
+        AUTH_REGISTER_IDENTITY_LIMIT,
+        'Too many registration attempts for this workspace or email. Please try again later.',
+      );
+      if (!allowed) return;
+    } catch (err) {
+      handleAuthRouteError(res, err, 'Registration is temporarily unavailable');
+      return;
     }
     const passwordHash = hashPassword(data.password);
     const client = await db.connect();
@@ -214,20 +240,33 @@ export function authRouter(
 
   // POST /auth/login
   router.post('/login', async (req: Request, res: Response) => {
-    // Rate limit: 10 attempts per 15 minutes per IP
-    const ip = clientIp(req);
-    if (!allowRequest(`login:${ip}`, 10, 15 * 60 * 1000)) {
-      res.status(429).json({
-        type: 'https://crmy.ai/errors/rate_limited',
-        title: 'Too Many Requests',
-        status: 429,
-        detail: 'Too many login attempts. Please try again later.',
-      });
+    try {
+      const allowed = await enforceAuthLimitOrRespond(
+        db,
+        res,
+        'auth:login:ip',
+        clientIp(req),
+        AUTH_LOGIN_IP_LIMIT,
+        'Too many login attempts. Please try again later.',
+      );
+      if (!allowed) return;
+    } catch (err) {
+      handleAuthRouteError(res, err, 'Login is temporarily unavailable');
       return;
     }
 
     try {
       const data = authLogin.parse(req.body);
+      const loginIdentity = `${data.tenant_slug?.toLowerCase() ?? '*'}:${data.email.toLowerCase()}`;
+      const allowed = await enforceAuthLimitOrRespond(
+        db,
+        res,
+        'auth:login:identity',
+        loginIdentity,
+        AUTH_LOGIN_IDENTITY_LIMIT,
+        'Too many login attempts for this account. Please try again later.',
+      );
+      if (!allowed) return;
 
       // Look up by email and optional tenant slug. Password verification happens
       // in application code using timingSafeEqual, not in SQL, to prevent timing

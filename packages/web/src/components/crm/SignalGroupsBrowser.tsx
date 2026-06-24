@@ -7,16 +7,20 @@ import {
   AlertTriangle,
   ArrowRight,
   ArrowUpRight,
+  Briefcase,
+  Building2,
   CheckCircle2,
   Eye,
   FileText,
   GitBranch,
+  FolderKanban,
   Loader2,
   MoreHorizontal,
   PenLine,
   PlusCircle,
   ShieldCheck,
   Sparkles,
+  User,
   Users,
   X,
 } from 'lucide-react';
@@ -254,6 +258,34 @@ function subjectLabel(group: SignalGroup) {
   if (group.subject_name) return group.subject_name;
   const type = group.subject_type === 'use_case' ? 'Use Case' : group.subject_type[0].toUpperCase() + group.subject_type.slice(1);
   return `${type} ${group.subject_id.slice(0, 8)}`;
+}
+
+const SUBJECT_ICONS: Record<string, ComponentType<{ className?: string }>> = {
+  contact: User,
+  account: Building2,
+  opportunity: Briefcase,
+  use_case: FolderKanban,
+};
+
+const SUBJECT_COLORS: Record<string, string> = {
+  contact: '#f97316',
+  account: '#8b5cf6',
+  opportunity: '#0ea5e9',
+  use_case: '#22c55e',
+};
+
+function SignalSubjectChip({ group }: { group: SignalGroup }) {
+  const Icon = SUBJECT_ICONS[group.subject_type] ?? User;
+  const color = SUBJECT_COLORS[group.subject_type] ?? '#94a3b8';
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium"
+      style={{ background: `${color}18`, color }}
+    >
+      <Icon className="h-2.5 w-2.5 flex-shrink-0" />
+      {subjectLabel(group)}
+    </span>
+  );
 }
 
 function subjectTypeLabel(subjectType: string) {
@@ -1323,7 +1355,7 @@ export function SignalGroupsBrowser({
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              Needs attention
+              Review Queue
             </button>
             <button
               type="button"
@@ -1345,7 +1377,9 @@ export function SignalGroupsBrowser({
         {headerContent}
         {!isLoading && groups.length > 0 && (
           <p className="mb-3 text-xs text-muted-foreground">
-            Showing {groups.length.toLocaleString()} of {total.toLocaleString()} {query ? 'matching' : attentionOnly ? 'attention' : ''} Signals. Use search, record, status, and type filters to narrow large workspaces.
+            {attentionOnly && !query
+              ? `Showing ${groups.length.toLocaleString()} of ${total.toLocaleString()} Signals in the Review Queue: items ready to confirm, missing detail, needing another source, or waiting for approval/conflict review.`
+              : `Showing ${groups.length.toLocaleString()} of ${total.toLocaleString()} ${query ? 'matching ' : ''}Signals. Use search, record, status, and type filters to narrow large workspaces.`}
           </p>
         )}
         {isLoading ? (
@@ -1357,12 +1391,14 @@ export function SignalGroupsBrowser({
           <div className="flex h-64 flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-card text-center">
             <Sparkles className="mb-3 h-10 w-10 text-muted-foreground" />
             <h3 className="font-display text-lg font-semibold text-foreground">
-              {q || Object.keys(activeFilters).length > 0 ? 'No Signals match your filters' : attentionOnly ? 'No Signals need attention' : 'No Signals yet'}
+              {q || Object.keys(activeFilters).length > 0 ? 'No Signals match your filters' : attentionOnly ? 'Review Queue is clear' : 'No Signals yet'}
             </h3>
             <p className="mt-1 max-w-md text-sm text-muted-foreground">
               {q || Object.keys(activeFilters).length > 0
                 ? 'Try adjusting search or filters.'
-                : 'Reviewable Signals appear here when Raw Context creates inferred customer context.'}
+                : attentionOnly
+                  ? 'Signals that need confirmation, more evidence, missing details, approval, or conflict review will appear here.'
+                  : 'Signals appear here when Raw Context creates inferred customer context.'}
             </p>
           </div>
         ) : viewMode === 'table' ? (
@@ -1461,12 +1497,12 @@ export function SignalGroupsBrowser({
                       </h3>
                       <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{resolutionTitle(resolution, readiness)}</p>
                       {blockerSummary && (
-                        <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-xs leading-5 text-amber-700 dark:text-amber-300">
-                          <span className="font-semibold">What's needed:</span> {blockerSummary}
+                        <div className="mt-2 border-t border-border/70 pt-2">
+                          <p className="line-clamp-2 text-sm text-muted-foreground"><span className="font-semibold">What's needed:</span> {blockerSummary}</p>
                         </div>
                       )}
                       <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <span className="rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground">{subjectLabel(group)}</span>
+                        <SignalSubjectChip group={group} />
                         <span className="rounded-full bg-muted px-2 py-0.5 font-semibold text-muted-foreground">
                           {pct(readiness.score)} signal readiness
                         </span>
@@ -1481,43 +1517,41 @@ export function SignalGroupsBrowser({
                       </div>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2 border-t border-border bg-surface-sunken/30 px-3 py-2" onClick={event => event.stopPropagation()}>
-                    <button type="button" className={signalActionClass('ghost')} onClick={() => openSignal(group.id)}>
-                      <Eye className="mr-1 h-3.5 w-3.5" />
-                      Details
-                    </button>
-                    {canAct && readiness.status === 'approval_required' && (
-                      <button type="button" className={signalActionClass('warning')} onClick={() => openSignal(group.id)}>
-                        <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-                        Review approval
-                      </button>
-                    )}
-                    {canPromote(group) && readiness.status !== 'approval_required' && (
-                      <button type="button" className={signalActionClass('success')} onClick={() => onPromote(group.id)} disabled={promote.isPending}>
-                        {promote.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
-                        Confirm Signal
-                      </button>
-                    )}
-                    {canAct && !canPromote(group) && readiness.status !== 'approval_required' && (
-                      <button
-                        type="button"
-                        className={signalActionClass(readiness.status === 'needs_more_evidence' ? 'ghost' : 'warning')}
-                        onClick={() => {
-                          if (readiness.status === 'needs_more_evidence') onAddEvidence(group);
-                          else {
-                            openSignal(group.id);
-                            if (readiness.status === 'approval_required') setShowDelegation(true);
-                          }
-                        }}
-                        disabled={handoff.isPending}
-                      >
-                        {readiness.status === 'needs_more_evidence'
-                          ? <PlusCircle className="mr-1 h-3.5 w-3.5" />
-                          : <PenLine className="mr-1 h-3.5 w-3.5" />}
-                        {primaryActionLabel(readiness)}
-                      </button>
-                    )}
-                    {canAct && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-sunken/30 px-3 py-2" onClick={event => event.stopPropagation()}>
+                    <div className="flex flex-wrap gap-2">
+                      {canAct && readiness.status === 'approval_required' && (
+                        <button type="button" className={signalActionClass('warning')} onClick={() => openSignal(group.id)}>
+                          <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+                          Review approval
+                        </button>
+                      )}
+                      {canPromote(group) && readiness.status !== 'approval_required' && (
+                        <button type="button" className={signalActionClass('success')} onClick={() => onPromote(group.id)} disabled={promote.isPending}>
+                          {promote.isPending ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="mr-1 h-3.5 w-3.5" />}
+                          Confirm Signal
+                        </button>
+                      )}
+                      {canAct && !canPromote(group) && readiness.status !== 'approval_required' && (
+                        <button
+                          type="button"
+                          className={signalActionClass(readiness.status === 'needs_more_evidence' ? 'ghost' : 'warning')}
+                          onClick={() => {
+                            if (readiness.status === 'needs_more_evidence') onAddEvidence(group);
+                            else {
+                              openSignal(group.id);
+                              if (readiness.status === 'approval_required') setShowDelegation(true);
+                            }
+                          }}
+                          disabled={handoff.isPending}
+                        >
+                          {readiness.status === 'needs_more_evidence'
+                            ? <PlusCircle className="mr-1 h-3.5 w-3.5" />
+                            : <PenLine className="mr-1 h-3.5 w-3.5" />}
+                          {primaryActionLabel(readiness)}
+                        </button>
+                      )}
+                    </div>
+                    <div className="ml-auto flex justify-end">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -1530,16 +1564,22 @@ export function SignalGroupsBrowser({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-44">
-                          <DropdownMenuItem
-                            onClick={() => onDismiss(group.id)}
-                            className="text-rose-600 focus:text-rose-600 dark:text-rose-400"
-                          >
-                            <X className="mr-2 h-3.5 w-3.5" />
-                            Reject as Memory
+                          <DropdownMenuItem onClick={() => openSignal(group.id)}>
+                            <Eye className="mr-2 h-3.5 w-3.5" />
+                            Details
                           </DropdownMenuItem>
+                          {canAct && (
+                            <DropdownMenuItem
+                              onClick={() => onDismiss(group.id)}
+                              className="text-rose-600 focus:text-rose-600 dark:text-rose-400"
+                            >
+                              <X className="mr-2 h-3.5 w-3.5" />
+                              Reject as Memory
+                            </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
-                    )}
+                    </div>
                   </div>
                 </article>
               );

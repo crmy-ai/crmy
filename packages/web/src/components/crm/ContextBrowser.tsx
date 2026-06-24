@@ -1422,6 +1422,11 @@ export function ContextBrowser({
                               {entry.evidence.length} evidence
                             </span>
                           )}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface-sunken/30 px-3 py-2" onClick={event => event.stopPropagation()}>
+                      <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
                           {entry.tags?.length > 0 && (
                             <span className="inline-flex items-center gap-1">
                               <Tag className="h-3 w-3" />
@@ -1434,92 +1439,85 @@ export function ContextBrowser({
                             {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
                           </span>
                           <ValidUntilBadge date={entry.valid_until} />
-                        </div>
                       </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2 border-t border-border bg-surface-sunken/30 px-3 py-2" onClick={event => event.stopPropagation()}>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 text-xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                        onClick={() => openEntryDrawer(entry)}
-                      >
-                        <Eye className="mr-1 h-3.5 w-3.5" />
-                        Details
-                      </Button>
-                      {expired && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 text-xs text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
-                          onClick={() => reviewEntry.mutate(entry.id)}
-                          disabled={reviewEntry.isPending}
-                        >
-                          <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                          Mark reviewed
-                        </Button>
-                      )}
-                      {isSignal && (
-                        <Button
-                          size="sm"
-                          className="h-7 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
-                          onClick={() => promoteSignal.mutate(
-                            { id: entry.id },
-                            { onSuccess: () => toast({ title: 'Promoted to Memory', description: 'Agents can now use this as confirmed operational context.' }) },
-                          )}
-                          disabled={promoteSignal.isPending}
-                        >
-                          <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                          Confirm Signal
-                        </Button>
-                      )}
-                      {!isSignal && (
-                        <Button variant="outline" size="sm" className="h-7 text-xs" asChild>
-                          <Link to={`/context?tab=lineage&context_entry_id=${entry.id}`}>
-                            View Lineage
-                          </Link>
-                        </Button>
-                      )}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground" aria-label="Entry actions">
-                            <MoreHorizontal className="h-3.5 w-3.5" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-44">
-                          {isSignal && (
-                            <DropdownMenuItem
-                              onClick={() => rejectSignal.mutate(
-                                { id: entry.id, reason: 'Rejected from Signals review' },
-                                { onSuccess: () => toast({ title: 'Signal dismissed', description: 'It will stay out of Memory.' }) },
-                              )}
-                            >
-                              <X className="mr-2 h-3.5 w-3.5" />
-                              Dismiss Signal
-                            </DropdownMenuItem>
-                          )}
-                          {expired && (
-                            <DropdownMenuItem onClick={() => reviewEntry.mutate(entry.id)}>
-                              <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
-                              Mark reviewed
-                            </DropdownMenuItem>
-                          )}
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive focus:bg-destructive/10"
-                            onClick={() => {
-                              const now = new Date().toISOString().slice(0, 10);
-                              supersedeEntry.mutate(
-                                { id: entry.id, body: `[Forgotten by user on ${now}]`, confidence: 0 },
-                                { onSuccess: () => toast({ title: 'Entry forgotten', description: 'Belief invalidated. Audit record preserved.' }) },
-                              );
-                            }}
+                      <div className="ml-auto flex flex-wrap justify-end gap-2">
+                        {expired && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
+                            onClick={() => reviewEntry.mutate(entry.id)}
+                            disabled={reviewEntry.isPending}
                           >
-                            <Trash2 className="mr-2 h-3.5 w-3.5" />
-                            Forget / Invalidate
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                            Mark reviewed
+                          </Button>
+                        )}
+                        {isSignal && (
+                          <Button
+                            size="sm"
+                            className="h-7 bg-emerald-600 text-xs text-white hover:bg-emerald-600/90"
+                            onClick={() => promoteSignal.mutate(
+                              { id: entry.id },
+                              { onSuccess: () => toast({ title: 'Promoted to Memory', description: 'Agents can now use this as confirmed operational context.' }) },
+                            )}
+                            disabled={promoteSignal.isPending}
+                          >
+                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                            Confirm Signal
+                          </Button>
+                        )}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground" aria-label="Entry actions">
+                              <MoreHorizontal className="h-3.5 w-3.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem onClick={() => openEntryDrawer(entry)}>
+                              <Eye className="mr-2 h-3.5 w-3.5" />
+                              Details
+                            </DropdownMenuItem>
+                            {!isSignal && (
+                              <DropdownMenuItem onClick={() => navigate(`/context?tab=lineage&context_entry_id=${entry.id}`)}>
+                                <FileText className="mr-2 h-3.5 w-3.5" />
+                                View Lineage
+                              </DropdownMenuItem>
+                            )}
+                            {isSignal && (
+                              <DropdownMenuItem
+                                onClick={() => rejectSignal.mutate(
+                                  { id: entry.id, reason: 'Rejected from Signals review' },
+                                  { onSuccess: () => toast({ title: 'Signal dismissed', description: 'It will stay out of Memory.' }) },
+                                )}
+                              >
+                                <X className="mr-2 h-3.5 w-3.5" />
+                                Dismiss Signal
+                              </DropdownMenuItem>
+                            )}
+                            {expired && (
+                              <DropdownMenuItem onClick={() => reviewEntry.mutate(entry.id)}>
+                                <CheckCircle2 className="mr-2 h-3.5 w-3.5" />
+                                Mark reviewed
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive focus:bg-destructive/10"
+                              onClick={() => {
+                                const now = new Date().toISOString().slice(0, 10);
+                                supersedeEntry.mutate(
+                                  { id: entry.id, body: `[Forgotten by user on ${now}]`, confidence: 0 },
+                                  { onSuccess: () => toast({ title: 'Entry forgotten', description: 'Belief invalidated. Audit record preserved.' }) },
+                                );
+                              }}
+                            >
+                              <Trash2 className="mr-2 h-3.5 w-3.5" />
+                              Forget / Invalidate
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     </div>
                   </motion.article>
                 );

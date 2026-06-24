@@ -118,7 +118,7 @@ export function serverCommand(): Command {
 
       const stepLabels: Record<string, string> = {
         db_connect:    'Connecting to database',
-        migrations:    'Running database migrations',
+        migrations:    'Checking database migrations',
         seed_defaults: 'Checking built-in registries',
       };
 
@@ -144,10 +144,16 @@ export function serverCommand(): Command {
       };
 
       let hitlInterval: ReturnType<typeof setInterval> | undefined;
+      let mcpHeartbeatInterval: ReturnType<typeof setInterval> | undefined;
+      let stopRetryLoop: (() => void) | undefined;
+      let stopMcpResourceNotifications: (() => Promise<void>) | undefined;
 
       try {
         const result = await createApp(serverConfig);
         hitlInterval = result.hitlInterval;
+        mcpHeartbeatInterval = result.mcpHeartbeatInterval;
+        stopRetryLoop = result.stopRetryLoop;
+        stopMcpResourceNotifications = result.stopMcpResourceNotifications;
         const app = result.app;
 
         // Bind port
@@ -170,6 +176,9 @@ export function serverCommand(): Command {
           console.log('\n  Shutting down...');
           logToFile('Received shutdown signal');
           if (hitlInterval) clearInterval(hitlInterval);
+          if (mcpHeartbeatInterval) clearInterval(mcpHeartbeatInterval);
+          stopRetryLoop?.();
+          await stopMcpResourceNotifications?.();
           await shutdownPlugins?.();
           await closePool();
           process.exit(0);

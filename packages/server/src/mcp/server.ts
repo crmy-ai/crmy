@@ -34,6 +34,7 @@ import { useCaseTools } from './tools/use-cases.js';
 import { webhookTools } from './tools/webhooks.js';
 import { emailTools } from './tools/email.js';
 import { calendarTools } from './tools/calendar.js';
+import { contextSourceDropTools } from './tools/context-source-drops.js';
 import { customFieldTools } from './tools/custom-fields.js';
 import { workflowTools } from './tools/workflows.js';
 import { actorTools } from './tools/actors.js';
@@ -125,6 +126,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...useCaseTools(db),
     ...emailTools(db),
     ...calendarTools(db),
+    ...contextSourceDropTools(db),
     ...emailSequenceTools(db),
     ...subjectGraphTools(db),
     ...entityResolveTools(db),

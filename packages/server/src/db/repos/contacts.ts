@@ -4,6 +4,7 @@
 import type { DbPool } from '../pool.js';
 import type { Contact, UUID, PaginatedResponse } from '@crmy/shared';
 import { CrmyError } from '@crmy/shared';
+import { addStableDescCursorCondition, encodeStableCursor, exactListTotalsEnabled, pageTotal } from './pagination.js';
 
 interface MutationOptions {
   expectedVersion?: number;
@@ -127,21 +128,20 @@ export async function searchContacts(
     params.push(filters.tags);
     idx++;
   }
-  if (filters.cursor) {
-    conditions.push(`c.created_at < $${idx}`);
-    params.push(filters.cursor);
-    idx++;
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'c.created_at', 'c.id');
 
   const where = conditions.join(' AND ');
 
-  const countResult = await db.query(
-    `SELECT count(*)::int as total
-     FROM contacts c
-     LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
-     WHERE ${where}`,
-    params,
-  );
+  const exactTotals = exactListTotalsEnabled();
+  const countResult = exactTotals
+    ? await db.query(
+      `SELECT count(*)::int as total
+       FROM contacts c
+       LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
+       WHERE ${where}`,
+      params,
+    )
+    : null;
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
@@ -149,7 +149,7 @@ export async function searchContacts(
      FROM contacts c
      LEFT JOIN accounts a ON a.id = c.account_id AND a.tenant_id = c.tenant_id
      WHERE ${where}
-     ORDER BY c.created_at DESC
+     ORDER BY c.created_at DESC, c.id DESC
      LIMIT $${idx}`,
     params,
   );
@@ -160,8 +160,10 @@ export async function searchContacts(
 
   return {
     data,
-    total: countResult.rows[0].total,
-    next_cursor: hasMore ? data[data.length - 1].created_at : undefined,
+    ...pageTotal(data.length, hasMore, exactTotals ? Number(countResult?.rows[0]?.total ?? 0) : undefined),
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({ sort_value: data[data.length - 1].created_at, id: data[data.length - 1].id })
+      : undefined,
   };
 }
 

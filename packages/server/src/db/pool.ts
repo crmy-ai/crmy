@@ -35,10 +35,18 @@ export async function initPool(databaseUrl: string, maxConnections = 10): Promis
       url.hostname === 'localhost' ||
       url.hostname === '127.0.0.1' ||
       url.hostname === '::1';
+    const isProduction = process.env.NODE_ENV === 'production';
+    const allowInsecureDbTls = process.env.CRMY_ALLOW_INSECURE_DB_TLS === 'true';
 
     if (sslMode === 'disable' || (!sslMode && isLocal)) {
       ssl = false;
     } else if (sslMode === 'require' || sslMode === 'prefer' || sslMode === 'verify-ca') {
+      if (isProduction && !isLocal && !allowInsecureDbTls) {
+        throw new Error(
+          `DATABASE_URL sslmode=${sslMode} does not verify the database server certificate in production. ` +
+          'Use sslmode=verify-full with a trusted CA, or set CRMY_ALLOW_INSECURE_DB_TLS=true only for a deliberate self-managed exception.',
+        );
+      }
       // Cloud providers (Supabase, Neon, etc.) use these modes.
       // rejectUnauthorized:false mirrors historical pg behaviour for these modes.
       ssl = { rejectUnauthorized: false };
@@ -50,7 +58,10 @@ export async function initPool(databaseUrl: string, maxConnections = 10): Promis
     // Strip sslmode from the URL so pg-connection-string never sees it
     url.searchParams.delete('sslmode');
     cleanUrl = url.toString();
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('DATABASE_URL sslmode=')) {
+      throw err;
+    }
     password = undefined;
   }
 

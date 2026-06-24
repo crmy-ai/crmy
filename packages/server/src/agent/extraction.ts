@@ -417,7 +417,11 @@ function sourceProvenanceForActivity(activity: ActivityRow): Record<string, unkn
   return {
     context_origin: detail.context_origin ?? 'activity',
     source_authorship: detail.source_authorship ?? 'unknown',
+    source_perspective: detail.source_perspective ?? 'unknown',
     customer_authored: detail.customer_authored ?? null,
+    customer_statement: detail.customer_statement ?? null,
+    evidence_weight: detail.evidence_weight ?? 'unknown_context',
+    evidence_role: detail.evidence_role ?? 'activity_source',
   };
 }
 

@@ -182,6 +182,25 @@ Update an activity.
 - **Input**: `id` (required), `patch`
 - **Output**: `{ activity, event_id }`
 
+### Transcript & notes drop tools
+Use these when transcripts or raw notes are exported to a storage location rather than sent inline through `context_ingest_auto`.
+
+Admin tools:
+- `context_source_connection_list`
+- `context_source_connection_create`
+- `context_source_connection_update`
+- `context_source_connection_delete`
+- `context_source_connection_sync`
+
+Review/processing tools:
+- `context_source_object_list`
+- `context_source_object_get`
+- `context_source_object_resolve`
+- `context_source_object_reprocess`
+- `context_source_object_ignore`
+
+Supported providers are `s3` and `local_folder`. S3 credentials are encrypted and write-only. Local folders are intended for local/self-hosted installs and must be inside `CRMY_LOCAL_SOURCE_ROOTS`. Unmatched or ambiguous source objects create Handoffs and appear in Customer Activity Needs Context; resolving an object links it to a meeting or customer record and queues processing into Raw Context, Signals, Memory, and Lineage.
+
 ## Assignment Tools
 
 ### assignment_create

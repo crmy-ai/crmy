@@ -3,6 +3,7 @@
 
 import type { DbPool } from '../pool.js';
 import type { UUID, PaginatedResponse } from '@crmy/shared';
+import { addStableDescCursorCondition, encodeStableCursor } from './pagination.js';
 
 export interface WorkflowRow {
   id: UUID;
@@ -132,18 +133,14 @@ export async function listWorkflows(
     params.push(filters.is_active);
     idx++;
   }
-  if (filters.cursor) {
-    conditions.push(`created_at < $${idx}`);
-    params.push(filters.cursor);
-    idx++;
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'created_at', 'id');
 
   const where = conditions.join(' AND ');
   const countResult = await db.query(`SELECT count(*)::int as total FROM workflows WHERE ${where}`, params);
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
-    `SELECT * FROM workflows WHERE ${where} ORDER BY created_at DESC LIMIT $${idx}`,
+    `SELECT * FROM workflows WHERE ${where} ORDER BY created_at DESC, id DESC LIMIT $${idx}`,
     params,
   );
 
@@ -154,7 +151,9 @@ export async function listWorkflows(
   return {
     data,
     total: countResult.rows[0].total,
-    next_cursor: hasMore ? data[data.length - 1].created_at : undefined,
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({ sort_value: data[data.length - 1].created_at, id: data[data.length - 1].id })
+      : undefined,
   };
 }
 
@@ -265,18 +264,14 @@ export async function listRuns(
     params.push(filters.status);
     idx++;
   }
-  if (filters.cursor) {
-    conditions.push(`started_at < $${idx}`);
-    params.push(filters.cursor);
-    idx++;
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'started_at', 'id');
 
   const where = conditions.join(' AND ');
   const countResult = await db.query(`SELECT count(*)::int as total FROM workflow_runs WHERE ${where}`, params);
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
-    `SELECT * FROM workflow_runs WHERE ${where} ORDER BY started_at DESC LIMIT $${idx}`,
+    `SELECT * FROM workflow_runs WHERE ${where} ORDER BY started_at DESC, id DESC LIMIT $${idx}`,
     params,
   );
 
@@ -287,6 +282,8 @@ export async function listRuns(
   return {
     data,
     total: countResult.rows[0].total,
-    next_cursor: hasMore ? data[data.length - 1].started_at : undefined,
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({ sort_value: data[data.length - 1].started_at, id: data[data.length - 1].id })
+      : undefined,
   };
 }

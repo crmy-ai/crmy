@@ -489,7 +489,7 @@ test('first-run setup persists a dedicated stored-secret encryption key', async 
   }
   assert.match(loadEnvSource, /process\.env\.NODE_ENV !== 'production'/);
   assert.match(loadEnvSource, /Generated CRMY_ENCRYPTION_KEY and saved it to/);
-  assert.match(readme, /local source dev server generate this automatically/);
+  assert.match(readme, /Generates persistent JWT and stored-secret encryption keys/);
   assert.match(guide, /local source dev server also generates and appends one to `\.env`/);
   assert.match(guide, /"encryptionKey": "\.\.\."/);
 });

@@ -284,8 +284,8 @@ function ActorConnectionsPanel({ actor, summary }: { actor: ActorRow; summary?: 
           <a href="/app/emails?tab=connections" className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground">
             Mailboxes <ExternalLink className="h-3 w-3" />
           </a>
-          <a href="/app/activities?tab=connections" className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground">
-            Calendars <ExternalLink className="h-3 w-3" />
+          <a href="/app/activities?tab=meeting_sources" className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground">
+            Meeting Sources <ExternalLink className="h-3 w-3" />
           </a>
           <a href="/settings/connections" className="inline-flex items-center gap-1 rounded-lg border border-border px-2.5 py-1 text-xs font-semibold text-muted-foreground hover:text-foreground">
             OAuth setup <ExternalLink className="h-3 w-3" />

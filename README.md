@@ -17,7 +17,7 @@
   <a href="https://www.npmjs.com/package/@crmy/cli"><img alt="npm" src="https://img.shields.io/npm/v/@crmy/cli?label=npm&color=2563eb"></a>
   <a href="https://github.com/crmy-ai/crmy/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-0f172a"></a>
   <a href="https://discord.gg/2HvmudDwE"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white"></a>
-  <a href="https://github.com/crmy-ai/crmy/releases"><img alt="Release" src="https://img.shields.io/badge/release-v0.9.1-16a34a"></a>
+  <a href="https://github.com/crmy-ai/crmy/releases"><img alt="Release" src="https://img.shields.io/badge/release-v0.9.2-16a34a"></a>
   <a href="https://github.com/crmy-ai/crmy/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/crmy-ai/crmy?style=social"></a>
 </p>
 
@@ -219,6 +219,7 @@ crmy server
 | **Customer briefings** | Retrieve Current Memory, recent activity, open Handoffs, stale warnings, and unresolved Signals before analysis. |
 | **Action Context** | Return readiness, policy, warnings, source authority, review requirements, and audit metadata before customer-facing or record-changing work. |
 | **Raw Context ingestion** | Accept messy notes, transcripts, emails, meetings, sync records, agent inputs, and custom source metadata. |
+| **Transcript & notes drops** | Watch S3-compatible buckets or local self-hosted folders for transcripts/notes, match them to meetings or records, and keep unmatched files in review. |
 | **Signals and Memory** | Extract inferred claims with evidence, then promote durable Memory only when readiness and policy allow it. |
 | **Email and calendar context** | Connect actor mailboxes/calendars for customer communication, meeting context, availability-aware suggestions, and sender-aware email actions. |
 | **Handoffs and approvals** | Route uncertain, sensitive, or governed work to humans with evidence attached. |
@@ -226,16 +227,16 @@ crmy server
 | **Lineage and audit** | Trace source material into Signals, Memory, actions, reviews, writebacks, and receipts. |
 | **MCP, CLI, REST, UI** | Use the same engine from agent tools, scripts, integrations, and the web app. |
 
-## Token-Aware Context
+## How CRMy Reduces Token Use
 
 CRMy is designed to reduce prompt waste, not maximize prompt size.
 
 - It compresses noisy source material into Signals and Memory with source receipts.
 - It returns confirmed Memory, unresolved Signals, stale warnings, and risky claims separately.
 - It retrieves by action through `briefing_get` and `action_context_get` instead of dumping the customer database.
-- It supports `context_radius`, explicit `token_budget`, and budget profiles such as `tiny`, `standard`, `deep`, and `evidence_heavy`.
+- It supports `context_radius`, explicit `token_budget`, and budget profiles (`tiny`, `standard`, `deep`, `evidence_heavy`).
 - It ranks high-value context first and reports when lower-priority entries were omitted.
-- It uses evidence summaries by default, with full Lineage and Raw Context available on demand.
+- It uses `evidence_mode: "summary"` by default, with full Lineage and Raw Context available on demand.
 
 The goal is the smallest sufficient, trustworthy customer context packet for the next action.
 
@@ -333,7 +334,7 @@ Authorization: Bearer crmy_<api-key>  # agent or integration
 | **Context** | Raw Context, Signals, Memory, Lineage, and Context Sources. |
 | **Handoffs** | Decision queue for approvals, escalations, delegated work, and governed action review. |
 | **Customer Email** | Mailbox Context plus Outbound Actions for governed drafts/sends with visible sender identity. |
-| **Customer Activity** | Meetings, notes, transcripts, calendar context, and availability-aware meeting suggestions. |
+| **Customer Activity** | Meetings, notes, transcript drops, calendar context, review queues, and availability-aware meeting suggestions. |
 | **Systems of Record** | Admin setup for CRMs, warehouses, mappings, sync, conflicts, and governed writeback. |
 | **Settings** | Actors, system connections, model settings, automations, API keys, and operational configuration. |
 
@@ -379,7 +380,20 @@ JWT_SECRET=<stable-random-secret>
 CRMY_ENCRYPTION_KEY=<stable-32-byte-base64-or-hex-secret>
 CRMY_PUBLIC_URL=https://<your-crmy-host>
 CRMY_CORS_ORIGINS=https://<your-web-origin>
+CRMY_MIGRATION_MODE=validate
 ```
+
+For production deploys, run `crmy migrate run` as a one-shot migration job before starting web/worker processes. Local installs keep automatic startup migrations by default.
+
+Common timeout controls:
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `LLM_TIMEOUT_MS` | Optional | General Workspace Agent and background LLM timeout. Default: `60000`. |
+| `AGENT_STREAM_TIMEOUT_MS` | Optional | Streaming Workspace Agent provider timeout. Default: `60000`. |
+| `SOURCE_SYNC_FETCH_TIMEOUT_MS` | Optional | Mailbox/calendar/provider fetch timeout. Default: `30000`. |
+| `CONNECTOR_FETCH_TIMEOUT_MS` | Optional | Systems-of-record connector fetch timeout. Default: `30000`. |
+| `SLACK_SEND_TIMEOUT_MS` | Optional | Slack webhook delivery timeout. Default: `10000`. |
 
 See [`.env.example`](.env.example) for the full reference, including hosted OAuth, mailbox/calendar, semantic retrieval, rate limits, MCP session routing, provider timeouts, and connector settings.
 
@@ -438,7 +452,7 @@ npm run test:ui-smoke   # with CRMy running on http://localhost:3000
 
 ## Release
 
-Current version: `0.9.1`
+Current version: `0.9.2`
 
 Release notes live in [RELEASE_NOTES.md](RELEASE_NOTES.md). Older release notes live in [CHANGELOG.md](CHANGELOG.md).
 

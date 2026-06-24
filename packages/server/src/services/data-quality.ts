@@ -283,6 +283,61 @@ const CHECKS: CheckSpec[] = [
     `,
   },
   {
+    name: 'stale_context_source_sync_jobs',
+    severity: 'warning',
+    sql: `
+      SELECT id, connection_id, status, attempts, last_error, updated_at
+      FROM context_source_sync_jobs
+      WHERE tenant_id = $1
+        AND (
+          (status = 'processing' AND updated_at < now() - interval '15 minutes')
+          OR (status = 'failed' AND attempts < 5)
+        )
+      ORDER BY updated_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'stale_context_source_processing_jobs',
+    severity: 'warning',
+    sql: `
+      SELECT id, source_object_id, status, attempts, last_error, updated_at
+      FROM context_source_processing_jobs
+      WHERE tenant_id = $1
+        AND (
+          (status = 'processing' AND updated_at < now() - interval '15 minutes')
+          OR (status = 'failed' AND attempts < 5)
+        )
+      ORDER BY updated_at ASC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'failed_context_source_objects',
+    severity: 'warning',
+    sql: `
+      SELECT id, object_key, match_status, processing_status, failure_code, failure_reason, updated_at
+      FROM context_source_objects
+      WHERE tenant_id = $1
+        AND processing_status = 'failed'
+      ORDER BY updated_at DESC
+      LIMIT $2
+    `,
+  },
+  {
+    name: 'context_source_objects_need_review',
+    severity: 'info',
+    sql: `
+      SELECT id, object_key, match_status, processing_status, match_reason, failure_reason, updated_at
+      FROM context_source_objects
+      WHERE tenant_id = $1
+        AND match_status IN ('needs_review', 'ambiguous')
+        AND processing_status <> 'ignored'
+      ORDER BY updated_at DESC
+      LIMIT $2
+    `,
+  },
+  {
     name: 'customer_calendar_events_missing_link',
     severity: 'info',
     sql: `

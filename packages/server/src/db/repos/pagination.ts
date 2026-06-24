@@ -54,3 +54,18 @@ export function addStableDescCursorCondition(
   params.push(decoded.sort_value);
   return idx + 1;
 }
+
+export function exactListTotalsEnabled(): boolean {
+  const mode = process.env.CRMY_LIST_TOTAL_MODE?.trim().toLowerCase();
+  if (mode === 'exact') return true;
+  if (mode === 'estimate' || mode === 'estimated') return false;
+  return process.env.NODE_ENV !== 'production';
+}
+
+export function pageTotal(dataLength: number, hasMore: boolean, exactTotal?: number): { total: number; total_is_estimate?: boolean } {
+  if (typeof exactTotal === 'number') return { total: exactTotal };
+  return {
+    total: dataLength + (hasMore ? 1 : 0),
+    total_is_estimate: true,
+  };
+}

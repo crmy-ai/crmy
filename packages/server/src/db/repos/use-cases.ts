@@ -4,6 +4,7 @@
 import type { DbPool } from '../pool.js';
 import type { UseCase, UseCaseContact, Activity, UUID, PaginatedResponse } from '@crmy/shared';
 import { CrmyError } from '@crmy/shared';
+import { addStableDescCursorCondition, encodeStableCursor, exactListTotalsEnabled, pageTotal } from './pagination.js';
 
 interface MutationOptions {
   expectedVersion?: number;
@@ -196,18 +197,14 @@ export async function searchUseCases(
     params.push(`%${filters.query}%`);
     idx++;
   }
-  if (filters.cursor) {
-    conditions.push(`u.created_at < $${idx}`);
-    params.push(filters.cursor);
-    idx++;
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'u.created_at', 'u.id');
 
   const where = conditions.join(' AND ');
 
-  const countResult = await db.query(
-    `SELECT count(*)::int as total FROM use_cases u WHERE ${where}`,
-    params,
-  );
+  const exactTotals = exactListTotalsEnabled();
+  const countResult = exactTotals
+    ? await db.query(`SELECT count(*)::int as total FROM use_cases u WHERE ${where}`, params)
+    : null;
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
@@ -219,7 +216,7 @@ export async function searchUseCases(
      LEFT JOIN accounts a ON a.id = u.account_id AND a.tenant_id = u.tenant_id
      LEFT JOIN opportunities o ON o.id = u.opportunity_id AND o.tenant_id = u.tenant_id
      WHERE ${where}
-     ORDER BY u.created_at DESC
+     ORDER BY u.created_at DESC, u.id DESC
      LIMIT $${idx}`,
     params,
   );
@@ -230,8 +227,10 @@ export async function searchUseCases(
 
   return {
     data,
-    total: countResult.rows[0].total,
-    next_cursor: hasMore ? data[data.length - 1].created_at : undefined,
+    ...pageTotal(data.length, hasMore, exactTotals ? Number(countResult?.rows[0]?.total ?? 0) : undefined),
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({ sort_value: data[data.length - 1].created_at, id: data[data.length - 1].id })
+      : undefined,
   };
 }
 

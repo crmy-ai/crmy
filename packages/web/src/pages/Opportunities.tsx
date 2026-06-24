@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState, useMemo, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { OnboardingEmptyState } from '@/components/crm/OnboardingEmptyState';
 import { useOpportunities } from '@/api/hooks';
@@ -79,6 +79,17 @@ const sortOptions: SortOption[] = [
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Opportunity = any;
 
+function viewFromQuery(value: string | null): ViewMode {
+  if (value === 'graph' || value === 'forecast') return 'forecast';
+  if (value === 'list' || value === 'table') return 'table';
+  if (value === 'kanban') return 'kanban';
+  return 'table';
+}
+
+function stageFromQuery(value: string | null): string | null {
+  return value && kanbanStages.includes(value) ? value : null;
+}
+
 function opportunityAmount(opportunity: Opportunity): number {
   const amount = Number(opportunity.amount ?? 0);
   return Number.isFinite(amount) ? amount : 0;
@@ -100,11 +111,15 @@ function isBestCaseOpportunity(opportunity: Opportunity): boolean {
 
 export default function Opportunities() {
   const navigate = useNavigate();
-  const [view, setView] = useState<ViewMode>('table');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [view, setView] = useState<ViewMode>(() => viewFromQuery(searchParams.get('view')));
   const { openDrawer, openQuickAdd, openAIWithContext, openDrawerBriefing } = useAppStore();
   const { enabled: agentEnabled } = useAgentSettings();
   const [search, setSearch] = useState('');
-  const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
+  const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>(() => {
+    const stage = stageFromQuery(searchParams.get('stage'));
+    return stage ? { stage: [stage] } : {} as Record<string, string[]>;
+  });
   const [sort, setSort] = useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
   const [closeDate, setCloseDate] = useState<CloseDatePreset>('this_quarter');
   const [page, setPage] = useState(1);
@@ -117,8 +132,26 @@ export default function Opportunities() {
   const allOpportunities: Opportunity[] = data?.data ?? [];
   const memoryCounts = useRecordMemoryCounts('opportunity');
 
+  const syncOpportunityUrl = (next: { view?: ViewMode; stage?: string | null }) => {
+    const params = new URLSearchParams(searchParams);
+    if (next.view) params.set('view', next.view === 'forecast' ? 'graph' : next.view === 'table' ? 'list' : next.view);
+    if ('stage' in next) {
+      if (next.stage) params.set('stage', next.stage);
+      else params.delete('stage');
+    }
+    setSearchParams(params, { replace: false });
+  };
+  const changeView = (nextView: ViewMode) => {
+    setView(nextView);
+    syncOpportunityUrl({ view: nextView });
+  };
   const handleFilterChange = (key: string, values: string[]) => {
-    setActiveFilters(prev => { const next = { ...prev }; if (values.length === 0) delete next[key]; else next[key] = values; return next; });
+    setActiveFilters(prev => {
+      const next = { ...prev };
+      if (values.length === 0) delete next[key]; else next[key] = values;
+      if (key === 'stage') syncOpportunityUrl({ stage: values[0] ?? null });
+      return next;
+    });
   };
   const handleSortChange = (key: string) => {
     setSort(prev => prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
@@ -157,7 +190,26 @@ export default function Opportunities() {
     return result;
   }, [allOpportunities, activeFilters, sort, closeDate, customFrom, customTo]);
 
+  useEffect(() => {
+    const nextView = viewFromQuery(searchParams.get('view'));
+    const nextStage = stageFromQuery(searchParams.get('stage'));
+    if (nextView !== view) setView(nextView);
+    const currentStage = activeFilters.stage?.[0] ?? null;
+    if (nextStage !== currentStage) {
+      setActiveFilters(prev => {
+        const next = { ...prev };
+        if (nextStage) next.stage = [nextStage]; else delete next.stage;
+        return next;
+      });
+    }
+  }, [searchParams, view, activeFilters.stage]);
   useEffect(() => { setPage(1); }, [search, activeFilters, sort, closeDate, customFrom, customTo]);
+
+  const openStageList = (stage: string) => {
+    setView('table');
+    setActiveFilters(prev => ({ ...prev, stage: [stage] }));
+    syncOpportunityUrl({ view: 'table', stage });
+  };
   const paginated = filtered.slice((page - 1) * pageSize, page * pageSize);
   const forecastMetrics = useMemo(() => {
     const open = filtered.filter(isOpenOpportunity);
@@ -191,7 +243,7 @@ export default function Opportunities() {
             { mode: 'table', icon: List },
             { mode: 'forecast', icon: BarChart3 },
           ].map(({ mode, icon: Icon }) => (
-            <button key={mode} onClick={() => setView(mode as ViewMode)}
+            <button key={mode} onClick={() => changeView(mode as ViewMode)}
               className={`p-1.5 rounded-lg text-sm transition-all ${view === mode ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
               <Icon className="w-4 h-4" />
             </button>
@@ -235,7 +287,7 @@ export default function Opportunities() {
 
       <ListToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder="Search opportunities..."
         filters={filterConfigs} activeFilters={activeFilters} onFilterChange={handleFilterChange}
-        onClearFilters={() => setActiveFilters({})} sortOptions={sortOptions} currentSort={sort}
+        onClearFilters={() => { setActiveFilters({}); syncOpportunityUrl({ stage: null }); }} sortOptions={sortOptions} currentSort={sort}
         onSortChange={handleSortChange} entityType="opportunities"
         onAdd={() => openQuickAdd('opportunity')} addLabel="New Opportunity" />
 
@@ -455,7 +507,12 @@ export default function Opportunities() {
                   const total = filtered.filter(d => d.stage === stage).reduce((sum, d) => sum + opportunityAmount(d), 0);
                   const max = Math.max(...kanbanStages.map(s => filtered.filter(d => d.stage === s).reduce((sum, d) => sum + opportunityAmount(d), 0)), 1);
                   return (
-                    <div key={stage} className="flex items-center gap-3">
+                    <button
+                      key={stage}
+                      type="button"
+                      onClick={() => openStageList(stage)}
+                      className="flex w-full items-center gap-3 rounded-xl p-1 text-left transition-colors hover:bg-muted/40"
+                    >
                       <span className="text-xs w-28 truncate font-semibold" style={{ color: config.color }}>{config.label}</span>
                       <div className="flex-1 h-8 bg-muted rounded-xl overflow-hidden">
                         <motion.div initial={{ width: 0 }} animate={{ width: `${(total / max) * 100}%` }}
@@ -467,7 +524,7 @@ export default function Opportunities() {
                           </span>
                         </motion.div>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>

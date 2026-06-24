@@ -1206,7 +1206,7 @@ function OAuthRedirectUrisPanel({
 function OAuthCapabilityCard({ item }: { item: OAuthReadinessItem }) {
   const configured = item.ready;
   const title = item.kind === 'mailbox' ? 'Mailbox + Sender Identity' : 'Calendar Context';
-  const destination = item.kind === 'mailbox' ? 'Customer Email -> Mailboxes & Senders' : 'Customer Activity -> Connections';
+  const destination = item.kind === 'mailbox' ? 'Customer Email -> Mailboxes & Senders' : 'Customer Activity -> Meeting Sources';
   const description = item.kind === 'mailbox'
     ? 'Users connect their work mailbox for customer email context, approved sends, and provider drafts when authorized.'
     : 'Users connect their work calendar so customer meetings can become activity context.';

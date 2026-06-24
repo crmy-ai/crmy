@@ -4,6 +4,7 @@
 import type { DbPool } from '../pool.js';
 import type { Opportunity, Activity, UUID, PaginatedResponse } from '@crmy/shared';
 import { CrmyError } from '@crmy/shared';
+import { addStableDescCursorCondition, encodeStableCursor, exactListTotalsEnabled, pageTotal } from './pagination.js';
 
 interface MutationOptions {
   expectedVersion?: number;
@@ -134,18 +135,14 @@ export async function searchOpportunities(
     params.push(filters.close_date_after);
     idx++;
   }
-  if (filters.cursor) {
-    conditions.push(`o.created_at < $${idx}`);
-    params.push(filters.cursor);
-    idx++;
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'o.created_at', 'o.id');
 
   const where = conditions.join(' AND ');
 
-  const countResult = await db.query(
-    `SELECT count(*)::int as total FROM opportunities o WHERE ${where}`,
-    params,
-  );
+  const exactTotals = exactListTotalsEnabled();
+  const countResult = exactTotals
+    ? await db.query(`SELECT count(*)::int as total FROM opportunities o WHERE ${where}`, params)
+    : null;
 
   params.push(filters.limit + 1);
   const dataResult = await db.query(
@@ -158,7 +155,7 @@ export async function searchOpportunities(
      LEFT JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
      LEFT JOIN contacts c ON c.id = o.contact_id AND c.tenant_id = o.tenant_id
      WHERE ${where}
-     ORDER BY o.created_at DESC
+     ORDER BY o.created_at DESC, o.id DESC
      LIMIT $${idx}`,
     params,
   );
@@ -169,8 +166,10 @@ export async function searchOpportunities(
 
   return {
     data,
-    total: countResult.rows[0].total,
-    next_cursor: hasMore ? data[data.length - 1].created_at : undefined,
+    ...pageTotal(data.length, hasMore, exactTotals ? Number(countResult?.rows[0]?.total ?? 0) : undefined),
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({ sort_value: data[data.length - 1].created_at, id: data[data.length - 1].id })
+      : undefined,
   };
 }
 

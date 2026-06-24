@@ -712,7 +712,7 @@ function PersonalConnectionsPanel({
       : 'Connect your work apps to build customer memory automatically.';
   const detail = mailboxConnected || calendarConnected
     ? 'CRMy uses connected work apps to keep agent briefings current without asking you to paste every customer touchpoint.'
-    : 'Email brings in customer threads and replies. Calendar brings in meetings, notes, and availability context. Together they help agents act with the latest customer memory.';
+    : 'Connect your email and calendar to feed CRMy raw customer context automatically.';
   const stepsComplete = Number(mailboxConnected) + Number(calendarConnected);
   const itemCls = 'rounded-xl border border-border bg-background/65 p-3';
   const readyCls = 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
@@ -762,7 +762,7 @@ function PersonalConnectionsPanel({
             </span>
           </div>
         </Link>
-        <Link to="/activities?tab=connections" className={`${itemCls} group transition-colors hover:border-primary/30 hover:bg-muted/30`}>
+        <Link to="/activities?tab=meeting_sources" className={`${itemCls} group transition-colors hover:border-primary/30 hover:bg-muted/30`}>
           <div className="flex items-start gap-3">
             <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${calendarConnected ? readyCls : actionCls}`}>
               <CalendarClock className="h-4 w-4" />
@@ -1159,7 +1159,7 @@ function ScopedOverviewDashboard() {
         <section className="rounded-2xl border border-border bg-surface p-4 shadow-sm">
           <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h2 className="font-display text-base font-semibold text-foreground">Book Snapshot</h2>
+              <h2 className="font-display text-base font-semibold text-foreground">Customer Portfolio</h2>
               <p className="text-sm text-muted-foreground">
                 {isManager ? 'Team coverage at a glance.' : 'Your customer coverage at a glance.'}
               </p>
@@ -1277,7 +1277,7 @@ function ScopedOverviewDashboard() {
                     <h2 className="font-display text-base font-semibold text-foreground">Pipeline Pulse</h2>
                     <p className="text-sm text-muted-foreground">Deal motion in your scope.</p>
                   </div>
-                  <Link to="/opportunities" className="text-xs font-semibold text-primary hover:underline">Open</Link>
+                  <Link to="/opportunities?view=graph" className="text-xs font-semibold text-primary hover:underline">Open</Link>
                 </div>
                 <div className="grid gap-2">
                   <PipelinePulseItem icon={DollarSign} label="Open pipeline" value={formatMoney(openPipelineValue)} />
@@ -1296,6 +1296,7 @@ function ScopedOverviewDashboard() {
 function AdminDashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [activationDismissed, setActivationDismissed] = useState(() => localStorage.getItem('crmy-activation-dismissed') === 'true');
+  const [activationForcedOpen, setActivationForcedOpen] = useState(false);
   const [skippedActivationSteps, setSkippedActivationSteps] = useState<Record<string, boolean>>(readSkippedActivationSteps);
   const [snapshotExpanded, setSnapshotExpanded] = useState(() => localStorage.getItem('crmy-command-center-system-snapshot') === 'expanded');
 
@@ -1412,17 +1413,19 @@ function AdminDashboard() {
   const activationComplete = activationSteps.filter(step => step.complete || skippedActivationSteps[step.id]).length;
   const activationIsComplete = activationComplete === activationTotal;
   const coreSetupReady = dbConnected && agentEnabled && (sampleSeeded || memoryTotal > 0 || signalTotal > 0) && handoffReady;
-  const showActivation = !coreSetupReady && !activationDismissed;
+  const showActivation = activationForcedOpen || (!coreSetupReady && !activationDismissed);
   const nextSetupSteps = activationSteps.filter(step => !step.complete && !skippedActivationSteps[step.id]).slice(0, 2);
 
   const hideActivation = () => {
     localStorage.setItem('crmy-activation-dismissed', 'true');
     setActivationDismissed(true);
+    setActivationForcedOpen(false);
   };
 
   const restoreActivation = () => {
     localStorage.removeItem('crmy-activation-dismissed');
     setActivationDismissed(false);
+    setActivationForcedOpen(true);
   };
 
   const toggleActivationSkip = (stepId: string) => {

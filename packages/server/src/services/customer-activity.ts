@@ -455,6 +455,38 @@ function primarySubject(event: calendarRepo.CalendarEvent): { subject_type?: 'ac
   return {};
 }
 
+function artifactSourceDetail(event: calendarRepo.CalendarEvent, artifact: calendarRepo.MeetingArtifact): Record<string, unknown> {
+  const metadata = artifact.metadata && typeof artifact.metadata === 'object' ? artifact.metadata : {};
+  const authored = typeof metadata.source_authorship === 'string'
+    ? metadata.source_authorship
+    : typeof metadata.customer_authored === 'boolean'
+      ? metadata.customer_authored ? 'customer_or_external' : 'crmy'
+      : 'mixed_or_unknown';
+  const customerAuthored = typeof metadata.customer_authored === 'boolean'
+    ? metadata.customer_authored
+    : authored === 'customer_or_external' ? true : authored === 'crmy' ? false : null;
+  return {
+    ...metadata,
+    calendar_event_id: event.id,
+    meeting_artifact_id: artifact.id,
+    artifact_type: artifact.artifact_type,
+    artifact_source: artifact.source,
+    meeting_url: event.meeting_url,
+    attendees: event.attendee_emails,
+    source_label: artifact.source_label ?? event.title,
+    context_origin: metadata.context_origin ?? 'meeting_artifact',
+    source_authorship: authored,
+    source_perspective: metadata.source_perspective
+      ?? (customerAuthored === true ? 'customer_or_external_words' : customerAuthored === false ? 'our_words' : 'mixed_or_unknown_words'),
+    customer_authored: customerAuthored,
+    customer_statement: metadata.customer_statement ?? customerAuthored,
+    evidence_weight: metadata.evidence_weight
+      ?? (customerAuthored === true ? 'customer_authored_context' : customerAuthored === false ? 'self_authored_action_context' : 'mixed_or_unknown_context'),
+    evidence_role: metadata.evidence_role
+      ?? (customerAuthored === true ? 'customer_source' : customerAuthored === false ? 'seller_action_or_commitment' : 'meeting_context'),
+  };
+}
+
 export async function processMeetingArtifact(
   db: DbPool,
   tenantId: UUID,
@@ -486,14 +518,15 @@ export async function processMeetingArtifact(
   });
 
   try {
-    let activity = event.activity_id ? await activityRepo.getActivity(db, tenantId, event.activity_id) : null;
+    let activity = artifact.activity_id ? await activityRepo.getActivity(db, tenantId, artifact.activity_id) : null;
     if (!activity) {
       const registry = (await calendarRepo.listMeetingClassifications(db, tenantId, true)).find(item => item.type_name === event.classification);
       const actorUserId = actor ? await getActorUserId(db, actor) : null;
       const fallbackActivityType: ActivityType = event.status === 'scheduled' ? 'meeting_scheduled' : 'meeting_held';
+      const detail = artifactSourceDetail(event, artifact);
       activity = await activityRepo.createActivity(db, tenantId, {
         type: toActivityType(registry?.mapped_activity_type, fallbackActivityType),
-        subject: event.title,
+        subject: artifact.source_label ? `${event.title} - ${artifact.source_label}` : event.title,
         body: artifact.text_content,
         contact_id: event.contact_id ?? undefined,
         account_id: event.account_id ?? undefined,
@@ -502,18 +535,12 @@ export async function processMeetingArtifact(
         subject_type: subject.subject_type,
         subject_id: subject.subject_id,
         owner_id: actorUserId ?? event.user_id ?? undefined,
-        source_agent: `calendar:${event.provider}`,
+        source_agent: `meeting_artifact:${artifact.source}`,
         occurred_at: event.starts_at,
-        detail: {
-          calendar_event_id: event.id,
-          meeting_artifact_id: artifact.id,
-          artifact_type: artifact.artifact_type,
-          meeting_url: event.meeting_url,
-          attendees: event.attendee_emails,
-        },
+        detail,
         created_by: actorUserId ?? undefined,
       });
-      await calendarRepo.updateCalendarEvent(db, tenantId, event.id, { activity_id: activity.id });
+      artifact = await calendarRepo.updateMeetingArtifact(db, tenantId, artifact.id, { activity_id: activity.id }) ?? artifact;
     }
 
     const extraction = await extractContextFromActivity(db, tenantId, activity.id, actor ? {
@@ -540,7 +567,6 @@ export async function processMeetingArtifact(
       extraction_receipt: receipt,
     });
     await calendarRepo.updateCalendarEvent(db, tenantId, event.id, {
-      activity_id: activity.id,
       raw_context_source_id: rawSource?.id ?? null,
       processing_status: status,
       processing_reason: status === 'processed' ? 'Meeting context processed.' : 'Meeting context needs review.',

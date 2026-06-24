@@ -498,6 +498,113 @@ export function useDeleteMeetingClassification() {
   });
 }
 
+// Transcript and raw-note source drops
+export function useContextSourceConnections() {
+  return useQuery({
+    queryKey: ['context-source-connections'],
+    queryFn: () => api.get('context-source-connections'),
+  });
+}
+
+export function useCreateContextSourceConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: Record<string, unknown>) => api.post('context-source-connections', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['context-source-connections'] }),
+  });
+}
+
+export function useUpdateContextSourceConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & Record<string, unknown>) => api.patch(`context-source-connections/${id}`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['context-source-connections'] }),
+  });
+}
+
+export function useDeleteContextSourceConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`context-source-connections/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['context-source-connections'] });
+      qc.invalidateQueries({ queryKey: ['context-source-objects'] });
+    },
+  });
+}
+
+export function useSyncContextSourceConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`context-source-connections/${id}/sync`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['context-source-connections'] });
+      qc.invalidateQueries({ queryKey: ['context-source-objects'] });
+    },
+  });
+}
+
+export function useContextSourceObjects(params?: {
+  connection_id?: string;
+  match_status?: string;
+  processing_status?: string;
+  q?: string;
+  account_id?: string;
+  contact_id?: string;
+  opportunity_id?: string;
+  use_case_id?: string;
+  calendar_event_id?: string;
+  limit?: number;
+  cursor?: string;
+}) {
+  return useList('context-source-objects', 'context-source-objects', params as Record<string, string | number | boolean | undefined>);
+}
+
+export function useContextSourceObject(id: string | null) {
+  return useQuery({
+    queryKey: ['context-source-object', id],
+    queryFn: () => api.get(`context-source-objects/${id}`),
+    enabled: !!id,
+  });
+}
+
+export function useResolveContextSourceObject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & Record<string, unknown>) => api.post(`context-source-objects/${id}/resolve`, data),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['context-source-object', variables.id] });
+      qc.invalidateQueries({ queryKey: ['context-source-objects'] });
+      qc.invalidateQueries({ queryKey: ['calendar-events'] });
+      qc.invalidateQueries({ queryKey: ['activities'] });
+      qc.invalidateQueries({ queryKey: ['context-entries'] });
+      qc.invalidateQueries({ queryKey: ['signal-groups'] });
+    },
+  });
+}
+
+export function useReprocessContextSourceObject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`context-source-objects/${id}/reprocess`, {}),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: ['context-source-object', id] });
+      qc.invalidateQueries({ queryKey: ['context-source-objects'] });
+    },
+  });
+}
+
+export function useIgnoreContextSourceObject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) => api.post(`context-source-objects/${id}/ignore`, { reason }),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ['context-source-object', variables.id] });
+      qc.invalidateQueries({ queryKey: ['context-source-objects'] });
+    },
+  });
+}
+
 // Analytics
 export function usePipelineSummary(params?: { owner_id?: string }) {
   return useQuery({

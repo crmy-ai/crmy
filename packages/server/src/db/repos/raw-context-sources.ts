@@ -3,7 +3,7 @@
 
 import type { DbPool } from '../pool.js';
 import type { PaginatedResponse, SubjectType, UUID } from '@crmy/shared';
-import { addStableDescCursorCondition, encodeStableCursor } from './pagination.js';
+import { addStableDescCursorCondition, encodeStableCursor, exactListTotalsEnabled, pageTotal } from './pagination.js';
 
 export interface RawContextSource {
   id: UUID;
@@ -363,7 +363,10 @@ export async function listRawContextSources(
   }
 
   const where = conditions.join(' AND ');
-  const count = await db.query(`SELECT count(*)::int AS total FROM raw_context_sources r WHERE ${where}`, params);
+  const exactTotals = exactListTotalsEnabled();
+  const count = exactTotals
+    ? await db.query(`SELECT count(*)::int AS total FROM raw_context_sources r WHERE ${where}`, params)
+    : null;
   params.push(filters.limit + 1);
   const rows = await db.query(
     `SELECT r.* FROM raw_context_sources r WHERE ${where} ORDER BY r.created_at DESC, r.id DESC LIMIT $${idx}`,
@@ -377,6 +380,6 @@ export async function listRawContextSources(
     next_cursor: hasMore && page.length > 0
       ? encodeStableCursor({ sort_value: page[page.length - 1].created_at, id: page[page.length - 1].id })
       : undefined,
-    total: count.rows[0]?.total ?? 0,
+    ...pageTotal(page.length, hasMore, exactTotals ? Number(count?.rows[0]?.total ?? 0) : undefined),
   };
 }

@@ -289,6 +289,15 @@ Created by `crmy init`. Stored in your project root. Auto-added to `.gitignore`.
 | `CRMY_TRUST_PROXY` | No | — | Set to `1` when CRMy runs behind one trusted reverse proxy |
 | `CRMY_API_KEY` | No | — | API key for CLI auth (overrides .crmy.json) |
 | `CRMY_SERVER_URL` | No | — | Server URL for remote CLI mode |
+| `CRMY_ALLOW_INSECURE_DB_TLS` | No | — | Production escape hatch for self-managed databases that cannot use `sslmode=verify-full`; leave unset unless you intentionally accept unverified DB TLS |
+| `CRMY_LIST_TOTAL_MODE` | No | dev: `exact`, production: `estimate` | Controls high-volume list totals. `estimate` returns page-based totals with `total_is_estimate: true` to avoid expensive count scans; `exact` preserves precise counts. |
+| `CRMY_AUTH_RATE_LIMIT_WINDOW_MS` | No | `900000` | Shared login/register rate-limit window; stored in PostgreSQL so multi-instance deployments cannot bypass auth throttles |
+| `CRMY_AUTH_REGISTER_IP_LIMIT` / `CRMY_AUTH_REGISTER_IDENTITY_LIMIT` | No | `5` / `3` | Registration attempt limits per client IP and hashed email/workspace identity |
+| `CRMY_AUTH_LOGIN_IP_LIMIT` / `CRMY_AUTH_LOGIN_IDENTITY_LIMIT` | No | `10` / `20` | Login attempt limits per client IP and hashed account identity |
+| `CRMY_RATE_LIMIT_HASH_SECRET` | No | encryption key / JWT secret | Optional HMAC secret for hashing unauthenticated rate-limit identities before storage |
+| `CRMY_RATE_LIMIT_BUCKET_RETENTION_HOURS` | No | `24` | Background cleanup retention for authenticated and unauthenticated rate-limit buckets |
+| `CRMY_PROCESS_ROLE` | No | `all` | Runtime role. `all` keeps local installs simple; `web` serves HTTP/MCP/UI without periodic workers; `worker` runs periodic background jobs without binding an HTTP port. |
+| `CRMY_MIGRATION_MODE` | No | dev: `auto`, production: `validate` | Startup migration behavior. `auto` applies pending migrations on startup, `validate` fails startup when migrations are pending, and `skip` bypasses startup checks. Hosted deployments should run `crmy migrate run` as a one-shot job before starting web/worker roles. |
 | `LLM_TIMEOUT_MS` | No | `60000` | Hard timeout for general background LLM calls |
 | `AGENT_STREAM_TIMEOUT_MS` | No | `60000` | Hard timeout for streaming Workspace Agent provider calls |
 | `CONTEXT_EXTRACTION_LLM_TIMEOUT_MS` | No | `90000` | Hard timeout for Raw Context → Signals extraction |
@@ -298,6 +307,8 @@ Created by `crmy init`. Stored in your project root. Auto-added to `.gitignore`.
 | `CRMY_DEPLOYMENT_MODE` | No | `single_instance` | Set `multi_instance` only when each app has `CRMY_INSTANCE_ID` and sticky MCP routing |
 | `CRMY_INSTANCE_ID` | Multi-instance | — | Stable unique id for this app process; required for durable MCP session ownership |
 | `CRMY_MCP_SESSION_MODE` | Multi-instance | — | Must be `sticky` for multi-instance deployments; route by `mcp-session-id` |
+| `CRMY_BROWSER_COOKIE_AUTH` / `VITE_CRMY_BROWSER_COOKIE_AUTH` | Hosted browser auth | — | Set both to `true` for hosted browser sessions so JWTs are carried in HttpOnly cookies instead of `localStorage`; required for `CRMY_DEPLOYMENT_MODE=multi_instance` unless explicitly overridden |
+| `CRMY_ALLOW_BROWSER_BEARER_AUTH` | No | — | Private-deployment escape hatch that allows multi-instance browser bearer-token auth; do not use for hosted SaaS |
 | `CRMY_MCP_SESSION_TTL_SECONDS` | No | `1800` | Durable MCP session expiry window |
 | `CRMY_MCP_STALE_INSTANCE_SECONDS` | No | `120` | Expire sessions owned by app instances that stop heartbeating |
 | `SOURCE_SYNC_FETCH_TIMEOUT_MS` | No | `30000` | Mailbox/calendar provider HTTP timeout |
@@ -316,6 +327,8 @@ Created by `crmy init`. Stored in your project root. Auto-added to `.gitignore`.
 | `MICROSOFT_TENANT_ID` | Microsoft OAuth | `common` | Microsoft tenant for OAuth authorization |
 | `CONNECTOR_FETCH_TIMEOUT_MS` | No | `30000` | Systems-of-record connector HTTP timeout |
 | `SLACK_SEND_TIMEOUT_MS` | No | `10000` | Slack webhook delivery timeout |
+
+For hosted deployments, run at least one `CRMY_PROCESS_ROLE=worker` process. Workers own periodic recovery work, including pending webhook deliveries and webhook delivery creation for persisted events that were emitted by web processes before an in-process subscriber could run.
 
 ---
 
@@ -568,7 +581,7 @@ Searchable card/table views for customer outcomes, stage, health, attributed ARR
 
 #### Customer Activity (`/app/activities`)
 
-Meeting and activity capture for customer context. Tabs cover **Meetings**, **Needs Context**, **Calls & Notes**, **All Activity**, and **Connections**. Calendar meetings can link to customer records, show missing transcript/notes status, and route directly into Add Context for Signal extraction.
+Meeting and activity capture for customer context. Tabs cover **Meetings**, **Needs Context**, **Calls & Notes**, **All Activity**, and **Meeting Sources**. Calendar meetings can link to customer records, show missing transcript/notes status, and route directly into Add Context for Signal extraction. Transcript and note drops are surfaced as meeting context: admins configure source drops from **Meeting Sources**, while regular users review unmatched or ambiguous files from **Needs Context**.
 
 #### Customer Email (`/app/emails`)
 
@@ -902,6 +915,38 @@ Calendar and meeting association uses the same account-first Subject Graph resol
 
 Availability suggestions are action-boundary context, not raw calendar memory. Agents can call `availability_suggest_times` with a customer record, date range, duration, timezone, and optional internal actor IDs. CRMy checks connected internal actor calendars through provider free/busy, ranks windows with customer timing preferences from Memory, and returns clear caveats. It does not expose raw calendar event details, does not confirm customer availability unless that person explicitly exists as a connected calendar actor, and does not create or send calendar invites.
 
+### Transcript & Notes Drops
+
+Transcript drops are admin-managed storage connections for teams that already export meeting transcripts, call notes, summaries, or raw notes into a bucket or folder. The first supported providers are:
+
+- **S3-compatible bucket**: bucket, prefix, region, optional endpoint/path-style mode, include/exclude globs, encrypted read/list credentials.
+- **Local folder**: local/self-hosted only, restricted to `CRMY_LOCAL_SOURCE_ROOTS`; disabled in hosted production unless `CRMY_ENABLE_LOCAL_CONTEXT_DROPS=true`.
+
+Dropped files follow the same context path as manually added meeting notes:
+
+`Source Object -> Meeting Artifact / Customer Activity -> Raw Context -> Signals -> Memory -> Lineage / Handoff`
+
+Supported formats are `.txt`, `.md`, `.vtt`, `.srt`, `.json`, `.docx`, and `.pdf`. VTT/SRT/JSON are normalized before extraction. Files larger than `CRMY_CONTEXT_DROP_MAX_OBJECT_BYTES` enter review with a friendly reason instead of being downloaded or processed silently. Long transcripts are chunked, but each chunk carries the parent source hash so one long transcript does not count as multiple independent sources.
+
+Sidecar metadata is optional but recommended. Put a JSON file beside the transcript with the same basename:
+
+```json
+{
+  "title": "Northstar renewal review",
+  "meeting_start": "2026-06-20T17:00:00Z",
+  "meeting_end": "2026-06-20T17:45:00Z",
+  "organizer_email": "cody@example.com",
+  "attendees": ["alex@northstarlabs.com"],
+  "source_url": "https://example.com/transcript",
+  "account_id": "<optional-account-id>",
+  "calendar_event_id": "<optional-calendar-event-id>",
+  "source_authorship": "customer_or_external",
+  "customer_authored": true
+}
+```
+
+Matching order is explicit IDs first, then provider calendar IDs, meeting time plus attendee overlap, contact email/account domains including Additional Domains, then Subject Graph resolution from the title, attendees, excerpt, and hints. Unmatched or ambiguous files appear in **Customer Activity -> Needs Context** and create a Handoff so a human can link, ignore, or reprocess them. Reviewers see the source object, match reason, candidate records, excerpt, and downstream lineage links.
+
 ### Activity types
 
 Default types are seeded and organized by category. Meeting classifications are customizable in [Type Registries](#type-registries), while the core activity write tools currently accept the built-in activity type values.
@@ -944,6 +989,8 @@ Default types are seeded and organized by category. Meeting classifications are 
 | `calendar_connection_start` | Start Google or Microsoft calendar OAuth from MCP/CLI and return a browser `auth_url` for the current human-linked actor |
 | `calendar_event_add_context` | Add transcript/notes/summary to a meeting and process it |
 | `meeting_classification_list` | List tenant meeting classifications |
+| `context_source_connection_list/create/update/delete/sync` | Admin tools for transcript/raw-note storage drops |
+| `context_source_object_list/get/resolve/reprocess/ignore` | Review, link, process, or skip transcript/raw-note source objects |
 
 ### CLI
 
@@ -955,6 +1002,12 @@ crmy activities add-context <id> --file transcript.txt --type transcript
 crmy activities process <id>
 crmy activities connections
 crmy activities connect-calendar google --scope owned_accounts
+crmy activities transcript-sources
+crmy activities transcript-source create-local --name "Local transcripts" --path /tmp/crmy-transcripts
+crmy activities transcript-source create-s3 --name "Meeting transcripts" --bucket crmy-transcripts --region us-east-1 --access-key-id ... --secret-access-key ...
+crmy activities transcript-source sync <id>
+crmy activities transcripts --status needs_review
+crmy activities transcript resolve <id> --account <account-id>
 crmy activities classifications
 crmy tools call availability_suggest_times '{"account_id":"<account-id>","duration_minutes":30,"timezone":"America/Los_Angeles","limit":3}'
 ```
@@ -974,6 +1027,16 @@ GET    /api/v1/calendar-events
 GET    /api/v1/calendar-events/:id
 POST   /api/v1/calendar-events/:id/process
 POST   /api/v1/calendar-events/:id/artifacts
+GET    /api/v1/context-source-connections
+POST   /api/v1/context-source-connections
+PATCH  /api/v1/context-source-connections/:id
+DELETE /api/v1/context-source-connections/:id
+POST   /api/v1/context-source-connections/:id/sync
+GET    /api/v1/context-source-objects
+GET    /api/v1/context-source-objects/:id
+POST   /api/v1/context-source-objects/:id/resolve
+POST   /api/v1/context-source-objects/:id/reprocess
+POST   /api/v1/context-source-objects/:id/ignore
 ```
 
 ---
@@ -2276,7 +2339,7 @@ Existing mailbox connections remain context-only until reauthorized with send/dr
 There are two setup paths:
 
 - **Admin path:** open **Settings -> System Connections -> OAuth**, choose **Google Workspace** or **Microsoft 365**, and verify the selected provider's first-connection preflight. Hosted SaaS tenants use the CRMy-managed provider app by default. Enterprise tenants can save a tenant-owned OAuth app override when they need their own consent screen, security review, verified publisher, or domain app restrictions. Self-hosted installs use environment-managed OAuth app credentials. The page shows the active app source, copyable redirect URIs, setup blockers, guided setup steps, missing setup details, and requested scopes. Do not ask the first actor to connect until mailbox and calendar show ready in the preflight panel. It never shows OAuth secrets or tokens after save. Admins monitor which actors have connected mailbox, sender, and calendar access from **Settings -> Actors**.
-- **User path:** open **Customer Email -> Mailboxes & Senders** to connect a mailbox, or **Customer Activity -> Connections** to connect a calendar. Users working from Claude, Codex, or the CLI can also call `mailbox_connection_start` / `calendar_connection_start` or run `crmy emails connect <provider>` / `crmy activities connect-calendar <provider>`. If OAuth is ready, CRMy returns a provider `auth_url`; the user opens that URL in a browser, finishes provider consent, then returns to MCP/CLI and lists connections to confirm `status=connected`. If OAuth is missing, users can request admin setup and admins can jump directly to the OAuth readiness page.
+- **User path:** open **Customer Email -> Mailboxes & Senders** to connect a mailbox, or **Customer Activity -> Meeting Sources** to connect a calendar. Users working from Claude, Codex, or the CLI can also call `mailbox_connection_start` / `calendar_connection_start` or run `crmy emails connect <provider>` / `crmy activities connect-calendar <provider>`. If OAuth is ready, CRMy returns a provider `auth_url`; the user opens that URL in a browser, finishes provider consent, then returns to MCP/CLI and lists connections to confirm `status=connected`. If OAuth is missing, users can request admin setup and admins can jump directly to the OAuth readiness page.
 
 OAuth app source precedence is tenant-owned app, then CRMy-managed hosted app, then self-hosted environment app. Tenant-owned secrets are encrypted and stored as write-only credentials; list and readiness responses only show whether a secret exists. Each mailbox/calendar connection records the OAuth client that issued its tokens so refresh uses the same app later; if an admin removes or changes that app, affected users should reauthorize their mailbox or calendar. Self-hosted/local users can ignore tenant-owned app settings and use `.env` credentials.
 
@@ -2303,7 +2366,7 @@ Mailbox setup:
 
 CRMy validates the scopes returned by the provider callback. If the provider does not grant send or draft/write permission, the mailbox remains connected for context but is not marked send-ready. Reauthorize the mailbox with the relevant toggle enabled after updating provider consent.
 
-Calendar setup uses the same admin/user split and the same app-source precedence. Hosted tenants can use the CRMy-managed app immediately when enabled, enterprise tenants can use the same tenant-owned Google/Microsoft override, and self-hosted installs configure `GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET` or `MICROSOFT_CALENDAR_CLIENT_ID` / `MICROSOFT_CALENDAR_CLIENT_SECRET`. The calendar redirect paths are `/api/v1/calendar/oauth/google/callback` and `/api/v1/calendar/oauth/microsoft/callback`. Users then connect their own calendar from **Customer Activity -> Connections**. Calendar OAuth is read-only, verifies the provider account email before saving, and feeds customer meeting context; calendar writeback is not enabled.
+Calendar setup uses the same admin/user split and the same app-source precedence. Hosted tenants can use the CRMy-managed app immediately when enabled, enterprise tenants can use the same tenant-owned Google/Microsoft override, and self-hosted installs configure `GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET` or `MICROSOFT_CALENDAR_CLIENT_ID` / `MICROSOFT_CALENDAR_CLIENT_SECRET`. The calendar redirect paths are `/api/v1/calendar/oauth/google/callback` and `/api/v1/calendar/oauth/microsoft/callback`. Users then connect their own calendar from **Customer Activity -> Meeting Sources**. Calendar OAuth is read-only, verifies the provider account email before saving, and feeds customer meeting context; calendar writeback is not enabled.
 
 Calendar ingest scope controls what synced meetings become CRMy records:
 
@@ -2403,7 +2466,7 @@ Admins can see actor connection coverage in **Settings → Actors**. The first v
 - **Activate** restores the prior capabilities when OAuth tokens are still available. If credentials were removed or scopes are missing, CRMy asks the user to reconnect through OAuth.
 - **Disconnect** deletes the connection and stored OAuth tokens. Reconnecting requires provider consent again.
 
-Individual users can manage their own mailbox from **Customer Email → Mailboxes & Senders** and their own calendar from **Customer Activity → Connections**.
+Individual users can manage their own mailbox from **Customer Email → Mailboxes & Senders** and their own calendar from **Customer Activity → Meeting Sources**.
 
 Connection cards show each source's ingest scope and sync stats, including items skipped because they were outside the selected account scope. These skips are expected when a mailbox or calendar sees customer-like conversations that do not belong to the connected actor's selected book.
 
@@ -3378,7 +3441,7 @@ npx -y @crmy/cli migrate run      # apply pending migrations
 npx -y @crmy/cli migrate status   # show migration status
 ```
 
-Migrations run automatically on server startup and during `crmy init`.
+Migrations run automatically during `crmy init` and during local/non-production server startup by default. In production, server startup defaults to `CRMY_MIGRATION_MODE=validate`: web and worker processes fail fast when migrations are pending instead of trying to mutate schema during deploy. Run `crmy migrate run` as a one-shot migration job first, then start the app/worker roles. Set `CRMY_MIGRATION_MODE=auto` only for local or deliberately single-instance self-hosted deployments; use `skip` only when another release gate already verifies schema state.
 
 ### Migration files
 

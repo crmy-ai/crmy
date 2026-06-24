@@ -3,6 +3,7 @@
 
 import type { DbPool } from '../pool.js';
 import type { PaginatedResponse, UUID } from '@crmy/shared';
+import { addStableDescCursorCondition, encodeStableCursor, exactListTotalsEnabled, pageTotal } from './pagination.js';
 
 export type CalendarProvider = 'google' | 'microsoft';
 export type CalendarConnectionStatus = 'configuration_required' | 'connected' | 'syncing' | 'error' | 'disconnected';
@@ -581,10 +582,7 @@ export async function listCalendarEvents(
       idx++;
     }
   }
-  if (filters.cursor) {
-    conditions.push(`ce.starts_at < $${idx++}`);
-    params.push(filters.cursor);
-  }
+  idx = addStableDescCursorCondition(conditions, params, idx, filters.cursor, 'ce.starts_at', 'ce.id');
 
   const from = `FROM calendar_events ce
     LEFT JOIN contacts c ON c.id = ce.contact_id AND c.tenant_id = ce.tenant_id
@@ -600,7 +598,10 @@ export async function listCalendarEvents(
       WHERE ma.tenant_id = ce.tenant_id AND ma.calendar_event_id = ce.id
     ) artifacts ON TRUE`;
   const where = conditions.join(' AND ');
-  const countResult = await db.query(`SELECT count(*)::int AS total ${from} WHERE ${where}`, params);
+  const exactTotals = exactListTotalsEnabled();
+  const countResult = exactTotals
+    ? await db.query(`SELECT count(*)::int AS total ${from} WHERE ${where}`, params)
+    : null;
 
   params.push(filters.limit + 1);
   const result = await db.query(
@@ -614,7 +615,7 @@ export async function listCalendarEvents(
        COALESCE(artifacts.notes_count, 0)::int AS notes_count
      ${from}
      WHERE ${where}
-     ORDER BY ce.starts_at DESC
+     ORDER BY ce.starts_at DESC, ce.id DESC
      LIMIT $${idx}`,
     params,
   );
@@ -623,8 +624,10 @@ export async function listCalendarEvents(
   const data = hasMore ? rows.slice(0, filters.limit) : rows;
   return {
     data,
-    total: Number(countResult.rows[0]?.total ?? 0),
-    next_cursor: hasMore ? data[data.length - 1].starts_at : undefined,
+    ...pageTotal(data.length, hasMore, exactTotals ? Number(countResult?.rows[0]?.total ?? 0) : undefined),
+    next_cursor: hasMore && data.length > 0
+      ? encodeStableCursor({ sort_value: data[data.length - 1].starts_at, id: data[data.length - 1].id })
+      : undefined,
   };
 }
 

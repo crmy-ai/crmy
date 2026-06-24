@@ -33,12 +33,20 @@ import {
   useAddMeetingArtifact,
   useCalendarConnections,
   useDeleteCalendarConnection,
+  useContextSourceConnections,
+  useContextSourceObject,
+  useContextSourceObjects,
+  useCreateContextSourceConnection,
+  useIgnoreContextSourceObject,
   useCalendarEvent,
   useCalendarEvents,
   useIgnoreCalendarEvent,
   useMeetingClassifications,
   useProcessCalendarEvent,
+  useReprocessContextSourceObject,
+  useResolveContextSourceObject,
   useStartCalendarConnection,
+  useSyncContextSourceConnection,
   useSyncCalendarConnection,
   useUpdateCalendarConnectionStatus,
 } from '@/api/hooks';
@@ -59,7 +67,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
 
-type CustomerActivityTab = 'meetings' | 'needs_context' | 'calls_notes' | 'all' | 'connections';
+type CustomerActivityTab = 'meetings' | 'needs_context' | 'calls_notes' | 'all' | 'meeting_sources';
 type CalendarProvider = 'google' | 'microsoft';
 type MeetingIngestScope = 'owned_accounts' | 'accessible_accounts' | 'all_meetings';
 
@@ -92,6 +100,27 @@ type CalendarEvent = {
   notes_count?: number;
 };
 
+type ContextSourceObject = {
+  id: string;
+  object_key: string;
+  source_label?: string | null;
+  match_status: string;
+  processing_status: string;
+  match_reason?: string | null;
+  failure_reason?: string | null;
+  text_excerpt?: string | null;
+  candidates?: Array<Record<string, any>>;
+  connection_name?: string | null;
+  connection_provider?: string | null;
+  account_name?: string | null;
+  contact_name?: string | null;
+  opportunity_name?: string | null;
+  use_case_name?: string | null;
+  calendar_title?: string | null;
+  extraction_receipt?: Record<string, any>;
+  sidecar_metadata?: Record<string, any>;
+};
+
 const PAGE_SIZE = 50;
 const ACTIVITY_BANNER_HIDDEN_KEY = 'crmy_customer_activity_banner_hidden';
 
@@ -100,8 +129,14 @@ const tabs: Array<{ key: CustomerActivityTab; label: string; icon: typeof Calend
   { key: 'needs_context', label: 'Needs Context', icon: AlertCircle },
   { key: 'calls_notes', label: 'Calls & Notes', icon: NotebookText },
   { key: 'all', label: 'All Activity', icon: ActivityIcon },
-  { key: 'connections', label: 'Connections', icon: SlidersHorizontal },
+  { key: 'meeting_sources', label: 'Meeting Sources', icon: SlidersHorizontal },
 ];
+
+function activityTabFromQuery(value: string | null): CustomerActivityTab {
+  if (value === 'connections') return 'meeting_sources';
+  if (value === 'meeting_sources' || value === 'meetings' || value === 'needs_context' || value === 'calls_notes' || value === 'all') return value;
+  return 'meetings';
+}
 
 const CALENDAR_PROVIDER_COPY: Record<CalendarProvider, {
   label: string;
@@ -591,6 +626,383 @@ function CalendarConnectionsPanel({
   );
 }
 
+function TranscriptDropsPanel({ isAdmin, onReview }: { isAdmin?: boolean; onReview: () => void }) {
+  const connectionsQ = useContextSourceConnections() as any;
+  const objectsQ = useContextSourceObjects({ limit: 50 }) as any;
+  const createConnection = useCreateContextSourceConnection();
+  const syncConnection = useSyncContextSourceConnection();
+  const [provider, setProvider] = useState<'local_folder' | 's3'>('local_folder');
+  const [name, setName] = useState('');
+  const [pathValue, setPathValue] = useState('');
+  const [bucket, setBucket] = useState('');
+  const [prefix, setPrefix] = useState('');
+  const [region, setRegion] = useState('us-east-1');
+  const [accessKeyId, setAccessKeyId] = useState('');
+  const [secretAccessKey, setSecretAccessKey] = useState('');
+  const connections = (connectionsQ.data?.data ?? []) as Array<Record<string, any>>;
+  const objects = (objectsQ.data?.data ?? []) as ContextSourceObject[];
+  const reviewCount = objects.filter(item => ['needs_review', 'ambiguous'].includes(item.match_status)).length;
+  const processedCount = objects.filter(item => item.processing_status === 'processed').length;
+
+  const create = async () => {
+    try {
+      if (!name.trim()) {
+        toast({ title: 'Source name required', description: 'Give this transcript drop a recognizable name.', variant: 'destructive' });
+        return;
+      }
+      const payload = provider === 'local_folder'
+        ? {
+            name: name.trim(),
+            provider,
+            config: { path: pathValue.trim(), include_globs: ['**/*.txt', '**/*.md', '**/*.vtt', '**/*.srt', '**/*.json', '**/*.docx', '**/*.pdf'] },
+          }
+        : {
+            name: name.trim(),
+            provider,
+            config: { bucket: bucket.trim(), prefix: prefix.trim(), region: region.trim(), include_globs: ['**/*.txt', '**/*.md', '**/*.vtt', '**/*.srt', '**/*.json', '**/*.docx', '**/*.pdf'] },
+            credentials: { access_key_id: accessKeyId.trim(), secret_access_key: secretAccessKey },
+          };
+      await createConnection.mutateAsync(payload);
+      setName('');
+      setPathValue('');
+      setBucket('');
+      setPrefix('');
+      setAccessKeyId('');
+      setSecretAccessKey('');
+      toast({ title: 'Transcript drop added', description: 'Run sync to discover transcripts and notes.' });
+    } catch (err) {
+      toast({ title: 'Could not add transcript drop', description: err instanceof Error ? err.message : 'Check the settings and try again.', variant: 'destructive' });
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+        <div>
+          <h3 className="font-display text-lg font-semibold text-foreground">Transcript & Notes Sources</h3>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            CRMy watches transcript and note drops configured by admins, matches files to meetings or customer records, and keeps anything uncertain in Needs Context.
+          </p>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+          <div className="rounded-lg border border-border bg-card px-3 py-2">
+            <p className="text-muted-foreground">Sources</p>
+            <p className="text-lg font-semibold text-foreground">{connections.length}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-card px-3 py-2">
+            <p className="text-muted-foreground">Review</p>
+            <p className="text-lg font-semibold text-amber-300">{reviewCount}</p>
+          </div>
+          <div className="rounded-lg border border-border bg-card px-3 py-2">
+            <p className="text-muted-foreground">Processed</p>
+            <p className="text-lg font-semibold text-emerald-300">{processedCount}</p>
+          </div>
+        </div>
+      </div>
+
+      {isAdmin ? (
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { key: 'local_folder', label: 'Local folder' },
+              { key: 's3', label: 'S3 bucket' },
+            ].map(item => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => setProvider(item.key as 'local_folder' | 's3')}
+                className={`rounded-lg border px-3 py-1.5 text-sm font-medium ${provider === item.key ? 'border-blue-500 bg-blue-500/10 text-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="space-y-1 text-xs font-medium text-muted-foreground">
+              Source name
+              <Input value={name} onChange={event => setName(event.target.value)} placeholder="Zoom transcript drop" />
+            </label>
+            {provider === 'local_folder' ? (
+              <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                Folder path
+                <Input value={pathValue} onChange={event => setPathValue(event.target.value)} placeholder="/tmp/crmy-transcripts" />
+              </label>
+            ) : (
+              <>
+                <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                  Bucket
+                  <Input value={bucket} onChange={event => setBucket(event.target.value)} placeholder="customer-transcripts" />
+                </label>
+                <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                  Prefix
+                  <Input value={prefix} onChange={event => setPrefix(event.target.value)} placeholder="transcripts/" />
+                </label>
+                <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                  Region
+                  <Input value={region} onChange={event => setRegion(event.target.value)} placeholder="us-east-1" />
+                </label>
+                <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                  Access key ID
+                  <Input value={accessKeyId} onChange={event => setAccessKeyId(event.target.value)} placeholder="Read/list key" />
+                </label>
+                <label className="space-y-1 text-xs font-medium text-muted-foreground">
+                  Secret access key
+                  <Input type="password" value={secretAccessKey} onChange={event => setSecretAccessKey(event.target.value)} placeholder="Stored encrypted" />
+                </label>
+              </>
+            )}
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              Sidecar JSON is optional but recommended for explicit meeting/account IDs, attendees, and authorship.
+            </p>
+            <Button onClick={create} disabled={createConnection.isPending}>
+              {createConnection.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+              Add drop
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-blue-500/20 bg-blue-500/8 p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Transcript drops are managed by admins</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                You do not need to configure storage. When a transcript or note needs your judgment, it appears in Needs Context so you can link it to the right customer record.
+              </p>
+            </div>
+            <Button variant={reviewCount > 0 ? 'default' : 'outline'} onClick={onReview}>
+              {reviewCount > 0 ? `Review ${reviewCount}` : 'Open Needs Context'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-3 md:grid-cols-2">
+        {connections.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground md:col-span-2">
+            {isAdmin
+              ? 'No transcript drops configured yet.'
+              : 'No transcript drops are configured for this workspace yet. You can still add notes directly to a meeting or use Add Context.'}
+          </div>
+        ) : connections.map(connection => (
+          <div key={connection.id} className="rounded-xl border border-border bg-card p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-foreground">{connection.name}</p>
+                <p className="text-xs text-muted-foreground">{connection.provider === 's3' ? 'S3-compatible bucket' : 'Local folder'} · {connection.status}</p>
+              </div>
+              {isAdmin && (
+                <Button size="sm" variant="outline" onClick={() => syncConnection.mutate(String(connection.id), { onSuccess: () => toast({ title: 'Transcript sync queued' }) })}>
+                  {syncConnection.isPending && syncConnection.variables === connection.id ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="mr-1 h-3.5 w-3.5" />}
+                  Sync
+                </Button>
+              )}
+            </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              {connection.last_sync_at ? `Last sync ${new Date(connection.last_sync_at).toLocaleString()}` : connection.last_error || 'Ready to sync transcripts and notes.'}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TranscriptReviewList({ objects, onOpen }: { objects: ContextSourceObject[]; onOpen: (id: string) => void }) {
+  if (objects.length === 0) return null;
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <FileText className="h-4 w-4 text-amber-300" />
+        <h3 className="text-sm font-semibold text-foreground">Transcript drops needing a link</h3>
+        <Badge variant="outline">{objects.length}</Badge>
+      </div>
+      {objects.map(object => (
+        <button
+          key={object.id}
+          type="button"
+          onClick={() => onOpen(object.id)}
+          className="w-full rounded-xl border border-border bg-card p-4 text-left transition-colors hover:bg-muted/30"
+        >
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-foreground">{object.source_label ?? object.object_key}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{object.connection_name ?? object.connection_provider ?? 'Transcript source'} · {object.match_reason ?? object.failure_reason ?? 'Needs review before processing'}</p>
+            </div>
+            <Badge className={object.match_status === 'ambiguous' ? 'bg-amber-500/15 text-amber-200' : 'bg-blue-500/15 text-blue-200'}>
+              {object.match_status === 'ambiguous' ? 'Choose match' : 'Needs link'}
+            </Badge>
+          </div>
+          {object.text_excerpt && <p className="mt-3 line-clamp-2 text-sm text-muted-foreground">{object.text_excerpt}</p>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function MeetingContextShortcuts({
+  isAdmin,
+  reviewCount,
+  calendarConnected,
+  sourceCount,
+  onNeedsContext,
+  onMeetingSources,
+  onLogActivity,
+}: {
+  isAdmin: boolean;
+  reviewCount: number;
+  calendarConnected: boolean;
+  sourceCount: number;
+  onNeedsContext: () => void;
+  onMeetingSources: () => void;
+  onLogActivity: () => void;
+}) {
+  return (
+    <div className="mb-4 rounded-xl border border-border bg-card/70 p-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-blue-300" />
+            <p className="text-sm font-semibold text-foreground">Meeting context</p>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {reviewCount > 0
+              ? `${reviewCount} transcript or meeting item${reviewCount === 1 ? '' : 's'} need a customer link before CRMy can turn them into Signals and Memory.`
+              : calendarConnected || sourceCount > 0
+                ? 'Calendar events and transcript drops feed this Activity workflow. Anything uncertain appears in Needs Context.'
+                : 'Connect a calendar or add notes manually when meetings should become customer context.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant={reviewCount > 0 ? 'default' : 'outline'} onClick={onNeedsContext}>
+            {reviewCount > 0 ? `Review ${reviewCount}` : 'Needs Context'}
+          </Button>
+          <Button size="sm" variant="outline" onClick={onMeetingSources}>
+            {isAdmin ? 'Manage Sources' : 'Meeting Sources'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onLogActivity}>
+            Log Activity
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ContextSourceObjectDrawer({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const { data, isLoading } = useContextSourceObject(id) as any;
+  const resolveObject = useResolveContextSourceObject();
+  const reprocessObject = useReprocessContextSourceObject();
+  const ignoreObject = useIgnoreContextSourceObject();
+  const [calendarEventId, setCalendarEventId] = useState('');
+  const [accountId, setAccountId] = useState('');
+  const [contactId, setContactId] = useState('');
+  const [opportunityId, setOpportunityId] = useState('');
+  const [useCaseId, setUseCaseId] = useState('');
+  const object = data?.source_object as ContextSourceObject | undefined;
+
+  if (!id) return null;
+  const resolve = async () => {
+    try {
+      await resolveObject.mutateAsync({
+        id,
+        calendar_event_id: calendarEventId || undefined,
+        account_id: accountId || undefined,
+        contact_id: contactId || undefined,
+        opportunity_id: opportunityId || undefined,
+        use_case_id: useCaseId || undefined,
+        note: 'Linked from Customer Activity review.',
+      });
+      toast({ title: 'Transcript linked', description: 'Processing has been queued.' });
+      onClose();
+    } catch (err) {
+      toast({ title: 'Could not resolve transcript', description: err instanceof Error ? err.message : 'Check the record IDs and try again.', variant: 'destructive' });
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-background/40 backdrop-blur-sm">
+      <button type="button" className="flex-1" aria-label="Close transcript source details" onClick={onClose} />
+      <aside className="h-full w-full max-w-2xl overflow-y-auto border-l border-border bg-background shadow-2xl">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background/95 px-5 py-4 backdrop-blur">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-amber-300">Transcript source</p>
+            <h2 className="truncate font-display text-lg font-semibold text-foreground">{object?.source_label ?? object?.object_key ?? 'Source object'}</h2>
+          </div>
+          <Button variant="ghost" size="icon" onClick={onClose}><X className="h-4 w-4" /></Button>
+        </div>
+        {isLoading || !object ? (
+          <div className="p-5 space-y-3">
+            {[...Array(5)].map((_, i) => <div key={i} className="h-16 rounded-xl bg-muted/50 animate-pulse" />)}
+          </div>
+        ) : (
+          <div className="space-y-5 p-5">
+            <div className="rounded-xl border border-border bg-card p-4">
+              <div className="flex flex-wrap gap-2">
+                <Badge>{object.match_status}</Badge>
+                <Badge variant="outline">{object.processing_status}</Badge>
+                {object.connection_name && <Badge variant="outline">{object.connection_name}</Badge>}
+              </div>
+              <p className="mt-3 text-sm text-muted-foreground">{object.match_reason ?? object.failure_reason ?? 'Review this file and link it to a meeting or customer record.'}</p>
+              {object.text_excerpt && <p className="mt-3 whitespace-pre-wrap rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">{object.text_excerpt}</p>}
+            </div>
+
+            {(object.account_name || object.contact_name || object.calendar_title) && (
+              <div className="rounded-xl border border-border bg-card p-4">
+                <p className="text-sm font-semibold text-foreground">Current links</p>
+                <div className="mt-2 grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
+                  <p>Meeting: {object.calendar_title ?? 'None'}</p>
+                  <p>Account: {object.account_name ?? 'None'}</p>
+                  <p>Contact: {object.contact_name ?? 'None'}</p>
+                  <p>Opportunity: {object.opportunity_name ?? 'None'}</p>
+                </div>
+              </div>
+            )}
+
+            {Array.isArray(object.candidates) && object.candidates.length > 0 && (
+              <div className="rounded-xl border border-border bg-card p-4">
+                <p className="text-sm font-semibold text-foreground">Possible matches</p>
+                <div className="mt-2 space-y-2">
+                  {object.candidates.slice(0, 5).map((candidate, index) => (
+                    <div key={index} className="rounded-lg bg-muted/40 p-2 text-xs text-muted-foreground">
+                      {candidate.type ?? candidate.record_type ?? 'record'} · {candidate.name ?? candidate.title ?? candidate.email ?? candidate.id}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-xl border border-border bg-card p-4">
+              <p className="text-sm font-semibold text-foreground">Resolve link</p>
+              <p className="mt-1 text-xs text-muted-foreground">Paste the meeting or customer record ID. Linking queues processing through Raw Context, Signals, and Memory.</p>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <Input placeholder="Calendar event ID" value={calendarEventId} onChange={event => setCalendarEventId(event.target.value)} />
+                <Input placeholder="Account ID" value={accountId} onChange={event => setAccountId(event.target.value)} />
+                <Input placeholder="Contact ID" value={contactId} onChange={event => setContactId(event.target.value)} />
+                <Input placeholder="Opportunity ID" value={opportunityId} onChange={event => setOpportunityId(event.target.value)} />
+                <Input placeholder="Use case ID" value={useCaseId} onChange={event => setUseCaseId(event.target.value)} />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button onClick={resolve} disabled={resolveObject.isPending}>
+                  {resolveObject.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Link2 className="mr-2 h-4 w-4" />}
+                  Resolve and process
+                </Button>
+                <Button variant="outline" onClick={() => reprocessObject.mutate(id, { onSuccess: () => toast({ title: 'Reprocessing queued' }) })}>
+                  <RefreshCw className="mr-2 h-4 w-4" /> Reprocess
+                </Button>
+                <Button variant="ghost" onClick={() => ignoreObject.mutate({ id, reason: 'Ignored from Customer Activity review.' }, { onSuccess: () => { toast({ title: 'Transcript ignored' }); onClose(); } })}>
+                  Ignore
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </aside>
+    </div>
+  );
+}
+
 function MeetingDetailDrawer({
   id,
   onClose,
@@ -777,10 +1189,12 @@ export default function Activities() {
   const navigate = useNavigate();
   const location = useLocation();
   const { openQuickAdd, openDrawer } = useAppStore();
-  const [tab, setTab] = useState<CustomerActivityTab>('meetings');
+  const queryParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const [tab, setTab] = useState<CustomerActivityTab>(() => activityTabFromQuery(queryParams.get('tab')));
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Record<string, string[]>>({});
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
+  const [selectedSourceObjectId, setSelectedSourceObjectId] = useState<string | null>(null);
   const [setupProvider, setSetupProvider] = useState<CalendarProvider | null>(null);
   const [setupStep, setSetupStep] = useState(0);
   const [setupEmail, setSetupEmail] = useState('');
@@ -796,7 +1210,6 @@ export default function Activities() {
       return false;
     }
   });
-  const queryParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const startGoogle = useStartCalendarConnection('google');
   const startMicrosoft = useStartCalendarConnection('microsoft');
   const syncConnection = useSyncCalendarConnection();
@@ -836,7 +1249,15 @@ export default function Activities() {
       ],
     },
   ];
-  const currentFilterConfigs = tab === 'meetings' || tab === 'needs_context' ? meetingFilterConfigs : tab === 'connections' ? [] : activityFilterConfigs;
+  const currentFilterConfigs = tab === 'meetings' || tab === 'needs_context' ? meetingFilterConfigs : tab === 'meeting_sources' ? [] : activityFilterConfigs;
+  useEffect(() => {
+    const nextTab = activityTabFromQuery(queryParams.get('tab'));
+    if (nextTab !== tab) {
+      setTab(nextTab);
+      setPage(1);
+      setActiveFilters({});
+    }
+  }, [queryParams, tab]);
   useEffect(() => {
     const message = queryParams.get('calendar_error');
     if (!message) return;
@@ -859,7 +1280,16 @@ export default function Activities() {
     });
   };
 
-  const calendarTab = tab === 'calls_notes' || tab === 'connections' ? 'meetings' : tab;
+  const setActivityTab = (nextTab: CustomerActivityTab) => {
+    setTab(nextTab);
+    setPage(1);
+    setActiveFilters({});
+    const next = new URLSearchParams(location.search);
+    next.set('tab', nextTab);
+    navigate(`${location.pathname}?${next.toString()}`, { replace: false });
+  };
+
+  const calendarTab = tab === 'calls_notes' || tab === 'meeting_sources' ? 'meetings' : tab;
   const calendarQ = useCalendarEvents({
     tab: calendarTab === 'all' ? 'all' : calendarTab,
     q: search,
@@ -868,11 +1298,16 @@ export default function Activities() {
     limit: 100,
   }) as any;
   const connectionsQ = useCalendarConnections() as any;
+  const contextSourceObjectsQ = useContextSourceObjects({ limit: 100 }) as any;
   const activitiesQ = useActivities({ limit: 200 }) as any;
 
   const meetings: CalendarEvent[] = calendarQ.data?.data ?? [];
   const summary = calendarQ.data?.summary ?? connectionsQ.data?.summary;
   const connections = connectionsQ.data?.data ?? [];
+  const contextSourceObjects = (contextSourceObjectsQ.data?.data ?? []) as ContextSourceObject[];
+  const transcriptReviewObjects = contextSourceObjects.filter(object => ['needs_review', 'ambiguous'].includes(object.match_status) || object.processing_status === 'failed');
+  const meetingContextReviewCount = Number(summary?.needs_context ?? 0) + transcriptReviewObjects.length;
+  const transcriptSourceCount = new Set(contextSourceObjects.map(object => object.connection_name ?? object.connection_provider ?? object.id)).size;
   const oauthReady = connectionsQ.data?.oauth_ready as Record<'google' | 'microsoft', boolean> | undefined;
   const currentUser = getUser();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'owner';
@@ -938,7 +1373,7 @@ export default function Activities() {
       onSuccess: () => toast({ title: 'Calendar disconnected' }),
       onError: (err) => toast({
         title: 'Could not disconnect calendar',
-        description: err instanceof Error ? err.message : 'Try again from Customer Activity connections.',
+        description: err instanceof Error ? err.message : 'Try again from Customer Activity Meeting Sources.',
         variant: 'destructive',
       }),
     });
@@ -973,7 +1408,7 @@ export default function Activities() {
         title: 'Admin setup requested',
         description: `${CALENDAR_PROVIDER_COPY[setupProvider].label} is waiting for an admin to finish OAuth setup before live sync can run.`,
       });
-      setTab('connections');
+      setActivityTab('meeting_sources');
       closeSetup();
       if (isAdmin) navigate('/settings/connections');
     } catch (err) {
@@ -1018,7 +1453,8 @@ export default function Activities() {
                   </button>
                 </div>
                 <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                  Connect your calendar when you want customer meetings auto matched to customer records and flagged when notes, transcripts, or debriefs are missing. This is optional: meeting transcripts and call notes can still feed context and agent memory through{' '}
+                  Connect your calendar when you want customer meetings auto matched to customer records and flagged when notes, transcripts, or debriefs are missing. Transcript drops and meeting notes live in Meeting Sources and Needs Context, so review work stays in the Activity flow.
+                  {' '}You can also add context manually through{' '}
                   <button
                     type="button"
                     onClick={() => navigate('/context?tab=observations&add=context')}
@@ -1033,11 +1469,14 @@ export default function Activities() {
                 {!calendarConnected && (
                   <>
                     <Button variant="ghost" onClick={() => navigate('/context?tab=sources')}>View Sources</Button>
-                    <Button variant="outline" onClick={() => setTab('connections')}>Connect calendar</Button>
+                    <Button variant="outline" onClick={() => setActivityTab('meeting_sources')}>Meeting Sources</Button>
                   </>
                 )}
                 {calendarConnected && (
-                  <Button className="shrink-0" variant="ghost" onClick={() => navigate('/context?tab=sources')}>View Sources</Button>
+                  <>
+                    <Button className="shrink-0" variant="ghost" onClick={() => setActivityTab('needs_context')}>Needs Context</Button>
+                    <Button className="shrink-0" variant="outline" onClick={() => setActivityTab('meeting_sources')}>Meeting Sources</Button>
+                  </>
                 )}
                 <button
                   type="button"
@@ -1061,7 +1500,7 @@ export default function Activities() {
               <button
                 key={item.key}
                 type="button"
-                onClick={() => { setTab(item.key); setPage(1); setActiveFilters({}); }}
+                onClick={() => setActivityTab(item.key)}
                 className={`inline-flex items-center gap-1.5 rounded-t-lg border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
                   active
                     ? 'border-blue-500 text-foreground'
@@ -1070,8 +1509,8 @@ export default function Activities() {
               >
                 <Icon className="h-4 w-4" />
                 {item.label}
-                {item.key === 'needs_context' && Number(summary?.needs_context ?? 0) > 0 && (
-                  <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-200">{summary?.needs_context}</span>
+                {item.key === 'needs_context' && meetingContextReviewCount > 0 && (
+                  <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-200">{meetingContextReviewCount}</span>
                 )}
               </button>
             );
@@ -1079,7 +1518,7 @@ export default function Activities() {
         </div>
       </div>
 
-      {tab !== 'connections' && (
+      {tab !== 'meeting_sources' && (
         <ListToolbar
           searchValue={search}
           onSearchChange={setSearch}
@@ -1098,19 +1537,33 @@ export default function Activities() {
       )}
 
       <div className="flex-1 overflow-y-auto px-4 py-4 pb-24 md:px-6 md:pb-6">
-        {tab === 'connections' ? (
-          <CalendarConnectionsPanel
-            connections={connections}
-            summary={connectionsQ.data?.summary}
-            onSetup={openSetup}
-            onSync={(id) => syncConnection.mutate(id, { onSuccess: () => toast({ title: 'Calendar sync queued' }) })}
-            onToggleActive={toggleCalendarActive}
-            onDisconnect={disconnectCalendar}
-            syncingId={syncConnection.variables ?? null}
-            connectionActionPending={updateCalendarStatus.isPending || deleteCalendarConnection.isPending}
-            oauthReady={oauthReady}
+        {tab !== 'meeting_sources' && (
+          <MeetingContextShortcuts
             isAdmin={isAdmin}
+            reviewCount={meetingContextReviewCount}
+            calendarConnected={calendarConnected}
+            sourceCount={transcriptSourceCount}
+            onNeedsContext={() => setActivityTab('needs_context')}
+            onMeetingSources={() => setActivityTab('meeting_sources')}
+            onLogActivity={() => openQuickAdd('activity')}
           />
+        )}
+        {tab === 'meeting_sources' ? (
+          <div className="space-y-6">
+            <CalendarConnectionsPanel
+              connections={connections}
+              summary={connectionsQ.data?.summary}
+              onSetup={openSetup}
+              onSync={(id) => syncConnection.mutate(id, { onSuccess: () => toast({ title: 'Calendar sync queued' }) })}
+              onToggleActive={toggleCalendarActive}
+              onDisconnect={disconnectCalendar}
+              syncingId={syncConnection.variables ?? null}
+              connectionActionPending={updateCalendarStatus.isPending || deleteCalendarConnection.isPending}
+              oauthReady={oauthReady}
+              isAdmin={isAdmin}
+            />
+            <TranscriptDropsPanel isAdmin={isAdmin} onReview={() => setActivityTab('needs_context')} />
+          </div>
         ) : tab === 'calls_notes' || tab === 'all' ? (
           activitiesQ.isLoading ? (
             <div className="space-y-3">
@@ -1148,6 +1601,8 @@ export default function Activities() {
           <div className="space-y-3">
             {[...Array(6)].map((_, i) => <div key={i} className="h-24 rounded-xl bg-muted/50 animate-pulse" />)}
           </div>
+        ) : tab === 'needs_context' && meetings.length === 0 && transcriptReviewObjects.length > 0 ? (
+          <TranscriptReviewList objects={transcriptReviewObjects} onOpen={setSelectedSourceObjectId} />
         ) : meetings.length === 0 ? (
           <OnboardingEmptyState
             icon={CalendarClock}
@@ -1161,6 +1616,9 @@ export default function Activities() {
           />
         ) : (
           <div className="space-y-3">
+            {tab === 'needs_context' && (
+              <TranscriptReviewList objects={transcriptReviewObjects} onOpen={setSelectedSourceObjectId} />
+            )}
             {meetings.map(event => (
               <MeetingCard
                 key={event.id}
@@ -1427,6 +1885,7 @@ export default function Activities() {
       </Dialog>
 
       <MeetingDetailDrawer id={selectedMeetingId} onClose={() => setSelectedMeetingId(null)} />
+      <ContextSourceObjectDrawer id={selectedSourceObjectId} onClose={() => setSelectedSourceObjectId(null)} />
     </div>
   );
 }

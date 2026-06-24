@@ -259,6 +259,26 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
   calendar_event_process: { method: 'POST', path: (i) => `/api/v1/calendar-events/${i.id}/process` },
   calendar_event_add_context: { method: 'POST', path: (i) => `/api/v1/calendar-events/${i.id}/artifacts` },
   meeting_classification_list: { method: 'GET', path: (i) => `/api/v1/meeting-classifications${i.include_disabled ? '?include_disabled=true' : ''}` },
+  context_source_connection_list: { method: 'GET', path: (i) => queryPath('/api/v1/context-source-connections', i, ['provider', 'status', 'limit', 'cursor']) },
+  context_source_connection_create: { method: 'POST', path: () => '/api/v1/context-source-connections' },
+  context_source_connection_sync: { method: 'POST', path: (i) => `/api/v1/context-source-connections/${i.id}/sync` },
+  context_source_object_list: {
+    method: 'GET',
+    path: (i) => queryPath('/api/v1/context-source-objects', i, [
+      'connection_id',
+      'match_state',
+      'processing_state',
+      'status',
+      'account_id',
+      'calendar_event_id',
+      'limit',
+      'cursor',
+    ]),
+  },
+  context_source_object_get: { method: 'GET', path: (i) => `/api/v1/context-source-objects/${i.id}` },
+  context_source_object_resolve: { method: 'POST', path: (i) => `/api/v1/context-source-objects/${i.id}/resolve` },
+  context_source_object_reprocess: { method: 'POST', path: (i) => `/api/v1/context-source-objects/${i.id}/reprocess` },
+  context_source_object_ignore: { method: 'POST', path: (i) => `/api/v1/context-source-objects/${i.id}/ignore` },
 
   // Record Drafts
   record_draft_preview: { method: 'POST', path: () => '/api/v1/agent/extract/record' },
