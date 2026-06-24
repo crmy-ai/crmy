@@ -183,7 +183,9 @@ export function evalCommand(): Command {
       requireLive?: boolean;
       json?: boolean;
     }) => {
-      const suites = opts.all ? KNOWN_SUITES.filter(suite => suite !== 'connector_certification') : parseSuites(opts.suite);
+      // --all includes planned suites too; runCrmyEval reports them as skipped
+      // rather than dropping them, so the report is complete and auditable.
+      const suites = opts.all ? KNOWN_SUITES : parseSuites(opts.suite);
       const { runCrmyEval } = await loadEvalRunner();
       const run = await runCrmyEval({
         suites,

@@ -1743,12 +1743,20 @@ async function writeArtifacts(outputDir: string, run: EvalRunSummary): Promise<s
 export async function runCrmyEval(options: RunEvalOptions = {}): Promise<EvalRunSummary> {
   const profile = profileForRun(options);
   const selected = selectSuites(options);
-  const unsupported = selected.filter(suite => !IMPLEMENTED_SUITES.includes(suite));
-  if (unsupported.length > 0) {
-    throw new Error(`Eval suite not implemented yet: ${unsupported.join(', ')}`);
-  }
+  const supported = selected.filter(suite => IMPLEMENTED_SUITES.includes(suite));
+  const planned = selected.filter(suite => !IMPLEMENTED_SUITES.includes(suite));
 
-  const results = (await Promise.all(selected.map(suite => runSuite(suite, options)))).flat();
+  // Planned-but-unimplemented suites (e.g. connector_certification) are reported
+  // as skipped rather than throwing, so `eval run --all` always produces a
+  // complete, auditable report instead of failing the whole run.
+  const ranResults = (await Promise.all(supported.map(suite => runSuite(suite, options)))).flat();
+  const plannedResults = planned.map(suite => skippedCase({
+    id: `${suite}:not_implemented`,
+    suite,
+    title: `${SUITE_META[suite].title} (planned)`,
+    reason: 'Suite is planned but not implemented yet; skipped.',
+  }));
+  const results = [...ranResults, ...plannedResults];
   const suites = await Promise.all(selected.map(suiteSummary));
   const scores = averageScores(results);
   const thresholds = [
