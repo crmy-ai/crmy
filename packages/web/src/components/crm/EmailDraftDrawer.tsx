@@ -68,6 +68,7 @@ export function EmailDraftDrawer() {
   const contact = contactData?.contact ?? contactData;
   const agentConfigured = agentEnabled || agentSettingsLoading;
   const actionContext = contextUsed?.action_context as { review_required?: boolean; readiness_status?: string; risk_level?: string; guidance_summary?: string } | undefined;
+  const productKnowledgeUsed = (contextUsed?.product_knowledge as { used_claim_ids?: string[] } | undefined)?.used_claim_ids ?? [];
 	  const directSendBlocked = Boolean(actionContext?.review_required);
 	  const sender = (senderQ.data?.sender ?? {}) as {
 	    sender_type?: 'actor_mailbox' | 'tenant_provider' | 'unknown';
@@ -359,6 +360,11 @@ export function EmailDraftDrawer() {
                     title={actionContext.guidance_summary}
                   >
                     Send readiness · {actionContext.review_required ? 'Review before send' : 'Ready'}
+                  </Badge>
+                )}
+                {productKnowledgeUsed.length > 0 && (
+                  <Badge variant="outline" className="border-sky-500/25 bg-sky-500/10 text-sky-200" title="Approved, source-grounded product claims used in this draft">
+                    <CheckCircle2 className="mr-1 h-3 w-3" /> {productKnowledgeUsed.length} product claim(s)
                   </Badge>
                 )}
                 {warnings.map(warning => (

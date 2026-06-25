@@ -141,6 +141,12 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
   const isEmpty = activityCount === 0 && assignmentCount === 0 && contextTypes.length === 0 && signalTypes.length === 0;
   const memoryEntries = flattenBriefingEntries(briefing?.context_entries);
   const signalEntries = flattenBriefingEntries(briefing?.signals);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const productContext = (briefing as any)?.product_context as {
+    status?: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    relevant_claims?: any[]; avoid_claims?: any[]; warnings?: string[];
+  } | undefined;
 
   return (
     <div className="flex flex-col h-full">
@@ -319,6 +325,39 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
                     </span>
                   </div>
                 </div>
+              ))}
+            </div>
+          </BriefingSection>
+        )}
+
+        {/* Product knowledge (governed, optional) */}
+        {productContext?.status === 'available' && (productContext.relevant_claims?.length ?? 0) > 0 && (
+          <BriefingSection
+            icon={<FileText className="w-4 h-4 text-primary" />}
+            title="Product Knowledge"
+            pill={productContext.relevant_claims?.length}
+            defaultOpen
+          >
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">Approved, source-grounded claims safe to cite in customer-facing messages.</p>
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+              {(productContext.relevant_claims ?? []).map((c: any) => (
+                <div key={c.id} className="rounded-lg border border-border p-3 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{c.category}</span>
+                    <span className="font-medium text-foreground text-sm">{c.title}</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground">{c.body}</p>
+                  {c.citations?.[0] && (
+                    <p className="text-xs text-muted-foreground">Source: {c.citations[0].source_label}</p>
+                  )}
+                </div>
+              ))}
+              {(productContext.avoid_claims?.length ?? 0) > 0 && (
+                <p className="text-xs text-warning">{productContext.avoid_claims?.length} claim(s) excluded as not customer-safe.</p>
+              )}
+              {(productContext.warnings ?? []).map((w: string, i: number) => (
+                <p key={i} className="text-xs text-warning">⚠ {w}</p>
               ))}
             </div>
           </BriefingSection>

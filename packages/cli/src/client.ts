@@ -250,6 +250,9 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
 	  action_context_get: { method: 'POST', path: () => '/api/v1/action-context' },
 	  action_context_request_human_unblock: { method: 'POST', path: () => '/api/v1/action-context/human-unblock' },
 
+	  // Product knowledge
+	  knowledge_retrieve: { method: 'POST', path: () => '/api/v1/knowledge/retrieve' },
+
   // Calendar / Customer Activity
   availability_suggest_times: { method: 'POST', path: () => '/api/v1/availability/suggest-times' },
   calendar_connection_list: { method: 'GET', path: () => '/api/v1/calendar/connections' },
