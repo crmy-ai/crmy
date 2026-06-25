@@ -1987,3 +1987,30 @@ export const knowledgeRetrieve = z.object({
   include_stale: z.boolean().optional().default(false),
   limit: z.number().int().min(1).max(50).optional().default(8),
 });
+
+/** Admin/governance write path for a product knowledge claim envelope. */
+export const knowledgeClaimUpsert = z.object({
+  external_key: z.string().max(256).optional().describe('Stable dedupe key from the source; re-upserts update in place.'),
+  category: z.string().min(1).describe('e.g. capability, proof_point, pricing, implementation, security, competitive_response.'),
+  title: z.string().min(1),
+  body: z.string().min(1),
+  summary: z.string().optional(),
+  product_scope: z.array(z.string()).optional(),
+  competitors: z.array(z.string()).optional(),
+  personas: z.array(z.string()).optional(),
+  industries: z.array(z.string()).optional(),
+  source_ref: z.string().optional(),
+  source_url: z.string().optional(),
+  source_label: z.string().optional(),
+  source_version: z.string().optional(),
+  /** Source text the claim is drawn from. When provided, CRMy verifies the claim is grounded in it. */
+  source_text: z.string().max(200000).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  source_priority: z.enum(['authoritative', 'secondary', 'informal']).optional(),
+  approval_status: z.enum(['approved', 'pending', 'unapproved', 'rejected']).optional(),
+  approved_for_external_use: z.boolean().optional(),
+  visibility: z.enum(['external', 'internal']).optional(),
+  status: z.enum(['active', 'stale', 'deprecated', 'conflicting', 'rejected']).optional(),
+  effective_at: z.string().optional(),
+  valid_until: z.string().optional(),
+});

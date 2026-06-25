@@ -26,9 +26,14 @@ Search the CRMy guide for feature, concept, and workflow documentation.
 - **Output**: `{ sections, available_sections }`
 
 ### knowledge_retrieve
-Retrieve **governed product knowledge** — approved, source-grounded, cited product, pricing, implementation, security, and competitive claims — to ground a customer-facing action. Optional and non-blocking: it never creates Memory or writes to systems of record, and returns a clear `not_configured` status until a `product_knowledge` source is set up. In the `product_knowledge` and `customer_outreach` toolsets; requires `knowledge:read` (covered by the `read` wildcard). See [Governed Product Knowledge Retrieval](governed-product-knowledge-retrieval.md).
+Retrieve **governed product knowledge** — approved, source-grounded, cited product, pricing, implementation, security, and competitive claims — to ground a customer-facing action. `customer_facing` (default) applies a strict policy: only approved, externally-visible, source-grounded, fresh claims; everything else is reported under `excluded_claims` with a reason. `internal` includes risky claims but labels them in `warnings`. Optional and non-blocking: it never creates Memory or writes to systems of record, and returns a clear `not_configured` status until claims exist. Every retrieval records a receipt for proof/lineage. In the `product_knowledge` and `customer_outreach` toolsets; requires `knowledge:read` (covered by the `read` wildcard). Also available over REST at `POST /api/v1/knowledge/retrieve`. See [Governed Product Knowledge Retrieval](governed-product-knowledge-retrieval.md).
 - **Input**: `query` (required), `subject_type`, `subject_id`, `audience` (`customer_facing` | `internal`), `proposed_action`, `product_scope`, `competitor`, `persona`, `industry`, `require_approved`, `include_stale`, `limit`
 - **Output**: `{ status, claims[], excluded_claims[], warnings[], retrieval_receipt?, message? }` where `status` is `available` | `no_results` | `degraded` | `not_configured`
+
+### knowledge_claim_upsert
+**Admin/governance** tool to author or update a product knowledge claim envelope (capability, proof point, pricing, implementation, security, or competitive response). Provide `source_text` so CRMy can verify the claim is **grounded** in its source — customer-facing eligibility requires grounding plus `approval_status: approved`, `approved_for_external_use`, `visibility: external`, and freshness. Re-upserts by `external_key` update in place. Authors governed product truth; does not touch customer Memory. Admin-only; requires `knowledge:write`.
+- **Input**: `category` (required), `title` (required), `body` (required), `summary`, `source_text`, `external_key`, `product_scope[]`, `competitors[]`, `personas[]`, `industries[]`, `source_ref`/`source_url`/`source_label`/`source_version`, `confidence`, `source_priority`, `approval_status`, `approved_for_external_use`, `visibility`, `status`, `effective_at`, `valid_until`
+- **Output**: the stored `KnowledgeClaim` (including the computed `grounded` flag)
 
 Common safe paths:
 - **Unknown customer reference**: `customer_record_resolve` → `action_context_get` or `briefing_get`
