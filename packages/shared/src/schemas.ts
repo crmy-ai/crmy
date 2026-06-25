@@ -1548,6 +1548,8 @@ export const briefingGet = z.object({
     .describe('Named token budget preset. Explicit token_budget wins when both are supplied.'),
   evidence_mode: evidenceMode.default('summary')
     .describe('summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries.'),
+  include_product_context: z.boolean().optional()
+    .describe('Include governed product knowledge relevant to this subject. Defaults to true when product knowledge is configured; never blocks the briefing.'),
 });
 
 export const actionContextProposedAction = z.object({
@@ -1586,6 +1588,8 @@ export const actionContextGet = z.object({
     .describe('summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries.'),
   emit_retrieval_event: z.boolean().default(true),
   proposed_action: actionContextProposedAction.optional(),
+  include_product_context: z.boolean().optional()
+    .describe('Include governed product knowledge in the assembled briefing. Defaults to true when product knowledge is configured.'),
 });
 
 export const actionContextHumanUnblock = z.object({

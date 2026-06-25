@@ -12,7 +12,10 @@ import type {
   AdjacentContext,
   ActiveSequenceEnrollment,
   TokenBudgetProfile,
+  ProductContext,
+  ActorContext,
 } from '@crmy/shared';
+import { isProductKnowledgeConfigured, getProductContextForSubject } from './knowledge-retrieval.js';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as accountRepo from '../db/repos/accounts.js';
 import * as oppRepo from '../db/repos/opportunities.js';
@@ -34,6 +37,31 @@ function parseSince(since?: string): string | undefined {
   const [, num, unit] = match;
   const ms = parseInt(num, 10) * (unit === 'd' ? 86400000 : unit === 'h' ? 3600000 : 60000);
   return new Date(Date.now() - ms).toISOString();
+}
+
+/** Context types that signal what product knowledge would help a draft for this subject. */
+const PRODUCT_QUERY_TYPES = new Set([
+  'objection', 'competitive_intel', 'deal_risk', 'buying_process',
+  'success_criteria', 'pain_point', 'next_step', 'use_case_fit',
+]);
+
+function subjectDisplayName(subject: Record<string, unknown>): string {
+  if (typeof subject.name === 'string' && subject.name) return subject.name;
+  const first = typeof subject.first_name === 'string' ? subject.first_name : '';
+  const last = typeof subject.last_name === 'string' ? subject.last_name : '';
+  return `${first} ${last}`.trim();
+}
+
+/** Derive a product-knowledge query from the subject and its most relevant context. */
+function buildProductQuery(subject: Record<string, unknown>, entries: ContextEntry[]): string {
+  const name = subjectDisplayName(subject);
+  const parts = entries
+    .filter(entry => PRODUCT_QUERY_TYPES.has(entry.context_type))
+    .slice(0, 8)
+    .map(entry => `${entry.title ?? ''} ${entry.body}`.trim())
+    .filter(Boolean);
+  const text = [name, ...parts].filter(Boolean).join('. ').slice(0, 600);
+  return text || name || 'product overview';
 }
 
 /** Rough token estimate: ~4 chars per token, plus per-entry overhead. */
@@ -356,6 +384,10 @@ export async function assembleBriefing(
     token_budget_profile?: TokenBudgetProfile;
     evidence_mode?: EvidenceMode;
     proposed_action_type?: ActionContextProposedActionType;
+    /** Include governed product knowledge. Defaults to true when product knowledge is configured. */
+    include_product_context?: boolean;
+    /** Actor attributed on the product-knowledge retrieval receipt. */
+    actor_id?: string;
   },
 ): Promise<Briefing> {
   const sinceDate = parseSince(options?.since);
@@ -518,6 +550,34 @@ export async function assembleBriefing(
     }
   }
 
+  // 12. Product context (optional, governed). Defaults on when product knowledge
+  //     is configured; strictly additive and never fails the briefing.
+  let product_context: ProductContext | undefined;
+  const wantProductContext = options?.include_product_context ?? await isProductKnowledgeConfigured(db, tenantId);
+  if (wantProductContext) {
+    try {
+      const pcActor: ActorContext = {
+        tenant_id: tenantId,
+        actor_id: options?.actor_id ?? 'briefing',
+        actor_type: 'agent',
+        role: 'member',
+      };
+      product_context = await getProductContextForSubject(db, pcActor, {
+        query: buildProductQuery(subject as Record<string, unknown>, [...ownEntries, ...ownSignals]),
+        subject_type: subjectType,
+        subject_id: subjectId,
+        audience: 'customer_facing',
+        ...(options?.proposed_action_type ? { proposed_action: options.proposed_action_type } : {}),
+        limit: 6,
+      });
+    } catch {
+      product_context = {
+        status: 'degraded', relevant_claims: [], proof_points: [], implementation_caveats: [],
+        competitive_context: [], avoid_claims: [], warnings: ['Product context temporarily unavailable.'], citations: [],
+      };
+    }
+  }
+
   return {
     subject: subject as Record<string, unknown>,
     subject_type: subjectType,
@@ -534,6 +594,7 @@ export async function assembleBriefing(
     ...(tokenEstimate !== undefined ? { token_estimate: tokenEstimate } : {}),
     ...(truncated !== undefined ? { truncated } : {}),
     ...(droppedEntries?.length ? { dropped_entries: droppedEntries } : {}),
+    ...(product_context ? { product_context } : {}),
     context_packing: {
       ...(tokenBudget.profile ? { token_budget_profile: tokenBudget.profile } : {}),
       ...(tokenBudget.budget ? { token_budget: tokenBudget.budget } : {}),
@@ -765,6 +826,21 @@ export function formatBriefingText(briefing: Briefing): string {
           if (evidence) lines.push(`        ${evidence}`);
         }
       }
+    }
+    lines.push('');
+  }
+
+  if (briefing.product_context && briefing.product_context.status === 'available') {
+    const pc = briefing.product_context;
+    lines.push('--- Product Knowledge (governed, approved + grounded) ---');
+    lines.push('  Use these approved, cited claims to ground customer-facing statements. Do not assert anything not listed here.');
+    for (const claim of pc.relevant_claims) {
+      const cite = claim.citations[0];
+      const citeText = cite ? ` [${cite.source_label}]` : '';
+      lines.push(`  • [${claim.category}] ${claim.title}: ${claim.body.slice(0, 240)}${citeText}`);
+    }
+    if (pc.avoid_claims.length > 0) {
+      lines.push(`  ⚠ ${pc.avoid_claims.length} claim(s) excluded (not customer-safe); do not use them.`);
     }
     lines.push('');
   }

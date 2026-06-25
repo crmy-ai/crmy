@@ -4092,7 +4092,8 @@ export function apiRouter(db: DbPool): Router {
         actor.tenant_id,
         subjectType as 'contact' | 'account' | 'opportunity' | 'use_case',
         subjectId,
-        { include_stale: false },
+        // Compact text endpoint does not render product context; skip the extra retrieval.
+        { include_stale: false, include_product_context: false },
       );
 
       // Build compact text representation for the LLM

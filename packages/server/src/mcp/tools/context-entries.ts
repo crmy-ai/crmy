@@ -1202,6 +1202,8 @@ export function contextEntryTools(db: DbPool): ToolDef[] {
             token_budget: input.token_budget,
             token_budget_profile: input.token_budget_profile,
             evidence_mode: input.evidence_mode,
+            include_product_context: input.include_product_context,
+            actor_id: actor.actor_id,
           },
         );
 
