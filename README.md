@@ -4,13 +4,13 @@
 
 <h1 align="center">CRMy</h1>
 
-<h2 align="center">Governed customer context engine for AI agents</h2>
+<h2 align="center">Governed memory for customer-facing AI agents</h2>
 
 <p align="center">
-  CRMy turns messy customer context into trusted active context: Drop in a transcript, meeting notes, etc. and CRMy returns an agent-ready briefing containing confirmed Memory, evidence-backed Signals, stale warnings, and a "safe to act?" check with audit-ready proof.
+  CRMy gives customer-facing agents a governed memory layer. Drop in messy transcripts, notes, emails, and CRM changes; CRMy extracts evidence-backed Signals, validates grounded claims, promotes only trusted facts into durable Memory, flags Memory decay, and returns a compact "safe to act?" briefing with proof.
 </p>
 <p align="center">
-  <strong>Messy customer context in. Agent-ready Signals, Memory, and action guidance out.</strong>
+  <strong>Messy customer context in. Governed agent context out.</strong>
 </p>
 
 <p align="center">
@@ -48,13 +48,13 @@ Without a governed context layer, agents can't answer the most critical question
 - Does this customer email, CRM update, or workflow need HITL approval?
 - What proof should exist after the agent acts? 
 
-CRMy is the operating layer for these questions. Instead of dumping raw records into a prompt, CRMy gives agents the customer Memory, warnings, policy, evidence, and action boundaries they need before they engage a customer or change a system of record — leaving an audit trail behind. It is the **trust boundary between your agents and your customer systems**, and you can prove the value with zero connectors before you ever wire up a CRM.
+CRMy is the operating layer for these questions. Instead of dumping raw records into a prompt, CRMy gives agents the customer Memory, warnings, policy, evidence, and action boundaries they need before they engage a customer or change a system of record, leaving an audit trail behind. It is the **trust boundary between your agents and your customer systems**, and you can prove the value with demo data or direct context ingestion.
 
 ```text
 Raw Context -> Signals -> Memory -> Briefing + Action Context -> Handoff / Writeback -> Audit Trail
 ```
 
-Start connector-free — `npx -y @crmy/cli quickstart` seeds demo context and shows an agent resolving a customer, getting a governed briefing, checking what is safe to act on, and proving lineage. Connecting a CRM or warehouse is an optional upgrade, not a prerequisite.
+Try the core flow: `npx -y @crmy/cli quickstart` seeds demo context and shows an agent resolving a customer, getting a governed briefing, checking what is safe to act on, and proving lineage.
 
 ## Why CRMy
 
@@ -62,14 +62,23 @@ CRMy is built for teams creating customer-facing agents that need to work safely
 
 | Agent need | What CRMy provides |
 |---|---|
-| Know the customer before acting | Account, contact, opportunity, activity, Signal, Memory, and stale-context briefings. |
-| Separate fact from inference | Evidence-backed Signals stay distinct from confirmed Memory until they are ready. |
-| Use messy sources | Notes, transcripts, emails, calendar events, CRM/warehouse sync, REST, CLI, MCP, and UI Add Context flows. |
-| Stay inside action boundaries | Actor scope, warnings, policy checks, approvals, Handoffs, writeback previews, and audit receipts. |
-| Keep prompts smaller | Ranked, token-budgeted packets with evidence summaries by default and full proof on demand. |
-| Connect through agent-native surfaces | MCP-first tools with REST, CLI, and Web UI surfaces over the same PostgreSQL-backed engine. |
+| Extract customer facts from messy inputs | Turn transcripts, notes, emails, meetings, CRM changes, REST, CLI, MCP, and UI inputs into structured Raw Context and Signals. |
+| Validate before agents rely on it | Keep inferred Signals separate from confirmed Memory until evidence, readiness, policy, and source grounding say they are safe. |
+| Track Memory decay | Carry freshness and decay signals, surface stale warnings, and avoid treating old customer truth as permanent. |
+| Decide whether an agent can act | Return readiness, policy checks, source authority, review requirements, Handoffs, writeback previews, and audit receipts. |
+| Keep prompts smaller and more useful | Retrieve ranked, token-budgeted packets with evidence summaries by default and full proof on demand. |
+| Fit any agent stack | Use MCP-first tools with REST, CLI, and Web UI surfaces over the same PostgreSQL-backed engine. |
 
 CRMy does not replace your CRM, warehouse, mailbox, calendar, support desk, or sales methodology. Those systems remain where work happens and state is stored. CRMy makes that state agent-operable.
+
+## Who CRMy Is For
+
+Use CRMy when you are building agents that need customer context they can trust before acting.
+
+- Sales and CS agents that draft customer emails, prep meetings, or summarize account state.
+- RevOps and support agents that update CRM records, create handoffs, or run workflows.
+- Agent platforms that need evidence, stale-context warnings, approvals, and audit receipts around customer-facing work.
+- Teams that want to test governed customer memory with realistic demo data or direct context ingestion.
 
 ## How It Works
 
@@ -102,21 +111,42 @@ CRMy keeps customer context useful without pretending messy source material is i
 
 ## 60-Second Proof
 
-With Postgres running, one command seeds demo context and runs the exact path an agent takes over MCP — resolve a customer, get a governed briefing, check what is safe to act on, and prove lineage. **No CRM connector required.**
+With Postgres running, one command seeds demo context and runs the path an agent takes over MCP: resolve a customer, get a governed briefing, check what is safe to act on, and prove lineage.
 
 ```bash
 npx -y @crmy/cli init --demo     # one-time: schema, owner, keys, demo data
-npx -y @crmy/cli quickstart      # the connector-free golden path + next steps
+npx -y @crmy/cli quickstart      # demo agent path + next steps
 ```
 
 Representative output:
 
 ```text
-✓ Demo workspace ready — 2 accounts · 6 Signals · 5 Memory (no connector configured)
+✓ Demo workspace ready: 2 accounts · 6 Signals · 5 Memory
 ✓ Resolved account "Northstar Labs"
 ✓ Briefing returned 4 Memory items, 3 activities, and 2 reviewable Signal sets
 ✓ Action Context returned warn mode, review_needed readiness, 2 recommended actions
 ✓ Lineage returned source-to-context proof (67 nodes, 395 edges)
+```
+
+What an agent gets back is not a raw data dump. It is a compact packet that separates durable facts from unresolved claims and action risk:
+
+```text
+Memory
+- Security review is the active expansion blocker.
+- Maya is the current expansion champion.
+
+Signals needing review
+- Procurement is not involved yet.
+  Evidence: "Procurement is not involved yet."
+  Status: grounded in source, not confirmed as Memory.
+
+Stale warnings
+- Expansion timeline has not been reconfirmed recently.
+
+Safe to act?
+- Customer outreach is allowed.
+- Include technical validation as the next step.
+- Keep the procurement claim out of committed CRM updates until confirmed.
 ```
 
 Prefer the individual tools? They map one-to-one to the MCP calls an agent makes:
@@ -127,7 +157,14 @@ npx -y @crmy/cli action-context "account:Northstar Labs" --action customer_outre
 npx -y @crmy/cli context lineage --subject "account:Northstar Labs"
 ```
 
-Want to watch messy text become reviewable context? With a Workspace Agent model configured, ingest a transcript and see it become evidence-backed Signals (never auto-confirmed Memory unless the evidence is grounded in the source):
+Connect an MCP client to the same path:
+
+```bash
+claude mcp add crmy -- npx -y @crmy/cli mcp
+codex mcp add crmy -- npx -y @crmy/cli mcp
+```
+
+Want to watch messy text become reviewable context? New extraction from your own notes or transcripts requires a Workspace Agent model. Once configured, ingest a transcript and see it become evidence-backed Signals. CRMy will not auto-confirm Memory unless the evidence is grounded in the source:
 
 ```bash
 cat > /tmp/northstar-note.txt <<'EOF'
@@ -139,7 +176,7 @@ npx -y @crmy/cli context ingest --subject "account:Northstar Labs" --file /tmp/n
 npx -y @crmy/cli context signal-groups
 ```
 
-The core concept: messy customer source material becomes reviewable Signals with evidence before it becomes trusted Memory — and a weak model cannot silently promote an ungrounded claim.
+The core concept: messy customer source material becomes reviewable Signals with evidence before it becomes trusted Memory, and a weak model cannot silently promote an ungrounded claim.
 
 ## Quickstart
 
@@ -171,7 +208,7 @@ npx -y @crmy/cli quickstart
 npx -y @crmy/cli server
 ```
 
-`quickstart` is the fastest way to see the point of CRMy: with **no CRM connector configured**, it seeds demo context and shows CRMy resolving a customer, returning a governed briefing, checking Action Context, and proving lineage — the same path an agent runs over MCP. Connecting a CRM or warehouse is an optional upgrade, not a prerequisite. (`npx -y @crmy/cli doctor` runs the same checks as a pass/fail health check.)
+`quickstart` is the fastest way to see CRMy with realistic demo data. It shows CRMy resolving a customer, returning a governed briefing, checking Action Context, and proving lineage. (`npx -y @crmy/cli doctor` runs the same checks as a pass/fail health check.)
 
 Open:
 
@@ -223,16 +260,17 @@ crmy server
 
 | Capability | What it does |
 |---|---|
-| **Customer briefings** | Retrieve Current Memory, recent activity, open Handoffs, stale warnings, and unresolved Signals before analysis. |
-| **Action Context** | Return readiness, policy, warnings, source authority, review requirements, and audit metadata before customer-facing or record-changing work. |
 | **Raw Context ingestion** | Accept messy notes, transcripts, emails, meetings, sync records, agent inputs, and custom source metadata. |
 | **Transcript & notes drops** | Watch S3-compatible buckets or local self-hosted folders for transcripts/notes, match them to meetings or records, and keep unmatched files in review. |
-| **Signals and Memory** | Extract inferred claims with evidence, then promote durable Memory only when readiness, policy, and source grounding allow it — a weak model cannot auto-confirm an ungrounded claim. |
-| **Email and calendar context** | Connect actor mailboxes/calendars for customer communication, meeting context, availability-aware suggestions, and sender-aware email actions. |
+| **Signals and Memory** | Extract inferred claims with evidence, then promote durable Memory only when readiness, policy, and source grounding allow it. |
+| **Memory freshness and decay** | Track freshness, surface stale warnings, and keep old customer truth from silently becoming agent truth. |
+| **Customer briefings** | Retrieve Current Memory, recent activity, open Handoffs, stale warnings, and unresolved Signals before analysis. |
+| **Action Context** | Return readiness, policy, warnings, source authority, review requirements, and audit metadata before customer-facing or record-changing work. |
+| **Governed product knowledge** | Retrieve approved, source-grounded product, pricing, implementation, security, and competitive claims to ground customer-facing drafts without mixing global product truth into customer Memory. |
 | **Handoffs and approvals** | Route uncertain, sensitive, or governed work to humans with evidence attached. |
+| **Lineage and audit** | Trace source material into Signals, Memory, product knowledge retrievals, actions, reviews, writebacks, and receipts. |
+| **Email and calendar context** | Connect actor mailboxes/calendars for customer communication, meeting context, availability-aware suggestions, and sender-aware email actions. |
 | **Systems of record** | Configure CRM/warehouse sync and governed writeback through mappings, previews, approvals, and receipts. |
-| **Lineage and audit** | Trace source material into Signals, Memory, actions, reviews, writebacks, and receipts. |
-| **Product knowledge** *(optional)* | Retrieve approved, source-grounded, cited product and competitive claims to ground customer-facing drafts via `knowledge_retrieve`. Off until configured; never blocks core flows. |
 | **MCP, CLI, REST, UI** | Use the same engine from agent tools, scripts, integrations, and the web app. |
 
 ## How CRMy Reduces Token Use
@@ -304,7 +342,7 @@ Use scoped API keys for agents whenever possible. Ordinary customer-reasoning ag
 
 ### Focus the tool catalog per session
 
-CRMy exposes a large tool catalog. Registering all of it on every session hurts tool-selection accuracy and wastes context, so you can narrow the working set to the job at hand with a **toolset**. Toolsets are chosen per connection — not baked into the API key — so the same key can open a `customer_outreach` session and a `systems_writeback` session and get the right tools for each.
+CRMy exposes a large tool catalog. Registering all of it on every session hurts tool-selection accuracy and wastes context, so you can narrow the working set to the job at hand with a **toolset**. Toolsets are chosen per connection, not baked into the API key, so the same key can open a `customer_outreach` session and a `systems_writeback` session and get the right tools for each.
 
 ```bash
 # stdio (CLI): pick a toolset for this session
@@ -317,7 +355,7 @@ POST https://<your-crmy-host>/mcp?toolset=customer_outreach
 X-CRMy-Toolset: customer_outreach
 ```
 
-Selection only ever *narrows* what the actor's scopes already allow — it can never widen access, and per-call scope enforcement is unchanged. Autonomous agents default to a lean `standard` set; human and admin sessions default to `full`. Set `CRMY_MCP_DEFAULT_TOOLSET=full` to restore the full catalog everywhere. Call `tool_guide` to see available toolsets and the one that matches your workflow.
+Selection only ever *narrows* what the actor's scopes already allow. It can never widen access, and per-call scope enforcement is unchanged. Autonomous agents default to a lean `standard` set; human and admin sessions default to `full`. Set `CRMY_MCP_DEFAULT_TOOLSET=full` to restore the full catalog everywhere. Call `tool_guide` to see available toolsets and the one that matches your workflow.
 
 See [MCP tools](docs/mcp-tools.md) for the full tool catalog and scoped-access model.
 
@@ -386,7 +424,7 @@ Design choices:
 - **Evidence and lineage**: important claims point back to source material.
 - **Grounded promotion**: a Signal becomes Memory only when its evidence is actually present in the source, so model confidence alone never mints trusted context.
 - **Governed writes**: mutating actions use idempotency, policy, approvals, and audit receipts.
-- **Connector-free first**: full briefing, Action Context, and lineage value with zero systems of record; CRM/warehouse connectors are an optional upgrade.
+- **Useful before production data setup**: full briefing, Action Context, and lineage value with demo or directly ingested context before CRM or warehouse setup.
 - **Runtime-neutral**: the same engine serves MCP, REST, CLI, and the Web UI, so any agent runtime gets the same governed contracts.
 - **Local-first model support**: Workspace Agent configuration can use local or OpenAI-compatible providers.
 
@@ -459,17 +497,26 @@ npm run test:ui-smoke   # with CRMy running on http://localhost:3000
 
 ## Learn More
 
+Docs:
+
 - [Guide](docs/guide.md)
 - [Context Engine](docs/context-engine.md)
 - [MCP tools](docs/mcp-tools.md)
 - [Agent recipes](docs/recipes/README.md)
 - [Examples](examples/README.md)
+- [0.8-1.0 roadmap](docs/roadmap-0.8-1.0.md)
+
+Agent examples:
+
 - [Claude Code account briefing example](examples/claude-code-account-briefing/README.md)
 - [Claude Desktop account briefing example](examples/claude-desktop-account-briefing/README.md)
 - [ChatGPT Developer Mode account briefing example](examples/chatgpt-developer-mode-account-briefing/README.md)
 - [Codex account briefing example](examples/codex-account-briefing/README.md)
 - [Hermes Agent account briefing example](examples/hermes-agent-account-briefing/README.md)
 - [OpenClaw plugin account briefing example](examples/openclaw-plugin-account-briefing/README.md)
+
+Recipes:
+
 - [GTM agent demo](docs/recipes/gtm-agent-demo.md)
 - [Post-meeting agent](docs/recipes/post-meeting-agent.md)
 - [Pipeline review agent](docs/recipes/pipeline-review-agent.md)
@@ -477,7 +524,6 @@ npm run test:ui-smoke   # with CRMy running on http://localhost:3000
 - [Context governance agent](docs/recipes/context-governance-agent.md)
 - [Renewal risk agent](docs/recipes/renewal-risk-agent.md)
 - [Public signal research agent](docs/recipes/public-signal-research-agent.md)
-- [0.8-1.0 roadmap](docs/roadmap-0.8-1.0.md)
 
 ## Release
 
