@@ -145,6 +145,14 @@ export const TOOLSET_DEFINITIONS: Record<string, ToolsetDefinition> = {
       'activity_create',
       'contact_outreach',
       'message_send',
+      'knowledge_retrieve',
+    ],
+  },
+  product_knowledge: {
+    description: 'Retrieve governed product, pricing, implementation, security, and competitive knowledge to ground customer-facing claims.',
+    tools: [
+      'knowledge_retrieve',
+      'email_draft_preview',
     ],
   },
   record_update: {

@@ -79,6 +79,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   context_diff: ['context:read'],
   briefing_get: ['context:read'],
   action_context_get: ['context:read'],
+  knowledge_retrieve: ['knowledge:read'],
   action_context_request_human_unblock: ['context:read', 'agent:write', 'hitl:write', 'assignments:write'],
   context_add: ['context:write'],
   context_signal_promote: ['context:write'],

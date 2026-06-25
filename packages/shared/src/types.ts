@@ -1564,3 +1564,74 @@ export interface EvalRunSummary {
   results: EvalCaseSummary[];
   created_at: string;
 }
+
+// -- Governed Product Knowledge Retrieval (optional, non-blocking) --
+// Product knowledge is a governed sibling namespace to customer Memory. Retrieval
+// returns approved, grounded, cited claims with trust metadata, or a clear
+// not_configured/no_results status. It never creates Memory or writes to systems
+// of record. See docs/governed-product-knowledge-retrieval.md.
+
+export type KnowledgeRetrievalStatus = 'available' | 'no_results' | 'degraded' | 'not_configured';
+export type KnowledgeAudience = 'customer_facing' | 'internal';
+export type KnowledgeApprovalStatus = 'approved' | 'pending' | 'unapproved' | 'rejected';
+export type KnowledgeVisibility = 'external' | 'internal';
+export type KnowledgeSourcePriority = 'authoritative' | 'secondary' | 'informal';
+
+export interface KnowledgeCitation {
+  source_label: string;
+  source_url?: string;
+  source_ref?: string;
+}
+
+export interface KnowledgeClaim {
+  id: string;
+  category: string;
+  title: string;
+  body: string;
+  confidence?: number;
+  /** True only when the claim text is grounded in its cited source (reuses the grounding gate). */
+  grounded: boolean;
+  approval_status: KnowledgeApprovalStatus;
+  approved_for_external_use: boolean;
+  visibility: KnowledgeVisibility;
+  effective_at?: string;
+  valid_until?: string;
+  source_priority?: KnowledgeSourcePriority;
+  citations: KnowledgeCitation[];
+}
+
+export interface KnowledgeExcludedClaim {
+  id: string;
+  reason: string;
+}
+
+export interface KnowledgeRetrievalReceipt {
+  id: string;
+  policy: string;
+  retrieved_at: string;
+}
+
+export interface KnowledgeRetrievalRequest {
+  query: string;
+  subject_type?: SubjectType;
+  subject_id?: UUID;
+  audience?: KnowledgeAudience;
+  proposed_action?: string;
+  product_scope?: string[];
+  competitor?: string;
+  persona?: string;
+  industry?: string;
+  require_approved?: boolean;
+  include_stale?: boolean;
+  limit?: number;
+}
+
+export interface KnowledgeRetrievalResult {
+  status: KnowledgeRetrievalStatus;
+  claims: KnowledgeClaim[];
+  excluded_claims: KnowledgeExcludedClaim[];
+  warnings: string[];
+  retrieval_receipt?: KnowledgeRetrievalReceipt;
+  /** Human/agent-readable explanation, especially for not_configured / degraded states. */
+  message?: string;
+}

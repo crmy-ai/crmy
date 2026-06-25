@@ -36,6 +36,7 @@ import { webhookTools } from './tools/webhooks.js';
 import { emailTools } from './tools/email.js';
 import { calendarTools } from './tools/calendar.js';
 import { contextSourceDropTools } from './tools/context-source-drops.js';
+import { knowledgeTools } from './tools/knowledge.js';
 import { customFieldTools } from './tools/custom-fields.js';
 import { workflowTools } from './tools/workflows.js';
 import { actorTools } from './tools/actors.js';
@@ -128,6 +129,7 @@ export function getAllTools(db: DbPool): ToolDef[] {
     ...emailTools(db),
     ...calendarTools(db),
     ...contextSourceDropTools(db),
+    ...knowledgeTools(db),       // knowledge_retrieve (optional governed product knowledge)
     ...emailSequenceTools(db),
     ...subjectGraphTools(db),
     ...entityResolveTools(db),

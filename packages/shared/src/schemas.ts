@@ -1970,3 +1970,20 @@ export const contextIngest = z.object({
   source_label: z.string().optional(),
   idempotency_key: idempotencyKey,
 });
+
+/** Governed product knowledge retrieval request (optional, non-blocking). */
+export const knowledgeRetrieve = z.object({
+  query: z.string().min(1).describe('What product/competitive context the agent needs for this customer action.'),
+  subject_type: subjectType.optional().describe('Optional customer subject to tailor relevance.'),
+  subject_id: uuid.optional(),
+  audience: z.enum(['customer_facing', 'internal']).optional().default('customer_facing')
+    .describe('customer_facing applies the strict approved+grounded+fresh policy; internal allows labeled warnings.'),
+  proposed_action: z.string().optional().describe('e.g. customer_outreach — used for policy and proof linkage.'),
+  product_scope: z.array(z.string()).optional().describe('Product/edition scopes to match, e.g. ["mcp","self-hosted"].'),
+  competitor: z.string().optional(),
+  persona: z.string().optional(),
+  industry: z.string().optional(),
+  require_approved: z.boolean().optional(),
+  include_stale: z.boolean().optional().default(false),
+  limit: z.number().int().min(1).max(50).optional().default(8),
+});
