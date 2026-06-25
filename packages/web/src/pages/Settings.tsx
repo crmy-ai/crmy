@@ -5,7 +5,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { TopBar } from '@/components/layout/TopBar';
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ListOrdered, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, ShieldCheck, Sparkles, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw, Zap } from 'lucide-react';
+import { CircleUser, Lock, Link2, ListFilter, Copy, Trash2, Plus, Database, CheckCircle2, XCircle, Users, Pencil, Eye, EyeOff, LayoutGrid, List, ListOrdered, ChevronUp, ChevronDown, ChevronRight, Bot, Key, Search, X, Tags, Settings as SettingsIcon, ShieldCheck, Sparkles, Info, Globe, Terminal, Server, AlertTriangle, RefreshCw, Zap, BookOpen } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/appStore';
 import { ListToolbar, type FilterConfig, type SortOption } from '@/components/crm/ListToolbar';
@@ -20,6 +20,7 @@ import AgentSettings from '@/pages/AgentSettings';
 import ActorsSettings from '@/components/settings/ActorsSettings';
 import MessagingSettings from '@/components/settings/MessagingSettings';
 import HITLRulesSettings from '@/components/settings/HITLRulesSettings';
+import KnowledgeGovernanceSettings from '@/components/settings/KnowledgeGovernanceSettings';
 
 type NavRole = 'member' | 'manager' | 'admin' | 'owner';
 
@@ -30,6 +31,7 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Sparkles,   label: 'Workspace Agent', path: '/settings/model',      roles: ['admin', 'owner'], group: 'Setup' },
   { icon: Server,     label: 'Systems of Record', path: '/settings/systems', roles: ['admin', 'owner'], group: 'Sources' },
   { icon: Server,     label: 'System Connections', path: '/settings/connections', roles: ['admin', 'owner'], group: 'Sources' },
+  { icon: BookOpen,   label: 'Product Knowledge', path: '/settings/knowledge', roles: ['admin', 'owner'], group: 'Sources' },
   { icon: ShieldCheck, label: 'Action Policies', path: '/settings/hitl-rules', roles: ['admin', 'owner'], group: 'Safety' },
   { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'], group: 'Safety' },
   { icon: Tags,       label: 'Memory Types',  path: '/settings/registries',   roles: ['admin', 'owner'], group: 'Advanced' },
@@ -336,6 +338,10 @@ const API_KEY_SCOPE_GROUPS = [
     { value: 'systems:read', label: 'Read' },
     { value: 'systems:write', label: 'Sync/writeback' },
     { value: 'systems:admin', label: 'Connection admin' },
+  ]},
+  { label: 'Product Knowledge', scopes: [
+    { value: 'knowledge:read', label: 'Retrieve / review' },
+    { value: 'knowledge:write', label: 'Author / govern' },
   ]},
   { label: 'Admin Setup', scopes: [
     { value: 'api_keys:admin', label: 'API keys' },
@@ -6429,6 +6435,7 @@ export default function Settings() {
             <Route path="messaging" element={<RedirectSettingsMessaging />} />
             <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
             <Route path="model" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
+            <Route path="knowledge" element={<RequireRole roles={['admin', 'owner']}><KnowledgeGovernanceSettings /></RequireRole>} />
             <Route path="automations" element={<Navigate to="/settings/advanced" replace />} />
             <Route path="systems" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
             <Route path="systems/oauth/hubspot/callback" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
