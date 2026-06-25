@@ -563,7 +563,7 @@ Start Google or Microsoft calendar OAuth for the current human-linked actor with
 - **Output**: `{ connection, auth_url, oauth_ready, setup_check, status, message }`
 
 ### email_draft_preview
-Generate a customer email draft preview from Memory, Signals, source email, linked records, and selected sender identity.
+Generate a customer email draft preview from Memory, Signals, source email, linked records, and selected sender identity. When product knowledge is configured, the draft is grounded in **approved, cited product claims** (and instructed to avoid excluded ones); `model_metadata` records `used_knowledge_claim_ids`, `knowledge_retrieval_receipt_ids`, and `knowledge_citations`, and `context_used.product_knowledge` summarizes what was used.
 - **Input**: `source_email_message_id`, `subject_type`, `subject_id`, `contact_id`, `account_id`, `opportunity_id`, `use_case_id`, `to_address`, `to_name`, `intent`, `instruction`, `tone`, `target`
 - **Output**: `{ subject, body_text, sender, context_used, warnings, model_metadata }`
 

@@ -6,6 +6,7 @@ import {
   type ActionContext,
   type ActionContextProposedAction,
   type ActorContext,
+  type ProductContext,
   type SubjectType,
   type UUID,
   notFound,
@@ -222,6 +223,37 @@ async function resolveDraftContext(
   };
 }
 
+/**
+ * Split product context into a concise LLM packet (approved claims survive
+ * briefing truncation) and compact proof metadata for the response. Returns
+ * undefined when there is nothing actionable to surface.
+ */
+export function buildProductDraftPieces(pc: ProductContext | undefined) {
+  if (!pc || (pc.relevant_claims.length === 0 && pc.avoid_claims.length === 0)) return undefined;
+  return {
+    packet: {
+      status: pc.status,
+      note: 'Use ONLY these approved, cited claims for product, pricing, capability, security, and competitive statements. Cite the source. Never assert product facts not listed here.',
+      claims: pc.relevant_claims.map(claim => ({
+        id: claim.id,
+        category: claim.category,
+        title: claim.title,
+        body: claim.body.slice(0, 320),
+        citations: claim.citations,
+      })),
+      avoid: pc.avoid_claims,
+    },
+    used: {
+      status: pc.status,
+      used_claim_ids: pc.relevant_claims.map(claim => claim.id),
+      excluded_count: pc.avoid_claims.length,
+      citations: pc.citations,
+      warnings: pc.warnings,
+      ...(pc.retrieval_receipt_id ? { retrieval_receipt_id: pc.retrieval_receipt_id } : {}),
+    },
+  };
+}
+
 async function buildResponsePacket(
   db: DbPool,
   actor: ActorContext,
@@ -239,6 +271,7 @@ async function buildResponsePacket(
     memoryCount = Object.values(actionContext.briefing.context_entries ?? {}).reduce((sum, entries) => sum + entries.length, 0);
     signalCount = actionContext.briefing.signal_groups?.length ?? 0;
   }
+  const productPieces = buildProductDraftPieces(actionContext?.briefing.product_context);
 
   return {
     ctx,
@@ -265,12 +298,16 @@ async function buildResponsePacket(
       } : null,
       briefing: briefingText,
       action_context: actionContextSummary ?? null,
+      product_knowledge: productPieces?.packet ?? null,
       guardrails: [
         'Use confirmed Memory as facts.',
         'Treat Signals as unconfirmed and do not overstate them.',
         'Follow the Action Context guidance. If review is required, draft the message but do not imply it can be sent without approval.',
         'Be concise, specific, and useful.',
         'Do not invent customer commitments, dates, pricing, or approvals.',
+        ...(productPieces
+          ? ['For any product, pricing, capability, security, or competitive claim, use ONLY the approved claims in product_knowledge and cite them. Do not state product facts that are not listed, and never use anything in product_knowledge.avoid.']
+          : ['Do not state specific product capabilities, pricing, security posture, or competitive claims unless they are in the briefing; when unsure, stay general.']),
       ],
     },
 	    context_used: {
@@ -281,6 +318,7 @@ async function buildResponsePacket(
       signal_count: signalCount,
       used_unconfirmed_signals: signalCount > 0,
 	      action_context: actionContextSummary,
+	      product_knowledge: productPieces?.used,
 	      sender: publicSender(sender),
 	    },
 	  };
@@ -353,11 +391,24 @@ export async function previewEmailDraft(db: DbPool, actor: ActorContext, input: 
       ...(context_used.action_context?.review_required
         ? ['Action Context says this email should go through review before sending.']
         : []),
+      ...(context_used.product_knowledge?.warnings ?? []),
+      ...((context_used.product_knowledge?.excluded_count ?? 0) > 0
+        ? [`${context_used.product_knowledge?.excluded_count} product claim(s) were excluded as not customer-safe and were not used.`]
+        : []),
     ],
     model_metadata: {
       draft_origin: 'agent_generated',
       generated_at: new Date().toISOString(),
       action_context: context_used.action_context,
+      ...(context_used.product_knowledge
+        ? {
+            used_knowledge_claim_ids: context_used.product_knowledge.used_claim_ids,
+            knowledge_retrieval_receipt_ids: context_used.product_knowledge.retrieval_receipt_id
+              ? [context_used.product_knowledge.retrieval_receipt_id]
+              : [],
+            knowledge_citations: context_used.product_knowledge.citations,
+          }
+        : {}),
     },
   };
 }
