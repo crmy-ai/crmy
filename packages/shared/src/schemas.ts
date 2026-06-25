@@ -2018,3 +2018,35 @@ export const knowledgeClaimUpsert = z.object({
   effective_at: z.string().optional(),
   valid_until: z.string().optional(),
 });
+
+/** Governance: list claim envelopes for the admin review queue (Phase 7). */
+export const knowledgeClaimList = z.object({
+  status: z.enum(['active', 'stale', 'deprecated', 'conflicting', 'rejected']).optional()
+    .describe('Filter by lifecycle status.'),
+  approval_status: z.enum(['approved', 'pending', 'unapproved', 'rejected']).optional(),
+  needs_review: z.boolean().optional()
+    .describe('Shortcut for the review queue: claims that are stale, conflicting, or pending approval.'),
+  review_owner_id: uuid.optional().describe('Filter to claims owned by a specific review owner.'),
+  query: z.string().optional().describe('Full-text filter over title/body/summary.'),
+  limit: z.number().int().min(1).max(100).optional().default(25),
+});
+
+/** Governance: apply an admin review decision to a claim envelope (Phase 7). */
+export const knowledgeClaimReview = z.object({
+  id: uuid,
+  decision: z.enum(['approve', 'reject', 'deprecate', 'mark_stale', 'reactivate'])
+    .describe('approve marks approved + re-verifies freshness; reject/deprecate retire it; mark_stale forces review; reactivate restores a stale/deprecated claim.'),
+  approved_for_external_use: z.boolean().optional()
+    .describe('Set customer-facing eligibility. Only honored with an approve decision.'),
+  review_owner_id: uuid.optional().describe('Assign or transfer the review owner.'),
+  idempotency_key: idempotencyKey,
+});
+
+/** Governance: detect competing product claims with source-priority resolution (Phase 7). */
+export const knowledgeConflictsDetect = z.object({
+  category: z.string().optional().describe('Limit detection to a single claim category.'),
+  competitor: z.string().optional().describe('Limit detection to claims about one competitor.'),
+  apply: z.boolean().optional().default(false)
+    .describe('When true, mark the lower-priority claim of each resolvable conflict as status=conflicting.'),
+  limit: z.number().int().min(1).max(100).optional().default(50),
+});

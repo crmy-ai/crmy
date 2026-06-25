@@ -252,6 +252,9 @@ const TOOL_REST_MAP: Record<string, { method: string; path: (input: Record<strin
 
 	  // Product knowledge
 	  knowledge_retrieve: { method: 'POST', path: () => '/api/v1/knowledge/retrieve' },
+	  knowledge_claim_list: { method: 'POST', path: () => '/api/v1/knowledge/claims/list' },
+	  knowledge_claim_review: { method: 'POST', path: () => '/api/v1/knowledge/claims/review' },
+	  knowledge_conflicts_detect: { method: 'POST', path: () => '/api/v1/knowledge/conflicts/detect' },
 
   // Calendar / Customer Activity
   availability_suggest_times: { method: 'POST', path: () => '/api/v1/availability/suggest-times' },

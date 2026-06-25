@@ -1673,3 +1673,63 @@ export interface ProductContext {
   citations: KnowledgeCitation[];
   retrieval_receipt_id?: string;
 }
+
+// -- Governance (Phases 6-7): freshness, claim review, and conflict detection --
+// The retrieval-facing KnowledgeClaim hides internal governance fields so they
+// never leak into customer-facing packets. Governance surfaces (admin review,
+// freshness sweep, conflict detection) need the full envelope, below.
+
+export type KnowledgeClaimStatus = 'active' | 'stale' | 'deprecated' | 'conflicting' | 'rejected';
+
+/**
+ * A claim envelope as surfaced to admin/governance surfaces — the full record,
+ * including the governance fields (status, approval, freshness, owner) that the
+ * customer-facing KnowledgeClaim intentionally omits.
+ */
+export interface KnowledgeClaimRecord {
+  id: string;
+  category: string;
+  title: string;
+  summary?: string;
+  product_scope: string[];
+  competitors: string[];
+  grounded: boolean;
+  confidence?: number;
+  source_priority: KnowledgeSourcePriority;
+  source_label?: string;
+  approval_status: KnowledgeApprovalStatus;
+  approved_for_external_use: boolean;
+  visibility: KnowledgeVisibility;
+  status: KnowledgeClaimStatus;
+  effective_at?: string;
+  valid_until?: string;
+  last_verified_at?: string;
+  review_owner_id?: string;
+  updated_at: string;
+}
+
+/** An admin review decision applied to a single claim envelope. */
+export type KnowledgeReviewDecision = 'approve' | 'reject' | 'deprecate' | 'mark_stale' | 'reactivate';
+
+/**
+ * Two competing product claims that may state inconsistent product truth.
+ * `suggested_action` encodes source-priority resolution: an authoritative claim
+ * should win over a secondary/informal one; an approved claim over an unapproved.
+ */
+export interface KnowledgeConflict {
+  claim_a: KnowledgeConflictParty;
+  claim_b: KnowledgeConflictParty;
+  category: string;
+  /** What made the pair candidates: a shared competitor, product scope, or just the category. */
+  basis: 'competitor' | 'product_scope' | 'category';
+  shared: string[];
+  suggested_action: 'prefer_authoritative' | 'prefer_approved' | 'manual_review';
+  detail: string;
+}
+
+export interface KnowledgeConflictParty {
+  id: string;
+  title: string;
+  source_priority: KnowledgeSourcePriority;
+  approval_status: KnowledgeApprovalStatus;
+}

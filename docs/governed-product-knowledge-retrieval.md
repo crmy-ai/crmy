@@ -2,8 +2,12 @@
 
 ## Status
 
-Planned for the 0.9.3 release as an optional capability, alongside the
+Implemented for the 0.9.3 release as an optional capability, alongside the
 [CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md).
+
+Phases 1–7 are shipped. The optional pgvector/embedding ranking noted under
+Phase 6 is intentionally deferred (see Non-Goals: vectors are not required for
+the first version); deterministic FTS + policy ranking is the shipped path.
 
 This plan covers product, service, solution, pricing, implementation, roadmap,
 security, compliance, and competitive knowledge that can improve GTM agent
@@ -467,20 +471,37 @@ claim envelopes and scopes.
 - Add source setup under Context Sources or Settings, not primary navigation.
 - Show warnings, exclusions, approval status, and citations.
 
-### Phase 6: Claim Cache And Source Adapters
+### Phase 6: Claim Cache And Source Adapters — shipped
 
-- Add optional cache/index for source-derived claims.
-- Add FTS and optional embedding support.
-- Add source freshness and deprecation handling.
-- Add adapters only for sources users actually need.
+- Claim cache/index and FTS shipped in Phases 1–2 (`knowledge_claims` with a
+  generated `search_vector`); `knowledge_claim_upsert` is the source-adapter
+  ingestion boundary (`external_key` dedupe + `source_version`).
+- Source freshness and deprecation handling: a background sweep
+  (`services/knowledge-freshness.ts`, wired into the 60s worker as
+  `knowledge_freshness_sweep`) demotes `active` claims to `stale` once they pass
+  an explicit `valid_until` or age beyond a category freshness window
+  (`freshnessWindowDays`, mirroring the Freshness table). Stale claims are then
+  excluded from customer-facing retrieval.
+- Optional embeddings are deferred (not required for the first version); the
+  shipped ranking is deterministic FTS + source priority + policy.
 
-### Phase 7: Governance
+### Phase 7: Governance — shipped
 
-- Add stale review assignments for claims with owners.
-- Add conflict detection for competing product claims.
-- Add source priority conflict resolution.
-- Add admin review flows for approval and external-use status if CRMy becomes
-  responsible for claim envelopes.
+- Stale review assignments for owned claims: `services/knowledge-governance.ts`
+  `processKnowledgeReviews` (worker task `knowledge_review_assignments`) opens a
+  `knowledge_claim_review` assignment for the `review_owner_id` of any stale,
+  conflicting, or pending-approval claim, mirroring the customer-Memory
+  staleness sweep and deduping on `metadata.knowledge_claim_id`.
+- Conflict detection with source-priority resolution: `detectKnowledgeConflicts`
+  finds same-category claims sharing a competitor/scope and recommends
+  `prefer_authoritative`, `prefer_approved`, or `manual_review`; `apply=true`
+  marks the losing claim `conflicting`. Exposed as `knowledge_conflicts_detect`.
+- Admin review flow: `knowledge_claim_list` (the review queue) and
+  `knowledge_claim_review` (approve / reject / deprecate / mark_stale /
+  reactivate, set external-use, assign owner). Approving re-verifies freshness
+  so the Phase 6 sweep restarts the clock. All admin-tier, `knowledge:read` /
+  `knowledge:write` scoped, with REST + CLI parity (`crmy knowledge list |
+  review | conflicts`).
 
 ## Tests Required
 

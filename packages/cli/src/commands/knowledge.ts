@@ -66,5 +66,85 @@ export function knowledgeCommand(): Command {
       await client.close();
     });
 
+  // --- Governance (Phase 7) ---
+
+  cmd.command('list')
+    .description('List product knowledge claim envelopes for the admin review queue')
+    .option('--status <status>', 'active | stale | deprecated | conflicting | rejected')
+    .option('--approval <status>', 'approved | pending | unapproved | rejected')
+    .option('--needs-review', 'Only claims that are stale, conflicting, or pending approval')
+    .option('--query <text>', 'Full-text filter over title/body/summary')
+    .option('--limit <n>', 'Maximum claims to return', '25')
+    .option('--json', 'Print raw JSON')
+    .action(async (opts) => {
+      const client = await getClient();
+      const result = await client.call('knowledge_claim_list', {
+        status: opts.status,
+        approval_status: opts.approval,
+        needs_review: opts.needsReview ?? undefined,
+        query: opts.query,
+        limit: Number(opts.limit) || 25,
+      });
+      const data = JSON.parse(result);
+      if (opts.json) { console.log(JSON.stringify(data, null, 2)); await client.close(); return; }
+      console.log(`${data.count ?? 0} claim(s):`);
+      for (const c of data.claims ?? []) {
+        const ext = c.approved_for_external_use ? 'external-ok' : 'internal-only';
+        console.log(`\n• ${c.id}`);
+        console.log(`  [${c.category}] ${c.title}`);
+        console.log(`  status=${c.status} approval=${c.approval_status} ${ext} priority=${c.source_priority}`);
+        if (c.valid_until) console.log(`  valid_until=${c.valid_until}`);
+      }
+      await client.close();
+    });
+
+  cmd.command('review <claimId>')
+    .description('Apply a governance decision to a product knowledge claim')
+    .requiredOption('--decision <decision>', 'approve | reject | deprecate | mark_stale | reactivate')
+    .option('--external-use <bool>', 'Set customer-facing eligibility (true/false); honored with approve')
+    .option('--owner <actorId>', 'Assign or transfer the review owner')
+    .option('--json', 'Print raw JSON')
+    .action(async (claimId, opts) => {
+      const client = await getClient();
+      const externalUse = opts.externalUse === undefined ? undefined : /^(true|1|yes)$/i.test(String(opts.externalUse));
+      const result = await client.call('knowledge_claim_review', {
+        id: claimId,
+        decision: opts.decision,
+        approved_for_external_use: externalUse,
+        review_owner_id: opts.owner,
+      });
+      const data = JSON.parse(result);
+      if (opts.json) { console.log(JSON.stringify(data, null, 2)); await client.close(); return; }
+      if (data.error) { console.log(data.message ?? data.error); await client.close(); return; }
+      console.log(`✓ ${data.id}: status=${data.status} approval=${data.approval_status} external=${data.approved_for_external_use}`);
+      await client.close();
+    });
+
+  cmd.command('conflicts')
+    .description('Detect competing product claims and recommend source-priority resolution')
+    .option('--category <name>', 'Limit to one claim category')
+    .option('--competitor <name>', 'Limit to claims about one competitor')
+    .option('--apply', 'Mark the lower-priority claim of each resolvable conflict as conflicting')
+    .option('--limit <n>', 'Maximum claims to scan', '50')
+    .option('--json', 'Print raw JSON')
+    .action(async (opts) => {
+      const client = await getClient();
+      const result = await client.call('knowledge_conflicts_detect', {
+        category: opts.category,
+        competitor: opts.competitor,
+        apply: opts.apply ?? false,
+        limit: Number(opts.limit) || 50,
+      });
+      const data = JSON.parse(result);
+      if (opts.json) { console.log(JSON.stringify(data, null, 2)); await client.close(); return; }
+      const conflicts = data.conflicts ?? [];
+      console.log(`${conflicts.length} conflict(s)${data.applied ? `, ${data.applied} marked conflicting` : ''}:`);
+      for (const c of conflicts) {
+        console.log(`\n• [${c.category}] ${c.suggested_action} (by ${c.basis}: ${(c.shared ?? []).join(', ')})`);
+        console.log(`  ${c.detail}`);
+      }
+      await client.close();
+    });
+
   return cmd;
 }
