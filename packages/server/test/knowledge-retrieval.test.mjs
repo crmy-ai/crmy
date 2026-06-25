@@ -11,6 +11,7 @@ import {
   buildProductContext,
   getProductContextForSubject,
 } from '../dist/services/knowledge-retrieval.js';
+import { buildProductDraftPieces } from '../dist/services/email-drafts.js';
 import { getAllTools, getToolsForActor } from '../dist/mcp/server.js';
 import { TOOLSET_DEFINITIONS, CORE_TOOLS } from '../dist/mcp/toolsets.js';
 import { getToolScopeRequirements, actorHasScope } from '../dist/auth/scopes.js';
@@ -218,4 +219,29 @@ test('isProductKnowledgeConfigured is resilient: a throwing/unknown DB is treate
   const throwing = { query: async () => { throw new Error('relation does not exist'); } };
   assert.equal(await isProductKnowledgeConfigured(throwing, 't1'), false);
   assert.equal(await isProductKnowledgeConfigured(new FakeKnowledgeDb([claim()]), 't1'), true);
+});
+
+// ---- Phase 4: email draft integration ----
+
+test('buildProductDraftPieces packages approved claims + proof, caps bodies, omits empty (Phase 4)', () => {
+  assert.equal(buildProductDraftPieces(undefined), undefined);
+  assert.equal(buildProductDraftPieces({
+    status: 'no_results', relevant_claims: [], proof_points: [], implementation_caveats: [],
+    competitive_context: [], avoid_claims: [], warnings: [], citations: [],
+  }), undefined, 'no claims and nothing to avoid -> nothing to surface');
+
+  const pieces = buildProductDraftPieces({
+    status: 'available',
+    relevant_claims: [{ id: 'c1', category: 'proof_point', title: 'T', body: 'x'.repeat(500), grounded: true, approval_status: 'approved', approved_for_external_use: true, visibility: 'external', citations: [{ source_label: 'Doc' }] }],
+    proof_points: [], implementation_caveats: [], competitive_context: [],
+    avoid_claims: [{ id: 'bad', reason: 'ungrounded' }],
+    warnings: ['w1'], citations: [{ source_label: 'Doc' }], retrieval_receipt_id: 'r9',
+  });
+  assert.ok(pieces);
+  assert.equal(pieces.packet.claims[0].body.length, 320, 'claim body capped for token control');
+  assert.deepEqual(pieces.packet.avoid, [{ id: 'bad', reason: 'ungrounded' }]);
+  assert.ok(pieces.packet.note.includes('approved'));
+  assert.deepEqual(pieces.used.used_claim_ids, ['c1']);
+  assert.equal(pieces.used.excluded_count, 1);
+  assert.equal(pieces.used.retrieval_receipt_id, 'r9');
 });
