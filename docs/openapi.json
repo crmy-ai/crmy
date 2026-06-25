@@ -5350,6 +5350,10 @@
             ],
             "default": "summary",
             "description": "summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries."
+          },
+          "include_product_context": {
+            "type": "boolean",
+            "description": "Include governed product knowledge relevant to this subject. Defaults to true when product knowledge is configured; never blocks the briefing."
           }
         }
       },
@@ -5503,6 +5507,10 @@
             "required": [
               "action_type"
             ]
+          },
+          "include_product_context": {
+            "type": "boolean",
+            "description": "Include governed product knowledge in the assembled briefing. Defaults to true when product knowledge is configured."
           }
         },
         "required": [
@@ -16638,6 +16646,16 @@
             "required": false,
             "description": "summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries.",
             "name": "evidence_mode",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "boolean",
+              "description": "Include governed product knowledge relevant to this subject. Defaults to true when product knowledge is configured; never blocks the briefing."
+            },
+            "required": false,
+            "description": "Include governed product knowledge relevant to this subject. Defaults to true when product knowledge is configured; never blocks the briefing.",
+            "name": "include_product_context",
             "in": "query"
           }
         ],

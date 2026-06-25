@@ -1150,6 +1150,12 @@ export interface Briefing {
   dropped_entries?: Array<{ context_type: string; title?: string; confidence?: number }>;
   /** Explains budget preset, effective budget, evidence detail, and ranking strategy used for this briefing. */
   context_packing?: ContextPackingMetadata;
+  /**
+   * Optional governed product knowledge relevant to this subject. Present only
+   * when product knowledge is configured (default) or explicitly requested.
+   * A sibling to customer Memory — never mixed into it, and never blocks the briefing.
+   */
+  product_context?: ProductContext;
 }
 
 export type ActionContextProposedActionType =
@@ -1187,6 +1193,7 @@ export interface ActionContextGetInput {
   evidence_mode?: EvidenceMode;
   emit_retrieval_event?: boolean;
   proposed_action?: ActionContextProposedAction;
+  include_product_context?: boolean;
 }
 
 export type ActionContextReadinessStatus = 'ready' | 'review_needed' | 'blocked';
@@ -1361,6 +1368,15 @@ export interface ActionContext {
       open_conflict_count: number;
       pending_writeback_count: number;
     };
+    product_knowledge?: ActionContextCheckStatus & {
+      approved_claim_count: number;
+      excluded_count: number;
+      ungrounded_excluded_count: number;
+      internal_only_excluded_count: number;
+      stale_excluded_count: number;
+      conflicting_excluded_count: number;
+      retrieval_receipt_id?: string;
+    };
     policy?: ActionContextPolicySummary;
   };
   allowed_actions: ActionContextAllowedAction[];
@@ -1374,6 +1390,10 @@ export interface ActionContext {
     retrieval_event_id?: number;
     used_context_entry_ids: UUID[];
     used_signal_group_ids: UUID[];
+    /** Product knowledge claims surfaced for this action (Phase 3). */
+    used_knowledge_claim_ids?: UUID[];
+    /** Receipts proving what product knowledge was retrieved (Phase 3). */
+    knowledge_retrieval_receipt_ids?: string[];
     expected_receipts: string[];
   };
 }
@@ -1634,4 +1654,22 @@ export interface KnowledgeRetrievalResult {
   retrieval_receipt?: KnowledgeRetrievalReceipt;
   /** Human/agent-readable explanation, especially for not_configured / degraded states. */
   message?: string;
+}
+
+/**
+ * Product knowledge packaged for a briefing or Action Context — a sibling to
+ * customer Memory. Claims are pre-categorized for convenience; `avoid_claims`
+ * are the excluded ones (e.g. ungrounded, internal-only, stale) so a drafting
+ * agent knows what NOT to assert.
+ */
+export interface ProductContext {
+  status: KnowledgeRetrievalStatus;
+  relevant_claims: KnowledgeClaim[];
+  proof_points: KnowledgeClaim[];
+  implementation_caveats: KnowledgeClaim[];
+  competitive_context: KnowledgeClaim[];
+  avoid_claims: KnowledgeExcludedClaim[];
+  warnings: string[];
+  citations: KnowledgeCitation[];
+  retrieval_receipt_id?: string;
 }

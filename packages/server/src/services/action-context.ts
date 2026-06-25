@@ -17,6 +17,7 @@ import type {
   ContextEvidence,
   ActionContextReadinessStatus,
   ActionContextRiskLevel,
+  ProductContext,
   ActionContextSourceAuthoritySummary,
   ActorContext,
   Briefing,
@@ -111,6 +112,30 @@ function actionPolicySummary(policy: ReturnType<typeof evaluateActionPolicy>): A
     required_evidence: policy.required_evidence,
     risk_level: policy.risk_level,
     policy: policy.policy,
+  };
+}
+
+/**
+ * Build the informational product_knowledge check from briefing product context.
+ * Status is always 'ready' — product knowledge is optional and must never block
+ * or downgrade an action's operating mode; the detail lives in counts and reasons.
+ */
+function buildProductKnowledgeCheck(pc: ProductContext): NonNullable<ActionContext['checks']['product_knowledge']> {
+  const countReason = (reason: string) => pc.avoid_claims.filter(item => item.reason === reason).length;
+  const reasons: string[] = [];
+  if (pc.status === 'not_configured') reasons.push('Product knowledge is not configured.');
+  else if (pc.status === 'degraded') reasons.push('Product knowledge retrieval was degraded.');
+  else if (pc.status === 'no_results') reasons.push('No approved product claims matched this subject.');
+  return {
+    status: 'ready',
+    reasons,
+    approved_claim_count: pc.relevant_claims.length,
+    excluded_count: pc.avoid_claims.length,
+    ungrounded_excluded_count: countReason('ungrounded'),
+    internal_only_excluded_count: countReason('internal_only'),
+    stale_excluded_count: countReason('stale'),
+    conflicting_excluded_count: countReason('conflicting'),
+    ...(pc.retrieval_receipt_id ? { retrieval_receipt_id: pc.retrieval_receipt_id } : {}),
   };
 }
 
@@ -1079,6 +1104,8 @@ export async function getActionContext(
     token_budget_profile: input.token_budget_profile,
     evidence_mode: input.evidence_mode,
     proposed_action_type: input.proposed_action?.action_type,
+    include_product_context: input.include_product_context,
+    actor_id: actor.actor_id,
   });
 
   const systems = await loadSourceAuthority(db, actor.tenant_id, input.subject_type, input.subject_id, input.proposed_action);
@@ -1138,6 +1165,17 @@ export async function getActionContext(
     'audit_event',
   ];
 
+  // Product knowledge check + proof — informational, derived from the briefing's
+  // product_context (populated when product knowledge is configured). Added after
+  // readiness derivation so it never changes the operating mode.
+  const productContext = briefing.product_context;
+  const productKnowledgeCheck = productContext ? buildProductKnowledgeCheck(productContext) : undefined;
+  const usedKnowledgeClaimIds = productContext ? productContext.relevant_claims.map(claim => claim.id) : [];
+  const knowledgeReceiptIds = productContext?.retrieval_receipt_id ? [productContext.retrieval_receipt_id] : [];
+  const checks = productKnowledgeCheck
+    ? { ...derived.checks, product_knowledge: productKnowledgeCheck }
+    : derived.checks;
+
   const actionContext: ActionContext = {
     subject_type: input.subject_type,
     subject_id: input.subject_id,
@@ -1149,23 +1187,27 @@ export async function getActionContext(
       guidance: derived.guidance,
       briefing,
       readiness: derived.readiness,
-      checks: derived.checks,
+      checks,
       allowed_actions: allowedActions,
       required_handoffs: derived.required_handoffs,
       proof: {
         used_context_entry_ids: usedContextEntryIds,
         used_signal_group_ids: usedSignalGroupIds,
+        ...(usedKnowledgeClaimIds.length ? { used_knowledge_claim_ids: usedKnowledgeClaimIds } : {}),
+        ...(knowledgeReceiptIds.length ? { knowledge_retrieval_receipt_ids: knowledgeReceiptIds } : {}),
         expected_receipts: unique(expectedReceipts),
       },
     }, input.proposed_action),
     briefing,
     readiness: derived.readiness,
-    checks: derived.checks,
+    checks,
     allowed_actions: allowedActions,
     required_handoffs: derived.required_handoffs,
     proof: {
       used_context_entry_ids: usedContextEntryIds,
       used_signal_group_ids: usedSignalGroupIds,
+      ...(usedKnowledgeClaimIds.length ? { used_knowledge_claim_ids: usedKnowledgeClaimIds } : {}),
+      ...(knowledgeReceiptIds.length ? { knowledge_retrieval_receipt_ids: knowledgeReceiptIds } : {}),
       expected_receipts: unique(expectedReceipts),
     },
   };

@@ -974,7 +974,7 @@ export { describeTool, zodToJsonSchema } from './mcp/tool-describe.js';
 export { emitEvent } from './events/emitter.js';
 export { createWorkflowEngine } from './workflows/engine.js';
 export { getSampleDataStatus, resetSampleData, seedSampleData } from './services/sample-data.js';
-export { retrieveKnowledge, isProductKnowledgeConfigured, selectClaims, upsertProductKnowledgeClaim } from './services/knowledge-retrieval.js';
+export { retrieveKnowledge, isProductKnowledgeConfigured, selectClaims, upsertProductKnowledgeClaim, buildProductContext, getProductContextForSubject } from './services/knowledge-retrieval.js';
 export { loadPlugins, shutdownPlugins } from './plugins/index.js';
 export { encrypt as encryptAgentSecret, decrypt as decryptAgentSecret } from './agent/crypto.js';
 export { buildOpenAICompatibleHeaders, verifyAgentToolCalling, verifyPlainModelReachability } from './agent/readiness.js';

@@ -8,6 +8,8 @@ import {
   isProductKnowledgeConfigured,
   selectClaims,
   upsertProductKnowledgeClaim,
+  buildProductContext,
+  getProductContextForSubject,
 } from '../dist/services/knowledge-retrieval.js';
 import { getAllTools, getToolsForActor } from '../dist/mcp/server.js';
 import { TOOLSET_DEFINITIONS, CORE_TOOLS } from '../dist/mcp/toolsets.js';
@@ -171,4 +173,49 @@ test('knowledge_retrieve is in product_knowledge and customer_outreach toolsets;
   assert.ok(TOOLSET_DEFINITIONS.product_knowledge.tools.includes('knowledge_retrieve'));
   assert.ok(TOOLSET_DEFINITIONS.customer_outreach.tools.includes('knowledge_retrieve'));
   assert.ok(!CORE_TOOLS.includes('knowledge_retrieve'));
+});
+
+// ---- Phase 3: briefing / Action Context enrichment ----
+
+test('buildProductContext categorizes claims, surfaces avoid_claims, and dedupes citations', () => {
+  const apiClaim = (over) => ({
+    id: over.id, category: over.category, title: over.id.toUpperCase(), body: 'b', grounded: true,
+    approval_status: 'approved', approved_for_external_use: true, visibility: 'external',
+    citations: over.citations ?? [{ source_label: 'Doc', source_url: 'u' }],
+  });
+  const pc = buildProductContext({
+    status: 'available',
+    claims: [
+      apiClaim({ id: 'p', category: 'proof_point' }),
+      apiClaim({ id: 'i', category: 'implementation' }),
+      apiClaim({ id: 'c', category: 'competitive_response', citations: [] }),
+    ],
+    excluded_claims: [{ id: 'x', reason: 'ungrounded' }],
+    warnings: [],
+    retrieval_receipt: { id: 'r1', policy: 'p', retrieved_at: 't' },
+  });
+  assert.equal(pc.status, 'available');
+  assert.equal(pc.relevant_claims.length, 3);
+  assert.deepEqual(pc.proof_points.map((c) => c.id), ['p']);
+  assert.deepEqual(pc.implementation_caveats.map((c) => c.id), ['i']);
+  assert.deepEqual(pc.competitive_context.map((c) => c.id), ['c']);
+  assert.deepEqual(pc.avoid_claims, [{ id: 'x', reason: 'ungrounded' }]);
+  assert.equal(pc.citations.length, 1, 'identical citations should be deduped');
+  assert.equal(pc.retrieval_receipt_id, 'r1');
+});
+
+test('getProductContextForSubject packages retrieval over the store', async () => {
+  const db = new FakeKnowledgeDb([claim({ id: 'ok', category: 'proof_point' })]);
+  const pc = await getProductContextForSubject(db, agent, {
+    query: 'lock-in', subject_type: 'account', subject_id: '00000000-0000-0000-0000-000000000001',
+  });
+  assert.equal(pc.status, 'available');
+  assert.deepEqual(pc.relevant_claims.map((c) => c.id), ['ok']);
+  assert.ok(pc.retrieval_receipt_id);
+});
+
+test('isProductKnowledgeConfigured is resilient: a throwing/unknown DB is treated as not configured', async () => {
+  const throwing = { query: async () => { throw new Error('relation does not exist'); } };
+  assert.equal(await isProductKnowledgeConfigured(throwing, 't1'), false);
+  assert.equal(await isProductKnowledgeConfigured(new FakeKnowledgeDb([claim()]), 't1'), true);
 });

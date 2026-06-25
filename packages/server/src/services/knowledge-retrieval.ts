@@ -21,10 +21,12 @@ import type { DbPool } from '../db/pool.js';
 import type {
   ActorContext,
   KnowledgeAudience,
+  KnowledgeCitation,
   KnowledgeClaim,
   KnowledgeExcludedClaim,
   KnowledgeRetrievalRequest,
   KnowledgeRetrievalResult,
+  ProductContext,
 } from '@crmy/shared';
 import { isSnippetGrounded } from '../agent/extraction-grounding.js';
 import {
@@ -47,9 +49,52 @@ const PRIORITY_WEIGHT: Record<KnowledgeClaimRow['source_priority'], number> = {
   informal: 1,
 };
 
-/** Whether product knowledge is configured for a tenant (any usable claim exists). */
+/**
+ * Whether product knowledge is configured for a tenant (any usable claim exists).
+ * Resilient: any error (missing table, fake DB in tests) is treated as
+ * not-configured so briefing/Action Context enrichment stays strictly additive.
+ */
 export async function isProductKnowledgeConfigured(db: DbPool, tenantId: string): Promise<boolean> {
-  return (await countKnowledgeClaims(db, tenantId)) > 0;
+  try {
+    return (await countKnowledgeClaims(db, tenantId)) > 0;
+  } catch {
+    return false;
+  }
+}
+
+function dedupeCitations(citations: KnowledgeCitation[]): KnowledgeCitation[] {
+  const seen = new Set<string>();
+  const out: KnowledgeCitation[] = [];
+  for (const citation of citations) {
+    const key = `${citation.source_label}|${citation.source_url ?? ''}|${citation.source_ref ?? ''}`;
+    if (!seen.has(key)) { seen.add(key); out.push(citation); }
+  }
+  return out;
+}
+
+/** Package a retrieval result as briefing/Action-Context product context (pure). */
+export function buildProductContext(result: KnowledgeRetrievalResult): ProductContext {
+  const matches = (claim: KnowledgeClaim, re: RegExp) => re.test(claim.category);
+  return {
+    status: result.status,
+    relevant_claims: result.claims,
+    proof_points: result.claims.filter(claim => matches(claim, /proof/i)),
+    implementation_caveats: result.claims.filter(claim => matches(claim, /implementation|onboarding|integration/i)),
+    competitive_context: result.claims.filter(claim => matches(claim, /competit/i)),
+    avoid_claims: result.excluded_claims,
+    warnings: result.warnings,
+    citations: dedupeCitations(result.claims.flatMap(claim => claim.citations)),
+    ...(result.retrieval_receipt ? { retrieval_receipt_id: result.retrieval_receipt.id } : {}),
+  };
+}
+
+/** Retrieve and package product context for a subject (used by briefing enrichment). */
+export async function getProductContextForSubject(
+  db: DbPool,
+  actor: ActorContext,
+  input: KnowledgeRetrievalRequest,
+): Promise<ProductContext> {
+  return buildProductContext(await retrieveKnowledge(db, actor, input));
 }
 
 function policyName(audience: KnowledgeAudience): string {
