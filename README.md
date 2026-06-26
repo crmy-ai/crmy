@@ -416,6 +416,14 @@ crmy knowledge retrieve "vendor lock-in objection" --subject "account:Northstar 
 crmy tools describe action_context_get
 ```
 
+Update the CLI without touching your config, database, or demo data:
+
+```bash
+crmy update
+```
+
+If a server is running, restart it after updating. Prefer npm directly? Use `npm install -g @crmy/cli@latest`.
+
 REST endpoints live at:
 
 ```text

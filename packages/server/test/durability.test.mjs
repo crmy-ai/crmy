@@ -6436,8 +6436,23 @@ test('transcript source drops are durable, reviewable, and integrated with activ
   assert.match(repo, /ON CONFLICT DO NOTHING/);
 
   const jobDedupeMigration = await readFile(new URL('../migrations/087_context_source_drop_job_dedupe.sql', import.meta.url), 'utf8');
+  assert.match(jobDedupeMigration, /repairs local\/dev databases/);
+  assert.match(jobDedupeMigration, /CREATE TABLE IF NOT EXISTS context_source_connections/);
+  assert.match(jobDedupeMigration, /CREATE TABLE IF NOT EXISTS context_source_objects/);
+  assert.match(jobDedupeMigration, /ADD COLUMN IF NOT EXISTS account_id UUID REFERENCES accounts/);
+  assert.match(jobDedupeMigration, /ADD COLUMN IF NOT EXISTS opportunity_id UUID REFERENCES opportunities/);
+  assert.match(jobDedupeMigration, /CREATE TABLE IF NOT EXISTS context_source_processing_jobs/);
+  assert.match(jobDedupeMigration, /context_source_objects_records_v2_idx/);
   assert.match(jobDedupeMigration, /context_source_sync_jobs_active_unique_idx/);
   assert.match(jobDedupeMigration, /context_source_processing_jobs_active_unique_idx/);
+
+  const schemaRepairMigration = await readFile(new URL('../migrations/088_context_source_drop_schema_repair.sql', import.meta.url), 'utf8');
+  assert.match(schemaRepairMigration, /pre-0\.9\.4 local\/dev installs/);
+  assert.match(schemaRepairMigration, /CREATE TABLE IF NOT EXISTS context_source_processing_jobs/);
+  assert.match(schemaRepairMigration, /ADD COLUMN IF NOT EXISTS account_id UUID REFERENCES accounts/);
+  assert.match(schemaRepairMigration, /ADD COLUMN IF NOT EXISTS use_case_id UUID REFERENCES use_cases/);
+  assert.match(schemaRepairMigration, /context_source_objects_records_v2_idx/);
+  assert.match(schemaRepairMigration, /context_source_processing_jobs_active_unique_idx/);
 
   const fixtureReadme = await readFile(new URL('../../../examples/transcript-drop/README.md', import.meta.url), 'utf8');
   const transcript = await readFile(new URL('../../../examples/transcript-drop/northstar-renewal-review.txt', import.meta.url), 'utf8');

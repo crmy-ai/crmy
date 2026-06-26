@@ -67,6 +67,7 @@ import { sequencesCommand } from './commands/sequences.js';
 import { agentSmokeCommand } from './commands/agent-smoke.js';
 import { toolsCommand } from './commands/tools.js';
 import { evalCommand } from './commands/eval.js';
+import { updateCommand } from './commands/update.js';
 
 const program = new Command();
 
@@ -111,6 +112,7 @@ program.addCommand(agentSmokeCommand());
 program.addCommand(systemsCommand());
 program.addCommand(toolsCommand());
 program.addCommand(evalCommand());
+program.addCommand(updateCommand());
 program.addCommand(helpCommand());
 
 // Top-level `crmy login` shortcut (delegates to `crmy auth login`)

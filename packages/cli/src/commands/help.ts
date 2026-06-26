@@ -13,6 +13,7 @@ const HELP_TEXT = `
     login               Sign in to a CRMy server (shortcut for crmy auth login)
     auth                Manage authentication (login, logout, whoami)
     config              View local/global CRMy configuration with secrets redacted
+    update              Update the CRMy CLI to the latest release
     migrate             Run database migrations
 
   Server
@@ -58,6 +59,7 @@ const HELP_TEXT = `
     $ crmy init                     Set up a new CRMy instance
     $ crmy server start             Start the server in the background on :3000
     $ crmy server                   Start the server in the foreground
+    $ crmy update                   Update the CLI to the latest release
     $ crmy doctor                   Check setup health
 	    $ crmy agent-smoke              Check the seeded demo agent workflow
 	    $ crmy briefing "contact:Maya Patel"  Get customer context before action

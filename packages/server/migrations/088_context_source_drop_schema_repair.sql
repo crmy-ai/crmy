@@ -1,8 +1,6 @@
--- Context source drop active job dedupe
+-- Context source drop schema repair for pre-0.9.4 local/dev installs
 -- Up:
 
--- 087 also repairs local/dev databases that applied an earlier 083 while
--- transcript drop tables were still changing during pre-release hardening.
 CREATE TABLE IF NOT EXISTS context_source_connections (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id           UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -108,9 +106,6 @@ CREATE INDEX IF NOT EXISTS context_source_objects_connection_idx
 CREATE INDEX IF NOT EXISTS context_source_objects_status_idx
   ON context_source_objects(tenant_id, match_status, processing_status, updated_at DESC);
 
-CREATE INDEX IF NOT EXISTS context_source_objects_records_idx
-  ON context_source_objects(tenant_id, account_id, contact_id, opportunity_id, use_case_id, calendar_event_id, activity_id, raw_context_source_id);
-
 CREATE INDEX IF NOT EXISTS context_source_objects_records_v2_idx
   ON context_source_objects(tenant_id, account_id, contact_id, opportunity_id, use_case_id, calendar_event_id, activity_id, raw_context_source_id);
 
@@ -180,5 +175,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS context_source_processing_jobs_active_unique_i
   WHERE status IN ('pending', 'processing', 'failed');
 
 -- Down:
--- DROP INDEX IF EXISTS context_source_processing_jobs_active_unique_idx;
--- DROP INDEX IF EXISTS context_source_sync_jobs_active_unique_idx;
+-- DROP INDEX IF EXISTS context_source_objects_records_v2_idx;
