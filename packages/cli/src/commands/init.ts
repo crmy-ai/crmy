@@ -27,14 +27,14 @@ function validatePassword(input: string): boolean | string {
   return input.length >= 12 ? true : 'Password must be at least 12 characters';
 }
 
-function redactDatabaseUrl(value: string): string {
+function maskDatabaseUrl(value: string): string {
   let redacted = value;
   try {
     const parsed = new URL(value);
-    if (parsed.password) parsed.password = 'xxxxx';
+    if (parsed.password) parsed.password = '***';
     for (const key of Array.from(parsed.searchParams.keys())) {
       if (/pass|password|token|secret|key/i.test(key)) {
-        parsed.searchParams.set(key, 'xxxxx');
+        parsed.searchParams.set(key, '***');
       }
     }
     redacted = parsed.toString();
@@ -43,8 +43,8 @@ function redactDatabaseUrl(value: string): string {
   }
 
   return redacted
-    .replace(/(postgres(?:ql)?:\/\/[^:\s/@]+):([^@\s]+)@/gi, '$1:xxxxx@')
-    .replace(/([?&](?:pass|password|token|secret|key)=)[^&\s]+/gi, '$1xxxxx');
+    .replace(/(postgres(?:ql)?:\/\/[^:\s/@]+):([^@\s]+)@/gi, '$1:***@')
+    .replace(/([?&](?:pass|password|token|secret|key)=)[^&\s]+/gi, '$1***');
 }
 
 /**
@@ -442,7 +442,7 @@ export function initCommand(): Command {
 
       if (yesMode || process.env.DATABASE_URL) {
         databaseUrl = process.env.DATABASE_URL ?? 'postgresql://localhost:5432/crmy';
-        console.log(`  Using database URL: ${redactDatabaseUrl(databaseUrl)}\n`);
+        console.log(`  Using database URL: ${maskDatabaseUrl(databaseUrl)}\n`);
       } else {
         console.log('  Enter your PostgreSQL connection string.');
         console.log('  Format: postgresql://user:password@host:5432/dbname\n');
@@ -484,7 +484,7 @@ export function initCommand(): Command {
         spinner.succeed('Connected to database');
       } catch (err) {
         spinner.fail('Database connection failed');
-        const msg = redactDatabaseUrl((err as Error).message ?? String(err));
+        const msg = maskDatabaseUrl((err as Error).message ?? String(err));
         console.error(
           `\n  Error: ${msg}\n\n` +
           '  Common causes:\n' +

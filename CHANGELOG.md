@@ -4,13 +4,19 @@ All notable changes to CRMy are documented here.
 
 ---
 
-## [0.9.3] — 2026-06-25
+## [Unreleased]
+
+No unreleased changes yet.
+
+---
+
+## [0.9.3] — 2026-06-26
 
 ### Added
 
 - **Local eval harness + production-path extraction quality eval** ([#29](https://github.com/crmy-ai/crmy/pull/29)) — makes extraction quality measurable across datasets and models, the foundation for capability-gated promotion.
 - **Per-session MCP toolsets** ([#30](https://github.com/crmy-ai/crmy/pull/30)) — narrow the registered tool catalog per session/job via `--toolset`, `?toolset=`, or the `X-CRMy-Toolset` header. Selection never widens scope; autonomous agents default to a lean `standard` set, humans/admins to `full`. Override with `CRMY_MCP_DEFAULT_TOOLSET`.
-- **Connector-free `crmy quickstart`** ([#32](https://github.com/crmy-ai/crmy/pull/32)) — one command seeds demo context and runs the connector-free golden path (resolve → briefing → Action Context → lineage) with onboarding next steps.
+- **Connector-free `crmy quickstart`** ([#32](https://github.com/crmy-ai/crmy/pull/32)) — one command seeds demo context and runs the connector-free golden path (resolve -> briefing -> Action Context -> lineage) with onboarding next steps.
 - **Governed Product Knowledge Retrieval — Phase 1** — `knowledge_retrieve` MCP tool + `KnowledgeRetrievalService` contract and `product_knowledge` toolset. Optional and non-blocking: returns a clear `not_configured` until governed product claims exist; never creates Memory or writes to systems of record.
 - **Governed Product Knowledge Retrieval — Phase 2** — claim store + governed retrieval: `knowledge_claims` / `knowledge_retrieval_receipts` (migration 086), policy filtering (customer-facing requires approved + source-grounded + external + fresh; internal labels risk in warnings), lexical search, ranking, and durable retrieval receipts. Adds the admin `knowledge_claim_upsert` tool (grounding verified against `source_text`) and the `POST /api/v1/knowledge/retrieve` REST endpoint.
 - **Governed Product Knowledge Retrieval — Phase 3** — briefings and Action Context now surface relevant product knowledge as a `product_context` sibling to customer Memory. `include_product_context` **defaults to true when product knowledge is configured** (override per call); it is strictly additive and never fails the core response. Action Context adds an informational `product_knowledge` check plus `used_knowledge_claim_ids` / `knowledge_retrieval_receipt_ids` proof, reusing the existing `checks`/`proof` slots.
@@ -18,10 +24,16 @@ All notable changes to CRMy are documented here.
 - **Governed Product Knowledge Retrieval — Phase 5** — `crmy knowledge retrieve` CLI command, plus web display: a **Product Knowledge** section in the briefing panel (approved claims, sources, exclusions, warnings) and a "product claim(s) used" indicator on generated email drafts.
 - **Governed Product Knowledge Retrieval — Phase 6** — freshness windows mark expired or aging product claims stale without blocking core customer-context flows.
 - **Governed Product Knowledge Retrieval — Phase 7** — admin governance for claim review, approval/rejection/deprecation/staleness/reactivation, conflict detection, source-priority resolution, review assignments, and the Product Knowledge settings surface.
+- **Provider certification checklist** — added a repeatable Google/Microsoft live-provider checklist for mailbox context, sender/drafts, calendar sync, free/busy, reply matching, failure handling, and app-source coverage before production claims.
+- **Transcript drop fixture** — added a synthetic Northstar transcript + sidecar fixture for local-folder and S3-compatible transcript source smoke testing.
 
 ### Changed
 
 - **Source-grounding gate for Memory auto-promotion** ([#31](https://github.com/crmy-ai/crmy/pull/31)) — a Signal only auto-promotes to Memory when at least one evidence snippet is present in the source, so a weak model cannot silently mint Memory from a hallucinated claim. On by default; disable with `CRMY_REQUIRE_GROUNDED_AUTOPROMOTE=0`.
+- **Admin pagination hardening** — admin actor and user lists now use stable timestamp-plus-id cursors, including pending-review sort rank for actors, so timestamp ties cannot skip or duplicate rows.
+- **First-run setup trust** — `crmy init` masks database credentials when printing non-interactive setup status.
+- **Settings performance** — heavy Settings subsections are lazy-loaded, reducing the main Settings route chunk from roughly 503 kB to roughly 222 kB in the production build.
+- **Background worker reliability** — fixed advisory-lock release parameter binding and made missing-schema background failures point operators to `crmy migrate run`.
 
 ---
 

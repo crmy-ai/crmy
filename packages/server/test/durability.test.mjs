@@ -4857,7 +4857,8 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   assert.match(indexSource, /runWithBackgroundLock/);
   assert.match(indexSource, /const client = await db\.connect\(\)/);
   assert.match(indexSource, /client\.query\('SELECT pg_try_advisory_lock/);
-  assert.match(indexSource, /client\.query\('SELECT pg_advisory_unlock/);
+  assert.match(indexSource, /client\.query\('SELECT pg_advisory_unlock\(\$1::bigint\)', \[BACKGROUND_WORKER_LOCK_KEY\]/);
+  assert.match(indexSource, /Stop CRMy, run `crmy migrate run`, then restart the server/);
   assert.match(indexSource, /app\.set\('trust proxy', parseTrustProxy/);
   assert.match(indexSource, /CRMY_CORS_ORIGINS/);
   assert.match(indexSource, /CRMY_BROWSER_COOKIE_AUTH=true is required when CRMY_DEPLOYMENT_MODE=multi_instance/);

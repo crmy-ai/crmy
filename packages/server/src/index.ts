@@ -91,6 +91,12 @@ function safeLogError(err: unknown): unknown {
   return redactSecrets(err);
 }
 
+function errorCode(err: unknown): string | undefined {
+  return typeof err === 'object' && err !== null && 'code' in err
+    ? String((err as { code?: unknown }).code ?? '')
+    : undefined;
+}
+
 export type ProgressStep = 'db_connect' | 'migrations' | 'seed_defaults';
 export type ProgressStatus = 'start' | 'done' | 'error';
 export type ProcessRole = 'all' | 'web' | 'worker';
@@ -657,7 +663,7 @@ export async function createApp(config: ServerConfig) {
       return true;
     } finally {
       if (locked) {
-        await client.query('SELECT pg_advisory_unlock($1::bigint)').catch((err) => {
+        await client.query('SELECT pg_advisory_unlock($1::bigint)', [BACKGROUND_WORKER_LOCK_KEY]).catch((err) => {
           console.warn('[background] Failed to release advisory lock:', safeLogError(err));
         });
       }
@@ -678,7 +684,15 @@ export async function createApp(config: ServerConfig) {
       ]);
     } catch (err) {
       failures.push(name);
-      console.error(`[background] ${name} failed:`, safeLogError(err));
+      if (errorCode(err) === '42P01') {
+        console.error(
+          `[background] ${name} failed because the database schema is missing a required table. ` +
+          'Stop CRMy, run `crmy migrate run`, then restart the server.',
+          safeLogError(err),
+        );
+      } else {
+        console.error(`[background] ${name} failed:`, safeLogError(err));
+      }
     } finally {
       if (timer) clearTimeout(timer);
     }
