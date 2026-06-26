@@ -83,6 +83,7 @@ import {
   updateSourceFilterSettings,
 } from '../services/source-filters.js';
 import { resolveActorRecordId } from '../services/actor-identity.js';
+import { decodeStableCursor, encodeStableCursor } from '../db/repos/pagination.js';
 import { z } from 'zod';
 
 function getActor(req: Request): ActorContext {
@@ -98,6 +99,11 @@ function qs(val: unknown): string | undefined {
 function qn(val: unknown, def: number): number {
   const s = qs(val);
   return s ? parseInt(s, 10) || def : def;
+}
+
+function cursorSortValue(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  return typeof value === 'string' ? value : String(value ?? '');
 }
 
 function qcsv(val: unknown): string[] | undefined {
@@ -4491,7 +4497,30 @@ export function apiRouter(db: DbPool): Router {
 	      if (!requireAdmin(req, res)) return;
 	      const actor = getActor(req);
 	      const limit = Math.min(qn(req.query.limit, 100), 500);
-	      const cursor = qs(req.query.cursor) ?? null;
+	      const cursor = decodeStableCursor(qs(req.query.cursor));
+	      const actorSortRankSql = `CASE WHEN a.registration_status = 'pending_review' THEN 0 ELSE 1 END`;
+	      const params: unknown[] = [actor.tenant_id];
+	      let cursorClause = '';
+	      if (cursor) {
+	        const cursorRank = typeof cursor.registration_rank === 'number' ? cursor.registration_rank : undefined;
+	        if (cursorRank !== undefined && cursor.id) {
+	          cursorClause = `AND (
+	            ${actorSortRankSql} > $2
+	            OR (
+	              ${actorSortRankSql} = $2
+	              AND (
+	                a.created_at < $3::timestamptz
+	                OR (a.created_at = $3::timestamptz AND a.id < $4::uuid)
+	              )
+	            )
+	          )`;
+	          params.push(cursorRank, cursor.sort_value, cursor.id);
+	        } else {
+	          cursorClause = `AND a.created_at < $2::timestamptz`;
+	          params.push(cursor.sort_value);
+	        }
+	      }
+	      params.push(limit + 1);
 	      const result = await db.query(
 	        `SELECT a.*,
 	                u.email as user_email,
@@ -4514,18 +4543,26 @@ export function apiRouter(db: DbPool): Router {
 	         FROM actors a
 	         LEFT JOIN users u ON u.id = a.user_id AND u.tenant_id = a.tenant_id
 	         WHERE a.tenant_id = $1
-	           AND ($2::timestamptz IS NULL OR a.created_at < $2::timestamptz)
+	           ${cursorClause}
 	         ORDER BY
-	           CASE WHEN a.registration_status = 'pending_review' THEN 0 ELSE 1 END,
-	           a.created_at DESC
-	         LIMIT $3`,
-	        [actor.tenant_id, cursor, limit + 1],
+	           ${actorSortRankSql},
+	           a.created_at DESC,
+	           a.id DESC
+	         LIMIT $${params.length}`,
+	        params,
 	      );
 	      const rows = result.rows;
 	      const data = rows.length > limit ? rows.slice(0, limit) : rows;
+	      const last = data[data.length - 1];
 	      res.json({
 	        data,
-	        next_cursor: rows.length > limit ? data[data.length - 1]?.created_at ?? null : null,
+	        next_cursor: rows.length > limit && last
+	          ? encodeStableCursor({
+	            sort_value: cursorSortValue(last.created_at),
+	            id: last.id,
+	            registration_rank: last.registration_status === 'pending_review' ? 0 : 1,
+	          })
+	          : null,
 	      });
 	    } catch (err) { handleError(res, err); }
 	  });
@@ -4689,21 +4726,39 @@ export function apiRouter(db: DbPool): Router {
 	      if (!requireAdmin(req, res)) return;
 	      const actor = getActor(req);
 	      const limit = Math.min(qn(req.query.limit, 100), 500);
-	      const cursor = qs(req.query.cursor) ?? null;
+	      const cursor = decodeStableCursor(qs(req.query.cursor));
+	      const params: unknown[] = [actor.tenant_id];
+	      let cursorClause = '';
+	      if (cursor) {
+	        if (cursor.id) {
+	          cursorClause = `AND (
+	            created_at > $2::timestamptz
+	            OR (created_at = $2::timestamptz AND id > $3::uuid)
+	          )`;
+	          params.push(cursor.sort_value, cursor.id);
+	        } else {
+	          cursorClause = `AND created_at > $2::timestamptz`;
+	          params.push(cursor.sort_value);
+	        }
+	      }
+	      params.push(limit + 1);
 	      const result = await db.query(
 	        `SELECT id, email, name, role, manager_id, is_active, invited_at, password_set_at, last_login_at, created_at, updated_at
 	         FROM users
 	         WHERE tenant_id = $1
-	           AND ($2::timestamptz IS NULL OR created_at > $2::timestamptz)
-	         ORDER BY created_at ASC
-	         LIMIT $3`,
-	        [actor.tenant_id, cursor, limit + 1],
+	           ${cursorClause}
+	         ORDER BY created_at ASC, id ASC
+	         LIMIT $${params.length}`,
+	        params,
 	      );
 	      const rows = result.rows;
 	      const data = rows.length > limit ? rows.slice(0, limit) : rows;
+	      const last = data[data.length - 1];
 	      res.json({
 	        data,
-	        next_cursor: rows.length > limit ? data[data.length - 1]?.created_at ?? null : null,
+	        next_cursor: rows.length > limit && last
+	          ? encodeStableCursor({ sort_value: cursorSortValue(last.created_at), id: last.id })
+	          : null,
 	      });
 	    } catch (err) { handleError(res, err); }
 	  });

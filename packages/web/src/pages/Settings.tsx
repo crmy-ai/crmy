@@ -16,11 +16,12 @@ import { getUser } from '@/api/client';
 import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useRevealWebhookSecret, useRotateWebhookSecret, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useMeetingClassifications, useCreateMeetingClassification, useUpdateMeetingClassification, useDeleteMeetingClassification, useSystemsOfRecord, useCreateSystemOfRecord, useUpdateSystemOfRecord, useDeleteSystemOfRecord, useTestSystemOfRecord, useRunSystemSync, useDiscoverSystemOfRecord, useSystemMappings, useUpsertSystemMapping, useDeleteSystemMapping, useSystemSyncRuns, useSystemConflicts, useResolveSystemConflict, useSystemWritebacks, usePreviewSystemWriteback, useRequestSystemWriteback, useExecuteSystemWriteback, useReviewSystemWriteback } from '@/api/hooks';
 import type { SystemMapping, SystemOfRecord } from '@/api/hooks';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
-import AgentSettings from '@/pages/AgentSettings';
-import ActorsSettings from '@/components/settings/ActorsSettings';
-import MessagingSettings from '@/components/settings/MessagingSettings';
-import HITLRulesSettings from '@/components/settings/HITLRulesSettings';
-import KnowledgeGovernanceSettings from '@/components/settings/KnowledgeGovernanceSettings';
+
+const AgentSettings = React.lazy(() => import('@/pages/AgentSettings'));
+const ActorsSettings = React.lazy(() => import('@/components/settings/ActorsSettings'));
+const MessagingSettings = React.lazy(() => import('@/components/settings/MessagingSettings'));
+const HITLRulesSettings = React.lazy(() => import('@/components/settings/HITLRulesSettings'));
+const KnowledgeGovernanceSettings = React.lazy(() => import('@/components/settings/KnowledgeGovernanceSettings'));
 
 type NavRole = 'member' | 'manager' | 'admin' | 'owner';
 
@@ -6423,25 +6424,27 @@ export default function Settings() {
         </nav>
         <div className="flex-1 overflow-y-auto p-6 pb-20 md:pb-6">
           <SettingsSetupStrip userRole={userRole} hidden={setupPathHidden} onHide={hideSetupPath} />
-          <Routes>
-            <Route index element={<ProfileSettings />} />
-            <Route path="appearance" element={<Navigate to="/settings" replace />} />
-            <Route path="api-keys" element={<ApiKeysSettings />} />
-            <Route path="webhooks" element={<RequireRole roles={['admin', 'owner']}><WebhooksSettings /></RequireRole>} />
-            <Route path="custom-fields" element={<RequireRole roles={['admin', 'owner']}><CustomFieldsSettings /></RequireRole>} />
-            <Route path="registries" element={<RequireRole roles={['admin', 'owner']}><RegistriesSettings /></RequireRole>} />
-            <Route path="actors" element={<RequireRole roles={['admin', 'owner']}><ActorsSettings /></RequireRole>} />
-            <Route path="connections" element={<RequireRole roles={['admin', 'owner']}><MessagingSettings /></RequireRole>} />
-            <Route path="messaging" element={<RedirectSettingsMessaging />} />
-            <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
-            <Route path="model" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
-            <Route path="knowledge" element={<RequireRole roles={['admin', 'owner']}><KnowledgeGovernanceSettings /></RequireRole>} />
-            <Route path="automations" element={<Navigate to="/settings/advanced" replace />} />
-            <Route path="systems" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
-            <Route path="systems/oauth/hubspot/callback" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
-            <Route path="database" element={<RequireRole roles={['admin', 'owner']}><DatabaseSettings /></RequireRole>} />
-            <Route path="advanced" element={<RequireRole roles={['admin', 'owner']}><AutomationsSettings /></RequireRole>} />
-          </Routes>
+          <React.Suspense fallback={<div className="min-h-[240px] rounded-md bg-muted/20" />}>
+            <Routes>
+              <Route index element={<ProfileSettings />} />
+              <Route path="appearance" element={<Navigate to="/settings" replace />} />
+              <Route path="api-keys" element={<ApiKeysSettings />} />
+              <Route path="webhooks" element={<RequireRole roles={['admin', 'owner']}><WebhooksSettings /></RequireRole>} />
+              <Route path="custom-fields" element={<RequireRole roles={['admin', 'owner']}><CustomFieldsSettings /></RequireRole>} />
+              <Route path="registries" element={<RequireRole roles={['admin', 'owner']}><RegistriesSettings /></RequireRole>} />
+              <Route path="actors" element={<RequireRole roles={['admin', 'owner']}><ActorsSettings /></RequireRole>} />
+              <Route path="connections" element={<RequireRole roles={['admin', 'owner']}><MessagingSettings /></RequireRole>} />
+              <Route path="messaging" element={<RedirectSettingsMessaging />} />
+              <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
+              <Route path="model" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
+              <Route path="knowledge" element={<RequireRole roles={['admin', 'owner']}><KnowledgeGovernanceSettings /></RequireRole>} />
+              <Route path="automations" element={<Navigate to="/settings/advanced" replace />} />
+              <Route path="systems" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
+              <Route path="systems/oauth/hubspot/callback" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
+              <Route path="database" element={<RequireRole roles={['admin', 'owner']}><DatabaseSettings /></RequireRole>} />
+              <Route path="advanced" element={<RequireRole roles={['admin', 'owner']}><AutomationsSettings /></RequireRole>} />
+            </Routes>
+          </React.Suspense>
         </div>
       </div>
     </div>

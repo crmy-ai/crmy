@@ -512,6 +512,10 @@ test('first-run setup persists a dedicated stored-secret encryption key', async 
   assert.match(initSource, /encryptionKey = crypto\.randomBytes\(32\)\.toString\('hex'\)/);
   assert.match(initSource, /process\.env\.CRMY_ENCRYPTION_KEY = encryptionKey/);
   assert.match(initSource, /Secret storage: dedicated encryption key generated and saved/);
+  assert.match(initSource, /function maskDatabaseUrl/);
+  assert.match(initSource, /parsed\.password = '\*\*\*'/);
+  assert.match(initSource, /Using database URL: \$\{maskDatabaseUrl\(databaseUrl\)\}/);
+  assert.doesNotMatch(initSource, /Using database URL: \$\{databaseUrl\}/);
   assert.match(serverCommandSource, /Generated a dedicated stored-secret encryption key and saved it to \.crmy\.json/);
   assert.match(serverCommandSource, /saveConfigFile\(config\)/);
   assert.match(doctorSource, /Stored-secret encryption key is configured/);

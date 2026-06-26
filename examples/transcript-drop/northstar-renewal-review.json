@@ -1,0 +1,15 @@
+{
+  "title": "Northstar Labs renewal review",
+  "meeting_start": "2026-06-20T17:00:00Z",
+  "meeting_end": "2026-06-20T17:45:00Z",
+  "organizer_email": "cody@example.com",
+  "attendees": [
+    "maya@northstarlabs.com",
+    "alex@northstarlabs.com",
+    "cody@example.com"
+  ],
+  "source_url": "https://example.invalid/transcripts/northstar-renewal-review",
+  "account_hint": "Northstar Labs",
+  "source_authorship": "mixed_customer_and_internal",
+  "customer_authored": false
+}

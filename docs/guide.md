@@ -1000,6 +1000,8 @@ Sidecar metadata is optional but recommended. Put a JSON file beside the transcr
 
 Matching order is explicit IDs first, then provider calendar IDs, meeting time plus attendee overlap, contact email/account domains including Additional Domains, then Subject Graph resolution from the title, attendees, excerpt, and hints. Unmatched or ambiguous files appear in **Customer Activity -> Needs Context** and create a Handoff so a human can link, ignore, or reprocess them. Reviewers see the source object, match reason, candidate records, excerpt, and downstream lineage links.
 
+A repeatable synthetic fixture lives in [`examples/transcript-drop`](../examples/transcript-drop/README.md). Use it for local-folder smoke tests or upload the same basename pair to an S3-compatible test bucket to verify discovery, sidecar matching, review, processing, and lineage without real customer content.
+
 ### Activity types
 
 Default types are seeded and organized by category. Meeting classifications are customizable in [Type Registries](#type-registries), while the core activity write tools currently accept the built-in activity type values.
@@ -2435,6 +2437,8 @@ Troubleshooting:
 - **Redirect URI mismatch:** Google and Microsoft require an exact string match. For local development, use the `http://localhost:3000/.../callback` URI shown in **System Connections -> OAuth** even if your browser is on `127.0.0.1`; CRMy normalizes loopback redirects to `localhost`. When CRMy is behind a tunnel, reverse proxy, or hosted domain, set `CRMY_PUBLIC_URL=https://your-crmy-host`, copy the exact redirect URI shown in **System Connections -> OAuth** into the provider app, then retry consent.
 - **Connected context-only but now needs send/drafts:** reauthorize the mailbox from **Mailboxes & Senders** with the send or provider-draft toggle enabled.
 - **Who has connected mail/calendar:** admins can review mailbox, sender, and calendar coverage badges and expanded details in **Settings -> Actors**, including connected email, connection date, last sync, latest message/event, processed volume, Raw Context sources, Signals, Memory, and latest issue.
+
+Before enabling live provider support for a production tenant, run the [0.9.3 provider certification checklist](provider-certification-0.9.3.md). Automated tests verify CRMy behavior; the certification checklist verifies real Google/Microsoft consent, sync, draft, send, reply, calendar, free/busy, and failure behavior for each OAuth app source.
 
 Requested scopes:
 

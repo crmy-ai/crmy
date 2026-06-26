@@ -762,6 +762,7 @@ test('high-volume context surfaces use stable timestamp plus id cursors', async 
   const actorsRepo = await readFile(new URL('../src/db/repos/actors.ts', import.meta.url), 'utf8');
   const useCasesRepo = await readFile(new URL('../src/db/repos/use-cases.ts', import.meta.url), 'utf8');
   const webhooksRepo = await readFile(new URL('../src/db/repos/webhooks.ts', import.meta.url), 'utf8');
+  const restRouter = await readFile(new URL('../src/rest/router.ts', import.meta.url), 'utf8');
 
   assert.match(paginationRepo, /encodeStableCursor/);
   assert.match(paginationRepo, /decodeStableCursor/);
@@ -822,6 +823,39 @@ test('high-volume context surfaces use stable timestamp plus id cursors', async 
   assert.match(signalGroupsRepo, /sg\.id < \$\$\{idx \+ 2\}::uuid/);
   assert.match(signalGroupsRepo, /sg\.updated_at DESC, sg\.id DESC/);
   assert.match(signalGroupsRepo, /rank: signalGroupSortRank/);
+
+  assert.match(restRouter, /decodeStableCursor\(qs\(req\.query\.cursor\)\)/);
+  assert.match(restRouter, /const actorSortRankSql = `CASE WHEN a\.registration_status = 'pending_review' THEN 0 ELSE 1 END`/);
+  assert.match(restRouter, /a\.created_at DESC,\s*a\.id DESC/);
+  assert.match(restRouter, /registration_rank: last\.registration_status === 'pending_review' \? 0 : 1/);
+  assert.match(restRouter, /created_at ASC,\s*id ASC/);
+  assert.match(restRouter, /encodeStableCursor\(\{ sort_value: cursorSortValue\(last\.created_at\), id: last\.id \}\)/);
+});
+
+test('live provider certification docs cover real OAuth provider behavior before production claims', async () => {
+  const certification = await readFile(new URL('../../../docs/provider-certification-0.9.3.md', import.meta.url), 'utf8');
+  const readme = await readFile(new URL('../../../README.md', import.meta.url), 'utf8');
+  const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
+
+  for (const required of [
+    'Gmail mailbox context sync',
+    'Gmail mailbox send and provider draft creation',
+    'Google Calendar sync and free/busy availability',
+    'Outlook mailbox context sync',
+    'Outlook mailbox send and provider draft creation',
+    'Microsoft 365 calendar sync and free/busy availability',
+    'CRMy-managed hosted OAuth app',
+    'Tenant-owned enterprise OAuth app',
+    'Self-hosted environment-managed OAuth app',
+    'Raw Context, Signals, Memory candidates, and Lineage',
+    'CRMy-authored context, not customer-authored evidence',
+    'Disconnect removes stored OAuth tokens',
+  ]) {
+    assert.match(certification, new RegExp(required.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+
+  assert.match(readme, /provider-certification-0\.9\.3\.md/);
+  assert.match(guide, /provider-certification-0\.9\.3\.md/);
 });
 
 test('production database TLS requires verified certificates unless explicitly overridden', async () => {
@@ -6403,4 +6437,20 @@ test('transcript source drops are durable, reviewable, and integrated with activ
   const jobDedupeMigration = await readFile(new URL('../migrations/087_context_source_drop_job_dedupe.sql', import.meta.url), 'utf8');
   assert.match(jobDedupeMigration, /context_source_sync_jobs_active_unique_idx/);
   assert.match(jobDedupeMigration, /context_source_processing_jobs_active_unique_idx/);
+
+  const fixtureReadme = await readFile(new URL('../../../examples/transcript-drop/README.md', import.meta.url), 'utf8');
+  const transcript = await readFile(new URL('../../../examples/transcript-drop/northstar-renewal-review.txt', import.meta.url), 'utf8');
+  const sidecarSource = await readFile(new URL('../../../examples/transcript-drop/northstar-renewal-review.json', import.meta.url), 'utf8');
+  const sidecar = JSON.parse(sidecarSource);
+  assert.match(fixtureReadme, /CRMY_LOCAL_SOURCE_ROOTS/);
+  assert.match(fixtureReadme, /transcript-source create-local/);
+  assert.match(fixtureReadme, /S3-compatible test bucket/);
+  assert.match(fixtureReadme, /Raw Context -> Signals -> Memory/);
+  assert.match(transcript, /Maya Patel, Northstar Labs/);
+  assert.match(transcript, /security review/);
+  assert.equal(sidecar.account_hint, 'Northstar Labs');
+  assert.equal(sidecar.source_authorship, 'mixed_customer_and_internal');
+  assert.equal(sidecar.customer_authored, false);
+  assert.ok(Array.isArray(sidecar.attendees));
+  assert.ok(sidecar.attendees.includes('maya@northstarlabs.com'));
 });

@@ -505,6 +505,8 @@ Common timeout controls:
 
 See [`.env.example`](.env.example) for the full reference, including hosted OAuth, mailbox/calendar, semantic retrieval, rate limits, MCP session routing, provider timeouts, and connector settings.
 
+Before claiming live Google or Microsoft mailbox/calendar support for a production tenant, run the [0.9.3 provider certification checklist](docs/provider-certification-0.9.3.md). Automated tests cover CRMy's contracts and failure handling; live provider certification verifies real OAuth consent, sync, draft, send, reply, calendar, and availability behavior against a sandbox or production app.
+
 ## Develop From Source
 
 ```bash

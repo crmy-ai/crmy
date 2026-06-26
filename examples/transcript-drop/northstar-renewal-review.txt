@@ -1,0 +1,26 @@
+Northstar Labs renewal review
+2026-06-20 10:00 America/Los_Angeles
+
+Cody Harris, CRMy:
+Thanks for making time. I want to confirm the renewal risks and what the next best action should be before we send anything to your team.
+
+Maya Patel, Northstar Labs:
+The pilot is useful, but our executive sponsor wants evidence that the system can keep customer context current without manual cleanup after every call.
+
+Alex Rivera, Northstar Labs:
+The biggest blocker is security review. We need a clear answer on data retention, OAuth scopes, and whether transcript-derived claims are kept separate from confirmed facts.
+
+Cody Harris, CRMy:
+That makes sense. We can send the retention summary and show the lineage view for the transcript-to-signal path.
+
+Maya Patel, Northstar Labs:
+Please also include how stale context is handled. We do not want the agent relying on a comment from last quarter if the renewal plan changed.
+
+Alex Rivera, Northstar Labs:
+If you can send that by Friday, I can move the security review forward next week.
+
+Cody Harris, CRMy:
+I will send the retention and lineage summary by Friday, and I will include the stale-context behavior.
+
+Maya Patel, Northstar Labs:
+Good. If security is comfortable, the renewal is likely to stay on track for the end of July.
