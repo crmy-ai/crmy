@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  <img src="examples/crmy-claude-demo.gif" alt="CRMy Claude demo showing governed customer context, Action Context, Signals, and lineage" width="900">
+  <img src="examples/crmy-claude-demo.gif" alt="CRMy Claude demo showing governed customer context, Action Context, Signals, and lineage" width="800">
 </p>
 
 <p align="center">
