@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CRMy API",
-    "version": "0.9.2",
+    "version": "0.9.3",
     "description": "The operational customer context backend for AI agents. MCP-native, PostgreSQL-backed, open source. Application endpoints require `Authorization: Bearer <jwt-or-api-key>` except `/auth/register` and `/auth/login`; provider OAuth callbacks and inbound email webhooks use provider state or tenant-scoped HMAC signatures instead.",
     "license": {
       "name": "Apache-2.0"
@@ -14866,6 +14866,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
                   "category": {
                     "type": "string",
                     "description": "Limit detection to a single claim category."

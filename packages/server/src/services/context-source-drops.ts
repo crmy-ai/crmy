@@ -3,6 +3,7 @@
 
 import crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
+import net from 'node:net';
 import * as path from 'node:path';
 import type { ActorContext, UUID } from '@crmy/shared';
 import { CrmyError, notFound, permissionDenied, validationError } from '@crmy/shared';
@@ -29,9 +30,23 @@ interface ListedObject {
   etag?: string | null;
 }
 
+interface ListedObjectsResult {
+  objects: ListedObject[];
+  truncated?: boolean;
+  pages?: number;
+  next_continuation_token?: string;
+}
+
 interface DownloadedObject {
   buffer: Buffer;
   content_hash: string;
+}
+
+class RetryableContextSourceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RetryableContextSourceError';
+  }
 }
 
 interface SidecarMetadata {
@@ -72,6 +87,8 @@ const SIDECAR_EXT = 'json';
 const DEFAULT_MAX_OBJECT_BYTES = 10 * 1024 * 1024;
 const DEFAULT_MAX_PARSE_CHARS = 240_000;
 const DEFAULT_CHUNK_CHARS = 55_000;
+const DEFAULT_S3_LIST_PAGES = 10;
+const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
 function maxObjectBytes(): number {
   return Number(process.env.CRMY_CONTEXT_DROP_MAX_OBJECT_BYTES ?? DEFAULT_MAX_OBJECT_BYTES);
@@ -83,6 +100,14 @@ function maxParseChars(): number {
 
 function chunkChars(): number {
   return Number(process.env.CRMY_CONTEXT_DROP_CHUNK_CHARS ?? DEFAULT_CHUNK_CHARS);
+}
+
+function maxS3ListPages(): number {
+  return Math.max(1, Number(process.env.CRMY_CONTEXT_DROP_MAX_S3_LIST_PAGES ?? DEFAULT_S3_LIST_PAGES));
+}
+
+function contextDropFetchTimeoutMs(): number {
+  return Math.max(1000, Number(process.env.CRMY_CONTEXT_DROP_FETCH_TIMEOUT_MS ?? process.env.SOURCE_SYNC_FETCH_TIMEOUT_MS ?? DEFAULT_FETCH_TIMEOUT_MS));
 }
 
 function sha256(value: Buffer | string): string {
@@ -365,7 +390,8 @@ export async function syncContextSourceConnection(db: DbPool, tenantId: UUID, co
   let queued = 0;
   let skipped = 0;
   try {
-    const objects = await listProviderObjects(connection);
+    const listing = await listProviderObjects(connection);
+    const { objects } = listing;
     const objectKeys = new Set(objects.map(item => item.key));
     for (const item of objects) {
       if (!isSupportedObject(item.key) || isLikelySidecar(item.key, objectKeys)) {
@@ -413,7 +439,17 @@ export async function syncContextSourceConnection(db: DbPool, tenantId: UUID, co
       status: 'configured',
       last_sync_at: new Date().toISOString(),
       last_error: null,
-      sync_stats: { discovered, queued, skipped, last_result: 'success' },
+      sync_stats: {
+        discovered,
+        queued,
+        skipped,
+        last_result: listing.truncated ? 'partial' : 'success',
+        truncated: Boolean(listing.truncated),
+        pages: listing.pages ?? 1,
+      },
+      ...(listing.truncated
+        ? { last_error: `S3 listing reached the ${listing.pages ?? maxS3ListPages()} page safety limit. Some transcript objects may not be discovered until the page limit is raised or the prefix is narrowed.` }
+        : {}),
     });
     return { discovered, queued, skipped };
   } catch (err) {
@@ -460,6 +496,26 @@ export async function processContextSourceObject(db: DbPool, tenantId: UUID, obj
         sidecar,
       });
     }
+    const duplicate = object.connection_id
+      ? await contextSourceRepo.findSourceObjectByActualHash(db, tenantId, object.connection_id, downloaded.content_hash, object.id)
+      : null;
+    if (duplicate) {
+      return await contextSourceRepo.updateSourceObject(db, tenantId, object.id, {
+        processing_status: 'ignored',
+        match_status: 'ignored',
+        failure_code: 'duplicate_source_object',
+        failure_reason: `Duplicate content already discovered as ${duplicate.source_label ?? duplicate.object_key}.`,
+        match_reason: 'Skipped because this transcript content was already processed or queued from the same source connection.',
+        raw_context_source_id: duplicate.raw_context_source_id ?? null,
+        activity_id: duplicate.activity_id ?? null,
+        meeting_artifact_id: duplicate.meeting_artifact_id ?? null,
+        metadata: {
+          actual_content_hash: downloaded.content_hash,
+          duplicate_of_source_object_id: duplicate.id,
+          duplicate_detected_at: new Date().toISOString(),
+        },
+      }) ?? object;
+    }
     object = await contextSourceRepo.updateSourceObject(db, tenantId, object.id, {
       text_excerpt: text.slice(0, 1200),
       sidecar_metadata: sidecar,
@@ -483,13 +539,15 @@ export async function processContextSourceObject(db: DbPool, tenantId: UUID, obj
     return await processMatchedSourceObject(db, tenantId, object, text, sidecar, artifactType, match, actor);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Transcript source processing failed.';
-    return await contextSourceRepo.updateSourceObject(db, tenantId, object.id, {
+    await contextSourceRepo.updateSourceObject(db, tenantId, object.id, {
       processing_status: 'failed',
       match_status: 'needs_review',
       failure_code: 'processing_failed',
       failure_reason: message,
       match_reason: message,
-    }) ?? object;
+    });
+    if (err instanceof RetryableContextSourceError) throw err;
+    return await contextSourceRepo.getSourceObject(db, tenantId, object.id) ?? object;
   }
 }
 
@@ -637,11 +695,57 @@ async function assertSourceObjectAccess(db: DbPool, actor: ActorContext, object:
 }
 
 function assertProviderAllowed(provider: Provider, config: Record<string, unknown>): void {
-  if (provider !== 'local_folder') return;
+  if (provider === 's3') {
+    assertS3EndpointAllowed(config);
+    return;
+  }
   if (process.env.NODE_ENV === 'production' && process.env.CRMY_ENABLE_LOCAL_CONTEXT_DROPS !== 'true') {
     throw validationError('Local transcript folders are disabled in hosted production. Use S3-compatible drops or enable CRMY_ENABLE_LOCAL_CONTEXT_DROPS explicitly for self-hosted deployments.');
   }
   assertLocalPathAllowed(String(config.path ?? ''));
+}
+
+function assertS3EndpointAllowed(config: Record<string, unknown>): void {
+  const endpoint = String(config.endpoint ?? '').trim();
+  if (!endpoint) return;
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw validationError('S3-compatible endpoint must be a valid URL.', [
+      { field: 'endpoint', message: 'Enter a valid HTTPS endpoint URL.' },
+    ]);
+  }
+  if (process.env.NODE_ENV === 'production' && url.protocol !== 'https:') {
+    throw validationError('S3-compatible endpoints must use HTTPS in production.', [
+      { field: 'endpoint', message: 'Use an HTTPS endpoint or omit the endpoint for AWS S3.' },
+    ]);
+  }
+  const allowCustomProductionEndpoint = process.env.CRMY_ALLOW_CUSTOM_CONTEXT_DROP_ENDPOINTS === 'true';
+  if (process.env.NODE_ENV === 'production' && !allowCustomProductionEndpoint) {
+    throw validationError('Custom S3-compatible endpoints are disabled in production by default.', [
+      { field: 'endpoint', message: 'Omit endpoint for AWS S3, or set CRMY_ALLOW_CUSTOM_CONTEXT_DROP_ENDPOINTS=true for a deliberate self-hosted exception.' },
+    ]);
+  }
+  if (!isPublicEndpointHost(url.hostname) && process.env.CRMY_ALLOW_PRIVATE_CONTEXT_DROP_ENDPOINTS !== 'true') {
+    throw validationError('S3-compatible endpoint cannot target local or private network addresses.', [
+      { field: 'endpoint', message: 'Use a public S3-compatible endpoint, or set CRMY_ALLOW_PRIVATE_CONTEXT_DROP_ENDPOINTS=true only for trusted self-hosted deployments.' },
+    ]);
+  }
+}
+
+function isPublicEndpointHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host.endsWith('.localhost')) return false;
+  const ipVersion = net.isIP(host);
+  if (ipVersion === 6) return host !== '::1' && !host.startsWith('fc') && !host.startsWith('fd') && !host.startsWith('fe80:');
+  if (ipVersion === 4) {
+    const [a, b] = host.split('.').map(Number);
+    if (a === 10 || a === 127 || a === 0 || a === 169 && b === 254) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 168) return false;
+  }
+  return true;
 }
 
 function localAllowedRoots(): string[] {
@@ -662,7 +766,7 @@ function assertLocalPathAllowed(folderPath: string): string {
   return resolved;
 }
 
-async function listProviderObjects(connection: SourceConnection): Promise<ListedObject[]> {
+async function listProviderObjects(connection: SourceConnection): Promise<ListedObjectsResult> {
   if (connection.provider === 'local_folder') return listLocalObjects(connection);
   return listS3Objects(connection);
 }
@@ -694,7 +798,7 @@ function localPathForKey(connection: SourceConnection, key: string): string {
   return resolved;
 }
 
-async function listLocalObjects(connection: SourceConnection): Promise<ListedObject[]> {
+async function listLocalObjects(connection: SourceConnection): Promise<ListedObjectsResult> {
   const root = assertLocalPathAllowed(String(connection.config.path ?? ''));
   const out: ListedObject[] = [];
   async function walk(dir: string): Promise<void> {
@@ -718,14 +822,16 @@ async function listLocalObjects(connection: SourceConnection): Promise<ListedObj
     }
   }
   await walk(root);
-  return out;
+  return { objects: out, truncated: false, pages: 1 };
 }
 
-async function listS3Objects(connection: SourceConnection): Promise<ListedObject[]> {
+async function listS3Objects(connection: SourceConnection): Promise<ListedObjectsResult> {
   const config = s3Config(connection);
   const objects: ListedObject[] = [];
   let continuationToken: string | undefined;
-  for (let page = 0; page < 10; page++) {
+  const maxPages = maxS3ListPages();
+  let page = 0;
+  for (; page < maxPages; page++) {
     const query = new URLSearchParams({
       'list-type': '2',
       prefix: config.prefix,
@@ -739,15 +845,47 @@ async function listS3Objects(connection: SourceConnection): Promise<ListedObject
     continuationToken = xml.match(/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/u)?.[1];
     if (!continuationToken) break;
   }
-  return objects;
+  return {
+    objects,
+    truncated: Boolean(continuationToken),
+    pages: Math.min(page + 1, maxPages),
+    next_continuation_token: continuationToken,
+  };
 }
 
 async function getS3Object(connection: SourceConnection, key: string): Promise<Buffer> {
   const config = s3Config(connection);
   const url = s3Url(config, key);
   const response = await signedS3Fetch(connection, 'GET', url);
-  const arrayBuffer = await response.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+  return readResponseBufferWithLimit(response, maxObjectBytes());
+}
+
+async function readResponseBufferWithLimit(response: Response, limit: number): Promise<Buffer> {
+  const contentLength = Number(response.headers.get('content-length') ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > limit) {
+    throw validationError(`File is larger than the ${Math.round(limit / 1024 / 1024)} MB transcript-drop limit.`);
+  }
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const fallback = Buffer.from(await response.arrayBuffer());
+    if (fallback.byteLength > limit) {
+      throw validationError(`File is larger than the ${Math.round(limit / 1024 / 1024)} MB transcript-drop limit.`);
+    }
+    return fallback;
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const chunk = Buffer.from(value);
+    total += chunk.byteLength;
+    if (total > limit) {
+      throw validationError(`File is larger than the ${Math.round(limit / 1024 / 1024)} MB transcript-drop limit.`);
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, total);
 }
 
 function s3Config(connection: SourceConnection): { bucket: string; region: string; prefix: string; endpoint?: string; forcePathStyle: boolean } {
@@ -818,9 +956,24 @@ async function signedS3Fetch(connection: SourceConnection, method: 'GET', url: U
   const signingKey = awsSigningKey(creds.secretAccessKey, dateStamp, config.region);
   const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex');
   headers.authorization = `AWS4-HMAC-SHA256 Credential=${creds.accessKeyId}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-  const response = await fetch(url, { method, headers });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), contextDropFetchTimeoutMs());
+  let response: Response;
+  try {
+    response = await fetch(url, { method, headers, signal: controller.signal });
+  } catch (err) {
+    const message = err instanceof Error && err.name === 'AbortError'
+      ? `S3 request timed out after ${contextDropFetchTimeoutMs()}ms`
+      : `S3 request failed: ${err instanceof Error ? err.message : 'network error'}`;
+    throw new RetryableContextSourceError(message);
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!response.ok) {
-    throw new Error(`S3 request failed (${response.status})`);
+    const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+    const message = `S3 request failed (${response.status})`;
+    if (retryable) throw new RetryableContextSourceError(message);
+    throw validationError(message);
   }
   return response;
 }

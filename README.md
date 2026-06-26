@@ -17,15 +17,13 @@
   <a href="https://www.npmjs.com/package/@crmy/cli"><img alt="npm" src="https://img.shields.io/npm/v/@crmy/cli?label=npm&color=2563eb"></a>
   <a href="https://github.com/crmy-ai/crmy/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-0f172a"></a>
   <a href="https://discord.gg/2HvmudDwE"><img alt="Discord" src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white"></a>
-  <a href="https://github.com/crmy-ai/crmy/releases"><img alt="Release" src="https://img.shields.io/badge/release-v0.9.2-16a34a"></a>
+  <a href="https://github.com/crmy-ai/crmy/releases"><img alt="Release" src="https://img.shields.io/badge/release-v0.9.3-16a34a"></a>
   <a href="https://github.com/crmy-ai/crmy/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/crmy-ai/crmy?style=social"></a>
 </p>
 
 <p align="center">
-  <img src="examples/crmy-claude-demo.gif" alt="CRMy Claude demo showing governed customer context, Action Context, Signals, and lineage" width="800">
-</p>
-
-<p align="center">
+  <a href="#quick-start">Quick Start</a>
+  ·
   <a href="#why-crmy">Why CRMy</a>
   ·
   <a href="#local-demo">Local Demo</a>
@@ -40,6 +38,37 @@
 </p>
 
 ---
+
+## Quick Start
+
+Install CRMy and create a local demo-ready workspace:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/crmy-ai/crmy/main/scripts/install.sh | bash
+```
+
+The installer checks Node.js 20+, asks which database route you want, asks whether to load demo data, optionally configures a Workspace Agent model/provider, installs `crmy` into a user-owned `~/.crmy` prefix, builds from source when the published CLI is behind, initializes the workspace, runs `crmy doctor`, and offers to start the web server in the background.
+
+Already have PostgreSQL?
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/crmy-ai/crmy/main/scripts/install.sh | bash -s -- \
+  --database-url "$DATABASE_URL"
+```
+
+After install, open a new shell or use the exact `crmy` path printed by the installer:
+
+```bash
+crmy server start
+claude mcp add crmy -- crmy mcp
+codex mcp add crmy -- crmy mcp
+```
+
+Use `crmy server status`, `crmy server logs --follow`, and `crmy server stop` to manage the background server.
+
+Prefer the manual path, or want to see exactly what gets seeded? Use the <a href="#local-demo">Local Demo</a> below.
+
+## Why CRMy
 
 Your AI sales, CS, support, and RevOps agents can draft content, summarize meetings, and call APIs. They still hit walls when customer truth is scattered across CRM fields, meeting transcripts, emails, notes, calendar events, and human approvals.
 
@@ -59,31 +88,6 @@ Raw Context -> Signals -> Memory -> Briefing + Action Context -> Handoff / Write
 ```
 
 Need proof? Try the <a href="#local-demo">local demo</a> below to see an agent resolve a customer, get a governed briefing, check what is safe to act on, and prove lineage.
-
-## What Agents Get Back
-
-CRMy does not return a raw data dump. It returns a compact packet that separates durable facts from unresolved claims and action risk:
-
-```text
-Memory
-- Security review is the active expansion blocker.
-- Maya is the current expansion champion.
-
-Signals needing review
-- Procurement is not involved yet.
-  Evidence: "Procurement is not involved yet."
-  Status: grounded in source, not confirmed as Memory.
-
-Stale warnings
-- Expansion timeline has not been reconfirmed recently.
-
-Safe to act?
-- Customer outreach is allowed.
-- Include technical validation as the next step.
-- Keep the procurement claim out of committed CRM updates until confirmed.
-```
-
-## Why CRMy
 
 CRMy is built for teams creating customer-facing agents that need to work safely with real GTM data.
 
@@ -108,6 +112,10 @@ Use CRMy when you are building agents that need customer context they can trust 
 - Teams that want to test governed customer memory with realistic demo data or direct context ingestion.
 
 ## Local Demo
+
+<p align="center">
+  <img src="examples/crmy-claude-demo.gif" alt="CRMy Claude demo showing governed customer context, Action Context, Signals, and lineage" width="800">
+</p>
 
 Local setup usually takes 2-5 minutes if Docker and Node.js are already installed.
 
@@ -200,7 +208,7 @@ What `init --demo` does:
 
 1. Connects to PostgreSQL.
 2. Creates the local database when needed.
-3. Runs migrations.
+3. Prepares the CRMy database tables.
 4. Creates the first owner account.
 5. Generates persistent JWT and stored-secret encryption keys.
 6. Writes local CLI and MCP config.
@@ -221,7 +229,7 @@ Prefer a global install?
 npm install -g @crmy/cli
 crmy init
 crmy doctor
-crmy server
+crmy server start
 ```
 
 ## How It Works
@@ -259,10 +267,33 @@ CRMy keeps customer context useful without pretending messy source material is i
 - **Raw Context** is source material before extraction: transcripts, emails, notes, meetings, CRM changes, docs, support/product signals, and agent inputs.
 - **Signals** are inferred claims with evidence, confidence, source lineage, and readiness.
 - **Memory** is confirmed operational customer context agents can rely on across sessions. Memory carries freshness and decay signals, so CRMy does not treat "customer truth" as permanent.
-- **Product Knowledge** is approved product, pricing, security, implementation, and competitive context for customer-facing claims. It stays separate from customer Memory.
+- **Product Knowledge** is the optional governed retrieval boundary for approved product, pricing, security, implementation, and competitive claims. It keeps global product truth separate from customer Memory while giving agents cited claims they can safely use.
 - **Briefings** answer: what should the agent know?
 - **Action Context** answers: is this action ready, allowed, risky, stale, or review-required?
 - **Handoffs and Writeback** keep approval, idempotency, audit, and execution receipts in the path when work touches a customer or system of record.
+
+## What Agents Get Back
+
+CRMy does not return a raw data dump. It returns a compact packet that separates durable facts from unresolved claims and action risk:
+
+```text
+Memory
+- Security review is the active expansion blocker.
+- Maya is the current expansion champion.
+
+Signals needing review
+- Procurement is not involved yet.
+  Evidence: "Procurement is not involved yet."
+  Status: grounded in source, not confirmed as Memory.
+
+Stale warnings
+- Expansion timeline has not been reconfirmed recently.
+
+Safe to act?
+- Customer outreach is allowed.
+- Include technical validation as the next step.
+- Keep the procurement claim out of committed CRM updates until confirmed.
+```
 
 ## Core Capabilities
 
@@ -274,9 +305,9 @@ CRMy keeps customer context useful without pretending messy source material is i
 | **Memory freshness and decay** | Track freshness, surface stale warnings, and keep old customer truth from silently becoming agent truth. |
 | **Customer briefings** | Retrieve Current Memory, recent activity, open Handoffs, stale warnings, and unresolved Signals before analysis. |
 | **Action Context** | Return readiness, policy, warnings, source authority, review requirements, and audit metadata before customer-facing or record-changing work. |
-| **Product Knowledge** | When configured, retrieve approved, source-grounded product, pricing, implementation, security, and competitive claims without mixing global product truth into customer Memory. |
+| **Product Knowledge** | Retrieve approved, source-grounded product, pricing, implementation, security, and competitive claims without mixing global product truth into customer Memory. Admins can govern claim freshness, approval, external-use eligibility, and conflicts. |
 | **Handoffs and approvals** | Route uncertain, sensitive, or governed work to humans with evidence attached. |
-| **Lineage and audit** | Trace source material into Signals, Memory, product knowledge retrievals, actions, reviews, writebacks, and receipts. |
+| **Lineage and audit** | Trace source material into Signals, Memory, actions, reviews, writebacks, and receipts. Product knowledge retrieval receipts prove which claims were used or excluded. |
 | **Email and calendar context** | Connect actor mailboxes/calendars for customer communication, meeting context, availability-aware suggestions, and sender-aware email actions. |
 | **Systems of record** | Configure CRM/warehouse sync and governed writeback through mappings, previews, approvals, and receipts. |
 | **MCP, CLI, REST, UI** | Use the same engine from agent tools, scripts, integrations, and the web app. |
@@ -374,7 +405,7 @@ Friendly CLI commands cover setup, demos, Raw Context ingestion, activity/email 
 ```bash
 crmy init
 crmy doctor
-crmy server
+crmy server start
 crmy seed-demo --reset
 
 crmy briefing "account:Northstar Labs"
@@ -468,6 +499,7 @@ Common timeout controls:
 | `LLM_TIMEOUT_MS` | Optional | General Workspace Agent and background LLM timeout. Default: `60000`. |
 | `AGENT_STREAM_TIMEOUT_MS` | Optional | Streaming Workspace Agent provider timeout. Default: `60000`. |
 | `SOURCE_SYNC_FETCH_TIMEOUT_MS` | Optional | Mailbox/calendar/provider fetch timeout. Default: `30000`. |
+| `CRMY_CONTEXT_DROP_FETCH_TIMEOUT_MS` | Optional | Transcript-drop S3-compatible fetch timeout. Defaults to `SOURCE_SYNC_FETCH_TIMEOUT_MS` or `30000`. |
 | `CONNECTOR_FETCH_TIMEOUT_MS` | Optional | Systems-of-record connector fetch timeout. Default: `30000`. |
 | `SLACK_SEND_TIMEOUT_MS` | Optional | Slack webhook delivery timeout. Default: `10000`. |
 
@@ -543,7 +575,7 @@ Recipes:
 
 ## Release
 
-Current version: `0.9.2`
+Current version: `0.9.3`
 
 Release notes live in [RELEASE_NOTES.md](RELEASE_NOTES.md). Older release notes live in [CHANGELOG.md](CHANGELOG.md).
 

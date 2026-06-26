@@ -76,7 +76,7 @@ function printNextSteps(account: string, modelConfigured: boolean, withModel: bo
   console.log(`     ${CYAN}claude mcp add crmy -- npx -y @crmy/cli mcp${RESET}`);
   console.log(`     ${DIM}codex mcp add crmy -- npx -y @crmy/cli mcp${RESET}\n`);
   console.log(`  ${GREEN}2.${RESET} Open the web app:`);
-  console.log(`     ${CYAN}crmy server${RESET}  ${DIM}→ http://localhost:3000/app${RESET}\n`);
+  console.log(`     ${CYAN}crmy server start${RESET}  ${DIM}→ http://localhost:3000/app${RESET}\n`);
   console.log(`  ${GREEN}3.${RESET} Drop in your own customer context (still no connector):`);
   console.log(`     ${CYAN}crmy context ingest --subject "account:${account}" --file ./call-notes.txt${RESET}`);
   if (!modelConfigured) {
