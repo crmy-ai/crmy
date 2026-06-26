@@ -70,7 +70,7 @@ Prefer the manual path, or want to see exactly what gets seeded? Use the <a href
 
 ## Why CRMy
 
-Your AI sales, CS, support, and RevOps agents can draft content, summarize meetings, and call APIs. They still hit walls when customer truth is scattered across CRM fields, meeting transcripts, emails, notes, calendar events, and human approvals.
+Your AI sales, CS, support, and RevOps agents can draft content, summarize meetings, and call APIs. They still hit walls when customer truth is scattered across CRM fields, meeting transcripts, emails, notes, calendar events, and random documents.
 
 Without a governed context layer, agents can't answer the most critical questions:
 
@@ -87,7 +87,7 @@ CRMy is the operating layer for these questions. Instead of dumping raw records 
 Raw Context -> Signals -> Memory -> Briefing + Action Context -> Handoff / Writeback -> Audit Trail
 ```
 
-Need proof? Try the <a href="#local-demo">local demo</a> below to see an agent resolve a customer, get a governed briefing, check what is safe to act on, and prove lineage.
+Want proof? Try the <a href="#local-demo">local demo</a> below to see an agent resolve a customer, get a governed briefing, check what is safe to act on, and prove lineage.
 
 CRMy is built for teams creating customer-facing agents that need to work safely with real GTM data.
 
@@ -121,7 +121,7 @@ Local setup usually takes 2-5 minutes if Docker and Node.js are already installe
 
 You need Node.js 20+ and PostgreSQL. For local development, pgvector is recommended but not required.
 
-Start Postgres:
+**Start Postgres:**
 
 ```bash
 docker run --name crmy-postgres \
@@ -132,7 +132,7 @@ docker run --name crmy-postgres \
   -d pgvector/pgvector:pg16
 ```
 
-Initialize and run CRMy:
+**Initialize and run CRMy:**
 
 ```bash
 export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/crmy
@@ -147,7 +147,7 @@ npx -y @crmy/cli server
 
 `quickstart` seeds realistic demo data and runs the path an agent takes over MCP: resolve a customer, get a governed briefing, check Action Context, and prove lineage. (`npx -y @crmy/cli doctor` runs the same checks as a pass/fail health check.)
 
-Representative output:
+**Representative output:**
 
 ```text
 ✓ Demo workspace ready: 2 accounts · 6 Signals · 5 Memory
@@ -157,7 +157,7 @@ Representative output:
 ✓ Lineage returned source-to-context proof (67 nodes, 395 edges)
 ```
 
-Open:
+**Open:**
 
 ```text
 Web UI   http://localhost:3000/app
@@ -166,7 +166,7 @@ MCP      http://localhost:3000/mcp
 Health   http://localhost:3000/health
 ```
 
-Demo users:
+**Demo users:**
 
 ```text
 Admin   sample.admin@crmy.local / crmy-demo-123
@@ -185,7 +185,7 @@ npx -y @crmy/cli action-context "account:Northstar Labs" --action customer_outre
 npx -y @crmy/cli context lineage --subject "account:Northstar Labs"
 ```
 
-Connect an MCP client to the same path:
+**Connect an MCP client to the same path:**
 
 ```bash
 claude mcp add crmy -- npx -y @crmy/cli mcp
@@ -204,6 +204,12 @@ npx -y @crmy/cli context ingest --subject "account:Northstar Labs" --file /tmp/n
 npx -y @crmy/cli context signal-groups
 ```
 
+**Prefer interactive setup?**
+
+```bash
+npx -y @crmy/cli init
+```
+
 What `init --demo` does:
 
 1. Connects to PostgreSQL.
@@ -217,13 +223,7 @@ What `init --demo` does:
 
 For CI or another fully headless setup, use `init --yes --demo`. For a clean workspace without sample data, use `init --yes --no-demo`.
 
-Prefer interactive setup?
-
-```bash
-npx -y @crmy/cli init
-```
-
-Prefer a global install?
+**Prefer a global install?**
 
 ```bash
 npm install -g @crmy/cli
