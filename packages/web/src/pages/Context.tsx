@@ -15,8 +15,8 @@ import { headerDescription } from '@/lib/headerCopy';
 import { ENTITY_COLORS } from '@/lib/entityColors';
 import { GraphTab } from './GraphExplorerPage';
 
-type ContextTab = 'observations' | 'browser' | 'signals' | 'lineage' | 'sources' | 'graph';
-type PrimaryContextTab = 'observations' | 'browser' | 'signals' | 'lineage';
+type ContextTab = 'sources' | 'browser' | 'signals' | 'lineage' | 'connectors' | 'graph';
+type PrimaryContextTab = 'sources' | 'browser' | 'signals' | 'lineage';
 type ViewMode = 'cards' | 'table';
 
 function HeaderViewToggle({
@@ -58,7 +58,7 @@ function ContextProofStrip({
   contextTotal: number;
 }) {
   const steps = [
-    { label: 'Raw Context', value: observationTotal, href: '/context?tab=observations', Icon: FileText, className: 'bg-[#0ea5e9]/15 text-[#0ea5e9]' },
+    { label: 'Sources', value: observationTotal, href: '/context?tab=sources', Icon: FileText, className: 'bg-[#0ea5e9]/15 text-[#0ea5e9]' },
     { label: 'Signals', value: signalGroupTotal, href: '/context?tab=signals', Icon: Sparkles, className: 'bg-violet-500/15 text-violet-500' },
     { label: 'Memory', value: contextTotal, href: '/context?tab=browser', Icon: Library, className: 'bg-emerald-500/15 text-emerald-500' },
     { label: 'Action Context', value: '1 call', href: '/agent', Icon: Bot, className: 'bg-[#6366f1]/15 text-[#6366f1]' },
@@ -70,7 +70,7 @@ function ContextProofStrip({
         <div className="min-w-0">
           <p className="text-sm font-semibold text-foreground">Context engine path</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Raw source material becomes Signals, confirmed Memory, and agent-ready action context with evidence and review boundaries.
+            Source material becomes Signals, confirmed Memory, and agent-ready Action Context with evidence and review boundaries.
           </p>
         </div>
         <div className="flex min-w-0 gap-1 overflow-x-auto md:flex-shrink-0">
@@ -95,7 +95,7 @@ function ContextProofStrip({
   );
 }
 
-function SourcesTab() {
+function ConnectorsTab() {
   const { data: mailboxData } = useMailboxConnections() as any;
   const { data: calendarData } = useCalendarConnections() as any;
   const { data: transcriptDropData } = useContextSourceConnections() as any;
@@ -116,10 +116,10 @@ function SourcesTab() {
       status: 'Best for notes, transcripts, and one-off source material',
       description: 'Paste or upload customer context you already have. CRMy links it to records, extracts Signals, and creates Memory when the evidence is ready.',
       primary: 'Add Context',
-      primaryHref: '/context?tab=observations&add=context',
+      primaryHref: '/context?tab=sources&add=context',
       primaryClassName: 'bg-[#0ea5e9] text-white hover:bg-[#0ea5e9]/90',
-      secondary: 'View Raw Context',
-      secondaryHref: '/context?tab=observations',
+      secondary: 'View Sources',
+      secondaryHref: '/context?tab=sources',
     },
     {
       title: 'MCP / API',
@@ -176,9 +176,9 @@ function SourcesTab() {
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-6">
       <div className="mb-5 max-w-3xl">
-        <h2 className="text-lg font-display font-semibold text-foreground">Raw Context Sources</h2>
+        <h2 className="text-lg font-display font-semibold text-foreground">Context Connectors</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Start here when you want to feed CRMy customer material directly. Add Context handles pasted or uploaded notes, emails, transcripts, and call summaries. MCP/API lets agents and scripts send messy context programmatically. CRMy turns each input into Raw Context, then Signals, Memory, and Action Context for agents.
+          Choose how customer material enters CRMy. Add Context handles pasted or uploaded notes, emails, transcripts, and call summaries. MCP/API lets agents and scripts send source material programmatically. CRMy turns each input into Sources, then Signals, Memory, and Action Context for agents.
         </p>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -248,10 +248,16 @@ export default function ContextPage() {
   const [signalViewMode, setSignalViewMode] = useState<ViewMode>('cards');
   const [memoryViewMode, setMemoryViewMode] = useState<ViewMode>('cards');
   const rawTab = searchParams.get('tab');
-  const normalizedTab = rawTab === 'signal-groups' ? 'signals' : rawTab === 'governance' ? 'browser' : rawTab ?? 'observations';
-  const tab: ContextTab = ['observations', 'browser', 'signals', 'lineage', 'sources', 'graph'].includes(normalizedTab)
+  const normalizedTab = rawTab === 'signal-groups'
+    ? 'signals'
+    : rawTab === 'governance'
+    ? 'browser'
+    : rawTab === 'observations'
+    ? 'sources'
+    : rawTab ?? 'sources';
+  const tab: ContextTab = ['sources', 'browser', 'signals', 'lineage', 'connectors', 'graph'].includes(normalizedTab)
     ? (normalizedTab as ContextTab)
-    : 'observations';
+    : 'sources';
   const { data: dbInfo } = useDbConfig() as any;
   const { data: contextData } = useContextEntries({ memory_status: 'active', limit: 1 }) as any;
   const { data: signalGroupData } = useSignalGroups({ attention_only: true, limit: 1 }) as any;
@@ -275,11 +281,11 @@ export default function ContextPage() {
 
   const openAddContext = () => {
     const existing = Object.fromEntries(searchParams.entries());
-    setSearchParams({ ...existing, tab: 'observations', add: 'context' });
+    setSearchParams({ ...existing, tab: 'sources', add: 'context' });
   };
 
   const tabs: { key: PrimaryContextTab; label: string; Icon: typeof Library; activeBorder: string }[] = [
-    { key: 'observations', label: 'Raw Context', Icon: FileText, activeBorder: 'border-[#0ea5e9]' },
+    { key: 'sources', label: 'Sources', Icon: FileText, activeBorder: 'border-[#0ea5e9]' },
     { key: 'signals', label: 'Signals', Icon: Sparkles, activeBorder: 'border-violet-500' },
     { key: 'browser', label: 'Memory', Icon: Library, activeBorder: 'border-emerald-500' },
     { key: 'lineage', label: 'Lineage', Icon: GitBranch, activeBorder: 'border-destructive' },
@@ -291,13 +297,13 @@ export default function ContextPage() {
         title="Context"
         icon={Library}
         iconClassName="text-[#0ea5e9]"
-        description={tab === 'observations'
+        description={tab === 'sources'
           ? headerDescription('Review source volume and processing outcomes', observationTotal, 'source', 'sources')
           : tab === 'signals'
           ? headerDescription('Review inferred customer context before it becomes Memory', signalGroupTotal, 'signal', 'signals')
           : tab === 'lineage'
           ? 'Trace source material into Memory and the actions it informed.'
-          : tab === 'sources'
+          : tab === 'connectors'
           ? 'Choose how customer context enters CRMy.'
           : tab === 'graph'
           ? 'Explore related records, Current Memory, recent activity, and open handoffs.'
@@ -333,15 +339,15 @@ export default function ContextPage() {
         <div className="ml-auto flex min-w-max items-center gap-2 pb-2">
           <button
             type="button"
-            onClick={() => setTab('sources')}
+            onClick={() => setTab('connectors')}
             className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold transition-colors ${
-              tab === 'sources'
+              tab === 'connectors'
                 ? 'border-primary/30 bg-primary/10 text-primary'
                 : 'border-border text-muted-foreground hover:bg-muted hover:text-foreground'
             }`}
           >
             <FileText className="h-3.5 w-3.5" />
-            Context Sources
+            Connectors
           </button>
           <button
             type="button"
@@ -358,7 +364,7 @@ export default function ContextPage() {
         </div>
       </div>
 
-      {tab === 'observations'
+      {tab === 'sources'
         ? (
           <>
             <ObservationsDashboard onAddContext={openAddContext} headerContent={contextProofStrip} />
@@ -369,8 +375,8 @@ export default function ContextPage() {
         ? <SignalGroupsBrowser viewMode={signalViewMode} headerContent={contextProofStrip} />
         : tab === 'lineage'
         ? <ContextLineageView headerContent={contextProofStrip} />
-        : tab === 'sources'
-        ? <SourcesTab />
+        : tab === 'connectors'
+        ? <ConnectorsTab />
         : tab === 'graph'
         ? <GraphTab />
         : <ContextBrowser memoryStatus="active" allowAddContext={false} viewMode={memoryViewMode} headerContent={contextProofStrip} />}

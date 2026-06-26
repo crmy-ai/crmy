@@ -224,7 +224,7 @@ async function resolveDraftContext(
 }
 
 /**
- * Split product context into a concise LLM packet (approved claims survive
+ * Split governed knowledge context into a concise LLM packet (approved claims survive
  * briefing truncation) and compact proof metadata for the response. Returns
  * undefined when there is nothing actionable to surface.
  */
@@ -233,9 +233,10 @@ export function buildProductDraftPieces(pc: ProductContext | undefined) {
   return {
     packet: {
       status: pc.status,
-      note: 'Use ONLY these approved, cited claims for product, pricing, capability, security, and competitive statements. Cite the source. Never assert product facts not listed here.',
+      note: 'Use ONLY these approved, cited claims for company, product, pricing, capability, security, and competitive statements. Cite the source. Never assert knowledge claims not listed here.',
       claims: pc.relevant_claims.map(claim => ({
         id: claim.id,
+        knowledge_type: claim.knowledge_type,
         category: claim.category,
         title: claim.title,
         body: claim.body.slice(0, 320),
@@ -393,7 +394,7 @@ export async function previewEmailDraft(db: DbPool, actor: ActorContext, input: 
         : []),
       ...(context_used.product_knowledge?.warnings ?? []),
       ...((context_used.product_knowledge?.excluded_count ?? 0) > 0
-        ? [`${context_used.product_knowledge?.excluded_count} product claim(s) were excluded as not customer-safe and were not used.`]
+        ? [`${context_used.product_knowledge?.excluded_count} knowledge claim(s) were excluded as not customer-safe and were not used.`]
         : []),
     ],
     model_metadata: {

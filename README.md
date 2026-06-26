@@ -4,13 +4,13 @@
 
 <h1 align="center">CRMy</h1>
 
-<h2 align="center">Governed customer context for AI agents</h2>
+<h2 align="center">Governed customer context and actions for AI agents</h2>
 
 <p align="center">
-  <strong>Messy customer interactions in. Governed agent context out.</strong>
+  <strong>Messy Customer Data -> Trusted Facts -> Safe Agent Actions -> Proof at Every Step</strong>
 </p>
 <p align="center">
-  CRMy turns messy customer source material into governed agent context. It ingests meeting transcripts, notes, customer emails, and CRM changes; extracts evidence-backed Signals; validates grounded claims; promotes trusted facts into durable Memory; flags stale context; and returns one compact briefing, with action checks and proof, so agents can act reliably from context you can trust.
+  Customer-facing AI agents can hallucinate facts, act on stale data, make unapproved claims, and typically leave no audit trail. That is why many never make it past the demo. CRMy gives them customer context they can trust. It turns transcripts, notes, emails, and CRM changes into source-checked facts, tells each agent what is safe to do now and what needs a human, and records a receipt for every action. Your agents act on what is real, not what a model guessed, and you can prove every move.
 </p>
 
 <p align="center">
@@ -47,7 +47,7 @@ Install CRMy and create a local demo-ready workspace:
 curl -fsSL https://raw.githubusercontent.com/crmy-ai/crmy/main/scripts/install.sh | bash
 ```
 
-The installer checks Node.js 20+, asks which database route you want, asks whether to load demo data, optionally configures a Workspace Agent model/provider, installs `crmy` into a user-owned `~/.crmy` prefix, builds from source when the published CLI is behind, initializes the workspace, runs `crmy doctor`, and offers to start the web server in the background.
+The installer sets up the CLI, database, optional demo data, health checks, and local web server in a guided flow.
 
 Already have PostgreSQL?
 
@@ -70,7 +70,7 @@ Prefer the manual path, or want to see exactly what gets seeded? Use the <a href
 
 ## Why CRMy
 
-Your AI sales, CS, support, and RevOps agents can draft content, summarize meetings, and call APIs. They still hit walls when customer truth is scattered across CRM fields, meeting transcripts, emails, notes, calendar events, and random documents.
+Your AI sales, CS, support, and RevOps agents can draft content, summarize meetings, and call APIs. They still hit walls when what's actually true about a customer is scattered across CRM fields, meeting transcripts, emails, notes, calendar events, and random documents.
 
 Without a governed context layer, agents can't answer the most critical questions:
 
@@ -78,13 +78,13 @@ Without a governed context layer, agents can't answer the most critical question
 - Is there evidence behind this risk, commitment, or next step?
 - Is this CRM field still current?
 - Is this actor (agent) allowed to see or change the record?
-- Does this customer email, CRM update, or workflow need human approval?
-- What proof should exist after the agent acts? 
+- Does this customer email, CRM update, or record change need human approval?
+- What proof should exist after the agent acts?
 
-CRMy is the operating layer for these questions. Instead of dumping raw records into a prompt, CRMy gives agents the customer Memory, warnings, policy, evidence, and action boundaries they need before they engage a customer or change a system of record, leaving an audit trail behind. It is the **trust boundary between your agents and your customer systems**.
+CRMy answers these questions for your agents. Instead of dumping raw records into a prompt, it gives the agent only the customer facts that hold up to evidence, the warnings and policy it needs, and clear boundaries on what it may do. Then it records what happened. In short, CRMy turns raw customer input into safe, provable agent action:
 
 ```text
-Raw Context -> Signals -> Memory -> Briefing + Action Context -> Handoff / Writeback -> Audit Trail
+Messy customer data  ->  trusted facts  ->  safe agent actions  ->  proof for every step
 ```
 
 Want proof? Try the <a href="#local-demo">local demo</a> below to see an agent resolve a customer, get a governed briefing, check what is safe to act on, and prove lineage.
@@ -95,9 +95,9 @@ CRMy is built for teams creating customer-facing agents that need to work safely
 |---|---|
 | Extract customer facts from messy inputs | Turn transcripts, notes, emails, meetings, CRM changes, REST, CLI, MCP, and UI inputs into structured Raw Context and Signals. |
 | Validate before agents rely on it | Keep inferred Signals separate from confirmed Memory until evidence, readiness, policy, and source grounding say they are safe. |
-| Track Memory decay | Carry freshness and decay signals, surface stale warnings, and avoid treating old customer truth as permanent. |
+| Flag context that has gone stale | Carry review dates on time-sensitive facts and surface stale warnings before an agent acts, so it doesn't treat last quarter's context as current. |
 | Decide whether an agent can act | Return readiness, policy checks, source authority, review requirements, Handoffs, writeback previews, and audit receipts. |
-| Keep prompts smaller and more useful | Retrieve ranked, token-budgeted packets with evidence summaries by default and full proof on demand. |
+| Send the right context, not the whole database | Return a ranked, evidence-backed briefing scoped to the next action, with relevant facts and proof instead of a data dump. |
 | Fit any agent stack | Use MCP-first tools with REST, CLI, and Web UI surfaces over the same PostgreSQL-backed engine. |
 
 CRMy does not replace your CRM, warehouse, mailbox, calendar, support desk, or sales methodology. Those systems remain where work happens and state is stored. CRMy makes that state agent-operable.
@@ -107,7 +107,7 @@ CRMy does not replace your CRM, warehouse, mailbox, calendar, support desk, or s
 Use CRMy when you are building agents that need customer context they can trust before acting.
 
 - Sales and CS agents that draft customer emails, prep meetings, or summarize account state.
-- RevOps and support agents that update CRM records, create handoffs, or run workflows.
+- RevOps and support agents that update CRM records, create handoffs, or coordinate governed actions.
 - Agent platforms that need evidence, stale-context warnings, approvals, and audit receipts around customer-facing work.
 - Teams that want to test governed customer memory with realistic demo data or direct context ingestion.
 
@@ -236,7 +236,7 @@ crmy server start
 
 ```mermaid
 flowchart LR
-  A[Raw Context]
+  A[Context Sources]
   B[Signals]
   C[Memory]
   D[Briefing]
@@ -244,7 +244,7 @@ flowchart LR
   F[Agent Action]
   G[Handoff or Review]
   H[Audit and Lineage]
-  K[Product Knowledge]
+  K[Knowledge Claims]
 
   A --> B
   B --> C
@@ -264,10 +264,10 @@ flowchart LR
 
 CRMy keeps customer context useful without pretending messy source material is instantly true.
 
-- **Raw Context** is source material before extraction: transcripts, emails, notes, meetings, CRM changes, docs, support/product signals, and agent inputs.
+- **Sources** is source material before extraction: transcripts, emails, notes, meetings, CRM changes, docs, support/product signals, and agent inputs.
 - **Signals** are inferred claims with evidence, confidence, source lineage, and readiness.
-- **Memory** is confirmed operational customer context agents can rely on across sessions. Memory carries freshness and decay signals, so CRMy does not treat "customer truth" as permanent.
-- **Product Knowledge** is the optional governed retrieval boundary for approved product, pricing, security, implementation, and competitive claims. It keeps global product truth separate from customer Memory while giving agents cited claims they can safely use.
+- **Memory** is evidence-backed customer context that has cleared CRMy's checks, so agents can rely on it across sessions. Time-sensitive Memory carries a review date and surfaces stale warnings, so aging context gets re-checked instead of silently being treated as current.
+- **Knowledge Claims** are the optional governed retrieval boundary for approved company, product, pricing, security, implementation, and competitive claims. They keep shared business and product truth separate from customer Memory while giving agents cited claims they can safely use.
 - **Briefings** answer: what should the agent know?
 - **Action Context** answers: is this action ready, allowed, risky, stale, or review-required?
 - **Handoffs and Writeback** keep approval, idempotency, audit, and execution receipts in the path when work touches a customer or system of record.
@@ -302,29 +302,25 @@ Safe to act?
 | **Raw Context ingestion** | Accept messy notes, transcripts, emails, meetings, sync records, agent inputs, and custom source metadata. |
 | **Transcript & notes drops** | Watch S3-compatible buckets or local self-hosted folders for transcripts/notes, match them to meetings or records, and keep unmatched files in review. |
 | **Signals and Memory** | Extract inferred claims with evidence, then promote durable Memory only when readiness, policy, and source grounding allow it. |
-| **Memory freshness and decay** | Track freshness, surface stale warnings, and keep old customer truth from silently becoming agent truth. |
+| **Memory freshness** | Carry review dates on time-sensitive facts and surface stale warnings, so aging context gets re-checked instead of silently being treated as current. |
 | **Customer briefings** | Retrieve Current Memory, recent activity, open Handoffs, stale warnings, and unresolved Signals before analysis. |
 | **Action Context** | Return readiness, policy, warnings, source authority, review requirements, and audit metadata before customer-facing or record-changing work. |
-| **Product Knowledge** | Retrieve approved, source-grounded product, pricing, implementation, security, and competitive claims without mixing global product truth into customer Memory. Admins can govern claim freshness, approval, external-use eligibility, and conflicts. |
+| **Knowledge Claims** | Retrieve approved, source-grounded company, product, pricing, implementation, security, and competitive claims without mixing shared business truth into customer Memory. Admins can govern claim freshness, approval, external-use eligibility, and conflicts. |
 | **Handoffs and approvals** | Route uncertain, sensitive, or governed work to humans with evidence attached. |
-| **Lineage and audit** | Trace source material into Signals, Memory, actions, reviews, writebacks, and receipts. Product knowledge retrieval receipts prove which claims were used or excluded. |
+| **Lineage and audit** | Trace source material into Signals, Memory, actions, reviews, writebacks, and receipts. Knowledge retrieval receipts prove which claims were used or excluded. |
 | **Email and calendar context** | Connect actor mailboxes/calendars for customer communication, meeting context, availability-aware suggestions, and sender-aware email actions. |
 | **Systems of record** | Configure CRM/warehouse sync and governed writeback through mappings, previews, approvals, and receipts. |
 | **MCP, CLI, REST, UI** | Use the same engine from agent tools, scripts, integrations, and the web app. |
 
-## How CRMy Reduces Token Use
+## The right context, not the whole database
 
-CRMy gives agents smaller, more trustworthy working context instead of a bigger prompt full of unverified customer data.
+Most agents fail on customer work because they get *too much unverified data*, not too little. CRMy sends the agent a ranked, evidence-backed packet scoped to the next action instead of dumping the customer database into the prompt.
 
-- It compresses noisy source material into Signals and Memory with source receipts.
-- It returns confirmed Memory, unresolved Signals, stale warnings, and risky claims separately.
-- It retrieves by action through `briefing_get` and `action_context_get` instead of dumping the customer database.
-- It registers a small, job-focused tool working set per session (toolsets) instead of the full catalog, so the model picks from the right handful of tools.
-- It supports `context_radius`, explicit `token_budget`, and budget profiles (`tiny`, `standard`, `deep`, `evidence_heavy`).
-- It ranks high-value context first and reports when lower-priority entries were omitted.
-- It uses `evidence_mode: "summary"` by default, with full Lineage and Raw Context available on demand.
+- It separates what's confirmed from what's still an unresolved Signal, a stale warning, or a risky claim, so the agent knows what it can rely on.
+- It retrieves by action through `briefing_get` and `action_context_get`, ranks the highest-value context first, and reports what it left out.
+- It attaches source evidence by default, with full Lineage and Raw Context available on demand.
 
-The goal is the smallest sufficient, trustworthy customer context packet for the next action.
+Advanced users can tune what gets packed (context radius, token budget, evidence detail) and narrow the tool set per session, but sensible defaults mean you rarely need to.
 
 ## Connect Agents Through MCP
 
@@ -400,7 +396,7 @@ See [MCP tools](docs/mcp-tools.md) for the full tool catalog and scoped-access m
 
 ## CLI And REST
 
-Friendly CLI commands cover setup, demos, Raw Context ingestion, activity/email review, systems, workflows, and operational QA.
+Friendly CLI commands cover setup, demos, Raw Context ingestion, activity/email review, systems, knowledge retrieval, and operational QA.
 
 ```bash
 crmy init
@@ -443,12 +439,12 @@ Authorization: Bearer crmy_<api-key>  # agent or integration
 |---|---|
 | **Overview** | Daily operating view: what is set up, what context is flowing, and what needs action. |
 | **Workspace Agent** | Scoped customer workbench for briefings, tool use, drafting, record work, and customer reasoning. |
-| **Context** | Raw Context, Signals, Memory, Lineage, and Context Sources. |
+| **Context** | Sources, Signals, Memory, Lineage, and Action Context. |
 | **Handoffs** | Decision queue for approvals, escalations, delegated work, and governed action review. |
 | **Customer Email** | Mailbox Context plus Outbound Actions for governed drafts/sends with visible sender identity. |
 | **Customer Activity** | Meetings, notes, transcript drops, calendar context, review queues, and availability-aware meeting suggestions. |
 | **Systems of Record** | Admin setup for CRMs, warehouses, mappings, sync, conflicts, and governed writeback. |
-| **Settings** | Actors, system connections, model settings, automations, API keys, and operational configuration. |
+| **Settings** | Actors, context connectors, model settings, API keys, and operational configuration. |
 
 ## Architecture
 

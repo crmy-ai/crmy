@@ -1996,6 +1996,8 @@ export const knowledgeRetrieve = z.object({
 export const knowledgeClaimUpsert = z.object({
   idempotency_key: idempotencyKey,
   external_key: z.string().max(256).optional().describe('Stable dedupe key from the source; re-upserts update in place.'),
+  knowledge_type: z.enum(['company', 'product', 'competitor']).optional()
+    .describe('High-level claim facet used by the Knowledge workspace. Defaults from category/scope when omitted.'),
   category: z.string().min(1).describe('e.g. capability, proof_point, pricing, implementation, security, competitive_response.'),
   title: z.string().min(1),
   body: z.string().min(1),
@@ -2022,6 +2024,8 @@ export const knowledgeClaimUpsert = z.object({
 
 /** Governance: list claim envelopes for the admin review queue (Phase 7). */
 export const knowledgeClaimList = z.object({
+  knowledge_type: z.enum(['company', 'product', 'competitor']).optional()
+    .describe('Filter by high-level Knowledge workspace facet. Legacy claims are inferred from category and competitor scope.'),
   status: z.enum(['active', 'stale', 'deprecated', 'conflicting', 'rejected']).optional()
     .describe('Filter by lifecycle status.'),
   approval_status: z.enum(['approved', 'pending', 'unapproved', 'rejected']).optional(),

@@ -1593,9 +1593,14 @@ export interface EvalRunSummary {
 
 export type KnowledgeRetrievalStatus = 'available' | 'no_results' | 'degraded' | 'not_configured';
 export type KnowledgeAudience = 'customer_facing' | 'internal';
+export type KnowledgeType = 'company' | 'product' | 'competitor';
 export type KnowledgeApprovalStatus = 'approved' | 'pending' | 'unapproved' | 'rejected';
 export type KnowledgeVisibility = 'external' | 'internal';
 export type KnowledgeSourcePriority = 'authoritative' | 'secondary' | 'informal';
+export type KnowledgeSourceConnectionStatus = 'configured' | 'syncing' | 'error' | 'disabled';
+export type KnowledgeSourceConnectionProvider = 'mcp';
+export type KnowledgeSourceConnectionTransport = 'streamable_http';
+export type KnowledgeSourceConnectionAuthType = 'none' | 'bearer_token';
 
 export interface KnowledgeCitation {
   source_label: string;
@@ -1605,6 +1610,7 @@ export interface KnowledgeCitation {
 
 export interface KnowledgeClaim {
   id: string;
+  knowledge_type: KnowledgeType;
   category: string;
   title: string;
   body: string;
@@ -1688,15 +1694,20 @@ export type KnowledgeClaimStatus = 'active' | 'stale' | 'deprecated' | 'conflict
  */
 export interface KnowledgeClaimRecord {
   id: string;
+  knowledge_type: KnowledgeType;
   category: string;
   title: string;
+  body: string;
   summary?: string;
   product_scope: string[];
   competitors: string[];
   grounded: boolean;
   confidence?: number;
   source_priority: KnowledgeSourcePriority;
+  source_ref?: string;
+  source_url?: string;
   source_label?: string;
+  source_version?: string;
   approval_status: KnowledgeApprovalStatus;
   approved_for_external_use: boolean;
   visibility: KnowledgeVisibility;
@@ -1705,6 +1716,29 @@ export interface KnowledgeClaimRecord {
   valid_until?: string;
   last_verified_at?: string;
   review_owner_id?: string;
+  external_key?: string;
+  updated_at: string;
+}
+
+/**
+ * Outbound setup for importing governed knowledge snippets from a compatible
+ * MCP source. This is separate from API keys used by clients to access CRMy.
+ */
+export interface KnowledgeSourceConnection {
+  id: UUID;
+  name: string;
+  provider: KnowledgeSourceConnectionProvider;
+  transport: KnowledgeSourceConnectionTransport;
+  auth_type: KnowledgeSourceConnectionAuthType;
+  status: KnowledgeSourceConnectionStatus;
+  config: Record<string, unknown>;
+  sync_stats: Record<string, unknown>;
+  has_credentials: boolean;
+  last_test_at?: string | null;
+  last_sync_at?: string | null;
+  last_error?: string | null;
+  created_by?: UUID | null;
+  created_at: string;
   updated_at: string;
 }
 

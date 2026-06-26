@@ -18,6 +18,7 @@ export const ENTITY_COLORS = {
   hitl:          { text: 'text-destructive',  bg: 'bg-destructive/15', bar: 'bg-destructive' },
   agents:        { text: 'text-[#6366f1]',   bg: 'bg-[#6366f1]/15',  bar: 'bg-[#6366f1]' },
   context:       { text: 'text-[#0ea5e9]',   bg: 'bg-[#0ea5e9]/15',  bar: 'bg-[#0ea5e9]' },
+  knowledge:     { text: 'text-[#f59e0b]',   bg: 'bg-[#f59e0b]/15',  bar: 'bg-[#f59e0b]' },
   workflows:     { text: 'text-amber-500',   bg: 'bg-amber-500/15',  bar: 'bg-amber-500' },
   emails:        { text: 'text-[#3b82f6]',   bg: 'bg-[#3b82f6]/15',  bar: 'bg-[#3b82f6]' },
   sequences:     { text: 'text-orange-500',  bg: 'bg-orange-500/15', bar: 'bg-orange-500' },
@@ -35,6 +36,7 @@ export const ENTITY_GRADIENTS: Record<string, string> = {
   workflows:     'from-amber-500 to-amber-500/80',
   sequences:     'from-amber-500 to-amber-500/80',
   context:       'from-[#0ea5e9] to-[#0ea5e9]/80',
+  knowledge:     'from-[#f59e0b] to-[#f59e0b]/80',
   emails:        'from-[#3b82f6] to-[#3b82f6]/80',
   actors:        'from-[#6366f1] to-[#6366f1]/80',
 };

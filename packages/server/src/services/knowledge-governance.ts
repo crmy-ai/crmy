@@ -35,9 +35,11 @@ import type {
   KnowledgeConflict,
   KnowledgeReviewDecision,
   KnowledgeSourcePriority,
+  KnowledgeType,
 } from '@crmy/shared';
 import {
   getKnowledgeClaim,
+  inferKnowledgeType,
   listClaimsForConflictScan,
   listKnowledgeClaims,
   listKnowledgeClaimsNeedingReviewAssignment,
@@ -59,15 +61,20 @@ const PRIORITY_RANK: Record<KnowledgeSourcePriority, number> = {
 export function rowToKnowledgeRecord(row: KnowledgeClaimRow): KnowledgeClaimRecord {
   return {
     id: row.id,
+    knowledge_type: inferKnowledgeType(row),
     category: row.category,
     title: row.title,
+    body: row.body,
     ...(row.summary ? { summary: row.summary } : {}),
     product_scope: row.product_scope ?? [],
     competitors: row.competitors ?? [],
     grounded: row.grounded,
     ...(row.confidence != null ? { confidence: row.confidence } : {}),
     source_priority: row.source_priority,
+    ...(row.source_ref ? { source_ref: row.source_ref } : {}),
+    ...(row.source_url ? { source_url: row.source_url } : {}),
     ...(row.source_label ? { source_label: row.source_label } : {}),
+    ...(row.source_version ? { source_version: row.source_version } : {}),
     approval_status: row.approval_status,
     approved_for_external_use: row.approved_for_external_use,
     visibility: row.visibility,
@@ -76,11 +83,13 @@ export function rowToKnowledgeRecord(row: KnowledgeClaimRow): KnowledgeClaimReco
     ...(row.valid_until ? { valid_until: row.valid_until } : {}),
     ...(row.last_verified_at ? { last_verified_at: row.last_verified_at } : {}),
     ...(row.review_owner_id ? { review_owner_id: row.review_owner_id } : {}),
+    ...(row.external_key ? { external_key: row.external_key } : {}),
     updated_at: row.updated_at,
   };
 }
 
 export interface ListKnowledgeClaimsInput {
+  knowledge_type?: KnowledgeType;
   status?: KnowledgeClaimRow['status'];
   approval_status?: KnowledgeApprovalStatus;
   needs_review?: boolean;
@@ -96,6 +105,7 @@ export async function listKnowledgeClaimsForReview(
   input: ListKnowledgeClaimsInput,
 ): Promise<{ claims: KnowledgeClaimRecord[]; count: number }> {
   const options: ListKnowledgeClaimsOptions = {
+    knowledgeType: input.knowledge_type,
     status: input.status,
     approvalStatus: input.approval_status,
     reviewOwnerId: input.review_owner_id,
@@ -138,16 +148,21 @@ export function reviewDecisionToPatch(
       patch.approval_status = 'approved';
       patch.touch_verified = true;
       if (current.status === 'stale' || current.status === 'conflicting') patch.status = 'active';
-      if (opts.approved_for_external_use !== undefined) patch.approved_for_external_use = opts.approved_for_external_use;
+      if (opts.approved_for_external_use !== undefined) {
+        patch.approved_for_external_use = opts.approved_for_external_use;
+        patch.visibility = opts.approved_for_external_use ? 'external' : 'internal';
+      }
       break;
     case 'reject':
       patch.approval_status = 'rejected';
       patch.status = 'rejected';
       patch.approved_for_external_use = false;
+      patch.visibility = 'internal';
       break;
     case 'deprecate':
       patch.status = 'deprecated';
       patch.approved_for_external_use = false;
+      patch.visibility = 'internal';
       break;
     case 'mark_stale':
       patch.status = 'stale';
@@ -260,7 +275,7 @@ export interface DetectKnowledgeConflictsInput {
 }
 
 /**
- * Detect competing product claims for a tenant. With `apply`, the lower-priority
+ * Detect competing knowledge claims for a tenant. With `apply`, the lower-priority
  * (or unapproved) claim of each *resolvable* conflict is marked `conflicting` so
  * it stops flowing into customer-facing retrieval until reviewed.
  */
@@ -322,7 +337,7 @@ export async function detectKnowledgeConflicts(
 
 function reviewReason(claim: { status: string; approval_status: string }): string {
   if (claim.status === 'stale') return 'reached its freshness window and needs re-verification';
-  if (claim.status === 'conflicting') return 'was flagged as conflicting with another product claim';
+  if (claim.status === 'conflicting') return 'was flagged as conflicting with another knowledge claim';
   if (claim.approval_status === 'pending') return 'is pending approval before customer-facing use';
   return 'needs review before customer-facing use';
 }
@@ -337,8 +352,8 @@ export async function processKnowledgeReviewsForTenant(
   let created = 0;
   for (const claim of claims) {
     await createAssignment(db, tenantId, {
-      title: `Review product claim: ${claim.category}`,
-      description: `The product knowledge claim "${claim.title}" ${reviewReason(claim)}.`,
+      title: `Review knowledge claim: ${claim.category}`,
+      description: `The knowledge claim "${claim.title}" ${reviewReason(claim)}.`,
       assignment_type: 'knowledge_claim_review',
       assigned_by: claim.created_by ?? claim.review_owner_id,
       assigned_to: claim.review_owner_id,
@@ -351,7 +366,7 @@ export async function processKnowledgeReviewsForTenant(
 }
 
 /**
- * Background sweep: open review assignments for owned product claims that are
+ * Background sweep: open review assignments for owned knowledge claims that are
  * stale, conflicting, or pending approval. Best-effort and non-blocking.
  */
 export async function processKnowledgeReviews(db: DbPool, limit = 20): Promise<void> {

@@ -147,6 +147,19 @@ test('upsert verifies grounding against source_text', async () => {
   assert.equal(db.inserts[1][14], false, 'grounded should be false when body is not in source_text');
 });
 
+test('upsert stores explicit knowledge_type metadata when supplied', async () => {
+  const db = new FakeKnowledgeDb([]);
+  const admin = { ...agent, role: 'admin', scopes: ['*'] };
+  await upsertProductKnowledgeClaim(db, admin, {
+    knowledge_type: 'company',
+    category: 'positioning_overview',
+    title: 'Company positioning',
+    body: 'CRMy helps teams ground customer-facing agents.',
+    grounded: true,
+  });
+  assert.deepEqual(db.inserts[0][23], { knowledge_type: 'company' });
+});
+
 // ---- Registration / governance surface ----
 
 test('both knowledge tools are registered with correct scopes and tiers', () => {

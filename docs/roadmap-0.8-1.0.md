@@ -1,8 +1,175 @@
-# CRMy 0.8-1.0 Roadmap: Enterprise Systems-Of-Record Overlay
+# CRMy 0.8-1.0 Roadmap: Governed Action & Provenance Control Plane
 
-CRMy's next major releases should move the product from a local-first customer context layer into the default context and execution platform between AI agents and enterprise revenue systems.
+CRMy's next major releases should move the product from a local-first customer context layer into the **governed action & provenance control plane for customer-facing agents**: the layer an agent calls before it acts on a customer or a system of record, that tells it what is trustworthy, what is allowed, and what proof will exist afterward — and that stays neutral across CRMs.
 
 The goal is not to replace Salesforce, HubSpot, Databricks, Snowflake, or future systems of record. The goal is to give agents one governed layer for typed revenue objects, long-term memory, scoped tools, HITL approvals, retry-safe writes, and audit-safe execution across those systems.
+
+---
+
+> ## ⚠ READ THIS FIRST — Authoritative direction (0.9.3 → 1.0)
+>
+> The **Strategic Refocus** section immediately below is the authoritative plan for the road to 1.0. **Where any later section of this document conflicts with it, the Strategic Refocus wins.**
+>
+> Two things changed and a downstream agent must not miss them:
+>
+> 1. **Repositioning.** The product is **trustworthy action**, not "memory." Memory is the substrate; the headline is `action_context_get` + grounded promotion + proof/lineage. Anything justified mainly by "smaller prompts / token reduction" is deprioritized.
+> 2. **Sequences and the Automations/Workflow *builder* are deprecated as product surfaces.** They compete with Outreach/Apollo and Zapier and are off-thesis. See [Scope Decisions](#scope-decisions-build-freeze-kill) and [Deprecation Plan](#deprecation-plan-sequences--automations).
+>    - **Do NOT remove the internal event bus.** The event bus (`events`, emitters, `workflow_runs` dedupe primitives, context outbox) is **load-bearing infrastructure** for ingestion, source sync, HITL, lineage, and webhooks. Only the **user-facing automation/sequence product surfaces** (the workflow builder UI, sequence engine UI, their MCP tools, docs, demo, and positioning) are being killed.
+>
+> Sections of this doc that are now **superseded / downgraded** by the refocus: the entire [Automations And Sequences Integration](#automations-and-sequences-integration) section (0.8), the "Sequences" and "Automations" rows in the [feature-altitude table](#10-product-surface-cleanup-and-feature-altitude), and any acceptance/test items that assert Sequences/Automations as supported first-class surfaces. They remain in the document as historical context only.
+
+## Strategic Refocus: The Governed Action & Provenance Control Plane
+
+> Added in the 0.9.3 cycle after an architecture + thesis review. This section is self-contained so another agent can execute it without external context.
+
+### North star (one sentence)
+
+CRMy is the **governed, cross-CRM action-and-proof control plane for customer-facing agents.** Memory is the durable substrate that makes action trustworthy; it is not the product. The product is the **preflight contract + proof** an agent uses before it acts.
+
+### Thesis verdict (why we are refocusing)
+
+The original thesis — "context alone is insufficient; agents need a durable *truth* layer" — is only half right, and the right half is not the half we led with. What the codebase actually proves is **provenance + action-gating + audit**, not "truth." Three consequences:
+
+- "Confirmed Memory" is **provenance-checked, corroborated inference**, not verified truth. Our language must stop overselling the epistemics.
+- The most defensible, least-copyable code is `action_context_get` (operational state) and grounded promotion (provenance) — **not** the memory store.
+- Long context windows and model-native memory will commoditize retrieval/compression. They will **not** commoditize provenance, policy gating, approval, writeback governance, or audit. Invest in the durable layers.
+
+### What is differentiated — invest here
+
+1. **Grounded promotion** — trust decoupled from model confidence. `packages/server/src/agent/extraction-grounding.ts`. A Signal auto-promotes to Memory only if its evidence snippet is present in the source.
+2. **Action Context** — the `inform` / `warn` / `require_review` preflight contract, `use_as_truth` / `do_not_use_as_truth` partition, and `source_posture`. `packages/server/src/services/action-context.ts`.
+3. **Lineage + receipts** — durable, exclusion-aware proof of what evidence an agent used and why context was excluded.
+4. **Cross-CRM neutrality** — the one structural advantage CRM-native agents (Salesforce Agentforce, HubSpot Breeze) cannot match.
+
+### What is NOT differentiated — do not invest / kill
+
+- Retrieval & token-compression cleverness (dies to long context + model-native memory). Demote token-budget packing to a silent utility; drop token-reduction messaging.
+- **Sequences** (competes with Outreach/Apollo) — **deprecate**.
+- **Automations / workflow *builder*** as a product surface (competes with Zapier) — **deprecate the surface, keep the event bus**.
+- Webhooks / messaging channels — maintain as plumbing only; no investment; out of positioning.
+- Knowledge-graph reasoning — we never had it (FK joins + a provenance DAG); stop implying it.
+- Generic "agent memory store" framing — keep memory GTM-typed and specific or it commoditizes.
+
+### Durable decisions (answers to the strategic open questions)
+
+These are committed decisions, not options. Each lists the **change** an implementer must make.
+
+| # | Decision | Concrete change |
+|---|---|---|
+| **D1** | **Product = action governance, not memory.** | Make `action_context_get` the canonical first tool in docs/demo/default toolset. Keep "Memory" as a UI noun; reposition all marketing around governed action + proof. |
+| **D2** | **SoR wins on field values; CRMy wins on the reasoning/evidence/decision layer.** | Invariant: **on conflict over a mapped SoR field, CRMy flags and defers — never overwrites.** Document CRMy as the audited decision layer *on top of* the SoR, never a parallel field store. Enforced via `source_authority` mappings in `action-context.ts`. |
+| **D3** | **Stop auto-promoting high-impact claims on lexical grounding alone.** Introduce claim-class promotion tiers. | Extend the `sensitive`/`requires_approval` logic in `packages/server/src/services/signal-readiness.ts` into the tier matrix below. Add `grounding_method: lexical \| corroborated \| human_reviewed` to every Memory row so "confirmed" carries an honest provenance qualifier. |
+| **D4** | **Model capability gates auto-promotion (not Signal creation).** | Run the 0.9.3 eval suite per tenant-model. A model below threshold may **create Signals** but **may not auto-promote** — everything routes to review. Reuse the `CRMY_REQUIRE_GROUNDED_AUTOPROMOTE` pattern, now keyed to a certification score. Local-first stays usable; weak models just produce more review. |
+| **D5** | **Procedural/reflective memory: substrate now, learning loop later.** | For 1.0, only **instrument outcomes** (reply / meeting-booked / stage-advanced / won-lost) linked to the actions and the Memory/Signals that informed them, via existing receipts/audit. The feedback-into-thresholds + next-best-action loop is the **v1.1 headline**, explicitly out of 1.0. |
+| **D6** | **Retrieval/compression value is sunset; invest in durable layers.** | Forcing function: anything justified mainly by "smaller prompts" is deprioritized for 1.0. Token-budget packing (`briefing.ts`) becomes a quiet utility, not a marketed feature. |
+| **D7** | **Cross-CRM neutrality is the moat and a 1.0 release gate.** | Require **two-SoR + connector-free parity**: the canonical flow must pass identically against Salesforce, HubSpot, and the no-connector path in the eval suite and the demo. All SoR specifics stay in adapters. |
+| **D8** | **Ship the Core Profile as the default product.** | Default install = the 5-tool spine (below), connector-free, ~20-tool default toolset. Everything else is opt-in. |
+
+**D3 claim-class promotion tiers:**
+
+| Tier | Examples | Auto-promote rule |
+|---|---|---|
+| **0 — Informational** | preference, relationship note | Grounded snippet → auto-promote |
+| **1 — Operational** | next_step, pain_point, objection | Grounded **and** (independent corroboration **or** a `valid_until` decay date) |
+| **2 — High-impact** | forecast_signal, commitment, economic-buyer/champion change, deal_risk affecting forecast | **Never auto-promote** — human review **or** ≥2 independent sources + recency |
+
+### Fix the decay gap (makes a headline claim actually true)
+
+Today, customer Memory only goes stale if the extraction model emitted a `valid_until` (`extraction.ts` prompt) or a human set a TTL — there is **no automatic, type-based freshness window for customer Memory.** Ironically the *optional* product-knowledge layer already has deterministic category windows. **Action:** give customer Memory the same treatment, using `packages/server/src/services/knowledge-freshness.ts` (`freshnessWindowDays`, `computeStaleClaimIds`) as the template, driven by `context_type`. Un-dated Memory must auto-stale by type so `staleness.ts` sweeps and briefing `staleness_warnings` actually fire.
+
+### The Core Profile — the smallest valuable product
+
+The spine everything hangs off. Ships as the **default install**: connector-free, no sequences, no workflow builder, ~20-tool default toolset.
+
+```text
+context_ingest_auto  ->  grounded promotion  ->  briefing_get  ->  action_context_get  ->  context_lineage_get
+```
+
+Everything beyond this loop (SoR connectors, email/calendar sources, product knowledge, HITL beyond review queue) is an **opt-in module**, not a prerequisite.
+
+### Scope Decisions: build, freeze, kill
+
+| Surface | Decision | Rationale |
+|---|---|---|
+| Raw Context → Signals → Memory lifecycle | **Core** | The substrate; differentiated via grounded promotion. |
+| Action Context (`inform`/`warn`/`require_review`) | **Core — lead with it** | Most defensible code; the product. |
+| Lineage + receipts + audit | **Core — the trust brand** | Hard to replicate; survives model-native memory. |
+| Grounded promotion + claim-class tiers (D3) + model gating (D4) + decay windows | **Core — must make true for 1.0** | Closes epistemic-overreach + weak-model + decay risks. |
+| SoR overlay (Salesforce, HubSpot, warehouse, connector-free) | **Core — as the neutrality moat (D7)** | Two-CRM parity is the gate, not breadth. |
+| Customer Email / Activity / Calendar | **Keep — framed as ingestion sources only** | Feed the loop; not inbox/calendar apps. |
+| HITL / Handoffs | **Keep** | The human-review half of governance. |
+| Internal event bus, context outbox, `workflow_runs` dedupe primitives | **Keep — load-bearing infra (NOT the builder)** | Ingestion, sync, HITL, lineage, webhooks depend on it. |
+| **Sequences** (`email-sequences`, migrations 037–041) | **KILL — deprecate & remove from product surface** | Competes with Outreach/Apollo; off-thesis. |
+| **Automations / Workflow builder** (`workflows.ts`, migration 011, builder UI) | **KILL the surface — deprecate** | Competes with Zapier; off-thesis. Keep the event bus underneath. |
+| Webhooks / Messaging channels | **Freeze — plumbing only, out of positioning** | Not differentiation. |
+| Token-budget profiles as a *feature* | **Demote to silent utility (D6)** | Dies to long context. |
+| Semantic-search tuning as a headline | **Deprioritize** | Retrieval cleverness is not the moat. |
+| Procedural/reflective learning loop | **Out of 1.0 — substrate only (D5)** | Biggest gap, riskiest scope; v1.1 headline. |
+
+### Deprecation Plan: Sequences & Automations
+
+**Principle:** remove the *product surfaces* and *positioning*, preserve *existing tenant data* and the *event bus*. No destructive migrations in this cycle.
+
+**Sequences — deprecate:**
+1. Remove `sequence_*` MCP tools from all default toolsets; mark them `deprecated` in `tool_guide` and hide from the default catalog. Keep callable only under an explicit `legacy_sequences` toolset for existing users.
+2. Remove Sequences from primary nav and from the demo/quickstart path. Move any remaining UI behind an "Advanced (legacy)" settings area.
+3. Strip Sequences from README, guide, recipes, examples, and positioning. Delete the "Outreach agent" / sequence-centric recipe framing.
+4. Freeze all feature work. Keep `sequence_enrollments`/`sequences` tables and durable execution intact for existing enrollments; add no new capability.
+5. Remove sequence-specific acceptance criteria and test-plan items from the 1.0 gate (keep regression tests only for existing-data safety).
+
+**Automations / Workflow builder — deprecate the surface, keep the bus:**
+1. Remove `workflow_*` builder tools and the Automations builder UI from default toolsets, primary nav, demo, and positioning.
+2. **Keep** the internal event bus (`events`, emitters), context outbox, and `workflow_runs` dedupe/replay primitives — these power ingestion, source sync, HITL routing, lineage, and webhooks and must not be removed.
+3. Re-scope internal event→action needs (e.g. "create review assignment when a Signal is stale") as **fixed, governed internal handlers**, not user-authored workflows. Reuse `staleness.ts` / `knowledge-governance.ts` patterns.
+4. Strip "automation engine," "workflow builder," and "sequences" framing from docs; replace with "governed internal handlers + event bus."
+5. Remove the 0.8 "Automations And Sequences Integration" workstream from the active roadmap (kept below as historical context only).
+
+**Migration/runbook note for implementers:** announce deprecation in `CHANGELOG`/`RELEASE_NOTES`, gate the legacy surfaces behind an opt-in flag for one minor version, then remove UI/tools. Plan eventual table removal (or extraction to a separate optional plugin package) **after** 1.0, not during it.
+
+### Focused Road to 1.0 (phased)
+
+Current release: 0.9.3. Each phase maps to a differentiated mechanism and has a hard acceptance gate.
+
+| Phase | Theme | Deliverables (grounded in existing code) | Acceptance gate |
+|---|---|---|---|
+| **0.9.4** | **Trust integrity** (make the headline claims true) | D3 claim-class tiers atop `signal-readiness.ts`; `grounding_method` on every Memory row; **customer-Memory decay windows** via `knowledge-freshness.ts` template; D4 model-certification gate for auto-promote via the eval harness | A weak/uncertified model can never mint Tier-2 Memory; un-dated Memory auto-stales by type; eval suite proves both |
+| **0.9.5** | **Core Profile + portable contract** | Default Core Profile install (connector-free, ~20-tool default toolset); **version & freeze the Action Context packet schema** (D1/D6); reposition docs/demo around `action_context_get`; **execute the Sequences + Automations deprecation** (routes preserved, surfaces removed) | New builder runs the 5-tool loop with zero connectors; Action Context contract is versioned + documented; Sequences/Automations gone from default surface |
+| **0.9.6** | **Neutrality + proof** (lock the moat) | D7 two-SoR + connector-free parity in eval + demo; universal proof-receipt envelope across retrieval/draft/HITL/writeback/turn; D2 "SoR-defers-on-conflict" invariant | Canonical flow passes identically on Salesforce, HubSpot, and no-connector; one receipt format audits all action types |
+| **1.0-RC** | **Resilience at scale (core loop only)** | Apply the existing [1.0: Resilience At Scale](#10-resilience-at-scale) workstreams **scoped to the ingest→promotion→briefing→action→lineage path**, not the full surface | High-volume soak on the core loop meets latency/correctness budgets |
+| **1.0 GA** | **Honest, focused launch** | Repositioned messaging; certified runtime matrix for the 5-tool loop; D5 outcome-instrumentation substrate (data capture only) | The "what dies / what survives model-native memory" story holds; no overclaimed epistemics in docs |
+
+### Explicitly NOT doing before 1.0
+
+- New connector types beyond the two-CRM + warehouse + connector-free set.
+- Any Sequences or Automations/workflow-builder feature work (they are being removed).
+- The procedural/reflective learning loop (substrate only — D5).
+- Token-reduction / "smaller prompt" messaging or features (D6).
+- Knowledge-graph reasoning.
+- Shipping the full 321-tool catalog as the default toolset.
+
+### Persona value guardrails (narrowing must not strand a core user)
+
+| Persona | Keeps / gains after narrowing | Loses | Net |
+|---|---|---|---|
+| **Agent builder** | Small, versioned, portable Action Context contract; ~20-tool default; proof receipts; cross-runtime + cross-CRM | The 321-tool firehose (a liability anyway) | **Gain** |
+| **GTM Ops / RevOps** | Honest decay, claim-class gating, model certification, audit, writeback safety, SoR-defers-on-conflict | Zapier/Outreach-style builders (they own better ones) | **Gain** |
+| **Seller / CS** | Briefings with *working* stale warnings, grounded drafting, Action Context guardrails | Nothing in the daily path | **Neutral→gain** |
+| **Admin / Security** | Scoped actors, PII/retention on the core loop, certified models, lineage; smaller surface to certify | Surface area to review | **Gain** |
+
+### The moat (restate for any reviewer)
+
+Not storage, not the contract (copyable). It is: (a) the **grounded-promotion + claim-class + proof discipline** as a trust brand; (b) per-tenant accumulated Memory + lineage (switching cost / data gravity); (c) **cross-CRM neutrality** no SoR vendor can match. The plan above invests only in these three and freezes/kills everything else.
+
+### Handoff notes for implementers (file pointers)
+
+- Promotion/grounding: `packages/server/src/agent/extraction-grounding.ts`, extraction prompt in `packages/server/src/agent/extraction.ts`.
+- Readiness/tiers (D3): `packages/server/src/services/signal-readiness.ts`.
+- Decay template (apply to customer Memory): `packages/server/src/services/knowledge-freshness.ts`; sweep in `packages/server/src/services/staleness.ts`; storage in migrations `012`/`013` (`context_entries.valid_until`).
+- Action Context contract (D1/D6) + SoR authority (D2): `packages/server/src/services/action-context.ts`.
+- Briefing/packing (demote per D6): `packages/server/src/services/briefing.ts`.
+- Toolsets / default catalog (Core Profile, D8): MCP tool registration under `packages/server/src/mcp/tools/` and toolset selection.
+- Eval harness (D4/D7 gates): see [Eval Harness Plan](eval-harness-0.9.3-plan.md).
+- Surfaces to deprecate: `packages/server/src/mcp/tools/email-sequences.ts`, `packages/server/src/mcp/tools/workflows.ts`; **do not touch** the event emitter / `events` / context-outbox infra.
 
 ## Strategic Direction
 
@@ -189,6 +356,8 @@ Add operational visibility for:
 - replay status
 
 ## Automations And Sequences Integration
+
+> **⚠ SUPERSEDED (0.9.3 refocus).** Sequences and the user-facing Automations/Workflow *builder* are **deprecated** — see [Strategic Refocus → Deprecation Plan](#deprecation-plan-sequences--automations). The **event bus and `workflow_runs` dedupe primitives described below remain load-bearing infrastructure** for ingestion, source sync, HITL, lineage, and webhooks and must be preserved. Read the rest of this section as historical context for the event-bus design only; do **not** invest in the sequence engine or the user-authored workflow builder as product surfaces.
 
 Goal: external updates feel native to CRMy.
 
@@ -585,6 +754,8 @@ Recommended feature altitude:
 | Sequences | Experimental/advanced | Governed outbound orchestration; avoid sales-engagement positioning. |
 | Manual writeback test bench | Advanced | Admin/operator testing only. |
 | Direct manual Memory creation | Advanced | Normal users should add context, review Signals, and confirm Memory. |
+
+> **⚠ SUPERSEDED (0.9.3 refocus).** The **Automations** and **Sequences** rows above are **deprecated**, not "Advanced/Experimental." They are being removed from the product surface (competes with Zapier / Outreach; off-thesis). The internal event bus stays. See [Strategic Refocus → Scope Decisions](#scope-decisions-build-freeze-kill) and [Deprecation Plan](#deprecation-plan-sequences--automations).
 
 Key cleanup changes:
 

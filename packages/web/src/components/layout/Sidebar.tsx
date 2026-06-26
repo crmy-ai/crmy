@@ -6,6 +6,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain,
+  BookOpen,
   Inbox,
   Library,
   Users,
@@ -30,6 +31,7 @@ export { ENTITY_COLORS };
 const agentNavItems = [
   { icon: Brain,       label: 'Overview',     path: '/',             color: ENTITY_COLORS.dashboard },
   { icon: Library,     label: 'Context',      path: '/context',      color: ENTITY_COLORS.context },
+  { icon: BookOpen,    label: 'Knowledge',    path: '/knowledge',    color: ENTITY_COLORS.knowledge },
   { icon: Inbox,       label: 'Handoffs',     path: '/handoffs',     color: ENTITY_COLORS.assignments },
 ];
 
@@ -118,7 +120,7 @@ export function Sidebar() {
   const admin = isAdminRole(user?.role);
   const visibleAgentNavItems = admin
     ? agentNavItems
-    : agentNavItems.filter(item => item.path !== '/automations');
+    : agentNavItems.filter(item => item.path !== '/knowledge' && item.path !== '/automations');
   const visibleBottomItems = admin
     ? bottomItems
     : bottomItems.filter(item => item.path === '/settings');

@@ -687,7 +687,7 @@ function sourceLabel(raw: string | undefined) {
     snowflake: 'Snowflake',
     manual: 'Manual Add Context',
     add_context: 'Add Context',
-    raw_context: 'Raw Context',
+    raw_context: 'Sources',
   };
   return labels[value] ?? value.replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
 }
@@ -1398,7 +1398,7 @@ export function SignalGroupsBrowser({
                 ? 'Try adjusting search or filters.'
                 : attentionOnly
                   ? 'Signals that need confirmation, more evidence, missing details, approval, or conflict review will appear here.'
-                  : 'Signals appear here when Raw Context creates inferred customer context.'}
+                  : 'Signals appear here when Sources create inferred customer context.'}
             </p>
           </div>
         ) : viewMode === 'table' ? (

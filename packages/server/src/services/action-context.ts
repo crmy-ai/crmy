@@ -125,7 +125,7 @@ function buildProductKnowledgeCheck(pc: ProductContext): NonNullable<ActionConte
   const reasons: string[] = [];
   if (pc.status === 'not_configured') reasons.push('Product knowledge is not configured.');
   else if (pc.status === 'degraded') reasons.push('Product knowledge retrieval was degraded.');
-  else if (pc.status === 'no_results') reasons.push('No approved product claims matched this subject.');
+  else if (pc.status === 'no_results') reasons.push('No approved knowledge claims matched this subject.');
   return {
     status: 'ready',
     reasons,

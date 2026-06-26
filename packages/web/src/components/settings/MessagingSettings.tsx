@@ -1469,7 +1469,7 @@ export default function MessagingSettings() {
   return (
     <div className="w-full space-y-5">
       <div>
-        <h2 className="font-display font-bold text-lg text-foreground mb-1">System Connections</h2>
+        <h2 className="font-display font-bold text-lg text-foreground mb-1">Context Connectors</h2>
         <p className="text-sm text-muted-foreground">Configure provider OAuth, fallback sending, inbound email, source filters, and operational notifications.</p>
       </div>
 

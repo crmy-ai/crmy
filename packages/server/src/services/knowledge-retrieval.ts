@@ -31,6 +31,7 @@ import type {
 import { isSnippetGrounded } from '../agent/extraction-grounding.js';
 import {
   countKnowledgeClaims,
+  inferKnowledgeType,
   searchKnowledgeClaims,
   upsertKnowledgeClaim,
   type KnowledgeClaimRow,
@@ -39,9 +40,9 @@ import {
 import { insertKnowledgeReceipt } from '../db/repos/knowledge-receipts.js';
 
 const NOT_CONFIGURED_MESSAGE =
-  'Product knowledge retrieval is not configured for this workspace. '
+  'Knowledge claim retrieval is not configured for this workspace. '
   + 'Customer Memory, briefings, and Action Context work without it. '
-  + 'Configure approved product/competitive claims to enable grounded, cited retrieval.';
+  + 'Configure approved company, product, or competitor claims to enable grounded, cited retrieval.';
 
 const PRIORITY_WEIGHT: Record<KnowledgeClaimRow['source_priority'], number> = {
   authoritative: 3,
@@ -111,6 +112,7 @@ function rowToClaim(row: KnowledgeClaimRow): KnowledgeClaim {
     : [];
   return {
     id: row.id,
+    knowledge_type: inferKnowledgeType(row),
     category: row.category,
     title: row.title,
     body: row.body,

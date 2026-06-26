@@ -43,7 +43,7 @@ const PHASES: Array<{ key: LineagePhase; label: string; group: PhaseGroup }> = [
 
 const NODE_CONFIG: Record<ContextLineageNode['type'], { label: string; icon: typeof FileText; className: string; dotClassName: string }> = {
   record:       { label: 'Record',       icon: UserRound,     className: 'bg-card text-foreground border-border',                       dotClassName: 'bg-muted-foreground' },
-  raw_context:  { label: 'Raw Context',  icon: FileText,      className: 'bg-sky-500/10 text-sky-500 border-sky-500/20',                dotClassName: 'bg-sky-500' },
+  raw_context:  { label: 'Sources',      icon: FileText,      className: 'bg-sky-500/10 text-sky-500 border-sky-500/20',                dotClassName: 'bg-sky-500' },
   activity:     { label: 'Activity',     icon: Activity,      className: 'bg-blue-500/10 text-blue-500 border-blue-500/20',             dotClassName: 'bg-blue-500' },
   signal:       { label: 'Signal',       icon: Sparkles,      className: 'bg-violet-500/10 text-violet-500 border-violet-500/20',       dotClassName: 'bg-violet-500' },
   signal_group: { label: 'Signal',       icon: GitBranch,     className: 'bg-violet-500/10 text-violet-500 border-violet-500/20',       dotClassName: 'bg-violet-500' },
@@ -651,13 +651,13 @@ export function ContextLineageView({ headerContent }: { headerContent?: ReactNod
               </p>
               <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
                 {hasLineageTarget
-                  ? 'This record does not have linked Raw Context, Signals, or Memory yet.'
+                  ? 'This record does not have linked Sources, Signals, or Memory yet.'
                   : 'Search for a customer record to trace how context became Signals and Memory.'}
               </p>
               {hasLineageTarget && (
                 <div className="mt-4 flex flex-wrap justify-center gap-2">
-                  <Link to="/context?tab=observations&add=context" className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Add Context</Link>
-                  <Link to="/context?tab=observations" className="rounded-lg border border-border px-3 py-2 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground">View Raw Context</Link>
+                  <Link to="/context?tab=sources&add=context" className="rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Add Context</Link>
+                  <Link to="/context?tab=sources" className="rounded-lg border border-border px-3 py-2 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground">View Sources</Link>
                   <Link to="/context" className="rounded-lg border border-border px-3 py-2 text-sm font-semibold text-muted-foreground hover:bg-muted hover:text-foreground">View Memory</Link>
                 </div>
               )}

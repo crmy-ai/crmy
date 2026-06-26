@@ -5,6 +5,7 @@ import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tansta
 import type {
   ActionContext, ActionContextGetInput, ProviderId, SignalReadiness, SignalResolution,
   KnowledgeClaimRecord, KnowledgeApprovalStatus, KnowledgeReviewDecision, KnowledgeConflict,
+  KnowledgeSourceConnection,
 } from '@crmy/shared';
 import { api, getUser } from './client';
 
@@ -2904,6 +2905,7 @@ export function useReviewSystemWriteback() {
 // knowledge_claim_review / knowledge_conflicts_detect MCP+REST surfaces.
 
 export interface KnowledgeClaimListFilters {
+  knowledge_type?: KnowledgeClaimRecord['knowledge_type'];
   status?: KnowledgeClaimRecord['status'];
   approval_status?: KnowledgeApprovalStatus;
   needs_review?: boolean;
@@ -2941,5 +2943,70 @@ export function useDetectKnowledgeConflicts() {
     mutationFn: (input: { category?: string; competitor?: string; apply?: boolean; limit?: number }) =>
       api.post<{ conflicts: KnowledgeConflict[]; applied: number }>('knowledge/conflicts/detect', input),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['knowledge-claims'] }),
+  });
+}
+
+export interface KnowledgeSourceConnectionInput {
+  name: string;
+  endpoint_url: string;
+  transport?: 'streamable_http';
+  auth_type?: 'none' | 'bearer_token';
+  token?: string | null;
+  description?: string | null;
+  status?: KnowledgeSourceConnection['status'];
+}
+
+export function useKnowledgeSourceConnections() {
+  return useQuery<{ data: KnowledgeSourceConnection[] }>({
+    queryKey: ['knowledge-source-connections'],
+    queryFn: () => api.get('knowledge/source-connections'),
+  });
+}
+
+export function useCreateKnowledgeSourceConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: KnowledgeSourceConnectionInput) => api.post<KnowledgeSourceConnection>('knowledge/source-connections', data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['knowledge-source-connections'] }),
+  });
+}
+
+export function useUpdateKnowledgeSourceConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & Partial<KnowledgeSourceConnectionInput>) =>
+      api.patch<KnowledgeSourceConnection>(`knowledge/source-connections/${id}`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['knowledge-source-connections'] }),
+  });
+}
+
+export function useDeleteKnowledgeSourceConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`knowledge/source-connections/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['knowledge-source-connections'] });
+      qc.invalidateQueries({ queryKey: ['knowledge-claims'] });
+    },
+  });
+}
+
+export function useTestKnowledgeSourceConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<{ ok: true; tool_count: number; claim_count_sample: number }>(`knowledge/source-connections/${id}/test`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['knowledge-source-connections'] }),
+  });
+}
+
+export function useSyncKnowledgeSourceConnection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, limit }: { id: string; limit?: number }) =>
+      api.post<{ imported: number; skipped: number; failed: number }>(`knowledge/source-connections/${id}/sync`, { limit }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['knowledge-source-connections'] });
+      qc.invalidateQueries({ queryKey: ['knowledge-claims'] });
+    },
   });
 }

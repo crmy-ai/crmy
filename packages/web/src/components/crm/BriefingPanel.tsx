@@ -330,11 +330,11 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
           </BriefingSection>
         )}
 
-        {/* Product knowledge (governed, optional) */}
+        {/* Knowledge claims (governed, optional) */}
         {productContext?.status === 'available' && (productContext.relevant_claims?.length ?? 0) > 0 && (
           <BriefingSection
             icon={<FileText className="w-4 h-4 text-primary" />}
-            title="Product Knowledge"
+            title="Knowledge Claims"
             pill={productContext.relevant_claims?.length}
             defaultOpen
           >
@@ -344,6 +344,7 @@ export function BriefingPanel({ subjectType, subjectId, subjectName, onClose }: 
               {(productContext.relevant_claims ?? []).map((c: any) => (
                 <div key={c.id} className="rounded-lg border border-border p-3 space-y-1">
                   <div className="flex items-center gap-2 flex-wrap">
+                    {c.knowledge_type && <span className="text-[10px] uppercase tracking-wide text-primary">{c.knowledge_type}</span>}
                     <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{c.category}</span>
                     <span className="font-medium text-foreground text-sm">{c.title}</span>
                   </div>
@@ -694,7 +695,7 @@ function BriefingAnswerSummary({
                 ? shortText(nextAction.title ?? nextAction.body ?? nextAction.action ?? nextAction.description, 'Review the next action with evidence.')
                 : trustedMemory
                   ? 'Use confirmed Memory, then check Signals before preparing any writeback or customer-facing action.'
-                  : 'Add raw context first so CRMy can create Signals and a trusted briefing.'}
+                  : 'Add source material first so CRMy can create Signals and a trusted briefing.'}
             </p>
           </div>
         </div>

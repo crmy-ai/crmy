@@ -13,15 +13,15 @@ import { PaginationBar } from '@/components/crm/PaginationBar';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { getUser } from '@/api/client';
-import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useRevealWebhookSecret, useRotateWebhookSecret, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useMeetingClassifications, useCreateMeetingClassification, useUpdateMeetingClassification, useDeleteMeetingClassification, useSystemsOfRecord, useCreateSystemOfRecord, useUpdateSystemOfRecord, useDeleteSystemOfRecord, useTestSystemOfRecord, useRunSystemSync, useDiscoverSystemOfRecord, useSystemMappings, useUpsertSystemMapping, useDeleteSystemMapping, useSystemSyncRuns, useSystemConflicts, useResolveSystemConflict, useSystemWritebacks, usePreviewSystemWriteback, useRequestSystemWriteback, useExecuteSystemWriteback, useReviewSystemWriteback } from '@/api/hooks';
+import { useApiKeys, useCreateApiKey, useUpdateApiKey, useRevokeApiKey, useActors, useUpdateProfile, useWebhooks, useCreateWebhook, useUpdateWebhook, useRevealWebhookSecret, useRotateWebhookSecret, useDeleteWebhook, useWebhookDeliveries, useCustomFields, useCreateCustomField, useUpdateCustomField, useDeleteCustomField, useDbConfig, useTestDbConfig, useSaveDbConfig, useSeedSampleData, useUsers, useCreateUser, useUpdateUser, useDeleteUser, useContextTypes, useCreateContextType, useDeleteContextType, useActivityTypes, useCreateActivityType, useDeleteActivityType, useMeetingClassifications, useCreateMeetingClassification, useUpdateMeetingClassification, useDeleteMeetingClassification, useSystemsOfRecord, useCreateSystemOfRecord, useUpdateSystemOfRecord, useDeleteSystemOfRecord, useTestSystemOfRecord, useRunSystemSync, useDiscoverSystemOfRecord, useSystemMappings, useUpsertSystemMapping, useDeleteSystemMapping, useSystemSyncRuns, useSystemConflicts, useResolveSystemConflict, useSystemWritebacks, usePreviewSystemWriteback, useRequestSystemWriteback, useExecuteSystemWriteback, useReviewSystemWriteback, useKnowledgeSourceConnections, useCreateKnowledgeSourceConnection, useUpdateKnowledgeSourceConnection, useDeleteKnowledgeSourceConnection, useTestKnowledgeSourceConnection, useSyncKnowledgeSourceConnection } from '@/api/hooks';
 import type { SystemMapping, SystemOfRecord } from '@/api/hooks';
+import type { KnowledgeSourceConnection } from '@crmy/shared';
 import { useAgentSettings } from '@/contexts/AgentSettingsContext';
 
 const AgentSettings = React.lazy(() => import('@/pages/AgentSettings'));
 const ActorsSettings = React.lazy(() => import('@/components/settings/ActorsSettings'));
 const MessagingSettings = React.lazy(() => import('@/components/settings/MessagingSettings'));
 const HITLRulesSettings = React.lazy(() => import('@/components/settings/HITLRulesSettings'));
-const KnowledgeGovernanceSettings = React.lazy(() => import('@/components/settings/KnowledgeGovernanceSettings'));
 
 type NavRole = 'member' | 'manager' | 'admin' | 'owner';
 
@@ -31,8 +31,8 @@ const settingsNavConfig: { icon: React.ElementType; label: string; path: string;
   { icon: Database,   label: 'Database',      path: '/settings/database',     roles: ['admin', 'owner'], group: 'Setup' },
   { icon: Sparkles,   label: 'Workspace Agent', path: '/settings/model',      roles: ['admin', 'owner'], group: 'Setup' },
   { icon: Server,     label: 'Systems of Record', path: '/settings/systems', roles: ['admin', 'owner'], group: 'Sources' },
-  { icon: Server,     label: 'System Connections', path: '/settings/connections', roles: ['admin', 'owner'], group: 'Sources' },
-  { icon: BookOpen,   label: 'Product Knowledge', path: '/settings/knowledge', roles: ['admin', 'owner'], group: 'Sources' },
+  { icon: Server,     label: 'Context Connectors', path: '/settings/connections', roles: ['admin', 'owner'], group: 'Sources' },
+  { icon: BookOpen,   label: 'Knowledge Sources', path: '/settings/knowledge-sources', roles: ['admin', 'owner'], group: 'Sources' },
   { icon: ShieldCheck, label: 'Action Policies', path: '/settings/hitl-rules', roles: ['admin', 'owner'], group: 'Safety' },
   { icon: Users,      label: 'Actors',        path: '/settings/actors',       roles: ['admin', 'owner'], group: 'Safety' },
   { icon: Tags,       label: 'Memory Types',  path: '/settings/registries',   roles: ['admin', 'owner'], group: 'Advanced' },
@@ -63,6 +63,325 @@ function RequireRole({ roles, children }: { roles: NavRole[]; children: React.Re
 function RedirectSettingsMessaging() {
   const location = useLocation();
   return <Navigate to={`/settings/connections${location.search}`} replace />;
+}
+
+function KnowledgeSourcesSettings() {
+  const { data, isLoading, isError, error } = useKnowledgeSourceConnections();
+  const createConnection = useCreateKnowledgeSourceConnection();
+  const updateConnection = useUpdateKnowledgeSourceConnection();
+  const deleteConnection = useDeleteKnowledgeSourceConnection();
+  const testConnection = useTestKnowledgeSourceConnection();
+  const syncConnection = useSyncKnowledgeSourceConnection();
+
+  const [showCreate, setShowCreate] = useState(false);
+  const [name, setName] = useState('');
+  const [endpointUrl, setEndpointUrl] = useState('');
+  const [authType, setAuthType] = useState<'bearer_token' | 'none'>('bearer_token');
+  const [token, setToken] = useState('');
+  const [description, setDescription] = useState('');
+
+  const connections = data?.data ?? [];
+  const buttonOutline = 'inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:opacity-40';
+  const buttonPrimary = 'inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40';
+  const inputCls = 'h-9 rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:ring-1 focus:ring-ring';
+
+  const resetForm = () => {
+    setShowCreate(false);
+    setName('');
+    setEndpointUrl('');
+    setAuthType('bearer_token');
+    setToken('');
+    setDescription('');
+  };
+
+  const createMcpConnector = async () => {
+    if (!name.trim() || !endpointUrl.trim()) {
+      toast({ title: 'Connector details required', description: 'Add a name and MCP endpoint URL.', variant: 'destructive' });
+      return;
+    }
+    if (authType === 'bearer_token' && !token.trim()) {
+      toast({ title: 'MCP credentials required', description: 'Add the bearer token for this MCP source.', variant: 'destructive' });
+      return;
+    }
+    try {
+      await createConnection.mutateAsync({
+        name: name.trim(),
+        endpoint_url: endpointUrl.trim(),
+        transport: 'streamable_http',
+        auth_type: authType,
+        token: authType === 'bearer_token' ? token : undefined,
+        description: description.trim() || undefined,
+      });
+      toast({ title: 'MCP connector saved', description: 'Test the connection before syncing snippets.' });
+      resetForm();
+    } catch (err) {
+      toast({ title: 'Failed to save connector', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+    }
+  };
+
+  const testMcpConnector = async (connection: KnowledgeSourceConnection) => {
+    try {
+      const result = await testConnection.mutateAsync(connection.id);
+      toast({ title: 'MCP connector is reachable', description: `${result.tool_count} tool(s) found; knowledge claim list is available.` });
+    } catch (err) {
+      toast({ title: 'Connection test failed', description: err instanceof Error ? err.message : 'Please check the endpoint and credentials.', variant: 'destructive' });
+    }
+  };
+
+  const syncMcpConnector = async (connection: KnowledgeSourceConnection) => {
+    try {
+      const result = await syncConnection.mutateAsync({ id: connection.id, limit: 100 });
+      toast({ title: 'Knowledge snippets synced', description: `${result.imported} imported, ${result.skipped} skipped, ${result.failed} failed.` });
+    } catch (err) {
+      toast({ title: 'Sync failed', description: err instanceof Error ? err.message : 'Please test the connector and try again.', variant: 'destructive' });
+    }
+  };
+
+  const toggleMcpConnector = async (connection: KnowledgeSourceConnection) => {
+    const nextStatus = connection.status === 'disabled' ? 'configured' : 'disabled';
+    try {
+      await updateConnection.mutateAsync({ id: connection.id, status: nextStatus });
+      toast({ title: nextStatus === 'disabled' ? 'Connector disabled' : 'Connector enabled' });
+    } catch (err) {
+      toast({ title: 'Failed to update connector', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+    }
+  };
+
+  const deleteMcpConnector = async (connection: KnowledgeSourceConnection) => {
+    try {
+      await deleteConnection.mutateAsync(connection.id);
+      toast({ title: 'Connector deleted', description: 'Imported claims remain in Knowledge for review.' });
+    } catch (err) {
+      toast({ title: 'Failed to delete connector', description: err instanceof Error ? err.message : 'Please try again.', variant: 'destructive' });
+    }
+  };
+
+  const statusTone = (status: KnowledgeSourceConnection['status']): 'ok' | 'warn' | 'error' | 'muted' => {
+    if (status === 'configured') return 'ok';
+    if (status === 'syncing') return 'warn';
+    if (status === 'error') return 'error';
+    return 'muted';
+  };
+
+  const endpointFor = (connection: KnowledgeSourceConnection): string => {
+    const endpoint = connection.config?.endpoint_url;
+    return typeof endpoint === 'string' ? endpoint : 'Endpoint not configured';
+  };
+
+  const descriptionFor = (connection: KnowledgeSourceConnection): string | undefined => {
+    const value = connection.config?.description;
+    return typeof value === 'string' ? value : undefined;
+  };
+
+  const formatDate = (iso?: string | null): string => {
+    if (!iso) return 'Never';
+    return new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  };
+
+  const statValue = (connection: KnowledgeSourceConnection, key: string): number | undefined => {
+    const value = connection.sync_stats?.[key];
+    return typeof value === 'number' ? value : undefined;
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <BookOpen className="w-5 h-5 text-primary" />
+            <h2 className="font-display font-bold text-lg text-foreground">Knowledge Sources</h2>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Configure MCP sources that import governed knowledge snippets into CRMy.
+          </p>
+        </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-3 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          <Plus className="h-4 w-4" />
+          Add Connector
+        </button>
+      </div>
+
+      {showCreate && (
+        <section className="rounded-xl border border-border bg-card p-4">
+          <div className="mb-4 flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Add MCP Knowledge Connector</p>
+              <p className="mt-1 text-sm text-muted-foreground">Credentials are stored with this outbound connector and are never shown after saving.</p>
+            </div>
+            <button onClick={resetForm} className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" aria-label="Close connector form">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Name</label>
+              <input className={`${inputCls} mt-1 w-full`} value={name} onChange={event => setName(event.target.value)} placeholder="Product snippets MCP" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Transport</label>
+              <select className={`${inputCls} mt-1 w-full`} value="streamable_http" disabled>
+                <option value="streamable_http">Streamable HTTP MCP</option>
+              </select>
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">MCP endpoint</label>
+              <input className={`${inputCls} mt-1 w-full`} value={endpointUrl} onChange={event => setEndpointUrl(event.target.value)} placeholder="https://example.com/mcp?toolset=full" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Auth</label>
+              <select className={`${inputCls} mt-1 w-full`} value={authType} onChange={event => setAuthType(event.target.value as 'bearer_token' | 'none')}>
+                <option value="bearer_token">Bearer token</option>
+                <option value="none">No auth</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">MCP credential</label>
+              <input
+                className={`${inputCls} mt-1 w-full`}
+                type="password"
+                value={token}
+                disabled={authType === 'none'}
+                onChange={event => setToken(event.target.value)}
+                placeholder={authType === 'none' ? 'Not required' : 'Stored encrypted'}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Description</label>
+              <input className={`${inputCls} mt-1 w-full`} value={description} onChange={event => setDescription(event.target.value)} placeholder="Optional note for admins" />
+            </div>
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">Sync snapshots snippets into Knowledge Claims for review; briefings do not live-query this source.</p>
+            <div className="flex gap-2">
+              <button className={buttonOutline} onClick={resetForm}>Cancel</button>
+              <button className={buttonPrimary} onClick={createMcpConnector} disabled={createConnection.isPending}>
+                {createConnection.isPending ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <ShieldCheck className="h-3.5 w-3.5" />}
+                Save Connector
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      <section className="rounded-xl border border-border bg-card">
+        <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Terminal className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold text-foreground">MCP Knowledge Connectors</span>
+            <span className="text-xs text-muted-foreground">{connections.length}</span>
+          </div>
+          <Link to="/knowledge" className={buttonOutline}>
+            Review claims
+          </Link>
+        </div>
+
+        {isLoading && (
+          <div className="space-y-3 p-4">
+            {[0, 1].map(item => <div key={item} className="h-28 animate-pulse rounded-lg bg-muted/50" />)}
+          </div>
+        )}
+
+        {isError && (
+          <div className="m-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+            <AlertTriangle className="h-4 w-4" />
+            {error instanceof Error ? error.message : 'Failed to load knowledge sources.'}
+          </div>
+        )}
+
+        {!isLoading && !isError && connections.length === 0 && (
+          <div className="p-8 text-center">
+            <Server className="mx-auto h-7 w-7 text-muted-foreground/50" />
+            <p className="mt-2 text-sm font-semibold text-foreground">No MCP connector configured</p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+              Add a CRMy-compatible MCP source when you are ready to import company, product, and competitor snippets for review.
+            </p>
+          </div>
+        )}
+
+        {!isLoading && !isError && connections.length > 0 && (
+          <div className="divide-y divide-border">
+            {connections.map(connection => {
+              const imported = statValue(connection, 'imported');
+              const skipped = statValue(connection, 'skipped');
+              const failed = statValue(connection, 'failed');
+              const busy = testConnection.isPending || syncConnection.isPending || updateConnection.isPending || deleteConnection.isPending;
+              return (
+                <div key={connection.id} className="p-4">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <SettingsHealthDot tone={statusTone(connection.status)} />
+                        <p className="text-sm font-semibold text-foreground">{connection.name}</p>
+                        <span className="rounded-md border border-border bg-muted px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                          {connection.status}
+                        </span>
+                        <span className="rounded-md border border-border bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                          {connection.auth_type === 'bearer_token' ? 'MCP credential stored' : 'No auth'}
+                        </span>
+                      </div>
+                      <p className="mt-1 truncate font-mono text-xs text-muted-foreground">{endpointFor(connection)}</p>
+                      {descriptionFor(connection) && <p className="mt-1 text-sm text-muted-foreground">{descriptionFor(connection)}</p>}
+                      {connection.last_error && (
+                        <p className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{connection.last_error}</p>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button className={buttonOutline} onClick={() => testMcpConnector(connection)} disabled={busy}>
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Test
+                      </button>
+                      <button className={buttonPrimary} onClick={() => syncMcpConnector(connection)} disabled={busy || connection.status === 'disabled'}>
+                        <RefreshCw className={`h-3.5 w-3.5 ${syncConnection.isPending ? 'animate-spin' : ''}`} />
+                        Sync
+                      </button>
+                      <button className={buttonOutline} onClick={() => toggleMcpConnector(connection)} disabled={busy}>
+                        {connection.status === 'disabled' ? 'Enable' : 'Disable'}
+                      </button>
+                      <button className={buttonOutline} onClick={() => deleteMcpConnector(connection)} disabled={busy}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-2 text-xs text-muted-foreground sm:grid-cols-4">
+                    <div className="rounded-lg border border-border bg-background px-3 py-2">
+                      <span className="block font-medium text-foreground">Last test</span>
+                      {formatDate(connection.last_test_at)}
+                    </div>
+                    <div className="rounded-lg border border-border bg-background px-3 py-2">
+                      <span className="block font-medium text-foreground">Last sync</span>
+                      {formatDate(connection.last_sync_at)}
+                    </div>
+                    <div className="rounded-lg border border-border bg-background px-3 py-2">
+                      <span className="block font-medium text-foreground">Imported</span>
+                      {imported ?? 0}
+                    </div>
+                    <div className="rounded-lg border border-border bg-background px-3 py-2">
+                      <span className="block font-medium text-foreground">Skipped / failed</span>
+                      {(skipped ?? 0)} / {(failed ?? 0)}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <div className="rounded-xl border border-info/25 bg-info/10 p-4 text-sm text-muted-foreground">
+        <div className="flex items-start gap-2">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-info" />
+          <p>
+            Knowledge Sources stores outbound MCP connector credentials and imports short claim envelopes. It is not a document editor, folder browser, or knowledge base.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function SettingsHealthDot({ tone, className = '' }: { tone: 'ok' | 'warn' | 'error' | 'muted'; className?: string }) {
@@ -340,7 +659,7 @@ const API_KEY_SCOPE_GROUPS = [
     { value: 'systems:write', label: 'Sync/writeback' },
     { value: 'systems:admin', label: 'Connection admin' },
   ]},
-  { label: 'Product Knowledge', scopes: [
+  { label: 'Knowledge Claims', scopes: [
     { value: 'knowledge:read', label: 'Retrieve / review' },
     { value: 'knowledge:write', label: 'Author / govern' },
   ]},
@@ -626,7 +945,7 @@ function ApiKeysSettings() {
       {/* Header */}
       <div>
         <h2 className="font-display font-bold text-lg text-foreground">API Keys</h2>
-        <p className="text-sm text-muted-foreground mt-0.5">Manage access tokens for the CRMy REST API and MCP server.</p>
+        <p className="text-sm text-muted-foreground mt-0.5">Manage keys for clients and agents accessing CRMy through the REST API or CRMy MCP server.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
@@ -5747,13 +6066,13 @@ EMBEDDING_MODEL=text-embedding-3-small`}</code></pre>
           <div>
             <h3 className="text-sm font-semibold text-foreground">Sample data</h3>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Load the same demo records used by <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">crmy seed-demo</code>: one customer thread that shows Raw Context becoming Signals, Memory, and a pending Handoff.
+              Load the same demo records used by <code className="text-xs font-mono bg-muted px-1 py-0.5 rounded">crmy seed-demo</code>: one customer thread that shows Sources becoming Signals, Memory, and a pending Handoff.
             </p>
           </div>
           {sampleCounts && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
               {[
-                ['Raw Context', sampleCounts.raw_context_sources ?? 0],
+                ['Sources', sampleCounts.raw_context_sources ?? 0],
                 ['Signals', sampleCounts.signals ?? 0],
                 ['Memory', sampleCounts.memory ?? sampleCounts.context_entries],
                 ['Handoffs', sampleCounts.handoffs ?? 0],
@@ -6146,7 +6465,7 @@ function RegistriesSettings() {
         <h3 className="text-sm font-semibold text-foreground mb-2">Meeting Classifications</h3>
         <p className="text-xs text-muted-foreground mb-3">
           Meeting classifications tell CRMy how to interpret calendar events, what customer records are required,
-          and whether notes or transcripts are needed before Raw Context can become Signals.
+          and whether notes or transcripts are needed before Sources can become Signals.
         </p>
         <div className="space-y-2 mb-3">
           {meetingLoading ? (
@@ -6166,7 +6485,7 @@ function RegistriesSettings() {
                   <p className="mt-1 text-xs text-muted-foreground">
                     Requires {(classification.required_record_types ?? []).join(', ') || 'no specific record'}
                     {(classification.required_artifact_types ?? []).length ? ` · Context: ${(classification.required_artifact_types ?? []).join(', ')}` : ''}
-                    {classification.auto_process_raw_context ? ' · Auto-processes Raw Context' : ' · Manual processing'}
+                    {classification.auto_process_raw_context ? ' · Auto-processes Sources' : ' · Manual processing'}
                   </p>
                 </div>
                 <button
@@ -6273,7 +6592,7 @@ function SettingsSetupStrip({ userRole, hidden, onHide }: { userRole: NavRole; h
   const steps = [
     {
       title: '1. Connect data',
-      description: 'Database first, then optional systems and source connections.',
+      description: 'Database first, then optional systems and context connectors.',
       href: '/settings/database',
       Icon: Database,
     },
@@ -6299,8 +6618,8 @@ function SettingsSetupStrip({ userRole, hidden, onHide }: { userRole: NavRole; h
           <h2 className="mt-1 font-display text-base font-bold text-foreground">Fast path to a working CRMy workspace</h2>
         </div>
         <div className="flex items-center gap-1.5">
-          <Link to="/context?tab=sources" className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-            Context sources
+          <Link to="/context?tab=connectors" className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            Context connectors
             <ChevronRight className="h-3.5 w-3.5" />
           </Link>
           <button
@@ -6437,7 +6756,8 @@ export default function Settings() {
               <Route path="messaging" element={<RedirectSettingsMessaging />} />
               <Route path="hitl-rules" element={<RequireRole roles={['admin', 'owner']}><HITLRulesSettings /></RequireRole>} />
               <Route path="model" element={<RequireRole roles={['admin', 'owner']}><AgentSettings /></RequireRole>} />
-              <Route path="knowledge" element={<RequireRole roles={['admin', 'owner']}><KnowledgeGovernanceSettings /></RequireRole>} />
+              <Route path="knowledge" element={<Navigate to="/knowledge" replace />} />
+              <Route path="knowledge-sources" element={<RequireRole roles={['admin', 'owner']}><KnowledgeSourcesSettings /></RequireRole>} />
               <Route path="automations" element={<Navigate to="/settings/advanced" replace />} />
               <Route path="systems" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />
               <Route path="systems/oauth/hubspot/callback" element={<RequireRole roles={['admin', 'owner']}><SystemsOfRecordSettings /></RequireRole>} />

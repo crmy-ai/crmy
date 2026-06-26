@@ -975,7 +975,7 @@ function ContextSourceObjectDrawer({ id, onClose }: { id: string | null; onClose
 
             <div className="rounded-xl border border-border bg-card p-4">
               <p className="text-sm font-semibold text-foreground">Resolve link</p>
-              <p className="mt-1 text-xs text-muted-foreground">Paste the meeting or customer record ID. Linking queues processing through Raw Context, Signals, and Memory.</p>
+              <p className="mt-1 text-xs text-muted-foreground">Paste the meeting or customer record ID. Linking queues processing through Sources, Signals, and Memory.</p>
               <div className="mt-3 grid gap-3 md:grid-cols-2">
                 <Input placeholder="Calendar event ID" value={calendarEventId} onChange={event => setCalendarEventId(event.target.value)} />
                 <Input placeholder="Account ID" value={accountId} onChange={event => setAccountId(event.target.value)} />
@@ -1036,7 +1036,7 @@ function MeetingDetailDrawer({
         process: true,
       });
       setArtifactText('');
-      toast({ title: 'Meeting context added', description: 'CRMy processed this meeting artifact as Raw Context.' });
+      toast({ title: 'Meeting context added', description: 'CRMy processed this meeting artifact as a Source.' });
     } catch (err) {
       toast({ title: 'Could not add context', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' });
     }
@@ -1112,7 +1112,7 @@ function MeetingDetailDrawer({
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h3 className="font-display text-sm font-semibold text-foreground">Transcript or notes</h3>
-                  <p className="text-xs text-muted-foreground">Add meeting notes, a transcript, or a recap. CRMy processes it as Raw Context.</p>
+                  <p className="text-xs text-muted-foreground">Add meeting notes, a transcript, or a recap. CRMy processes it as a Source.</p>
                 </div>
                 <Badge variant="outline" className={STATUS_TONES.muted}>{artifacts.length} artifacts</Badge>
               </div>
@@ -1168,7 +1168,7 @@ function MeetingDetailDrawer({
             </section>
 
             <section className="flex flex-wrap justify-end gap-2">
-              <Button variant="outline" onClick={() => navigate('/app/context?tab=observations&add=context')}>
+              <Button variant="outline" onClick={() => navigate('/app/context?tab=sources&add=context')}>
                 <Upload className="mr-1.5 h-3.5 w-3.5" />
                 Add Context page
               </Button>
@@ -1457,7 +1457,7 @@ export default function Activities() {
                   {' '}You can also add context manually through{' '}
                   <button
                     type="button"
-                    onClick={() => navigate('/context?tab=observations&add=context')}
+                    onClick={() => navigate('/context?tab=sources&add=context')}
                     className="font-medium text-blue-300 underline-offset-2 hover:underline"
                   >
                     Add Context
@@ -1755,7 +1755,7 @@ export default function Activities() {
                       {selectedProviderReady
                         ? 'Continue to provider consent to connect this calendar. You will choose the Google or Microsoft account CRMy can use.'
                         : isAdmin
-                          ? 'Prepare System Connections -> OAuth, then users can connect their own calendar here.'
+                          ? 'Prepare Context Connectors -> OAuth, then users can connect their own calendar here.'
                           : 'Your workspace admin needs to enable this provider before you can connect your calendar.'}
                     </p>
                     {selectedProviderReady ? (
@@ -1766,9 +1766,9 @@ export default function Activities() {
                     ) : isAdmin ? (
                       <div className="rounded-lg border border-border bg-background/40 p-3">
                         <p className="font-medium text-foreground">Admin setup</p>
-                        <p className="mt-1 text-xs">Redirect URIs, OAuth app source, tenant-owned credentials, and provider scopes live in System Connections.</p>
+                        <p className="mt-1 text-xs">Redirect URIs, OAuth app source, tenant-owned credentials, and provider scopes live in Context Connectors.</p>
                         <Button variant="outline" size="sm" onClick={() => navigate('/settings/connections')} className="mt-3">
-                          Open System Connections
+                          Open Context Connectors
                         </Button>
                       </div>
                     ) : (
@@ -1849,7 +1849,7 @@ export default function Activities() {
               <div className="rounded-lg border border-border bg-muted/25 p-3">
                 <p className="text-sm font-semibold text-foreground">{String(debriefActivity.subject ?? 'Activity')}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Add call notes, meeting notes, or a quick summary. CRMy will process this as Raw Context.
+                  Add call notes, meeting notes, or a quick summary. CRMy will process this as a Source.
                 </p>
               </div>
               <Textarea
@@ -1870,7 +1870,7 @@ export default function Activities() {
                   source_label: 'Activity debrief',
                 }, {
                   onSuccess: () => {
-                    toast({ title: 'Debrief processed', description: 'CRMy processed this activity as Raw Context.' });
+                    toast({ title: 'Debrief processed', description: 'CRMy processed this activity as a Source.' });
                     setDebriefActivity(null);
                     setDebriefText('');
                   },

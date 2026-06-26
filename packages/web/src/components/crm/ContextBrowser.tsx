@@ -1216,7 +1216,7 @@ export function ContextBrowser({
                 </p>
               </div>
               <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground whitespace-nowrap">
-                <span>Raw Context</span>
+                <span>Sources</span>
                 <span className="text-violet-500">→</span>
                 <span className="text-violet-600 dark:text-violet-300">Signals</span>
                 <span className="text-violet-500">→</span>
@@ -1280,7 +1280,7 @@ export function ContextBrowser({
                   ? 'Try rephrasing your question or adjusting filters.'
                   : 'Try adjusting your search or filters.'
                 : memoryStatus === 'signal'
-                ? 'Raw Context from calls, emails, documents, and systems of record creates Signals here before they become Memory.'
+                ? 'Sources from calls, emails, documents, and systems of record create Signals here before they become Memory.'
                 : 'Current Memory powers briefings, agent work, handoffs, and governed writeback.'}
             </p>
             {hasFilters && (

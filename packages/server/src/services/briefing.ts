@@ -832,12 +832,12 @@ export function formatBriefingText(briefing: Briefing): string {
 
   if (briefing.product_context && briefing.product_context.status === 'available') {
     const pc = briefing.product_context;
-    lines.push('--- Product Knowledge (governed, approved + grounded) ---');
+    lines.push('--- Knowledge Claims (governed, approved + grounded) ---');
     lines.push('  Use these approved, cited claims to ground customer-facing statements. Do not assert anything not listed here.');
     for (const claim of pc.relevant_claims) {
       const cite = claim.citations[0];
       const citeText = cite ? ` [${cite.source_label}]` : '';
-      lines.push(`  • [${claim.category}] ${claim.title}: ${claim.body.slice(0, 240)}${citeText}`);
+      lines.push(`  • [${claim.knowledge_type}/${claim.category}] ${claim.title}: ${claim.body.slice(0, 240)}${citeText}`);
     }
     if (pc.avoid_claims.length > 0) {
       lines.push(`  ⚠ ${pc.avoid_claims.length} claim(s) excluded (not customer-safe); do not use them.`);

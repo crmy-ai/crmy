@@ -21,6 +21,7 @@ import {
   processKnowledgeReviewsForTenant,
   rowToKnowledgeRecord,
 } from '../dist/services/knowledge-governance.js';
+import { inferKnowledgeType } from '../dist/db/repos/knowledge-claims.js';
 import { getToolScopeRequirements } from '../dist/auth/scopes.js';
 import { getAllTools } from '../dist/mcp/server.js';
 
@@ -86,11 +87,12 @@ test('reviewDecisionToPatch: approve re-verifies and revives a stale claim', () 
   assert.equal(patch.status, 'active');
   assert.equal(patch.touch_verified, true);
   assert.equal(patch.approved_for_external_use, true);
+  assert.equal(patch.visibility, 'external');
 });
 
 test('reviewDecisionToPatch: reject/deprecate/mark_stale/reactivate transitions', () => {
-  assert.deepEqual(reviewDecisionToPatch('reject', { status: 'active' }), { approval_status: 'rejected', status: 'rejected', approved_for_external_use: false });
-  assert.deepEqual(reviewDecisionToPatch('deprecate', { status: 'active' }), { status: 'deprecated', approved_for_external_use: false });
+  assert.deepEqual(reviewDecisionToPatch('reject', { status: 'active' }), { approval_status: 'rejected', status: 'rejected', approved_for_external_use: false, visibility: 'internal' });
+  assert.deepEqual(reviewDecisionToPatch('deprecate', { status: 'active' }), { status: 'deprecated', approved_for_external_use: false, visibility: 'internal' });
   assert.deepEqual(reviewDecisionToPatch('mark_stale', { status: 'active' }), { status: 'stale' });
   const reactivate = reviewDecisionToPatch('reactivate', { status: 'deprecated' });
   assert.equal(reactivate.status, 'active');
@@ -186,11 +188,20 @@ test('processKnowledgeReviewsForTenant opens an assignment per owned reviewable 
   assert.ok(assignTos.includes('owner-1') && assignTos.includes('owner-2'));
 });
 
-test('rowToKnowledgeRecord omits empty optionals and never leaks the body', () => {
+test('rowToKnowledgeRecord omits empty optionals and includes the governed envelope body', () => {
   const rec = rowToKnowledgeRecord(row({ id: 'rec', summary: null, body: 'secret internal text' }));
   assert.equal(rec.id, 'rec');
+  assert.equal(rec.knowledge_type, 'product');
   assert.equal('summary' in rec, false);
-  assert.equal('body' in rec, false, 'governance record summarizes; the body is not part of the envelope record');
+  assert.equal(rec.body, 'secret internal text');
+});
+
+test('inferKnowledgeType honors explicit metadata and legacy category/scope signals', () => {
+  assert.equal(inferKnowledgeType(row({ metadata: { knowledge_type: 'company' } })), 'company');
+  assert.equal(inferKnowledgeType(row({ competitors: ['Attio'] })), 'competitor');
+  assert.equal(inferKnowledgeType(row({ category: 'competitive_response' })), 'competitor');
+  assert.equal(inferKnowledgeType(row({ category: 'positioning_overview' })), 'company');
+  assert.equal(inferKnowledgeType(row({ category: 'security' })), 'product');
 });
 
 // ── Registration / scopes ────────────────────────────────────────────────────

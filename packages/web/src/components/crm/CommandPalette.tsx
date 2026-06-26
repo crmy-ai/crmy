@@ -7,7 +7,7 @@ import { Command } from 'cmdk';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Users, Briefcase, LayoutDashboard, FolderKanban, Activity, Settings, Search,
-  Building2, ClipboardList, Zap, ListOrdered, Plus, Database, Bot, Mail,
+  Building2, BookOpen, ClipboardList, Zap, ListOrdered, Plus, Database, Bot, Mail,
   ScrollText, ShieldCheck, Network, KeyRound, Tags, Palette,
   Webhook, Sparkles, Loader2, FileText, Server, type LucideIcon,
 } from 'lucide-react';
@@ -42,10 +42,11 @@ interface ActionCommand {
 
 const DESTINATIONS: DestinationCommand[] = [
   { label: 'Overview',        icon: LayoutDashboard, path: '/',                         color: ENTITY_COLORS.dashboard, keywords: 'dashboard command center status activate setup home' },
-  { label: 'Context',         icon: FileText,        path: '/context',                  color: ENTITY_COLORS.context, keywords: 'raw context observations sources ingestion processing volume signals memory browser context entries customer memory lineage graph' },
+  { label: 'Context',         icon: FileText,        path: '/context',                  color: ENTITY_COLORS.context, keywords: 'sources ingestion processing volume signals memory browser context entries customer memory lineage graph' },
   { label: 'Signals',         icon: Sparkles,        path: '/context?tab=signals',      color: ENTITY_COLORS.context, keywords: 'signals inferred context review promote dismiss evidence confidence' },
   { label: 'Memory',          icon: FileText,        path: '/context?tab=browser',      color: ENTITY_COLORS.context, keywords: 'memory confirmed context operational knowledge evidence' },
-  { label: 'Context Sources',  icon: Activity,        path: '/context?tab=sources',      color: ENTITY_COLORS.context, keywords: 'sources email activity meetings calls mailbox calendar mcp api add context' },
+  { label: 'Context Connectors', icon: Activity,      path: '/context?tab=connectors',   color: ENTITY_COLORS.context, keywords: 'connectors sources email activity meetings calls mailbox calendar mcp api add context' },
+  { label: 'Knowledge',        icon: BookOpen,        path: '/knowledge',                color: ENTITY_COLORS.knowledge, keywords: 'knowledge claims company product competitor approved grounded cite claims briefing drafts', roles: ['admin', 'owner'] },
   { label: 'Memory Health',   icon: ShieldCheck,     path: '/?tab=health',              color: ENTITY_COLORS.context, keywords: 'memory health review contradictions context quality', roles: ['admin', 'owner'] },
   { label: 'Context Graph',   icon: Network,         path: '/context?tab=graph',        color: ENTITY_COLORS.context, keywords: 'graph context memory relationships briefing network' },
   { label: 'Memory Lineage',  icon: Network,         path: '/context?tab=lineage',      color: ENTITY_COLORS.context, keywords: 'lineage evidence sources signals memory handoffs writebacks audit' },
@@ -68,12 +69,13 @@ const DESTINATIONS: DestinationCommand[] = [
   { label: 'Database Settings', icon: Database,      path: '/settings/database',        color: ENTITY_COLORS.operations, keywords: 'database postgres neon supabase rds lakebase pgvector sample data', roles: ['admin', 'owner'] },
   { label: 'Model Settings',  icon: Sparkles,        path: '/settings/model',           color: ENTITY_COLORS.agents, keywords: 'model local workspace agent llm openai anthropic azure gemini bedrock mistral litellm openrouter ollama databricks nvidia backup provider', roles: ['admin', 'owner'] },
   { label: 'Systems of Record', icon: Server,        path: '/settings/systems',         color: ENTITY_COLORS.operations, keywords: 'systems of record hubspot salesforce snowflake databricks connectors sync mappings writebacks external systems', roles: ['admin', 'owner'] },
+  { label: 'Knowledge Sources', icon: BookOpen,      path: '/settings/knowledge-sources', color: ENTITY_COLORS.knowledge, keywords: 'knowledge sources mcp connectors snippets setup', roles: ['admin', 'owner'] },
   { label: 'Appearance',      icon: Palette,         path: '/settings/appearance',      color: null, keywords: 'appearance theme charcoal color display' },
   { label: 'API Keys',        icon: KeyRound,        path: '/settings/api-keys',        color: null, keywords: 'api keys tokens access' },
   { label: 'Webhooks',        icon: Webhook,         path: '/settings/webhooks',        color: null, keywords: 'webhooks integrations outbound events advanced', roles: ['admin', 'owner'] },
   { label: 'Custom Fields',   icon: Tags,            path: '/settings/custom-fields',   color: null, keywords: 'custom fields record fields schema typed memory fields', roles: ['admin', 'owner'] },
   { label: 'Registries',      icon: Tags,            path: '/settings/registries',      color: null, keywords: 'registries activity types context types taxonomy', roles: ['admin', 'owner'] },
-  { label: 'System Connections', icon: Server,        path: '/settings/connections',     color: null, keywords: 'system connections messaging email provider smtp resend sendgrid oauth calendar mailbox', roles: ['admin', 'owner'] },
+  { label: 'Context Connectors', icon: Server,        path: '/settings/connections',     color: null, keywords: 'context connectors messaging email provider smtp resend sendgrid oauth calendar mailbox', roles: ['admin', 'owner'] },
   { label: 'Action Policies', icon: ShieldCheck,     path: '/settings/hitl-rules',      color: ENTITY_COLORS.assignments, keywords: 'hitl rules approval handoff policy action policies', roles: ['admin', 'owner'] },
 ];
 

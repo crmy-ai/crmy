@@ -155,7 +155,7 @@ const MAILBOX_PROVIDER_COPY: Record<MailboxProvider, {
   google: {
     label: 'Gmail',
     title: 'Set up Gmail',
-    description: 'Capture customer replies from Google Workspace mailboxes and process them as Raw Context.',
+    description: 'Capture customer replies from Google Workspace mailboxes and process them as Sources.',
     credentialLabel: 'Google Cloud OAuth app',
     callbackPath: '/api/v1/mailbox/oauth/google/callback',
   },
@@ -562,7 +562,7 @@ function MessageDetail({
                 <div className="mt-4 rounded-lg border border-dashed border-border bg-background/35 p-3">
                   <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Link and process</p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    Choose the safest customer record, then CRMy will process this email as Raw Context.
+                    Choose the safest customer record, then CRMy will process this email as a Source.
                   </p>
                   <div className="mt-3 grid gap-2 md:grid-cols-[150px,1fr,auto]">
                     <select
@@ -662,7 +662,7 @@ function MessageDetail({
 	                )}
 	                {message.raw_context_source_id && (
 	                  <div>
-	                    <span className="text-muted-foreground">Raw Context source </span>
+	                    <span className="text-muted-foreground">Source </span>
 	                    <span className="text-foreground">{String(message.raw_context_source_id).slice(0, 8)}</span>
 	                  </div>
 	                )}
@@ -717,14 +717,14 @@ function MessageDetail({
               </Button>
               <Button
                 onClick={() => processMessage.mutate(message.id, {
-                  onSuccess: () => toast({ title: 'Email processed', description: 'CRMy processed this email as Raw Context.' }),
+                  onSuccess: () => toast({ title: 'Email processed', description: 'CRMy processed this email as a Source.' }),
                   onError: (err) => toast({ title: 'Could not process email', description: err instanceof Error ? err.message : 'Try again.', variant: 'destructive' }),
                 })}
                 disabled={processMessage.isPending}
                 className="gap-1.5 bg-blue-600 text-white hover:bg-blue-500"
               >
                 {processMessage.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                Process as Raw Context
+                Process as Source
               </Button>
             </div>
           </div>
@@ -1094,7 +1094,7 @@ export default function EmailsPage() {
                 Connect your mailbox when you want customer threads auto matched to customer records and processed into Signal and Memory. This is optional: emails can still feed context and agent memory through{' '}
                 <button
                   type="button"
-                  onClick={() => navigate('/context?tab=observations&add=context')}
+                  onClick={() => navigate('/context?tab=sources&add=context')}
                   className="font-medium text-blue-300 underline-offset-2 hover:underline"
                 >
                   Add Context
@@ -1320,7 +1320,7 @@ export default function EmailsPage() {
                 ? 'Mailbox context and outbound actions linked to this record will appear here.'
                 : tab === 'review'
                 ? 'Ambiguous, unmatched, or failed customer emails will appear here.'
-                : 'Connect a mailbox so customer conversations can become Raw Context, Signals, and Memory.'}
+                : 'Connect a mailbox so customer conversations can become Sources, Signals, and Memory.'}
             </p>
           </div>
         ) : (
@@ -1355,7 +1355,7 @@ export default function EmailsPage() {
               <section className="rounded-xl border border-border bg-card/70 p-4">
                 <h3 className="text-sm font-semibold text-foreground">Choose your mailbox provider</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Pick the work inbox CRMy should connect. Provider setup details stay in System Connections for admins.
+                  Pick the work inbox CRMy should connect. Provider setup details stay in Context Connectors for admins.
                 </p>
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
                   {(['google', 'microsoft'] as MailboxProvider[]).map(providerKey => {
@@ -1417,7 +1417,7 @@ export default function EmailsPage() {
                     <input type="checkbox" checked={setupContextSync} onChange={event => setSetupContextSync(event.target.checked)} className="mt-1" />
                     <span>
                       <span className="block text-sm font-semibold text-foreground">Use email for customer context</span>
-                      <span className="block text-xs text-muted-foreground">Read customer-facing threads, link them to records, and process useful messages into Raw Context, Signals, and Memory.</span>
+                      <span className="block text-xs text-muted-foreground">Read customer-facing threads, link them to records, and process useful messages into Sources, Signals, and Memory.</span>
                     </span>
                   </label>
                   <label className="flex items-start gap-3 rounded-lg border border-border bg-background/40 p-3">
@@ -1526,11 +1526,11 @@ export default function EmailsPage() {
                   {selectedProviderReady
                     ? `CRMy will send you to ${setupCopy.label} consent. When you return, mailbox context and sender options will appear here.`
                     : isAdmin
-                      ? 'Prepare System Connections -> OAuth, then users can connect their own mailbox here.'
+                      ? 'Prepare Context Connectors -> OAuth, then users can connect their own mailbox here.'
                       : 'Your workspace admin needs to enable this provider before you can connect your mailbox.'}
                   {!selectedProviderReady && isAdmin && (
                     <Button variant="outline" size="sm" onClick={() => navigate('/settings/connections')} className="mt-3">
-                      Open System Connections
+                      Open Context Connectors
                     </Button>
                   )}
                 </div>

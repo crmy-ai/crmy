@@ -34,6 +34,7 @@ const Settings = lazy(() => import('@/pages/Settings'));
 const NotFound = lazy(() => import('@/pages/NotFound'));
 const InboxPage = lazy(() => import('@/pages/Inbox'));
 const ContextPage = lazy(() => import('@/pages/Context'));
+const KnowledgePage = lazy(() => import('@/pages/Knowledge'));
 const EmailsPage = lazy(() => import('@/pages/Emails'));
 const MemoryGraphPage = lazy(() => import('@/pages/MemoryGraphPage'));
 const AutomationsPage = lazy(() => import('@/pages/Automations'));
@@ -110,6 +111,7 @@ function AnimatedRoutes() {
             <Route path="/activities" element={<Activities />} />
             <Route path="/handoffs" element={<InboxPage />} />
             <Route path="/context" element={<ContextPage />} />
+            <Route path="/knowledge" element={<AdminGuard><KnowledgePage /></AdminGuard>} />
             <Route path="/automations" element={<AdminGuard><AutomationsPage /></AdminGuard>} />
             <Route path="/emails" element={<EmailsPage />} />
             <Route path="/contacts/:id/graph" element={<MemoryGraphPage />} />

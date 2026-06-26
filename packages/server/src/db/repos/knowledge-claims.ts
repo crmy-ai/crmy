@@ -37,6 +37,22 @@ export interface KnowledgeClaimRow {
   rank?: number;
 }
 
+export type KnowledgeType = 'company' | 'product' | 'competitor';
+
+const KNOWLEDGE_TYPES = new Set<KnowledgeType>(['company', 'product', 'competitor']);
+const COMPETITOR_CATEGORY_RE = /(^|[_\W])(competitive|competitor|battlecard|objection)([_\W]|$)/i;
+const COMPANY_CATEGORY_RE = /(^|[_\W])(company|positioning|about|brand|overview|mission|values)([_\W]|$)/i;
+const COMPETITOR_CATEGORY_SQL_RE = '(^|[_[:space:]-])(competitive|competitor|battlecard|objection)([_[:space:]-]|$)';
+const COMPANY_CATEGORY_SQL_RE = '(^|[_[:space:]-])(company|positioning|about|brand|overview|mission|values)([_[:space:]-]|$)';
+
+export function inferKnowledgeType(row: Pick<KnowledgeClaimRow, 'category' | 'competitors' | 'metadata'>): KnowledgeType {
+  const explicit = typeof row.metadata?.knowledge_type === 'string' ? row.metadata.knowledge_type : undefined;
+  if (explicit && KNOWLEDGE_TYPES.has(explicit as KnowledgeType)) return explicit as KnowledgeType;
+  if ((row.competitors ?? []).length > 0 || COMPETITOR_CATEGORY_RE.test(row.category)) return 'competitor';
+  if (COMPANY_CATEGORY_RE.test(row.category)) return 'company';
+  return 'product';
+}
+
 /** Count of usable (non-rejected) claims — drives `not_configured` vs configured. */
 export async function countKnowledgeClaims(db: DbPool, tenantId: string): Promise<number> {
   const result = await db.query<{ count: number }>(
@@ -95,6 +111,7 @@ export async function searchKnowledgeClaims(
 
 export interface UpsertKnowledgeClaimInput {
   external_key?: string;
+  knowledge_type?: KnowledgeType;
   category: string;
   title: string;
   body: string;
@@ -116,6 +133,7 @@ export interface UpsertKnowledgeClaimInput {
   status?: 'active' | 'stale' | 'deprecated' | 'conflicting' | 'rejected';
   effective_at?: string;
   valid_until?: string;
+  metadata?: Record<string, unknown>;
 }
 
 /** Fetch a single claim envelope by id (tenant-scoped). */
@@ -131,7 +149,21 @@ export async function getKnowledgeClaim(
   return result.rows[0] ?? null;
 }
 
+/** Fetch one claim by source dedupe key. */
+export async function getKnowledgeClaimByExternalKey(
+  db: DbPool,
+  tenantId: string,
+  externalKey: string,
+): Promise<KnowledgeClaimRow | null> {
+  const result = await db.query<KnowledgeClaimRow>(
+    `SELECT * FROM knowledge_claims WHERE tenant_id = $1 AND external_key = $2`,
+    [tenantId, externalKey],
+  );
+  return result.rows[0] ?? null;
+}
+
 export interface ListKnowledgeClaimsOptions {
+  knowledgeType?: KnowledgeType;
   status?: string;
   approvalStatus?: string;
   reviewOwnerId?: string;
@@ -155,6 +187,21 @@ export async function listKnowledgeClaims(
   if (options.status) { params.push(options.status); where.push(`status = $${params.length}`); }
   if (options.approvalStatus) { params.push(options.approvalStatus); where.push(`approval_status = $${params.length}`); }
   if (options.reviewOwnerId) { params.push(options.reviewOwnerId); where.push(`review_owner_id = $${params.length}`); }
+  if (options.knowledgeType) {
+    params.push(options.knowledgeType);
+    const idx = params.length;
+    where.push(`(
+      metadata->>'knowledge_type' = $${idx}
+      OR (
+        NOT (metadata ? 'knowledge_type')
+        AND CASE
+          WHEN cardinality(competitors) > 0 OR category ~* '${COMPETITOR_CATEGORY_SQL_RE}' THEN 'competitor'
+          WHEN category ~* '${COMPANY_CATEGORY_SQL_RE}' THEN 'company'
+          ELSE 'product'
+        END = $${idx}
+      )
+    )`);
+  }
   if (options.needsReview) {
     where.push(`(status IN ('stale', 'conflicting') OR approval_status IN ('pending', 'unapproved'))`);
   }
@@ -178,6 +225,7 @@ export interface ReviewKnowledgeClaimPatch {
   status?: 'active' | 'stale' | 'deprecated' | 'conflicting' | 'rejected';
   approval_status?: 'approved' | 'pending' | 'unapproved' | 'rejected';
   approved_for_external_use?: boolean;
+  visibility?: 'external' | 'internal';
   review_owner_id?: string | null;
   /** When true, set last_verified_at = now() (used on approve). */
   touch_verified?: boolean;
@@ -197,6 +245,7 @@ export async function reviewKnowledgeClaim(
   if (patch.status !== undefined) add('status', patch.status);
   if (patch.approval_status !== undefined) add('approval_status', patch.approval_status);
   if (patch.approved_for_external_use !== undefined) add('approved_for_external_use', patch.approved_for_external_use);
+  if (patch.visibility !== undefined) add('visibility', patch.visibility);
   if (patch.review_owner_id !== undefined) add('review_owner_id', patch.review_owner_id);
   if (patch.touch_verified) sets.push('last_verified_at = now()');
 
@@ -348,14 +397,14 @@ export async function upsertKnowledgeClaim(
        source_ref, source_url, source_label, source_version,
        grounded, confidence, source_priority,
        approval_status, approved_for_external_use, visibility, status,
-       effective_at, valid_until, created_by
+       effective_at, valid_until, metadata, created_by
      ) VALUES (
        $1, $2, $3, $4, $5, $6,
        $7, $8, $9, $10,
        $11, $12, $13, $14,
        $15, $16, COALESCE($17, 'secondary'),
        COALESCE($18, 'pending'), COALESCE($19, false), COALESCE($20, 'internal'), COALESCE($21, 'active'),
-       $22, $23, $24
+       $22, $23, $24, $25
      )
      ON CONFLICT (tenant_id, external_key) DO UPDATE SET
        category = EXCLUDED.category,
@@ -379,6 +428,7 @@ export async function upsertKnowledgeClaim(
        status = EXCLUDED.status,
        effective_at = EXCLUDED.effective_at,
        valid_until = EXCLUDED.valid_until,
+       metadata = knowledge_claims.metadata || EXCLUDED.metadata,
        updated_at = now()
      RETURNING *`,
     [
@@ -387,7 +437,12 @@ export async function upsertKnowledgeClaim(
       input.source_ref ?? null, input.source_url ?? null, input.source_label ?? null, input.source_version ?? null,
       input.grounded, input.confidence ?? null, input.source_priority ?? null,
       input.approval_status ?? null, input.approved_for_external_use ?? null, input.visibility ?? null, input.status ?? null,
-      input.effective_at ?? null, input.valid_until ?? null, actorId,
+      input.effective_at ?? null, input.valid_until ?? null,
+      {
+        ...(input.metadata ?? {}),
+        ...(input.knowledge_type ? { knowledge_type: input.knowledge_type } : {}),
+      },
+      actorId,
     ],
   );
   return result.rows[0];

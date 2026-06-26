@@ -333,7 +333,7 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
         actionDisabled: reprocessSource.isPending,
         onAction: ['Failed', 'No context found'].includes(status)
           ? () => reprocessSource.mutate(source.id, {
-              onSuccess: () => toast({ title: 'Raw Context reprocessed', description: 'Refresh the review queues to inspect any new Signals or Memory.' }),
+              onSuccess: () => toast({ title: 'Source reprocessed', description: 'Refresh the review queues to inspect any new Signals or Memory.' }),
               onError: (err) => toast({
                 title: 'Reprocess failed',
                 description: err instanceof Error ? err.message : 'Try again after checking the source.',
@@ -485,7 +485,7 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
         <div className="rounded-2xl border border-border bg-card p-4 md:p-5 shadow-sm lg:col-span-2">
           <div className="mb-4">
             <h2 className="font-display font-bold text-foreground">Processing Outcomes</h2>
-            <p className="mt-1 text-sm text-muted-foreground">What recent raw context is turning into.</p>
+            <p className="mt-1 text-sm text-muted-foreground">What recent source material is turning into.</p>
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <OutcomeCard label="Memory available" value={Number(memoryQ.data?.total ?? 0)} detail="Confirmed context agents can rely on." tone="border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" />
@@ -542,9 +542,9 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
           <div className="flex flex-shrink-0 items-center gap-2">
             {isLoading && <Clock className="h-4 w-4 animate-pulse text-muted-foreground" />}
             <Link
-              to="/context?tab=sources"
-              title="Source settings"
-              aria-label="Source settings"
+              to="/context?tab=connectors"
+              title="Context connectors"
+              aria-label="Context connectors"
               className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <Settings className="h-4 w-4" />
@@ -607,13 +607,13 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
           )}
         </div>
         <p className="mb-3 text-xs text-muted-foreground">
-          Showing recent and top matching sources. Search runs against Raw Context before CRMy trims the review list, so large workspaces stay searchable without loading the full archive.
+          Showing recent and top matching sources. Search runs across source material before CRMy trims the review list, so large workspaces stay searchable without loading the full archive.
         </p>
 
         {filteredRows.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-10 text-center">
             <FileText className="mb-3 h-9 w-9 text-muted-foreground/50" />
-            <p className="text-sm font-semibold text-foreground">{rows.length === 0 ? 'No raw context yet' : 'No sources match these filters'}</p>
+            <p className="text-sm font-semibold text-foreground">{rows.length === 0 ? 'No sources yet' : 'No sources match these filters'}</p>
             <p className="mt-1 max-w-md text-sm text-muted-foreground">
               {rows.length === 0
                 ? 'Add notes, transcripts, emails, connect a system of record, or let an agent send context through MCP to start building Signals and Memory.'
@@ -630,14 +630,14 @@ export function ObservationsDashboard({ onAddContext, headerContent }: { onAddCo
           <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-amber-700 dark:text-amber-300">
             <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" />
             <p className="text-xs">
-              System sync data requires Systems of Record access. Other raw context sources are still shown.
+              System sync data requires Systems of Record access. Other source rows are still shown.
             </p>
           </div>
         )}
         <div className="mt-3 flex items-start gap-2 rounded-xl border border-border bg-muted/40 p-3 text-muted-foreground">
           <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0" />
           <p className="text-xs">
-            Source rows use recent visible data. Direct MCP, REST, CLI, and workflow context writes are shown from their evidence or source metadata; when CRMy cannot prove raw context produced Signals or Memory, it shows “No context found” instead of guessing.
+            Source rows use recent visible data. Direct MCP, REST, CLI, and workflow context writes are shown from their evidence or source metadata; when CRMy cannot prove source material produced Signals or Memory, it shows “No context found” instead of guessing.
           </p>
         </div>
       </section>

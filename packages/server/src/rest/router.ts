@@ -11,6 +11,14 @@ import type { ActorContext, UUID } from '@crmy/shared';
 import { CrmyError, actionContextGet, actionContextHumanUnblock, knowledgeRetrieve, knowledgeClaimList, knowledgeClaimReview, knowledgeConflictsDetect, notFound, validationError, workflowAction } from '@crmy/shared';
 import { retrieveKnowledge } from '../services/knowledge-retrieval.js';
 import { listKnowledgeClaimsForReview, reviewKnowledgeClaim, detectKnowledgeConflicts } from '../services/knowledge-governance.js';
+import {
+  createKnowledgeSourceConnection,
+  deleteKnowledgeSourceConnection,
+  listKnowledgeSourceConnections,
+  syncKnowledgeSourceConnection,
+  testKnowledgeSourceConnection,
+  updateKnowledgeSourceConnection,
+} from '../services/knowledge-source-connections.js';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as accountRepo from '../db/repos/accounts.js';
 import * as oppRepo from '../db/repos/opportunities.js';
@@ -364,6 +372,75 @@ export function apiRouter(db: DbPool): Router {
       enforceToolScopes('knowledge_conflicts_detect', actor);
       const input = knowledgeConflictsDetect.parse(req.body ?? {});
       res.json(await detectKnowledgeConflicts(db, actor, input));
+    } catch (err) { handleError(res, err); }
+  });
+
+  const knowledgeSourceCreate = z.object({
+    name: z.string().min(1).max(200),
+    endpoint_url: z.string().min(1).max(2048),
+    transport: z.literal('streamable_http').optional().default('streamable_http'),
+    auth_type: z.enum(['none', 'bearer_token']).optional().default('bearer_token'),
+    token: z.string().optional(),
+    description: z.string().max(1000).nullable().optional(),
+  });
+  const knowledgeSourcePatch = z.object({
+    name: z.string().min(1).max(200).optional(),
+    endpoint_url: z.string().min(1).max(2048).optional(),
+    transport: z.literal('streamable_http').optional(),
+    auth_type: z.enum(['none', 'bearer_token']).optional(),
+    token: z.string().nullable().optional(),
+    description: z.string().max(1000).nullable().optional(),
+    status: z.enum(['configured', 'syncing', 'error', 'disabled']).optional(),
+  });
+
+  router.get('/knowledge/source-connections', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      res.json(await listKnowledgeSourceConnections(db, actor));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/knowledge/source-connections', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      const input = knowledgeSourceCreate.parse(req.body ?? {});
+      res.status(201).json(await createKnowledgeSourceConnection(db, actor, input));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.patch('/knowledge/source-connections/:id([0-9a-fA-F-]{36})', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      const input = knowledgeSourcePatch.parse(req.body ?? {});
+      res.json(await updateKnowledgeSourceConnection(db, actor, p(req, 'id'), input));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.delete('/knowledge/source-connections/:id([0-9a-fA-F-]{36})', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      res.json(await deleteKnowledgeSourceConnection(db, actor, p(req, 'id')));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/knowledge/source-connections/:id([0-9a-fA-F-]{36})/test', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      res.json(await testKnowledgeSourceConnection(db, actor, p(req, 'id')));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/knowledge/source-connections/:id([0-9a-fA-F-]{36})/sync', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      requireAdminActor(actor);
+      const input = z.object({ limit: z.number().int().min(1).max(100).optional() }).parse(req.body ?? {});
+      res.json(await syncKnowledgeSourceConnection(db, actor, p(req, 'id'), input));
     } catch (err) { handleError(res, err); }
   });
 
