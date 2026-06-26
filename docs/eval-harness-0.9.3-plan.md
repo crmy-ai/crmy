@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress for the 0.9.3 release. The local eval harness foundation and a production-path extraction quality eval have landed ([#29](https://github.com/crmy-ai/crmy/pull/29)); the remaining first-class suites below (retrieval quality, tool choice, Action Context, source attribution, agent trajectory, connector certification) are still planned.
+Landed for the 0.9.3 release with remaining follow-on work called out below. The local eval harness foundation, production-path extraction quality eval, seeded-context profile, agent-runtime smoke profile, source-attribution checks, and export artifacts are implemented. Connector certification, compare commands, REST/MCP eval management APIs, direct external uploads, and trace-to-eval feedback loops remain planned.
 
 This plan turns CRMy's existing regression and durability coverage into a first-class eval harness for customer-context agents. The goal is not to replace the current test suite. The goal is to make CRMy's product promise measurable across datasets, models, prompts, embeddings, connectors, agent runtimes, and customer-specific configuration.
 
@@ -24,13 +24,15 @@ Raw Context -> Signals -> Memory -> Briefing / Action Context -> Handoff / Write
 
 The current codebase already has strong internal checks for parsing, idempotency, scoped access, signal readiness, duplicate-source protection, Action Context propagation, and writeback receipts. Those tests are necessary, but they are mostly engineering guarantees.
 
-0.9.3 should add product-grade evals:
+0.9.3 adds the first product-grade eval foundation:
 
 - repeatable datasets that represent realistic customer-agent work;
 - metrics that match CRMy's trust boundaries, not only generic answer quality;
-- comparison runs across retrieval settings, models, prompts, and tenant configuration;
-- trace artifacts that can be inspected locally or exported to external eval and observability systems;
-- a path for production failures to become offline regression cases.
+- trace artifacts that can be inspected locally or exported to external eval and observability systems.
+
+Planned follow-on work adds comparison runs across retrieval settings, models,
+prompts, and tenant configuration, plus a path for production failures to become
+offline regression cases.
 
 ## Relationship To Existing Tests
 
@@ -603,7 +605,7 @@ Rules:
 
 ## CLI Surface
 
-Recommended commands:
+Implemented commands:
 
 ```bash
 crmy eval list
@@ -614,29 +616,25 @@ crmy eval run --profile seeded_context
 crmy eval run --profile agent_runtime
 crmy eval run --profile live_model --require-live
 crmy eval run --all --output ./eval-runs
-crmy eval compare <baseline_run_id_or_path> <candidate_run_id_or_path>
-crmy eval export <run_id_or_path> --format jsonl
-crmy eval export <run_id_or_path> --format openai-evals
-crmy eval export <run_id_or_path> --format ragas
-crmy eval export <run_id_or_path> --format langsmith
+crmy eval run --all --output ./eval-runs --export openai,ragas,langsmith
 ```
 
-Helpful flags:
+Helpful planned flags below are roadmap notes unless they are shown by `crmy eval run --help` in the current release.
 
 | Flag | Purpose |
 |---|---|
 | `--suite` | Select one suite. |
-| `--case` | Run one case or case pattern. |
+| `--case` | Planned: run one case or case pattern. |
 | `--profile` | Use `contract`, `live_model`, `seeded_context`, or `agent_runtime`. |
-| `--tenant` | Run against an existing tenant when appropriate. |
-| `--seed` | Load a deterministic fixture seed. |
-| `--model` | Override Workspace Agent or judge model. |
-| `--embedding-profile` | Enable or disable embedding-backed graders/retrieval. |
-| `--redact` | Redact exported artifacts. Defaults to true for external export. |
+| `--tenant` | Planned: run against an existing tenant when appropriate. |
+| `--seed` | Planned: load a deterministic fixture seed. |
+| `--model` | Planned: override Workspace Agent or judge model. |
+| `--embedding-profile` | Planned: enable or disable embedding-backed graders/retrieval. |
+| `--redact` | Planned: expose redaction as a CLI flag. Named external exports are redacted by default in 0.9.3; local JSON artifacts remain unredacted for debugging. |
 | `--output` | Write run artifacts to a directory. |
 | `--fail-under` | Fail process when aggregate score is below threshold. |
 | `--require-live` | Treat missing live-model eval configuration as a failure instead of a skip. |
-| `--changed-since` | Run cases touched since a Git ref for faster development loops. |
+| `--changed-since` | Planned: run cases touched since a Git ref for faster development loops. |
 | `--export` | Export to a named external format after running. |
 
 ## REST And MCP Surface
@@ -645,7 +643,7 @@ CLI should be first, but REST and MCP should expose the same concept where usefu
 
 ### REST
 
-Candidate endpoints:
+Candidate future endpoints:
 
 - `GET /api/v1/evals/suites`
 - `GET /api/v1/evals/suites/:name`
@@ -658,7 +656,7 @@ REST should support async runs because model-backed and live-connector suites ca
 
 ### MCP
 
-Candidate tools:
+Candidate future tools:
 
 - `eval_suite_list`
 - `eval_suite_get`
@@ -976,17 +974,20 @@ Exit criteria:
 
 ## Documentation Work
 
-0.9.3 should add:
+0.9.3 documentation now includes:
 
 - Eval quickstart in `docs/guide.md`.
 - Eval CLI reference in the CLI docs section.
 - Eval suite definitions in a dedicated docs page.
-- How to create a customer-redacted eval case.
-- How to run model-backed evals.
-- How to run connector certification evals.
-- How to export to OpenAI Evals, Ragas, LangSmith, and JSONL.
-- How to read eval traces.
 - How evals differ from tests.
+
+Still planned:
+
+- How to create a customer-redacted eval case.
+- How to run connector certification evals.
+- How to compare eval runs across retrieval settings, models, prompts, and
+  tenant configuration.
+- How to promote production failures into reviewed eval cases.
 
 ## Open Questions
 
@@ -998,10 +999,12 @@ Exit criteria:
 
 ## Acceptance Target
 
-CRMy 0.9.3 is successful when a contributor or customer can run:
+CRMy 0.9.3 is successful when a contributor or customer can run the implemented local profiles:
 
 ```bash
-crmy eval run --all --profile local
+crmy eval run --profile contract
+crmy eval run --profile seeded_context
+crmy eval run --profile agent_runtime
 ```
 
 and get a readable report answering:

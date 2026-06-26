@@ -4727,10 +4727,21 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   const dockerfile = await readFile(new URL('../../../docker/Dockerfile', import.meta.url), 'utf8');
   const compose = await readFile(new URL('../../../docker/docker-compose.yml', import.meta.url), 'utf8');
   const rootPackage = await readFile(new URL('../../../package.json', import.meta.url), 'utf8');
+  const sharedPackage = await readFile(new URL('../../shared/package.json', import.meta.url), 'utf8');
+  const serverPackage = await readFile(new URL('../package.json', import.meta.url), 'utf8');
+  const cliPackage = await readFile(new URL('../../cli/package.json', import.meta.url), 'utf8');
+  const webPackage = await readFile(new URL('../../web/package.json', import.meta.url), 'utf8');
+  const openclawPackage = await readFile(new URL('../../openclaw-plugin/package.json', import.meta.url), 'utf8');
+  const openapiArtifact = await readFile(new URL('../../../docs/openapi.json', import.meta.url), 'utf8');
+  const releaseNotes = await readFile(new URL('../../../RELEASE_NOTES.md', import.meta.url), 'utf8');
+  const changelog = await readFile(new URL('../../../CHANGELOG.md', import.meta.url), 'utf8');
   const publishWorkflow = await readFile(new URL('../../../.github/workflows/npm-publish-github-packages.yml', import.meta.url), 'utf8');
   const envExample = await readFile(new URL('../../../.env.example', import.meta.url), 'utf8');
   const readme = await readFile(new URL('../../../README.md', import.meta.url), 'utf8');
   const guide = await readFile(new URL('../../../docs/guide.md', import.meta.url), 'utf8');
+  const mcpDocs = await readFile(new URL('../../../docs/mcp-tools.md', import.meta.url), 'utf8');
+  const productKnowledgeDocs = await readFile(new URL('../../../docs/governed-product-knowledge-retrieval.md', import.meta.url), 'utf8');
+  const roadmap = await readFile(new URL('../../../docs/roadmap-0.8-1.0.md', import.meta.url), 'utf8');
   const cliServerSource = await readFile(new URL('../../cli/src/commands/server.ts', import.meta.url), 'utf8');
   const seedScript = await readFile(new URL('../scripts/seed.ts', import.meta.url), 'utf8');
   const tokenScript = await readFile(new URL('../scripts/gen-token.mts', import.meta.url), 'utf8');
@@ -4746,6 +4757,28 @@ test('production release gates cover packaging, secrets, HTTP hardening, and tim
   const snowflakeSource = await readFile(new URL('../src/services/systems-of-record/snowflake.ts', import.meta.url), 'utf8');
   const workflowSource = await readFile(new URL('../src/workflows/engine.ts', import.meta.url), 'utf8');
   const schemasSource = await readFile(new URL('../../shared/src/schemas.ts', import.meta.url), 'utf8');
+
+  const releaseVersion = JSON.parse(rootPackage).version;
+  assert.equal(releaseVersion, '0.9.3');
+  for (const pkg of [sharedPackage, serverPackage, cliPackage, webPackage, openclawPackage]) {
+    assert.equal(JSON.parse(pkg).version, releaseVersion);
+  }
+  assert.equal(JSON.parse(openapiArtifact).info.version, releaseVersion);
+  assert.match(readme, new RegExp(`release-v${releaseVersion}`));
+  assert.match(readme, new RegExp(`Current version: \`${releaseVersion}\``));
+  assert.match(releaseNotes, new RegExp(`# CRMy v${releaseVersion}`));
+  assert.match(changelog, new RegExp(`## \\[${releaseVersion}\\]`));
+  assert.match(readme, /Retrieve approved, source-grounded product, pricing, implementation, security, and competitive claims/);
+  assert.doesNotMatch(readme, /source-backed retrieval ships|Product Knowledge.*Phase 1 MCP contract/);
+  assert.match(releaseNotes, /governed Product Knowledge retrieval, receipts, briefing\/Action Context\/email grounding, CLI, and admin review controls/);
+  assert.doesNotMatch(releaseNotes, /Product Knowledge is Phase 1|source-backed retrieval is not yet configured/);
+  assert.match(guide, /Governed Product Knowledge retrieval is also available/);
+  assert.doesNotMatch(guide, /governed product knowledge retrieval remain roadmap/);
+  assert.match(mcpDocs, /### knowledge_claim_review/);
+  assert.match(mcpDocs, /### knowledge_conflicts_detect/);
+  assert.match(productKnowledgeDocs, /Phases 1-7 of the governed claim\s+path have landed in 0\.9\.3/);
+  assert.doesNotMatch(productKnowledgeDocs, /first-class `POST \/api\/v1\/knowledge\/retrieve` endpoint remains planned/);
+  assert.match(roadmap, /Phases 1-7 of the governed claim path landed in 0\.9\.3/);
 
   assert.match(dockerfile, /COPY packages\/web\/package\*\.json packages\/web\//);
   assert.match(dockerfile, /npm run build --workspace=packages\/web[\s\S]*npm run build --workspace=packages\/server/);
@@ -6318,6 +6351,12 @@ test('transcript source drops are durable, reviewable, and integrated with activ
   const service = await readFile(new URL('../src/services/context-source-drops.ts', import.meta.url), 'utf8');
   assert.match(service, /CRMY_LOCAL_SOURCE_ROOTS/);
   assert.match(service, /CRMY_ENABLE_LOCAL_CONTEXT_DROPS/);
+  assert.match(service, /CRMY_CONTEXT_DROP_FETCH_TIMEOUT_MS/);
+  assert.match(service, /CRMY_ALLOW_CUSTOM_CONTEXT_DROP_ENDPOINTS/);
+  assert.match(service, /CRMY_ALLOW_PRIVATE_CONTEXT_DROP_ENDPOINTS/);
+  assert.match(service, /RetryableContextSourceError/);
+  assert.match(service, /readResponseBufferWithLimit/);
+  assert.match(service, /findSourceObjectByActualHash/);
   assert.match(service, /context_source\.resolve/);
   assert.match(service, /source_document_hash/);
   assert.match(service, /parent_content_hash/);
@@ -6356,4 +6395,12 @@ test('transcript source drops are durable, reviewable, and integrated with activ
   const dataQuality = await readFile(new URL('../src/services/data-quality.ts', import.meta.url), 'utf8');
   assert.match(dataQuality, /stale_context_source_sync_jobs/);
   assert.match(dataQuality, /failed_context_source_objects/);
+
+  const repo = await readFile(new URL('../src/db/repos/context-source-drops.ts', import.meta.url), 'utf8');
+  assert.match(repo, /findSourceObjectByActualHash/);
+  assert.match(repo, /ON CONFLICT DO NOTHING/);
+
+  const jobDedupeMigration = await readFile(new URL('../migrations/087_context_source_drop_job_dedupe.sql', import.meta.url), 'utf8');
+  assert.match(jobDedupeMigration, /context_source_sync_jobs_active_unique_idx/);
+  assert.match(jobDedupeMigration, /context_source_processing_jobs_active_unique_idx/);
 });

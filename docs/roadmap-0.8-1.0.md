@@ -678,19 +678,18 @@ Recommended next direction:
   rows, and LangSmith-compatible traces or datasets where configured.
 - Support redacted customer-derived eval cases so production failures can become
   offline regression tests without leaking unnecessary customer data.
-- Build a shared `KnowledgeRetrievalService` and expose it through MCP, REST,
-  CLI, Workspace Agent, briefing, Action Context, and UI surfaces where
-  configured.
+- Keep extending the shared `KnowledgeRetrievalService` now exposed through MCP,
+  REST, CLI, Workspace Agent, briefing, Action Context, and UI surfaces.
 - Keep external systems authoritative for product docs, battlecards,
   changelogs, pricing, roadmap, security, and compliance material.
-- Store product-knowledge source metadata, optional source-derived claim
-  envelopes, freshness, approval, visibility, citations, and retrieval
-  receipts separately from customer Memory.
+- Store product-knowledge claim envelopes, freshness, approval, visibility,
+  citations, and retrieval receipts separately from customer Memory.
 - Prevent stale, unapproved, internal-only, deprecated, unsupported, or
   conflicting product claims from reaching customer-facing draft packets.
 
-Acceptance target: a contributor or customer can run `crmy eval run --all
---profile local` and receive a report showing whether CRMy retrieved the right
+Acceptance target: a contributor or customer can run `crmy eval run --profile
+contract`, `crmy eval run --profile seeded_context`, and `crmy eval run
+--profile agent_runtime` and receive reports showing whether CRMy retrieved the right
 Memory and Signals, chose safe tool paths, made correct Action Context
 decisions, preserved source attribution, avoided unsupported customer-facing
 claims, and left enough proof to audit the workflow. When governed product
@@ -701,12 +700,15 @@ it does today.
 
 ## 0.9.3: Optional Governed Product Knowledge Retrieval
 
-Status: **Planned for 0.9.3.** See
+Status: **Phases 1-7 of the governed claim path landed in 0.9.3; source-adapter automation remains roadmap.** See
 [Governed Product Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
 
 After 0.9 hardens customer Memory, Action Context, source reliability, proof,
-and surface consistency, 0.9.3 should add an optional governed retrieval layer
-for product, service, solution, and competitive knowledge.
+and surface consistency, 0.9.3 adds optional governed retrieval for product,
+service, solution, and competitive knowledge. The implementation includes claim
+envelopes, policy filtering, retrieval receipts, MCP, REST, CLI, briefing/Action
+Context enrichment, email draft grounding, freshness, conflicts, and admin
+governance. It returns `not_configured` until governed claims exist.
 
 This should not become a required dependency for core CRMy behavior. Customer
 briefings, Action Context, Workspace Agent flows, email drafts, and writeback
@@ -718,15 +720,15 @@ citations, warnings, and retrieval proof.
 
 Recommended direction:
 
-- Build a shared backend `KnowledgeRetrievalService` rather than a local-agent
-  or MCP-only dependency.
-- Expose that service through MCP first for external agents, with REST, CLI,
-  Workspace Agent, briefing, Action Context, and UI surfaces calling the same
-  retrieval contract.
+- Add source-adapter automation so product docs, battlecards, changelogs,
+  security/compliance material, and support/KB systems can produce governed
+  claim envelopes without manual upsert.
+- Add embedding-backed retrieval and richer product-knowledge eval suites where
+  they improve precision beyond the current FTS/ranking foundation.
 - Keep external systems authoritative for product docs, battlecards, changelogs,
   pricing, roadmap, security, and compliance material.
-- Store source metadata, optional source-derived claim envelopes, freshness,
-  approval, visibility, citations, and retrieval receipts in CRMy.
+- Store source metadata, source-derived claim envelopes, freshness, approval,
+  visibility, citations, and retrieval receipts in CRMy.
 - Add product context to briefings and Action Context only when explicitly
   requested or configured.
 - Treat edge-provided product knowledge as allowed but not CRMy-verified unless

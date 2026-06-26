@@ -1,77 +1,65 @@
-# CRMy v0.9.2
+# CRMy v0.9.3
 
-CRMy v0.9.2 is the transcript ingestion, scale, and production hardening release. It expands CRMy beyond mailbox/calendar context by adding admin-managed transcript and raw-note drops, then tightens the runtime path for higher-volume, hosted, and agent-first deployments.
+CRMy v0.9.3 is the agent-quality and grounded-context release. It makes the core promise more measurable, tightens the first-run proof path, narrows agent tool catalogs by job, and adds a source-grounding gate so evidence-backed Signals cannot become durable Memory on model confidence alone.
 
-This release keeps the core promise intact: messy customer context enters once, becomes traceable Raw Context, resolves into reviewable Signals, promotes into durable Memory only when ready, and returns compact Action Context before agents act.
+This release keeps the product contract simple: messy customer context enters CRMy once, becomes traceable Raw Context, resolves into reviewable Signals, promotes into Memory only when ready, and returns compact Briefings and Action Context before an agent acts.
 
 ## Release Focus
 
-v0.9.2 focuses on source breadth, durability, and release readiness:
+v0.9.3 focuses on proof, quality gates, and safer agent operation:
 
-- add transcript and raw-note drop ingestion through S3-compatible buckets and local self-hosted folders;
-- match transcript files to meetings, accounts, contacts, opportunities, and use cases through the same Subject Graph resolver;
-- keep unmatched or ambiguous files reviewable instead of silently dropping them;
-- harden high-volume list pagination, webhook delivery creation, migration startup, database TLS, and worker coordination;
-- reduce token waste with budget profiles, ranked retrieval, and evidence-on-demand behavior;
-- update CLI, MCP, REST/OpenAPI, UI, docs, and generated web assets for the new context-source workflow.
+- add a local eval harness with contract, seeded-context, agent-runtime, and live-model extraction profiles;
+- make the connector-free `quickstart` path demonstrate resolve -> briefing -> Action Context -> lineage in one pass;
+- add per-session MCP toolsets so agents receive the smallest useful tool catalog for the job;
+- require grounded evidence before high-confidence Signals can auto-promote to Memory;
+- add governed Product Knowledge retrieval, receipts, briefing/Action Context/email grounding, CLI, and admin review controls;
+- harden transcript-drop processing around retries, dedupe, provider timeouts, and hosted endpoint safety.
 
 ## Highlights
 
-### Transcript & Notes Drops
+### Eval Harness And Quality Gates
 
-- Added admin-managed Context Source Drops for S3-compatible buckets and local folders.
-- Supported transcript/raw-note formats include `.txt`, `.md`, `.vtt`, `.srt`, `.json`, `.docx`, and `.pdf`.
-- Dropped files are tracked as source objects with content hash, size, modified time, match state, processing state, linked records, and review status.
-- Long transcripts are chunked while preserving parent source hash so one long transcript does not inflate independent corroboration.
-- Oversized, unmatched, ambiguous, or failed files stay visible in review/Handoff flows.
+- Added `crmy eval list`, `crmy eval describe`, and `crmy eval run`.
+- Implemented local profiles for contract corpora, seeded retrieval/Action Context/source attribution, agent-runtime smoke coverage, and live-model extraction quality.
+- Eval exports can be written to local artifacts with external-tool formats for OpenAI Evals, Ragas, and LangSmith.
+- Connector certification, REST/MCP eval management APIs, comparison commands, explicit redaction flags, and direct external uploads remain roadmap items.
 
-### Context Engine Integration
+### Safer Agent Tooling
 
-- Transcript drops feed the same path as customer activity notes:
+- Added per-session MCP toolsets selected through CLI flags, HTTP headers, query parameters, or actor defaults.
+- Toolsets narrow the registered catalog and never widen the actor's scopes.
+- Core orientation tools remain available so agents can resolve customers, retrieve Briefings, get Action Context, and discover next tools.
 
-  `Source Object -> Meeting Artifact / Customer Activity -> Raw Context -> Signals -> Memory -> Lineage / Handoff`
+### Grounded Memory Promotion
 
-- Matching now supports sidecar metadata, provider calendar identifiers, meeting time plus attendee overlap, contact/account domain matching, and Subject Graph resolution.
-- Transcript and meeting context preserve authorship metadata so customer-authored, CRMy-authored, mixed, and unknown sources can be treated differently.
-- Context lineage and activity surfaces expose source-object proof so agents and humans can trace where customer memory came from.
+- Auto-promotion now requires evidence that is grounded in the source text.
+- The source-grounding gate is enabled by default and can be disabled only with `CRMY_REQUIRE_GROUNDED_AUTOPROMOTE=0`.
+- This keeps weak or hallucinated extraction output from silently becoming durable Memory.
 
-### Production Hardening
+### First-Run Proof
 
-- Added shared unauthenticated login/register rate limiting backed by PostgreSQL and hashed identities.
-- Added production database TLS guardrails requiring verified server certificates unless an explicit escape hatch is set.
-- Added production migration startup modes: local installs auto-migrate, while production defaults to validation and expects a one-shot `crmy migrate run`.
-- Split runtime process roles into `all`, `web`, and `worker` so hosted deployments can separate HTTP/MCP/UI from background work.
-- Fixed the background worker advisory lock to acquire and release on the same checked-out database client.
-- Added durable outbound webhook event backlog processing so persisted events can still create deliveries if an in-process subscriber misses them.
-- Added stable timestamp-plus-id cursor pagination and estimated totals across high-volume list surfaces.
+- `crmy quickstart` seeds realistic demo data and runs the connector-free golden path.
+- The proof path resolves Northstar Labs, returns a governed briefing, checks Action Context, and shows lineage.
+- `crmy doctor` and `crmy agent-smoke` remain the quick local health and agent-path checks.
 
-### Agent and CLI Surfaces
+### Governed Product Knowledge Retrieval
 
-- Added MCP tools for context source connection and object list/create/sync/resolve/reprocess/ignore workflows.
-- Added CLI commands for transcript source setup, sync, review, resolution, reprocessing, and ignore flows.
-- Added efficient REST mappings for transcript source CLI commands.
-- Updated OpenAPI and docs for transcript source drops, migration mode, process roles, token usage controls, and hosted/runtime guardrails.
-
-### Security and Dependency Updates
-
-- Upgraded production mail/form dependencies to clear high-severity audit findings:
-  - `nodemailer` to `9.0.1`
-  - `form-data` to `4.0.6`
-  - transitive `hono` to `4.12.27`
-- Upgraded `tsx` to `4.22.4`.
-- `npm audit --audit-level=moderate --omit=dev` reports zero vulnerabilities.
-- A remaining low-severity `esbuild` advisory exists only through `tsup` dev/build tooling and does not affect published runtime dependencies.
+- Added the `knowledge_retrieve` MCP tool, `POST /api/v1/knowledge/retrieve`, `crmy knowledge retrieve`, and the `product_knowledge` toolset.
+- Added governed claim envelopes and retrieval receipts via `knowledge_claims` / `knowledge_retrieval_receipts`.
+- Customer-facing retrieval only returns approved, source-grounded, externally visible, fresh claims; internal retrieval labels risky claims with warnings.
+- Briefings, Action Context, and email draft previews can include approved product claims as a sibling to customer Memory, with used-claim IDs, citations, exclusions, and retrieval receipts.
+- Added admin governance for product claims: review queue, approval/rejection/deprecation/staleness/reactivation, freshness review, conflict detection, and source-priority resolution.
 
 ## Published Packages
 
 Publish candidates:
 
-- `@crmy/core@0.9.2`
-- `@crmy/shared@0.9.2`
-- `@crmy/server@0.9.2`
-- `@crmy/web@0.9.2`
-- `@crmy/cli@0.9.2`
-- `@crmy/openclaw-plugin@0.9.2`
+- `@crmy/core@0.9.3`
+- `@crmy/shared@0.9.3`
+- `@crmy/server@0.9.3`
+- `@crmy/web@0.9.3`
+- `@crmy/cli@0.9.3`
+- `@crmy/openclaw-plugin@0.9.3`
 
 ## Quick Validation
 
@@ -80,18 +68,19 @@ For a fresh local demo:
 ```bash
 npx -y @crmy/cli init --demo
 npx -y @crmy/cli doctor
+npx -y @crmy/cli quickstart
+npx -y @crmy/cli eval run --profile contract
+npx -y @crmy/cli eval run --profile seeded_context
 npx -y @crmy/cli agent-smoke
-npx -y @crmy/cli activities transcript-sources
-npx -y @crmy/cli briefing "account:Northstar Labs"
-npx -y @crmy/cli action-context "account:Northstar Labs" --action customer_outreach
 ```
 
 ## Validation Run
 
 Before publish:
 
-- `npm test` — 159/159 passing
-- `npm run test:cli-coverage` — 22/22 passing
+- `npm test`
+- `npm run test:cli-coverage`
+- `node --test packages/server/test/eval-harness.test.mjs packages/server/test/extraction-grounding.test.mjs packages/server/test/knowledge-retrieval.test.mjs packages/server/test/knowledge-governance.test.mjs packages/server/test/toolsets.test.mjs`
 - `npm run lint`
 - `npm run build`
 - `npm run generate:openapi --workspace=packages/server`
@@ -101,7 +90,8 @@ Before publish:
 ## Notes and Caveats
 
 - Live Gmail, Outlook, Google Calendar, Microsoft Calendar, HubSpot, Salesforce, and warehouse connector certification should still be run in the target tenant/provider environment before production claims.
-- Global REST/MCP/agent rate limiting remains a post-0.9 item; current actor and auth throttles are materially stronger but not a full hosted SaaS quota system.
+- Product Knowledge is optional and non-blocking. If no governed claims exist, retrieval returns `not_configured` and customer Memory, briefings, Action Context, drafting, and writeback continue normally.
+- Source-adapter automation for product docs and embedding-backed retrieval remain roadmap; 0.9.3 supports governed claim envelopes, lexical retrieval, receipts, and admin review.
 - Hosted multi-instance deployments should use separate `web`, `worker`, and migration jobs with sticky MCP routing, as documented in the runtime plan.
 - Local folder transcript drops are local/self-hosted only unless explicitly enabled in production.
 

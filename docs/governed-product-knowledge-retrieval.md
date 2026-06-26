@@ -3,7 +3,9 @@
 ## Status
 
 Originally drafted before 0.9.1. **Revised for 0.9.3** to build on infrastructure
-that has since landed rather than duplicate it. Still an **optional** capability
+that has since landed rather than duplicate it. Phases 1-7 of the governed claim
+path have landed in 0.9.3; source-adapter automation and embedding-backed
+retrieval remain follow-on work. Still an **optional** capability
 alongside the [CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md); it does
 not become a required dependency for customer Memory, briefings, Action Context,
 or writeback.
@@ -20,7 +22,7 @@ that now exists for customer context and should be **reused**, not rebuilt:
 
 | Landed since draft | What it gives product knowledge for free |
 |---|---|
-| **Context Sources spine** (0.9.2): `context_source_connections` / `context_source_objects`, S3 / local-folder / HTTP providers, content hashing, processing receipts, match/processing/review states, `context_source_connection_*` and `context_source_object_*` tools | The "knowledge source registry + retriever adapters + sync + freshness" the old plan wanted to invent. Product docs/battlecards/changelogs ingest through the **same spine**, just routed to a different namespace. |
+| **Context Sources spine** (0.9.2): `context_source_connections` / `context_source_objects`, S3 / local-folder / HTTP providers, content hashing, processing receipts, match/processing/review states, `context_source_connection_*` and `context_source_object_*` tools | The "knowledge source registry + retriever adapters + sync + freshness" the old plan wanted to invent. Source-adapter automation for product docs should reuse this spine later; 0.9.3 stores governed product truth as claim envelopes. |
 | **Signals → Memory lifecycle** with readiness, confidence decay, duplicate-source/independent-source corroboration, contradiction detection | A proven lifecycle to mirror for **claim envelopes** (draft → reviewed → approved; conflict detection between competing claims). |
 | **Source-grounding gate** (0.9.3, #31): a claim only auto-promotes when its evidence is present in the source | The exact governance primitive product claims need — a claim is "approved for external use" only when **grounded in its cited source**. Reuse the helper. |
 | **Versioned Action Context packet** (0.9.x): `operating_mode`, `checks{}`, `proof{ expected_receipts }` | A first-class slot for a `product_knowledge` check and `used_knowledge_claim_ids` / `knowledge_retrieval_receipt_ids` proof — no new contract needed. |
@@ -78,23 +80,25 @@ an agent know which product claims are safe to use for *this* customer action?"*
 - Do not merge product truth into customer Memory; keep a separate namespace.
 - Do not let customer-facing drafts use stale, unapproved, conflicting, or internal-only claims.
 - Do not require pgvector/embeddings for v1.
-- **Do not fork the source-ingestion model** — extend Context Sources with a knowledge source class.
+- **Do not fork the source-ingestion model** — source-adapter automation should reuse Context Sources; governed retrieval should operate over claim envelopes.
 
 ## Architecture: One Spine, Two Namespaces
 
-The central design decision: **product knowledge enters through the same Context
-Sources pipeline as customer context, but lands in a product-knowledge namespace
-of claim envelopes instead of customer Memory.**
+The central design decision: **product knowledge stays in a product-knowledge
+namespace of claim envelopes instead of customer Memory.** Future source
+adapters should reuse the Context Sources spine, but 0.9.3 does not require a
+new source class to retrieve governed claims.
 
 ```text
 Customer context:   Source object -> Activity/Artifact -> Signals -> Memory
-Product knowledge:  Source object -> Claim Signal      -> Claim envelope (approved)
-                    \____________ same connections/objects spine ____________/
+Product knowledge:  Source text/tool -> Claim envelope -> Governed retrieval
+                    Future adapters should reuse the source-object spine.
 ```
 
-- A `context_source_connections` row gains a **source class** of `product_knowledge`
-  (alongside today's customer transcript/note drops). Same S3/local/HTTP providers,
-  same sync, same content hashing, same processing receipts and review states.
+- Admins and trusted tools can author claim envelopes directly through
+  `knowledge_claim_upsert`; future source adapters should produce the same
+  envelopes from product docs, battlecards, changelogs, and support/security
+  materials.
 - Processing a product source object yields **claim signals** (extracted, draft,
   reviewable) rather than customer Signals. A claim becomes an **approved claim**
   only when it is reviewed/approved by policy **and grounded in its cited source**
@@ -110,10 +114,10 @@ separate namespaces.
 
 | Component | Status | Responsibility |
 |---|---|---|
-| Context Sources connection/object spine | **exists** | Source registration, providers, sync, hashing, processing receipts, review state. Add a `product_knowledge` source class. |
-| `KnowledgeRetrievalService` | **new** | Retrieval, policy filtering, ranking, warning generation, proof creation. The one internal boundary. |
-| Claim namespace (`knowledge_claims`) | **new** | Source-derived claim envelopes with scope, evidence, freshness, approval, visibility, conflict, status. |
-| Retrieval receipt store (`knowledge_retrieval_receipts`) | **new** (mirrors Action Context receipts/Lineage) | Durable proof of query, filters, returned/excluded claims, warnings, citations, source versions, actor. |
+| Context Sources connection/object spine | **exists** | Source registration, providers, sync, hashing, processing receipts, review state. Reuse for future source adapters; not required for 0.9.3 claim-envelope retrieval. |
+| `KnowledgeRetrievalService` | **landed** | Retrieval, policy filtering, ranking, warning generation, proof creation. The one internal boundary. |
+| Claim namespace (`knowledge_claims`) | **landed** | Source-derived claim envelopes with scope, evidence, freshness, approval, visibility, conflict, status. |
+| Retrieval receipt store (`knowledge_retrieval_receipts`) | **landed** (mirrors Action Context receipts/Lineage) | Durable proof of query, filters, returned/excluded claims, warnings, citations, source versions, actor. |
 | Grounding check | **reuse** (`extraction-grounding`) | A claim is external-safe only if grounded in its cited source text. |
 | Action Context `product_knowledge` check + proof | **reuse slot** | Adds to existing `checks{}` / `proof{}`; no new contract. |
 | Token-budget packer + `evidence_mode` | **reuse** | Packs product context within budget; reports dropped/excluded claims. |
@@ -312,12 +316,12 @@ scopes derived from sources**, not a hand-maintained catalog.
 
 | Original question | Decision |
 |---|---|
-| Off by default per tenant until configured? | **Yes.** Product context is `not_configured` until a `product_knowledge` source exists. |
-| First source systems? | **HTTP/document + S3/local drops first** (already supported providers); changelog/battlecard URLs next. Warehouse/support-KB adapters later, by demand. |
+| Off by default per tenant until configured? | **Yes.** Product context is `not_configured` until governed product claims exist. |
+| First source systems? | **Direct governed claims first** through `knowledge_claim_upsert`; source adapters for docs, changelogs, battlecards, warehouses, and support KBs remain future work. |
 | Can edge-provided knowledge satisfy customer-facing policy? | **No.** Recorded as not-verified proof only; never satisfies the approved+grounded customer-facing gate. |
 | Should CRMy write approval state back to source systems? | **No** in v1 — product-knowledge sources are retrieval-only. |
 | Categories requiring mandatory expiry? | Competitive, pricing/packaging, roadmap (short windows above); others get defaults with override. |
-| Minimum UI for source setup? | Reuse **Context → Sources**; no new primary nav (consistent with `what-belongs-where.md`). |
+| Minimum UI for source setup? | 0.9.3 uses **Settings → Product Knowledge** for admin governance. Future source-adapter setup should reuse the existing source/setup patterns rather than adding primary nav. |
 
 Still genuinely open: claim-approval ownership per category (competitive vs
 pricing vs security/compliance); anonymization/approval workflow for
@@ -326,40 +330,40 @@ review queue separate from Handoffs.
 
 ## Implementation Phases (revised to reuse what exists)
 
-### Phase 1 — Contracts + no-op service
+### Phase 1 — Contracts + no-op service (landed)
 Shared schemas (`knowledge_retrieve` I/O, claim envelope, receipt, `crmy.eval_case`
-product cases). `KnowledgeRetrievalService` returns `not_configured`. Regression
-tests prove core briefing/Action Context unchanged. Feature-flagged.
+product cases). `KnowledgeRetrievalService` returns `not_configured` when no
+claims exist. Regression tests prove core briefing/Action Context unchanged.
 
-### Phase 2 — Source class + retrieval over sources
-Add `product_knowledge` source class to Context Sources (reuse connection/object
-spine, providers, hashing, receipts). Implement deterministic policy filtering,
-lexical retrieval, grounding gate on claims, and `knowledge_retrieval_receipts`.
-Ship `knowledge_retrieve` (MCP) + `POST /api/v1/knowledge/retrieve`.
+### Phase 2 — Claim envelopes + governed retrieval (landed)
+Add `knowledge_claims` and `knowledge_retrieval_receipts` (migration 086).
+Implement deterministic policy filtering, lexical retrieval, grounding gate on
+claims, ranking, durable retrieval receipts, `knowledge_retrieve` over MCP, and
+`POST /api/v1/knowledge/retrieve` over REST.
 
-### Phase 3 — Briefing + Action Context enrichment
+### Phase 3 — Briefing + Action Context enrichment (landed)
 Optional `include_product_context`; product-context briefing section; Action
 Context `product_knowledge` check + proof using existing slots. Unavailable
 product context never fails the core response.
 
-### Phase 4 — Workspace Agent + draft integration
+### Phase 4 — Workspace Agent + draft integration (landed)
 Workspace Agent + `email_draft_preview` request product context via the service;
 drafts include only approved, grounded, external-safe claims with citations,
 used-claim IDs, and receipt IDs in generation metadata.
 
-### Phase 5 — UI + CLI
+### Phase 5 — UI + CLI (landed)
 `crmy knowledge retrieve`; product context in BriefingPanel / EmailDraftDrawer;
-source setup under Context → Sources; show warnings, exclusions, approval,
+Product Knowledge governance under Settings; show warnings, exclusions, approval,
 citations, and the `not_configured` state.
 
-### Phase 6 — Claim cache/index + adapters
-Optional FTS + embeddings on claim envelopes; freshness/deprecation handling;
-additional source adapters only where users need them.
+### Phase 6 — Freshness + index foundation (landed; adapters planned)
+FTS over claim envelopes and freshness/deprecation handling have landed.
+Embedding-backed retrieval and automated source adapters remain planned.
 
-### Phase 7 — Governance
+### Phase 7 — Governance (landed)
 Reuse stale-review assignments for claim freshness; reuse contradiction patterns
 for claim-conflict detection; source-priority conflict resolution; approval flows
-only if CRMy becomes responsible for claim approval.
+for governed product truth.
 
 ## Tests Required
 

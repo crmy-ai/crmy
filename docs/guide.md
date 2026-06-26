@@ -361,6 +361,10 @@ Created by `crmy init`. Stored in your project root. Auto-added to `.gitignore`.
 | `CRMY_MCP_SESSION_TTL_SECONDS` | No | `1800` | Durable MCP session expiry window |
 | `CRMY_MCP_STALE_INSTANCE_SECONDS` | No | `120` | Expire sessions owned by app instances that stop heartbeating |
 | `SOURCE_SYNC_FETCH_TIMEOUT_MS` | No | `30000` | Mailbox/calendar provider HTTP timeout |
+| `CRMY_CONTEXT_DROP_FETCH_TIMEOUT_MS` | No | `SOURCE_SYNC_FETCH_TIMEOUT_MS` / `30000` | Transcript-drop S3-compatible fetch timeout |
+| `CRMY_CONTEXT_DROP_MAX_S3_LIST_PAGES` | No | `10` | Safety cap for one S3-compatible transcript-drop sync. Narrow prefixes or raise deliberately for very large buckets. |
+| `CRMY_ALLOW_CUSTOM_CONTEXT_DROP_ENDPOINTS` | No | — | Production escape hatch for custom S3-compatible endpoints. Leave unset for hosted SaaS unless egress is explicitly trusted. |
+| `CRMY_ALLOW_PRIVATE_CONTEXT_DROP_ENDPOINTS` | No | — | Self-hosted escape hatch for local/private S3-compatible endpoints such as MinIO. Do not enable in hosted SaaS. |
 | `CRMY_MANAGED_OAUTH_APPS_ENABLED` | Hosted SaaS | — | Enables CRMy-managed Google/Microsoft OAuth apps as the default System Connections app source |
 | `CRMY_MANAGED_GOOGLE_CLIENT_ID` / `CRMY_MANAGED_GOOGLE_CLIENT_SECRET` | Hosted SaaS | — | CRMy-managed Google OAuth app used for hosted mailbox and calendar consent when no tenant-owned override exists |
 | `CRMY_MANAGED_MICROSOFT_CLIENT_ID` / `CRMY_MANAGED_MICROSOFT_CLIENT_SECRET` | Hosted SaaS | — | CRMy-managed Microsoft OAuth app used for hosted mailbox and calendar consent when no tenant-owned override exists |
@@ -630,7 +634,7 @@ Searchable card/table views for customer outcomes, stage, health, attributed ARR
 
 #### Customer Activity (`/app/activities`)
 
-Meeting and activity capture for customer context. Tabs cover **Meetings**, **Needs Context**, **Calls & Notes**, **All Activity**, and **Meeting Sources**. Calendar meetings can link to customer records, show missing transcript/notes status, and route directly into Add Context for Signal extraction. Transcript and note drops are surfaced as meeting context: admins configure source drops from **Meeting Sources**, while regular users review unmatched or ambiguous files from **Needs Context**.
+Meeting and activity capture for customer context. Tabs cover **Meetings**, **Needs Context**, **Calls & Notes**, **All Activity**, and **Meeting Sources**. Calendar meetings can link to customer records, show missing transcript/notes status, and route directly into Add Context for Signal extraction. Transcript and note drops are surfaced as meeting context: admins configure source drops from **Meeting Sources**. Regular users see linked transcript review items for records they can access; fully unmatched source objects stay admin-reviewable until they are linked safely.
 
 #### Customer Email (`/app/emails`)
 
@@ -968,14 +972,14 @@ Availability suggestions are action-boundary context, not raw calendar memory. A
 
 Transcript drops are admin-managed storage connections for teams that already export meeting transcripts, call notes, summaries, or raw notes into a bucket or folder. The first supported providers are:
 
-- **S3-compatible bucket**: bucket, prefix, region, optional endpoint/path-style mode, include/exclude globs, encrypted read/list credentials.
+- **S3-compatible bucket**: bucket, prefix, region, optional endpoint/path-style mode, include/exclude globs, encrypted read/list credentials. Hosted production blocks custom/private endpoints by default; use AWS S3 without `endpoint`, or enable the custom/private endpoint escape hatches only for trusted self-hosted deployments.
 - **Local folder**: local/self-hosted only, restricted to `CRMY_LOCAL_SOURCE_ROOTS`; disabled in hosted production unless `CRMY_ENABLE_LOCAL_CONTEXT_DROPS=true`.
 
 Dropped files follow the same context path as manually added meeting notes:
 
 `Source Object -> Meeting Artifact / Customer Activity -> Raw Context -> Signals -> Memory -> Lineage / Handoff`
 
-Supported formats are `.txt`, `.md`, `.vtt`, `.srt`, `.json`, `.docx`, and `.pdf`. VTT/SRT/JSON are normalized before extraction. Files larger than `CRMY_CONTEXT_DROP_MAX_OBJECT_BYTES` enter review with a friendly reason instead of being downloaded or processed silently. Long transcripts are chunked, but each chunk carries the parent source hash so one long transcript does not count as multiple independent sources.
+Supported formats are `.txt`, `.md`, `.vtt`, `.srt`, `.json`, `.docx`, and `.pdf`. VTT/SRT/JSON are normalized before extraction. Files larger than `CRMY_CONTEXT_DROP_MAX_OBJECT_BYTES` enter review with a friendly reason instead of being downloaded or processed silently. S3 downloads use a hard timeout and active sync/reprocess jobs are deduped, so retries do not create duplicate work. Long transcripts are chunked, but each chunk carries the parent source hash so one long transcript does not count as multiple independent sources.
 
 Sidecar metadata is optional but recommended. Put a JSON file beside the transcript with the same basename:
 
@@ -2969,7 +2973,7 @@ CRMy's 0.8-1.0 roadmap focuses on becoming the enterprise context and execution 
 
 The 0.8 direction expands CRMy beyond CRM-adjacent storage into a governed systems-of-record overlay across Salesforce, HubSpot, Databricks, and Snowflake. HubSpot is the first certified connector path; Salesforce, Databricks, and Snowflake share the same governed framework and should receive live-environment certification before production rollout. Connector and warehouse changes should emit normal CRMy events so existing Workflows, Sequences, HITL approvals, audit, and context extraction continue to operate through the same event bus.
 
-For 0.9.3, CRMy now has first-class local eval profiles for contract corpora, live-model extraction quality, seeded retrieval quality, Action Context decisions, source attribution, tool choice, and agent trajectory smoke coverage. Connector certification and governed product knowledge retrieval remain roadmap items for safe product, pricing, security, implementation, roadmap, and competitive claims. See the [CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md) and [Governed Product Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
+For 0.9.3, CRMy now has first-class local eval profiles for contract corpora, live-model extraction quality, seeded retrieval quality, Action Context decisions, source attribution, tool choice, and agent trajectory smoke coverage. Governed Product Knowledge retrieval is also available for safe product, pricing, security, implementation, roadmap, and competitive claims: admins can author/review claim envelopes, agents can retrieve approved cited claims, and briefings/Action Context/email drafts can include product context without mixing it into customer Memory. Connector certification and source-adapter automation for product knowledge remain roadmap. See the [CRMy 0.9.3 Eval Harness Plan](eval-harness-0.9.3-plan.md) and [Governed Product Knowledge Retrieval Plan](governed-product-knowledge-retrieval.md).
 
 Read the full roadmap: [CRMy 0.8-1.0 Roadmap: Enterprise Systems-Of-Record Overlay](roadmap-0.8-1.0.md). For hosted multi-instance production requirements, see the [CRMy 1.0 Multi-Instance Runtime Plan](multi-instance-runtime-plan.md).
 

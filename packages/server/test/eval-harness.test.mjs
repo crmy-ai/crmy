@@ -54,6 +54,26 @@ test('exportRun yields distinct filenames per format', async () => {
   assert.ok(!isEvalExportFormat('nope'));
 });
 
+test('external eval exports redact sensitive source and model output fields by default', async () => {
+  const run = await contractRun();
+  run.results[0].expected = { document: 'customer transcript body', safe_label: 'expected' };
+  run.results[0].observed = { raw_output_excerpt: 'model output with customer data', metrics: { score: 1 } };
+
+  const generic = JSON.parse(exportRun(run, 'generic').content.trim().split('\n')[0]);
+  assert.equal(generic.expected.document, '[redacted]');
+  assert.equal(generic.expected.safe_label, 'expected');
+  assert.equal(generic.observed.raw_output_excerpt, '[redacted]');
+
+  const openai = JSON.parse(exportRun(run, 'openai').content.trim().split('\n')[0]);
+  assert.equal(openai.ideal.document, '[redacted]');
+  assert.equal(openai.result.raw_output_excerpt, '[redacted]');
+  assert.equal(openai.metadata.redacted, true);
+
+  const langsmith = JSON.parse(exportRun(run, 'langsmith').content);
+  assert.equal(langsmith.examples[0].outputs.raw_output_excerpt, '[redacted]');
+  assert.equal(langsmith.examples[0].metadata.redacted, true);
+});
+
 test('loadExternalCases validates against crmy.eval_case.v1 (#5)', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'crmy-eval-'));
   try {

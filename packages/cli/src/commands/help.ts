@@ -17,6 +17,10 @@ const HELP_TEXT = `
 
   Server
     server              Start the CRMy API, Web UI, and HTTP MCP endpoint
+    server start        Start CRMy in the background
+    server stop         Stop the background server
+    server status       Show server process and health status
+    server logs         Show server logs
     mcp                 Start the local stdio MCP server for agent clients
 
   Customer State
@@ -52,7 +56,8 @@ const HELP_TEXT = `
 
   Examples
     $ crmy init                     Set up a new CRMy instance
-    $ crmy server                   Start the server on :3000
+    $ crmy server start             Start the server in the background on :3000
+    $ crmy server                   Start the server in the foreground
     $ crmy doctor                   Check setup health
 	    $ crmy agent-smoke              Check the seeded demo agent workflow
 	    $ crmy briefing "contact:Maya Patel"  Get customer context before action

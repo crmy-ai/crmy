@@ -27,6 +27,26 @@ function validatePassword(input: string): boolean | string {
   return input.length >= 12 ? true : 'Password must be at least 12 characters';
 }
 
+function redactDatabaseUrl(value: string): string {
+  let redacted = value;
+  try {
+    const parsed = new URL(value);
+    if (parsed.password) parsed.password = 'xxxxx';
+    for (const key of Array.from(parsed.searchParams.keys())) {
+      if (/pass|password|token|secret|key/i.test(key)) {
+        parsed.searchParams.set(key, 'xxxxx');
+      }
+    }
+    redacted = parsed.toString();
+  } catch {
+    // Error strings often include the URL inside a longer sentence.
+  }
+
+  return redacted
+    .replace(/(postgres(?:ql)?:\/\/[^:\s/@]+):([^@\s]+)@/gi, '$1:xxxxx@')
+    .replace(/([?&](?:pass|password|token|secret|key)=)[^&\s]+/gi, '$1xxxxx');
+}
+
 /**
  * Try to connect to the PostgreSQL maintenance database (usually `postgres`) to
  * check whether the target database exists. If it doesn't, offer to create it.
@@ -370,7 +390,7 @@ async function saveWorkspaceAgentConfig(
 
 export function initCommand(): Command {
   return new Command('init')
-    .description('Set up CRMy: database, migrations, owner account, API key, Workspace Agent model, and demo data')
+    .description('Set up CRMy: database tables, owner account, API key, Workspace Agent model, and demo data')
     .option('-y, --yes', 'Use defaults non-interactively (requires CRMY_ADMIN_EMAIL + CRMY_ADMIN_PASSWORD; DATABASE_URL optional)')
     .option('--demo', 'Load demo customer data and context for a fast first run')
     .option('--no-demo', 'Skip demo data seeding')
@@ -387,7 +407,7 @@ export function initCommand(): Command {
       console.log('  └─────────────────────────────────────────────┘\n');
       console.log('  This wizard will:\n');
       console.log('    Step 1 — Connect to your PostgreSQL database');
-      console.log('    Step 2 — Create all CRMy tables (migrations)');
+      console.log('    Step 2 — Prepare the CRMy database tables');
       console.log('    Step 3 — Create your owner account and local API key');
       console.log('    Step 4 — Optionally configure the Workspace Agent model');
       console.log('    Step 5 — Optionally seed demo data for a fast first run\n');
@@ -422,7 +442,7 @@ export function initCommand(): Command {
 
       if (yesMode || process.env.DATABASE_URL) {
         databaseUrl = process.env.DATABASE_URL ?? 'postgresql://localhost:5432/crmy';
-        console.log(`  Using database URL: ${databaseUrl}\n`);
+        console.log(`  Using database URL: ${redactDatabaseUrl(databaseUrl)}\n`);
       } else {
         console.log('  Enter your PostgreSQL connection string.');
         console.log('  Format: postgresql://user:password@host:5432/dbname\n');
@@ -464,7 +484,7 @@ export function initCommand(): Command {
         spinner.succeed('Connected to database');
       } catch (err) {
         spinner.fail('Database connection failed');
-        const msg = (err as Error).message ?? String(err);
+        const msg = redactDatabaseUrl((err as Error).message ?? String(err));
         console.error(
           `\n  Error: ${msg}\n\n` +
           '  Common causes:\n' +
@@ -477,26 +497,26 @@ export function initCommand(): Command {
       }
 
       // Migrations (with per-file progress)
-      spinner = createSpinner('Running database migrations…');
+      spinner = createSpinner('Preparing database tables…');
       let ran: string[] = [];
 
       try {
         ran = await runMigrations(db, (name, index, total) => {
-          spinner.update(`Running migration ${index + 1}/${total}: ${name}…`);
+          spinner.update(`Applying database update ${index + 1}/${total}: ${name}…`);
         });
         if (ran.length > 0) {
-          spinner.succeed(`Migrations complete  \x1b[2m(${ran.length} applied)\x1b[0m`);
+          spinner.succeed(`Database tables ready  \x1b[2m(${ran.length} updates applied)\x1b[0m`);
         } else {
-          spinner.succeed('Migrations complete  \x1b[2m(already up to date)\x1b[0m');
+          spinner.succeed('Database tables ready  \x1b[2m(already up to date)\x1b[0m');
         }
       } catch (err) {
-        spinner.fail('Migration failed');
+        spinner.fail('Database setup failed');
         const msg = (err as Error).message ?? String(err);
         console.error(
           `\n  SQL error: ${msg}\n\n` +
           '  This may mean:\n' +
           '    • The database user lacks CREATE TABLE permissions\n' +
-          '    • A previous partial migration left the schema in a bad state\n' +
+          '    • A previous partial setup left the database tables in a bad state\n' +
           '      Try: drop and recreate the database, then run init again\n',
         );
         await closePool();

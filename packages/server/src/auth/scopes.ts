@@ -83,7 +83,7 @@ const TOOL_SCOPES: Record<string, string[]> = {
   knowledge_claim_upsert: ['knowledge:write'],
   knowledge_claim_list: ['knowledge:read'],
   knowledge_claim_review: ['knowledge:write'],
-  knowledge_conflicts_detect: ['knowledge:read'],
+  knowledge_conflicts_detect: ['knowledge:write'],
   action_context_request_human_unblock: ['context:read', 'agent:write', 'hitl:write', 'assignments:write'],
   context_add: ['context:write'],
   context_signal_promote: ['context:write'],

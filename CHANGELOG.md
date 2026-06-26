@@ -4,18 +4,20 @@ All notable changes to CRMy are documented here.
 
 ---
 
-## [Unreleased]
+## [0.9.3] — 2026-06-25
 
 ### Added
 
 - **Local eval harness + production-path extraction quality eval** ([#29](https://github.com/crmy-ai/crmy/pull/29)) — makes extraction quality measurable across datasets and models, the foundation for capability-gated promotion.
 - **Per-session MCP toolsets** ([#30](https://github.com/crmy-ai/crmy/pull/30)) — narrow the registered tool catalog per session/job via `--toolset`, `?toolset=`, or the `X-CRMy-Toolset` header. Selection never widens scope; autonomous agents default to a lean `standard` set, humans/admins to `full`. Override with `CRMY_MCP_DEFAULT_TOOLSET`.
 - **Connector-free `crmy quickstart`** ([#32](https://github.com/crmy-ai/crmy/pull/32)) — one command seeds demo context and runs the connector-free golden path (resolve → briefing → Action Context → lineage) with onboarding next steps.
-- **Governed Product Knowledge Retrieval — Phase 1** — `knowledge_retrieve` MCP tool + `KnowledgeRetrievalService` contract and `product_knowledge` toolset. Optional and non-blocking: returns a clear `not_configured` until a product-knowledge source is configured; never creates Memory or writes to systems of record.
+- **Governed Product Knowledge Retrieval — Phase 1** — `knowledge_retrieve` MCP tool + `KnowledgeRetrievalService` contract and `product_knowledge` toolset. Optional and non-blocking: returns a clear `not_configured` until governed product claims exist; never creates Memory or writes to systems of record.
 - **Governed Product Knowledge Retrieval — Phase 2** — claim store + governed retrieval: `knowledge_claims` / `knowledge_retrieval_receipts` (migration 086), policy filtering (customer-facing requires approved + source-grounded + external + fresh; internal labels risk in warnings), lexical search, ranking, and durable retrieval receipts. Adds the admin `knowledge_claim_upsert` tool (grounding verified against `source_text`) and the `POST /api/v1/knowledge/retrieve` REST endpoint.
 - **Governed Product Knowledge Retrieval — Phase 3** — briefings and Action Context now surface relevant product knowledge as a `product_context` sibling to customer Memory. `include_product_context` **defaults to true when product knowledge is configured** (override per call); it is strictly additive and never fails the core response. Action Context adds an informational `product_knowledge` check plus `used_knowledge_claim_ids` / `knowledge_retrieval_receipt_ids` proof, reusing the existing `checks`/`proof` slots.
 - **Governed Product Knowledge Retrieval — Phase 4** — `email_draft_preview` grounds customer-facing drafts in approved, cited product claims (and is instructed to avoid excluded ones). The draft records `used_knowledge_claim_ids`, `knowledge_retrieval_receipt_ids`, and `knowledge_citations` in `model_metadata`, surfaces a `context_used.product_knowledge` summary, and warns when claims were excluded as not customer-safe.
 - **Governed Product Knowledge Retrieval — Phase 5** — `crmy knowledge retrieve` CLI command, plus web display: a **Product Knowledge** section in the briefing panel (approved claims, sources, exclusions, warnings) and a "product claim(s) used" indicator on generated email drafts.
+- **Governed Product Knowledge Retrieval — Phase 6** — freshness windows mark expired or aging product claims stale without blocking core customer-context flows.
+- **Governed Product Knowledge Retrieval — Phase 7** — admin governance for claim review, approval/rejection/deprecation/staleness/reactivation, conflict detection, source-priority resolution, review assignments, and the Product Knowledge settings surface.
 
 ### Changed
 

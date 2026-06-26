@@ -34,8 +34,23 @@ Retrieve **governed product knowledge** — approved, source-grounded, cited pro
 
 ### knowledge_claim_upsert
 **Admin/governance** tool to author or update a product knowledge claim envelope (capability, proof point, pricing, implementation, security, or competitive response). Provide `source_text` so CRMy can verify the claim is **grounded** in its source — customer-facing eligibility requires grounding plus `approval_status: approved`, `approved_for_external_use`, `visibility: external`, and freshness. Re-upserts by `external_key` update in place. Authors governed product truth; does not touch customer Memory. Admin-only; requires `knowledge:write`.
-- **Input**: `category` (required), `title` (required), `body` (required), `summary`, `source_text`, `external_key`, `product_scope[]`, `competitors[]`, `personas[]`, `industries[]`, `source_ref`/`source_url`/`source_label`/`source_version`, `confidence`, `source_priority`, `approval_status`, `approved_for_external_use`, `visibility`, `status`, `effective_at`, `valid_until`
+- **Input**: `category` (required), `title` (required), `body` (required), `summary`, `source_text`, `external_key`, `product_scope[]`, `competitors[]`, `personas[]`, `industries[]`, `source_ref`/`source_url`/`source_label`/`source_version`, `confidence`, `source_priority`, `approval_status`, `approved_for_external_use`, `visibility`, `status`, `effective_at`, `valid_until`, `idempotency_key`
 - **Output**: the stored `KnowledgeClaim` (including the computed `grounded` flag)
+
+### knowledge_claim_list
+**Admin/governance** tool to list product knowledge claim envelopes for review. Use it to find pending, stale, conflicting, rejected, deprecated, or assigned claims without exposing full claim bodies in customer-facing packets. Admin-only; requires `knowledge:read`.
+- **Input**: `status`, `approval_status`, `needs_review`, `review_owner_id`, `query`, `limit`
+- **Output**: `{ claims, count }`
+
+### knowledge_claim_review
+**Admin/governance** tool to apply a review decision to a product knowledge claim. `approve` re-verifies freshness and can set external-use eligibility; `reject` retires the claim; `deprecate` removes it from live use; `mark_stale` forces review; `reactivate` restores stale/deprecated claims. Admin-only; requires `knowledge:write`.
+- **Input**: `id` (required), `decision` (`approve` | `reject` | `deprecate` | `mark_stale` | `reactivate`, required), `approved_for_external_use`, `review_owner_id`, `idempotency_key`
+- **Output**: the updated `KnowledgeClaimRecord`, or `{ error, message }` if the claim is not found
+
+### knowledge_conflicts_detect
+**Admin/governance** tool to detect competing product claims in the same category and recommend source-priority resolution. With `apply=true`, CRMy marks the lower-priority resolvable claim as `conflicting` so it stops flowing into customer-facing retrieval until reviewed. Admin-only; requires `knowledge:write` because the same surface can apply status changes.
+- **Input**: `category`, `competitor`, `apply`, `limit`, `idempotency_key`
+- **Output**: `{ conflicts, applied }`
 
 Common safe paths:
 - **Unknown customer reference**: `customer_record_resolve` → `action_context_get` or `briefing_get`

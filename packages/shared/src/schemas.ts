@@ -1994,6 +1994,7 @@ export const knowledgeRetrieve = z.object({
 
 /** Admin/governance write path for a product knowledge claim envelope. */
 export const knowledgeClaimUpsert = z.object({
+  idempotency_key: idempotencyKey,
   external_key: z.string().max(256).optional().describe('Stable dedupe key from the source; re-upserts update in place.'),
   category: z.string().min(1).describe('e.g. capability, proof_point, pricing, implementation, security, competitive_response.'),
   title: z.string().min(1),
@@ -2044,6 +2045,7 @@ export const knowledgeClaimReview = z.object({
 
 /** Governance: detect competing product claims with source-priority resolution (Phase 7). */
 export const knowledgeConflictsDetect = z.object({
+  idempotency_key: idempotencyKey,
   category: z.string().optional().describe('Limit detection to a single claim category.'),
   competitor: z.string().optional().describe('Limit detection to claims about one competitor.'),
   apply: z.boolean().optional().default(false)

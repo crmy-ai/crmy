@@ -203,7 +203,14 @@ test('governance tools are registered admin-tier with knowledge scopes', () => {
   }
   assert.deepEqual(getToolScopeRequirements('knowledge_claim_list'), ['knowledge:read']);
   assert.deepEqual(getToolScopeRequirements('knowledge_claim_review'), ['knowledge:write']);
-  assert.deepEqual(getToolScopeRequirements('knowledge_conflicts_detect'), ['knowledge:read']);
+  assert.deepEqual(getToolScopeRequirements('knowledge_conflicts_detect'), ['knowledge:write']);
+});
+
+test('product knowledge mutation tools expose idempotency keys for safe retries', () => {
+  const byName = new Map(getAllTools(new FakeGovDb()).map(t => [t.name, t]));
+  for (const name of ['knowledge_claim_upsert', 'knowledge_claim_review', 'knowledge_conflicts_detect']) {
+    assert.ok(byName.get(name).inputSchema.shape.idempotency_key, `${name} accepts idempotency_key`);
+  }
 });
 
 // ── Fake DB ──────────────────────────────────────────────────────────────────

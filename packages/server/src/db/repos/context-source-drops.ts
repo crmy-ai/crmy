@@ -197,13 +197,57 @@ export async function enqueueSyncJob(
   connectionId: UUID,
   metadata: Record<string, unknown> = {},
 ): Promise<{ id: UUID; status: string }> {
+  const existing = await db.query(
+    `SELECT id, status
+     FROM context_source_sync_jobs
+     WHERE tenant_id = $1
+       AND connection_id = $2
+       AND job_type = 'sync'
+       AND status IN ('pending', 'processing', 'failed')
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [tenantId, connectionId],
+  );
+  if (existing.rows[0]) {
+    const row = existing.rows[0] as { id: UUID; status: string };
+    if (row.status === 'failed') {
+      const revived = await db.query(
+        `UPDATE context_source_sync_jobs
+         SET status = 'pending',
+             run_after = now(),
+             locked_at = NULL,
+             last_error = NULL,
+             metadata = metadata || $2::jsonb,
+             updated_at = now()
+         WHERE id = $1
+         RETURNING id, status`,
+        [row.id, JSON.stringify(metadata)],
+      );
+      return revived.rows[0] as { id: UUID; status: string };
+    }
+    return row;
+  }
+
   const result = await db.query(
     `INSERT INTO context_source_sync_jobs (tenant_id, connection_id, metadata)
      VALUES ($1,$2,$3::jsonb)
+     ON CONFLICT DO NOTHING
      RETURNING id, status`,
     [tenantId, connectionId, JSON.stringify(metadata)],
   );
-  return result.rows[0] as { id: UUID; status: string };
+  if (result.rows[0]) return result.rows[0] as { id: UUID; status: string };
+  const fallback = await db.query(
+    `SELECT id, status
+     FROM context_source_sync_jobs
+     WHERE tenant_id = $1
+       AND connection_id = $2
+       AND job_type = 'sync'
+       AND status IN ('pending', 'processing', 'failed')
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [tenantId, connectionId],
+  );
+  return fallback.rows[0] as { id: UUID; status: string };
 }
 
 export async function claimSyncJobs(db: DbPool, limit = 5): Promise<Array<{ id: UUID; tenant_id: UUID; connection_id: UUID; metadata: Record<string, unknown> }>> {
@@ -254,13 +298,55 @@ export async function enqueueProcessingJob(
   sourceObjectId: UUID,
   metadata: Record<string, unknown> = {},
 ): Promise<{ id: UUID; status: string }> {
+  const existing = await db.query(
+    `SELECT id, status
+     FROM context_source_processing_jobs
+     WHERE tenant_id = $1
+       AND source_object_id = $2
+       AND status IN ('pending', 'processing', 'failed')
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [tenantId, sourceObjectId],
+  );
+  if (existing.rows[0]) {
+    const row = existing.rows[0] as { id: UUID; status: string };
+    if (row.status === 'failed') {
+      const revived = await db.query(
+        `UPDATE context_source_processing_jobs
+         SET status = 'pending',
+             run_after = now(),
+             locked_at = NULL,
+             last_error = NULL,
+             metadata = metadata || $2::jsonb,
+             updated_at = now()
+         WHERE id = $1
+         RETURNING id, status`,
+        [row.id, JSON.stringify(metadata)],
+      );
+      return revived.rows[0] as { id: UUID; status: string };
+    }
+    return row;
+  }
+
   const result = await db.query(
     `INSERT INTO context_source_processing_jobs (tenant_id, source_object_id, metadata)
      VALUES ($1,$2,$3::jsonb)
+     ON CONFLICT DO NOTHING
      RETURNING id, status`,
     [tenantId, sourceObjectId, JSON.stringify(metadata)],
   );
-  return result.rows[0] as { id: UUID; status: string };
+  if (result.rows[0]) return result.rows[0] as { id: UUID; status: string };
+  const fallback = await db.query(
+    `SELECT id, status
+     FROM context_source_processing_jobs
+     WHERE tenant_id = $1
+       AND source_object_id = $2
+       AND status IN ('pending', 'processing', 'failed')
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [tenantId, sourceObjectId],
+  );
+  return fallback.rows[0] as { id: UUID; status: string };
 }
 
 export async function claimProcessingJobs(db: DbPool, limit = 5): Promise<Array<{ id: UUID; tenant_id: UUID; source_object_id: UUID; metadata: Record<string, unknown> }>> {
@@ -405,6 +491,38 @@ export async function getSourceObject(db: DbPool, tenantId: UUID, id: UUID): Pro
      LEFT JOIN calendar_events ce ON ce.id = o.calendar_event_id AND ce.tenant_id = o.tenant_id
      WHERE o.tenant_id = $1 AND o.id = $2`,
     [tenantId, id],
+  );
+  return (result.rows[0] as ContextSourceObject | undefined) ?? null;
+}
+
+export async function findSourceObjectByActualHash(
+  db: DbPool,
+  tenantId: UUID,
+  connectionId: UUID,
+  contentHash: string,
+  excludeId?: UUID,
+): Promise<ContextSourceObject | null> {
+  const result = await db.query(
+    `SELECT o.*, c.name AS connection_name, c.provider AS connection_provider,
+            a.name AS account_name, ct.name AS contact_name, opp.name AS opportunity_name,
+            uc.name AS use_case_name, ce.title AS calendar_title
+     FROM context_source_objects o
+     LEFT JOIN context_source_connections c ON c.id = o.connection_id AND c.tenant_id = o.tenant_id
+     LEFT JOIN accounts a ON a.id = o.account_id AND a.tenant_id = o.tenant_id
+     LEFT JOIN contacts ct ON ct.id = o.contact_id AND ct.tenant_id = o.tenant_id
+     LEFT JOIN opportunities opp ON opp.id = o.opportunity_id AND opp.tenant_id = o.tenant_id
+     LEFT JOIN use_cases uc ON uc.id = o.use_case_id AND uc.tenant_id = o.tenant_id
+     LEFT JOIN calendar_events ce ON ce.id = o.calendar_event_id AND ce.tenant_id = o.tenant_id
+     WHERE o.tenant_id = $1
+       AND o.connection_id = $2
+       AND o.metadata->>'actual_content_hash' = $3
+       AND ($4::uuid IS NULL OR o.id <> $4)
+       AND o.processing_status IN ('processed', 'needs_review', 'queued', 'processing')
+     ORDER BY
+       CASE o.processing_status WHEN 'processed' THEN 0 WHEN 'needs_review' THEN 1 ELSE 2 END,
+       o.updated_at DESC
+     LIMIT 1`,
+    [tenantId, connectionId, contentHash, excludeId ?? null],
   );
   return (result.rows[0] as ContextSourceObject | undefined) ?? null;
 }

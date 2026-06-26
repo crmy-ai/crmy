@@ -14,6 +14,7 @@ import {
   type ListKnowledgeClaimsInput,
   type ReviewKnowledgeClaimInput,
 } from '../../services/knowledge-governance.js';
+import { runToolOperation } from '../tool-operation.js';
 
 export function knowledgeTools(db: DbPool): ToolDef[] {
   return [
@@ -39,7 +40,9 @@ export function knowledgeTools(db: DbPool): ToolDef[] {
         + 'Re-upserts by external_key update in place. This authors governed product truth; it does not touch customer Memory.',
       inputSchema: knowledgeClaimUpsert,
       handler: async (input, actor: ActorContext) => {
-        return upsertProductKnowledgeClaim(db, actor, input as UpsertProductKnowledgeClaimInput);
+        return runToolOperation(db, actor, 'knowledge_claim_upsert', input as object, () =>
+          upsertProductKnowledgeClaim(db, actor, input as UpsertProductKnowledgeClaimInput),
+        );
       },
     },
     {
@@ -62,8 +65,10 @@ export function knowledgeTools(db: DbPool): ToolDef[] {
         + 'Optionally set customer-facing eligibility (approved_for_external_use) or assign a review owner. This governs product truth; it never touches customer Memory.',
       inputSchema: knowledgeClaimReview,
       handler: async (input, actor: ActorContext) => {
-        const result = await reviewKnowledgeClaim(db, actor, input as ReviewKnowledgeClaimInput);
-        return result ?? { error: 'not_found', message: 'No claim with that id in this workspace.' };
+        return runToolOperation(db, actor, 'knowledge_claim_review', input as object, async () => {
+          const result = await reviewKnowledgeClaim(db, actor, input as ReviewKnowledgeClaimInput);
+          return result ?? { error: 'not_found', message: 'No claim with that id in this workspace.' };
+        });
       },
     },
     {
@@ -75,7 +80,9 @@ export function knowledgeTools(db: DbPool): ToolDef[] {
         + 'Pass apply=true to mark the lower-priority claim of each resolvable conflict as conflicting so it stops flowing into customer-facing retrieval.',
       inputSchema: knowledgeConflictsDetect,
       handler: async (input, actor: ActorContext) => {
-        return detectKnowledgeConflicts(db, actor, input as DetectKnowledgeConflictsInput);
+        return runToolOperation(db, actor, 'knowledge_conflicts_detect', input as object, () =>
+          detectKnowledgeConflicts(db, actor, input as DetectKnowledgeConflictsInput),
+        );
       },
     },
   ];
