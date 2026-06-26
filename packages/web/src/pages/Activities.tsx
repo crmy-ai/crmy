@@ -1570,14 +1570,15 @@ export default function Activities() {
               {[...Array(6)].map((_, i) => <div key={i} className="h-12 rounded-xl bg-muted/50 animate-pulse" />)}
             </div>
           ) : activityRows.length === 0 ? (
-            <OnboardingEmptyState
-              icon={FileText}
-              title={tab === 'calls_notes' ? 'No calls or notes yet' : 'No activity yet'}
-              description="Log manual calls, notes, and off-calendar meetings when they do not come from calendar or email."
-              showSampleData={false}
-              iconClassName={ENTITY_COLORS.activities.text}
-              iconBgClassName={ENTITY_COLORS.activities.bg}
-            />
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <FileText className={`w-14 h-14 mb-4 opacity-20 ${ENTITY_COLORS.activities.text}`} />
+              <p className="text-base font-display font-semibold text-foreground mb-1">
+                {tab === 'calls_notes' ? 'No calls or notes yet' : 'No activity yet'}
+              </p>
+              <p className="text-sm text-muted-foreground max-w-sm">
+                Log manual calls, notes, and off-calendar meetings when they do not come from calendar or email.
+              </p>
+            </div>
           ) : tab === 'calls_notes' ? (
             <ActivityTable
               activities={paginatedActivities}
@@ -1604,16 +1605,17 @@ export default function Activities() {
         ) : tab === 'needs_context' && meetings.length === 0 && transcriptReviewObjects.length > 0 ? (
           <TranscriptReviewList objects={transcriptReviewObjects} onOpen={setSelectedSourceObjectId} />
         ) : meetings.length === 0 ? (
-          <OnboardingEmptyState
-            icon={CalendarClock}
-            title={tab === 'needs_context' ? 'No meetings need context' : 'No customer meetings yet'}
-            description={tab === 'needs_context'
-              ? 'Meetings that need transcripts, notes, or record links will appear here.'
-              : 'Connect a calendar or log a meeting manually to start capturing customer context.'}
-            showSampleData={false}
-            iconClassName="text-blue-300"
-            iconBgClassName="bg-blue-500/10"
-          />
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <CalendarClock className="w-14 h-14 mb-4 opacity-20 text-blue-400" />
+              <p className="text-base font-display font-semibold text-foreground mb-1">
+                {tab === 'needs_context' ? 'No meetings need context' : 'No customer meetings yet'}
+              </p>
+              <p className="text-sm text-muted-foreground max-w-sm">
+                {tab === 'needs_context'
+                  ? 'Meetings that need transcripts, notes, or record links will appear here.'
+                  : 'Connect a calendar or log a meeting manually to start capturing customer context.'}
+              </p>
+            </div>
         ) : (
           <div className="space-y-3">
             {tab === 'needs_context' && (
