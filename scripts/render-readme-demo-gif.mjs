@@ -5,7 +5,7 @@ import path from 'node:path';
 const width = 900;
 const height = 506;
 const fps = 10;
-const seconds = 10.5;
+const seconds = 11.6;
 const frameCount = Math.round(fps * seconds);
 const delayCs = Math.round(100 / fps);
 const outFile = path.resolve('examples/crmy-governed-agent-context-demo.gif');
@@ -215,33 +215,30 @@ const H = ${height};
 const total = ${frameCount};
 
 const lines = [
-  { kind: 'cmd', text: '$ npx -y @crmy/cli quickstart' },
+  { kind: 'cmd', text: '$ crmy briefing "account:Northstar Labs"' },
   { kind: 'dim', text: '' },
-  { kind: 'title', text: 'CRMy quickstart — customer context for agents' },
-  { kind: 'run', text: '… Preparing demo workspace' },
-  { kind: 'ok', text: '✓ Demo workspace ready: 2 accounts · 6 Signals · 5 Memory' },
+  { kind: 'ok', text: '✓ Resolved account "Northstar Labs" (d0000000)' },
+  { kind: 'ok', text: '✓ Briefing returned 4 Memory items, 3 activities, and 2 reviewable Signal sets' },
+  { kind: 'title', text: 'Memory' },
+  { kind: 'out', text: '- Security review is the active expansion blocker' },
+  { kind: 'out', text: '- Maya is the current expansion champion' },
+  { kind: 'title', text: 'Signals needing review' },
+  { kind: 'warn', text: '- Procurement is not involved yet · grounded, not confirmed as Memory' },
   { kind: 'dim', text: '' },
-  { kind: 'title', text: 'CRMy Demo Agent Check' },
-  { kind: 'rule', text: '══════════════════════════════════════' },
-  { kind: 'ok', text: '✓ Resolved account "Northstar Labs" (d0000000).' },
-  { kind: 'ok', text: '✓ Briefing returned 4 Memory items, 3 activities, and 2 reviewable Signal sets.' },
-  { kind: 'ok', text: '✓ Action Context returned warn mode, review_needed readiness, and 2 recommended actions.' },
-  { kind: 'ok', text: '✓ Lineage returned 74 nodes, 459 edges, 0 pending outcomes, and 0 failed outcomes.' },
-  { kind: 'ok', text: '✓ Found 4 Signals needing attention.' },
+  { kind: 'cmd', text: '$ crmy action-context "account:Northstar Labs" --action customer_outreach' },
   { kind: 'dim', text: '' },
-  { kind: 'title', text: 'Signals needing attention:' },
-  { kind: 'warn', text: '- Maya may be the evaluation sponsor · blocked · 74% trust' },
-  { kind: 'warn', text: '- Security review may block pilot approval · blocked · 84% trust' },
-  { kind: 'warn', text: '- Schedule technical validation for next Friday · blocked · 81% trust' },
+  { kind: 'ok', text: '✓ Action Context returned warn mode, review_needed readiness' },
+  { kind: 'title', text: 'Safe to act?' },
+  { kind: 'out', text: '- Customer outreach is allowed' },
+  { kind: 'out', text: '- Include technical validation as the next step' },
+  { kind: 'warn', text: '- Keep the procurement claim out of committed CRM updates until confirmed' },
   { kind: 'dim', text: '' },
-  { kind: 'title', text: 'Action Context: warn · review_needed' },
-  { kind: 'title', text: 'Lineage: 74 nodes, 459 edges, 0 pending outcomes' },
+  { kind: 'cmd', text: '$ crmy context lineage --subject "account:Northstar Labs"' },
   { kind: 'dim', text: '' },
-  { kind: 'ok', text: '✓ CRMy agent tools are ready for the seeded demo workflow.' },
+  { kind: 'ok', text: '✓ Lineage returned 74 nodes, 459 edges, 0 pending outcomes' },
+  { kind: 'out', text: 'Raw Context → Signals → Memory → Action Context → audit receipts' },
   { kind: 'dim', text: '' },
-  { kind: 'title', text: 'Next:' },
-  { kind: 'cmd2', text: 'claude mcp add crmy -- npx -y @crmy/cli mcp' },
-  { kind: 'cmd2', text: 'crmy server  →  http://localhost:3000/app' },
+  { kind: 'cmd', text: '$ claude mcp add crmy -- crmy mcp' },
 ];
 
 function clamp(n, min = 0, max = 1) { return Math.max(min, Math.min(max, n)); }
@@ -282,6 +279,7 @@ function colorFor(kind) {
   if (kind === 'ok') return '#34d399';
   if (kind === 'warn') return '#fbbf24';
   if (kind === 'title') return '#f8fafc';
+  if (kind === 'out') return '#cbd5e1';
   if (kind === 'run') return '#a5b4fc';
   if (kind === 'rule' || kind === 'dim') return '#64748b';
   return '#cbd5e1';
@@ -291,55 +289,42 @@ function drawTerminal(t) {
   const reveal = Math.floor(ease(t) * (lines.length + 4));
   const cursorLine = Math.min(lines.length - 1, Math.max(0, reveal));
   const lineHeight = 18;
-  const top = 122;
-  const visibleRows = 18;
+  const top = 40;
+  const visibleRows = 23;
   const start = Math.max(0, cursorLine - visibleRows + 1);
   const end = Math.min(lines.length, reveal + 1);
 
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
-  ctx.shadowBlur = 34;
-  ctx.shadowOffsetY = 16;
-  roundRect(42, 86, 816, 372, 18, '#121821', '#2b3441', 1);
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
+  ctx.shadowBlur = 18;
+  ctx.shadowOffsetY = 8;
+  roundRect(26, 22, 848, 462, 12, '#10151d', '#29313b', 1);
   ctx.shadowColor = 'transparent';
-  roundRect(42, 86, 816, 38, 18, '#171f2a', null);
-  roundRect(42, 106, 816, 20, 0, '#171f2a', null);
+  roundRect(26, 22, 848, 34, 12, '#171d26', null);
+  roundRect(26, 44, 848, 13, 0, '#171d26', null);
 
-  ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(68, 106, 6, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#f59e0b'; ctx.beginPath(); ctx.arc(88, 106, 6, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#10b981'; ctx.beginPath(); ctx.arc(108, 106, 6, 0, Math.PI * 2); ctx.fill();
-  text('actual local quickstart transcript', 136, 98, 12, '#94a3b8', 700, 'Inter, ui-sans-serif');
+  ctx.fillStyle = '#ef4444'; ctx.beginPath(); ctx.arc(52, 39, 5.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#f59e0b'; ctx.beginPath(); ctx.arc(70, 39, 5.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#10b981'; ctx.beginPath(); ctx.arc(88, 39, 5.5, 0, Math.PI * 2); ctx.fill();
+  text('crmy production-style demo', 116, 31, 12, '#94a3b8', 700, 'Inter, ui-sans-serif');
 
-  let y = top + 17;
+  let y = top + 36;
   for (let i = start; i < end; i += 1) {
     const line = lines[i];
     const prefix = line.kind === 'ok' || line.kind === 'warn' ? '' : '  ';
     const maxText = (prefix + line.text).slice(0, 105);
-    text(maxText, 66, y, line.kind === 'title' ? 13 : 12, colorFor(line.kind), line.kind === 'title' ? 800 : 650);
+    text(maxText, 58, y, line.kind === 'title' ? 13 : 12, colorFor(line.kind), line.kind === 'title' ? 800 : 650);
     y += line.kind === 'dim' ? 10 : lineHeight;
   }
 
   if (reveal < lines.length + 2 && Math.floor(t * 12) % 2 === 0) {
-    roundRect(66 + 7 * Math.min(86, (lines[cursorLine]?.text ?? '').length), y - lineHeight + 2, 8, 14, 1, '#cbd5e1');
+    roundRect(58 + 7 * Math.min(90, (lines[cursorLine]?.text ?? '').length), y - lineHeight + 2, 8, 14, 1, '#cbd5e1');
   }
 }
 
 function drawFrame(i) {
   const t = i / (total - 1);
-  const bg = ctx.createLinearGradient(0, 0, W, H);
-  bg.addColorStop(0, '#070b10');
-  bg.addColorStop(0.52, '#0d131b');
-  bg.addColorStop(1, '#111827');
-  ctx.fillStyle = bg;
+  ctx.fillStyle = '#0b0f14';
   ctx.fillRect(0, 0, W, H);
-
-  ctx.fillStyle = '#f8fafc';
-  ctx.font = '800 27px Inter, ui-sans-serif, system-ui';
-  ctx.fillText('CRMy quickstart: command-line demo', 44, 38);
-  ctx.font = '700 14px Inter, ui-sans-serif, system-ui';
-  ctx.fillStyle = '#94a3b8';
-  ctx.fillText('Resolve customer → briefing → Action Context → Signals → lineage.', 46, 69);
-  pill('actual CLI output', 706, 34, '#1e293b', '#93c5fd');
-  pill('MCP-ready', 736, 68, '#052e16', '#34d399');
 
   drawTerminal(t);
 }

@@ -22,7 +22,7 @@
 </p>
 
 <p align="center">
-  <img src="examples/crmy-governed-agent-context-demo.gif" alt="CRMy demo showing messy customer interactions becoming governed agent context" width="900">
+  <img src="examples/crmy-claude-demo.gif" alt="CRMy Claude demo showing governed customer context, Action Context, Signals, and lineage" width="900">
 </p>
 
 <p align="center">
@@ -258,7 +258,7 @@ CRMy keeps customer context useful without pretending messy source material is i
 
 - **Raw Context** is source material before extraction: transcripts, emails, notes, meetings, CRM changes, docs, support/product signals, and agent inputs.
 - **Signals** are inferred claims with evidence, confidence, source lineage, and readiness.
-- **Memory** is confirmed operational customer context agents can rely on across sessions. Memory carries freshness and decay signals, so CRMy does not treat customer truth as permanent.
+- **Memory** is confirmed operational customer context agents can rely on across sessions. Memory carries freshness and decay signals, so CRMy does not treat "customer truth" as permanent.
 - **Product Knowledge** is approved product, pricing, security, implementation, and competitive context for customer-facing claims. It stays separate from customer Memory.
 - **Briefings** answer: what should the agent know?
 - **Action Context** answers: is this action ready, allowed, risky, stale, or review-required?
@@ -549,3 +549,4 @@ Release notes live in [RELEASE_NOTES.md](RELEASE_NOTES.md). Older release notes 
 ## License
 
 Apache-2.0
+ 
