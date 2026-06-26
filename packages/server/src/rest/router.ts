@@ -8,7 +8,9 @@ import * as path from 'node:path';
 import crypto from 'node:crypto';
 import type { DbPool } from '../db/pool.js';
 import type { ActorContext, UUID } from '@crmy/shared';
-import { CrmyError, actionContextGet, actionContextHumanUnblock, notFound, validationError, workflowAction } from '@crmy/shared';
+import { CrmyError, actionContextGet, actionContextHumanUnblock, knowledgeRetrieve, knowledgeClaimList, knowledgeClaimReview, knowledgeConflictsDetect, notFound, validationError, workflowAction } from '@crmy/shared';
+import { retrieveKnowledge } from '../services/knowledge-retrieval.js';
+import { listKnowledgeClaimsForReview, reviewKnowledgeClaim, detectKnowledgeConflicts } from '../services/knowledge-governance.js';
 import * as contactRepo from '../db/repos/contacts.js';
 import * as accountRepo from '../db/repos/accounts.js';
 import * as oppRepo from '../db/repos/opportunities.js';
@@ -316,6 +318,46 @@ export function apiRouter(db: DbPool): Router {
       const parsedInput = tool.inputSchema.parse(normalizeToolInput(input));
       const result = await tool.handler(parsedInput, actor);
       res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  // --- Product knowledge (optional, governed) ---
+  router.post('/knowledge/retrieve', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      enforceToolScopes('knowledge_retrieve', actor);
+      const input = knowledgeRetrieve.parse(req.body ?? {});
+      res.json(await retrieveKnowledge(db, actor, input));
+    } catch (err) { handleError(res, err); }
+  });
+
+  // Governance (Phase 7): review queue, review decisions, conflict detection.
+  router.post('/knowledge/claims/list', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      enforceToolScopes('knowledge_claim_list', actor);
+      const input = knowledgeClaimList.parse(req.body ?? {});
+      res.json(await listKnowledgeClaimsForReview(db, actor, input));
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/knowledge/claims/review', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      enforceToolScopes('knowledge_claim_review', actor);
+      const input = knowledgeClaimReview.parse(req.body ?? {});
+      const result = await reviewKnowledgeClaim(db, actor, input);
+      if (!result) throw notFound('knowledge_claim', input.id);
+      res.json(result);
+    } catch (err) { handleError(res, err); }
+  });
+
+  router.post('/knowledge/conflicts/detect', async (req: Request, res: Response) => {
+    try {
+      const actor = getActor(req);
+      enforceToolScopes('knowledge_conflicts_detect', actor);
+      const input = knowledgeConflictsDetect.parse(req.body ?? {});
+      res.json(await detectKnowledgeConflicts(db, actor, input));
     } catch (err) { handleError(res, err); }
   });
 
@@ -4081,7 +4123,8 @@ export function apiRouter(db: DbPool): Router {
         actor.tenant_id,
         subjectType as 'contact' | 'account' | 'opportunity' | 'use_case',
         subjectId,
-        { include_stale: false },
+        // Compact text endpoint does not render product context; skip the extra retrieval.
+        { include_stale: false, include_product_context: false },
       );
 
       // Build compact text representation for the LLM

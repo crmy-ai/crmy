@@ -1150,6 +1150,12 @@ export interface Briefing {
   dropped_entries?: Array<{ context_type: string; title?: string; confidence?: number }>;
   /** Explains budget preset, effective budget, evidence detail, and ranking strategy used for this briefing. */
   context_packing?: ContextPackingMetadata;
+  /**
+   * Optional governed product knowledge relevant to this subject. Present only
+   * when product knowledge is configured (default) or explicitly requested.
+   * A sibling to customer Memory — never mixed into it, and never blocks the briefing.
+   */
+  product_context?: ProductContext;
 }
 
 export type ActionContextProposedActionType =
@@ -1187,6 +1193,7 @@ export interface ActionContextGetInput {
   evidence_mode?: EvidenceMode;
   emit_retrieval_event?: boolean;
   proposed_action?: ActionContextProposedAction;
+  include_product_context?: boolean;
 }
 
 export type ActionContextReadinessStatus = 'ready' | 'review_needed' | 'blocked';
@@ -1361,6 +1368,15 @@ export interface ActionContext {
       open_conflict_count: number;
       pending_writeback_count: number;
     };
+    product_knowledge?: ActionContextCheckStatus & {
+      approved_claim_count: number;
+      excluded_count: number;
+      ungrounded_excluded_count: number;
+      internal_only_excluded_count: number;
+      stale_excluded_count: number;
+      conflicting_excluded_count: number;
+      retrieval_receipt_id?: string;
+    };
     policy?: ActionContextPolicySummary;
   };
   allowed_actions: ActionContextAllowedAction[];
@@ -1374,6 +1390,10 @@ export interface ActionContext {
     retrieval_event_id?: number;
     used_context_entry_ids: UUID[];
     used_signal_group_ids: UUID[];
+    /** Product knowledge claims surfaced for this action (Phase 3). */
+    used_knowledge_claim_ids?: UUID[];
+    /** Receipts proving what product knowledge was retrieved (Phase 3). */
+    knowledge_retrieval_receipt_ids?: string[];
     expected_receipts: string[];
   };
 }
@@ -1634,4 +1654,82 @@ export interface KnowledgeRetrievalResult {
   retrieval_receipt?: KnowledgeRetrievalReceipt;
   /** Human/agent-readable explanation, especially for not_configured / degraded states. */
   message?: string;
+}
+
+/**
+ * Product knowledge packaged for a briefing or Action Context — a sibling to
+ * customer Memory. Claims are pre-categorized for convenience; `avoid_claims`
+ * are the excluded ones (e.g. ungrounded, internal-only, stale) so a drafting
+ * agent knows what NOT to assert.
+ */
+export interface ProductContext {
+  status: KnowledgeRetrievalStatus;
+  relevant_claims: KnowledgeClaim[];
+  proof_points: KnowledgeClaim[];
+  implementation_caveats: KnowledgeClaim[];
+  competitive_context: KnowledgeClaim[];
+  avoid_claims: KnowledgeExcludedClaim[];
+  warnings: string[];
+  citations: KnowledgeCitation[];
+  retrieval_receipt_id?: string;
+}
+
+// -- Governance (Phases 6-7): freshness, claim review, and conflict detection --
+// The retrieval-facing KnowledgeClaim hides internal governance fields so they
+// never leak into customer-facing packets. Governance surfaces (admin review,
+// freshness sweep, conflict detection) need the full envelope, below.
+
+export type KnowledgeClaimStatus = 'active' | 'stale' | 'deprecated' | 'conflicting' | 'rejected';
+
+/**
+ * A claim envelope as surfaced to admin/governance surfaces — the full record,
+ * including the governance fields (status, approval, freshness, owner) that the
+ * customer-facing KnowledgeClaim intentionally omits.
+ */
+export interface KnowledgeClaimRecord {
+  id: string;
+  category: string;
+  title: string;
+  summary?: string;
+  product_scope: string[];
+  competitors: string[];
+  grounded: boolean;
+  confidence?: number;
+  source_priority: KnowledgeSourcePriority;
+  source_label?: string;
+  approval_status: KnowledgeApprovalStatus;
+  approved_for_external_use: boolean;
+  visibility: KnowledgeVisibility;
+  status: KnowledgeClaimStatus;
+  effective_at?: string;
+  valid_until?: string;
+  last_verified_at?: string;
+  review_owner_id?: string;
+  updated_at: string;
+}
+
+/** An admin review decision applied to a single claim envelope. */
+export type KnowledgeReviewDecision = 'approve' | 'reject' | 'deprecate' | 'mark_stale' | 'reactivate';
+
+/**
+ * Two competing product claims that may state inconsistent product truth.
+ * `suggested_action` encodes source-priority resolution: an authoritative claim
+ * should win over a secondary/informal one; an approved claim over an unapproved.
+ */
+export interface KnowledgeConflict {
+  claim_a: KnowledgeConflictParty;
+  claim_b: KnowledgeConflictParty;
+  category: string;
+  /** What made the pair candidates: a shared competitor, product scope, or just the category. */
+  basis: 'competitor' | 'product_scope' | 'category';
+  shared: string[];
+  suggested_action: 'prefer_authoritative' | 'prefer_approved' | 'manual_review';
+  detail: string;
+}
+
+export interface KnowledgeConflictParty {
+  id: string;
+  title: string;
+  source_priority: KnowledgeSourcePriority;
+  approval_status: KnowledgeApprovalStatus;
 }

@@ -5350,6 +5350,10 @@
             ],
             "default": "summary",
             "description": "summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries."
+          },
+          "include_product_context": {
+            "type": "boolean",
+            "description": "Include governed product knowledge relevant to this subject. Defaults to true when product knowledge is configured; never blocks the briefing."
           }
         }
       },
@@ -5503,6 +5507,10 @@
             "required": [
               "action_type"
             ]
+          },
+          "include_product_context": {
+            "type": "boolean",
+            "description": "Include governed product knowledge in the assembled briefing. Defaults to true when product knowledge is configured."
           }
         },
         "required": [
@@ -14494,6 +14502,438 @@
         }
       }
     },
+    "/knowledge/retrieve": {
+      "post": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "Retrieve governed product/competitive knowledge for a customer action (optional, non-blocking)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "What product/competitive context the agent needs for this customer action."
+                  },
+                  "subject_type": {
+                    "type": "string",
+                    "enum": [
+                      "contact",
+                      "account",
+                      "opportunity",
+                      "use_case"
+                    ],
+                    "description": "Optional customer subject to tailor relevance."
+                  },
+                  "subject_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "audience": {
+                    "type": "string",
+                    "enum": [
+                      "customer_facing",
+                      "internal"
+                    ],
+                    "default": "customer_facing",
+                    "description": "customer_facing applies the strict approved+grounded+fresh policy; internal allows labeled warnings."
+                  },
+                  "proposed_action": {
+                    "type": "string",
+                    "description": "e.g. customer_outreach — used for policy and proof linkage."
+                  },
+                  "product_scope": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Product/edition scopes to match, e.g. [\"mcp\",\"self-hosted\"]."
+                  },
+                  "competitor": {
+                    "type": "string"
+                  },
+                  "persona": {
+                    "type": "string"
+                  },
+                  "industry": {
+                    "type": "string"
+                  },
+                  "require_approved": {
+                    "type": "boolean"
+                  },
+                  "include_stale": {
+                    "type": "boolean",
+                    "default": false
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 50,
+                    "default": 8
+                  }
+                },
+                "required": [
+                  "query"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/claims/list": {
+      "post": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "List product knowledge claim envelopes for the admin review queue (governance)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "active",
+                      "stale",
+                      "deprecated",
+                      "conflicting",
+                      "rejected"
+                    ],
+                    "description": "Filter by lifecycle status."
+                  },
+                  "approval_status": {
+                    "type": "string",
+                    "enum": [
+                      "approved",
+                      "pending",
+                      "unapproved",
+                      "rejected"
+                    ]
+                  },
+                  "needs_review": {
+                    "type": "boolean",
+                    "description": "Shortcut for the review queue: claims that are stale, conflicting, or pending approval."
+                  },
+                  "review_owner_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Filter to claims owned by a specific review owner."
+                  },
+                  "query": {
+                    "type": "string",
+                    "description": "Full-text filter over title/body/summary."
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 25
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/claims/review": {
+      "post": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "Apply a governance review decision to a product knowledge claim (approve/reject/deprecate/mark_stale/reactivate)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "reject",
+                      "deprecate",
+                      "mark_stale",
+                      "reactivate"
+                    ],
+                    "description": "approve marks approved + re-verifies freshness; reject/deprecate retire it; mark_stale forces review; reactivate restores a stale/deprecated claim."
+                  },
+                  "approved_for_external_use": {
+                    "type": "boolean",
+                    "description": "Set customer-facing eligibility. Only honored with an approve decision."
+                  },
+                  "review_owner_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Assign or transfer the review owner."
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "id",
+                  "decision"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/conflicts/detect": {
+      "post": {
+        "tags": [
+          "Knowledge"
+        ],
+        "summary": "Detect competing product claims with source-priority resolution (governance)",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "category": {
+                    "type": "string",
+                    "description": "Limit detection to a single claim category."
+                  },
+                  "competitor": {
+                    "type": "string",
+                    "description": "Limit detection to claims about one competitor."
+                  },
+                  "apply": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "When true, mark the lower-priority claim of each resolvable conflict as status=conflicting."
+                  },
+                  "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                    "default": 50
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenericObject"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — missing scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/context/detect-subjects": {
       "post": {
         "tags": [
@@ -16507,6 +16947,16 @@
             "required": false,
             "description": "summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries.",
             "name": "evidence_mode",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "boolean",
+              "description": "Include governed product knowledge relevant to this subject. Defaults to true when product knowledge is configured; never blocks the briefing."
+            },
+            "required": false,
+            "description": "Include governed product knowledge relevant to this subject. Defaults to true when product knowledge is configured; never blocks the briefing.",
+            "name": "include_product_context",
             "in": "query"
           }
         ],

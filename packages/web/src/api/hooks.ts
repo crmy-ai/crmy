@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import type { ActionContext, ActionContextGetInput, ProviderId, SignalReadiness, SignalResolution } from '@crmy/shared';
+import type {
+  ActionContext, ActionContextGetInput, ProviderId, SignalReadiness, SignalResolution,
+  KnowledgeClaimRecord, KnowledgeApprovalStatus, KnowledgeReviewDecision, KnowledgeConflict,
+} from '@crmy/shared';
 import { api, getUser } from './client';
 
 // Generic list hook with pagination
@@ -2893,5 +2896,50 @@ export function useReviewSystemWriteback() {
     mutationFn: ({ id, decision, note }: { id: string; decision: 'approved' | 'rejected'; note?: string }) =>
       api.post(`systems-of-record/writebacks/${id}/review`, { decision, note }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['systems-of-record-writebacks'] }),
+  });
+}
+
+// ── Product knowledge governance (admin) ─────────────────────────────────────
+// Optional, non-blocking layer. Mirrors the knowledge_claim_list /
+// knowledge_claim_review / knowledge_conflicts_detect MCP+REST surfaces.
+
+export interface KnowledgeClaimListFilters {
+  status?: KnowledgeClaimRecord['status'];
+  approval_status?: KnowledgeApprovalStatus;
+  needs_review?: boolean;
+  review_owner_id?: string;
+  query?: string;
+  limit?: number;
+}
+
+export function useKnowledgeClaims(filters: KnowledgeClaimListFilters) {
+  return useQuery<{ claims: KnowledgeClaimRecord[]; count: number }>({
+    queryKey: ['knowledge-claims', filters],
+    queryFn: () => api.post('knowledge/claims/list', filters),
+  });
+}
+
+export function useReviewKnowledgeClaim() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      id: string;
+      decision: KnowledgeReviewDecision;
+      approved_for_external_use?: boolean;
+      review_owner_id?: string;
+    }) => api.post<KnowledgeClaimRecord>('knowledge/claims/review', input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['knowledge-claims'] });
+      qc.invalidateQueries({ queryKey: ['knowledge-conflicts'] });
+    },
+  });
+}
+
+export function useDetectKnowledgeConflicts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { category?: string; competitor?: string; apply?: boolean; limit?: number }) =>
+      api.post<{ conflicts: KnowledgeConflict[]; applied: number }>('knowledge/conflicts/detect', input),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['knowledge-claims'] }),
   });
 }

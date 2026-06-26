@@ -44,6 +44,8 @@ import { cleanExpiredSessions } from './db/repos/agent.js';
 import { processPendingExtractions } from './agent/extraction.js';
 import { processPendingAgentTurns } from './agent/turn-runner.js';
 import { processStaleEntries } from './services/staleness.js';
+import { sweepKnowledgeFreshness } from './services/knowledge-freshness.js';
+import { processKnowledgeReviews } from './services/knowledge-governance.js';
 import { getSampleDataStatus, seedSampleData } from './services/sample-data.js';
 import { actorRateLimitMiddleware, enforceActorRateLimit } from './services/rate-limit.js';
 import { redactSecrets } from './lib/secrets.js';
@@ -695,6 +697,9 @@ export async function createApp(config: ServerConfig) {
         await runBackgroundTask('context_pending_extractions', () => processPendingExtractions(db), failures);
         await runBackgroundTask('raw_context_sources', () => processPendingRawContextSources(db), failures);
         await runBackgroundTask('context_stale_entries', () => processStaleEntries(db), failures);
+        // Product knowledge (optional): age out stale claims, then open review assignments for owned claims needing attention.
+        await runBackgroundTask('knowledge_freshness_sweep', () => sweepKnowledgeFreshness(db), failures);
+        await runBackgroundTask('knowledge_review_assignments', () => processKnowledgeReviews(db), failures);
         await runBackgroundTask('webhook_event_backlog', () => processWebhookEventBacklog(db), failures);
         await runBackgroundTask('webhook_retries', () => processWebhookRetries(db), failures);
         await runBackgroundTask('context_outbox', () => processContextOutbox(db), failures);
@@ -974,7 +979,13 @@ export { describeTool, zodToJsonSchema } from './mcp/tool-describe.js';
 export { emitEvent } from './events/emitter.js';
 export { createWorkflowEngine } from './workflows/engine.js';
 export { getSampleDataStatus, resetSampleData, seedSampleData } from './services/sample-data.js';
-export { retrieveKnowledge, isProductKnowledgeConfigured } from './services/knowledge-retrieval.js';
+export { retrieveKnowledge, isProductKnowledgeConfigured, selectClaims, upsertProductKnowledgeClaim, buildProductContext, getProductContextForSubject } from './services/knowledge-retrieval.js';
+export { sweepKnowledgeFreshness, sweepTenantKnowledgeFreshness, computeStaleClaimIds, freshnessWindowDays } from './services/knowledge-freshness.js';
+export {
+  listKnowledgeClaimsForReview, reviewKnowledgeClaim, reviewDecisionToPatch,
+  detectKnowledgeConflicts, conflictBasis, classifyConflict,
+  processKnowledgeReviews, processKnowledgeReviewsForTenant, rowToKnowledgeRecord,
+} from './services/knowledge-governance.js';
 export { loadPlugins, shutdownPlugins } from './plugins/index.js';
 export { encrypt as encryptAgentSecret, decrypt as decryptAgentSecret } from './agent/crypto.js';
 export { buildOpenAICompatibleHeaders, verifyAgentToolCalling, verifyPlainModelReachability } from './agent/readiness.js';

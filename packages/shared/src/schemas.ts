@@ -1548,6 +1548,8 @@ export const briefingGet = z.object({
     .describe('Named token budget preset. Explicit token_budget wins when both are supplied.'),
   evidence_mode: evidenceMode.default('summary')
     .describe('summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries.'),
+  include_product_context: z.boolean().optional()
+    .describe('Include governed product knowledge relevant to this subject. Defaults to true when product knowledge is configured; never blocks the briefing.'),
 });
 
 export const actionContextProposedAction = z.object({
@@ -1586,6 +1588,8 @@ export const actionContextGet = z.object({
     .describe('summary returns compact evidence references; full returns complete evidence payloads; none omits evidence arrays from context entries.'),
   emit_retrieval_event: z.boolean().default(true),
   proposed_action: actionContextProposedAction.optional(),
+  include_product_context: z.boolean().optional()
+    .describe('Include governed product knowledge in the assembled briefing. Defaults to true when product knowledge is configured.'),
 });
 
 export const actionContextHumanUnblock = z.object({
@@ -1986,4 +1990,63 @@ export const knowledgeRetrieve = z.object({
   require_approved: z.boolean().optional(),
   include_stale: z.boolean().optional().default(false),
   limit: z.number().int().min(1).max(50).optional().default(8),
+});
+
+/** Admin/governance write path for a product knowledge claim envelope. */
+export const knowledgeClaimUpsert = z.object({
+  external_key: z.string().max(256).optional().describe('Stable dedupe key from the source; re-upserts update in place.'),
+  category: z.string().min(1).describe('e.g. capability, proof_point, pricing, implementation, security, competitive_response.'),
+  title: z.string().min(1),
+  body: z.string().min(1),
+  summary: z.string().optional(),
+  product_scope: z.array(z.string()).optional(),
+  competitors: z.array(z.string()).optional(),
+  personas: z.array(z.string()).optional(),
+  industries: z.array(z.string()).optional(),
+  source_ref: z.string().optional(),
+  source_url: z.string().optional(),
+  source_label: z.string().optional(),
+  source_version: z.string().optional(),
+  /** Source text the claim is drawn from. When provided, CRMy verifies the claim is grounded in it. */
+  source_text: z.string().max(200000).optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  source_priority: z.enum(['authoritative', 'secondary', 'informal']).optional(),
+  approval_status: z.enum(['approved', 'pending', 'unapproved', 'rejected']).optional(),
+  approved_for_external_use: z.boolean().optional(),
+  visibility: z.enum(['external', 'internal']).optional(),
+  status: z.enum(['active', 'stale', 'deprecated', 'conflicting', 'rejected']).optional(),
+  effective_at: z.string().optional(),
+  valid_until: z.string().optional(),
+});
+
+/** Governance: list claim envelopes for the admin review queue (Phase 7). */
+export const knowledgeClaimList = z.object({
+  status: z.enum(['active', 'stale', 'deprecated', 'conflicting', 'rejected']).optional()
+    .describe('Filter by lifecycle status.'),
+  approval_status: z.enum(['approved', 'pending', 'unapproved', 'rejected']).optional(),
+  needs_review: z.boolean().optional()
+    .describe('Shortcut for the review queue: claims that are stale, conflicting, or pending approval.'),
+  review_owner_id: uuid.optional().describe('Filter to claims owned by a specific review owner.'),
+  query: z.string().optional().describe('Full-text filter over title/body/summary.'),
+  limit: z.number().int().min(1).max(100).optional().default(25),
+});
+
+/** Governance: apply an admin review decision to a claim envelope (Phase 7). */
+export const knowledgeClaimReview = z.object({
+  id: uuid,
+  decision: z.enum(['approve', 'reject', 'deprecate', 'mark_stale', 'reactivate'])
+    .describe('approve marks approved + re-verifies freshness; reject/deprecate retire it; mark_stale forces review; reactivate restores a stale/deprecated claim.'),
+  approved_for_external_use: z.boolean().optional()
+    .describe('Set customer-facing eligibility. Only honored with an approve decision.'),
+  review_owner_id: uuid.optional().describe('Assign or transfer the review owner.'),
+  idempotency_key: idempotencyKey,
+});
+
+/** Governance: detect competing product claims with source-priority resolution (Phase 7). */
+export const knowledgeConflictsDetect = z.object({
+  category: z.string().optional().describe('Limit detection to a single claim category.'),
+  competitor: z.string().optional().describe('Limit detection to claims about one competitor.'),
+  apply: z.boolean().optional().default(false)
+    .describe('When true, mark the lower-priority claim of each resolvable conflict as status=conflicting.'),
+  limit: z.number().int().min(1).max(100).optional().default(50),
 });

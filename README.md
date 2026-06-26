@@ -381,6 +381,7 @@ crmy briefing "account:Northstar Labs"
 crmy action-context "account:Northstar Labs" --action customer_outreach
 crmy context signal-groups
 crmy context lineage --subject "account:Northstar Labs"
+crmy knowledge retrieve "vendor lock-in objection" --subject "account:Northstar Labs"
 crmy tools describe action_context_get
 ```
 

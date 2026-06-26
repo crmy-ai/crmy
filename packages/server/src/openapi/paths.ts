@@ -996,6 +996,42 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: 'post', path: '/knowledge/retrieve',
+  tags: ['Knowledge'],
+  summary: 'Retrieve governed product/competitive knowledge for a customer action (optional, non-blocking)',
+  security: bearer,
+  request: { body: jsonBody(S.knowledgeRetrieve) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/knowledge/claims/list',
+  tags: ['Knowledge'],
+  summary: 'List product knowledge claim envelopes for the admin review queue (governance)',
+  security: bearer,
+  request: { body: jsonBody(S.knowledgeClaimList) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/knowledge/claims/review',
+  tags: ['Knowledge'],
+  summary: 'Apply a governance review decision to a product knowledge claim (approve/reject/deprecate/mark_stale/reactivate)',
+  security: bearer,
+  request: { body: jsonBody(S.knowledgeClaimReview) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403, 404: err404 },
+});
+
+registry.registerPath({
+  method: 'post', path: '/knowledge/conflicts/detect',
+  tags: ['Knowledge'],
+  summary: 'Detect competing product claims with source-priority resolution (governance)',
+  security: bearer,
+  request: { body: jsonBody(S.knowledgeConflictsDetect) },
+  responses: { 200: ok(GenericObject), 400: err400, 401: err401, 403: err403 },
+});
+
+registry.registerPath({
   method: 'post', path: '/context/detect-subjects',
   tags: ['Context'],
   summary: 'Detect customer records mentioned in free text',
