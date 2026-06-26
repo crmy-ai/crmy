@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Command } from 'commander';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -133,18 +133,62 @@ function isProcessRunning(pid: number): boolean {
   }
 }
 
-async function probeHealth(port: number, timeoutMs = 800): Promise<{ ok: boolean; detail?: string }> {
+async function probeHealth(port: number, timeoutMs = 800): Promise<{ ok: boolean; detail?: string; crmy?: boolean; version?: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`http://localhost:${port}/health`, { signal: controller.signal });
     if (!res.ok) return { ok: false, detail: `HTTP ${res.status}` };
-    return { ok: true };
+    try {
+      const body = await res.json() as { status?: unknown; version?: unknown };
+      const version = typeof body.version === 'string' ? body.version : undefined;
+      return { ok: true, crmy: body.status === 'ok' && !!version, version };
+    } catch {
+      return { ok: true };
+    }
   } catch (err) {
     return { ok: false, detail: err instanceof Error ? err.message : String(err) };
   } finally {
     clearTimeout(timer);
   }
+}
+
+function findListeningPid(port: number): Promise<number | null> {
+  return new Promise(resolve => {
+    execFile('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-t'], { timeout: 1500 }, (err, stdout) => {
+      if (err) {
+        resolve(null);
+        return;
+      }
+      const pid = Number.parseInt(stdout.trim().split(/\s+/)[0] ?? '', 10);
+      resolve(Number.isInteger(pid) && pid > 0 ? pid : null);
+    });
+  });
+}
+
+async function adoptUnmanagedServer(port: number, health: { crmy?: boolean; version?: string }): Promise<boolean> {
+  if (!health.crmy) return false;
+
+  const pid = await findListeningPid(port);
+  if (!pid || !isProcessRunning(pid) || pid === process.pid) return false;
+
+  const state: ServerState = {
+    pid,
+    port,
+    startedAt: new Date().toISOString(),
+    cwd: process.cwd(),
+    logFile: LOG_FILE,
+    command: `crmy server --port ${port}`,
+  };
+  writeServerState(state);
+
+  console.log(`\n  CRMy is already responding on http://localhost:${port}/health.`);
+  console.log('  Adopted the existing process so this CLI can manage it.\n');
+  printManagedServerSummary(state);
+  if (health.version) console.log(`  Version: ${health.version}`);
+  console.log('\n  Stop it with: crmy server stop');
+  console.log('  Watch logs with: crmy server logs --follow\n');
+  return true;
 }
 
 async function waitForHealth(port: number, pid: number, timeoutMs: number): Promise<{ ok: boolean; detail?: string; running: boolean }> {
@@ -456,8 +500,11 @@ async function startBackgroundServer(port: number): Promise<void> {
 
   const unmanagedHealth = await probeHealth(port);
   if (unmanagedHealth.ok) {
+    if (await adoptUnmanagedServer(port, unmanagedHealth)) return;
+
     console.log(`\n  CRMy is already responding on http://localhost:${port}/health.\n`);
     console.log('  No CRMy PID file was found, so this process is not managed by `crmy server stop`.\n');
+    console.log('  Stop the existing listener manually, then run: crmy server start\n');
     return;
   }
 
@@ -572,6 +619,15 @@ async function stopBackgroundServer(force: boolean): Promise<void> {
 async function printServerStatus(): Promise<void> {
   const state = readServerState();
   if (!state) {
+    const defaultPort = parsePort(DEFAULT_PORT);
+    const unmanagedHealth = await probeHealth(defaultPort);
+    if (unmanagedHealth.ok) {
+      console.log(`\n  CRMy is responding on http://localhost:${defaultPort}/health, but no managed PID file exists.`);
+      console.log('  Run `crmy server start` to adopt the running process, or stop the existing listener manually.\n');
+      process.exitCode = 2;
+      return;
+    }
+
     console.log('\n  CRMy server is not running. Start it with: crmy server start\n');
     process.exitCode = 1;
     return;
