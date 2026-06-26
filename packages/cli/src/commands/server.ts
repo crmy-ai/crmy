@@ -5,7 +5,7 @@ import { Command } from 'commander';
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -69,21 +69,45 @@ function resolvePortOption(opts: { port?: string }, command: Command): number {
   return parsePort(opts.port ?? parentPort ?? DEFAULT_PORT);
 }
 
+function supportsTerminalLinks(): boolean {
+  return !!process.stdout.isTTY && process.env.TERM !== 'dumb';
+}
+
+function terminalLink(label: string, target: string): string {
+  if (!supportsTerminalLinks()) return label;
+  const safeTarget = target.replace(/[\u0000-\u001F\u007F]/g, '');
+  return `\u001B]8;;${safeTarget}\u0007${label}\u001B]8;;\u0007`;
+}
+
+function localServerUrl(port: number, pathname: string): string {
+  return `http://localhost:${port}${pathname}`;
+}
+
+function logFileLink(filePath: string): string {
+  return terminalLink(filePath, pathToFileURL(filePath).href);
+}
+
+function printLinkedBoxLine(line: string, linkTarget?: string, innerWidth?: number): void {
+  const width = innerWidth ?? line.length;
+  const rendered = linkTarget ? terminalLink(line, linkTarget) : line;
+  console.log(`  \u2502${rendered}${' '.repeat(Math.max(0, width - line.length))}\u2502`);
+}
+
 function printReadyBox(port: number, background = false): void {
-  const lines = [
-    `  Web UI  \u2192  http://localhost:${port}/app`,
-    `  API     \u2192  http://localhost:${port}/api/v1`,
-    `  MCP     \u2192  http://localhost:${port}/mcp`,
-    `  Health  \u2192  http://localhost:${port}/health`,
+  const rows = [
+    { line: `  Web UI  \u2192  ${localServerUrl(port, '/app')}`, target: localServerUrl(port, '/app') },
+    { line: `  API     \u2192  ${localServerUrl(port, '/api/v1')}`, target: localServerUrl(port, '/api/v1') },
+    { line: `  MCP     \u2192  ${localServerUrl(port, '/mcp')}`, target: localServerUrl(port, '/mcp') },
+    { line: `  Health  \u2192  ${localServerUrl(port, '/health')}`, target: localServerUrl(port, '/health') },
   ];
-  const innerWidth = Math.max(...lines.map(l => l.length)) + 2;
+  const innerWidth = Math.max(...rows.map(row => row.line.length)) + 2;
   const bar = '\u2500'.repeat(innerWidth);
   console.log(`\n  \u250c${bar}\u2510`);
-  for (const line of lines) {
-    console.log(`  \u2502${line.padEnd(innerWidth)}\u2502`);
+  for (const row of rows) {
+    printLinkedBoxLine(row.line, row.target, innerWidth);
   }
   console.log(`  \u2514${bar}\u2518\n`);
-  console.log(`  Log file: ${LOG_FILE}`);
+  console.log(`  Log file: ${logFileLink(LOG_FILE)}`);
   if (background) {
     console.log('  Managed by: crmy server stop\n');
   } else {
@@ -182,7 +206,8 @@ async function adoptUnmanagedServer(port: number, health: { crmy?: boolean; vers
   };
   writeServerState(state);
 
-  console.log(`\n  CRMy is already responding on http://localhost:${port}/health.`);
+  const healthUrl = localServerUrl(port, '/health');
+  console.log(`\n  CRMy is already responding on ${terminalLink(healthUrl, healthUrl)}.`);
   console.log('  Adopted the existing process so this CLI can manage it.\n');
   printManagedServerSummary(state);
   if (health.version) console.log(`  Version: ${health.version}`);
@@ -211,9 +236,11 @@ async function waitForHealth(port: number, pid: number, timeoutMs: number): Prom
 
 function printManagedServerSummary(state: ServerState): void {
   console.log(`  PID:    ${state.pid}`);
-  console.log(`  Web UI: http://localhost:${state.port}/app`);
-  console.log(`  Health: http://localhost:${state.port}/health`);
-  console.log(`  Logs:   ${state.logFile}`);
+  const webUrl = localServerUrl(state.port, '/app');
+  const healthUrl = localServerUrl(state.port, '/health');
+  console.log(`  Web UI: ${terminalLink(webUrl, webUrl)}`);
+  console.log(`  Health: ${terminalLink(healthUrl, healthUrl)}`);
+  console.log(`  Logs:   ${logFileLink(state.logFile)}`);
 }
 
 function printLogTail(lines = 80): void {
@@ -502,7 +529,8 @@ async function startBackgroundServer(port: number): Promise<void> {
   if (unmanagedHealth.ok) {
     if (await adoptUnmanagedServer(port, unmanagedHealth)) return;
 
-    console.log(`\n  CRMy is already responding on http://localhost:${port}/health.\n`);
+    const healthUrl = localServerUrl(port, '/health');
+    console.log(`\n  CRMy is already responding on ${terminalLink(healthUrl, healthUrl)}.\n`);
     console.log('  No CRMy PID file was found, so this process is not managed by `crmy server stop`.\n');
     console.log('  Stop the existing listener manually, then run: crmy server start\n');
     return;
@@ -622,7 +650,8 @@ async function printServerStatus(): Promise<void> {
     const defaultPort = parsePort(DEFAULT_PORT);
     const unmanagedHealth = await probeHealth(defaultPort);
     if (unmanagedHealth.ok) {
-      console.log(`\n  CRMy is responding on http://localhost:${defaultPort}/health, but no managed PID file exists.`);
+      const healthUrl = localServerUrl(defaultPort, '/health');
+      console.log(`\n  CRMy is responding on ${terminalLink(healthUrl, healthUrl)}, but no managed PID file exists.`);
       console.log('  Run `crmy server start` to adopt the running process, or stop the existing listener manually.\n');
       process.exitCode = 2;
       return;
