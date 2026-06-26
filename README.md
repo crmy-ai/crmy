@@ -281,7 +281,7 @@ CRMy keeps customer context useful without pretending messy source material is i
 | **Systems of record** | Configure CRM/warehouse sync and governed writeback through mappings, previews, approvals, and receipts. |
 | **MCP, CLI, REST, UI** | Use the same engine from agent tools, scripts, integrations, and the web app. |
 
-## Why Agents Work Better With CRMy
+## How CRMy Reduces Token Use
 
 CRMy gives agents smaller, more trustworthy working context instead of a bigger prompt full of unverified customer data.
 
