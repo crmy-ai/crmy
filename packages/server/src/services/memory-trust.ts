@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export const CONTEXT_GROUNDING_METHODS = ['lexical', 'corroborated', 'human_reviewed'] as const;
+export const TIER2_AUTOPROMOTE_POLICIES = ['corroborated', 'human_only'] as const;
 
 export type ContextGroundingMethod = typeof CONTEXT_GROUNDING_METHODS[number];
 export type MemoryClaimTier = 0 | 1 | 2;
+export type Tier2AutopromotePolicy = typeof TIER2_AUTOPROMOTE_POLICIES[number];
 
-const TIER_2_CONTEXT_TYPES = new Set([
+export const TIER_2_CONTEXT_TYPES = new Set([
   'approval',
   'commitment',
   'deal_risk',
@@ -45,6 +47,17 @@ export function memoryClaimTier(contextType: string | undefined | null): MemoryC
   if (TIER_2_CONTEXT_TYPES.has(normalized)) return 2;
   if (TIER_1_CONTEXT_TYPES.has(normalized)) return 1;
   return 0;
+}
+
+export function normalizeTier2AutopromotePolicy(value: unknown): Tier2AutopromotePolicy {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized === 'human_only' ? 'human_only' : 'corroborated';
+}
+
+export function tier2AutopromotePolicyFromEnv(
+  env: Record<string, string | undefined> = process.env,
+): Tier2AutopromotePolicy {
+  return normalizeTier2AutopromotePolicy(env.CRMY_TIER2_AUTOPROMOTE_POLICY);
 }
 
 export function memoryFreshnessWindowDays(contextType: string | undefined | null): number {
@@ -109,7 +122,8 @@ export function canAutoPromoteSignalByTrustTier(input: {
   threshold: number;
   evidenceCount: number;
   independentSourceCount?: number;
-  allowGroupCorroboration?: boolean;
+  tier2AutopromotePolicy?: Tier2AutopromotePolicy;
+  recencySatisfied?: boolean;
   sourceGrounded: boolean;
   speculative?: boolean;
   readinessReady?: boolean;
@@ -121,7 +135,11 @@ export function canAutoPromoteSignalByTrustTier(input: {
   if ((input.confidence ?? 0) < input.threshold) return false;
 
   const tier = memoryClaimTier(input.contextType);
-  if (tier === 2) return (input.independentSourceCount ?? 0) >= 2 || input.allowGroupCorroboration === true;
+  if (tier === 2) {
+    if (normalizeTier2AutopromotePolicy(input.tier2AutopromotePolicy) === 'human_only') return false;
+    if (input.recencySatisfied !== true) return false;
+    return (input.independentSourceCount ?? 0) >= 2;
+  }
   return true;
 }
 

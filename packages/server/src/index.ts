@@ -1004,5 +1004,7 @@ export { loadPlugins, shutdownPlugins } from './plugins/index.js';
 export { encrypt as encryptAgentSecret, decrypt as decryptAgentSecret } from './agent/crypto.js';
 export { buildOpenAICompatibleHeaders, verifyAgentToolCalling, verifyPlainModelReachability } from './agent/readiness.js';
 export { listCrmyEvalSuites, runCrmyEval } from './evals/runner.js';
+export { certifyTenantModel } from './services/model-certification-runner.js';
+export { recordedCertificationForModel, modelCertificationMeetsAutoPromoteGate } from './services/model-certification.js';
 export type { CrmyPlugin, PluginConfig } from './plugins/index.js';
 export type { ToolDef } from './mcp/server.js';

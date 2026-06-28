@@ -47,6 +47,8 @@ import { callLLM } from '../dist/agent/providers/llm.js';
 import { previewRecordDraft } from '../dist/services/record-drafts.js';
 import { processNextBatch as processContextOutboxBatch } from '../dist/workers/context_ingestion_worker.service.js';
 import { listCrmyEvalSuites, runCrmyEval } from '../dist/evals/runner.js';
+import { certifyTenantModel } from '../dist/services/model-certification-runner.js';
+import { modelCertificationMeetsAutoPromoteGate, recordedCertificationForModel } from '../dist/services/model-certification.js';
 
 const baseInput = {
   tenantId: '11111111-1111-4111-8111-111111111111',
@@ -1731,6 +1733,147 @@ test('active context quality evals run seeded gates and live extraction without 
   assert.equal(live.results.every(result => result.observed?.attempt_status === 'succeeded'), true);
   assert.equal(live.scores.parse_success, 1);
   assert.ok(live.scores.expected_signal_recall >= 0.85);
+});
+
+function certificationRun(overrides = {}) {
+  const status = overrides.status ?? 'pass';
+  const skipped = overrides.skipped ?? 0;
+  const failed = status === 'fail' ? 1 : 0;
+  return {
+    version: 'crmy.eval_result.v1',
+    run_id: overrides.run_id ?? 'eval_20260628_000000',
+    profile: overrides.profile ?? 'live_model',
+    suites: [],
+    status,
+    thresholds: [
+      { metric: 'parse_success', op: '=', value: 1 },
+      { metric: 'expected_signal_recall', op: '>=', value: 0.85 },
+    ],
+    artifacts: [],
+    totals: {
+      cases: 2,
+      passed: status === 'pass' ? 2 : 1,
+      failed,
+      errored: 0,
+      skipped,
+    },
+    scores: {
+      parse_success: overrides.parse_success ?? 1,
+      expected_signal_recall: overrides.expected_signal_recall ?? 0.91,
+    },
+    results: [],
+    created_at: '2026-06-28T00:00:00.000Z',
+  };
+}
+
+class FakeCertificationDb {
+  constructor(config = {}) {
+    this.config = {
+      id: 'agent-config-1',
+      tenant_id: 'tenant-1',
+      enabled: true,
+      provider: 'custom',
+      base_url: 'http://localhost/eval',
+      api_key_enc: null,
+      model: 'byo-model',
+      system_prompt: null,
+      max_tokens_per_turn: 4000,
+      llm_timeout_ms: 60000,
+      history_retention_days: 90,
+      can_write_objects: true,
+      can_log_activities: true,
+      can_create_assignments: true,
+      auto_extract_context: true,
+      auto_promote_signals: true,
+      signal_auto_promote_threshold: 0.85,
+      signal_source_quality: { high: 1, medium: 0.9, lower: 0.75, fallback: 0.85 },
+      tier2_autopromote_policy: 'corroborated',
+      model_certification_status: 'uncertified',
+      model_certification_profile: null,
+      model_certification_run_id: null,
+      model_certification_score: null,
+      model_certified_at: null,
+      backup_enabled: false,
+      backup_provider: null,
+      backup_base_url: null,
+      backup_api_key_enc: null,
+      backup_model: null,
+      ...config,
+    };
+  }
+
+  async query(sql, params = []) {
+    const text = sql.replace(/\s+/g, ' ').trim();
+    if (text === 'SELECT * FROM agent_configs WHERE tenant_id = $1') {
+      return { rows: [this.config], rowCount: 1 };
+    }
+    if (text.startsWith('INSERT INTO agent_configs') && text.includes('model_certification_status')) {
+      this.config = {
+        ...this.config,
+        tenant_id: params[0],
+        model_certification_status: params[1],
+        model_certification_profile: params[2],
+        model_certification_run_id: params[3],
+        model_certification_score: params[4],
+        model_certified_at: params[5],
+      };
+      return { rows: [this.config], rowCount: 1 };
+    }
+    throw new Error(`Unexpected certification query: ${text}`);
+  }
+}
+
+test('eval-driven model certification persists only passing live_model runs', async () => {
+  const db = new FakeCertificationDb();
+  const result = await certifyTenantModel({
+    db,
+    tenantId: 'tenant-1',
+    runEval: async (options) => {
+      assert.equal(options.profile, 'live_model');
+      assert.equal(options.requireLive, true);
+      return certificationRun({ run_id: 'eval_pass', expected_signal_recall: 0.91 });
+    },
+  });
+  assert.equal(result.status, 'certified');
+  assert.equal(db.config.model_certification_status, 'certified');
+  assert.equal(db.config.model_certification_profile, 'live_model');
+  assert.equal(db.config.model_certification_run_id, 'eval_pass');
+  assert.equal(modelCertificationMeetsAutoPromoteGate(db.config), true);
+
+  const failingDb = new FakeCertificationDb();
+  const failed = await certifyTenantModel({
+    db: failingDb,
+    tenantId: 'tenant-1',
+    runEval: async () => certificationRun({ status: 'fail', run_id: 'eval_fail', expected_signal_recall: 0.7 }),
+  });
+  assert.equal(failed.status, 'failed');
+  assert.equal(failingDb.config.model_certification_status, 'failed');
+  assert.equal(modelCertificationMeetsAutoPromoteGate(failingDb.config), false);
+
+  const skippedDb = new FakeCertificationDb();
+  const skipped = await certifyTenantModel({
+    db: skippedDb,
+    tenantId: 'tenant-1',
+    runEval: async () => certificationRun({ status: 'skipped', skipped: 1, run_id: 'eval_skipped' }),
+  });
+  assert.equal(skipped.status, 'failed');
+  assert.equal(skippedDb.config.model_certification_status, 'failed');
+  assert.equal(modelCertificationMeetsAutoPromoteGate(skippedDb.config), false);
+});
+
+test('pre-certified recommended model provenance enables only exact recommended models', () => {
+  const recommended = recordedCertificationForModel({
+    provider: 'anthropic',
+    baseUrl: 'https://api.anthropic.com/v1/',
+    model: 'claude-sonnet-4-20250514',
+  });
+  assert.ok(recommended);
+  assert.equal(modelCertificationMeetsAutoPromoteGate(recommended), true);
+  assert.equal(recordedCertificationForModel({
+    provider: 'anthropic',
+    baseUrl: 'https://api.anthropic.com/v1',
+    model: 'unknown-model',
+  }), null);
 });
 
 test('live extraction quality eval scores malformed, missing, and unsafe injected model output', async () => {

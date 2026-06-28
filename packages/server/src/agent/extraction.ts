@@ -34,7 +34,7 @@ import { attachSignalToGroup } from '../services/signal-groups.js';
 import { embedQuery, ensureEmbeddingBestEffort } from '../services/embedding-service.js';
 import type { RawContextRecordProposal } from '../services/raw-context-subjects.js';
 import { evaluateMemoryReadiness } from '../services/memory-readiness.js';
-import { canAutoPromoteSignalByTrustTier } from '../services/memory-trust.js';
+import { normalizeTier2AutopromotePolicy } from '../services/memory-trust.js';
 import {
   autoPromoteBlockedByModelCertification,
   isModelCertifiedForAutoPromote,
@@ -1322,6 +1322,7 @@ export async function extractContextFromActivity(
   const autoPromoteBlockedByCertification = autoPromoteBlockedByModelCertification(config);
   const autoPromoteSignals = config.auto_promote_signals !== false && modelCertifiedForAutoPromote;
   const autoPromoteThreshold = Number(config.signal_auto_promote_threshold ?? 0.85);
+  const tier2AutopromotePolicy = normalizeTier2AutopromotePolicy(config.tier2_autopromote_policy);
   // Source-grounding gate: a Signal may only auto-promote to Memory when at least
   // one of its evidence snippets is actually present in the source text. This is
   // model-independent — it does not trust the model's self-reported confidence —
@@ -1427,20 +1428,17 @@ export async function extractContextFromActivity(
 
       const groundedForPromotion = !requireGroundedPromotion || isPromotionGrounded(evidence, content);
       const speculativeOrIncomplete = looksSpeculative(normalizedEntry, evidence) || readiness.readiness_status !== 'ready_for_memory';
-      const eligibleForGroupingPromotion = autoPromoteSignals && canAutoPromoteSignalByTrustTier({
-        contextType: normalizedEntry.context_type,
-        confidence: normalizedEntry.confidence ?? 0,
-        threshold: autoPromoteThreshold,
-        evidenceCount: evidence.length,
-        sourceGrounded: groundedForPromotion,
-        speculative: speculativeOrIncomplete,
-        readinessReady: readiness.readiness_status === 'ready_for_memory',
-        allowGroupCorroboration: true,
-      });
+      const eligibleForGroupingPromotion = autoPromoteSignals
+        && evidence.length > 0
+        && groundedForPromotion
+        && !speculativeOrIncomplete
+        && readiness.readiness_status === 'ready_for_memory'
+        && (normalizedEntry.confidence ?? 0) >= autoPromoteThreshold;
       const groupResult = await attachSignalToGroup(db, tenantId, created, {
         threshold: autoPromoteThreshold,
         autoPromote: eligibleForGroupingPromotion,
         actorId: extractorActor.id,
+        tier2AutopromotePolicy,
       });
       if (groupResult.promoted_context_entry) {
         outcome.memory_created++;
